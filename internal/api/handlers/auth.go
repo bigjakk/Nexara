@@ -312,6 +312,17 @@ func (h *AuthHandler) LogoutAll(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"message": "All sessions revoked"})
 }
 
+// SetupStatus returns whether initial admin setup has been completed.
+func (h *AuthHandler) SetupStatus(c *fiber.Ctx) error {
+	count, err := h.queries.CountUsers(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check user count")
+	}
+	return c.JSON(fiber.Map{
+		"needs_setup": count == 0,
+	})
+}
+
 // isDuplicateKeyError checks if a pgx error is a unique constraint violation.
 func isDuplicateKeyError(err error) bool {
 	if err == nil {
