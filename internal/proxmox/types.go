@@ -1,0 +1,167 @@
+package proxmox
+
+import "encoding/json"
+
+// response is the standard Proxmox API envelope.
+type response struct {
+	Data json.RawMessage `json:"data"`
+}
+
+// Resource type constants for GET /cluster/resources filtering.
+const (
+	ResourceTypeNode    = "node"
+	ResourceTypeQEMU    = "qemu"
+	ResourceTypeLXC     = "lxc"
+	ResourceTypeStorage = "storage"
+)
+
+// NodeListEntry represents a single node from GET /nodes.
+type NodeListEntry struct {
+	Node           string  `json:"node"`
+	Status         string  `json:"status"`
+	CPU            float64 `json:"cpu"`
+	MaxCPU         int     `json:"maxcpu"`
+	Mem            int64   `json:"mem"`
+	MaxMem         int64   `json:"maxmem"`
+	Disk           int64   `json:"disk"`
+	MaxDisk        int64   `json:"maxdisk"`
+	Uptime         int64   `json:"uptime"`
+	SSLFingerprint string  `json:"ssl_fingerprint"`
+}
+
+// NodeStatus represents the full status of a node from GET /nodes/{node}/status.
+type NodeStatus struct {
+	Node       string  `json:"node"`
+	Uptime     int64   `json:"uptime"`
+	Kversion   string  `json:"kversion"`
+	PVEVersion string  `json:"pveversion"`
+	CPUInfo    CPUInfo `json:"cpuinfo"`
+	Memory     Memory  `json:"memory"`
+	RootFS     RootFS  `json:"rootfs"`
+	CPU        float64 `json:"cpu"`
+	Wait       float64 `json:"wait"`
+	LoadAvg    []string `json:"loadavg"`
+}
+
+// CPUInfo represents CPU information from a node status response.
+type CPUInfo struct {
+	Cores   int    `json:"cores"`
+	CPUs    int    `json:"cpus"`
+	MHz     string `json:"mhz"`
+	Model   string `json:"model"`
+	Sockets int    `json:"sockets"`
+	Threads int    `json:"threads"`
+}
+
+// Memory represents memory usage from a node status response.
+type Memory struct {
+	Total int64 `json:"total"`
+	Used  int64 `json:"used"`
+	Free  int64 `json:"free"`
+}
+
+// RootFS represents root filesystem usage from a node status response.
+type RootFS struct {
+	Total int64 `json:"total"`
+	Used  int64 `json:"used"`
+	Free  int64 `json:"free"`
+	Avail int64 `json:"avail"`
+}
+
+// VirtualMachine represents a QEMU VM from GET /nodes/{node}/qemu.
+type VirtualMachine struct {
+	VMID      int     `json:"vmid"`
+	Name      string  `json:"name"`
+	Status    string  `json:"status"`
+	Node      string  `json:"node"`
+	CPU       float64 `json:"cpu"`
+	CPUs      int     `json:"cpus"`
+	Mem       int64   `json:"mem"`
+	MaxMem    int64   `json:"maxmem"`
+	Disk      int64   `json:"disk"`
+	MaxDisk   int64   `json:"maxdisk"`
+	Uptime    int64   `json:"uptime"`
+	NetIn     int64   `json:"netin"`
+	NetOut    int64   `json:"netout"`
+	DiskRead  int64   `json:"diskread"`
+	DiskWrite int64   `json:"diskwrite"`
+	PID       int     `json:"pid"`
+	Template  int     `json:"template"`
+	Tags      string  `json:"tags"`
+}
+
+// Container represents an LXC container from GET /nodes/{node}/lxc.
+type Container struct {
+	VMID      int     `json:"vmid"`
+	Name      string  `json:"name"`
+	Status    string  `json:"status"`
+	Node      string  `json:"node"`
+	CPU       float64 `json:"cpu"`
+	CPUs      int     `json:"cpus"`
+	Mem       int64   `json:"mem"`
+	MaxMem    int64   `json:"maxmem"`
+	Disk      int64   `json:"disk"`
+	MaxDisk   int64   `json:"maxdisk"`
+	Swap      int64   `json:"swap"`
+	MaxSwap   int64   `json:"maxswap"`
+	Uptime    int64   `json:"uptime"`
+	NetIn     int64   `json:"netin"`
+	NetOut    int64   `json:"netout"`
+	DiskRead  int64   `json:"diskread"`
+	DiskWrite int64   `json:"diskwrite"`
+	PID       int     `json:"pid"`
+	Template  int     `json:"template"`
+	Tags      string  `json:"tags"`
+}
+
+// ClusterResource represents a resource from GET /cluster/resources.
+// This is polymorphic — the Type field determines which fields are populated.
+type ClusterResource struct {
+	ID         string  `json:"id"`
+	Type       string  `json:"type"`
+	Node       string  `json:"node"`
+	Status     string  `json:"status"`
+	Name       string  `json:"name"`
+	VMID       int     `json:"vmid,omitempty"`
+	CPU        float64 `json:"cpu,omitempty"`
+	MaxCPU     int     `json:"maxcpu,omitempty"`
+	Mem        int64   `json:"mem,omitempty"`
+	MaxMem     int64   `json:"maxmem,omitempty"`
+	Disk       int64   `json:"disk,omitempty"`
+	MaxDisk    int64   `json:"maxdisk,omitempty"`
+	Uptime     int64   `json:"uptime,omitempty"`
+	Template   int     `json:"template,omitempty"`
+	HAState    string  `json:"hastate,omitempty"`
+	Pool       string  `json:"pool,omitempty"`
+	Storage    string  `json:"storage,omitempty"`
+	PluginType string  `json:"plugintype,omitempty"`
+}
+
+// StoragePool represents a storage pool from GET /nodes/{node}/storage.
+type StoragePool struct {
+	Storage    string `json:"storage"`
+	Type       string `json:"type"`
+	Content    string `json:"content"`
+	Active     int    `json:"active"`
+	Enabled    int    `json:"enabled"`
+	Shared     int    `json:"shared"`
+	Total      int64  `json:"total"`
+	Used       int64  `json:"used"`
+	Avail      int64  `json:"avail"`
+	UsedFrac   float64 `json:"used_fraction"`
+}
+
+// ClusterStatusEntry represents an entry from GET /cluster/status.
+type ClusterStatusEntry struct {
+	Type    string `json:"type"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	IP      string `json:"ip,omitempty"`
+	Level   string `json:"level,omitempty"`
+	Local   int    `json:"local,omitempty"`
+	NodeID  int    `json:"nodeid,omitempty"`
+	Online  int    `json:"online,omitempty"`
+	Version int    `json:"version,omitempty"`
+	Quorate int    `json:"quorate,omitempty"`
+	Nodes   int    `json:"nodes,omitempty"`
+}
