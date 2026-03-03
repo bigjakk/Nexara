@@ -25,6 +25,22 @@ type Cluster struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
+type Node struct {
+	ID             uuid.UUID `json:"id"`
+	ClusterID      uuid.UUID `json:"cluster_id"`
+	Name           string    `json:"name"`
+	Status         string    `json:"status"`
+	CpuCount       int32     `json:"cpu_count"`
+	MemTotal       int64     `json:"mem_total"`
+	DiskTotal      int64     `json:"disk_total"`
+	PveVersion     string    `json:"pve_version"`
+	SslFingerprint string    `json:"ssl_fingerprint"`
+	Uptime         int64     `json:"uptime"`
+	LastSeenAt     time.Time `json:"last_seen_at"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type NodeMetric struct {
 	Time      time.Time `json:"time"`
 	NodeID    uuid.UUID `json:"node_id"`
@@ -98,6 +114,24 @@ type Setting struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+type StoragePool struct {
+	ID         uuid.UUID `json:"id"`
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	NodeID     uuid.UUID `json:"node_id"`
+	Storage    string    `json:"storage"`
+	Type       string    `json:"type"`
+	Content    string    `json:"content"`
+	Active     bool      `json:"active"`
+	Enabled    bool      `json:"enabled"`
+	Shared     bool      `json:"shared"`
+	Total      int64     `json:"total"`
+	Used       int64     `json:"used"`
+	Avail      int64     `json:"avail"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 type User struct {
 	ID           uuid.UUID   `json:"id"`
 	Email        string      `json:"email"`
@@ -108,6 +142,27 @@ type User struct {
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 	Role         string      `json:"role"`
+}
+
+type Vm struct {
+	ID         uuid.UUID `json:"id"`
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	NodeID     uuid.UUID `json:"node_id"`
+	Vmid       int32     `json:"vmid"`
+	Name       string    `json:"name"`
+	Type       string    `json:"type"`
+	Status     string    `json:"status"`
+	CpuCount   int32     `json:"cpu_count"`
+	MemTotal   int64     `json:"mem_total"`
+	DiskTotal  int64     `json:"disk_total"`
+	Uptime     int64     `json:"uptime"`
+	Template   bool      `json:"template"`
+	Tags       string    `json:"tags"`
+	HaState    string    `json:"ha_state"`
+	Pool       string    `json:"pool"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type VmMetric struct {

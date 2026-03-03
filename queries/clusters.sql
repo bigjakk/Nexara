@@ -23,3 +23,6 @@ RETURNING *;
 
 -- name: DeleteCluster :exec
 DELETE FROM clusters WHERE id = $1;
+
+-- name: ListActiveClusters :many
+SELECT * FROM clusters WHERE is_active = true ORDER BY created_at;

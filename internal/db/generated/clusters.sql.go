@@ -84,6 +84,41 @@ func (q *Queries) GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 	return i, err
 }
 
+const listActiveClusters = `-- name: ListActiveClusters :many
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at FROM clusters WHERE is_active = true ORDER BY created_at
+`
+
+func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
+	rows, err := q.db.Query(ctx, listActiveClusters)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Cluster{}
+	for rows.Next() {
+		var i Cluster
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ApiUrl,
+			&i.TokenID,
+			&i.TokenSecretEncrypted,
+			&i.TlsFingerprint,
+			&i.SyncIntervalSeconds,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listClusters = `-- name: ListClusters :many
 SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at FROM clusters ORDER BY created_at DESC
 `

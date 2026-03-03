@@ -22,16 +22,23 @@ type Querier interface {
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
+	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	ListActiveClusters(ctx context.Context) ([]Cluster, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
+	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
 	ListPBSServersByCluster(ctx context.Context, clusterID pgtype.UUID) ([]PbsServer, error)
+	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
+	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListUsers(ctx context.Context) ([]User, error)
+	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
+	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
@@ -39,6 +46,9 @@ type Querier interface {
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
 	UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
+	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
+	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (StoragePool, error)
+	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
 }
 
 var _ Querier = (*Queries)(nil)
