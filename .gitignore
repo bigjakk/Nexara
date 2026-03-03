@@ -1,0 +1,54 @@
+# Go
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.local
+
+# Database
+*.sql.bak
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+coverage.out
+coverage.html
+
+# Build artifacts
+/proxdash-api
+/proxdash-ws
+/proxdash-collector
+/proxdash-scheduler
+
+# Logs
+*.log
+logs/
+
+# Temporary
+tmp/
