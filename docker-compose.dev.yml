@@ -1,0 +1,78 @@
+# Development overrides — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  proxdash-db:
+    ports:
+      - "5432:5432"
+
+  proxdash-redis:
+    ports:
+      - "6379:6379"
+
+  proxdash-api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+      target: builder
+    volumes:
+      - .:/build
+    command: ["go", "run", "./cmd/api"]
+    ports:
+      - "8080:8080"
+      - "2345:2345"  # Delve debugger
+    environment:
+      LOG_LEVEL: debug
+
+  proxdash-ws:
+    build:
+      context: .
+      dockerfile: docker/ws/Dockerfile
+      target: builder
+    volumes:
+      - .:/build
+    command: ["go", "run", "./cmd/ws"]
+    ports:
+      - "8081:8081"
+      - "2346:2345"  # Delve debugger
+    environment:
+      LOG_LEVEL: debug
+
+  proxdash-collector:
+    build:
+      context: .
+      dockerfile: docker/collector/Dockerfile
+      target: builder
+    volumes:
+      - .:/build
+    command: ["go", "run", "./cmd/collector"]
+    environment:
+      LOG_LEVEL: debug
+      COLLECT_INTERVAL: 10s
+
+  proxdash-scheduler:
+    build:
+      context: .
+      dockerfile: docker/scheduler/Dockerfile
+      target: builder
+    volumes:
+      - .:/build
+    command: ["go", "run", "./cmd/scheduler"]
+    environment:
+      LOG_LEVEL: debug
+      SCHEDULER_TICK: 15s
+
+  proxdash-frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+      target: builder
+    volumes:
+      - ./frontend:/build
+      - /build/node_modules
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
+    ports:
+      - "3000:3000"
+
+  proxdash-proxy:
+    ports:
+      - "80:80"

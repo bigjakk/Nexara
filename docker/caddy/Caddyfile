@@ -1,0 +1,22 @@
+{$PROXDASH_DOMAIN:localhost} {
+    # API routes
+    handle /api/* {
+        reverse_proxy proxdash-api:8080
+    }
+
+    # WebSocket routes
+    handle /ws/* {
+        reverse_proxy proxdash-ws:8081
+    }
+
+    # Frontend (default)
+    handle {
+        reverse_proxy proxdash-frontend:3000
+    }
+
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+}
