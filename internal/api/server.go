@@ -21,6 +21,8 @@ type Server struct {
 	jwtService     *auth.JWTService
 	sessionManager *auth.SessionManager
 	authHandler    *handlers.AuthHandler
+	clusterHandler *handlers.ClusterHandler
+	pbsHandler     *handlers.PBSHandler
 }
 
 // New creates a new API server with the given dependencies.
@@ -46,6 +48,11 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil && s.jwtService != nil && s.sessionManager != nil {
 		s.authHandler = handlers.NewAuthHandler(s.queries, s.jwtService, s.sessionManager)
+	}
+
+	if s.queries != nil && cfg.EncryptionKey != "" {
+		s.clusterHandler = handlers.NewClusterHandler(s.queries, cfg.EncryptionKey)
+		s.pbsHandler = handlers.NewPBSHandler(s.queries, cfg.EncryptionKey)
 	}
 
 	s.app = fiber.New(fiber.Config{
