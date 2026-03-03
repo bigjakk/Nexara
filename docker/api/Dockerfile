@@ -1,5 +1,9 @@
 # Build stage
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
+
+ARG VERSION=dev
+ARG COMMIT=none
+ARG BUILD_TIME=unknown
 
 RUN apk add --no-cache git ca-certificates
 
@@ -11,7 +15,11 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" -o /build/proxdash-api ./cmd/api
+    go build -ldflags="-s -w \
+    -X github.com/proxdash/proxdash/internal/api.Version=${VERSION} \
+    -X github.com/proxdash/proxdash/internal/api.Commit=${COMMIT} \
+    -X github.com/proxdash/proxdash/internal/api.BuildTime=${BUILD_TIME}" \
+    -o /build/proxdash-api ./cmd/api
 
 # Runtime stage
 FROM gcr.io/distroless/static-debian12

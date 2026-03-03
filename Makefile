@@ -10,13 +10,22 @@ BINARY_WS=proxdash-ws
 BINARY_COLLECTOR=proxdash-collector
 BINARY_SCHEDULER=proxdash-scheduler
 
+# Version injection
+VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
+BUILD_TIME?=$(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+LDFLAGS=-s -w \
+	-X github.com/proxdash/proxdash/internal/api.Version=$(VERSION) \
+	-X github.com/proxdash/proxdash/internal/api.Commit=$(COMMIT) \
+	-X github.com/proxdash/proxdash/internal/api.BuildTime=$(BUILD_TIME)
+
 # Database
 MIGRATIONS_DIR=migrations
 DATABASE_URL?=postgres://proxdash:proxdash@localhost:5432/proxdash?sslmode=disable
 
 ## build: Build all Go binaries
 build:
-	$(GOBUILD) -o bin/$(BINARY_API) ./cmd/api
+	$(GOBUILD) -ldflags="$(LDFLAGS)" -o bin/$(BINARY_API) ./cmd/api
 	$(GOBUILD) -o bin/$(BINARY_WS) ./cmd/ws
 	$(GOBUILD) -o bin/$(BINARY_COLLECTOR) ./cmd/collector
 	$(GOBUILD) -o bin/$(BINARY_SCHEDULER) ./cmd/scheduler
