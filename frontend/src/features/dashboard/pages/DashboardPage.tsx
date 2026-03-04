@@ -2,13 +2,17 @@ import { useDashboardData } from "../api/dashboard-queries";
 import { StatsOverview } from "../components/StatsOverview";
 import { ClusterCard } from "../components/ClusterCard";
 import { EmptyState } from "../components/EmptyState";
+import { AddClusterDialog } from "../components/AddClusterDialog";
 
 export function DashboardPage() {
   const { data, isLoading, error } = useDashboardData();
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <AddClusterDialog />
+      </div>
 
       {error != null ? (
         <div className="rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">

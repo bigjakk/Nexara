@@ -41,6 +41,25 @@ export interface ApiError {
   details?: Record<string, unknown>;
 }
 
+export interface CreateClusterRequest {
+  name: string;
+  api_url: string;
+  token_id: string;
+  token_secret: string;
+  tls_fingerprint?: string;
+  sync_interval_seconds?: number;
+}
+
+export interface ConnectivityResult {
+  reachable: boolean;
+  message: string;
+}
+
+export interface CreateClusterResponse {
+  cluster: ClusterResponse;
+  connectivity: ConnectivityResult;
+}
+
 export interface ClusterResponse {
   id: string;
   name: string;

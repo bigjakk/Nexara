@@ -1,4 +1,4 @@
-{$PROXDASH_DOMAIN:localhost} {
+:80 {
     # API routes
     handle /api/* {
         reverse_proxy proxdash-api:8080

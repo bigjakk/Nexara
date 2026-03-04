@@ -35,6 +35,13 @@ const mockUseDashboardData = vi.fn();
 vi.mock("../api/dashboard-queries", () => ({
   useDashboardData: (...args: unknown[]) =>
     mockUseDashboardData(...args) as unknown,
+  useCreateCluster: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    error: null,
+    data: null,
+    reset: vi.fn(),
+  }),
 }));
 
 beforeEach(() => {

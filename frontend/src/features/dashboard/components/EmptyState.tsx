@@ -1,4 +1,5 @@
 import { ServerCrash } from "lucide-react";
+import { AddClusterDialog } from "./AddClusterDialog";
 
 export function EmptyState() {
   return (
@@ -9,6 +10,9 @@ export function EmptyState() {
         Add a Proxmox cluster to get started with monitoring your
         infrastructure.
       </p>
+      <div className="mt-6">
+        <AddClusterDialog />
+      </div>
     </div>
   );
 }

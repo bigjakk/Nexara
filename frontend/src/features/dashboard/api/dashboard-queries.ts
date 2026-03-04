@@ -1,7 +1,9 @@
-import { useQuery, useQueries } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type {
   ClusterResponse,
+  CreateClusterRequest,
+  CreateClusterResponse,
   NodeResponse,
   VMResponse,
   StorageResponse,
@@ -119,4 +121,15 @@ export function useDashboardData() {
   }
 
   return { data, isLoading, error };
+}
+
+export function useCreateCluster() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateClusterRequest) =>
+      apiClient.post<CreateClusterResponse>("/api/v1/clusters", req),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["clusters"] });
+    },
+  });
 }
