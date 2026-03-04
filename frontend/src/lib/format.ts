@@ -20,3 +20,25 @@ export function formatUptime(seconds: number): string {
   if (hours > 0) return `${String(hours)}h ${String(minutes)}m`;
   return `${String(minutes)}m`;
 }
+
+export function formatPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
+export function formatBytesPerSecond(bytesPerSec: number): string {
+  if (bytesPerSec === 0) return "0 B/s";
+  const i = Math.floor(Math.log(bytesPerSec) / Math.log(1024));
+  const index = Math.min(i, BYTE_UNITS.length - 1);
+  const unit = BYTE_UNITS[index];
+  if (unit === undefined) return `${String(bytesPerSec)} B/s`;
+  const value = bytesPerSec / Math.pow(1024, index);
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${unit}/s`;
+}
+
+export function formatTimestamp(ts: number): string {
+  const date = new Date(ts);
+  const h = String(date.getHours()).padStart(2, "0");
+  const m = String(date.getMinutes()).padStart(2, "0");
+  const s = String(date.getSeconds()).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}

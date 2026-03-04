@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { LogOut, LogOutIcon, User } from "lucide-react";
 
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
+import { useWebSocketStore } from "@/stores/websocket-store";
 import { Sidebar } from "./Sidebar";
 
 function getInitials(name: string): string {
@@ -26,6 +28,13 @@ function getInitials(name: string): string {
 
 export function AppShell() {
   const { user, logout, logoutAll } = useAuth();
+  const wsConnect = useWebSocketStore((s) => s.connect);
+  const wsDisconnect = useWebSocketStore((s) => s.disconnect);
+
+  useEffect(() => {
+    wsConnect();
+    return () => { wsDisconnect(); };
+  }, [wsConnect, wsDisconnect]);
 
   const handleLogout = () => {
     void logout();
