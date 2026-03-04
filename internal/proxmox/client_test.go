@@ -926,6 +926,211 @@ func TestGetTaskStatus_EmptyUPID(t *testing.T) {
 	}
 }
 
+// --- CT lifecycle actions ---
+
+func TestCTStatusActions(t *testing.T) {
+	actions := []string{"start", "stop", "shutdown", "reboot", "suspend", "resume"}
+
+	for _, action := range actions {
+		t.Run(action, func(t *testing.T) {
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/api2/json/nodes/pve1/lxc/200/status/" + action: func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodPost {
+						t.Errorf("expected POST, got %s", r.Method)
+					}
+					jsonResponse(w, "UPID:pve1:000012:00AB:65000000:vz"+action+":200:user@pam:")
+				},
+			})
+			defer srv.Close()
+
+			c := newTestClient(t, srv.URL)
+			var upid string
+			var err error
+
+			switch action {
+			case "start":
+				upid, err = c.StartCT(context.Background(), "pve1", 200)
+			case "stop":
+				upid, err = c.StopCT(context.Background(), "pve1", 200)
+			case "shutdown":
+				upid, err = c.ShutdownCT(context.Background(), "pve1", 200)
+			case "reboot":
+				upid, err = c.RebootCT(context.Background(), "pve1", 200)
+			case "suspend":
+				upid, err = c.SuspendCT(context.Background(), "pve1", 200)
+			case "resume":
+				upid, err = c.ResumeCT(context.Background(), "pve1", 200)
+			}
+
+			if err != nil {
+				t.Fatalf("%s CT: %v", action, err)
+			}
+			if upid == "" {
+				t.Errorf("%s CT: expected non-empty UPID", action)
+			}
+		})
+	}
+}
+
+func TestCTStatusAction_InvalidNode(t *testing.T) {
+	c, _ := NewClient(ClientConfig{
+		BaseURL:     "https://pve.example.com:8006",
+		TokenID:     "user@pam!test",
+		TokenSecret: "secret",
+	})
+
+	_, err := c.StartCT(context.Background(), "", 200)
+	if err == nil {
+		t.Fatal("expected error for empty node")
+	}
+
+	_, err = c.StartCT(context.Background(), "../etc", 200)
+	if err == nil {
+		t.Fatal("expected error for path traversal node")
+	}
+}
+
+func TestCTStatusAction_InvalidVMID(t *testing.T) {
+	c, _ := NewClient(ClientConfig{
+		BaseURL:     "https://pve.example.com:8006",
+		TokenID:     "user@pam!test",
+		TokenSecret: "secret",
+	})
+
+	_, err := c.StartCT(context.Background(), "pve1", 0)
+	if err == nil {
+		t.Fatal("expected error for VMID 0")
+	}
+
+	_, err = c.StartCT(context.Background(), "pve1", -1)
+	if err == nil {
+		t.Fatal("expected error for negative VMID")
+	}
+}
+
+// --- CloneCT ---
+
+func TestCloneCT(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes/pve1/lxc/200/clone": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			if r.FormValue("newid") != "300" {
+				t.Errorf("newid = %q, want 300", r.FormValue("newid"))
+			}
+			if r.FormValue("hostname") != "clone-ct" {
+				t.Errorf("hostname = %q, want clone-ct", r.FormValue("hostname"))
+			}
+			if r.FormValue("full") != "1" {
+				t.Errorf("full = %q, want 1", r.FormValue("full"))
+			}
+			jsonResponse(w, "UPID:pve1:000012:00AB:65000000:vzclone:200:user@pam:")
+		},
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	upid, err := c.CloneCT(context.Background(), "pve1", 200, CloneParams{
+		NewID: 300,
+		Name:  "clone-ct",
+		Full:  true,
+	})
+	if err != nil {
+		t.Fatalf("CloneCT: %v", err)
+	}
+	if upid == "" {
+		t.Error("expected non-empty UPID")
+	}
+}
+
+func TestCloneCT_MissingNewID(t *testing.T) {
+	c, _ := NewClient(ClientConfig{
+		BaseURL:     "https://pve.example.com:8006",
+		TokenID:     "user@pam!test",
+		TokenSecret: "secret",
+	})
+
+	_, err := c.CloneCT(context.Background(), "pve1", 200, CloneParams{})
+	if err == nil {
+		t.Fatal("expected error for missing newid")
+	}
+}
+
+// --- DestroyCT ---
+
+func TestDestroyCT(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes/pve1/lxc/200": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodDelete {
+				t.Errorf("expected DELETE, got %s", r.Method)
+			}
+			jsonResponse(w, "UPID:pve1:000012:00AB:65000000:vzdestroy:200:user@pam:")
+		},
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	upid, err := c.DestroyCT(context.Background(), "pve1", 200)
+	if err != nil {
+		t.Fatalf("DestroyCT: %v", err)
+	}
+	if upid == "" {
+		t.Error("expected non-empty UPID")
+	}
+}
+
+// --- MigrateCT ---
+
+func TestMigrateCT(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes/pve1/lxc/200/migrate": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			if r.FormValue("target") != "pve2" {
+				t.Errorf("target = %q, want pve2", r.FormValue("target"))
+			}
+			if r.FormValue("restart") != "1" {
+				t.Errorf("restart = %q, want 1", r.FormValue("restart"))
+			}
+			jsonResponse(w, "UPID:pve1:000012:00AB:65000000:vzmigrate:200:user@pam:")
+		},
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	upid, err := c.MigrateCT(context.Background(), "pve1", 200, MigrateParams{
+		Target: "pve2",
+		Online: true,
+	})
+	if err != nil {
+		t.Fatalf("MigrateCT: %v", err)
+	}
+	if upid == "" {
+		t.Error("expected non-empty UPID")
+	}
+}
+
+func TestMigrateCT_MissingTarget(t *testing.T) {
+	c, _ := NewClient(ClientConfig{
+		BaseURL:     "https://pve.example.com:8006",
+		TokenID:     "user@pam!test",
+		TokenSecret: "secret",
+	})
+
+	_, err := c.MigrateCT(context.Background(), "pve1", 200, MigrateParams{})
+	if err == nil {
+		t.Fatal("expected error for missing target")
+	}
+}
+
 // --- validateVMID ---
 
 func TestValidateVMID(t *testing.T) {

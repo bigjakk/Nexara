@@ -28,3 +28,9 @@ SELECT * FROM vms WHERE id = $1;
 
 -- name: GetVMByClusterAndVmid :one
 SELECT * FROM vms WHERE cluster_id = $1 AND vmid = $2;
+
+-- name: ListContainersByCluster :many
+SELECT * FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid;
+
+-- name: GetContainer :one
+SELECT * FROM vms WHERE id = $1 AND type = 'lxc';

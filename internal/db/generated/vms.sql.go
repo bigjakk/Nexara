@@ -11,6 +11,36 @@ import (
 	"github.com/google/uuid"
 )
 
+const getContainer = `-- name: GetContainer :one
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE id = $1 AND type = 'lxc'
+`
+
+func (q *Queries) GetContainer(ctx context.Context, id uuid.UUID) (Vm, error) {
+	row := q.db.QueryRow(ctx, getContainer, id)
+	var i Vm
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.NodeID,
+		&i.Vmid,
+		&i.Name,
+		&i.Type,
+		&i.Status,
+		&i.CpuCount,
+		&i.MemTotal,
+		&i.DiskTotal,
+		&i.Uptime,
+		&i.Template,
+		&i.Tags,
+		&i.HaState,
+		&i.Pool,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getVM = `-- name: GetVM :one
 SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE id = $1
 `
@@ -74,6 +104,49 @@ func (q *Queries) GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterA
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listContainersByCluster = `-- name: ListContainersByCluster :many
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid
+`
+
+func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error) {
+	rows, err := q.db.Query(ctx, listContainersByCluster, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Vm{}
+	for rows.Next() {
+		var i Vm
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.NodeID,
+			&i.Vmid,
+			&i.Name,
+			&i.Type,
+			&i.Status,
+			&i.CpuCount,
+			&i.MemTotal,
+			&i.DiskTotal,
+			&i.Uptime,
+			&i.Template,
+			&i.Tags,
+			&i.HaState,
+			&i.Pool,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listVMsByCluster = `-- name: ListVMsByCluster :many

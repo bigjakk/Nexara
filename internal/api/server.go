@@ -24,8 +24,9 @@ type Server struct {
 	clusterHandler *handlers.ClusterHandler
 	pbsHandler     *handlers.PBSHandler
 	nodeHandler    *handlers.NodeHandler
-	vmHandler      *handlers.VMHandler
-	storageHandler *handlers.StorageHandler
+	vmHandler        *handlers.VMHandler
+	containerHandler *handlers.ContainerHandler
+	storageHandler   *handlers.StorageHandler
 	metricsHandler *handlers.MetricsHandler
 }
 
@@ -61,6 +62,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
 		s.vmHandler = handlers.NewVMHandler(s.queries, cfg.EncryptionKey)
+		s.containerHandler = handlers.NewContainerHandler(s.queries, cfg.EncryptionKey)
 	}
 
 	if s.queries != nil {

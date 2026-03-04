@@ -356,6 +356,129 @@ func (c *Client) DestroyVM(ctx context.Context, node string, vmid int) (string, 
 	return upid, nil
 }
 
+// ctStatusAction sends a POST to /nodes/{node}/lxc/{vmid}/status/{action} and returns the UPID.
+func (c *Client) ctStatusAction(ctx context.Context, node string, vmid int, action string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/status/" + action
+	var upid string
+	if err := c.doPost(ctx, path, nil, &upid); err != nil {
+		return "", fmt.Errorf("%s CT %d on %s: %w", action, vmid, node, err)
+	}
+	return upid, nil
+}
+
+// StartCT starts an LXC container and returns the task UPID.
+func (c *Client) StartCT(ctx context.Context, node string, vmid int) (string, error) {
+	return c.ctStatusAction(ctx, node, vmid, "start")
+}
+
+// StopCT forcefully stops an LXC container and returns the task UPID.
+func (c *Client) StopCT(ctx context.Context, node string, vmid int) (string, error) {
+	return c.ctStatusAction(ctx, node, vmid, "stop")
+}
+
+// ShutdownCT sends a shutdown signal to an LXC container and returns the task UPID.
+func (c *Client) ShutdownCT(ctx context.Context, node string, vmid int) (string, error) {
+	return c.ctStatusAction(ctx, node, vmid, "shutdown")
+}
+
+// RebootCT reboots an LXC container and returns the task UPID.
+func (c *Client) RebootCT(ctx context.Context, node string, vmid int) (string, error) {
+	return c.ctStatusAction(ctx, node, vmid, "reboot")
+}
+
+// SuspendCT suspends (freezes) an LXC container and returns the task UPID.
+func (c *Client) SuspendCT(ctx context.Context, node string, vmid int) (string, error) {
+	return c.ctStatusAction(ctx, node, vmid, "suspend")
+}
+
+// ResumeCT resumes a suspended LXC container and returns the task UPID.
+func (c *Client) ResumeCT(ctx context.Context, node string, vmid int) (string, error) {
+	return c.ctStatusAction(ctx, node, vmid, "resume")
+}
+
+// CloneCT clones an LXC container and returns the task UPID.
+func (c *Client) CloneCT(ctx context.Context, node string, vmid int, params CloneParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if params.NewID <= 0 {
+		return "", fmt.Errorf("clone requires a positive newid")
+	}
+
+	form := url.Values{}
+	form.Set("newid", strconv.Itoa(params.NewID))
+	if params.Name != "" {
+		form.Set("hostname", params.Name)
+	}
+	if params.Target != "" {
+		form.Set("target", params.Target)
+	}
+	if params.Full {
+		form.Set("full", "1")
+	}
+	if params.Storage != "" {
+		form.Set("storage", params.Storage)
+	}
+
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/clone"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("clone CT %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// DestroyCT deletes an LXC container and returns the task UPID.
+func (c *Client) DestroyCT(ctx context.Context, node string, vmid int) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid)
+	var upid string
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("destroy CT %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// MigrateCT migrates an LXC container to another node and returns the task UPID.
+func (c *Client) MigrateCT(ctx context.Context, node string, vmid int, params MigrateParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if params.Target == "" {
+		return "", fmt.Errorf("migrate requires a target node")
+	}
+
+	form := url.Values{}
+	form.Set("target", params.Target)
+	if params.Online {
+		form.Set("restart", "1")
+	}
+
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/migrate"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("migrate CT %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
 // GetTaskStatus returns the status of an async task by its UPID.
 func (c *Client) GetTaskStatus(ctx context.Context, node string, upid string) (*TaskStatus, error) {
 	if err := validateNodeName(node); err != nil {

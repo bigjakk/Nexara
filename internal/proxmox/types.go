@@ -160,6 +160,12 @@ type CloneParams struct {
 	Storage string `json:"storage,omitempty"`
 }
 
+// MigrateParams holds parameters for a CT/VM migration operation.
+type MigrateParams struct {
+	Target string `json:"target"`
+	Online bool   `json:"online,omitempty"`
+}
+
 // TaskStatus represents the status of an async Proxmox task.
 type TaskStatus struct {
 	Status     string `json:"status"`

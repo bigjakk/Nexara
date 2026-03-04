@@ -43,6 +43,14 @@ func (s *Server) setupRoutes() {
 			clusters.Delete("/:cluster_id/vms/:vm_id", s.vmHandler.DestroyVM)
 			clusters.Get("/:cluster_id/tasks/:upid", s.vmHandler.GetTaskStatus)
 		}
+		if s.containerHandler != nil {
+			clusters.Get("/:cluster_id/containers", s.containerHandler.ListByCluster)
+			clusters.Get("/:cluster_id/containers/:ct_id", s.containerHandler.GetContainer)
+			clusters.Post("/:cluster_id/containers/:ct_id/status", s.containerHandler.PerformAction)
+			clusters.Post("/:cluster_id/containers/:ct_id/clone", s.containerHandler.CloneContainer)
+			clusters.Post("/:cluster_id/containers/:ct_id/migrate", s.containerHandler.MigrateContainer)
+			clusters.Delete("/:cluster_id/containers/:ct_id", s.containerHandler.DestroyContainer)
+		}
 		if s.storageHandler != nil {
 			clusters.Get("/:cluster_id/storage", s.storageHandler.ListByCluster)
 		}
