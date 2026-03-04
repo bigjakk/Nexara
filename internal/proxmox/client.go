@@ -31,6 +31,7 @@ type Client struct {
 	httpClient *http.Client
 	baseURL    string
 	authHeader string
+	tlsCfg     *tls.Config
 }
 
 // NewClient creates a Client from the given config.
@@ -88,6 +89,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		},
 		baseURL:    baseURL,
 		authHeader: fmt.Sprintf("PVEAPIToken=%s=%s", cfg.TokenID, cfg.TokenSecret),
+		tlsCfg:     tlsCfg,
 	}, nil
 }
 

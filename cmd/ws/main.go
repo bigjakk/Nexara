@@ -9,10 +9,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/proxdash/proxdash/internal/auth"
 	"github.com/proxdash/proxdash/internal/config"
+	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/ws"
 )
 
@@ -45,8 +47,24 @@ func main() {
 	}
 	logger.Info("connected to Redis")
 
+	// Connect to PostgreSQL for console proxy.
+	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+	if err := pool.Ping(context.Background()); err != nil {
+		logger.Error("failed to ping database", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("connected to database")
+
 	// Create JWT service for token validation.
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+
+	// Create console handler for terminal proxy.
+	queries := db.New(pool)
+	consoleHandler := ws.NewConsoleHandler(queries, cfg.EncryptionKey, jwtSvc, logger)
 
 	// Create and start Hub.
 	hub := ws.NewHub(logger)
@@ -60,7 +78,9 @@ func main() {
 	go subscriber.Run(ctx)
 
 	// Create and start WebSocket server.
-	server := ws.NewServer(hub, jwtSvc, logger, cfg.WSPingInterval, cfg.WSPongTimeout)
+	server := ws.NewServer(hub, jwtSvc, logger, cfg.WSPingInterval, cfg.WSPongTimeout, ws.ServerConfig{
+		ConsoleHandler: consoleHandler,
+	})
 
 	// Graceful shutdown.
 	go func() {
@@ -73,6 +93,7 @@ func main() {
 			logger.Error("server shutdown error", "error", err)
 		}
 		hub.Stop()
+		pool.Close()
 		redisClient.Close()
 	}()
 

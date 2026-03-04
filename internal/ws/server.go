@@ -14,17 +14,23 @@ import (
 
 // Server is the WebSocket server backed by Fiber.
 type Server struct {
-	app    *fiber.App
-	hub    *Hub
-	jwt    *auth.JWTService
-	logger *slog.Logger
+	app            *fiber.App
+	hub            *Hub
+	jwt            *auth.JWTService
+	logger         *slog.Logger
+	consoleHandler *ConsoleHandler
 
 	pingInterval time.Duration
 	pongTimeout  time.Duration
 }
 
+// ServerConfig holds optional dependencies for the WebSocket server.
+type ServerConfig struct {
+	ConsoleHandler *ConsoleHandler
+}
+
 // NewServer creates a new WebSocket server.
-func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInterval, pongTimeout time.Duration) *Server {
+func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInterval, pongTimeout time.Duration, opts ...ServerConfig) *Server {
 	s := &Server{
 		hub:          hub,
 		jwt:          jwtSvc,
@@ -33,11 +39,22 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		pongTimeout:  pongTimeout,
 	}
 
+	if len(opts) > 0 {
+		s.consoleHandler = opts[0].ConsoleHandler
+	}
+
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 	})
 
 	app.Get("/healthz", s.healthz)
+
+	// Register console route before generic /ws so it matches first.
+	if s.consoleHandler != nil {
+		app.Use("/ws/console", s.authMiddleware)
+		app.Get("/ws/console", websocket.New(s.consoleHandler.HandleConsole))
+	}
+
 	app.Use("/ws", s.authMiddleware)
 	app.Get("/ws", websocket.New(s.handleWS))
 

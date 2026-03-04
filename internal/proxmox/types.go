@@ -151,6 +151,14 @@ type StoragePool struct {
 	UsedFrac   float64 `json:"used_fraction"`
 }
 
+// TermProxyResponse holds the response from a termproxy POST request.
+type TermProxyResponse struct {
+	Port   int    `json:"port"`
+	Ticket string `json:"ticket"`
+	UPID   string `json:"upid"`
+	User   string `json:"user"`
+}
+
 // CloneParams holds parameters for a VM clone operation.
 type CloneParams struct {
 	NewID   int    `json:"newid"`

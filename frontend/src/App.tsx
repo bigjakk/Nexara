@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AppShell } from "@/components/layout/AppShell";
@@ -7,6 +8,12 @@ import { DashboardPage } from "@/features/dashboard/pages/DashboardPage";
 import { ClustersListPage } from "@/features/clusters/pages/ClustersListPage";
 import { ClusterDetailPage } from "@/features/clusters/pages/ClusterDetailPage";
 import { InventoryPage } from "@/features/inventory/pages/InventoryPage";
+
+const ConsolePage = lazy(() =>
+  import("@/features/console/pages/ConsolePage").then((m) => ({
+    default: m.ConsolePage,
+  })),
+);
 
 const router = createBrowserRouter([
   {
@@ -38,6 +45,14 @@ const router = createBrowserRouter([
           {
             path: "inventory",
             element: <InventoryPage />,
+          },
+          {
+            path: "console",
+            element: (
+              <Suspense fallback={<div className="flex h-full items-center justify-center">Loading...</div>}>
+                <ConsolePage />
+              </Suspense>
+            ),
           },
         ],
       },

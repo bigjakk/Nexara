@@ -6,6 +6,7 @@ import {
   Settings,
   Users,
   Shield,
+  TerminalSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
@@ -21,6 +22,7 @@ const navItems: NavItem[] = [
   { label: "Dashboard", to: "/", icon: LayoutDashboard },
   { label: "Clusters", to: "/clusters", icon: Server },
   { label: "Inventory", to: "/inventory", icon: Package },
+  { label: "Console", to: "/console", icon: TerminalSquare },
   { label: "Backup", to: "/backup", icon: Shield },
   { label: "Users", to: "/users", icon: Users, adminOnly: true },
   { label: "Settings", to: "/settings", icon: Settings, adminOnly: true },
