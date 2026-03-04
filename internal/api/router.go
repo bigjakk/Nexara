@@ -28,9 +28,18 @@ func (s *Server) setupRoutes() {
 		clusters.Put("/:id", s.clusterHandler.Update)
 		clusters.Delete("/:id", s.clusterHandler.Delete)
 
-		// Nested PBS servers by cluster.
+		// Nested resources by cluster.
 		if s.pbsHandler != nil {
 			clusters.Get("/:cluster_id/pbs-servers", s.pbsHandler.ListByCluster)
+		}
+		if s.nodeHandler != nil {
+			clusters.Get("/:cluster_id/nodes", s.nodeHandler.ListByCluster)
+		}
+		if s.vmHandler != nil {
+			clusters.Get("/:cluster_id/vms", s.vmHandler.ListByCluster)
+		}
+		if s.storageHandler != nil {
+			clusters.Get("/:cluster_id/storage", s.storageHandler.ListByCluster)
 		}
 	}
 

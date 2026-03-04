@@ -40,3 +40,69 @@ export interface ApiError {
   message: string;
   details?: Record<string, unknown>;
 }
+
+export interface ClusterResponse {
+  id: string;
+  name: string;
+  api_url: string;
+  token_id: string;
+  tls_fingerprint: string;
+  sync_interval_seconds: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NodeResponse {
+  id: string;
+  cluster_id: string;
+  name: string;
+  status: string;
+  cpu_count: number;
+  mem_total: number;
+  disk_total: number;
+  pve_version: string;
+  uptime: number;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VMResponse {
+  id: string;
+  cluster_id: string;
+  node_id: string;
+  vmid: number;
+  name: string;
+  type: string;
+  status: string;
+  cpu_count: number;
+  mem_total: number;
+  disk_total: number;
+  uptime: number;
+  template: boolean;
+  tags: string;
+  ha_state: string;
+  pool: string;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StorageResponse {
+  id: string;
+  cluster_id: string;
+  node_id: string;
+  storage: string;
+  type: string;
+  content: string;
+  active: boolean;
+  enabled: boolean;
+  shared: boolean;
+  total: number;
+  used: number;
+  avail: number;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+}

@@ -3,18 +3,8 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AppShell } from "@/components/layout/AppShell";
 import { LoginPage } from "@/features/auth/pages/LoginPage";
 import { RegisterPage } from "@/features/auth/pages/RegisterPage";
-
-function DashboardPlaceholder() {
-  return (
-    <div>
-      <h1 className="text-2xl font-bold">Dashboard</h1>
-      <p className="mt-2 text-muted-foreground">
-        Welcome to ProxDash. Your Proxmox infrastructure overview will appear
-        here.
-      </p>
-    </div>
-  );
-}
+import { DashboardPage } from "@/features/dashboard/pages/DashboardPage";
+import { ClusterDetailPage } from "@/features/clusters/pages/ClusterDetailPage";
 
 const router = createBrowserRouter([
   {
@@ -33,7 +23,11 @@ const router = createBrowserRouter([
         children: [
           {
             index: true,
-            element: <DashboardPlaceholder />,
+            element: <DashboardPage />,
+          },
+          {
+            path: "clusters/:clusterId",
+            element: <ClusterDetailPage />,
           },
         ],
       },
