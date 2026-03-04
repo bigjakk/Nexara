@@ -22,6 +22,8 @@ type Querier interface {
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
+	GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error)
+	GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error)
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
@@ -31,8 +33,6 @@ type Querier interface {
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
-	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
-	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
 	ListPBSServersByCluster(ctx context.Context, clusterID pgtype.UUID) ([]PbsServer, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
@@ -41,6 +41,8 @@ type Querier interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
+	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
+	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)

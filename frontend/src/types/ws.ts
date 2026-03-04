@@ -75,6 +75,12 @@ export interface MetricDataPoint {
   netOutBps: number;
 }
 
+/** Per-VM live metric snapshot (CPU and memory percent). */
+export interface VmLiveMetric {
+  cpuPercent: number;
+  memPercent: number;
+}
+
 /** Aggregated live metrics for a single cluster. */
 export interface AggregatedMetrics {
   cpuPercent: number;
@@ -90,6 +96,8 @@ export interface AggregatedMetrics {
   healthScore: number;
   history: MetricDataPoint[];
   topConsumers: TopConsumer[];
+  /** Live metrics for ALL VMs in the cluster, keyed by VM UUID. */
+  vmMetrics: Map<string, VmLiveMetric>;
 }
 
 /** A VM ranked by resource consumption. */

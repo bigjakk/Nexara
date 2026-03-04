@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { useMetricStore, MAX_HISTORY_POINTS } from "./metric-store";
 import type { AggregatedMetrics, ClusterMetricSummary } from "@/types/ws";
 
@@ -75,6 +75,12 @@ function getMetrics(clusterId: string): AggregatedMetrics {
 describe("metric-store", () => {
   beforeEach(() => {
     useMetricStore.getState().clearAll();
+    // Set minimum refresh interval so rapid calls are not throttled
+    useMetricStore.getState().setRefreshInterval(0);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("processes a metric message and stores aggregated data", () => {
@@ -170,6 +176,28 @@ describe("metric-store", () => {
 
     const metrics = getMetrics("test-cluster");
     expect(metrics.topConsumers).toHaveLength(10);
+  });
+
+  it("vmMetrics contains ALL VMs, not just top 10", () => {
+    const vms = Array.from({ length: 15 }, (_, i) => ({
+      vm_id: `vm-${String(i)}`,
+      cpu_usage: 0.5,
+      mem_used: 1_000_000_000,
+      mem_total: 2_000_000_000,
+      disk_read: 0,
+      disk_write: 0,
+      net_in: 0,
+      net_out: 0,
+    }));
+    const payload = createPayload({ vms, vm_count: 15 });
+    useMetricStore.getState().processMetricMessage("test-cluster", payload);
+
+    const metrics = getMetrics("test-cluster");
+    expect(metrics.vmMetrics.size).toBe(15);
+    const vm0 = metrics.vmMetrics.get("vm-0");
+    expect(vm0).toBeDefined();
+    expect(vm0?.cpuPercent).toBe(50);
+    expect(vm0?.memPercent).toBe(50);
   });
 
   it("clearCluster removes specific cluster data", () => {

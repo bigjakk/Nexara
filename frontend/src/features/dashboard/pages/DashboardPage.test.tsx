@@ -28,6 +28,7 @@ const mockDashboardData: DashboardData = {
   totalVMs: 10,
   totalContainers: 5,
   totalStorageBytes: 1099511627776,
+  vmNameMap: new Map(),
 };
 
 const mockUseDashboardData = vi.fn();
@@ -41,6 +42,14 @@ vi.mock("../api/dashboard-queries", () => ({
     error: null,
     data: null,
     reset: vi.fn(),
+  }),
+}));
+
+vi.mock("../api/historical-queries", () => ({
+  useHistoricalMetrics: () => ({
+    data: undefined,
+    isLoading: false,
+    error: null,
   }),
 }));
 
@@ -79,6 +88,7 @@ describe("DashboardPage", () => {
         totalVMs: 0,
         totalContainers: 0,
         totalStorageBytes: 0,
+        vmNameMap: new Map(),
       },
       isLoading: false,
       error: null,
@@ -99,5 +109,31 @@ describe("DashboardPage", () => {
     expect(
       screen.getByText("Failed to load dashboard data. Please try again."),
     ).toBeInTheDocument();
+  });
+
+  it("shows Live Metrics heading by default", () => {
+    mockUseDashboardData.mockReturnValue({
+      data: mockDashboardData,
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithProviders(<DashboardPage />);
+    expect(
+      screen.getByText("Prod Cluster — Live Metrics"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders time range selector with all buttons enabled", () => {
+    mockUseDashboardData.mockReturnValue({
+      data: mockDashboardData,
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithProviders(<DashboardPage />);
+    expect(screen.getByTestId("range-live")).not.toBeDisabled();
+    expect(screen.getByTestId("range-1h")).not.toBeDisabled();
+    expect(screen.getByTestId("range-7d")).not.toBeDisabled();
   });
 });

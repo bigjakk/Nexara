@@ -30,6 +30,8 @@ export interface DashboardData {
   totalVMs: number;
   totalContainers: number;
   totalStorageBytes: number;
+  /** VM UUID → display name (e.g. "web-01") for resolving metric IDs. */
+  vmNameMap: Map<string, string>;
 }
 
 export function useDashboardData() {
@@ -87,6 +89,7 @@ export function useDashboardData() {
     let totalVMs = 0;
     let totalContainers = 0;
     let totalStorageBytes = 0;
+    const vmNameMap = new Map<string, string>();
 
     const clusterSummaries = clusters.map((cluster, i) => {
       const nodes = nodeQueries[i]?.data ?? [];
@@ -101,6 +104,10 @@ export function useDashboardData() {
       totalVMs += vmCount;
       totalContainers += containerCount;
       totalStorageBytes += storageTotalBytes;
+
+      for (const vm of vms) {
+        vmNameMap.set(vm.id, vm.name);
+      }
 
       return {
         cluster,
@@ -117,6 +124,7 @@ export function useDashboardData() {
       totalVMs,
       totalContainers,
       totalStorageBytes,
+      vmNameMap,
     };
   }
 

@@ -26,6 +26,7 @@ type Server struct {
 	nodeHandler    *handlers.NodeHandler
 	vmHandler      *handlers.VMHandler
 	storageHandler *handlers.StorageHandler
+	metricsHandler *handlers.MetricsHandler
 }
 
 // New creates a new API server with the given dependencies.
@@ -62,6 +63,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.nodeHandler = handlers.NewNodeHandler(s.queries)
 		s.vmHandler = handlers.NewVMHandler(s.queries)
 		s.storageHandler = handlers.NewStorageHandler(s.queries)
+		s.metricsHandler = handlers.NewMetricsHandler(s.queries)
 	}
 
 	s.app = fiber.New(fiber.Config{

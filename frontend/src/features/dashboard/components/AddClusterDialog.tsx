@@ -41,7 +41,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
     }
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     createCluster.mutate(
       {

@@ -42,3 +42,19 @@ export function formatTimestamp(ts: number): string {
   const s = String(date.getSeconds()).padStart(2, "0");
   return `${h}:${m}:${s}`;
 }
+
+export function formatTimestampShort(ts: number): string {
+  const date = new Date(ts);
+  const h = String(date.getHours()).padStart(2, "0");
+  const m = String(date.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+export function formatTimestampLong(ts: number): string {
+  const date = new Date(ts);
+  const mon = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const m = String(date.getMinutes()).padStart(2, "0");
+  return `${mon}/${day} ${h}:${m}`;
+}

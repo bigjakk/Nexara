@@ -180,7 +180,12 @@ func (h *Hub) run() {
 
 // trySendOrEvict performs a non-blocking send to a client. If the client's
 // buffer is full, it is evicted as a slow client with full cleanup.
+// Safe to call even if the client was already removed (e.g. evicted by a
+// prior trySendOrEvict in the same event-loop iteration).
 func (h *Hub) trySendOrEvict(st *hubState, c *Client, data []byte) {
+	if _, ok := st.clients[c]; !ok {
+		return // Client already removed; send channel is closed.
+	}
 	select {
 	case c.send <- data:
 	default:

@@ -86,7 +86,9 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://proxdash:changeme@proxdash-db:5432/proxdash?sslmode=disable}
       REDIS_URL: ${REDIS_URL:-redis://proxdash-redis:6379/0}
-      COLLECT_INTERVAL: ${COLLECT_INTERVAL:-30s}
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      METRICS_COLLECT_INTERVAL: ${METRICS_COLLECT_INTERVAL:-10s}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       proxdash-api:
@@ -102,6 +104,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://proxdash:changeme@proxdash-db:5432/proxdash?sslmode=disable}
       REDIS_URL: ${REDIS_URL:-redis://proxdash-redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       SCHEDULER_TICK: ${SCHEDULER_TICK:-60s}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:

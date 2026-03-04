@@ -9,8 +9,9 @@ import {
   Tooltip,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatTimestamp, formatPercent, formatBytesPerSecond } from "@/lib/format";
+import { formatTimestamp, formatTimestampShort, formatTimestampLong, formatPercent, formatBytesPerSecond } from "@/lib/format";
 import type { MetricDataPoint } from "@/types/ws";
+import type { TimeRange } from "@/types/api";
 
 type MetricField = "cpuPercent" | "memPercent" | "diskReadBps" | "diskWriteBps" | "netInBps" | "netOutBps";
 
@@ -20,6 +21,13 @@ interface MetricChartProps {
   dataKey: MetricField;
   color: string;
   formatValue?: (value: number) => string;
+  timeRange?: TimeRange;
+}
+
+function getTimestampFormatter(timeRange?: TimeRange): (ts: number) => string {
+  if (timeRange === "7d") return formatTimestampLong;
+  if (timeRange === "1h" || timeRange === "6h" || timeRange === "24h") return formatTimestampShort;
+  return formatTimestamp;
 }
 
 export function MetricChart({
@@ -28,6 +36,7 @@ export function MetricChart({
   dataKey,
   color,
   formatValue,
+  timeRange,
 }: MetricChartProps) {
   const formatter = formatValue ?? ((v: number) => {
     if (dataKey === "cpuPercent" || dataKey === "memPercent") {
@@ -36,8 +45,9 @@ export function MetricChart({
     return formatBytesPerSecond(v);
   });
 
-  const tooltipLabelFormatter = (): ReactNode => {
-    return null;
+  const tsFormatter = getTimestampFormatter(timeRange);
+  const tooltipLabelFormatter = (label: ReactNode): ReactNode => {
+    return tsFormatter(Number(label));
   };
 
   const tooltipValueFormatter = (
@@ -78,7 +88,7 @@ export function MetricChart({
             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
             <XAxis
               dataKey="timestamp"
-              tickFormatter={formatTimestamp}
+              tickFormatter={getTimestampFormatter(timeRange)}
               className="text-xs"
               tick={{ fontSize: 10 }}
             />

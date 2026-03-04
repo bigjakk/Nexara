@@ -8,8 +8,10 @@ import "./index.css";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      staleTime: 5 * 60_000, // 5 minutes — inventory data doesn't change rapidly
+      gcTime: 10 * 60_000,   // 10 minutes — keep cache longer to avoid refetches
       retry: 1,
+      refetchOnWindowFocus: false,
     },
   },
 });

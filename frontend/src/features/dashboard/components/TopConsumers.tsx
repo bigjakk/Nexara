@@ -6,11 +6,12 @@ import type { TopConsumer } from "@/types/ws";
 
 interface TopConsumersProps {
   consumers: TopConsumer[];
+  vmNames: Map<string, string>;
 }
 
 type SortField = "cpu" | "memory";
 
-export function TopConsumers({ consumers }: TopConsumersProps) {
+export function TopConsumers({ consumers, vmNames }: TopConsumersProps) {
   const [sortBy, setSortBy] = useState<SortField>("cpu");
 
   const sorted = [...consumers].sort((a, b) => {
@@ -55,7 +56,7 @@ export function TopConsumers({ consumers }: TopConsumersProps) {
               return (
                 <div key={vm.vmId} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="truncate font-mono">{vm.vmId.slice(0, 8)}</span>
+                    <span className="truncate">{vmNames.get(vm.vmId) ?? vm.vmId.slice(0, 8)}</span>
                     <span className="text-muted-foreground">
                       {formatPercent(value)}
                     </span>

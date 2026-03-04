@@ -108,6 +108,18 @@ export interface VMResponse {
   updated_at: string;
 }
 
+export type TimeRange = "live" | "1h" | "6h" | "24h" | "7d";
+
+export interface HistoricalMetricPoint {
+  timestamp: number;
+  cpuPercent: number;
+  memPercent: number;
+  diskReadBps: number;
+  diskWriteBps: number;
+  netInBps: number;
+  netOutBps: number;
+}
+
 export interface StorageResponse {
   id: string;
   cluster_id: string;

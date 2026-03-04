@@ -7,9 +7,134 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const getClusterMetrics1h = `-- name: GetClusterMetrics1h :many
+SELECT
+  m.bucket::timestamptz                   AS bucket,
+  avg(m.avg_cpu_usage)::double precision  AS cpu,
+  avg(m.avg_mem_used)::double precision   AS mem_used,
+  avg(m.avg_mem_total)::double precision  AS mem_total,
+  avg(m.avg_disk_read)::double precision  AS disk_read,
+  avg(m.avg_disk_write)::double precision AS disk_write,
+  avg(m.avg_net_in)::double precision     AS net_in,
+  avg(m.avg_net_out)::double precision    AS net_out
+FROM node_metrics_1h m
+JOIN nodes n ON n.id = m.node_id
+WHERE n.cluster_id = $1 AND m.bucket >= $2
+GROUP BY m.bucket
+ORDER BY m.bucket
+`
+
+type GetClusterMetrics1hParams struct {
+	ClusterID uuid.UUID   `json:"cluster_id"`
+	Bucket    interface{} `json:"bucket"`
+}
+
+type GetClusterMetrics1hRow struct {
+	Bucket    time.Time `json:"bucket"`
+	Cpu       float64   `json:"cpu"`
+	MemUsed   float64   `json:"mem_used"`
+	MemTotal  float64   `json:"mem_total"`
+	DiskRead  float64   `json:"disk_read"`
+	DiskWrite float64   `json:"disk_write"`
+	NetIn     float64   `json:"net_in"`
+	NetOut    float64   `json:"net_out"`
+}
+
+func (q *Queries) GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error) {
+	rows, err := q.db.Query(ctx, getClusterMetrics1h, arg.ClusterID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetClusterMetrics1hRow{}
+	for rows.Next() {
+		var i GetClusterMetrics1hRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Cpu,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getClusterMetrics5m = `-- name: GetClusterMetrics5m :many
+SELECT
+  m.bucket::timestamptz                   AS bucket,
+  avg(m.avg_cpu_usage)::double precision  AS cpu,
+  avg(m.avg_mem_used)::double precision   AS mem_used,
+  avg(m.avg_mem_total)::double precision  AS mem_total,
+  avg(m.avg_disk_read)::double precision  AS disk_read,
+  avg(m.avg_disk_write)::double precision AS disk_write,
+  avg(m.avg_net_in)::double precision     AS net_in,
+  avg(m.avg_net_out)::double precision    AS net_out
+FROM node_metrics_5m m
+JOIN nodes n ON n.id = m.node_id
+WHERE n.cluster_id = $1 AND m.bucket >= $2
+GROUP BY m.bucket
+ORDER BY m.bucket
+`
+
+type GetClusterMetrics5mParams struct {
+	ClusterID uuid.UUID   `json:"cluster_id"`
+	Bucket    interface{} `json:"bucket"`
+}
+
+type GetClusterMetrics5mRow struct {
+	Bucket    time.Time `json:"bucket"`
+	Cpu       float64   `json:"cpu"`
+	MemUsed   float64   `json:"mem_used"`
+	MemTotal  float64   `json:"mem_total"`
+	DiskRead  float64   `json:"disk_read"`
+	DiskWrite float64   `json:"disk_write"`
+	NetIn     float64   `json:"net_in"`
+	NetOut    float64   `json:"net_out"`
+}
+
+func (q *Queries) GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error) {
+	rows, err := q.db.Query(ctx, getClusterMetrics5m, arg.ClusterID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetClusterMetrics5mRow{}
+	for rows.Next() {
+		var i GetClusterMetrics5mRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Cpu,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 const markNodeOffline = `-- name: MarkNodeOffline :exec
 UPDATE nodes SET status = 'offline' WHERE id = $1 AND status != 'offline'

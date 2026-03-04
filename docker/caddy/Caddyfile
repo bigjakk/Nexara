@@ -5,6 +5,9 @@
     }
 
     # WebSocket routes
+    handle /ws {
+        reverse_proxy proxdash-ws:8081
+    }
     handle /ws/* {
         reverse_proxy proxdash-ws:8081
     }

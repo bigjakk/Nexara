@@ -41,6 +41,9 @@ func (s *Server) setupRoutes() {
 		if s.storageHandler != nil {
 			clusters.Get("/:cluster_id/storage", s.storageHandler.ListByCluster)
 		}
+		if s.metricsHandler != nil {
+			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)
+		}
 	}
 
 	// PBS server routes.

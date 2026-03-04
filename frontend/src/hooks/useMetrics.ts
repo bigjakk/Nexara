@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef, useMemo } from "react";
 import { useWebSocketStore } from "@/stores/websocket-store";
 import { useMetricStore } from "@/stores/metric-store";
 import type { AggregatedMetrics, ClusterMetricSummary } from "@/types/ws";
@@ -38,7 +38,7 @@ export function useClusterMetrics(
 
 /**
  * Subscribe to live metrics for multiple clusters.
- * Returns a Map of clusterId -> AggregatedMetrics.
+ * Returns a stable Map reference that only updates when metric data actually changes.
  */
 export function useDashboardMetrics(
   clusterIds: string[],
@@ -46,7 +46,13 @@ export function useDashboardMetrics(
   const subscribe = useWebSocketStore((s) => s.subscribe);
   const unsubscribe = useWebSocketStore((s) => s.unsubscribe);
   const processMetricMessage = useMetricStore((s) => s.processMetricMessage);
-  const allMetrics = useMetricStore((s) => s.metrics);
+
+  // Track the last version counter to know when to rebuild the result map
+  const version = useMetricStore((s) => s.version);
+  const resultRef = useRef(new Map<string, AggregatedMetrics>());
+
+  // Stable cluster ID list reference
+  const clusterIdKey = clusterIds.join(",");
 
   useEffect(() => {
     const handlers = new Map<string, (payload: unknown) => void>();
@@ -65,15 +71,21 @@ export function useDashboardMetrics(
         unsubscribe(channel, handler);
       }
     };
-  }, [clusterIds, subscribe, unsubscribe, processMetricMessage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clusterIdKey, subscribe, unsubscribe, processMetricMessage]);
 
-  // Filter to only the requested cluster IDs
-  const result = new Map<string, AggregatedMetrics>();
-  for (const id of clusterIds) {
-    const m = allMetrics.get(id);
-    if (m) {
-      result.set(id, m);
+  // Only rebuild the result map when the store version changes
+  return useMemo(() => {
+    const allMetrics = useMetricStore.getState().metrics;
+    const result = new Map<string, AggregatedMetrics>();
+    for (const id of clusterIds) {
+      const m = allMetrics.get(id);
+      if (m) {
+        result.set(id, m);
+      }
     }
-  }
-  return result;
+    resultRef.current = result;
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, clusterIdKey]);
 }

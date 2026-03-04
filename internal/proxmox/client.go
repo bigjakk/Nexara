@@ -181,7 +181,7 @@ func (c *Client) GetVMs(ctx context.Context, node string) ([]VirtualMachine, err
 		return nil, err
 	}
 	var vms []VirtualMachine
-	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/qemu", &vms); err != nil {
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/qemu?full=1", &vms); err != nil {
 		return nil, fmt.Errorf("get VMs on %s: %w", node, err)
 	}
 	for i := range vms {
@@ -196,7 +196,7 @@ func (c *Client) GetContainers(ctx context.Context, node string) ([]Container, e
 		return nil, err
 	}
 	var cts []Container
-	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/lxc", &cts); err != nil {
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/lxc?full=1", &cts); err != nil {
 		return nil, fmt.Errorf("get containers on %s: %w", node, err)
 	}
 	for i := range cts {

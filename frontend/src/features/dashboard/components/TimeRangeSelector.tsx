@@ -1,30 +1,37 @@
 import { Button } from "@/components/ui/button";
+import type { TimeRange } from "@/types/api";
 
-const ranges = [
-  { key: "live", label: "Live", disabled: false },
-  { key: "1h", label: "1h", disabled: true },
-  { key: "6h", label: "6h", disabled: true },
-  { key: "24h", label: "24h", disabled: true },
-  { key: "7d", label: "7d", disabled: true },
-] as const;
+const ranges: readonly TimeRange[] = ["live", "1h", "6h", "24h", "7d"];
 
-export function TimeRangeSelector() {
+const labels: Record<TimeRange, string> = {
+  live: "Live",
+  "1h": "1h",
+  "6h": "6h",
+  "24h": "24h",
+  "7d": "7d",
+};
+
+interface TimeRangeSelectorProps {
+  value: TimeRange;
+  onChange: (range: TimeRange) => void;
+}
+
+export function TimeRangeSelector({ value, onChange }: TimeRangeSelectorProps) {
   return (
     <div className="flex items-center gap-1" data-testid="time-range-selector">
       {ranges.map((range) => (
-        <div key={range.key} className="relative">
+        <div key={range} className="relative">
           <Button
-            variant={range.key === "live" ? "default" : "ghost"}
+            variant={range === value ? "default" : "ghost"}
             size="sm"
             className="h-7 px-2 text-xs"
-            disabled={range.disabled}
-            title={range.disabled ? "Coming soon" : undefined}
-            data-testid={`range-${range.key}`}
+            onClick={() => { onChange(range); }}
+            data-testid={`range-${range}`}
           >
-            {range.key === "live" && (
+            {range === "live" && (
               <span className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-green-400" />
             )}
-            {range.label}
+            {labels[range]}
           </Button>
         </div>
       ))}
