@@ -66,6 +66,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://proxdash:changeme@proxdash-db:5432/proxdash?sslmode=disable}
       REDIS_URL: ${REDIS_URL:-redis://proxdash-redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       WS_PORT: ${WS_PORT:-8081}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:

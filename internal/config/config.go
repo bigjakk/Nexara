@@ -20,6 +20,9 @@ type Config struct {
 	RateLimitExpiration    time.Duration `envconfig:"RATE_LIMIT_EXPIRATION" default:"1m"`
 	CORSAllowOrigins       string        `envconfig:"CORS_ALLOW_ORIGINS" default:"*"`
 	MetricsCollectInterval time.Duration `envconfig:"METRICS_COLLECT_INTERVAL" default:"30s"`
+	WSPort                 int           `envconfig:"WS_PORT" default:"8081"`
+	WSPingInterval         time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
+	WSPongTimeout          time.Duration `envconfig:"WS_PONG_TIMEOUT" default:"30s"`
 }
 
 // NewMetricsTicker creates a time.Ticker using the configured metrics collection interval.

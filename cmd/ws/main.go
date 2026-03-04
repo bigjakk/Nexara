@@ -1,7 +1,105 @@
 package main
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/redis/go-redis/v9"
+
+	"github.com/proxdash/proxdash/internal/auth"
+	"github.com/proxdash/proxdash/internal/config"
+	"github.com/proxdash/proxdash/internal/ws"
+)
 
 func main() {
-	fmt.Println("ProxDash WebSocket server")
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		healthcheck()
+		return
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+
+	// Parse Redis URL.
+	opts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		logger.Error("failed to parse Redis URL", "error", err)
+		os.Exit(1)
+	}
+	redisClient := redis.NewClient(opts)
+
+	// Verify Redis connection.
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		logger.Error("failed to connect to Redis", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("connected to Redis")
+
+	// Create JWT service for token validation.
+	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+
+	// Create and start Hub.
+	hub := ws.NewHub(logger)
+	hub.Run()
+
+	// Create and start Redis subscriber.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	subscriber := ws.NewRedisSubscriber(redisClient, hub, logger)
+	go subscriber.Run(ctx)
+
+	// Create and start WebSocket server.
+	server := ws.NewServer(hub, jwtSvc, logger, cfg.WSPingInterval, cfg.WSPongTimeout)
+
+	// Graceful shutdown.
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		sig := <-sigCh
+		logger.Info("received signal, shutting down", "signal", sig)
+		cancel()
+		if err := server.Shutdown(); err != nil {
+			logger.Error("server shutdown error", "error", err)
+		}
+		hub.Stop()
+		redisClient.Close()
+	}()
+
+	logger.Info("starting WebSocket server", "port", cfg.WSPort)
+	if err := server.Listen(cfg.WSPort); err != nil {
+		logger.Error("server error", "error", err)
+		os.Exit(1)
+	}
+}
+
+// healthcheck performs a simple HTTP health check against the local server.
+func healthcheck() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+	url := fmt.Sprintf("http://localhost:%d/healthz", cfg.WSPort)
+	resp, err := http.Get(url) //nolint:gosec // localhost health check
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "healthcheck failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "healthcheck returned %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
+	fmt.Println("ok")
 }
