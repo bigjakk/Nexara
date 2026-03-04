@@ -1,4 +1,4 @@
-import { X, Terminal, Loader2, AlertCircle, Unplug } from "lucide-react";
+import { X, Terminal, Loader2, AlertCircle, Unplug, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConsoleStore } from "@/stores/console-store";
 import type { ConsoleStatus } from "../types/console";
@@ -21,13 +21,14 @@ export function ConsoleTabBar() {
   const activeTabId = useConsoleStore((s) => s.activeTabId);
   const setActiveTab = useConsoleStore((s) => s.setActiveTab);
   const removeTab = useConsoleStore((s) => s.removeTab);
+  const reconnectTab = useConsoleStore((s) => s.reconnectTab);
 
   if (tabs.length === 0) {
     return null;
   }
 
   return (
-    <div className="flex items-center gap-1 border-b bg-card px-2 pt-1">
+    <div className="flex items-center gap-1 px-2 pt-1">
       {tabs.map((tab) => (
         <div
           key={tab.id}
@@ -53,9 +54,21 @@ export function ConsoleTabBar() {
             className="ml-1 rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
             onClick={(e) => {
               e.stopPropagation();
+              reconnectTab(tab.id);
+            }}
+            aria-label={`Reconnect ${tab.label}`}
+            title="Reconnect"
+          >
+            <RotateCcw className="h-3 w-3" />
+          </button>
+          <button
+            className="rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+            onClick={(e) => {
+              e.stopPropagation();
               removeTab(tab.id);
             }}
             aria-label={`Close ${tab.label}`}
+            title="Close"
           >
             <X className="h-3 w-3" />
           </button>

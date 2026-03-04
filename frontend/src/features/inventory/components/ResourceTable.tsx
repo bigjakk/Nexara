@@ -12,6 +12,7 @@ import {
   type VisibilityState,
   type RowSelectionState,
 } from "@tanstack/react-table";
+import { Link } from "react-router-dom";
 import { ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Table,
@@ -101,9 +102,20 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
           <ArrowUpDown className="ml-1 h-3 w-3" />
         </Button>
       ),
-      cell: ({ getValue }) => (
-        <span className="font-medium">{getValue()}</span>
-      ),
+      cell: ({ row, getValue }) => {
+        const r = row.original;
+        if (r.type === "node") {
+          return <span className="font-medium">{getValue()}</span>;
+        }
+        return (
+          <Link
+            to={`/inventory/${r.type}/${r.clusterId}/${r.id}`}
+            className="font-medium text-primary hover:underline"
+          >
+            {getValue()}
+          </Link>
+        );
+      },
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("status", {

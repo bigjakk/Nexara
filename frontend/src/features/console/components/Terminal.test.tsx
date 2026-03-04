@@ -79,6 +79,7 @@ const testTab: ConsoleTab = {
   type: "node_shell",
   label: "node1 shell",
   status: "connecting",
+  reconnectKey: 0,
 };
 
 describe("Terminal", () => {

@@ -10,4 +10,5 @@ export interface ConsoleTab {
   type: ConsoleType;
   label: string;
   status: ConsoleStatus;
+  reconnectKey: number;
 }

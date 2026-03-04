@@ -15,7 +15,7 @@ func termProxyHandler(t *testing.T) http.HandlerFunc {
 			return
 		}
 		jsonResponse(w, TermProxyResponse{
-			Port:   5900,
+			Port:   FlexInt(5900),
 			Ticket: "PVEVNC:test-ticket",
 			UPID:   "UPID:node1:0001:0001:0001:vncproxy:0:user@pam:",
 			User:   "user@pam",
@@ -34,7 +34,7 @@ func TestNodeTermProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeTermProxy: %v", err)
 	}
-	if resp.Port != 5900 {
+	if int(resp.Port) != 5900 {
 		t.Errorf("expected port 5900, got %d", resp.Port)
 	}
 	if resp.Ticket != "PVEVNC:test-ticket" {
@@ -64,7 +64,7 @@ func TestVMTermProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VMTermProxy: %v", err)
 	}
-	if resp.Port != 5900 {
+	if int(resp.Port) != 5900 {
 		t.Errorf("expected port 5900, got %d", resp.Port)
 	}
 }
@@ -91,7 +91,7 @@ func TestCTTermProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CTTermProxy: %v", err)
 	}
-	if resp.Port != 5900 {
+	if int(resp.Port) != 5900 {
 		t.Errorf("expected port 5900, got %d", resp.Port)
 	}
 }

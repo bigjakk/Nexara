@@ -139,7 +139,7 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	}
 
 	// Dial the Proxmox vncwebsocket.
-	pxConn, err := pxClient.DialTerminal(ctx, node, termResp.Ticket, termResp.Port)
+	pxConn, err := pxClient.DialTerminal(ctx, node, termResp.Ticket, int(termResp.Port))
 	if err != nil {
 		logger.Error("dial terminal failed", "error", err)
 		h.writeError(conn, "failed to connect to terminal")

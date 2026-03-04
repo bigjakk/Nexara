@@ -7,9 +7,24 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const deleteStaleVMs = `-- name: DeleteStaleVMs :exec
+DELETE FROM vms WHERE cluster_id = $1 AND last_seen_at < $2
+`
+
+type DeleteStaleVMsParams struct {
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
+func (q *Queries) DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) error {
+	_, err := q.db.Exec(ctx, deleteStaleVMs, arg.ClusterID, arg.LastSeenAt)
+	return err
+}
 
 const getContainer = `-- name: GetContainer :one
 SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE id = $1 AND type = 'lxc'

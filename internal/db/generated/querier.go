@@ -20,6 +20,7 @@ type Querier interface {
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
+	DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 	GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error)

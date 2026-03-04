@@ -497,6 +497,22 @@ func (c *Client) GetTaskStatus(ctx context.Context, node string, upid string) (*
 	return &status, nil
 }
 
+// GetTaskLog returns the log lines for an async task.
+func (c *Client) GetTaskLog(ctx context.Context, node string, upid string, start int) ([]TaskLogEntry, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if upid == "" {
+		return nil, fmt.Errorf("UPID cannot be empty")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/tasks/" + url.PathEscape(upid) + "/log?start=" + strconv.Itoa(start) + "&limit=5000"
+	var entries []TaskLogEntry
+	if err := c.do(ctx, path, &entries); err != nil {
+		return nil, fmt.Errorf("get task log on %s: %w", node, err)
+	}
+	return entries, nil
+}
+
 // validateNodeName rejects empty names and path traversal attempts.
 func validateNodeName(node string) error {
 	if node == "" {

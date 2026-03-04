@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { ClusterResponse, NodeResponse } from "@/types/api";
+import type { ClusterResponse, NodeResponse, StorageResponse } from "@/types/api";
 
 export function useCluster(id: string) {
   return useQuery({
@@ -16,6 +16,17 @@ export function useClusterNodes(clusterId: string) {
     queryFn: () =>
       apiClient.get<NodeResponse[]>(
         `/api/v1/clusters/${clusterId}/nodes`,
+      ),
+    enabled: clusterId.length > 0,
+  });
+}
+
+export function useClusterStorage(clusterId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "storage"],
+    queryFn: () =>
+      apiClient.get<StorageResponse[]>(
+        `/api/v1/clusters/${clusterId}/storage`,
       ),
     enabled: clusterId.length > 0,
   });

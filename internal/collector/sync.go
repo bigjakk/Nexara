@@ -21,6 +21,7 @@ type SyncQueries interface {
 	UpsertVM(ctx context.Context, arg db.UpsertVMParams) (db.Vm, error)
 	UpsertStoragePool(ctx context.Context, arg db.UpsertStoragePoolParams) (db.StoragePool, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
+	DeleteStaleVMs(ctx context.Context, arg db.DeleteStaleVMsParams) error
 }
 
 // ProxmoxClient defines the Proxmox API methods needed by the Syncer.
@@ -121,6 +122,19 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 
 		result.NodeMetrics = append(result.NodeMetrics, nr.NodeMetric)
 		result.VMMetrics = append(result.VMMetrics, nr.VMMetrics...)
+	}
+
+	// Prune VMs/CTs that no longer exist on Proxmox. Any VM that wasn't
+	// upserted during this sync cycle will have a last_seen_at older than
+	// the timestamp captured at the start of the cycle.
+	if err := s.queries.DeleteStaleVMs(ctx, db.DeleteStaleVMsParams{
+		ClusterID:  cluster.ID,
+		LastSeenAt: now,
+	}); err != nil {
+		s.logger.Warn("failed to prune stale VMs",
+			"cluster_id", cluster.ID,
+			"error", err,
+		)
 	}
 
 	return result, nil

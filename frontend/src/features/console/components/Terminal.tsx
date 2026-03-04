@@ -33,7 +33,7 @@ function buildConsoleWsUrl(
 }
 
 export function Terminal({ tab, visible }: TerminalProps) {
-  const { id: tabId, clusterID, node, type, vmid } = tab;
+  const { id: tabId, clusterID, node, type, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -174,7 +174,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
       wsRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [tabId, clusterID, node, type, vmid, updateTabStatus]);
+  }, [tabId, clusterID, node, type, vmid, reconnectKey, updateTabStatus]);
 
   // Re-fit when visibility changes.
   useEffect(() => {

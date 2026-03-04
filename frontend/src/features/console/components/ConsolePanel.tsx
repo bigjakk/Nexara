@@ -1,6 +1,7 @@
 import { TerminalSquare } from "lucide-react";
 import { useConsoleStore } from "@/stores/console-store";
 import { ConsoleTabBar } from "./ConsoleTabBar";
+import { QuickConnect } from "./QuickConnect";
 import { Terminal } from "./Terminal";
 import { VNCViewer } from "./VNCViewer";
 
@@ -10,7 +11,14 @@ export function ConsolePanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <ConsoleTabBar />
+      <div className="flex items-center border-b bg-card">
+        <div className="flex-1">
+          <ConsoleTabBar />
+        </div>
+        <div className="px-2 py-1">
+          <QuickConnect />
+        </div>
+      </div>
       <div className="relative flex-1 bg-[#1a1b26]">
         {tabs.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
@@ -18,8 +26,8 @@ export function ConsolePanel() {
             <div className="text-center">
               <p className="text-lg font-medium">No console sessions</p>
               <p className="text-sm">
-                Open a terminal or VNC console from the Inventory or Cluster
-                detail page
+                Click &quot;New Console&quot; to connect to a VM or container,
+                or open one from the Inventory page
               </p>
             </div>
           </div>

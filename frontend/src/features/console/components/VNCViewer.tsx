@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import RFB from "@novnc/novnc/lib/rfb";
 import type { ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
@@ -29,41 +29,18 @@ function buildVncWsUrl(
 }
 
 export function VNCViewer({ tab, visible }: VNCViewerProps) {
-  const { id: tabId, clusterID, node, vmid } = tab;
+  const { id: tabId, clusterID, node, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
   const [rfb, setRfb] = useState<RFB | null>(null);
 
-  const initRFB = useCallback(
-    (ws: WebSocket) => {
-      if (!containerRef.current) return;
-
-      const rfbInstance = new RFB(containerRef.current, ws);
-      rfbInstance.scaleViewport = true;
-      rfbInstance.resizeSession = false;
-      rfbInstance.focusOnClick = true;
-
-      rfbInstance.addEventListener("connect", () => {
-        updateTabStatus(tabId, "connected");
-      });
-
-      rfbInstance.addEventListener("disconnect", () => {
-        updateTabStatus(tabId, "disconnected");
-        rfbRef.current = null;
-        setRfb(null);
-      });
-
-      rfbInstance.addEventListener("securityfailure", () => {
-        updateTabStatus(tabId, "error");
-      });
-
-      rfbRef.current = rfbInstance;
-      setRfb(rfbInstance);
-    },
-    [tabId, updateTabStatus],
-  );
+  // Store latest callbacks in refs so the effect doesn't depend on them.
+  const updateTabStatusRef = useRef(updateTabStatus);
+  updateTabStatusRef.current = updateTabStatus;
+  const tabIdRef = useRef(tabId);
+  tabIdRef.current = tabId;
 
   useEffect(() => {
     const wsUrl = buildVncWsUrl(clusterID, node, vmid);
@@ -77,14 +54,42 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
           const msg = JSON.parse(event.data) as {
             type: string;
             message?: string;
+            password?: string;
           };
           if (msg.type === "connected") {
             // Backend proxy is connected to Proxmox — now initialize noVNC RFB.
-            initRFB(ws);
+            if (!containerRef.current) return;
+
+            const options: Record<string, unknown> = {};
+            if (msg.password) {
+              options["credentials"] = { password: msg.password };
+            }
+
+            const rfbInstance = new RFB(containerRef.current, ws, options);
+            rfbInstance.scaleViewport = true;
+            rfbInstance.resizeSession = false;
+            rfbInstance.focusOnClick = true;
+
+            rfbInstance.addEventListener("connect", () => {
+              updateTabStatusRef.current(tabIdRef.current, "connected");
+            });
+
+            rfbInstance.addEventListener("disconnect", () => {
+              updateTabStatusRef.current(tabIdRef.current, "disconnected");
+              rfbRef.current = null;
+              setRfb(null);
+            });
+
+            rfbInstance.addEventListener("securityfailure", () => {
+              updateTabStatusRef.current(tabIdRef.current, "error");
+            });
+
+            rfbRef.current = rfbInstance;
+            setRfb(rfbInstance);
             return;
           }
           if (msg.type === "error") {
-            updateTabStatus(tabId, "error");
+            updateTabStatusRef.current(tabIdRef.current, "error");
             return;
           }
         } catch {
@@ -95,12 +100,12 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
 
     ws.onclose = () => {
       if (!rfbRef.current) {
-        updateTabStatus(tabId, "disconnected");
+        updateTabStatusRef.current(tabIdRef.current, "disconnected");
       }
     };
 
     ws.onerror = () => {
-      updateTabStatus(tabId, "error");
+      updateTabStatusRef.current(tabIdRef.current, "error");
     };
 
     return () => {
@@ -113,7 +118,9 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       }
       wsRef.current = null;
     };
-  }, [tabId, clusterID, node, vmid, updateTabStatus, initRFB]);
+    // Only re-run when the actual connection parameters change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId, clusterID, node, vmid, reconnectKey]);
 
   return (
     <div

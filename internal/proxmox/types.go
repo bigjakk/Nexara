@@ -1,6 +1,10 @@
 package proxmox
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+)
 
 // response is the standard Proxmox API envelope.
 type response struct {
@@ -151,12 +155,37 @@ type StoragePool struct {
 	UsedFrac   float64 `json:"used_fraction"`
 }
 
-// TermProxyResponse holds the response from a termproxy POST request.
+// FlexInt handles Proxmox fields that may be returned as either a JSON number
+// or a quoted string (e.g. port: 5900 vs port: "5900").
+type FlexInt int
+
+func (fi *FlexInt) UnmarshalJSON(b []byte) error {
+	// Try number first.
+	var n int
+	if err := json.Unmarshal(b, &n); err == nil {
+		*fi = FlexInt(n)
+		return nil
+	}
+	// Try string.
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		parsed, err := strconv.Atoi(s)
+		if err != nil {
+			return fmt.Errorf("FlexInt: cannot parse %q as int: %w", s, err)
+		}
+		*fi = FlexInt(parsed)
+		return nil
+	}
+	return fmt.Errorf("FlexInt: cannot unmarshal %s", string(b))
+}
+
+// TermProxyResponse holds the response from a termproxy or vncproxy POST request.
 type TermProxyResponse struct {
-	Port   int    `json:"port"`
-	Ticket string `json:"ticket"`
-	UPID   string `json:"upid"`
-	User   string `json:"user"`
+	Port     FlexInt `json:"port"`
+	Ticket   string  `json:"ticket"`
+	UPID     string  `json:"upid"`
+	User     string  `json:"user"`
+	Password string  `json:"password,omitempty"`
 }
 
 // CloneParams holds parameters for a VM clone operation.
@@ -183,6 +212,12 @@ type TaskStatus struct {
 	Node       string `json:"node"`
 	PID        int    `json:"pid"`
 	StartTime  int64  `json:"starttime"`
+}
+
+// TaskLogEntry represents a single line from the Proxmox task log.
+type TaskLogEntry struct {
+	N int    `json:"n"`
+	T string `json:"t"`
 }
 
 // ClusterStatusEntry represents an entry from GET /cluster/status.

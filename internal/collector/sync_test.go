@@ -102,6 +102,10 @@ func (m *mockQueries) GetNodeByClusterAndName(_ context.Context, arg db.GetNodeB
 	return node, nil
 }
 
+func (m *mockQueries) DeleteStaleVMs(_ context.Context, _ db.DeleteStaleVMsParams) error {
+	return nil
+}
+
 // --- Test helpers ---
 
 func testLogger() *slog.Logger {

@@ -3,6 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -99,13 +102,14 @@ type vmActionResponse struct {
 }
 
 type taskStatusResponse struct {
-	Status     string `json:"status"`
-	ExitStatus string `json:"exit_status"`
-	Type       string `json:"type"`
-	UPID       string `json:"upid"`
-	Node       string `json:"node"`
-	PID        int    `json:"pid"`
-	StartTime  int64  `json:"start_time"`
+	Status     string   `json:"status"`
+	ExitStatus string   `json:"exit_status"`
+	Type       string   `json:"type"`
+	UPID       string   `json:"upid"`
+	Node       string   `json:"node"`
+	PID        int      `json:"pid"`
+	StartTime  int64    `json:"start_time"`
+	Progress   *float64 `json:"progress,omitempty"`
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/vms.
@@ -307,9 +311,15 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
 	}
 
-	upid := c.Params("upid")
-	if upid == "" {
+	rawUPID := c.Params("upid")
+	if rawUPID == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "UPID is required")
+	}
+	// Fiber (fasthttp) doesn't auto-decode route params; the frontend
+	// URL-encodes the UPID so colons arrive as %3A, etc.
+	upid, err := url.PathUnescape(rawUPID)
+	if err != nil {
+		upid = rawUPID // fall back to raw value
 	}
 
 	// We need a node name to query task status. Extract it from the UPID.
@@ -329,7 +339,7 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(taskStatusResponse{
+	resp := taskStatusResponse{
 		Status:     status.Status,
 		ExitStatus: status.ExitStatus,
 		Type:       status.Type,
@@ -337,7 +347,36 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 		Node:       status.Node,
 		PID:        status.PID,
 		StartTime:  status.StartTime,
-	})
+	}
+
+	// For running tasks, fetch the log to extract progress (e.g. clone operations).
+	// Proxmox emits progress in two formats:
+	//   1. "progress 0.50"                                  (generic tasks)
+	//   2. "transferred 1.0 GiB of 100.0 GiB (1.00%)"     (clone/move disk)
+	if status.Status == "running" {
+		if logEntries, logErr := pxClient.GetTaskLog(c.Context(), nodeName, upid, 0); logErr == nil {
+			for i := len(logEntries) - 1; i >= 0; i-- {
+				line := logEntries[i].T
+				if strings.HasPrefix(line, "progress ") {
+					if pct, parseErr := strconv.ParseFloat(strings.TrimPrefix(line, "progress "), 64); parseErr == nil {
+						resp.Progress = &pct
+					}
+					break
+				}
+				// Parse "transferred X of Y (Z%)" lines from clone operations.
+				if pctIdx := strings.LastIndex(line, "("); pctIdx != -1 && strings.HasSuffix(line, "%)") {
+					pctStr := line[pctIdx+1 : len(line)-2] // extract "1.00"
+					if pct, parseErr := strconv.ParseFloat(pctStr, 64); parseErr == nil {
+						p := pct / 100.0
+						resp.Progress = &p
+					}
+					break
+				}
+			}
+		}
+	}
+
+	return c.JSON(resp)
 }
 
 // resolveVM loads the VM, its node, the cluster, and creates a Proxmox client.

@@ -2,11 +2,9 @@ package ws
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"log/slog"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -40,7 +38,9 @@ func NewVNCHandler(queries *db.Queries, encryptionKey string, jwt *auth.JWTServi
 	}
 }
 
-// HandleVNC proxies a browser noVNC session to Proxmox vncwebsocket.
+// HandleVNC proxies a browser noVNC session to Proxmox via the vncwebsocket endpoint.
+// The flow matches ProxCenter's approach: connect to vncwebsocket with the ticket
+// in the URL query params, then bidirectionally forward all WebSocket messages.
 func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	clusterIDStr := conn.Query("cluster_id")
 	node := conn.Query("node")
@@ -108,10 +108,10 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 		return
 	}
 
-	// Dial the Proxmox vncwebsocket.
-	pxConn, err := pxClient.DialTerminal(ctx, node, vncResp.Ticket, vncResp.Port)
+	// Connect to Proxmox vncwebsocket endpoint (ticket in URL query params).
+	pxConn, err := pxClient.DialVNCWebSocket(ctx, node, vmid, vncResp.Ticket, int(vncResp.Port))
 	if err != nil {
-		logger.Error("dial VNC terminal failed", "error", err)
+		logger.Error("dial VNC websocket failed", "error", err)
 		h.writeError(conn, "failed to connect to VNC")
 		return
 	}
@@ -119,14 +119,15 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 
 	logger.Info("VNC session established")
 
-	// Send a connected status to the browser.
-	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(`{"type":"connected"}`))
+	// Send connected status with the VNC ticket as the password for noVNC RFB auth.
+	connectedMsg := `{"type":"connected","password":` + strconv.Quote(vncResp.Ticket) + `}`
+	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(connectedMsg))
 
-	// Bidirectional proxy with protocol translation.
+	// Bidirectional proxy: browser WebSocket ↔ Proxmox WebSocket.
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Browser → Proxmox: binary frames from noVNC → base64 encode → channel 0 text.
+	// Browser → Proxmox: forward all messages.
 	go func() {
 		defer wg.Done()
 		defer pxConn.WriteMessage(gorillaWs.CloseMessage,
@@ -136,41 +137,25 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 			if readErr != nil {
 				return
 			}
-
-			if msgType == fiberWs.BinaryMessage || msgType == fiberWs.TextMessage {
-				encoded := base64.StdEncoding.EncodeToString(msg)
-				dataMsg := "0:" + encoded + "\n"
-				if writeErr := pxConn.WriteMessage(gorillaWs.TextMessage, []byte(dataMsg)); writeErr != nil {
-					return
-				}
+			if writeErr := pxConn.WriteMessage(msgType, msg); writeErr != nil {
+				return
 			}
 		}
 	}()
 
-	// Proxmox → Browser: channel 0 base64 text → decode → binary frames for noVNC.
+	// Proxmox → Browser: forward all messages.
 	go func() {
 		defer wg.Done()
 		defer conn.WriteMessage(fiberWs.CloseMessage,
 			fiberWs.FormatCloseMessage(fiberWs.CloseNormalClosure, ""))
 		for {
-			_, msg, readErr := pxConn.ReadMessage()
+			msgType, msg, readErr := pxConn.ReadMessage()
 			if readErr != nil {
 				return
 			}
-
-			text := string(msg)
-			if strings.HasPrefix(text, "0:") {
-				data := strings.TrimPrefix(text, "0:")
-				data = strings.TrimSuffix(data, "\n")
-				decoded, decErr := base64.StdEncoding.DecodeString(data)
-				if decErr != nil {
-					continue
-				}
-				if writeErr := conn.WriteMessage(fiberWs.BinaryMessage, decoded); writeErr != nil {
-					return
-				}
+			if writeErr := conn.WriteMessage(msgType, msg); writeErr != nil {
+				return
 			}
-			// Ignore non-zero channels.
 		}
 	}()
 
