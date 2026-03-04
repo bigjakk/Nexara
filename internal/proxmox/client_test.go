@@ -663,3 +663,285 @@ func TestNewClient_TLSMinVersion(t *testing.T) {
 		t.Errorf("MinVersion = %d, want %d (TLS 1.2)", transport.TLSClientConfig.MinVersion, tls.VersionTLS12)
 	}
 }
+
+// --- doPost ---
+
+func TestDoPost_Success(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes/pve1/qemu/100/status/start": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			jsonResponse(w, "UPID:pve1:00001234:0001ABCD:65000000:qmstart:100:user@pam:")
+		},
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	upid, err := c.StartVM(context.Background(), "pve1", 100)
+	if err != nil {
+		t.Fatalf("StartVM: %v", err)
+	}
+	if upid == "" {
+		t.Error("expected non-empty UPID")
+	}
+	if !strings.HasPrefix(upid, "UPID:pve1:") {
+		t.Errorf("unexpected UPID format: %q", upid)
+	}
+}
+
+func TestDoPost_ErrorMapping(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantErr    error
+	}{
+		{"404", http.StatusNotFound, ErrNotFound},
+		{"401", http.StatusUnauthorized, ErrForbidden},
+		{"403", http.StatusForbidden, ErrForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/api2/json/nodes/pve1/qemu/100/status/start": func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(tt.statusCode)
+					_, _ = w.Write([]byte("error"))
+				},
+			})
+			defer srv.Close()
+
+			c := newTestClient(t, srv.URL)
+			_, err := c.StartVM(context.Background(), "pve1", 100)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("expected %v, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+// --- VM lifecycle actions ---
+
+func TestVMStatusActions(t *testing.T) {
+	actions := []string{"start", "stop", "shutdown", "reboot", "reset", "suspend", "resume"}
+
+	for _, action := range actions {
+		t.Run(action, func(t *testing.T) {
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/api2/json/nodes/pve1/qemu/100/status/" + action: func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodPost {
+						t.Errorf("expected POST, got %s", r.Method)
+					}
+					jsonResponse(w, "UPID:pve1:000012:00AB:65000000:qm"+action+":100:user@pam:")
+				},
+			})
+			defer srv.Close()
+
+			c := newTestClient(t, srv.URL)
+			var upid string
+			var err error
+
+			switch action {
+			case "start":
+				upid, err = c.StartVM(context.Background(), "pve1", 100)
+			case "stop":
+				upid, err = c.StopVM(context.Background(), "pve1", 100)
+			case "shutdown":
+				upid, err = c.ShutdownVM(context.Background(), "pve1", 100)
+			case "reboot":
+				upid, err = c.RebootVM(context.Background(), "pve1", 100)
+			case "reset":
+				upid, err = c.ResetVM(context.Background(), "pve1", 100)
+			case "suspend":
+				upid, err = c.SuspendVM(context.Background(), "pve1", 100)
+			case "resume":
+				upid, err = c.ResumeVM(context.Background(), "pve1", 100)
+			}
+
+			if err != nil {
+				t.Fatalf("%s: %v", action, err)
+			}
+			if upid == "" {
+				t.Errorf("%s: expected non-empty UPID", action)
+			}
+		})
+	}
+}
+
+func TestVMStatusAction_InvalidNode(t *testing.T) {
+	c, _ := NewClient(ClientConfig{
+		BaseURL:     "https://pve.example.com:8006",
+		TokenID:     "user@pam!test",
+		TokenSecret: "secret",
+	})
+
+	_, err := c.StartVM(context.Background(), "", 100)
+	if err == nil {
+		t.Fatal("expected error for empty node")
+	}
+
+	_, err = c.StartVM(context.Background(), "../etc", 100)
+	if err == nil {
+		t.Fatal("expected error for path traversal node")
+	}
+}
+
+func TestVMStatusAction_InvalidVMID(t *testing.T) {
+	c, _ := NewClient(ClientConfig{
+		BaseURL:     "https://pve.example.com:8006",
+		TokenID:     "user@pam!test",
+		TokenSecret: "secret",
+	})
+
+	_, err := c.StartVM(context.Background(), "pve1", 0)
+	if err == nil {
+		t.Fatal("expected error for VMID 0")
+	}
+
+	_, err = c.StartVM(context.Background(), "pve1", -1)
+	if err == nil {
+		t.Fatal("expected error for negative VMID")
+	}
+}
+
+// --- CloneVM ---
+
+func TestCloneVM(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes/pve1/qemu/100/clone": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			if ct := r.Header.Get("Content-Type"); ct != "application/x-www-form-urlencoded" {
+				t.Errorf("expected form content type, got %q", ct)
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			if r.FormValue("newid") != "200" {
+				t.Errorf("newid = %q, want 200", r.FormValue("newid"))
+			}
+			if r.FormValue("name") != "clone-test" {
+				t.Errorf("name = %q, want clone-test", r.FormValue("name"))
+			}
+			if r.FormValue("full") != "1" {
+				t.Errorf("full = %q, want 1", r.FormValue("full"))
+			}
+			jsonResponse(w, "UPID:pve1:000012:00AB:65000000:qmclone:100:user@pam:")
+		},
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	upid, err := c.CloneVM(context.Background(), "pve1", 100, CloneParams{
+		NewID: 200,
+		Name:  "clone-test",
+		Full:  true,
+	})
+	if err != nil {
+		t.Fatalf("CloneVM: %v", err)
+	}
+	if upid == "" {
+		t.Error("expected non-empty UPID")
+	}
+}
+
+func TestCloneVM_MissingNewID(t *testing.T) {
+	c, _ := NewClient(ClientConfig{
+		BaseURL:     "https://pve.example.com:8006",
+		TokenID:     "user@pam!test",
+		TokenSecret: "secret",
+	})
+
+	_, err := c.CloneVM(context.Background(), "pve1", 100, CloneParams{})
+	if err == nil {
+		t.Fatal("expected error for missing newid")
+	}
+}
+
+// --- DestroyVM ---
+
+func TestDestroyVM(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes/pve1/qemu/100": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodDelete {
+				t.Errorf("expected DELETE, got %s", r.Method)
+			}
+			jsonResponse(w, "UPID:pve1:000012:00AB:65000000:qmdestroy:100:user@pam:")
+		},
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	upid, err := c.DestroyVM(context.Background(), "pve1", 100)
+	if err != nil {
+		t.Fatalf("DestroyVM: %v", err)
+	}
+	if upid == "" {
+		t.Error("expected non-empty UPID")
+	}
+}
+
+// --- GetTaskStatus ---
+
+func TestGetTaskStatus(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes/pve1/tasks/UPID%3Apve1%3A000012%3A00AB%3A65000000%3Aqmstart%3A100%3Auser%40pam%3A/status": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, TaskStatus{
+				Status:     "stopped",
+				ExitStatus: "OK",
+				Type:       "qmstart",
+				UPID:       "UPID:pve1:000012:00AB:65000000:qmstart:100:user@pam:",
+				Node:       "pve1",
+				PID:        18,
+				StartTime:  1694649344,
+			})
+		},
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	status, err := c.GetTaskStatus(context.Background(), "pve1", "UPID:pve1:000012:00AB:65000000:qmstart:100:user@pam:")
+	if err != nil {
+		t.Fatalf("GetTaskStatus: %v", err)
+	}
+	if status.Status != "stopped" {
+		t.Errorf("Status = %q, want stopped", status.Status)
+	}
+	if status.ExitStatus != "OK" {
+		t.Errorf("ExitStatus = %q, want OK", status.ExitStatus)
+	}
+}
+
+func TestGetTaskStatus_EmptyUPID(t *testing.T) {
+	c, _ := NewClient(ClientConfig{
+		BaseURL:     "https://pve.example.com:8006",
+		TokenID:     "user@pam!test",
+		TokenSecret: "secret",
+	})
+
+	_, err := c.GetTaskStatus(context.Background(), "pve1", "")
+	if err == nil {
+		t.Fatal("expected error for empty UPID")
+	}
+}
+
+// --- validateVMID ---
+
+func TestValidateVMID(t *testing.T) {
+	tests := []struct {
+		vmid    int
+		wantErr bool
+	}{
+		{100, false},
+		{1, false},
+		{0, true},
+		{-1, true},
+	}
+	for _, tt := range tests {
+		err := validateVMID(tt.vmid)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("validateVMID(%d): err=%v, wantErr=%v", tt.vmid, err, tt.wantErr)
+		}
+	}
+}

@@ -151,6 +151,26 @@ type StoragePool struct {
 	UsedFrac   float64 `json:"used_fraction"`
 }
 
+// CloneParams holds parameters for a VM clone operation.
+type CloneParams struct {
+	NewID   int    `json:"newid"`
+	Name    string `json:"name,omitempty"`
+	Target  string `json:"target,omitempty"`
+	Full    bool   `json:"full,omitempty"`
+	Storage string `json:"storage,omitempty"`
+}
+
+// TaskStatus represents the status of an async Proxmox task.
+type TaskStatus struct {
+	Status     string `json:"status"`
+	ExitStatus string `json:"exitstatus"`
+	Type       string `json:"type"`
+	UPID       string `json:"upid"`
+	Node       string `json:"node"`
+	PID        int    `json:"pid"`
+	StartTime  int64  `json:"starttime"`
+}
+
 // ClusterStatusEntry represents an entry from GET /cluster/status.
 type ClusterStatusEntry struct {
 	Type    string `json:"type"`

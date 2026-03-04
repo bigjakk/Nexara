@@ -12,6 +12,9 @@ ON CONFLICT (cluster_id, name) DO UPDATE SET
     last_seen_at = now()
 RETURNING *;
 
+-- name: GetNode :one
+SELECT * FROM nodes WHERE id = $1;
+
 -- name: GetNodeByClusterAndName :one
 SELECT * FROM nodes WHERE cluster_id = $1 AND name = $2;
 

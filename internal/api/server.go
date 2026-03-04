@@ -59,9 +59,12 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.pbsHandler = handlers.NewPBSHandler(s.queries, cfg.EncryptionKey)
 	}
 
+	if s.queries != nil && cfg.EncryptionKey != "" {
+		s.vmHandler = handlers.NewVMHandler(s.queries, cfg.EncryptionKey)
+	}
+
 	if s.queries != nil {
 		s.nodeHandler = handlers.NewNodeHandler(s.queries)
-		s.vmHandler = handlers.NewVMHandler(s.queries)
 		s.storageHandler = handlers.NewStorageHandler(s.queries)
 		s.metricsHandler = handlers.NewMetricsHandler(s.queries)
 	}

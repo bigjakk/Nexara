@@ -11,6 +11,71 @@ import (
 	"github.com/google/uuid"
 )
 
+const getVM = `-- name: GetVM :one
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE id = $1
+`
+
+func (q *Queries) GetVM(ctx context.Context, id uuid.UUID) (Vm, error) {
+	row := q.db.QueryRow(ctx, getVM, id)
+	var i Vm
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.NodeID,
+		&i.Vmid,
+		&i.Name,
+		&i.Type,
+		&i.Status,
+		&i.CpuCount,
+		&i.MemTotal,
+		&i.DiskTotal,
+		&i.Uptime,
+		&i.Template,
+		&i.Tags,
+		&i.HaState,
+		&i.Pool,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getVMByClusterAndVmid = `-- name: GetVMByClusterAndVmid :one
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE cluster_id = $1 AND vmid = $2
+`
+
+type GetVMByClusterAndVmidParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+}
+
+func (q *Queries) GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error) {
+	row := q.db.QueryRow(ctx, getVMByClusterAndVmid, arg.ClusterID, arg.Vmid)
+	var i Vm
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.NodeID,
+		&i.Vmid,
+		&i.Name,
+		&i.Type,
+		&i.Status,
+		&i.CpuCount,
+		&i.MemTotal,
+		&i.DiskTotal,
+		&i.Uptime,
+		&i.Template,
+		&i.Tags,
+		&i.HaState,
+		&i.Pool,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listVMsByCluster = `-- name: ListVMsByCluster :many
 SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE cluster_id = $1 ORDER BY vmid
 `

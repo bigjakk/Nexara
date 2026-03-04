@@ -11,6 +11,31 @@ import (
 	"github.com/google/uuid"
 )
 
+const getNode = `-- name: GetNode :one
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at FROM nodes WHERE id = $1
+`
+
+func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (Node, error) {
+	row := q.db.QueryRow(ctx, getNode, id)
+	var i Node
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.Name,
+		&i.Status,
+		&i.CpuCount,
+		&i.MemTotal,
+		&i.DiskTotal,
+		&i.PveVersion,
+		&i.SslFingerprint,
+		&i.Uptime,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getNodeByClusterAndName = `-- name: GetNodeByClusterAndName :one
 SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at FROM nodes WHERE cluster_id = $1 AND name = $2
 `

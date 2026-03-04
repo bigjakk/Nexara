@@ -22,3 +22,9 @@ SELECT * FROM vms WHERE cluster_id = $1 ORDER BY vmid;
 
 -- name: ListVMsByNode :many
 SELECT * FROM vms WHERE node_id = $1 ORDER BY vmid;
+
+-- name: GetVM :one
+SELECT * FROM vms WHERE id = $1;
+
+-- name: GetVMByClusterAndVmid :one
+SELECT * FROM vms WHERE cluster_id = $1 AND vmid = $2;

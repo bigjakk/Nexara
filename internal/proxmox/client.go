@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -141,6 +142,234 @@ func (c *Client) do(ctx context.Context, path string, dst interface{}) error {
 	}
 
 	return nil
+}
+
+// doPost performs an authenticated POST request with form-encoded body and unmarshals the response into dst.
+func (c *Client) doPost(ctx context.Context, path string, params url.Values, dst interface{}) error {
+	apiURL := c.baseURL + "/api2/json" + path
+
+	var body io.Reader
+	if params != nil {
+		body = strings.NewReader(params.Encode())
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, body)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", c.authHeader)
+	if params != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return ErrNotFound
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return ErrForbidden
+	case resp.StatusCode >= 400:
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    strings.TrimSpace(string(respBody)),
+		}
+	}
+
+	var envelope response
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+	}
+
+	if dst != nil && len(envelope.Data) > 0 {
+		if err := json.Unmarshal(envelope.Data, dst); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+		}
+	}
+
+	return nil
+}
+
+// doDelete performs an authenticated DELETE request and unmarshals the response into dst.
+func (c *Client) doDelete(ctx context.Context, path string, dst interface{}) error {
+	apiURL := c.baseURL + "/api2/json" + path
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", c.authHeader)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return ErrNotFound
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return ErrForbidden
+	case resp.StatusCode >= 400:
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    strings.TrimSpace(string(body)),
+		}
+	}
+
+	var envelope response
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+	}
+
+	if dst != nil && len(envelope.Data) > 0 {
+		if err := json.Unmarshal(envelope.Data, dst); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+		}
+	}
+
+	return nil
+}
+
+// validateVMID rejects non-positive VM IDs.
+func validateVMID(vmid int) error {
+	if vmid <= 0 {
+		return fmt.Errorf("invalid VMID: %d", vmid)
+	}
+	return nil
+}
+
+// vmStatusAction sends a POST to /nodes/{node}/qemu/{vmid}/status/{action} and returns the UPID.
+func (c *Client) vmStatusAction(ctx context.Context, node string, vmid int, action string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/status/" + action
+	var upid string
+	if err := c.doPost(ctx, path, nil, &upid); err != nil {
+		return "", fmt.Errorf("%s VM %d on %s: %w", action, vmid, node, err)
+	}
+	return upid, nil
+}
+
+// StartVM starts a QEMU VM and returns the task UPID.
+func (c *Client) StartVM(ctx context.Context, node string, vmid int) (string, error) {
+	return c.vmStatusAction(ctx, node, vmid, "start")
+}
+
+// StopVM forcefully stops a QEMU VM and returns the task UPID.
+func (c *Client) StopVM(ctx context.Context, node string, vmid int) (string, error) {
+	return c.vmStatusAction(ctx, node, vmid, "stop")
+}
+
+// ShutdownVM sends an ACPI shutdown to a QEMU VM and returns the task UPID.
+func (c *Client) ShutdownVM(ctx context.Context, node string, vmid int) (string, error) {
+	return c.vmStatusAction(ctx, node, vmid, "shutdown")
+}
+
+// RebootVM sends an ACPI reboot to a QEMU VM and returns the task UPID.
+func (c *Client) RebootVM(ctx context.Context, node string, vmid int) (string, error) {
+	return c.vmStatusAction(ctx, node, vmid, "reboot")
+}
+
+// ResetVM forcefully resets a QEMU VM and returns the task UPID.
+func (c *Client) ResetVM(ctx context.Context, node string, vmid int) (string, error) {
+	return c.vmStatusAction(ctx, node, vmid, "reset")
+}
+
+// SuspendVM suspends a QEMU VM and returns the task UPID.
+func (c *Client) SuspendVM(ctx context.Context, node string, vmid int) (string, error) {
+	return c.vmStatusAction(ctx, node, vmid, "suspend")
+}
+
+// ResumeVM resumes a suspended QEMU VM and returns the task UPID.
+func (c *Client) ResumeVM(ctx context.Context, node string, vmid int) (string, error) {
+	return c.vmStatusAction(ctx, node, vmid, "resume")
+}
+
+// CloneVM clones a QEMU VM and returns the task UPID.
+func (c *Client) CloneVM(ctx context.Context, node string, vmid int, params CloneParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if params.NewID <= 0 {
+		return "", fmt.Errorf("clone requires a positive newid")
+	}
+
+	form := url.Values{}
+	form.Set("newid", strconv.Itoa(params.NewID))
+	if params.Name != "" {
+		form.Set("name", params.Name)
+	}
+	if params.Target != "" {
+		form.Set("target", params.Target)
+	}
+	if params.Full {
+		form.Set("full", "1")
+	}
+	if params.Storage != "" {
+		form.Set("storage", params.Storage)
+	}
+
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/clone"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("clone VM %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// DestroyVM deletes a QEMU VM and returns the task UPID.
+func (c *Client) DestroyVM(ctx context.Context, node string, vmid int) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid)
+	var upid string
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("destroy VM %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// GetTaskStatus returns the status of an async task by its UPID.
+func (c *Client) GetTaskStatus(ctx context.Context, node string, upid string) (*TaskStatus, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if upid == "" {
+		return nil, fmt.Errorf("UPID cannot be empty")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/tasks/" + url.PathEscape(upid) + "/status"
+	var status TaskStatus
+	if err := c.do(ctx, path, &status); err != nil {
+		return nil, fmt.Errorf("get task status on %s: %w", node, err)
+	}
+	return &status, nil
 }
 
 // validateNodeName rejects empty names and path traversal attempts.

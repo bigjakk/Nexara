@@ -12,6 +12,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AuditLog struct {
+	ID           uuid.UUID       `json:"id"`
+	ClusterID    uuid.UUID       `json:"cluster_id"`
+	UserID       uuid.UUID       `json:"user_id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceID   string          `json:"resource_id"`
+	Action       string          `json:"action"`
+	Details      json.RawMessage `json:"details"`
+	CreatedAt    time.Time       `json:"created_at"`
+}
+
 type Cluster struct {
 	ID                   uuid.UUID `json:"id"`
 	Name                 string    `json:"name"`
