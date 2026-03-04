@@ -93,6 +93,15 @@ func (m *mockQueries) UpsertStoragePool(_ context.Context, arg db.UpsertStorageP
 	return pool, nil
 }
 
+func (m *mockQueries) GetNodeByClusterAndName(_ context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error) {
+	key := arg.ClusterID.String() + ":" + arg.Name
+	node, ok := m.nodes[key]
+	if !ok {
+		return db.Node{}, errors.New("node not found")
+	}
+	return node, nil
+}
+
 // --- Test helpers ---
 
 func testLogger() *slog.Logger {
@@ -157,7 +166,8 @@ func TestSyncCluster_Success(t *testing.T) {
 				Node:       "pve1",
 				PVEVersion: "pve-manager/8.1.3",
 				CPUInfo:    proxmox.CPUInfo{CPUs: 8},
-				Memory:     proxmox.Memory{Total: 17179869184},
+				CPU:        0.25,
+				Memory:     proxmox.Memory{Total: 17179869184, Used: 8589934592},
 				RootFS:     proxmox.RootFS{Total: 107374182400},
 			})
 		},
@@ -166,23 +176,27 @@ func TestSyncCluster_Success(t *testing.T) {
 				Node:       "pve2",
 				PVEVersion: "pve-manager/8.1.3",
 				CPUInfo:    proxmox.CPUInfo{CPUs: 16},
-				Memory:     proxmox.Memory{Total: 34359738368},
+				CPU:        0.10,
+				Memory:     proxmox.Memory{Total: 34359738368, Used: 17179869184},
 				RootFS:     proxmox.RootFS{Total: 214748364800},
 			})
 		},
 		"/api2/json/nodes/pve1/qemu": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.VirtualMachine{
-				{VMID: 100, Name: "web-server", Status: "running", CPUs: 4, MaxMem: 4294967296, MaxDisk: 53687091200, Uptime: 3600},
+				{VMID: 100, Name: "web-server", Status: "running", CPUs: 4, MaxMem: 4294967296, MaxDisk: 53687091200, Uptime: 3600,
+					CPU: 0.5, Mem: 2147483648, NetIn: 1000, NetOut: 2000, DiskRead: 3000, DiskWrite: 4000},
 			})
 		},
 		"/api2/json/nodes/pve2/qemu": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.VirtualMachine{
-				{VMID: 101, Name: "db-server", Status: "running", CPUs: 8, MaxMem: 8589934592, MaxDisk: 107374182400, Template: 0},
+				{VMID: 101, Name: "db-server", Status: "running", CPUs: 8, MaxMem: 8589934592, MaxDisk: 107374182400, Template: 0,
+					CPU: 0.8, Mem: 4294967296, NetIn: 5000, NetOut: 6000, DiskRead: 7000, DiskWrite: 8000},
 			})
 		},
 		"/api2/json/nodes/pve1/lxc": func(w http.ResponseWriter, _ *http.Request) {
 			jsonResponse(w, []proxmox.Container{
-				{VMID: 200, Name: "dns-ct", Status: "running", CPUs: 1, MaxMem: 536870912, MaxDisk: 10737418240},
+				{VMID: 200, Name: "dns-ct", Status: "running", CPUs: 1, MaxMem: 536870912, MaxDisk: 10737418240,
+					CPU: 0.1, Mem: 268435456, NetIn: 500, NetOut: 600, DiskRead: 700, DiskWrite: 800},
 			})
 		},
 		"/api2/json/nodes/pve2/lxc": func(w http.ResponseWriter, _ *http.Request) {
@@ -205,7 +219,7 @@ func TestSyncCluster_Success(t *testing.T) {
 	syncer := newTestSyncer(mq)
 	cluster := makeCluster(t, srv.URL)
 
-	err := syncer.SyncCluster(context.Background(), cluster)
+	result, err := syncer.SyncCluster(context.Background(), cluster)
 	if err != nil {
 		t.Fatalf("SyncCluster: %v", err)
 	}
@@ -253,6 +267,66 @@ func TestSyncCluster_Success(t *testing.T) {
 	}
 	if !mq.upsertStorageCalls[0].Active {
 		t.Error("storage[0].Active should be true")
+	}
+
+	// Verify metric result.
+	if result == nil {
+		t.Fatal("expected non-nil metric result")
+	}
+	if len(result.NodeMetrics) != 2 {
+		t.Fatalf("expected 2 node metrics, got %d", len(result.NodeMetrics))
+	}
+	if len(result.VMMetrics) != 3 {
+		t.Fatalf("expected 3 VM metrics, got %d", len(result.VMMetrics))
+	}
+
+	// Verify pve1 node metrics.
+	nm1 := result.NodeMetrics[0]
+	if nm1.CPUUsage != 0.25 {
+		t.Errorf("pve1 CPUUsage = %f, want 0.25", nm1.CPUUsage)
+	}
+	if nm1.MemUsed != 8589934592 {
+		t.Errorf("pve1 MemUsed = %d, want 8589934592", nm1.MemUsed)
+	}
+	if nm1.MemTotal != 17179869184 {
+		t.Errorf("pve1 MemTotal = %d, want 17179869184", nm1.MemTotal)
+	}
+	// pve1 disk I/O = VM 100 (3000/4000) + CT 200 (700/800) = 3700/4800.
+	if nm1.DiskRead != 3700 {
+		t.Errorf("pve1 DiskRead = %d, want 3700", nm1.DiskRead)
+	}
+	if nm1.DiskWrite != 4800 {
+		t.Errorf("pve1 DiskWrite = %d, want 4800", nm1.DiskWrite)
+	}
+	// pve1 net I/O = VM 100 (1000/2000) + CT 200 (500/600) = 1500/2600.
+	if nm1.NetIn != 1500 {
+		t.Errorf("pve1 NetIn = %d, want 1500", nm1.NetIn)
+	}
+	if nm1.NetOut != 2600 {
+		t.Errorf("pve1 NetOut = %d, want 2600", nm1.NetOut)
+	}
+
+	// Verify pve2 node metrics.
+	nm2 := result.NodeMetrics[1]
+	if nm2.CPUUsage != 0.10 {
+		t.Errorf("pve2 CPUUsage = %f, want 0.10", nm2.CPUUsage)
+	}
+	if nm2.DiskRead != 7000 {
+		t.Errorf("pve2 DiskRead = %d, want 7000", nm2.DiskRead)
+	}
+	if nm2.NetIn != 5000 {
+		t.Errorf("pve2 NetIn = %d, want 5000", nm2.NetIn)
+	}
+
+	// Verify VM metric snapshots have correct CPU values.
+	if result.VMMetrics[0].CPUUsage != 0.5 {
+		t.Errorf("VM 100 CPUUsage = %f, want 0.5", result.VMMetrics[0].CPUUsage)
+	}
+	if result.VMMetrics[1].CPUUsage != 0.1 {
+		t.Errorf("CT 200 CPUUsage = %f, want 0.1", result.VMMetrics[1].CPUUsage)
+	}
+	if result.VMMetrics[2].CPUUsage != 0.8 {
+		t.Errorf("VM 101 CPUUsage = %f, want 0.8", result.VMMetrics[2].CPUUsage)
 	}
 }
 
@@ -314,14 +388,16 @@ func TestSyncCluster_VMMigration(t *testing.T) {
 	cluster := makeCluster(t, srv.URL)
 
 	// First sync.
-	if err := syncer.SyncCluster(context.Background(), cluster); err != nil {
+	_, err := syncer.SyncCluster(context.Background(), cluster)
+	if err != nil {
 		t.Fatalf("first sync: %v", err)
 	}
 
 	firstNodeID := mq.upsertVMCalls[0].NodeID
 
 	// Second sync (VM migrated to pve2).
-	if err := syncer.SyncCluster(context.Background(), cluster); err != nil {
+	_, err = syncer.SyncCluster(context.Background(), cluster)
+	if err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
 
@@ -350,13 +426,20 @@ func TestSyncCluster_EmptyCluster(t *testing.T) {
 	syncer := newTestSyncer(mq)
 	cluster := makeCluster(t, srv.URL)
 
-	err := syncer.SyncCluster(context.Background(), cluster)
+	result, err := syncer.SyncCluster(context.Background(), cluster)
 	if err != nil {
 		t.Fatalf("SyncCluster with empty cluster: %v", err)
 	}
 
 	if len(mq.upsertNodeCalls) != 0 {
 		t.Errorf("expected 0 node upserts, got %d", len(mq.upsertNodeCalls))
+	}
+
+	if result == nil {
+		t.Fatal("expected non-nil result even for empty cluster")
+	}
+	if len(result.NodeMetrics) != 0 {
+		t.Errorf("expected 0 node metrics, got %d", len(result.NodeMetrics))
 	}
 }
 
@@ -373,7 +456,7 @@ func TestSyncCluster_AuthFailure(t *testing.T) {
 	syncer := newTestSyncer(mq)
 	cluster := makeCluster(t, srv.URL)
 
-	err := syncer.SyncCluster(context.Background(), cluster)
+	_, err := syncer.SyncCluster(context.Background(), cluster)
 	if err == nil {
 		t.Fatal("expected error for auth failure")
 	}
@@ -432,7 +515,7 @@ func TestSyncCluster_PartialNodeFailure(t *testing.T) {
 	cluster := makeCluster(t, srv.URL)
 
 	// Should not return an error — partial failure is logged but doesn't fail the cluster sync.
-	err := syncer.SyncCluster(context.Background(), cluster)
+	result, err := syncer.SyncCluster(context.Background(), cluster)
 	if err != nil {
 		t.Fatalf("SyncCluster with partial failure: %v", err)
 	}
@@ -452,6 +535,14 @@ func TestSyncCluster_PartialNodeFailure(t *testing.T) {
 	if !foundVM100 {
 		t.Error("expected VM 100 to be synced from pve1")
 	}
+
+	// Metric result should have both nodes (pve2 used fallback data).
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.NodeMetrics) != 2 {
+		t.Errorf("expected 2 node metrics, got %d", len(result.NodeMetrics))
+	}
 }
 
 func TestSyncCluster_DecryptFailure(t *testing.T) {
@@ -469,7 +560,7 @@ func TestSyncCluster_DecryptFailure(t *testing.T) {
 		TokenSecretEncrypted: "not-valid-base64-encrypted-data!!",
 	}
 
-	err := syncer.SyncCluster(context.Background(), cluster)
+	_, err := syncer.SyncCluster(context.Background(), cluster)
 	if err == nil {
 		t.Fatal("expected error for decrypt failure")
 	}
@@ -488,8 +579,106 @@ func TestSyncAll(t *testing.T) {
 	mq.clusters = []db.Cluster{cluster}
 	syncer := newTestSyncer(mq)
 
-	err := syncer.SyncAll(context.Background())
+	results := syncer.SyncAll(context.Background())
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ClusterID != cluster.ID {
+		t.Errorf("result cluster ID = %s, want %s", results[0].ClusterID, cluster.ID)
+	}
+}
+
+func TestSyncCluster_MetricSnapshots(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.NodeListEntry{
+				{Node: "pve1", Status: "online", MaxCPU: 4, MaxMem: 8589934592, MaxDisk: 53687091200},
+			})
+		},
+		"/api2/json/nodes/pve1/status": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, proxmox.NodeStatus{
+				Node:    "pve1",
+				CPUInfo: proxmox.CPUInfo{CPUs: 4},
+				CPU:     0.75,
+				Memory:  proxmox.Memory{Total: 8589934592, Used: 6442450944},
+				RootFS:  proxmox.RootFS{Total: 53687091200},
+			})
+		},
+		"/api2/json/nodes/pve1/qemu": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.VirtualMachine{
+				{VMID: 100, Name: "vm1", Status: "running", CPUs: 2, MaxMem: 4294967296,
+					CPU: 0.50, Mem: 2147483648, DiskRead: 100, DiskWrite: 200, NetIn: 300, NetOut: 400},
+				{VMID: 101, Name: "vm2", Status: "stopped", CPUs: 1, MaxMem: 2147483648,
+					CPU: 0, Mem: 0, DiskRead: 0, DiskWrite: 0, NetIn: 0, NetOut: 0},
+			})
+		},
+		"/api2/json/nodes/pve1/lxc": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.Container{
+				{VMID: 200, Name: "ct1", Status: "running", CPUs: 1, MaxMem: 1073741824,
+					CPU: 0.20, Mem: 536870912, DiskRead: 50, DiskWrite: 60, NetIn: 70, NetOut: 80},
+			})
+		},
+		"/api2/json/nodes/pve1/storage": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.StoragePool{})
+		},
+	})
+	defer srv.Close()
+
+	mq := newMockQueries()
+	syncer := newTestSyncer(mq)
+	cluster := makeCluster(t, srv.URL)
+
+	result, err := syncer.SyncCluster(context.Background(), cluster)
 	if err != nil {
-		t.Fatalf("SyncAll: %v", err)
+		t.Fatalf("SyncCluster: %v", err)
+	}
+
+	// 1 node metric.
+	if len(result.NodeMetrics) != 1 {
+		t.Fatalf("expected 1 node metric, got %d", len(result.NodeMetrics))
+	}
+	nm := result.NodeMetrics[0]
+	if nm.CPUUsage != 0.75 {
+		t.Errorf("node CPUUsage = %f, want 0.75", nm.CPUUsage)
+	}
+	if nm.MemUsed != 6442450944 {
+		t.Errorf("node MemUsed = %d, want 6442450944", nm.MemUsed)
+	}
+	// Node disk I/O = VM1 (100/200) + CT1 (50/60) = 150/260.
+	if nm.DiskRead != 150 {
+		t.Errorf("node DiskRead = %d, want 150", nm.DiskRead)
+	}
+	if nm.DiskWrite != 260 {
+		t.Errorf("node DiskWrite = %d, want 260", nm.DiskWrite)
+	}
+	// Node net I/O = VM1 (300/400) + CT1 (70/80) = 370/480.
+	if nm.NetIn != 370 {
+		t.Errorf("node NetIn = %d, want 370", nm.NetIn)
+	}
+	if nm.NetOut != 480 {
+		t.Errorf("node NetOut = %d, want 480", nm.NetOut)
+	}
+
+	// 3 VM metrics (2 QEMU + 1 LXC).
+	if len(result.VMMetrics) != 3 {
+		t.Fatalf("expected 3 VM metrics, got %d", len(result.VMMetrics))
+	}
+	// VM1.
+	if result.VMMetrics[0].CPUUsage != 0.50 {
+		t.Errorf("VM1 CPUUsage = %f, want 0.50", result.VMMetrics[0].CPUUsage)
+	}
+	if result.VMMetrics[0].MemUsed != 2147483648 {
+		t.Errorf("VM1 MemUsed = %d, want 2147483648", result.VMMetrics[0].MemUsed)
+	}
+	// VM2 (stopped).
+	if result.VMMetrics[1].CPUUsage != 0 {
+		t.Errorf("VM2 CPUUsage = %f, want 0", result.VMMetrics[1].CPUUsage)
+	}
+	// CT1.
+	if result.VMMetrics[2].CPUUsage != 0.20 {
+		t.Errorf("CT1 CPUUsage = %f, want 0.20", result.VMMetrics[2].CPUUsage)
+	}
+	if result.VMMetrics[2].MemUsed != 536870912 {
+		t.Errorf("CT1 MemUsed = %d, want 536870912", result.VMMetrics[2].MemUsed)
 	}
 }

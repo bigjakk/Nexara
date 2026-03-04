@@ -6,9 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/proxdash/proxdash/internal/collector"
 	"github.com/proxdash/proxdash/internal/config"
@@ -41,16 +41,37 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Redis client for publishing metrics and alerts.
+	redisOpts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		logger.Error("failed to parse Redis URL", "error", err)
+		os.Exit(1)
+	}
+	redisClient := redis.NewClient(redisOpts)
+	defer redisClient.Close()
+
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		logger.Warn("Redis not reachable, metrics will still be collected but not published", "error", err)
+	}
+
 	queries := db.New(pool)
 	syncer := collector.NewSyncer(queries, cfg.EncryptionKey, logger)
 
-	logger.Info("ProxDash collector started")
+	publisher := collector.NewPublisher(redisClient, logger)
+	health := collector.NewHealthMonitor(queries, publisher, logger)
+	syncer.SetHealthMonitor(health)
+
+	mc := collector.NewMetricCollector(pool, publisher, logger)
+
+	logger.Info("ProxDash collector started",
+		"metrics_interval", cfg.MetricsCollectInterval,
+	)
 
 	// Run initial sync immediately.
-	syncer.SyncAll(ctx)
+	results := syncer.SyncAll(ctx)
+	mc.ProcessResults(ctx, results)
 
-	// Default sync interval.
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := cfg.NewMetricsTicker()
 	defer ticker.Stop()
 
 	sigCh := make(chan os.Signal, 1)
@@ -59,7 +80,8 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			syncer.SyncAll(ctx)
+			results := syncer.SyncAll(ctx)
+			mc.ProcessResults(ctx, results)
 		case sig := <-sigCh:
 			logger.Info("received signal, shutting down", "signal", sig)
 			cancel()

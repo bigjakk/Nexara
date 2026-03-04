@@ -31,6 +31,8 @@ type Querier interface {
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
+	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
+	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
 	ListPBSServersByCluster(ctx context.Context, clusterID pgtype.UUID) ([]PbsServer, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
