@@ -1,4 +1,4 @@
-export type ConsoleType = "node_shell" | "vm_serial" | "ct_attach";
+export type ConsoleType = "node_shell" | "vm_serial" | "ct_attach" | "vm_vnc";
 
 export type ConsoleStatus = "connecting" | "connected" | "disconnected" | "error";
 

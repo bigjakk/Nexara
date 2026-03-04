@@ -11,23 +11,29 @@ interface TerminalProps {
   visible: boolean;
 }
 
-function buildConsoleWsUrl(tab: ConsoleTab): string {
+function buildConsoleWsUrl(
+  clusterID: string,
+  node: string,
+  type: string,
+  vmid?: number,
+): string {
   const token = localStorage.getItem("access_token");
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
   const params = new URLSearchParams({
     token: token ?? "",
-    cluster_id: tab.clusterID,
-    node: tab.node,
-    type: tab.type,
+    cluster_id: clusterID,
+    node,
+    type,
   });
-  if (tab.vmid !== undefined) {
-    params.set("vmid", String(tab.vmid));
+  if (vmid !== undefined) {
+    params.set("vmid", String(vmid));
   }
   return `${protocol}//${host}/ws/console?${params.toString()}`;
 }
 
 export function Terminal({ tab, visible }: TerminalProps) {
+  const { id: tabId, clusterID, node, type, vmid } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -81,7 +87,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
     });
 
     // Connect WebSocket.
-    const wsUrl = buildConsoleWsUrl(tab);
+    const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
@@ -96,7 +102,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
         try {
           const msg = JSON.parse(event.data) as { type: string; message?: string };
           if (msg.type === "connected") {
-            updateTabStatus(tab.id, "connected");
+            updateTabStatus(tabId, "connected");
             // Send initial resize.
             ws.send(
               JSON.stringify({
@@ -109,7 +115,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
           }
           if (msg.type === "error") {
             term.writeln(`\r\nError: ${msg.message ?? "unknown error"}`);
-            updateTabStatus(tab.id, "error");
+            updateTabStatus(tabId, "error");
             return;
           }
         } catch {
@@ -122,12 +128,12 @@ export function Terminal({ tab, visible }: TerminalProps) {
     };
 
     ws.onclose = () => {
-      updateTabStatus(tab.id, "disconnected");
+      updateTabStatus(tabId, "disconnected");
       term.writeln("\r\n\r\n[Connection closed]");
     };
 
     ws.onerror = () => {
-      updateTabStatus(tab.id, "error");
+      updateTabStatus(tabId, "error");
     };
 
     // Wire terminal input to WebSocket.
@@ -168,7 +174,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
       wsRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [tab.id, tab.clusterID, tab.node, tab.type, tab.vmid, updateTabStatus]);
+  }, [tabId, clusterID, node, type, vmid, updateTabStatus]);
 
   // Re-fit when visibility changes.
   useEffect(() => {

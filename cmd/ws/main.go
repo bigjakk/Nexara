@@ -62,9 +62,10 @@ func main() {
 	// Create JWT service for token validation.
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
-	// Create console handler for terminal proxy.
+	// Create console and VNC handlers for terminal/graphical proxy.
 	queries := db.New(pool)
 	consoleHandler := ws.NewConsoleHandler(queries, cfg.EncryptionKey, jwtSvc, logger)
+	vncHandler := ws.NewVNCHandler(queries, cfg.EncryptionKey, jwtSvc, logger)
 
 	// Create and start Hub.
 	hub := ws.NewHub(logger)
@@ -80,6 +81,7 @@ func main() {
 	// Create and start WebSocket server.
 	server := ws.NewServer(hub, jwtSvc, logger, cfg.WSPingInterval, cfg.WSPongTimeout, ws.ServerConfig{
 		ConsoleHandler: consoleHandler,
+		VNCHandler:     vncHandler,
 	})
 
 	// Graceful shutdown.

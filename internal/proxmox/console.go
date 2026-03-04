@@ -58,6 +58,24 @@ func (c *Client) CTTermProxy(ctx context.Context, node string, vmid int) (*TermP
 	return &resp, nil
 }
 
+// VMVNCProxy requests a VNC proxy ticket for a QEMU VM graphical console.
+func (c *Client) VMVNCProxy(ctx context.Context, node string, vmid int) (*TermProxyResponse, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/vncproxy"
+	params := url.Values{}
+	params.Set("websocket", "1")
+	var resp TermProxyResponse
+	if err := c.doPost(ctx, path, params, &resp); err != nil {
+		return nil, fmt.Errorf("VM %d vncproxy on %s: %w", vmid, node, err)
+	}
+	return &resp, nil
+}
+
 // DialTerminal opens a WebSocket connection to the Proxmox vncwebsocket endpoint.
 // It returns the gorilla/websocket connection for bidirectional communication.
 func (c *Client) DialTerminal(ctx context.Context, node string, vncTicket string, port int) (*websocket.Conn, error) {

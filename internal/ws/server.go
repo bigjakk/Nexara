@@ -19,6 +19,7 @@ type Server struct {
 	jwt            *auth.JWTService
 	logger         *slog.Logger
 	consoleHandler *ConsoleHandler
+	vncHandler     *VNCHandler
 
 	pingInterval time.Duration
 	pongTimeout  time.Duration
@@ -27,6 +28,7 @@ type Server struct {
 // ServerConfig holds optional dependencies for the WebSocket server.
 type ServerConfig struct {
 	ConsoleHandler *ConsoleHandler
+	VNCHandler     *VNCHandler
 }
 
 // NewServer creates a new WebSocket server.
@@ -41,6 +43,7 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 
 	if len(opts) > 0 {
 		s.consoleHandler = opts[0].ConsoleHandler
+		s.vncHandler = opts[0].VNCHandler
 	}
 
 	app := fiber.New(fiber.Config{
@@ -49,10 +52,15 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 
 	app.Get("/healthz", s.healthz)
 
-	// Register console route before generic /ws so it matches first.
+	// Register console and VNC routes before generic /ws so they match first.
 	if s.consoleHandler != nil {
 		app.Use("/ws/console", s.authMiddleware)
 		app.Get("/ws/console", websocket.New(s.consoleHandler.HandleConsole))
+	}
+
+	if s.vncHandler != nil {
+		app.Use("/ws/vnc", s.authMiddleware)
+		app.Get("/ws/vnc", websocket.New(s.vncHandler.HandleVNC))
 	}
 
 	app.Use("/ws", s.authMiddleware)
