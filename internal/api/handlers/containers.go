@@ -592,6 +592,61 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 	})
 }
 
+// --- Container Config handlers ---
+
+type setCTConfigRequest struct {
+	Fields map[string]string `json:"fields"`
+}
+
+// SetContainerConfig handles PUT /api/v1/clusters/:cluster_id/containers/:ct_id/config.
+func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	var req setCTConfigRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if len(req.Fields) == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "fields map is required")
+	}
+
+	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.SetContainerConfig(c.Context(), node.Name, int(ct.Vmid), req.Fields); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	// Audit log with field details.
+	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
+		details, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
+		_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+			ClusterID:    cluster.ID,
+			UserID:       uid,
+			ResourceType: "container",
+			ResourceID:   ct.ID.String(),
+			Action:       "config_update",
+			Details:      details,
+		})
+	}
+
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
 // createProxmoxClient creates a Proxmox client for the given cluster.
 func (h *ContainerHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	cluster, err := h.queries.GetCluster(c.Context(), clusterID)

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Monitor, Terminal } from "lucide-react";
+import { ArrowLeft, Monitor, Terminal, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,7 +12,7 @@ import { useVMHistoricalMetrics } from "@/features/dashboard/api/historical-quer
 import { useMetricStore } from "@/stores/metric-store";
 import { useConsoleStore } from "@/stores/console-store";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
-import { useVM } from "../api/vm-queries";
+import { useVM, useSetResourceConfig } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
 import { CloneDialog } from "../components/CloneDialog";
 import { MigrateDialog } from "../components/MigrateDialog";
@@ -67,6 +67,10 @@ export function VMDetailPage() {
   const [cloneOpen, setCloneOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [destroyOpen, setDestroyOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [newName, setNewName] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const setConfig = useSetResourceConfig();
 
   if (isLoading) {
     return (
@@ -125,7 +129,40 @@ export function VMDetailPage() {
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
-            <h1 className="text-2xl font-bold">{vm.name}</h1>
+            {renaming ? (
+              <InlineRename
+                inputRef={renameInputRef}
+                value={newName}
+                onChange={setNewName}
+                isPending={setConfig.isPending}
+                onConfirm={() => {
+                  const trimmed = newName.trim();
+                  if (trimmed.length === 0 || trimmed === vm.name) {
+                    setRenaming(false);
+                    return;
+                  }
+                  const field = kind === "ct" ? "hostname" : "name";
+                  setConfig.mutate(
+                    { clusterId, resourceId: vmId, kind, fields: { [field]: trimmed } },
+                    { onSuccess: () => { setRenaming(false); } },
+                  );
+                }}
+                onCancel={() => { setRenaming(false); }}
+              />
+            ) : (
+              <>
+                <h1 className="text-2xl font-bold">{vm.name}</h1>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => { setNewName(vm.name); setRenaming(true); }}
+                  title="Rename"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            )}
             <StatusBadge status={normalizedStatus} />
             {vm.template && (
               <Badge variant="secondary">Template</Badge>
@@ -404,6 +441,61 @@ function InfoCard({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border p-3">
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <p className="mt-1 text-sm font-medium">{value}</p>
+    </div>
+  );
+}
+
+function InlineRename({
+  inputRef,
+  value,
+  onChange,
+  isPending,
+  onConfirm,
+  onCancel,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  value: string;
+  onChange: (v: string) => void;
+  isPending: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [inputRef]);
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        ref={inputRef}
+        className="h-9 rounded-md border bg-transparent px-2 text-xl font-bold outline-none focus:ring-2 focus:ring-ring"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onConfirm();
+          if (e.key === "Escape") onCancel();
+        }}
+        disabled={isPending}
+      />
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 w-7 p-0 text-green-600"
+        onClick={onConfirm}
+        disabled={isPending}
+      >
+        <Check className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 w-7 p-0 text-destructive"
+        onClick={onCancel}
+        disabled={isPending}
+      >
+        <X className="h-4 w-4" />
+      </Button>
     </div>
   );
 }

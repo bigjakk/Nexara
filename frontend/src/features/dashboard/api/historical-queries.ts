@@ -31,6 +31,20 @@ export function useHistoricalMetrics(clusterId: string, range: TimeRange) {
   });
 }
 
+export function useNodeHistoricalMetrics(clusterId: string, nodeId: string, range: TimeRange) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeId, "metrics", range],
+    queryFn: async () => {
+      const data = await apiClient.get<HistoricalMetricPoint[]>(
+        `/api/v1/clusters/${clusterId}/nodes/${nodeId}/metrics?range=${range}`,
+      );
+      return toMetricDataPoints(data);
+    },
+    enabled: range !== "live" && clusterId.length > 0 && nodeId.length > 0,
+    staleTime: 60_000,
+  });
+}
+
 export function useVMHistoricalMetrics(clusterId: string, vmId: string, range: TimeRange) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vms", vmId, "metrics", range],

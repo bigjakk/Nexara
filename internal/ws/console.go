@@ -107,15 +107,17 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		return
 	}
 
-	// Call the appropriate vncproxy endpoint.
-	// We use vncproxy (not termproxy) because termproxy ticket validation
-	// does not work with API tokens (Proxmox bug #6079).
+	// Call the appropriate proxy endpoint.
+	// node_shell uses termproxy for a text terminal.
+	// vm_serial and ct_attach use vncproxy because termproxy ticket validation
+	// has issues with API tokens on some Proxmox versions (bug #6079).
 	var vncResp *proxmox.TermProxyResponse
 	var vncPath string // resource path for vncwebsocket URL
+	useTermProxy := false
 	switch consoleType {
 	case "node_shell":
-		vncResp, err = pxClient.NodeVNCProxy(ctx, node)
-		// node-level: no extra path
+		vncResp, err = pxClient.NodeTermProxy(ctx, node)
+		useTermProxy = true
 	case "vm_serial":
 		vmid, parseErr := strconv.Atoi(vmidStr)
 		if parseErr != nil {
@@ -137,24 +139,31 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		return
 	}
 	if err != nil {
-		logger.Error("vncproxy request failed", "error", err)
+		logger.Error("proxy request failed", "error", err)
 		h.writeError(conn, "failed to create console session")
 		return
 	}
 
-	logger.Info("vncproxy response",
+	logger.Info("proxy response",
 		"port", int(vncResp.Port),
 		"user", vncResp.User,
 		"upid", vncResp.UPID,
 		"vncPath", vncPath,
+		"useTermProxy", useTermProxy,
 		"ticket_len", len(vncResp.Ticket),
 	)
 
-	// Dial the Proxmox vncwebsocket — no handshake needed with vncproxy.
-	// The ticket is passed as a query parameter and API token authenticates the upgrade.
-	pxConn, err := pxClient.DialVNCWebSocket(ctx, node, vncResp.Ticket, int(vncResp.Port), vncPath)
+	// Dial the Proxmox vncwebsocket.
+	var pxConn *gorillaWs.Conn
+	if useTermProxy {
+		// termproxy: DialTerminal does user:ticket handshake.
+		pxConn, err = pxClient.DialTerminal(ctx, node, vncResp.Ticket, int(vncResp.Port), vncPath, vncResp.User)
+	} else {
+		// vncproxy: no handshake needed.
+		pxConn, err = pxClient.DialVNCWebSocket(ctx, node, vncResp.Ticket, int(vncResp.Port), vncPath)
+	}
 	if err != nil {
-		logger.Error("dial vncwebsocket failed", "error", err)
+		logger.Error("dial websocket failed", "error", err)
 		h.writeError(conn, "failed to connect to console")
 		return
 	}
@@ -165,9 +174,6 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// Send a connected status to the browser.
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(`{"type":"connected"}`))
 
-	// Bidirectional raw proxy — vncproxy uses raw data (no channel encoding).
-	// Resize is still sent as JSON from the browser; we ignore it for vncproxy
-	// since VNC handles its own framebuffer sizing.
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -184,19 +190,41 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 
 			switch msgType {
 			case fiberWs.TextMessage:
-				// Check if it's a resize message — skip for vncproxy.
+				// Check if it's a resize message.
 				var resize consoleResizeMsg
 				if json.Unmarshal(msg, &resize) == nil && resize.Type == "resize" {
+					if useTermProxy {
+						// termproxy resize: send "1:cols:rows:" format.
+						resizeMsg := "1:" + strconv.Itoa(resize.Cols) + ":" + strconv.Itoa(resize.Rows) + ":"
+						if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, []byte(resizeMsg)); writeErr != nil {
+							return
+						}
+					}
+					// For vncproxy, skip — VNC handles its own framebuffer sizing.
 					continue
 				}
-				// Terminal input — relay raw.
-				if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, msg); writeErr != nil {
-					return
+				if useTermProxy {
+					// termproxy: prefix with "0:" data channel.
+					prefixed := append([]byte("0:"), msg...)
+					if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, prefixed); writeErr != nil {
+						return
+					}
+				} else {
+					if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, msg); writeErr != nil {
+						return
+					}
 				}
 			case fiberWs.BinaryMessage:
-				// Raw binary input — relay directly.
-				if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, msg); writeErr != nil {
-					return
+				if useTermProxy {
+					// termproxy: prefix with "0:" data channel.
+					prefixed := append([]byte("0:"), msg...)
+					if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, prefixed); writeErr != nil {
+						return
+					}
+				} else {
+					if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, msg); writeErr != nil {
+						return
+					}
 				}
 			}
 		}
@@ -208,16 +236,22 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		defer conn.WriteMessage(fiberWs.CloseMessage,
 			fiberWs.FormatCloseMessage(fiberWs.CloseNormalClosure, ""))
 		for {
-			msgType, msg, readErr := pxConn.ReadMessage()
+			_, msg, readErr := pxConn.ReadMessage()
 			if readErr != nil {
 				logger.Debug("proxmox read error", "error", readErr)
 				return
 			}
-			logger.Debug("proxmox data", "type", msgType, "len", len(msg), "preview", string(msg[:min(len(msg), 64)]))
 
-			// Relay raw data to browser.
-			if writeErr := conn.WriteMessage(fiberWs.BinaryMessage, msg); writeErr != nil {
-				return
+			if useTermProxy && len(msg) > 2 && msg[1] == ':' {
+				// termproxy channel protocol: "0:data" for terminal output.
+				// Strip the channel prefix before sending to browser.
+				if writeErr := conn.WriteMessage(fiberWs.BinaryMessage, msg[2:]); writeErr != nil {
+					return
+				}
+			} else {
+				if writeErr := conn.WriteMessage(fiberWs.BinaryMessage, msg); writeErr != nil {
+					return
+				}
 			}
 		}
 	}()

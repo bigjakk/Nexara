@@ -136,6 +136,126 @@ func (q *Queries) GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics
 	return items, nil
 }
 
+const getNodeMetrics1h = `-- name: GetNodeMetrics1h :many
+SELECT
+  m.bucket::timestamptz                   AS bucket,
+  m.avg_cpu_usage::double precision       AS cpu,
+  m.avg_mem_used::double precision        AS mem_used,
+  m.avg_mem_total::double precision       AS mem_total,
+  m.avg_disk_read::double precision       AS disk_read,
+  m.avg_disk_write::double precision      AS disk_write,
+  m.avg_net_in::double precision          AS net_in,
+  m.avg_net_out::double precision         AS net_out
+FROM node_metrics_1h m
+WHERE m.node_id = $1 AND m.bucket >= $2
+ORDER BY m.bucket
+`
+
+type GetNodeMetrics1hParams struct {
+	NodeID uuid.UUID   `json:"node_id"`
+	Bucket interface{} `json:"bucket"`
+}
+
+type GetNodeMetrics1hRow struct {
+	Bucket    time.Time `json:"bucket"`
+	Cpu       float64   `json:"cpu"`
+	MemUsed   float64   `json:"mem_used"`
+	MemTotal  float64   `json:"mem_total"`
+	DiskRead  float64   `json:"disk_read"`
+	DiskWrite float64   `json:"disk_write"`
+	NetIn     float64   `json:"net_in"`
+	NetOut    float64   `json:"net_out"`
+}
+
+func (q *Queries) GetNodeMetrics1h(ctx context.Context, arg GetNodeMetrics1hParams) ([]GetNodeMetrics1hRow, error) {
+	rows, err := q.db.Query(ctx, getNodeMetrics1h, arg.NodeID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodeMetrics1hRow{}
+	for rows.Next() {
+		var i GetNodeMetrics1hRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Cpu,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getNodeMetrics5m = `-- name: GetNodeMetrics5m :many
+SELECT
+  m.bucket::timestamptz                   AS bucket,
+  m.avg_cpu_usage::double precision       AS cpu,
+  m.avg_mem_used::double precision        AS mem_used,
+  m.avg_mem_total::double precision       AS mem_total,
+  m.avg_disk_read::double precision       AS disk_read,
+  m.avg_disk_write::double precision      AS disk_write,
+  m.avg_net_in::double precision          AS net_in,
+  m.avg_net_out::double precision         AS net_out
+FROM node_metrics_5m m
+WHERE m.node_id = $1 AND m.bucket >= $2
+ORDER BY m.bucket
+`
+
+type GetNodeMetrics5mParams struct {
+	NodeID uuid.UUID   `json:"node_id"`
+	Bucket interface{} `json:"bucket"`
+}
+
+type GetNodeMetrics5mRow struct {
+	Bucket    time.Time `json:"bucket"`
+	Cpu       float64   `json:"cpu"`
+	MemUsed   float64   `json:"mem_used"`
+	MemTotal  float64   `json:"mem_total"`
+	DiskRead  float64   `json:"disk_read"`
+	DiskWrite float64   `json:"disk_write"`
+	NetIn     float64   `json:"net_in"`
+	NetOut    float64   `json:"net_out"`
+}
+
+func (q *Queries) GetNodeMetrics5m(ctx context.Context, arg GetNodeMetrics5mParams) ([]GetNodeMetrics5mRow, error) {
+	rows, err := q.db.Query(ctx, getNodeMetrics5m, arg.NodeID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodeMetrics5mRow{}
+	for rows.Next() {
+		var i GetNodeMetrics5mRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Cpu,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getVMMetrics1h = `-- name: GetVMMetrics1h :many
 SELECT
   m.bucket::timestamptz                   AS bucket,

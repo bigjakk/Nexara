@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Square, Trash2, X, Loader2 } from "lucide-react";
+import { Play, Square, PowerOff, RotateCcw, Trash2, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,7 +32,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
     (r) => r.original.type === "vm" || r.original.type === "ct",
   );
 
-  async function executeBulkAction(action: "start" | "stop") {
+  async function executeBulkAction(action: "start" | "stop" | "shutdown" | "reboot") {
     const rows = vmCtRows;
     setProgress({ done: 0, total: rows.length });
     let done = 0;
@@ -122,6 +122,26 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
             >
               <Square className="h-3 w-3" />
               Stop
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={isBusy || vmCtRows.length === 0}
+              onClick={() => { void executeBulkAction("shutdown"); }}
+            >
+              <PowerOff className="h-3 w-3" />
+              Shutdown
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={isBusy || vmCtRows.length === 0}
+              onClick={() => { void executeBulkAction("reboot"); }}
+            >
+              <RotateCcw className="h-3 w-3" />
+              Reboot
             </Button>
             <Button
               variant="outline"

@@ -1,6 +1,7 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -10,20 +11,33 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Terminal } from "lucide-react";
 import { useCluster, useClusterNodes } from "../api/cluster-queries";
+import { useConsoleStore } from "@/stores/console-store";
 import { formatBytes, formatUptime } from "@/lib/format";
 
 export function ClusterDetailPage() {
   const { clusterId } = useParams<{ clusterId: string }>();
+  const navigate = useNavigate();
   const clusterQuery = useCluster(clusterId ?? "");
   const nodesQuery = useClusterNodes(clusterId ?? "");
+  const addTab = useConsoleStore((s) => s.addTab);
 
   const cluster = clusterQuery.data;
   const nodes = nodesQuery.data ?? [];
 
   const isLoading = clusterQuery.isLoading || nodesQuery.isLoading;
   const error = clusterQuery.error ?? nodesQuery.error;
+
+  function openNodeShell(nodeName: string) {
+    addTab({
+      clusterID: clusterId ?? "",
+      node: nodeName,
+      type: "node_shell",
+      label: `Shell: ${nodeName}`,
+    });
+    void navigate("/console");
+  }
 
   return (
     <div className="space-y-6">
@@ -95,13 +109,19 @@ export function ClusterDetailPage() {
                       <TableHead>Disk</TableHead>
                       <TableHead>PVE Version</TableHead>
                       <TableHead>Uptime</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {nodes.map((node) => (
                       <TableRow key={node.id}>
                         <TableCell className="font-medium">
-                          {node.name}
+                          <Link
+                            to={`/clusters/${clusterId ?? ""}/nodes/${node.id}`}
+                            className="text-primary hover:underline"
+                          >
+                            {node.name}
+                          </Link>
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -119,6 +139,18 @@ export function ClusterDetailPage() {
                         <TableCell>{formatBytes(node.disk_total)}</TableCell>
                         <TableCell>{node.pve_version}</TableCell>
                         <TableCell>{formatUptime(node.uptime)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="gap-1"
+                            disabled={node.status !== "online"}
+                            onClick={() => { openNodeShell(node.name); }}
+                            title="Open Shell"
+                          >
+                            <Terminal className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

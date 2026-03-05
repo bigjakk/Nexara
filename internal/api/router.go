@@ -63,6 +63,7 @@ func (s *Server) setupRoutes() {
 			clusters.Post("/:cluster_id/containers/:ct_id/snapshots", s.containerHandler.CreateSnapshot)
 			clusters.Delete("/:cluster_id/containers/:ct_id/snapshots/:snap_name", s.containerHandler.DeleteSnapshot)
 			clusters.Post("/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback", s.containerHandler.RollbackSnapshot)
+			clusters.Put("/:cluster_id/containers/:ct_id/config", s.containerHandler.SetContainerConfig)
 		}
 		if s.vmHandler != nil {
 			clusters.Post("/:cluster_id/vms/:vm_id/disks/resize", s.vmHandler.ResizeDisk)
@@ -82,6 +83,7 @@ func (s *Server) setupRoutes() {
 		if s.metricsHandler != nil {
 			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)
 			clusters.Get("/:cluster_id/vms/:vm_id/metrics", s.metricsHandler.GetVMHistorical)
+			clusters.Get("/:cluster_id/nodes/:node_id/metrics", s.metricsHandler.GetNodeHistorical)
 		}
 		if s.cephHandler != nil {
 			ceph := clusters.Group("/:cluster_id/ceph")

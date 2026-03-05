@@ -1153,7 +1153,18 @@ func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "config_update")
+	// Audit log with field details.
+	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
+		details, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
+		_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+			ClusterID:    cluster.ID,
+			UserID:       uid,
+			ResourceType: "vm",
+			ResourceID:   vm.ID.String(),
+			Action:       "config_update",
+			Details:      details,
+		})
+	}
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

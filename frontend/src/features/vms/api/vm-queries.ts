@@ -474,6 +474,37 @@ export function useSetVMConfig() {
   });
 }
 
+interface SetResourceConfigParams {
+  clusterId: string;
+  resourceId: string;
+  kind: "vm" | "ct";
+  fields: Record<string, string>;
+}
+
+export function useSetResourceConfig() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, resourceId, kind, fields }: SetResourceConfigParams) => {
+      const path = kind === "ct"
+        ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/config`
+        : `/api/v1/clusters/${clusterId}/vms/${resourceId}/config`;
+      return apiClient.put<{ status: string }>(path, { fields });
+    },
+    onSuccess: (_data, variables) => {
+      const qk = ["clusters", variables.clusterId, variables.kind === "ct" ? "containers" : "vms", variables.resourceId];
+      // Optimistically patch the cached VM/CT with new name if present
+      const nameField = variables.kind === "ct" ? variables.fields["hostname"] : variables.fields["name"];
+      if (nameField) {
+        queryClient.setQueryData<VMResponse>(qk, (old) =>
+          old ? { ...old, name: nameField } : old,
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: qk });
+    },
+  });
+}
+
 // --- Task History ---
 
 export interface TaskHistoryEntry {

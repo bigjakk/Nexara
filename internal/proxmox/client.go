@@ -1164,3 +1164,22 @@ func (c *Client) SetVMConfig(ctx context.Context, node string, vmid int, fields 
 	}
 	return nil
 }
+
+// SetContainerConfig updates configuration fields on an LXC container.
+func (c *Client) SetContainerConfig(ctx context.Context, node string, vmid int, fields map[string]string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	form := url.Values{}
+	for k, v := range fields {
+		form.Set(k, v)
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/config"
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("set container %d config on %s: %w", vmid, node, err)
+	}
+	return nil
+}

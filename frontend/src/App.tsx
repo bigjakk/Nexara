@@ -7,6 +7,7 @@ import { RegisterPage } from "@/features/auth/pages/RegisterPage";
 import { DashboardPage } from "@/features/dashboard/pages/DashboardPage";
 import { ClustersListPage } from "@/features/clusters/pages/ClustersListPage";
 import { ClusterDetailPage } from "@/features/clusters/pages/ClusterDetailPage";
+import { NodeDetailPage } from "@/features/clusters/pages/NodeDetailPage";
 import { InventoryPage } from "@/features/inventory/pages/InventoryPage";
 import { VMDetailPage } from "@/features/vms/pages/VMDetailPage";
 import { StoragePage } from "@/features/storage/pages/StoragePage";
@@ -46,6 +47,10 @@ const router = createBrowserRouter([
           {
             path: "clusters/:clusterId",
             element: <ClusterDetailPage />,
+          },
+          {
+            path: "clusters/:clusterId/nodes/:nodeId",
+            element: <NodeDetailPage />,
           },
           {
             path: "inventory",

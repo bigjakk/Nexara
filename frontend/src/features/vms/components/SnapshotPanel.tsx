@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Camera, RotateCcw, Trash2, Loader2 } from "lucide-react";
+import { Camera, RotateCcw, Trash2, Loader2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ import {
   useRollbackSnapshot,
 } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
-import type { ResourceKind } from "../types/vm";
+import type { ResourceKind, Snapshot } from "../types/vm";
 
 interface SnapshotPanelProps {
   clusterId: string;
@@ -108,6 +108,25 @@ export function SnapshotPanel({
   function formatDate(ts: number | undefined): string {
     if (!ts) return "--";
     return new Date(ts * 1000).toLocaleString();
+  }
+
+  // Build tree from flat list using parent field
+  function buildTree(snaps: Snapshot[]): { roots: Snapshot[]; childrenMap: Map<string, Snapshot[]> } {
+    const childrenMap = new Map<string, Snapshot[]>();
+    const roots: Snapshot[] = [];
+    for (const snap of snaps) {
+      if (snap.parent) {
+        const siblings = childrenMap.get(snap.parent);
+        if (siblings) {
+          siblings.push(snap);
+        } else {
+          childrenMap.set(snap.parent, [snap]);
+        }
+      } else {
+        roots.push(snap);
+      }
+    }
+    return { roots, childrenMap };
   }
 
   return (
@@ -221,113 +240,178 @@ export function SnapshotPanel({
         </p>
       )}
 
-      {!isLoading && snapshots && snapshots.length > 0 && (
-        <div className="overflow-hidden rounded-lg border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="px-4 py-2 text-left font-medium">Name</th>
-                <th className="px-4 py-2 text-left font-medium">
-                  Description
-                </th>
-                <th className="px-4 py-2 text-left font-medium">Date</th>
-                <th className="px-4 py-2 text-left font-medium">RAM</th>
-                <th className="px-4 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshots.map((snap) => (
-                <tr key={snap.name} className="border-b last:border-b-0">
-                  <td className="px-4 py-2 font-medium">{snap.name}</td>
-                  <td className="px-4 py-2 text-muted-foreground">
-                    {snap.description || "--"}
-                  </td>
-                  <td className="px-4 py-2 text-muted-foreground">
-                    {formatDate(snap.snap_time)}
-                  </td>
-                  <td className="px-4 py-2 text-muted-foreground">
-                    {snap.vmstate ? "Yes" : "No"}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <div className="flex justify-end gap-1">
-                      {confirmRollback === snap.name ? (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => {
-                              handleRollback(snap.name);
-                            }}
-                            disabled={rollbackMutation.isPending}
-                          >
-                            Confirm
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setConfirmRollback(null);
-                            }}
-                          >
-                            Cancel
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="gap-1"
-                          onClick={() => {
-                            setConfirmRollback(snap.name);
-                          }}
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          Rollback
-                        </Button>
-                      )}
-                      {confirmDelete === snap.name ? (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => {
-                              handleDelete(snap.name);
-                            }}
-                            disabled={deleteMutation.isPending}
-                          >
-                            Confirm
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setConfirmDelete(null);
-                            }}
-                          >
-                            Cancel
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="gap-1 text-destructive hover:text-destructive"
-                          onClick={() => {
-                            setConfirmDelete(snap.name);
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Delete
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {!isLoading && snapshots && snapshots.length > 0 && (() => {
+        const { roots, childrenMap } = buildTree(snapshots);
+        return (
+          <div className="space-y-1">
+            {roots.map((snap) => (
+              <SnapshotNode
+                key={snap.name}
+                snap={snap}
+                depth={0}
+                childrenMap={childrenMap}
+                confirmDelete={confirmDelete}
+                confirmRollback={confirmRollback}
+                onConfirmDelete={setConfirmDelete}
+                onConfirmRollback={setConfirmRollback}
+                onDelete={handleDelete}
+                onRollback={handleRollback}
+                deletePending={deleteMutation.isPending}
+                rollbackPending={rollbackMutation.isPending}
+                formatDate={formatDate}
+              />
+            ))}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+interface SnapshotNodeProps {
+  snap: Snapshot;
+  depth: number;
+  childrenMap: Map<string, Snapshot[]>;
+  confirmDelete: string | null;
+  confirmRollback: string | null;
+  onConfirmDelete: (name: string | null) => void;
+  onConfirmRollback: (name: string | null) => void;
+  onDelete: (name: string) => void;
+  onRollback: (name: string) => void;
+  deletePending: boolean;
+  rollbackPending: boolean;
+  formatDate: (ts: number | undefined) => string;
+}
+
+function SnapshotNode({
+  snap,
+  depth,
+  childrenMap,
+  confirmDelete,
+  confirmRollback,
+  onConfirmDelete,
+  onConfirmRollback,
+  onDelete,
+  onRollback,
+  deletePending,
+  rollbackPending,
+  formatDate,
+}: SnapshotNodeProps) {
+  const children = childrenMap.get(snap.name) ?? [];
+  const isCurrent = snap.name === "current";
+
+  return (
+    <div>
+      <div
+        className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+        style={{ marginLeft: `${String(depth * 24)}px` }}
+      >
+        {depth > 0 && (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        )}
+        <span className="font-medium">{snap.name}</span>
+        <span className="text-muted-foreground">
+          {snap.description || ""}
+        </span>
+        <span className="text-muted-foreground">
+          {formatDate(snap.snap_time)}
+        </span>
+        {snap.vmstate ? (
+          <span className="text-xs text-muted-foreground">(RAM)</span>
+        ) : null}
+
+        {!isCurrent && (
+          <div className="ml-auto flex gap-1">
+            {confirmRollback === snap.name ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    onRollback(snap.name);
+                  }}
+                  disabled={rollbackPending}
+                >
+                  Confirm
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onConfirmRollback(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1"
+                onClick={() => {
+                  onConfirmRollback(snap.name);
+                }}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Rollback
+              </Button>
+            )}
+            {confirmDelete === snap.name ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    onDelete(snap.name);
+                  }}
+                  disabled={deletePending}
+                >
+                  Confirm
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    onConfirmDelete(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1 text-destructive hover:text-destructive"
+                onClick={() => {
+                  onConfirmDelete(snap.name);
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+      {children.map((child) => (
+        <SnapshotNode
+          key={child.name}
+          snap={child}
+          depth={depth + 1}
+          childrenMap={childrenMap}
+          confirmDelete={confirmDelete}
+          confirmRollback={confirmRollback}
+          onConfirmDelete={onConfirmDelete}
+          onConfirmRollback={onConfirmRollback}
+          onDelete={onDelete}
+          onRollback={onRollback}
+          deletePending={deletePending}
+          rollbackPending={rollbackPending}
+          formatDate={formatDate}
+        />
+      ))}
     </div>
   );
 }
