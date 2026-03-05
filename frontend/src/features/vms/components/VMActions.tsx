@@ -249,6 +249,7 @@ export function VMActions({
         kind={kind}
         resourceId={resourceId}
         onComplete={handleTaskComplete}
+        description={`${lastAction ?? "action"} ${name}`}
       />
 
       {/* Confirmation dialog */}

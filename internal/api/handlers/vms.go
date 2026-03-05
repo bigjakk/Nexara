@@ -379,6 +379,53 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
+// GetTaskLog returns the log lines for a Proxmox task.
+func (h *VMHandler) GetTaskLog(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	rawUPID := c.Params("upid")
+	if rawUPID == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "UPID is required")
+	}
+	upid, err := url.PathUnescape(rawUPID)
+	if err != nil {
+		upid = rawUPID
+	}
+
+	nodeName := extractNodeFromUPID(upid)
+	if nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Could not extract node from UPID")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	entries, err := pxClient.GetTaskLog(c.Context(), nodeName, upid, 0)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	type logLine struct {
+		N int    `json:"n"`
+		T string `json:"t"`
+	}
+	result := make([]logLine, len(entries))
+	for i, e := range entries {
+		result[i] = logLine{N: e.N, T: e.T}
+	}
+
+	return c.JSON(result)
+}
+
 type diskResizeRequest struct {
 	Disk string `json:"disk"`
 	Size string `json:"size"`
@@ -603,6 +650,334 @@ func (h *VMHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, re
 		Action:       action,
 		Details:      json.RawMessage(`{}`),
 	})
+}
+
+// --- Snapshot handlers ---
+
+type snapshotRequest struct {
+	SnapName    string `json:"snap_name"`
+	Description string `json:"description"`
+	VMState     bool   `json:"vmstate"`
+}
+
+type snapshotResponse struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	SnapTime    int64  `json:"snap_time,omitempty"`
+	VMState     int    `json:"vmstate,omitempty"`
+	Parent      string `json:"parent,omitempty"`
+}
+
+// ListSnapshots handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
+func (h *VMHandler) ListSnapshots(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	vm, node, _, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	snaps, err := pxClient.ListVMSnapshots(c.Context(), node.Name, int(vm.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	resp := make([]snapshotResponse, 0, len(snaps))
+	for _, s := range snaps {
+		if s.Name == "current" {
+			continue
+		}
+		resp = append(resp, snapshotResponse{
+			Name:        s.Name,
+			Description: s.Description,
+			SnapTime:    s.SnapTime,
+			VMState:     s.VMState,
+			Parent:      s.Parent,
+		})
+	}
+
+	return c.JSON(resp)
+}
+
+// CreateSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
+func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var req snapshotRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.SnapName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "snap_name is required")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.CreateVMSnapshot(c.Context(), node.Name, int(vm.Vmid), proxmox.SnapshotParams{
+		SnapName:    req.SnapName,
+		Description: req.Description,
+		VMState:     req.VMState,
+	})
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_create")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name.
+func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	snapName := c.Params("snap_name")
+	if snapName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Snapshot name is required")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.DeleteVMSnapshot(c.Context(), node.Name, int(vm.Vmid), snapName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_delete")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback.
+func (h *VMHandler) RollbackSnapshot(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	snapName := c.Params("snap_name")
+	if snapName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Snapshot name is required")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.RollbackVMSnapshot(c.Context(), node.Name, int(vm.Vmid), snapName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_rollback")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// --- Create VM handler ---
+
+type createVMRequest struct {
+	VMID    int    `json:"vmid"`
+	Name    string `json:"name"`
+	Node    string `json:"node"`
+	Memory  int    `json:"memory"`
+	Cores   int    `json:"cores"`
+	Sockets int    `json:"sockets"`
+	SCSI0   string `json:"scsi0"`
+	IDE2    string `json:"ide2"`
+	Net0    string `json:"net0"`
+	OSType  string `json:"ostype"`
+	Boot    string `json:"boot"`
+	CDRom   string `json:"cdrom"`
+	Start   bool   `json:"start"`
+}
+
+// CreateVM handles POST /api/v1/clusters/:cluster_id/vms.
+func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	var req createVMRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.VMID <= 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "vmid is required and must be positive")
+	}
+	if req.Node == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.CreateVM(c.Context(), req.Node, proxmox.CreateVMParams{
+		VMID:    req.VMID,
+		Name:    req.Name,
+		Memory:  req.Memory,
+		Cores:   req.Cores,
+		Sockets: req.Sockets,
+		SCSI0:   req.SCSI0,
+		IDE2:    req.IDE2,
+		Net0:    req.Net0,
+		OSType:  req.OSType,
+		Boot:    req.Boot,
+		CDRom:   req.CDRom,
+		Start:   req.Start,
+	})
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, clusterID, "vm", strconv.Itoa(req.VMID), "create")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// --- VM Config handlers (Cloud-Init) ---
+
+// GetVMConfig handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/config.
+func (h *VMHandler) GetVMConfig(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	vm, node, _, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	config, err := pxClient.GetVMConfig(c.Context(), node.Name, int(vm.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	return c.JSON(config)
+}
+
+type setVMConfigRequest struct {
+	Fields map[string]string `json:"fields"`
+}
+
+// SetVMConfig handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/config.
+func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var req setVMConfigRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if len(req.Fields) == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "fields map is required")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.SetVMConfig(c.Context(), node.Name, int(vm.Vmid), req.Fields); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "config_update")
+
+	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // mapProxmoxError converts a Proxmox client error to an appropriate Fiber error.

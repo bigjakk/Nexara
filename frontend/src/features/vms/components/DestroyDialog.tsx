@@ -82,6 +82,7 @@ export function DestroyDialog({
               handleClose();
               void navigate("/inventory");
             }}
+            description={`Destroy ${resourceName}`}
           />
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">

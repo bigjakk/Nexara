@@ -77,6 +77,7 @@ export function MigrateDialog({
             kind="ct"
             resourceId={containerId}
             onComplete={() => { handleClose(); }}
+            description={`Migrate ${containerName}`}
           />
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">

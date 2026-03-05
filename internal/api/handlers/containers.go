@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -332,6 +333,280 @@ func (h *ContainerHandler) resolveCT(c *fiber.Ctx, clusterID, ctID uuid.UUID) (d
 	}
 
 	return ct, node, cluster, pxClient, nil
+}
+
+// --- Snapshot handlers ---
+
+// ListSnapshots handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
+func (h *ContainerHandler) ListSnapshots(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	ct, node, _, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	snaps, err := pxClient.ListCTSnapshots(c.Context(), node.Name, int(ct.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	resp := make([]snapshotResponse, 0, len(snaps))
+	for _, s := range snaps {
+		if s.Name == "current" {
+			continue
+		}
+		resp = append(resp, snapshotResponse{
+			Name:        s.Name,
+			Description: s.Description,
+			SnapTime:    s.SnapTime,
+			VMState:     s.VMState,
+			Parent:      s.Parent,
+		})
+	}
+
+	return c.JSON(resp)
+}
+
+// CreateSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
+func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	var req snapshotRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.SnapName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "snap_name is required")
+	}
+
+	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.CreateCTSnapshot(c.Context(), node.Name, int(ct.Vmid), proxmox.SnapshotParams{
+		SnapName:    req.SnapName,
+		Description: req.Description,
+	})
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "snapshot_create")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name.
+func (h *ContainerHandler) DeleteSnapshot(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	snapName := c.Params("snap_name")
+	if snapName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Snapshot name is required")
+	}
+
+	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.DeleteCTSnapshot(c.Context(), node.Name, int(ct.Vmid), snapName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "snapshot_delete")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback.
+func (h *ContainerHandler) RollbackSnapshot(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	snapName := c.Params("snap_name")
+	if snapName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Snapshot name is required")
+	}
+
+	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.RollbackCTSnapshot(c.Context(), node.Name, int(ct.Vmid), snapName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "snapshot_rollback")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// --- Create Container handler ---
+
+type createCTRequest struct {
+	VMID         int    `json:"vmid"`
+	Hostname     string `json:"hostname"`
+	Node         string `json:"node"`
+	OSTemplate   string `json:"ostemplate"`
+	Storage      string `json:"storage"`
+	RootFS       string `json:"rootfs"`
+	Memory       int    `json:"memory"`
+	Swap         int    `json:"swap"`
+	Cores        int    `json:"cores"`
+	Net0         string `json:"net0"`
+	Password     string `json:"password"`
+	SSHKeys      string `json:"ssh_keys"`
+	Unprivileged bool   `json:"unprivileged"`
+	Start        bool   `json:"start"`
+}
+
+// CreateContainer handles POST /api/v1/clusters/:cluster_id/containers.
+func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	var req createCTRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.VMID <= 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "vmid is required and must be positive")
+	}
+	if req.Node == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node is required")
+	}
+	if req.OSTemplate == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "ostemplate is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.CreateCT(c.Context(), req.Node, proxmox.CreateCTParams{
+		VMID:         req.VMID,
+		Hostname:     req.Hostname,
+		OSTemplate:   req.OSTemplate,
+		Storage:      req.Storage,
+		RootFS:       req.RootFS,
+		Memory:       req.Memory,
+		Swap:         req.Swap,
+		Cores:        req.Cores,
+		Net0:         req.Net0,
+		Password:     req.Password,
+		SSHKeys:      req.SSHKeys,
+		Unprivileged: req.Unprivileged,
+		Start:        req.Start,
+	})
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, clusterID, "container", strconv.Itoa(req.VMID), "create")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// createProxmoxClient creates a Proxmox client for the given cluster.
+func (h *ContainerHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fiber.NewError(fiber.StatusNotFound, "Cluster not found")
+		}
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
+	}
+
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
+	if err != nil {
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
+	}
+
+	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
+		BaseURL:        cluster.ApiUrl,
+		TokenID:        cluster.TokenID,
+		TokenSecret:    tokenSecret,
+		TLSFingerprint: cluster.TlsFingerprint,
+		Timeout:        30 * time.Second,
+	})
+	if err != nil {
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
+	}
+
+	return pxClient, nil
 }
 
 // auditLog writes an audit log entry for container operations.

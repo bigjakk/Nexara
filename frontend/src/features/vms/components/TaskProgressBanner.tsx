@@ -1,5 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api-client";
 import { useTaskStatus } from "../api/vm-queries";
 import type { ResourceKind } from "../types/vm";
 
@@ -9,6 +11,7 @@ interface TaskProgressBannerProps {
   kind: ResourceKind;
   resourceId: string;
   onComplete?: () => void;
+  description?: string;
 }
 
 export function TaskProgressBanner({
@@ -17,23 +20,73 @@ export function TaskProgressBanner({
   kind: _kind,
   resourceId: _resourceId,
   onComplete,
+  description,
 }: TaskProgressBannerProps) {
   const { data: task } = useTaskStatus(clusterId, upid);
+  const queryClient = useQueryClient();
 
   const isStopped = task?.status === "stopped";
-  const isOk = isStopped && task.exit_status === "OK";
-  const isFailed = isStopped && task.exit_status !== "OK";
+  const isOk =
+    isStopped &&
+    (task.exit_status === "OK" ||
+      task.exit_status === "" ||
+      task.exit_status.startsWith("WARNINGS"));
+  const isFailed = isStopped && !isOk;
 
-  // Track whether we've already fired onComplete for this UPID to avoid
-  // calling it on every re-render while isStopped remains true.
+  // Track whether we've already fired onComplete for this UPID.
   const firedRef = useRef<string | null>(null);
+  // Track whether we've already persisted this UPID to the task history.
+  const persistedRef = useRef<string | null>(null);
+  // Track the last update key to avoid duplicate updates.
+  const lastUpdateRef = useRef<string | null>(null);
+
+  const invalidateTaskHistory = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+  }, [queryClient]);
+
+  // Persist task to DB when UPID becomes available.
+  useEffect(() => {
+    if (upid && persistedRef.current !== upid) {
+      persistedRef.current = upid;
+      void apiClient
+        .post("/api/v1/tasks", {
+          cluster_id: clusterId,
+          upid,
+          description: description ?? "Task",
+          status: "running",
+          node: "",
+          task_type: "",
+        })
+        .then(invalidateTaskHistory)
+        .catch(() => {
+          // ignore — task may already exist (ON CONFLICT)
+        });
+    }
+  }, [upid, clusterId, description, invalidateTaskHistory]);
+
+  // Update task status on each poll result.
+  useEffect(() => {
+    if (!upid || !task) return;
+    const key = `${upid}:${task.status}:${task.exit_status ?? ""}:${String(task.progress)}`;
+    if (lastUpdateRef.current === key) return;
+    lastUpdateRef.current = key;
+
+    void apiClient
+      .put(`/api/v1/tasks/${encodeURIComponent(upid)}`, {
+        status: task.status,
+        exit_status: task.exit_status ?? "",
+        progress: task.progress ?? null,
+        finished_at: task.status === "stopped" ? new Date().toISOString() : null,
+      })
+      .then(invalidateTaskHistory)
+      .catch(() => {
+        // ignore update failures
+      });
+  }, [upid, task, invalidateTaskHistory]);
 
   useEffect(() => {
     if (isStopped && upid && firedRef.current !== upid) {
       firedRef.current = upid;
-      // Let the parent (VMActions) handle the optimistic cache update.
-      // Don't invalidate queries here — the DB hasn't been updated yet
-      // and refetching would overwrite the optimistic status.
       onComplete?.();
     }
   }, [isStopped, upid, onComplete]);

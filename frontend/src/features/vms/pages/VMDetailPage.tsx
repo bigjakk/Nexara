@@ -15,6 +15,8 @@ import { VMActions } from "../components/VMActions";
 import { CloneDialog } from "../components/CloneDialog";
 import { MigrateDialog } from "../components/MigrateDialog";
 import { DestroyDialog } from "../components/DestroyDialog";
+import { SnapshotPanel } from "../components/SnapshotPanel";
+import { CloudInitPanel } from "../components/CloudInitPanel";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 
@@ -147,6 +149,10 @@ export function VMDetailPage() {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="metrics">Metrics</TabsTrigger>
+          <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
+          {kind === "vm" && (
+            <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
+          )}
           <TabsTrigger value="console">Console</TabsTrigger>
         </TabsList>
 
@@ -193,6 +199,20 @@ export function VMDetailPage() {
             </div>
           </div>
         </TabsContent>
+
+        <TabsContent value="snapshots" className="mt-4">
+          <SnapshotPanel
+            clusterId={clusterId}
+            resourceId={vmId}
+            kind={kind}
+          />
+        </TabsContent>
+
+        {kind === "vm" && (
+          <TabsContent value="cloud-init" className="mt-4">
+            <CloudInitPanel clusterId={clusterId} vmId={vmId} />
+          </TabsContent>
+        )}
 
         <TabsContent value="console" className="mt-4">
           <div className="flex gap-3">

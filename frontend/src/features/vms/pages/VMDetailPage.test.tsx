@@ -58,6 +58,14 @@ vi.mock("../api/vm-queries", () => ({
   useClusterVMIDs: () => ({
     data: new Set<number>(),
   }),
+  useAddTaskHistory: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useUpdateTaskHistory: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
 }));
 
 vi.mock("@/features/clusters/api/cluster-queries", () => ({

@@ -37,19 +37,32 @@ func (s *Server) setupRoutes() {
 		}
 		if s.vmHandler != nil {
 			clusters.Get("/:cluster_id/vms", s.vmHandler.ListByCluster)
+			clusters.Post("/:cluster_id/vms", s.vmHandler.CreateVM)
 			clusters.Get("/:cluster_id/vms/:vm_id", s.vmHandler.GetVM)
 			clusters.Post("/:cluster_id/vms/:vm_id/status", s.vmHandler.PerformAction)
 			clusters.Post("/:cluster_id/vms/:vm_id/clone", s.vmHandler.CloneVM)
 			clusters.Delete("/:cluster_id/vms/:vm_id", s.vmHandler.DestroyVM)
+			clusters.Get("/:cluster_id/vms/:vm_id/snapshots", s.vmHandler.ListSnapshots)
+			clusters.Post("/:cluster_id/vms/:vm_id/snapshots", s.vmHandler.CreateSnapshot)
+			clusters.Delete("/:cluster_id/vms/:vm_id/snapshots/:snap_name", s.vmHandler.DeleteSnapshot)
+			clusters.Post("/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback", s.vmHandler.RollbackSnapshot)
+			clusters.Get("/:cluster_id/vms/:vm_id/config", s.vmHandler.GetVMConfig)
+			clusters.Put("/:cluster_id/vms/:vm_id/config", s.vmHandler.SetVMConfig)
 			clusters.Get("/:cluster_id/tasks/:upid", s.vmHandler.GetTaskStatus)
+			clusters.Get("/:cluster_id/tasks/:upid/log", s.vmHandler.GetTaskLog)
 		}
 		if s.containerHandler != nil {
 			clusters.Get("/:cluster_id/containers", s.containerHandler.ListByCluster)
+			clusters.Post("/:cluster_id/containers", s.containerHandler.CreateContainer)
 			clusters.Get("/:cluster_id/containers/:ct_id", s.containerHandler.GetContainer)
 			clusters.Post("/:cluster_id/containers/:ct_id/status", s.containerHandler.PerformAction)
 			clusters.Post("/:cluster_id/containers/:ct_id/clone", s.containerHandler.CloneContainer)
 			clusters.Post("/:cluster_id/containers/:ct_id/migrate", s.containerHandler.MigrateContainer)
 			clusters.Delete("/:cluster_id/containers/:ct_id", s.containerHandler.DestroyContainer)
+			clusters.Get("/:cluster_id/containers/:ct_id/snapshots", s.containerHandler.ListSnapshots)
+			clusters.Post("/:cluster_id/containers/:ct_id/snapshots", s.containerHandler.CreateSnapshot)
+			clusters.Delete("/:cluster_id/containers/:ct_id/snapshots/:snap_name", s.containerHandler.DeleteSnapshot)
+			clusters.Post("/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback", s.containerHandler.RollbackSnapshot)
 		}
 		if s.vmHandler != nil {
 			clusters.Post("/:cluster_id/vms/:vm_id/disks/resize", s.vmHandler.ResizeDisk)
@@ -110,6 +123,15 @@ func (s *Server) setupRoutes() {
 	if s.backupHandler != nil && s.clusterHandler != nil {
 		clusters := v1.Group("/clusters", s.authRequired())
 		clusters.Post("/:cluster_id/restore", s.backupHandler.RestoreBackup)
+	}
+
+	// Task history routes.
+	if s.taskHandler != nil {
+		tasks := v1.Group("/tasks", s.authRequired())
+		tasks.Get("/", s.taskHandler.List)
+		tasks.Post("/", s.taskHandler.Create)
+		tasks.Put("/:upid", s.taskHandler.Update)
+		tasks.Delete("/", s.taskHandler.ClearCompleted)
 	}
 
 	// Future route groups:

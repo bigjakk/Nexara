@@ -660,3 +660,324 @@ func (c *Client) RestoreCT(ctx context.Context, node string, params RestoreParam
 	}
 	return upid, nil
 }
+
+// --- Snapshot Methods ---
+
+// ListVMSnapshots returns all snapshots for a QEMU VM.
+func (c *Client) ListVMSnapshots(ctx context.Context, node string, vmid int) ([]Snapshot, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/snapshot"
+	var snaps []Snapshot
+	if err := c.do(ctx, path, &snaps); err != nil {
+		return nil, fmt.Errorf("list VM %d snapshots on %s: %w", vmid, node, err)
+	}
+	return snaps, nil
+}
+
+// CreateVMSnapshot creates a snapshot for a QEMU VM and returns the task UPID.
+func (c *Client) CreateVMSnapshot(ctx context.Context, node string, vmid int, params SnapshotParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if params.SnapName == "" {
+		return "", fmt.Errorf("snapshot name is required")
+	}
+	form := url.Values{}
+	form.Set("snapname", params.SnapName)
+	if params.Description != "" {
+		form.Set("description", params.Description)
+	}
+	if params.VMState {
+		form.Set("vmstate", "1")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/snapshot"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("create snapshot on VM %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// DeleteVMSnapshot deletes a snapshot from a QEMU VM and returns the task UPID.
+func (c *Client) DeleteVMSnapshot(ctx context.Context, node string, vmid int, snapname string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if snapname == "" {
+		return "", fmt.Errorf("snapshot name is required")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/snapshot/" + url.PathEscape(snapname)
+	var upid string
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("delete snapshot %s on VM %d on %s: %w", snapname, vmid, node, err)
+	}
+	return upid, nil
+}
+
+// RollbackVMSnapshot rolls back a QEMU VM to a snapshot and returns the task UPID.
+func (c *Client) RollbackVMSnapshot(ctx context.Context, node string, vmid int, snapname string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if snapname == "" {
+		return "", fmt.Errorf("snapshot name is required")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/snapshot/" + url.PathEscape(snapname) + "/rollback"
+	var upid string
+	if err := c.doPost(ctx, path, nil, &upid); err != nil {
+		return "", fmt.Errorf("rollback snapshot %s on VM %d on %s: %w", snapname, vmid, node, err)
+	}
+	return upid, nil
+}
+
+// ListCTSnapshots returns all snapshots for an LXC container.
+func (c *Client) ListCTSnapshots(ctx context.Context, node string, vmid int) ([]Snapshot, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/snapshot"
+	var snaps []Snapshot
+	if err := c.do(ctx, path, &snaps); err != nil {
+		return nil, fmt.Errorf("list CT %d snapshots on %s: %w", vmid, node, err)
+	}
+	return snaps, nil
+}
+
+// CreateCTSnapshot creates a snapshot for an LXC container and returns the task UPID.
+func (c *Client) CreateCTSnapshot(ctx context.Context, node string, vmid int, params SnapshotParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if params.SnapName == "" {
+		return "", fmt.Errorf("snapshot name is required")
+	}
+	form := url.Values{}
+	form.Set("snapname", params.SnapName)
+	if params.Description != "" {
+		form.Set("description", params.Description)
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/snapshot"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("create snapshot on CT %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// DeleteCTSnapshot deletes a snapshot from an LXC container and returns the task UPID.
+func (c *Client) DeleteCTSnapshot(ctx context.Context, node string, vmid int, snapname string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if snapname == "" {
+		return "", fmt.Errorf("snapshot name is required")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/snapshot/" + url.PathEscape(snapname)
+	var upid string
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("delete snapshot %s on CT %d on %s: %w", snapname, vmid, node, err)
+	}
+	return upid, nil
+}
+
+// RollbackCTSnapshot rolls back an LXC container to a snapshot and returns the task UPID.
+func (c *Client) RollbackCTSnapshot(ctx context.Context, node string, vmid int, snapname string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if snapname == "" {
+		return "", fmt.Errorf("snapshot name is required")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/snapshot/" + url.PathEscape(snapname) + "/rollback"
+	var upid string
+	if err := c.doPost(ctx, path, nil, &upid); err != nil {
+		return "", fmt.Errorf("rollback snapshot %s on CT %d on %s: %w", snapname, vmid, node, err)
+	}
+	return upid, nil
+}
+
+// --- Create VM/CT Methods ---
+
+// CreateVM creates a new QEMU VM and returns the task UPID.
+func (c *Client) CreateVM(ctx context.Context, node string, params CreateVMParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if params.VMID <= 0 {
+		return "", fmt.Errorf("VMID is required and must be positive")
+	}
+	form := url.Values{}
+	form.Set("vmid", strconv.Itoa(params.VMID))
+	if params.Name != "" {
+		form.Set("name", params.Name)
+	}
+	if params.Memory > 0 {
+		form.Set("memory", strconv.Itoa(params.Memory))
+	}
+	if params.Cores > 0 {
+		form.Set("cores", strconv.Itoa(params.Cores))
+	}
+	if params.Sockets > 0 {
+		form.Set("sockets", strconv.Itoa(params.Sockets))
+	}
+	if params.SCSI0 != "" {
+		form.Set("scsi0", params.SCSI0)
+	}
+	if params.IDE2 != "" {
+		form.Set("ide2", params.IDE2)
+	}
+	if params.Net0 != "" {
+		form.Set("net0", params.Net0)
+	}
+	if params.OSType != "" {
+		form.Set("ostype", params.OSType)
+	}
+	if params.Boot != "" {
+		form.Set("boot", params.Boot)
+	}
+	if params.CDRom != "" {
+		form.Set("cdrom", params.CDRom)
+	}
+	if params.Start {
+		form.Set("start", "1")
+	}
+	if params.CIUser != "" {
+		form.Set("ciuser", params.CIUser)
+	}
+	if params.CIPassword != "" {
+		form.Set("cipassword", params.CIPassword)
+	}
+	if params.IPConfig0 != "" {
+		form.Set("ipconfig0", params.IPConfig0)
+	}
+	if params.SSHKeys != "" {
+		form.Set("sshkeys", url.QueryEscape(params.SSHKeys))
+	}
+	if params.CIType != "" {
+		form.Set("citype", params.CIType)
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("create VM %d on %s: %w", params.VMID, node, err)
+	}
+	return upid, nil
+}
+
+// CreateCT creates a new LXC container and returns the task UPID.
+func (c *Client) CreateCT(ctx context.Context, node string, params CreateCTParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if params.VMID <= 0 {
+		return "", fmt.Errorf("VMID is required and must be positive")
+	}
+	if params.OSTemplate == "" {
+		return "", fmt.Errorf("ostemplate is required")
+	}
+	form := url.Values{}
+	form.Set("vmid", strconv.Itoa(params.VMID))
+	form.Set("ostemplate", params.OSTemplate)
+	if params.Hostname != "" {
+		form.Set("hostname", params.Hostname)
+	}
+	if params.Storage != "" {
+		form.Set("storage", params.Storage)
+	}
+	if params.RootFS != "" {
+		form.Set("rootfs", params.RootFS)
+	}
+	if params.Memory > 0 {
+		form.Set("memory", strconv.Itoa(params.Memory))
+	}
+	if params.Swap > 0 {
+		form.Set("swap", strconv.Itoa(params.Swap))
+	}
+	if params.Cores > 0 {
+		form.Set("cores", strconv.Itoa(params.Cores))
+	}
+	if params.Net0 != "" {
+		form.Set("net0", params.Net0)
+	}
+	if params.Password != "" {
+		form.Set("password", params.Password)
+	}
+	if params.SSHKeys != "" {
+		form.Set("ssh-public-keys", url.QueryEscape(params.SSHKeys))
+	}
+	if params.Unprivileged {
+		form.Set("unprivileged", "1")
+	}
+	if params.Start {
+		form.Set("start", "1")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("create CT %d on %s: %w", params.VMID, node, err)
+	}
+	return upid, nil
+}
+
+// --- VM Config Methods (Cloud-Init) ---
+
+// GetVMConfig returns the full configuration of a QEMU VM.
+func (c *Client) GetVMConfig(ctx context.Context, node string, vmid int) (VMConfig, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/config"
+	var config VMConfig
+	if err := c.do(ctx, path, &config); err != nil {
+		return nil, fmt.Errorf("get VM %d config on %s: %w", vmid, node, err)
+	}
+	return config, nil
+}
+
+// SetVMConfig updates configuration fields on a QEMU VM.
+func (c *Client) SetVMConfig(ctx context.Context, node string, vmid int, fields map[string]string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	form := url.Values{}
+	for k, v := range fields {
+		form.Set(k, v)
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/config"
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("set VM %d config on %s: %w", vmid, node, err)
+	}
+	return nil
+}

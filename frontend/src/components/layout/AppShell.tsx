@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
 import { useWebSocketStore } from "@/stores/websocket-store";
 import { Sidebar } from "./Sidebar";
+import { TaskLogPanel } from "./TaskLogPanel";
 
 function getInitials(name: string): string {
   return name
@@ -88,6 +89,7 @@ export function AppShell() {
         <main className="flex-1 overflow-auto p-6">
           <Outlet />
         </main>
+        <TaskLogPanel />
       </div>
     </div>
   );

@@ -125,6 +125,7 @@ export function CloneDialog({
               kind={kind}
               resourceId={resourceId}
               onComplete={() => { handleClose(); }}
+              description={`Clone ${sourceName}`}
             />
           </div>
         ) : (

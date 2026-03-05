@@ -18,6 +18,7 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
+	DeleteCompletedTasks(ctx context.Context, userID uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
@@ -48,6 +49,7 @@ type Querier interface {
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
 	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
 	ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error)
@@ -62,6 +64,8 @@ type Querier interface {
 	ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsVerifyJob, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
+	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
+	ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHistoryByClusterParams) ([]TaskHistory, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
@@ -74,6 +78,7 @@ type Querier interface {
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
 	UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error
+	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)

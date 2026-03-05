@@ -389,3 +389,61 @@ type ClusterStatusEntry struct {
 	Quorate int    `json:"quorate,omitempty"`
 	Nodes   int    `json:"nodes,omitempty"`
 }
+
+// Snapshot represents a snapshot from GET /nodes/{node}/qemu|lxc/{vmid}/snapshot.
+type Snapshot struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	SnapTime    int64  `json:"snaptime,omitempty"`
+	VMState     int    `json:"vmstate,omitempty"`
+	Parent      string `json:"parent,omitempty"`
+}
+
+// SnapshotParams holds parameters for creating a snapshot.
+type SnapshotParams struct {
+	SnapName    string `json:"snapname"`
+	Description string `json:"description,omitempty"`
+	VMState     bool   `json:"vmstate,omitempty"`
+}
+
+// CreateVMParams holds parameters for creating a QEMU VM.
+type CreateVMParams struct {
+	VMID    int    `json:"vmid"`
+	Name    string `json:"name,omitempty"`
+	Memory  int    `json:"memory,omitempty"`
+	Cores   int    `json:"cores,omitempty"`
+	Sockets int    `json:"sockets,omitempty"`
+	SCSI0   string `json:"scsi0,omitempty"`
+	IDE2    string `json:"ide2,omitempty"`
+	Net0    string `json:"net0,omitempty"`
+	OSType  string `json:"ostype,omitempty"`
+	Boot    string `json:"boot,omitempty"`
+	CDRom   string `json:"cdrom,omitempty"`
+	Start   bool   `json:"start,omitempty"`
+	// Cloud-init fields
+	CIUser     string `json:"ciuser,omitempty"`
+	CIPassword string `json:"cipassword,omitempty"`
+	IPConfig0  string `json:"ipconfig0,omitempty"`
+	SSHKeys    string `json:"sshkeys,omitempty"`
+	CIType     string `json:"citype,omitempty"`
+}
+
+// CreateCTParams holds parameters for creating an LXC container.
+type CreateCTParams struct {
+	VMID         int    `json:"vmid"`
+	Hostname     string `json:"hostname,omitempty"`
+	OSTemplate   string `json:"ostemplate"`
+	Storage      string `json:"storage,omitempty"`
+	RootFS       string `json:"rootfs,omitempty"`
+	Memory       int    `json:"memory,omitempty"`
+	Swap         int    `json:"swap,omitempty"`
+	Cores        int    `json:"cores,omitempty"`
+	Net0         string `json:"net0,omitempty"`
+	Password     string `json:"password,omitempty"`
+	SSHKeys      string `json:"ssh-public-keys,omitempty"`
+	Unprivileged bool   `json:"unprivileged,omitempty"`
+	Start        bool   `json:"start,omitempty"`
+}
+
+// VMConfig represents the full configuration of a QEMU VM from GET /nodes/{node}/qemu/{vmid}/config.
+type VMConfig map[string]interface{}

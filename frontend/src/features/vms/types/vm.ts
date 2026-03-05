@@ -41,3 +41,52 @@ export interface TaskStatusResponse {
 }
 
 export type ResourceKind = "vm" | "ct";
+
+export interface Snapshot {
+  name: string;
+  description?: string;
+  snap_time?: number;
+  vmstate?: number;
+  parent?: string;
+}
+
+export interface SnapshotRequest {
+  snap_name: string;
+  description?: string;
+  vmstate?: boolean;
+}
+
+export interface CreateVMRequest {
+  vmid: number;
+  name: string;
+  node: string;
+  memory: number;
+  cores: number;
+  sockets: number;
+  scsi0: string;
+  ide2: string;
+  net0: string;
+  ostype: string;
+  boot: string;
+  cdrom: string;
+  start: boolean;
+}
+
+export interface CreateCTRequest {
+  vmid: number;
+  hostname: string;
+  node: string;
+  ostemplate: string;
+  storage: string;
+  rootfs: string;
+  memory: number;
+  swap: number;
+  cores: number;
+  net0: string;
+  password: string;
+  ssh_keys: string;
+  unprivileged: boolean;
+  start: boolean;
+}
+
+export type VMConfig = Record<string, unknown>;

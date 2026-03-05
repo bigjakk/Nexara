@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { VMResponse } from "@/types/api";
 import type {
@@ -8,6 +8,11 @@ import type {
   MigrateRequest,
   TaskStatusResponse,
   ResourceKind,
+  Snapshot,
+  SnapshotRequest,
+  CreateVMRequest,
+  CreateCTRequest,
+  VMConfig,
 } from "../types/vm";
 
 // --- All VMIDs in a cluster (for next-available-ID calculation) ---
@@ -179,5 +184,357 @@ export function useTaskStatus(clusterId: string, upid: string | null) {
       if (data && data.status === "stopped") return false;
       return 2000;
     },
+  });
+}
+
+// --- Snapshots ---
+
+export function useSnapshots(
+  clusterId: string,
+  resourceId: string,
+  kind: ResourceKind,
+) {
+  const base =
+    kind === "ct"
+      ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots`
+      : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots`;
+
+  return useQuery({
+    queryKey: [
+      "clusters",
+      clusterId,
+      kind === "ct" ? "containers" : "vms",
+      resourceId,
+      "snapshots",
+    ],
+    queryFn: () => apiClient.get<Snapshot[]>(base),
+    enabled: clusterId.length > 0 && resourceId.length > 0,
+  });
+}
+
+interface CreateSnapshotParams {
+  clusterId: string;
+  resourceId: string;
+  kind: ResourceKind;
+  body: SnapshotRequest;
+}
+
+export function useCreateSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, resourceId, kind, body }: CreateSnapshotParams) => {
+      const base =
+        kind === "ct"
+          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots`
+          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots`;
+      return apiClient.post<VMActionResponse>(base, body);
+    },
+    onSuccess: (_data, variables) => {
+      const coll = variables.kind === "ct" ? "containers" : "vms";
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          coll,
+          variables.resourceId,
+          "snapshots",
+        ],
+      });
+    },
+  });
+}
+
+interface DeleteSnapshotParams {
+  clusterId: string;
+  resourceId: string;
+  kind: ResourceKind;
+  snapName: string;
+}
+
+export function useDeleteSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      clusterId,
+      resourceId,
+      kind,
+      snapName,
+    }: DeleteSnapshotParams) => {
+      const base =
+        kind === "ct"
+          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots/${encodeURIComponent(snapName)}`
+          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots/${encodeURIComponent(snapName)}`;
+      return apiClient.delete<VMActionResponse>(base);
+    },
+    onSuccess: (_data, variables) => {
+      const coll = variables.kind === "ct" ? "containers" : "vms";
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          coll,
+          variables.resourceId,
+          "snapshots",
+        ],
+      });
+    },
+  });
+}
+
+interface RollbackSnapshotParams {
+  clusterId: string;
+  resourceId: string;
+  kind: ResourceKind;
+  snapName: string;
+}
+
+export function useRollbackSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      clusterId,
+      resourceId,
+      kind,
+      snapName,
+    }: RollbackSnapshotParams) => {
+      const base =
+        kind === "ct"
+          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots/${encodeURIComponent(snapName)}/rollback`
+          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshots/${encodeURIComponent(snapName)}/rollback`;
+      return apiClient.post<VMActionResponse>(base, {});
+    },
+    onSuccess: (_data, variables) => {
+      const coll = variables.kind === "ct" ? "containers" : "vms";
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          coll,
+          variables.resourceId,
+          "snapshots",
+        ],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vms"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "containers"],
+      });
+    },
+  });
+}
+
+// --- Create VM ---
+
+interface CreateVMParams {
+  clusterId: string;
+  body: CreateVMRequest;
+}
+
+export function useCreateVM() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, body }: CreateVMParams) =>
+      apiClient.post<VMActionResponse>(
+        `/api/v1/clusters/${clusterId}/vms`,
+        body,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vms"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vmids"],
+      });
+    },
+  });
+}
+
+// --- Create Container ---
+
+interface CreateContainerParams {
+  clusterId: string;
+  body: CreateCTRequest;
+}
+
+export function useCreateContainer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, body }: CreateContainerParams) =>
+      apiClient.post<VMActionResponse>(
+        `/api/v1/clusters/${clusterId}/containers`,
+        body,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "containers"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vmids"],
+      });
+    },
+  });
+}
+
+// --- VM Config (Cloud-Init) ---
+
+export function useVMConfig(clusterId: string, vmId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "vms", vmId, "config"],
+    queryFn: () =>
+      apiClient.get<VMConfig>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/config`,
+      ),
+    enabled: clusterId.length > 0 && vmId.length > 0,
+  });
+}
+
+interface SetVMConfigParams {
+  clusterId: string;
+  vmId: string;
+  fields: Record<string, string>;
+}
+
+export function useSetVMConfig() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, vmId, fields }: SetVMConfigParams) =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/config`,
+        { fields },
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "vms",
+          variables.vmId,
+          "config",
+        ],
+      });
+    },
+  });
+}
+
+// --- Task History ---
+
+export interface TaskHistoryEntry {
+  id: string;
+  cluster_id: string;
+  upid: string;
+  description: string;
+  status: string;
+  exit_status: string;
+  node: string;
+  task_type: string;
+  progress: number | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export function useTaskHistory(): UseQueryResult<TaskHistoryEntry[]> {
+  return useQuery({
+    queryKey: ["task-history"],
+    queryFn: () =>
+      apiClient.get<TaskHistoryEntry[]>("/api/v1/tasks"),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && data.some((t) => t.status === "running")) return 3000;
+      return false;
+    },
+  });
+}
+
+interface AddTaskHistoryParams {
+  clusterId: string;
+  upid: string;
+  description: string;
+  node?: string;
+  taskType?: string;
+}
+
+export function useAddTaskHistory() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, upid, description, node, taskType }: AddTaskHistoryParams) =>
+      apiClient.post<TaskHistoryEntry>("/api/v1/tasks", {
+        cluster_id: clusterId,
+        upid,
+        description,
+        status: "running",
+        node: node ?? "",
+        task_type: taskType ?? "",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+    },
+  });
+}
+
+interface UpdateTaskHistoryParams {
+  upid: string;
+  status: string;
+  exitStatus?: string | undefined;
+  progress?: number | null | undefined;
+  finishedAt?: string | undefined;
+}
+
+export function useUpdateTaskHistory() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ upid, status, exitStatus, progress, finishedAt }: UpdateTaskHistoryParams) =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/tasks/${encodeURIComponent(upid)}`,
+        {
+          status,
+          exit_status: exitStatus ?? "",
+          progress: progress ?? null,
+          finished_at: finishedAt ?? null,
+        },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+    },
+  });
+}
+
+export function useClearTaskHistory() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => apiClient.delete<{ status: string }>("/api/v1/tasks"),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+    },
+  });
+}
+
+export interface TaskLogLine {
+  n: number;
+  t: string;
+}
+
+export function useTaskLog(
+  clusterId: string | null,
+  upid: string | null,
+  enabled: boolean,
+): UseQueryResult<TaskLogLine[]> {
+  return useQuery({
+    queryKey: ["task-log", clusterId, upid],
+    queryFn: () =>
+      apiClient.get<TaskLogLine[]>(
+        `/api/v1/clusters/${clusterId}/tasks/${encodeURIComponent(upid!)}/log`,
+      ),
+    enabled: enabled && !!clusterId && !!upid,
+    staleTime: 60_000,
   });
 }

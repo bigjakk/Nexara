@@ -286,6 +286,23 @@ type StoragePool struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+type TaskHistory struct {
+	ID          uuid.UUID          `json:"id"`
+	ClusterID   uuid.UUID          `json:"cluster_id"`
+	UserID      uuid.UUID          `json:"user_id"`
+	Upid        string             `json:"upid"`
+	Description string             `json:"description"`
+	Status      string             `json:"status"`
+	ExitStatus  string             `json:"exit_status"`
+	Node        string             `json:"node"`
+	TaskType    string             `json:"task_type"`
+	Progress    pgtype.Float8      `json:"progress"`
+	StartedAt   time.Time          `json:"started_at"`
+	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+}
+
 type User struct {
 	ID           uuid.UUID   `json:"id"`
 	Email        string      `json:"email"`
