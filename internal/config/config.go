@@ -18,7 +18,7 @@ type Config struct {
 	RefreshTokenTTL        time.Duration `envconfig:"REFRESH_TOKEN_TTL" default:"168h"`
 	RateLimitMax           int           `envconfig:"RATE_LIMIT_MAX" default:"100"`
 	RateLimitExpiration    time.Duration `envconfig:"RATE_LIMIT_EXPIRATION" default:"1m"`
-	CORSAllowOrigins       string        `envconfig:"CORS_ALLOW_ORIGINS" default:"*"`
+	CORSAllowOrigins       string        `envconfig:"CORS_ALLOW_ORIGINS" default:"http://localhost:3001"`
 	MetricsCollectInterval time.Duration `envconfig:"METRICS_COLLECT_INTERVAL" default:"30s"`
 	WSPort                 int           `envconfig:"WS_PORT" default:"8081"`
 	WSPingInterval         time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`

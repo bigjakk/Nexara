@@ -1,10 +1,11 @@
-import { useState } from "react";
-import { HardDrive } from "lucide-react";
+import { useState, useMemo } from "react";
+import { HardDrive, ChevronDown, ChevronRight, Server, Share2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import {
   useClusterStorage,
   useStorageContent,
@@ -12,8 +13,74 @@ import {
 import { StorageCapacityBar } from "../components/StorageCapacityBar";
 import { StorageContentTable } from "../components/StorageContentTable";
 import { UploadDialog } from "../components/UploadDialog";
-import type { StorageResponse } from "@/types/api";
+import type { StorageResponse, NodeResponse } from "@/types/api";
 import type { StorageContentItem } from "../types/storage";
+
+interface StorageGroup {
+  label: string;
+  icon: "shared" | "node";
+  pools: StorageResponse[];
+}
+
+function groupStorage(
+  pools: StorageResponse[],
+  nodes: NodeResponse[],
+): StorageGroup[] {
+  const nodeMap = new Map<string, string>();
+  for (const node of nodes) {
+    nodeMap.set(node.id, node.name);
+  }
+
+  // Deduplicate shared storage — keep first occurrence per storage name
+  const sharedSeen = new Map<string, StorageResponse>();
+  const localByNode = new Map<string, StorageResponse[]>();
+
+  for (const pool of pools) {
+    if (pool.shared) {
+      if (!sharedSeen.has(pool.storage)) {
+        sharedSeen.set(pool.storage, pool);
+      }
+    } else {
+      const nodeId = pool.node_id;
+      const existing = localByNode.get(nodeId);
+      if (existing) {
+        existing.push(pool);
+      } else {
+        localByNode.set(nodeId, [pool]);
+      }
+    }
+  }
+
+  const groups: StorageGroup[] = [];
+
+  if (sharedSeen.size > 0) {
+    groups.push({
+      label: "Shared Storage",
+      icon: "shared",
+      pools: Array.from(sharedSeen.values()),
+    });
+  }
+
+  // Sort nodes by name
+  const sortedNodeIds = Array.from(localByNode.keys()).sort((a, b) => {
+    const nameA = nodeMap.get(a) ?? a;
+    const nameB = nodeMap.get(b) ?? b;
+    return nameA.localeCompare(nameB);
+  });
+
+  for (const nodeId of sortedNodeIds) {
+    const nodePools = localByNode.get(nodeId);
+    if (nodePools && nodePools.length > 0) {
+      groups.push({
+        label: nodeMap.get(nodeId) ?? nodeId,
+        icon: "node",
+        pools: nodePools,
+      });
+    }
+  }
+
+  return groups;
+}
 
 export function StoragePage() {
   const clustersQuery = useClusters();
@@ -23,12 +90,15 @@ export function StoragePage() {
     null,
   );
 
-  // Auto-select first cluster once loaded.
   const activeClusterId =
     selectedClusterId || (clusters.length > 0 ? clusters[0]?.id ?? "" : "");
 
   const storageQuery = useClusterStorage(activeClusterId);
+  const nodesQuery = useClusterNodes(activeClusterId);
   const pools = storageQuery.data ?? [];
+  const nodes = nodesQuery.data ?? [];
+
+  const groups = useMemo(() => groupStorage(pools, nodes), [pools, nodes]);
 
   return (
     <div className="space-y-6">
@@ -69,12 +139,72 @@ export function StoragePage() {
       )}
 
       {!selectedPool && !storageQuery.isLoading && (
+        <>
+          {groups.map((group) => (
+            <StorageGroupSection
+              key={group.label}
+              group={group}
+              onSelectPool={setSelectedPool}
+            />
+          ))}
+          {pools.length === 0 && (
+            <p className="py-8 text-center text-muted-foreground">
+              No storage pools found.
+            </p>
+          )}
+        </>
+      )}
+
+      {selectedPool && (
+        <StoragePoolDetail
+          pool={selectedPool}
+          clusterId={activeClusterId}
+          onBack={() => { setSelectedPool(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- Collapsible Storage Group ---
+
+interface StorageGroupSectionProps {
+  group: StorageGroup;
+  onSelectPool: (pool: StorageResponse) => void;
+}
+
+function StorageGroupSection({ group, onSelectPool }: StorageGroupSectionProps) {
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="space-y-3">
+      <button
+        onClick={() => { setExpanded(!expanded); }}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        )}
+        {group.icon === "shared" ? (
+          <Share2 className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <Server className="h-4 w-4 text-muted-foreground" />
+        )}
+        <span className="text-sm font-medium">{group.label}</span>
+        <Badge variant="secondary" className="text-xs">
+          {group.pools.length}
+        </Badge>
+      </button>
+
+      {expanded && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {pools.map((pool) => (
+          {group.pools.map((pool) => (
             <Card
               key={pool.id}
               className="cursor-pointer transition-shadow hover:shadow-md"
-              onClick={() => { setSelectedPool(pool); }}
+              onClick={() => { onSelectPool(pool); }}
             >
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
@@ -97,28 +227,10 @@ export function StoragePage() {
                     </Badge>
                   ))}
                 </div>
-                {pool.shared && (
-                  <Badge variant="secondary" className="text-xs">
-                    Shared
-                  </Badge>
-                )}
               </CardContent>
             </Card>
           ))}
-          {pools.length === 0 && (
-            <p className="col-span-full py-8 text-center text-muted-foreground">
-              No storage pools found.
-            </p>
-          )}
         </div>
-      )}
-
-      {selectedPool && (
-        <StoragePoolDetail
-          pool={selectedPool}
-          clusterId={activeClusterId}
-          onBack={() => { setSelectedPool(null); }}
-        />
       )}
     </div>
   );

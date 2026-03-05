@@ -2,16 +2,8 @@ package proxmox
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
-	"net"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -29,357 +21,16 @@ type ClientConfig struct {
 
 // Client communicates with a single Proxmox VE host.
 type Client struct {
-	httpClient *http.Client
-	baseURL    string
-	authHeader string
-	tlsCfg     *tls.Config
+	*apiClient
 }
 
 // NewClient creates a Client from the given config.
 func NewClient(cfg ClientConfig) (*Client, error) {
-	if cfg.BaseURL == "" {
-		return nil, fmt.Errorf("proxmox: BaseURL is required")
-	}
-	if cfg.TokenID == "" {
-		return nil, fmt.Errorf("proxmox: TokenID is required")
-	}
-	if cfg.TokenSecret == "" {
-		return nil, fmt.Errorf("proxmox: TokenSecret is required")
-	}
-
-	if cfg.Timeout == 0 {
-		cfg.Timeout = 30 * time.Second
-	}
-
-	baseURL := strings.TrimRight(cfg.BaseURL, "/")
-
-	tlsCfg := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-	}
-
-	if cfg.TLSFingerprint != "" {
-		expected := strings.ToLower(strings.ReplaceAll(cfg.TLSFingerprint, ":", ""))
-
-		tlsCfg.InsecureSkipVerify = true //nolint:gosec // Custom VerifyPeerCertificate provides fingerprint verification
-		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) == 0 {
-				return fmt.Errorf("proxmox: server presented no certificates")
-			}
-			actual := formatFingerprint(rawCerts[0])
-			if actual != expected {
-				return fmt.Errorf("proxmox: TLS fingerprint mismatch: got %s, want %s", actual, expected)
-			}
-			return nil
-		}
-	}
-
-	transport := &http.Transport{
-		TLSClientConfig: tlsCfg,
-		DialContext: (&net.Dialer{
-			Timeout:   cfg.Timeout,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-	}
-
-	return &Client{
-		httpClient: &http.Client{
-			Transport: transport,
-			Timeout:   cfg.Timeout,
-		},
-		baseURL:    baseURL,
-		authHeader: fmt.Sprintf("PVEAPIToken=%s=%s", cfg.TokenID, cfg.TokenSecret),
-		tlsCfg:     tlsCfg,
-	}, nil
-}
-
-// formatFingerprint returns the lowercase hex SHA-256 digest of a DER-encoded certificate.
-func formatFingerprint(der []byte) string {
-	sum := sha256.Sum256(der)
-	return hex.EncodeToString(sum[:])
-}
-
-// do performs an authenticated GET request and unmarshals the response data into dst.
-func (c *Client) do(ctx context.Context, path string, dst interface{}) error {
-	url := c.baseURL + "/api2/json" + path
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	ac, err := newAPIClient(cfg, "PVEAPIToken")
 	if err != nil {
-		return fmt.Errorf("build request: %w", err)
+		return nil, err
 	}
-	req.Header.Set("Authorization", c.authHeader)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		return ErrNotFound
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return ErrForbidden
-	case resp.StatusCode >= 400:
-		return &APIError{
-			StatusCode: resp.StatusCode,
-			Message:    strings.TrimSpace(string(body)),
-		}
-	}
-
-	var envelope response
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-	}
-
-	if dst != nil && len(envelope.Data) > 0 {
-		if err := json.Unmarshal(envelope.Data, dst); err != nil {
-			return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-		}
-	}
-
-	return nil
-}
-
-// doPost performs an authenticated POST request with form-encoded body and unmarshals the response into dst.
-func (c *Client) doPost(ctx context.Context, path string, params url.Values, dst interface{}) error {
-	apiURL := c.baseURL + "/api2/json" + path
-
-	var body io.Reader
-	if params != nil {
-		body = strings.NewReader(params.Encode())
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, body)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", c.authHeader)
-	if params != nil {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		return ErrNotFound
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return ErrForbidden
-	case resp.StatusCode >= 400:
-		return &APIError{
-			StatusCode: resp.StatusCode,
-			Message:    strings.TrimSpace(string(respBody)),
-		}
-	}
-
-	var envelope response
-	if err := json.Unmarshal(respBody, &envelope); err != nil {
-		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-	}
-
-	if dst != nil && len(envelope.Data) > 0 {
-		if err := json.Unmarshal(envelope.Data, dst); err != nil {
-			return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-		}
-	}
-
-	return nil
-}
-
-// doDelete performs an authenticated DELETE request and unmarshals the response into dst.
-func (c *Client) doDelete(ctx context.Context, path string, dst interface{}) error {
-	apiURL := c.baseURL + "/api2/json" + path
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, apiURL, nil)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", c.authHeader)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		return ErrNotFound
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return ErrForbidden
-	case resp.StatusCode >= 400:
-		return &APIError{
-			StatusCode: resp.StatusCode,
-			Message:    strings.TrimSpace(string(body)),
-		}
-	}
-
-	var envelope response
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-	}
-
-	if dst != nil && len(envelope.Data) > 0 {
-		if err := json.Unmarshal(envelope.Data, dst); err != nil {
-			return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-		}
-	}
-
-	return nil
-}
-
-// doPut performs an authenticated PUT request with form-encoded body and unmarshals the response into dst.
-func (c *Client) doPut(ctx context.Context, path string, params url.Values, dst interface{}) error {
-	apiURL := c.baseURL + "/api2/json" + path
-
-	var body io.Reader
-	if params != nil {
-		body = strings.NewReader(params.Encode())
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, apiURL, body)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", c.authHeader)
-	if params != nil {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		return ErrNotFound
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return ErrForbidden
-	case resp.StatusCode >= 400:
-		return &APIError{
-			StatusCode: resp.StatusCode,
-			Message:    strings.TrimSpace(string(respBody)),
-		}
-	}
-
-	var envelope response
-	if err := json.Unmarshal(respBody, &envelope); err != nil {
-		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-	}
-
-	if dst != nil && len(envelope.Data) > 0 {
-		if err := json.Unmarshal(envelope.Data, dst); err != nil {
-			return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-		}
-	}
-
-	return nil
-}
-
-// doMultipart performs an authenticated POST request with multipart form data and unmarshals the response into dst.
-func (c *Client) doMultipart(ctx context.Context, path string, fields map[string]string, fileField, fileName string, fileReader io.Reader, dst interface{}) error {
-	apiURL := c.baseURL + "/api2/json" + path
-
-	pr, pw := io.Pipe()
-	writer := multipart.NewWriter(pw)
-
-	// Write the multipart body in a goroutine to avoid buffering the whole file.
-	errCh := make(chan error, 1)
-	go func() {
-		defer pw.Close()
-		for k, v := range fields {
-			if err := writer.WriteField(k, v); err != nil {
-				errCh <- fmt.Errorf("write field %s: %w", k, err)
-				return
-			}
-		}
-		part, err := writer.CreateFormFile(fileField, fileName)
-		if err != nil {
-			errCh <- fmt.Errorf("create form file: %w", err)
-			return
-		}
-		if _, err := io.Copy(part, fileReader); err != nil {
-			errCh <- fmt.Errorf("copy file data: %w", err)
-			return
-		}
-		errCh <- writer.Close()
-	}()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, pr)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Authorization", c.authHeader)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
-	}
-	defer resp.Body.Close()
-
-	// Check for multipart writer errors.
-	if writeErr := <-errCh; writeErr != nil {
-		return fmt.Errorf("multipart write: %w", writeErr)
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
-
-	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		return ErrNotFound
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return ErrForbidden
-	case resp.StatusCode >= 400:
-		return &APIError{
-			StatusCode: resp.StatusCode,
-			Message:    strings.TrimSpace(string(respBody)),
-		}
-	}
-
-	var envelope response
-	if err := json.Unmarshal(respBody, &envelope); err != nil {
-		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-	}
-
-	if dst != nil && len(envelope.Data) > 0 {
-		if err := json.Unmarshal(envelope.Data, dst); err != nil {
-			return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
-		}
-	}
-
-	return nil
+	return &Client{apiClient: ac}, nil
 }
 
 // validateVMID rejects non-positive VM IDs.
@@ -710,7 +361,6 @@ func (c *Client) GetContainers(ctx context.Context, node string) ([]Container, e
 }
 
 // GetClusterResources returns resources across the cluster, optionally filtered by type.
-// Pass an empty string to get all resource types.
 func (c *Client) GetClusterResources(ctx context.Context, resourceType string) ([]ClusterResource, error) {
 	path := "/cluster/resources"
 	if resourceType != "" {
@@ -775,7 +425,7 @@ func (c *Client) UploadToStorage(ctx context.Context, node, storage, contentType
 	return upid, nil
 }
 
-// DeleteStorageContent deletes a volume from a storage pool and returns the task UPID (if async) or nil.
+// DeleteStorageContent deletes a volume from a storage pool and returns the task UPID.
 func (c *Client) DeleteStorageContent(ctx context.Context, node, storage, volume string) (string, error) {
 	if err := validateNodeName(node); err != nil {
 		return "", err
@@ -788,7 +438,127 @@ func (c *Client) DeleteStorageContent(ctx context.Context, node, storage, volume
 	return upid, nil
 }
 
-// ResizeDisk resizes a VM disk and returns the task UPID.
+// --- Ceph API Methods ---
+
+// GetCephStatus returns the cluster-wide Ceph status from any node.
+func (c *Client) GetCephStatus(ctx context.Context, node string) (*CephStatus, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var status CephStatus
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/ceph/status", &status); err != nil {
+		return nil, fmt.Errorf("get ceph status on %s: %w", node, err)
+	}
+	return &status, nil
+}
+
+// GetCephOSDs returns the OSD tree from a node.
+func (c *Client) GetCephOSDs(ctx context.Context, node string) (*CephOSDResponse, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var resp CephOSDResponse
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/ceph/osd", &resp); err != nil {
+		return nil, fmt.Errorf("get ceph osds on %s: %w", node, err)
+	}
+	return &resp, nil
+}
+
+// GetCephPools returns all Ceph pools visible from a node.
+func (c *Client) GetCephPools(ctx context.Context, node string) ([]CephPool, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var pools []CephPool
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/ceph/pools", &pools); err != nil {
+		return nil, fmt.Errorf("get ceph pools on %s: %w", node, err)
+	}
+	return pools, nil
+}
+
+// GetCephMonitors returns all Ceph monitors from a node.
+func (c *Client) GetCephMonitors(ctx context.Context, node string) ([]CephMon, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var mons []CephMon
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/ceph/mon", &mons); err != nil {
+		return nil, fmt.Errorf("get ceph monitors on %s: %w", node, err)
+	}
+	return mons, nil
+}
+
+// GetCephFS returns CephFS filesystems from a node.
+func (c *Client) GetCephFS(ctx context.Context, node string) ([]CephFS, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var fs []CephFS
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/ceph/fs", &fs); err != nil {
+		return nil, fmt.Errorf("get ceph fs on %s: %w", node, err)
+	}
+	return fs, nil
+}
+
+// GetCephCrushRules returns CRUSH rules from a node.
+func (c *Client) GetCephCrushRules(ctx context.Context, node string) ([]CephCrushRule, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var rules []CephCrushRule
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/ceph/rules", &rules); err != nil {
+		return nil, fmt.Errorf("get ceph crush rules on %s: %w", node, err)
+	}
+	return rules, nil
+}
+
+// CreateCephPool creates a new Ceph pool on a node.
+func (c *Client) CreateCephPool(ctx context.Context, node string, params CephPoolCreateParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if params.Name == "" {
+		return fmt.Errorf("pool name is required")
+	}
+	form := url.Values{}
+	form.Set("name", params.Name)
+	form.Set("size", strconv.Itoa(params.Size))
+	form.Set("pg_num", strconv.Itoa(params.PGNum))
+	if params.MinSize > 0 {
+		form.Set("min_size", strconv.Itoa(params.MinSize))
+	}
+	if params.Application != "" {
+		form.Set("application", params.Application)
+	}
+	if params.CrushRule != "" {
+		form.Set("crush_rule_name", params.CrushRule)
+	}
+	if params.PGAutoScale != "" {
+		form.Set("pg_autoscale_mode", params.PGAutoScale)
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/ceph/pools"
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("create ceph pool %s on %s: %w", params.Name, node, err)
+	}
+	return nil
+}
+
+// DeleteCephPool deletes a Ceph pool on a node.
+func (c *Client) DeleteCephPool(ctx context.Context, node, poolName string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if poolName == "" {
+		return fmt.Errorf("pool name is required")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/ceph/pools/" + url.PathEscape(poolName)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete ceph pool %s on %s: %w", poolName, node, err)
+	}
+	return nil
+}
+
+// ResizeDisk resizes a VM disk.
 func (c *Client) ResizeDisk(ctx context.Context, node string, vmid int, params DiskResizeParams) error {
 	if err := validateNodeName(node); err != nil {
 		return err
@@ -824,6 +594,69 @@ func (c *Client) MoveDisk(ctx context.Context, node string, vmid int, params Dis
 	var upid string
 	if err := c.doPost(ctx, path, form, &upid); err != nil {
 		return "", fmt.Errorf("move disk on VM %d: %w", vmid, err)
+	}
+	return upid, nil
+}
+
+// --- PBS Restore Methods (calls PVE API to restore from PBS) ---
+
+// RestoreVM restores a QEMU VM from a PBS backup and returns the task UPID.
+func (c *Client) RestoreVM(ctx context.Context, node string, params RestoreParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if params.VMID <= 0 {
+		return "", fmt.Errorf("restore requires a positive VMID")
+	}
+	if params.Archive == "" {
+		return "", fmt.Errorf("restore requires an archive path")
+	}
+
+	form := url.Values{}
+	form.Set("vmid", strconv.Itoa(params.VMID))
+	form.Set("archive", params.Archive)
+	if params.Storage != "" {
+		form.Set("storage", params.Storage)
+	}
+	if params.Unique {
+		form.Set("unique", "1")
+	}
+
+	path := "/nodes/" + url.PathEscape(node) + "/qemu"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("restore VM %d on %s: %w", params.VMID, node, err)
+	}
+	return upid, nil
+}
+
+// RestoreCT restores an LXC container from a PBS backup and returns the task UPID.
+func (c *Client) RestoreCT(ctx context.Context, node string, params RestoreParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if params.VMID <= 0 {
+		return "", fmt.Errorf("restore requires a positive VMID")
+	}
+	if params.Archive == "" {
+		return "", fmt.Errorf("restore requires an archive path")
+	}
+
+	form := url.Values{}
+	form.Set("vmid", strconv.Itoa(params.VMID))
+	form.Set("ostemplate", params.Archive)
+	form.Set("restore", "1")
+	if params.Storage != "" {
+		form.Set("storage", params.Storage)
+	}
+	if params.Unique {
+		form.Set("unique", "1")
+	}
+
+	path := "/nodes/" + url.PathEscape(node) + "/lxc"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("restore CT %d on %s: %w", params.VMID, node, err)
 	}
 	return upid, nil
 }

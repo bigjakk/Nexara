@@ -20,14 +20,25 @@ type Querier interface {
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
+	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
+	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
+	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
 	DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	GetCephClusterMetrics1h(ctx context.Context, arg GetCephClusterMetrics1hParams) ([]CephClusterMetrics1h, error)
+	GetCephClusterMetrics5m(ctx context.Context, arg GetCephClusterMetrics5mParams) ([]CephClusterMetrics5m, error)
+	GetCephClusterMetricsHistory(ctx context.Context, arg GetCephClusterMetricsHistoryParams) ([]CephClusterMetric, error)
 	GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 	GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error)
 	GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
+	GetLatestCephClusterMetrics(ctx context.Context, clusterID uuid.UUID) (CephClusterMetric, error)
+	GetLatestCephOSDMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephOsdMetric, error)
+	GetLatestCephPoolMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephPoolMetric, error)
+	GetLatestPBSDatastoreMetrics(ctx context.Context, pbsServerID uuid.UUID) ([]PbsDatastoreMetric, error)
 	GetNode(ctx context.Context, id uuid.UUID) (Node, error)
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
+	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]PbsDatastoreMetric, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
@@ -38,12 +49,17 @@ type Querier interface {
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
+	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
 	ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
 	ListPBSServersByCluster(ctx context.Context, clusterID pgtype.UUID) ([]PbsServer, error)
+	ListPBSSnapshotsByDatastore(ctx context.Context, arg ListPBSSnapshotsByDatastoreParams) ([]PbsSnapshot, error)
+	ListPBSSnapshotsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSnapshot, error)
+	ListPBSSyncJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSyncJob, error)
+	ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsVerifyJob, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
@@ -60,6 +76,9 @@ type Querier interface {
 	UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
+	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)
+	UpsertPBSSyncJob(ctx context.Context, arg UpsertPBSSyncJobParams) (PbsSyncJob, error)
+	UpsertPBSVerifyJob(ctx context.Context, arg UpsertPBSVerifyJobParams) (PbsVerifyJob, error)
 	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (StoragePool, error)
 	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
 }

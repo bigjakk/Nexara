@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -22,6 +23,14 @@ type SyncQueries interface {
 	UpsertStoragePool(ctx context.Context, arg db.UpsertStoragePoolParams) (db.StoragePool, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
 	DeleteStaleVMs(ctx context.Context, arg db.DeleteStaleVMsParams) error
+	// PBS queries
+	ListActivePBSServers(ctx context.Context) ([]db.PbsServer, error)
+	UpsertPBSSnapshot(ctx context.Context, arg db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error)
+	UpsertPBSSyncJob(ctx context.Context, arg db.UpsertPBSSyncJobParams) (db.PbsSyncJob, error)
+	UpsertPBSVerifyJob(ctx context.Context, arg db.UpsertPBSVerifyJobParams) (db.PbsVerifyJob, error)
+	DeleteStalePBSSnapshots(ctx context.Context, arg db.DeleteStalePBSSnapshotsParams) error
+	DeleteStalePBSSyncJobs(ctx context.Context, arg db.DeleteStalePBSSyncJobsParams) error
+	DeleteStalePBSVerifyJobs(ctx context.Context, arg db.DeleteStalePBSVerifyJobsParams) error
 }
 
 // ProxmoxClient defines the Proxmox API methods needed by the Syncer.
@@ -31,11 +40,26 @@ type ProxmoxClient interface {
 	GetVMs(ctx context.Context, node string) ([]proxmox.VirtualMachine, error)
 	GetContainers(ctx context.Context, node string) ([]proxmox.Container, error)
 	GetStoragePools(ctx context.Context, node string) ([]proxmox.StoragePool, error)
+	GetCephStatus(ctx context.Context, node string) (*proxmox.CephStatus, error)
+	GetCephOSDs(ctx context.Context, node string) (*proxmox.CephOSDResponse, error)
+	GetCephPools(ctx context.Context, node string) ([]proxmox.CephPool, error)
 }
 
 // ClientFactory creates a ProxmoxClient from cluster credentials.
 // Extracted for testability.
 type ClientFactory func(apiURL, tokenID, tokenSecret, tlsFingerprint string) (ProxmoxClient, error)
+
+// PBSProxmoxClient defines the PBS API methods needed by the Syncer.
+type PBSProxmoxClient interface {
+	GetDatastores(ctx context.Context) ([]proxmox.PBSDatastore, error)
+	GetDatastoreStatus(ctx context.Context) ([]proxmox.PBSDatastoreStatus, error)
+	GetSnapshots(ctx context.Context, store string) ([]proxmox.PBSSnapshot, error)
+	GetSyncJobs(ctx context.Context) ([]proxmox.PBSSyncJob, error)
+	GetVerifyJobs(ctx context.Context) ([]proxmox.PBSVerifyJob, error)
+}
+
+// PBSClientFactory creates a PBSProxmoxClient from server credentials.
+type PBSClientFactory func(apiURL, tokenID, tokenSecret, tlsFingerprint string) (PBSProxmoxClient, error)
 
 // DefaultClientFactory creates a real proxmox.Client.
 func DefaultClientFactory(apiURL, tokenID, tokenSecret, tlsFingerprint string) (ProxmoxClient, error) {
@@ -48,22 +72,35 @@ func DefaultClientFactory(apiURL, tokenID, tokenSecret, tlsFingerprint string) (
 	})
 }
 
+// DefaultPBSClientFactory creates a real proxmox.PBSClient.
+func DefaultPBSClientFactory(apiURL, tokenID, tokenSecret, tlsFingerprint string) (PBSProxmoxClient, error) {
+	return proxmox.NewPBSClient(proxmox.ClientConfig{
+		BaseURL:        apiURL,
+		TokenID:        tokenID,
+		TokenSecret:    tokenSecret,
+		TLSFingerprint: tlsFingerprint,
+		Timeout:        30 * time.Second,
+	})
+}
+
 // Syncer discovers and persists Proxmox inventory data.
 type Syncer struct {
-	queries       SyncQueries
-	encryptionKey string
-	clientFactory ClientFactory
-	healthMonitor *HealthMonitor
-	logger        *slog.Logger
+	queries          SyncQueries
+	encryptionKey    string
+	clientFactory    ClientFactory
+	pbsClientFactory PBSClientFactory
+	healthMonitor    *HealthMonitor
+	logger           *slog.Logger
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
 func NewSyncer(queries SyncQueries, encryptionKey string, logger *slog.Logger) *Syncer {
 	return &Syncer{
-		queries:       queries,
-		encryptionKey: encryptionKey,
-		clientFactory: DefaultClientFactory,
-		logger:        logger,
+		queries:          queries,
+		encryptionKey:    encryptionKey,
+		clientFactory:    DefaultClientFactory,
+		pbsClientFactory: DefaultPBSClientFactory,
+		logger:           logger,
 	}
 }
 
@@ -122,6 +159,16 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 
 		result.NodeMetrics = append(result.NodeMetrics, nr.NodeMetric)
 		result.VMMetrics = append(result.VMMetrics, nr.VMMetrics...)
+	}
+
+	// Sync Ceph data once per cluster using the first online node.
+	if len(nodes) > 0 {
+		cephResult := s.syncCeph(ctx, client, cluster.ID, nodes[0].Node)
+		if cephResult != nil {
+			result.CephCluster = cephResult.CephCluster
+			result.CephOSDs = cephResult.CephOSDs
+			result.CephPools = cephResult.CephPools
+		}
 	}
 
 	// Prune VMs/CTs that no longer exist on Proxmox. Any VM that wasn't
@@ -346,6 +393,279 @@ func (s *Syncer) syncStorage(ctx context.Context, client ProxmoxClient, clusterI
 	}
 
 	return nil
+}
+
+// cephCollectionResult holds Ceph metric data from a sync cycle.
+type cephCollectionResult struct {
+	CephCluster *cephClusterMetricSnapshot
+	CephOSDs    []cephOSDMetricSnapshot
+	CephPools   []cephPoolMetricSnapshot
+}
+
+// syncCeph syncs Ceph data once per cluster. Returns nil if Ceph is not available.
+func (s *Syncer) syncCeph(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID, nodeName string) *cephCollectionResult {
+	status, err := client.GetCephStatus(ctx, nodeName)
+	if err != nil {
+		// Ceph not installed or not configured — skip silently for 404.
+		if errors.Is(err, proxmox.ErrNotFound) {
+			return nil
+		}
+		s.logger.Warn("failed to get ceph status",
+			"cluster_id", clusterID,
+			"node", nodeName,
+			"error", err,
+		)
+		return nil
+	}
+
+	result := &cephCollectionResult{
+		CephCluster: &cephClusterMetricSnapshot{
+			ClusterID:    clusterID,
+			HealthStatus: status.Health.Status,
+			OSDsTotal:    status.OSDMap.NumOSDs,
+			OSDsUp:       status.OSDMap.NumUpOSDs,
+			OSDsIn:       status.OSDMap.NumInOSDs,
+			PGsTotal:     status.PGMap.NumPGs,
+			BytesUsed:    status.PGMap.BytesUsed,
+			BytesAvail:   status.PGMap.BytesAvail,
+			BytesTotal:   status.PGMap.BytesTotal,
+			ReadOpsSec:   status.PGMap.ReadOpPerSec,
+			WriteOpsSec:  status.PGMap.WritOpPerSec,
+			ReadBytesSec: status.PGMap.ReadBytesSec,
+			WritBytesSec: status.PGMap.WritBytesSec,
+		},
+	}
+
+	// Collect OSD metrics.
+	osdResp, err := client.GetCephOSDs(ctx, nodeName)
+	if err != nil {
+		s.logger.Warn("failed to get ceph osds", "cluster_id", clusterID, "error", err)
+	} else {
+		result.CephOSDs = flattenOSDs(clusterID, &osdResp.Root)
+	}
+
+	// Collect pool metrics.
+	pools, err := client.GetCephPools(ctx, nodeName)
+	if err != nil {
+		s.logger.Warn("failed to get ceph pools", "cluster_id", clusterID, "error", err)
+	} else {
+		for _, p := range pools {
+			result.CephPools = append(result.CephPools, cephPoolMetricSnapshot{
+				ClusterID:    clusterID,
+				PoolID:       p.Pool,
+				PoolName:     p.PoolName,
+				Size:         p.Size,
+				MinSize:      p.MinSize,
+				PGNum:        p.PGNum,
+				BytesUsed:    p.BytesUsed,
+				PercentUsed:  p.PercentUsed,
+				ReadOpsSec:   p.ReadOpPerSec,
+				WriteOpsSec:  p.WritOpPerSec,
+				ReadBytesSec: p.ReadBytesSec,
+				WritBytesSec: p.WritBytesSec,
+			})
+		}
+	}
+
+	return result
+}
+
+// flattenOSDs walks the OSD tree and extracts OSD nodes.
+func flattenOSDs(clusterID uuid.UUID, node *proxmox.CephOSDTreeNode) []cephOSDMetricSnapshot {
+	var result []cephOSDMetricSnapshot
+	if node.Type == "osd" {
+		result = append(result, cephOSDMetricSnapshot{
+			ClusterID:   clusterID,
+			OSDID:       node.ID,
+			OSDName:     node.Name,
+			Host:        node.Host,
+			StatusUp:    node.Status == "up",
+			StatusIn:    true, // present in tree means "in"
+			CrushWeight: node.CrushWeight,
+		})
+	}
+	for i := range node.Children {
+		// Propagate host name to child OSDs
+		if node.Type == "host" {
+			for j := range node.Children {
+				if node.Children[j].Host == "" {
+					node.Children[j].Host = node.Name
+				}
+			}
+		}
+		result = append(result, flattenOSDs(clusterID, &node.Children[i])...)
+	}
+	return result
+}
+
+// SyncAllPBS syncs all active PBS servers and returns collected metric results.
+func (s *Syncer) SyncAllPBS(ctx context.Context) []*pbsMetricResult {
+	servers, err := s.queries.ListActivePBSServers(ctx)
+	if err != nil {
+		s.logger.Error("failed to list active PBS servers", "error", err)
+		return nil
+	}
+
+	var results []*pbsMetricResult
+	for _, server := range servers {
+		s.logger.Info("syncing PBS server", "pbs_id", server.ID, "name", server.Name)
+		result, err := s.syncPBSServer(ctx, server)
+		if err != nil {
+			s.logger.Error("failed to sync PBS server",
+				"pbs_id", server.ID,
+				"name", server.Name,
+				"error", err,
+			)
+			continue
+		}
+		if result != nil {
+			results = append(results, result)
+		}
+	}
+
+	return results
+}
+
+// syncPBSServer syncs a single PBS server: datastores, snapshots, sync jobs, verify jobs.
+func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMetricResult, error) {
+	tokenSecret, err := crypto.Decrypt(server.TokenSecretEncrypted, s.encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("sync PBS %s: decrypt token: %w", server.ID, err)
+	}
+
+	client, err := s.pbsClientFactory(server.ApiUrl, server.TokenID, tokenSecret, server.TlsFingerprint)
+	if err != nil {
+		return nil, fmt.Errorf("sync PBS %s: create client: %w", server.ID, err)
+	}
+
+	now := time.Now()
+	result := &pbsMetricResult{
+		PBSServerID: server.ID,
+		CollectedAt: now,
+	}
+
+	// Sync datastore status (metrics).
+	dsStatus, err := client.GetDatastoreStatus(ctx)
+	if err != nil {
+		s.logger.Warn("failed to get PBS datastore status", "pbs_id", server.ID, "error", err)
+	} else {
+		for _, ds := range dsStatus {
+			result.DatastoreMetrics = append(result.DatastoreMetrics, pbsDatastoreMetricSnapshot{
+				PBSServerID: server.ID,
+				Datastore:   ds.Store,
+				Total:       ds.Total,
+				Used:        ds.Used,
+				Avail:       ds.Avail,
+			})
+		}
+	}
+
+	// Sync snapshots per datastore.
+	datastores, err := client.GetDatastores(ctx)
+	if err != nil {
+		s.logger.Warn("failed to get PBS datastores", "pbs_id", server.ID, "error", err)
+	} else {
+		for _, ds := range datastores {
+			snaps, err := client.GetSnapshots(ctx, ds.Name)
+			if err != nil {
+				s.logger.Warn("failed to get PBS snapshots",
+					"pbs_id", server.ID,
+					"datastore", ds.Name,
+					"error", err,
+				)
+				continue
+			}
+			for _, snap := range snaps {
+				verified := false
+				if snap.Verification != nil && snap.Verification.State == "ok" {
+					verified = true
+				}
+				_, uErr := s.queries.UpsertPBSSnapshot(ctx, db.UpsertPBSSnapshotParams{
+					PbsServerID: server.ID,
+					Datastore:   ds.Name,
+					BackupType:  snap.BackupType,
+					BackupID:    snap.BackupID,
+					BackupTime:  snap.BackupTime,
+					Size:        snap.Size,
+					Verified:    verified,
+					Protected:   snap.Protected,
+					Comment:     snap.Comment,
+					Owner:       snap.Owner,
+				})
+				if uErr != nil {
+					s.logger.Warn("failed to upsert PBS snapshot",
+						"pbs_id", server.ID,
+						"error", uErr,
+					)
+				}
+			}
+		}
+	}
+
+	// Sync sync jobs.
+	syncJobs, err := client.GetSyncJobs(ctx)
+	if err != nil {
+		s.logger.Warn("failed to get PBS sync jobs", "pbs_id", server.ID, "error", err)
+	} else {
+		for _, job := range syncJobs {
+			_, uErr := s.queries.UpsertPBSSyncJob(ctx, db.UpsertPBSSyncJobParams{
+				PbsServerID:  server.ID,
+				JobID:        job.ID,
+				Store:        job.Store,
+				Remote:       job.Remote,
+				RemoteStore:  job.RemoteStore,
+				Schedule:     job.Schedule,
+				LastRunState: job.LastRunState,
+				NextRun:      job.NextRun,
+				Comment:      job.Comment,
+			})
+			if uErr != nil {
+				s.logger.Warn("failed to upsert PBS sync job", "pbs_id", server.ID, "error", uErr)
+			}
+		}
+	}
+
+	// Sync verify jobs.
+	verifyJobs, err := client.GetVerifyJobs(ctx)
+	if err != nil {
+		s.logger.Warn("failed to get PBS verify jobs", "pbs_id", server.ID, "error", err)
+	} else {
+		for _, job := range verifyJobs {
+			_, uErr := s.queries.UpsertPBSVerifyJob(ctx, db.UpsertPBSVerifyJobParams{
+				PbsServerID:  server.ID,
+				JobID:        job.ID,
+				Store:        job.Store,
+				Schedule:     job.Schedule,
+				LastRunState: job.LastRunState,
+				Comment:      job.Comment,
+			})
+			if uErr != nil {
+				s.logger.Warn("failed to upsert PBS verify job", "pbs_id", server.ID, "error", uErr)
+			}
+		}
+	}
+
+	// Prune stale inventory.
+	if err := s.queries.DeleteStalePBSSnapshots(ctx, db.DeleteStalePBSSnapshotsParams{
+		PbsServerID: server.ID,
+		LastSeenAt:  now,
+	}); err != nil {
+		s.logger.Warn("failed to prune stale PBS snapshots", "pbs_id", server.ID, "error", err)
+	}
+	if err := s.queries.DeleteStalePBSSyncJobs(ctx, db.DeleteStalePBSSyncJobsParams{
+		PbsServerID: server.ID,
+		LastSeenAt:  now,
+	}); err != nil {
+		s.logger.Warn("failed to prune stale PBS sync jobs", "pbs_id", server.ID, "error", err)
+	}
+	if err := s.queries.DeleteStalePBSVerifyJobs(ctx, db.DeleteStalePBSVerifyJobsParams{
+		PbsServerID: server.ID,
+		LastSeenAt:  now,
+	}); err != nil {
+		s.logger.Warn("failed to prune stale PBS verify jobs", "pbs_id", server.ID, "error", err)
+	}
+
+	return result, nil
 }
 
 // SyncAll syncs all active clusters and returns collected metric results.

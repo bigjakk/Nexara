@@ -10,6 +10,8 @@ import { ClusterDetailPage } from "@/features/clusters/pages/ClusterDetailPage";
 import { InventoryPage } from "@/features/inventory/pages/InventoryPage";
 import { VMDetailPage } from "@/features/vms/pages/VMDetailPage";
 import { StoragePage } from "@/features/storage/pages/StoragePage";
+import { CephDashboardPage } from "@/features/ceph/pages/CephDashboardPage";
+import { BackupDashboardPage } from "@/features/backup/pages/BackupDashboardPage";
 
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
@@ -55,6 +57,14 @@ const router = createBrowserRouter([
           {
             path: "storage",
             element: <StoragePage />,
+          },
+          {
+            path: "ceph",
+            element: <CephDashboardPage />,
+          },
+          {
+            path: "backup",
+            element: <BackupDashboardPage />,
           },
           {
             path: "console",

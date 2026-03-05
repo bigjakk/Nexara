@@ -106,6 +106,35 @@ func (m *mockQueries) DeleteStaleVMs(_ context.Context, _ db.DeleteStaleVMsParam
 	return nil
 }
 
+// PBS mock methods (no-op stubs for interface compliance).
+func (m *mockQueries) ListActivePBSServers(_ context.Context) ([]db.PbsServer, error) {
+	return nil, nil
+}
+
+func (m *mockQueries) UpsertPBSSnapshot(_ context.Context, _ db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error) {
+	return db.PbsSnapshot{}, nil
+}
+
+func (m *mockQueries) UpsertPBSSyncJob(_ context.Context, _ db.UpsertPBSSyncJobParams) (db.PbsSyncJob, error) {
+	return db.PbsSyncJob{}, nil
+}
+
+func (m *mockQueries) UpsertPBSVerifyJob(_ context.Context, _ db.UpsertPBSVerifyJobParams) (db.PbsVerifyJob, error) {
+	return db.PbsVerifyJob{}, nil
+}
+
+func (m *mockQueries) DeleteStalePBSSnapshots(_ context.Context, _ db.DeleteStalePBSSnapshotsParams) error {
+	return nil
+}
+
+func (m *mockQueries) DeleteStalePBSSyncJobs(_ context.Context, _ db.DeleteStalePBSSyncJobsParams) error {
+	return nil
+}
+
+func (m *mockQueries) DeleteStalePBSVerifyJobs(_ context.Context, _ db.DeleteStalePBSVerifyJobsParams) error {
+	return nil
+}
+
 // --- Test helpers ---
 
 func testLogger() *slog.Logger {

@@ -28,39 +28,43 @@ func NewPBSHandler(queries *db.Queries, encryptionKey string) *PBSHandler {
 }
 
 type createPBSRequest struct {
-	Name        string  `json:"name"`
-	APIURL      string  `json:"api_url"`
-	TokenID     string  `json:"token_id"`
-	TokenSecret string  `json:"token_secret"`
-	ClusterID   *string `json:"cluster_id"`
+	Name           string  `json:"name"`
+	APIURL         string  `json:"api_url"`
+	TokenID        string  `json:"token_id"`
+	TokenSecret    string  `json:"token_secret"`
+	TLSFingerprint string  `json:"tls_fingerprint"`
+	ClusterID      *string `json:"cluster_id"`
 }
 
 type updatePBSRequest struct {
-	Name        *string `json:"name"`
-	APIURL      *string `json:"api_url"`
-	TokenID     *string `json:"token_id"`
-	TokenSecret *string `json:"token_secret"`
-	ClusterID   *string `json:"cluster_id"`
+	Name           *string `json:"name"`
+	APIURL         *string `json:"api_url"`
+	TokenID        *string `json:"token_id"`
+	TokenSecret    *string `json:"token_secret"`
+	TLSFingerprint *string `json:"tls_fingerprint"`
+	ClusterID      *string `json:"cluster_id"`
 }
 
 type pbsResponse struct {
-	ID        uuid.UUID  `json:"id"`
-	Name      string     `json:"name"`
-	APIURL    string     `json:"api_url"`
-	TokenID   string     `json:"token_id"`
-	ClusterID *uuid.UUID `json:"cluster_id"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID             uuid.UUID  `json:"id"`
+	Name           string     `json:"name"`
+	APIURL         string     `json:"api_url"`
+	TokenID        string     `json:"token_id"`
+	TLSFingerprint string     `json:"tls_fingerprint"`
+	ClusterID      *uuid.UUID `json:"cluster_id"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 func toPBSResponse(p db.PbsServer) pbsResponse {
 	resp := pbsResponse{
-		ID:        p.ID,
-		Name:      p.Name,
-		APIURL:    p.ApiUrl,
-		TokenID:   p.TokenID,
-		CreatedAt: p.CreatedAt,
-		UpdatedAt: p.UpdatedAt,
+		ID:             p.ID,
+		Name:           p.Name,
+		APIURL:         p.ApiUrl,
+		TokenID:        p.TokenID,
+		TLSFingerprint: p.TlsFingerprint,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
 	}
 	if p.ClusterID.Valid {
 		id := p.ClusterID.Bytes
@@ -113,6 +117,7 @@ func (h *PBSHandler) Create(c *fiber.Ctx) error {
 		TokenID:              req.TokenID,
 		TokenSecretEncrypted: encrypted,
 		ClusterID:            clusterID,
+		TlsFingerprint:       req.TLSFingerprint,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create PBS server")
@@ -217,6 +222,7 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 		TokenID:              existing.TokenID,
 		TokenSecretEncrypted: existing.TokenSecretEncrypted,
 		ClusterID:            existing.ClusterID,
+		TlsFingerprint:       existing.TlsFingerprint,
 	}
 
 	if req.Name != nil {
@@ -247,6 +253,9 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id format")
 		}
 		params.ClusterID = pgtype.UUID{Bytes: parsed, Valid: true}
+	}
+	if req.TLSFingerprint != nil {
+		params.TlsFingerprint = *req.TLSFingerprint
 	}
 
 	pbs, err := h.queries.UpdatePBSServer(c.Context(), params)

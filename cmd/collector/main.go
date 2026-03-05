@@ -70,6 +70,8 @@ func main() {
 	// Run initial sync immediately.
 	results := syncer.SyncAll(ctx)
 	mc.ProcessResults(ctx, results)
+	pbsResults := syncer.SyncAllPBS(ctx)
+	mc.ProcessPBSResults(ctx, pbsResults)
 
 	ticker := cfg.NewMetricsTicker()
 	defer ticker.Stop()
@@ -82,6 +84,8 @@ func main() {
 		case <-ticker.C:
 			results := syncer.SyncAll(ctx)
 			mc.ProcessResults(ctx, results)
+			pbsResults := syncer.SyncAllPBS(ctx)
+			mc.ProcessPBSResults(ctx, pbsResults)
 		case sig := <-sigCh:
 			logger.Info("received signal, shutting down", "signal", sig)
 			cancel()

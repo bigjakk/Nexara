@@ -36,8 +36,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.RateLimitExpiration != time.Minute {
 		t.Errorf("RateLimitExpiration = %v, want 1m", cfg.RateLimitExpiration)
 	}
-	if cfg.CORSAllowOrigins != "*" {
-		t.Errorf("CORSAllowOrigins = %q, want %q", cfg.CORSAllowOrigins, "*")
+	if cfg.CORSAllowOrigins != "http://localhost:3001" {
+		t.Errorf("CORSAllowOrigins = %q, want %q", cfg.CORSAllowOrigins, "http://localhost:3001")
 	}
 	if cfg.AccessTokenTTL != 15*time.Minute {
 		t.Errorf("AccessTokenTTL = %v, want 15m", cfg.AccessTokenTTL)

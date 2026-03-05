@@ -243,6 +243,138 @@ type DiskMoveParams struct {
 	Delete  bool   `json:"delete,omitempty"`
 }
 
+// CephStatus represents the cluster-wide Ceph status from GET /nodes/{node}/ceph/status.
+type CephStatus struct {
+	Health  CephHealth  `json:"health"`
+	PGMap   CephPGMap   `json:"pgmap"`
+	OSDMap  CephOSDMap  `json:"osdmap"`
+	MonMap  CephMonMap  `json:"monmap"`
+	Quorum  []int       `json:"quorum,omitempty"`
+}
+
+// CephHealth represents the Ceph health summary.
+type CephHealth struct {
+	Status string `json:"status"`
+}
+
+// CephPGMap represents Ceph placement group statistics.
+type CephPGMap struct {
+	BytesUsed    int64   `json:"bytes_used"`
+	BytesAvail   int64   `json:"bytes_avail"`
+	BytesTotal   int64   `json:"bytes_total"`
+	ReadBytesSec int64   `json:"read_bytes_sec"`
+	WritBytesSec int64   `json:"write_bytes_sec"`
+	ReadOpPerSec int64   `json:"read_op_per_sec"`
+	WritOpPerSec int64   `json:"write_op_per_sec"`
+	PGsPerState  []PGStateCount `json:"pgs_by_state,omitempty"`
+	NumPGs       int     `json:"num_pgs"`
+	DataBytes    int64   `json:"data_bytes"`
+	UsedFraction float64 `json:"used_pct,omitempty"`
+}
+
+// PGStateCount represents PG counts by state.
+type PGStateCount struct {
+	StateName string `json:"state_name"`
+	Count     int    `json:"count"`
+}
+
+// CephOSDMap represents Ceph OSD map summary.
+type CephOSDMap struct {
+	Full      bool `json:"full"`
+	NearFull  bool `json:"nearfull"`
+	NumOSDs   int  `json:"num_osds"`
+	NumUpOSDs int  `json:"num_up_osds"`
+	NumInOSDs int  `json:"num_in_osds"`
+}
+
+// CephMonMap represents Ceph monitor map summary.
+type CephMonMap struct {
+	NumMons int `json:"num_mons"`
+}
+
+// CephOSD represents a single OSD from GET /nodes/{node}/ceph/osd.
+type CephOSD struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Host string `json:"host,omitempty"`
+	In   int    `json:"in"`
+	Up   int    `json:"up"`
+	// DevicePath contains the block device path.
+	DevicePath string  `json:"device_path,omitempty"`
+	Status     string  `json:"status,omitempty"`
+	CrushWeight float64 `json:"crush_weight,omitempty"`
+}
+
+// CephOSDTreeNode represents a node in the OSD tree from the Proxmox response.
+type CephOSDTreeNode struct {
+	ID       int               `json:"id"`
+	Name     string            `json:"name"`
+	Type     string            `json:"type"`
+	Status   string            `json:"status,omitempty"`
+	Host     string            `json:"host,omitempty"`
+	Children []CephOSDTreeNode `json:"children,omitempty"`
+	CrushWeight float64        `json:"crush_weight,omitempty"`
+}
+
+// CephOSDResponse wraps the response from GET /nodes/{node}/ceph/osd.
+type CephOSDResponse struct {
+	Root CephOSDTreeNode `json:"root"`
+}
+
+// CephPool represents a Ceph pool from GET /nodes/{node}/ceph/pools.
+type CephPool struct {
+	PoolName     string  `json:"pool_name"`
+	Pool         int     `json:"pool"`
+	Size         int     `json:"size"`
+	MinSize      int     `json:"min_size"`
+	PGNum        int     `json:"pg_num"`
+	PGAutoScale  string  `json:"pg_autoscale_mode,omitempty"`
+	CrushRule    int     `json:"crush_rule"`
+	Type         string  `json:"type,omitempty"`
+	BytesUsed    int64   `json:"bytes_used"`
+	PercentUsed  float64 `json:"percent_used"`
+	ReadBytesSec int64   `json:"read_bytes_sec,omitempty"`
+	WritBytesSec int64   `json:"write_bytes_sec,omitempty"`
+	ReadOpPerSec int64   `json:"read_op_per_sec,omitempty"`
+	WritOpPerSec int64   `json:"write_op_per_sec,omitempty"`
+}
+
+// CephPoolCreateParams holds parameters for creating a new Ceph pool.
+type CephPoolCreateParams struct {
+	Name         string `json:"name"`
+	Size         int    `json:"size"`
+	MinSize      int    `json:"min_size,omitempty"`
+	PGNum        int    `json:"pg_num"`
+	Application  string `json:"application,omitempty"`
+	CrushRule    string `json:"crush_rule_name,omitempty"`
+	PGAutoScale  string `json:"pg_autoscale_mode,omitempty"`
+}
+
+// CephFS represents a CephFS filesystem from GET /nodes/{node}/ceph/fs.
+type CephFS struct {
+	Name       string `json:"name"`
+	MetaPool   string `json:"metadata_pool"`
+	DataPool   string `json:"data_pool"`
+}
+
+// CephCrushRule represents a CRUSH rule from GET /nodes/{node}/ceph/rules.
+type CephCrushRule struct {
+	RuleID   int    `json:"rule_id"`
+	RuleName string `json:"rule_name"`
+	Type     int    `json:"type"`
+	MinSize  int    `json:"min_size"`
+	MaxSize  int    `json:"max_size"`
+}
+
+// CephMon represents a Ceph monitor from GET /nodes/{node}/ceph/mon.
+type CephMon struct {
+	Name    string `json:"name"`
+	Addr    string `json:"addr,omitempty"`
+	Host    string `json:"host,omitempty"`
+	Rank    int    `json:"rank,omitempty"`
+	Quorum  bool   `json:"quorum,omitempty"`
+}
+
 // ClusterStatusEntry represents an entry from GET /cluster/status.
 type ClusterStatusEntry struct {
 	Type    string `json:"type"`

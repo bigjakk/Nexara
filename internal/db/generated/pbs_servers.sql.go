@@ -13,9 +13,9 @@ import (
 )
 
 const createPBSServer = `-- name: CreatePBSServer :one
-INSERT INTO pbs_servers (name, api_url, token_id, token_secret_encrypted, cluster_id)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at
+INSERT INTO pbs_servers (name, api_url, token_id, token_secret_encrypted, cluster_id, tls_fingerprint)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at, tls_fingerprint
 `
 
 type CreatePBSServerParams struct {
@@ -24,6 +24,7 @@ type CreatePBSServerParams struct {
 	TokenID              string      `json:"token_id"`
 	TokenSecretEncrypted string      `json:"token_secret_encrypted"`
 	ClusterID            pgtype.UUID `json:"cluster_id"`
+	TlsFingerprint       string      `json:"tls_fingerprint"`
 }
 
 func (q *Queries) CreatePBSServer(ctx context.Context, arg CreatePBSServerParams) (PbsServer, error) {
@@ -33,6 +34,7 @@ func (q *Queries) CreatePBSServer(ctx context.Context, arg CreatePBSServerParams
 		arg.TokenID,
 		arg.TokenSecretEncrypted,
 		arg.ClusterID,
+		arg.TlsFingerprint,
 	)
 	var i PbsServer
 	err := row.Scan(
@@ -44,6 +46,7 @@ func (q *Queries) CreatePBSServer(ctx context.Context, arg CreatePBSServerParams
 		&i.ClusterID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TlsFingerprint,
 	)
 	return i, err
 }
@@ -58,7 +61,7 @@ func (q *Queries) DeletePBSServer(ctx context.Context, id uuid.UUID) error {
 }
 
 const getPBSServer = `-- name: GetPBSServer :one
-SELECT id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at FROM pbs_servers WHERE id = $1
+SELECT id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at, tls_fingerprint FROM pbs_servers WHERE id = $1
 `
 
 func (q *Queries) GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error) {
@@ -73,12 +76,47 @@ func (q *Queries) GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, er
 		&i.ClusterID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TlsFingerprint,
 	)
 	return i, err
 }
 
+const listActivePBSServers = `-- name: ListActivePBSServers :many
+SELECT id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at, tls_fingerprint FROM pbs_servers ORDER BY created_at ASC
+`
+
+func (q *Queries) ListActivePBSServers(ctx context.Context) ([]PbsServer, error) {
+	rows, err := q.db.Query(ctx, listActivePBSServers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PbsServer{}
+	for rows.Next() {
+		var i PbsServer
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ApiUrl,
+			&i.TokenID,
+			&i.TokenSecretEncrypted,
+			&i.ClusterID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TlsFingerprint,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPBSServers = `-- name: ListPBSServers :many
-SELECT id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at FROM pbs_servers ORDER BY created_at DESC
+SELECT id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at, tls_fingerprint FROM pbs_servers ORDER BY created_at DESC
 `
 
 func (q *Queries) ListPBSServers(ctx context.Context) ([]PbsServer, error) {
@@ -99,6 +137,7 @@ func (q *Queries) ListPBSServers(ctx context.Context) ([]PbsServer, error) {
 			&i.ClusterID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TlsFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -111,7 +150,7 @@ func (q *Queries) ListPBSServers(ctx context.Context) ([]PbsServer, error) {
 }
 
 const listPBSServersByCluster = `-- name: ListPBSServersByCluster :many
-SELECT id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at FROM pbs_servers WHERE cluster_id = $1 ORDER BY created_at DESC
+SELECT id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at, tls_fingerprint FROM pbs_servers WHERE cluster_id = $1 ORDER BY created_at DESC
 `
 
 func (q *Queries) ListPBSServersByCluster(ctx context.Context, clusterID pgtype.UUID) ([]PbsServer, error) {
@@ -132,6 +171,7 @@ func (q *Queries) ListPBSServersByCluster(ctx context.Context, clusterID pgtype.
 			&i.ClusterID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TlsFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -149,9 +189,10 @@ SET name = $2,
     api_url = $3,
     token_id = $4,
     token_secret_encrypted = $5,
-    cluster_id = $6
+    cluster_id = $6,
+    tls_fingerprint = $7
 WHERE id = $1
-RETURNING id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at
+RETURNING id, name, api_url, token_id, token_secret_encrypted, cluster_id, created_at, updated_at, tls_fingerprint
 `
 
 type UpdatePBSServerParams struct {
@@ -161,6 +202,7 @@ type UpdatePBSServerParams struct {
 	TokenID              string      `json:"token_id"`
 	TokenSecretEncrypted string      `json:"token_secret_encrypted"`
 	ClusterID            pgtype.UUID `json:"cluster_id"`
+	TlsFingerprint       string      `json:"tls_fingerprint"`
 }
 
 func (q *Queries) UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error) {
@@ -171,6 +213,7 @@ func (q *Queries) UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams
 		arg.TokenID,
 		arg.TokenSecretEncrypted,
 		arg.ClusterID,
+		arg.TlsFingerprint,
 	)
 	var i PbsServer
 	err := row.Scan(
@@ -182,6 +225,7 @@ func (q *Queries) UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams
 		&i.ClusterID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TlsFingerprint,
 	)
 	return i, err
 }

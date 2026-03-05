@@ -64,6 +64,20 @@ func (s *Server) setupRoutes() {
 		if s.metricsHandler != nil {
 			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)
 		}
+		if s.cephHandler != nil {
+			ceph := clusters.Group("/:cluster_id/ceph")
+			ceph.Get("/status", s.cephHandler.GetStatus)
+			ceph.Get("/osds", s.cephHandler.ListOSDs)
+			ceph.Get("/pools", s.cephHandler.ListPools)
+			ceph.Get("/monitors", s.cephHandler.ListMonitors)
+			ceph.Get("/fs", s.cephHandler.ListFS)
+			ceph.Get("/rules", s.cephHandler.ListCrushRules)
+			ceph.Post("/pools", s.cephHandler.CreatePool)
+			ceph.Delete("/pools/:pool_name", s.cephHandler.DeletePool)
+			ceph.Get("/metrics", s.cephHandler.GetHistorical)
+			ceph.Get("/osds/metrics", s.cephHandler.GetOSDMetrics)
+			ceph.Get("/pools/metrics", s.cephHandler.GetPoolMetrics)
+		}
 	}
 
 	// PBS server routes.
@@ -74,6 +88,28 @@ func (s *Server) setupRoutes() {
 		pbs.Get("/:id", s.pbsHandler.Get)
 		pbs.Put("/:id", s.pbsHandler.Update)
 		pbs.Delete("/:id", s.pbsHandler.Delete)
+
+		// Backup management routes nested under PBS servers.
+		if s.backupHandler != nil {
+			pbs.Get("/:pbs_id/datastores", s.backupHandler.ListDatastores)
+			pbs.Get("/:pbs_id/datastores/status", s.backupHandler.GetDatastoreStatus)
+			pbs.Post("/:pbs_id/datastores/:store/gc", s.backupHandler.TriggerGC)
+			pbs.Delete("/:pbs_id/datastores/:store/snapshots", s.backupHandler.DeleteSnapshot)
+			pbs.Get("/:pbs_id/snapshots", s.backupHandler.ListSnapshots)
+			pbs.Get("/:pbs_id/sync-jobs", s.backupHandler.ListSyncJobs)
+			pbs.Post("/:pbs_id/sync-jobs/:job_id/run", s.backupHandler.RunSyncJob)
+			pbs.Get("/:pbs_id/verify-jobs", s.backupHandler.ListVerifyJobs)
+			pbs.Post("/:pbs_id/verify-jobs/:job_id/run", s.backupHandler.RunVerifyJob)
+			pbs.Get("/:pbs_id/tasks", s.backupHandler.ListTasks)
+			pbs.Get("/:pbs_id/tasks/:upid", s.backupHandler.GetTaskStatus)
+			pbs.Get("/:pbs_id/metrics", s.backupHandler.GetDatastoreMetrics)
+		}
+	}
+
+	// Restore route under clusters.
+	if s.backupHandler != nil && s.clusterHandler != nil {
+		clusters := v1.Group("/clusters", s.authRequired())
+		clusters.Post("/:cluster_id/restore", s.backupHandler.RestoreBackup)
 	}
 
 	// Future route groups:

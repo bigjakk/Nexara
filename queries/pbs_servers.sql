@@ -1,6 +1,6 @@
 -- name: CreatePBSServer :one
-INSERT INTO pbs_servers (name, api_url, token_id, token_secret_encrypted, cluster_id)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO pbs_servers (name, api_url, token_id, token_secret_encrypted, cluster_id, tls_fingerprint)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetPBSServer :one
@@ -18,9 +18,13 @@ SET name = $2,
     api_url = $3,
     token_id = $4,
     token_secret_encrypted = $5,
-    cluster_id = $6
+    cluster_id = $6,
+    tls_fingerprint = $7
 WHERE id = $1
 RETURNING *;
 
 -- name: DeletePBSServer :exec
 DELETE FROM pbs_servers WHERE id = $1;
+
+-- name: ListActivePBSServers :many
+SELECT * FROM pbs_servers ORDER BY created_at ASC;

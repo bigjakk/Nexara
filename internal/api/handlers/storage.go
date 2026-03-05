@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -169,13 +170,18 @@ func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "file is required")
 	}
 
+	filename := filepath.Base(fileHeader.Filename)
+	if filename == "." || filename == "/" || filename == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid filename")
+	}
+
 	file, err := fileHeader.Open()
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to open uploaded file")
 	}
 	defer file.Close()
 
-	upid, err := pxClient.UploadToStorage(c.Context(), node.Name, pool.Storage, contentType, fileHeader.Filename, file)
+	upid, err := pxClient.UploadToStorage(c.Context(), node.Name, pool.Storage, contentType, filename, file)
 	if err != nil {
 		return mapProxmoxError(err)
 	}

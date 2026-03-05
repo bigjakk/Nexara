@@ -28,6 +28,8 @@ type Server struct {
 	containerHandler *handlers.ContainerHandler
 	storageHandler   *handlers.StorageHandler
 	metricsHandler *handlers.MetricsHandler
+	cephHandler    *handlers.CephHandler
+	backupHandler  *handlers.BackupHandler
 }
 
 // New creates a new API server with the given dependencies.
@@ -72,6 +74,8 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
 		s.storageHandler = handlers.NewStorageHandler(s.queries, cfg.EncryptionKey)
+		s.cephHandler = handlers.NewCephHandler(s.queries, cfg.EncryptionKey)
+		s.backupHandler = handlers.NewBackupHandler(s.queries, cfg.EncryptionKey)
 	}
 
 	s.app = fiber.New(fiber.Config{

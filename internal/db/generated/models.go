@@ -23,6 +23,84 @@ type AuditLog struct {
 	CreatedAt    time.Time       `json:"created_at"`
 }
 
+type CephClusterMetric struct {
+	Time          time.Time `json:"time"`
+	ClusterID     uuid.UUID `json:"cluster_id"`
+	HealthStatus  string    `json:"health_status"`
+	OsdsTotal     int32     `json:"osds_total"`
+	OsdsUp        int32     `json:"osds_up"`
+	OsdsIn        int32     `json:"osds_in"`
+	PgsTotal      int32     `json:"pgs_total"`
+	BytesUsed     int64     `json:"bytes_used"`
+	BytesAvail    int64     `json:"bytes_avail"`
+	BytesTotal    int64     `json:"bytes_total"`
+	ReadOpsSec    int64     `json:"read_ops_sec"`
+	WriteOpsSec   int64     `json:"write_ops_sec"`
+	ReadBytesSec  int64     `json:"read_bytes_sec"`
+	WriteBytesSec int64     `json:"write_bytes_sec"`
+}
+
+type CephClusterMetrics1h struct {
+	Bucket           interface{} `json:"bucket"`
+	ClusterID        uuid.UUID   `json:"cluster_id"`
+	HealthStatus     interface{} `json:"health_status"`
+	AvgOsdsTotal     int32       `json:"avg_osds_total"`
+	AvgOsdsUp        int32       `json:"avg_osds_up"`
+	AvgOsdsIn        int32       `json:"avg_osds_in"`
+	AvgPgsTotal      int32       `json:"avg_pgs_total"`
+	AvgBytesUsed     float64     `json:"avg_bytes_used"`
+	AvgBytesAvail    float64     `json:"avg_bytes_avail"`
+	AvgBytesTotal    float64     `json:"avg_bytes_total"`
+	AvgReadOpsSec    float64     `json:"avg_read_ops_sec"`
+	AvgWriteOpsSec   float64     `json:"avg_write_ops_sec"`
+	AvgReadBytesSec  float64     `json:"avg_read_bytes_sec"`
+	AvgWriteBytesSec float64     `json:"avg_write_bytes_sec"`
+}
+
+type CephClusterMetrics5m struct {
+	Bucket           interface{} `json:"bucket"`
+	ClusterID        uuid.UUID   `json:"cluster_id"`
+	HealthStatus     interface{} `json:"health_status"`
+	AvgOsdsTotal     int32       `json:"avg_osds_total"`
+	AvgOsdsUp        int32       `json:"avg_osds_up"`
+	AvgOsdsIn        int32       `json:"avg_osds_in"`
+	AvgPgsTotal      int32       `json:"avg_pgs_total"`
+	AvgBytesUsed     float64     `json:"avg_bytes_used"`
+	AvgBytesAvail    float64     `json:"avg_bytes_avail"`
+	AvgBytesTotal    float64     `json:"avg_bytes_total"`
+	AvgReadOpsSec    float64     `json:"avg_read_ops_sec"`
+	AvgWriteOpsSec   float64     `json:"avg_write_ops_sec"`
+	AvgReadBytesSec  float64     `json:"avg_read_bytes_sec"`
+	AvgWriteBytesSec float64     `json:"avg_write_bytes_sec"`
+}
+
+type CephOsdMetric struct {
+	Time        time.Time `json:"time"`
+	ClusterID   uuid.UUID `json:"cluster_id"`
+	OsdID       int32     `json:"osd_id"`
+	OsdName     string    `json:"osd_name"`
+	Host        string    `json:"host"`
+	StatusUp    bool      `json:"status_up"`
+	StatusIn    bool      `json:"status_in"`
+	CrushWeight float64   `json:"crush_weight"`
+}
+
+type CephPoolMetric struct {
+	Time          time.Time `json:"time"`
+	ClusterID     uuid.UUID `json:"cluster_id"`
+	PoolID        int32     `json:"pool_id"`
+	PoolName      string    `json:"pool_name"`
+	Size          int32     `json:"size"`
+	MinSize       int32     `json:"min_size"`
+	PgNum         int32     `json:"pg_num"`
+	BytesUsed     int64     `json:"bytes_used"`
+	PercentUsed   float64   `json:"percent_used"`
+	ReadOpsSec    int64     `json:"read_ops_sec"`
+	WriteOpsSec   int64     `json:"write_ops_sec"`
+	ReadBytesSec  int64     `json:"read_bytes_sec"`
+	WriteBytesSec int64     `json:"write_bytes_sec"`
+}
+
 type Cluster struct {
 	ID                   uuid.UUID `json:"id"`
 	Name                 string    `json:"name"`
@@ -92,6 +170,24 @@ type NodeMetrics5m struct {
 	AvgNetOut    float64     `json:"avg_net_out"`
 }
 
+type PbsDatastoreMetric struct {
+	Time        time.Time `json:"time"`
+	PbsServerID uuid.UUID `json:"pbs_server_id"`
+	Datastore   string    `json:"datastore"`
+	Total       int64     `json:"total"`
+	Used        int64     `json:"used"`
+	Avail       int64     `json:"avail"`
+}
+
+type PbsDatastoreMetrics5m struct {
+	Bucket      interface{} `json:"bucket"`
+	PbsServerID uuid.UUID   `json:"pbs_server_id"`
+	Datastore   string      `json:"datastore"`
+	Total       int64       `json:"total"`
+	Used        int64       `json:"used"`
+	Avail       int64       `json:"avail"`
+}
+
 type PbsServer struct {
 	ID                   uuid.UUID   `json:"id"`
 	Name                 string      `json:"name"`
@@ -101,6 +197,53 @@ type PbsServer struct {
 	ClusterID            pgtype.UUID `json:"cluster_id"`
 	CreatedAt            time.Time   `json:"created_at"`
 	UpdatedAt            time.Time   `json:"updated_at"`
+	TlsFingerprint       string      `json:"tls_fingerprint"`
+}
+
+type PbsSnapshot struct {
+	ID          uuid.UUID `json:"id"`
+	PbsServerID uuid.UUID `json:"pbs_server_id"`
+	Datastore   string    `json:"datastore"`
+	BackupType  string    `json:"backup_type"`
+	BackupID    string    `json:"backup_id"`
+	BackupTime  int64     `json:"backup_time"`
+	Size        int64     `json:"size"`
+	Verified    bool      `json:"verified"`
+	Protected   bool      `json:"protected"`
+	Comment     string    `json:"comment"`
+	Owner       string    `json:"owner"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type PbsSyncJob struct {
+	ID           uuid.UUID `json:"id"`
+	PbsServerID  uuid.UUID `json:"pbs_server_id"`
+	JobID        string    `json:"job_id"`
+	Store        string    `json:"store"`
+	Remote       string    `json:"remote"`
+	RemoteStore  string    `json:"remote_store"`
+	Schedule     string    `json:"schedule"`
+	LastRunState string    `json:"last_run_state"`
+	NextRun      int64     `json:"next_run"`
+	Comment      string    `json:"comment"`
+	LastSeenAt   time.Time `json:"last_seen_at"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type PbsVerifyJob struct {
+	ID           uuid.UUID `json:"id"`
+	PbsServerID  uuid.UUID `json:"pbs_server_id"`
+	JobID        string    `json:"job_id"`
+	Store        string    `json:"store"`
+	Schedule     string    `json:"schedule"`
+	LastRunState string    `json:"last_run_state"`
+	Comment      string    `json:"comment"`
+	LastSeenAt   time.Time `json:"last_seen_at"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type Session struct {
