@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,10 +72,21 @@ export function DeployTemplateDialog({
   const parsedNewId = parseInt(newId, 10);
   const isDuplicate = existingIds ? existingIds.has(parsedNewId) : false;
 
-  function handleOpen(isOpen: boolean) {
-    if (isOpen) {
+  // Auto-fill VMID and name when dialog opens or when existingIds loads
+  useEffect(() => {
+    if (open && newId === "" && existingIds) {
       setNewId(String(nextAvailableId));
+    }
+    if (open && newName === "") {
       setNewName(`${templateName}-clone`);
+    }
+  }, [open, existingIds, nextAvailableId, newId, newName, templateName]);
+
+  function handleOpen(isOpen: boolean) {
+    if (!isOpen) {
+      // Reset on close
+      setNewId("");
+      setNewName("");
       setFullClone(true);
       setStorage("");
       setTargetNode("");
