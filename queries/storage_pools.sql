@@ -13,6 +13,9 @@ ON CONFLICT (cluster_id, node_id, storage) DO UPDATE SET
     last_seen_at = now()
 RETURNING *;
 
+-- name: GetStoragePool :one
+SELECT * FROM storage_pools WHERE id = $1;
+
 -- name: ListStoragePoolsByNode :many
 SELECT * FROM storage_pools WHERE node_id = $1 ORDER BY storage;
 

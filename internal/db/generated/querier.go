@@ -31,6 +31,7 @@ type Querier interface {
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
+	GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)

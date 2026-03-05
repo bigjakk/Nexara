@@ -55,10 +55,16 @@ vi.mock("../api/vm-queries", () => ({
   useTaskStatus: () => ({
     data: null,
   }),
+  useClusterVMIDs: () => ({
+    data: new Set<number>(),
+  }),
 }));
 
 vi.mock("@/features/clusters/api/cluster-queries", () => ({
   useClusterNodes: () => ({
+    data: [],
+  }),
+  useClusterStorage: () => ({
     data: [],
   }),
 }));

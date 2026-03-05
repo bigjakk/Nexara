@@ -67,8 +67,11 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil {
 		s.nodeHandler = handlers.NewNodeHandler(s.queries)
-		s.storageHandler = handlers.NewStorageHandler(s.queries)
 		s.metricsHandler = handlers.NewMetricsHandler(s.queries)
+	}
+
+	if s.queries != nil && cfg.EncryptionKey != "" {
+		s.storageHandler = handlers.NewStorageHandler(s.queries, cfg.EncryptionKey)
 	}
 
 	s.app = fiber.New(fiber.Config{

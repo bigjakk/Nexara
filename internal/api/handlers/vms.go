@@ -379,6 +379,109 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
+type diskResizeRequest struct {
+	Disk string `json:"disk"`
+	Size string `json:"size"`
+}
+
+type diskMoveRequest struct {
+	Disk    string `json:"disk"`
+	Storage string `json:"storage"`
+	Delete  bool   `json:"delete"`
+}
+
+// ResizeDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize.
+func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var req diskResizeRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Disk == "" || req.Size == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "disk and size are required")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.ResizeDisk(c.Context(), node.Name, int(vm.Vmid), proxmox.DiskResizeParams{
+		Disk: req.Disk,
+		Size: req.Size,
+	}); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_resize")
+
+	return c.JSON(vmActionResponse{
+		UPID:   "",
+		Status: "completed",
+	})
+}
+
+// MoveDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/move.
+func (h *VMHandler) MoveDisk(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var req diskMoveRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Disk == "" || req.Storage == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "disk and storage are required")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.MoveDisk(c.Context(), node.Name, int(vm.Vmid), proxmox.DiskMoveParams{
+		Disk:    req.Disk,
+		Storage: req.Storage,
+		Delete:  req.Delete,
+	})
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_move")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
 // resolveVM loads the VM, its node, the cluster, and creates a Proxmox client.
 func (h *VMHandler) resolveVM(c *fiber.Ctx, clusterID, vmID uuid.UUID) (db.Vm, db.Node, db.Cluster, *proxmox.Client, error) {
 	var zeroVM db.Vm

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -236,6 +237,139 @@ func (c *Client) doDelete(ctx context.Context, path string, dst interface{}) err
 
 	var envelope response
 	if err := json.Unmarshal(body, &envelope); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+	}
+
+	if dst != nil && len(envelope.Data) > 0 {
+		if err := json.Unmarshal(envelope.Data, dst); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+		}
+	}
+
+	return nil
+}
+
+// doPut performs an authenticated PUT request with form-encoded body and unmarshals the response into dst.
+func (c *Client) doPut(ctx context.Context, path string, params url.Values, dst interface{}) error {
+	apiURL := c.baseURL + "/api2/json" + path
+
+	var body io.Reader
+	if params != nil {
+		body = strings.NewReader(params.Encode())
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, apiURL, body)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", c.authHeader)
+	if params != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return ErrNotFound
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return ErrForbidden
+	case resp.StatusCode >= 400:
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    strings.TrimSpace(string(respBody)),
+		}
+	}
+
+	var envelope response
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+	}
+
+	if dst != nil && len(envelope.Data) > 0 {
+		if err := json.Unmarshal(envelope.Data, dst); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+		}
+	}
+
+	return nil
+}
+
+// doMultipart performs an authenticated POST request with multipart form data and unmarshals the response into dst.
+func (c *Client) doMultipart(ctx context.Context, path string, fields map[string]string, fileField, fileName string, fileReader io.Reader, dst interface{}) error {
+	apiURL := c.baseURL + "/api2/json" + path
+
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+
+	// Write the multipart body in a goroutine to avoid buffering the whole file.
+	errCh := make(chan error, 1)
+	go func() {
+		defer pw.Close()
+		for k, v := range fields {
+			if err := writer.WriteField(k, v); err != nil {
+				errCh <- fmt.Errorf("write field %s: %w", k, err)
+				return
+			}
+		}
+		part, err := writer.CreateFormFile(fileField, fileName)
+		if err != nil {
+			errCh <- fmt.Errorf("create form file: %w", err)
+			return
+		}
+		if _, err := io.Copy(part, fileReader); err != nil {
+			errCh <- fmt.Errorf("copy file data: %w", err)
+			return
+		}
+		errCh <- writer.Close()
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, pr)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", c.authHeader)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+	}
+	defer resp.Body.Close()
+
+	// Check for multipart writer errors.
+	if writeErr := <-errCh; writeErr != nil {
+		return fmt.Errorf("multipart write: %w", writeErr)
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return ErrNotFound
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return ErrForbidden
+	case resp.StatusCode >= 400:
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    strings.TrimSpace(string(respBody)),
+		}
+	}
+
+	var envelope response
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidResponse, err)
 	}
 
@@ -610,4 +744,86 @@ func (c *Client) GetClusterStatus(ctx context.Context) ([]ClusterStatusEntry, er
 		return nil, fmt.Errorf("get cluster status: %w", err)
 	}
 	return entries, nil
+}
+
+// GetStorageContent returns the contents of a storage pool on a node.
+func (c *Client) GetStorageContent(ctx context.Context, node, storage string) ([]StorageContent, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/content"
+	var items []StorageContent
+	if err := c.do(ctx, path, &items); err != nil {
+		return nil, fmt.Errorf("get storage content on %s/%s: %w", node, storage, err)
+	}
+	return items, nil
+}
+
+// UploadToStorage uploads a file (ISO or container template) to a storage pool and returns the task UPID.
+func (c *Client) UploadToStorage(ctx context.Context, node, storage, contentType, filename string, reader io.Reader) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/upload"
+	fields := map[string]string{
+		"content": contentType,
+	}
+	var upid string
+	if err := c.doMultipart(ctx, path, fields, "filename", filename, reader, &upid); err != nil {
+		return "", fmt.Errorf("upload to %s/%s: %w", node, storage, err)
+	}
+	return upid, nil
+}
+
+// DeleteStorageContent deletes a volume from a storage pool and returns the task UPID (if async) or nil.
+func (c *Client) DeleteStorageContent(ctx context.Context, node, storage, volume string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/content/" + url.PathEscape(volume)
+	var upid string
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("delete volume %s on %s/%s: %w", volume, node, storage, err)
+	}
+	return upid, nil
+}
+
+// ResizeDisk resizes a VM disk and returns the task UPID.
+func (c *Client) ResizeDisk(ctx context.Context, node string, vmid int, params DiskResizeParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	form := url.Values{}
+	form.Set("disk", params.Disk)
+	form.Set("size", params.Size)
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/resize"
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("resize disk on VM %d: %w", vmid, err)
+	}
+	return nil
+}
+
+// MoveDisk moves a VM disk to another storage and returns the task UPID.
+func (c *Client) MoveDisk(ctx context.Context, node string, vmid int, params DiskMoveParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	form.Set("disk", params.Disk)
+	form.Set("storage", params.Storage)
+	if params.Delete {
+		form.Set("delete", "1")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/move_disk"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("move disk on VM %d: %w", vmid, err)
+	}
+	return upid, nil
 }

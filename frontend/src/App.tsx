@@ -9,6 +9,7 @@ import { ClustersListPage } from "@/features/clusters/pages/ClustersListPage";
 import { ClusterDetailPage } from "@/features/clusters/pages/ClusterDetailPage";
 import { InventoryPage } from "@/features/inventory/pages/InventoryPage";
 import { VMDetailPage } from "@/features/vms/pages/VMDetailPage";
+import { StoragePage } from "@/features/storage/pages/StoragePage";
 
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
@@ -50,6 +51,10 @@ const router = createBrowserRouter([
           {
             path: "inventory/:kind/:clusterId/:vmId",
             element: <VMDetailPage />,
+          },
+          {
+            path: "storage",
+            element: <StoragePage />,
           },
           {
             path: "console",

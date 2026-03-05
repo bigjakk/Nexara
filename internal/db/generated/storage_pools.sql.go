@@ -11,6 +11,33 @@ import (
 	"github.com/google/uuid"
 )
 
+const getStoragePool = `-- name: GetStoragePool :one
+SELECT id, cluster_id, node_id, storage, type, content, active, enabled, shared, total, used, avail, last_seen_at, created_at, updated_at FROM storage_pools WHERE id = $1
+`
+
+func (q *Queries) GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error) {
+	row := q.db.QueryRow(ctx, getStoragePool, id)
+	var i StoragePool
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.NodeID,
+		&i.Storage,
+		&i.Type,
+		&i.Content,
+		&i.Active,
+		&i.Enabled,
+		&i.Shared,
+		&i.Total,
+		&i.Used,
+		&i.Avail,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listStoragePoolsByCluster = `-- name: ListStoragePoolsByCluster :many
 SELECT id, cluster_id, node_id, storage, type, content, active, enabled, shared, total, used, avail, last_seen_at, created_at, updated_at FROM storage_pools WHERE cluster_id = $1 ORDER BY storage
 `

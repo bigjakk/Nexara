@@ -51,8 +51,15 @@ func (s *Server) setupRoutes() {
 			clusters.Post("/:cluster_id/containers/:ct_id/migrate", s.containerHandler.MigrateContainer)
 			clusters.Delete("/:cluster_id/containers/:ct_id", s.containerHandler.DestroyContainer)
 		}
+		if s.vmHandler != nil {
+			clusters.Post("/:cluster_id/vms/:vm_id/disks/resize", s.vmHandler.ResizeDisk)
+			clusters.Post("/:cluster_id/vms/:vm_id/disks/move", s.vmHandler.MoveDisk)
+		}
 		if s.storageHandler != nil {
 			clusters.Get("/:cluster_id/storage", s.storageHandler.ListByCluster)
+			clusters.Get("/:cluster_id/storage/:storage_id/content", s.storageHandler.GetContent)
+			clusters.Post("/:cluster_id/storage/:storage_id/upload", s.storageHandler.UploadFile)
+			clusters.Delete("/:cluster_id/storage/:storage_id/content/:volume", s.storageHandler.DeleteContent)
 		}
 		if s.metricsHandler != nil {
 			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)

@@ -220,6 +220,29 @@ type TaskLogEntry struct {
 	T string `json:"t"`
 }
 
+// StorageContent represents an item from GET /nodes/{node}/storage/{storage}/content.
+type StorageContent struct {
+	Volid   string `json:"volid"`
+	Format  string `json:"format"`
+	Size    int64  `json:"size"`
+	CTime   int64  `json:"ctime"`
+	Content string `json:"content"`
+	VMID    int    `json:"vmid,omitempty"`
+}
+
+// DiskResizeParams holds parameters for a VM disk resize operation.
+type DiskResizeParams struct {
+	Disk string `json:"disk"`
+	Size string `json:"size"`
+}
+
+// DiskMoveParams holds parameters for a VM disk move operation.
+type DiskMoveParams struct {
+	Disk    string `json:"disk"`
+	Storage string `json:"storage"`
+	Delete  bool   `json:"delete,omitempty"`
+}
+
 // ClusterStatusEntry represents an entry from GET /cluster/status.
 type ClusterStatusEntry struct {
 	Type    string `json:"type"`
