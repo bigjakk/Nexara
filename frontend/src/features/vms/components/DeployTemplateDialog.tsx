@@ -62,17 +62,19 @@ export function DeployTemplateDialog({
   const [targetNode, setTargetNode] = useState("");
   const [upid, setUpid] = useState<string | null>(null);
 
-  function getNextId(): number {
-    if (!existingIds) return 100;
-    let id = 100;
-    while (existingIds.has(id)) id++;
-    return id;
-  }
+  const nextAvailableId = (() => {
+    if (!existingIds || existingIds.size === 0) return 100;
+    let candidate = 100;
+    while (existingIds.has(candidate)) candidate++;
+    return candidate;
+  })();
+
+  const parsedNewId = parseInt(newId, 10);
+  const isDuplicate = existingIds ? existingIds.has(parsedNewId) : false;
 
   function handleOpen(isOpen: boolean) {
     if (isOpen) {
-      const next = getNextId();
-      setNewId(String(next));
+      setNewId(String(nextAvailableId));
       setNewName(`${templateName}-clone`);
       setFullClone(true);
       setStorage("");
@@ -145,6 +147,11 @@ export function DeployTemplateDialog({
                   onChange={(e) => { setNewId(e.target.value); }}
                   required
                 />
+                {isDuplicate && (
+                  <p className="text-xs text-yellow-600 dark:text-yellow-500">
+                    VMID already in use
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="deploy-name">Name</Label>
@@ -214,7 +221,7 @@ export function DeployTemplateDialog({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={cloneMutation.isPending}>
+              <Button type="submit" disabled={cloneMutation.isPending || isDuplicate}>
                 {cloneMutation.isPending ? "Deploying..." : "Deploy"}
               </Button>
             </DialogFooter>
