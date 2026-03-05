@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import type { PBSSnapshot } from "../types/backup";
+import { RestoreDialog } from "./RestoreDialog";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -23,9 +24,10 @@ function formatUnixTime(ts: number): string {
 
 interface SnapshotTableProps {
   snapshots: PBSSnapshot[];
+  pbsId: string;
 }
 
-export function SnapshotTable({ snapshots }: SnapshotTableProps) {
+export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
   if (snapshots.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
@@ -47,6 +49,7 @@ export function SnapshotTable({ snapshots }: SnapshotTableProps) {
             <TableHead>Verified</TableHead>
             <TableHead>Protected</TableHead>
             <TableHead>Owner</TableHead>
+            <TableHead className="w-12" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -85,6 +88,9 @@ export function SnapshotTable({ snapshots }: SnapshotTableProps) {
               </TableCell>
               <TableCell className="text-sm text-muted-foreground">
                 {snap.owner || "-"}
+              </TableCell>
+              <TableCell>
+                <RestoreDialog snapshot={snap} pbsId={pbsId} />
               </TableCell>
             </TableRow>
           ))}

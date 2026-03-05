@@ -141,3 +141,33 @@ export function useCreateCluster() {
     },
   });
 }
+
+export interface UpdateClusterRequest {
+  name?: string;
+  api_url?: string;
+  token_id?: string;
+  token_secret?: string;
+  tls_fingerprint?: string;
+}
+
+export function useUpdateCluster() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateClusterRequest }) =>
+      apiClient.put<ClusterResponse>(`/api/v1/clusters/${id}`, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["clusters"] });
+    },
+  });
+}
+
+export function useDeleteCluster() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient.delete<{ status: string }>(`/api/v1/clusters/${id}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["clusters"] });
+    },
+  });
+}

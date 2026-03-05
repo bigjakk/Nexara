@@ -3,8 +3,6 @@ import {
   LayoutDashboard,
   Server,
   Package,
-  Settings,
-  Users,
   Shield,
   HardDrive,
   TerminalSquare,
@@ -30,8 +28,6 @@ const navItems: NavItem[] = [
   { label: "Ceph", to: "/ceph", icon: Database },
   { label: "Backup", to: "/backup", icon: Shield },
   { label: "Audit Log", to: "/audit-log", icon: ScrollText, adminOnly: true },
-  { label: "Users", to: "/users", icon: Users, adminOnly: true },
-  { label: "Settings", to: "/settings", icon: Settings, adminOnly: true },
 ];
 
 export function Sidebar() {

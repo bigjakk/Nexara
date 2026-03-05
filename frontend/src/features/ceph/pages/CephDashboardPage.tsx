@@ -8,6 +8,7 @@ import {
   useCephOSDs,
   useCephPools,
   useCephMonitors,
+  useCephFS,
   useCephCrushRules,
 } from "../api/ceph-queries";
 import { CephStatusCards } from "../components/CephStatusCards";
@@ -16,7 +17,7 @@ import { OSDTable } from "../components/OSDTable";
 import { PoolTable } from "../components/PoolTable";
 import { PoolCreateDialog } from "../components/PoolCreateDialog";
 import { MonitorList } from "../components/MonitorList";
-import { CrushRuleTable } from "../components/CrushRuleTable";
+import { CrushTree } from "../components/CrushTree";
 import { CephMetricsChart } from "../components/CephMetricsChart";
 import { ApiClientError } from "@/lib/api-client";
 
@@ -32,12 +33,14 @@ export function CephDashboardPage() {
   const osdsQuery = useCephOSDs(activeClusterId);
   const poolsQuery = useCephPools(activeClusterId);
   const monitorsQuery = useCephMonitors(activeClusterId);
+  const fsQuery = useCephFS(activeClusterId);
   const crushRulesQuery = useCephCrushRules(activeClusterId);
 
   const status = statusQuery.data;
   const osds = osdsQuery.data ?? [];
   const pools = poolsQuery.data ?? [];
   const monitors = monitorsQuery.data ?? [];
+  const filesystems = fsQuery.data ?? [];
   const crushRules = crushRulesQuery.data ?? [];
 
   const isCephNotFound =
@@ -114,15 +117,17 @@ export function CephDashboardPage() {
               <TabsTrigger value="monitors">
                 Monitors ({status.monmap.num_mons})
               </TabsTrigger>
+              {filesystems.length > 0 && (
+                <TabsTrigger value="fs">
+                  CephFS ({filesystems.length})
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6">
               <CephMetricsChart clusterId={activeClusterId} />
-              {crushRules.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="text-sm font-medium">CRUSH Rules</h3>
-                  <CrushRuleTable rules={crushRules} />
-                </div>
+              {osds.length > 0 && (
+                <CrushTree osds={osds} crushRules={crushRules} />
               )}
             </TabsContent>
 
@@ -144,6 +149,31 @@ export function CephDashboardPage() {
             <TabsContent value="monitors" className="space-y-4">
               <MonitorList monitors={monitors} />
             </TabsContent>
+
+            {filesystems.length > 0 && (
+              <TabsContent value="fs" className="space-y-4">
+                <div className="rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/30">
+                        <th className="px-4 py-2 text-left font-medium">Name</th>
+                        <th className="px-4 py-2 text-left font-medium">Metadata Pool</th>
+                        <th className="px-4 py-2 text-left font-medium">Data Pool</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filesystems.map((fs) => (
+                        <tr key={fs.name} className="border-b">
+                          <td className="px-4 py-2 font-medium">{fs.name}</td>
+                          <td className="px-4 py-2 text-muted-foreground">{fs.metadata_pool}</td>
+                          <td className="px-4 py-2 text-muted-foreground">{fs.data_pool}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </TabsContent>
+            )}
           </Tabs>
         </>
       )}

@@ -9,11 +9,13 @@ import {
   usePBSSnapshots,
   usePBSSyncJobs,
   usePBSVerifyJobs,
+  usePBSTasks,
 } from "../api/backup-queries";
 import { DatastoreCards } from "../components/DatastoreCards";
 import { SnapshotTable } from "../components/SnapshotTable";
 import { SyncJobTable } from "../components/SyncJobTable";
 import { VerifyJobTable } from "../components/VerifyJobTable";
+import { PBSTaskTable } from "../components/PBSTaskTable";
 import { GCDialog } from "../components/GCDialog";
 import { DatastoreChart } from "../components/DatastoreChart";
 import { AddPBSServerDialog } from "../components/AddPBSServerDialog";
@@ -33,10 +35,13 @@ export function BackupDashboardPage() {
   const syncJobsQuery = usePBSSyncJobs(activeServerId);
   const verifyJobsQuery = usePBSVerifyJobs(activeServerId);
 
+  const tasksQuery = usePBSTasks(activeServerId);
+
   const datastores = dsStatusQuery.data ?? [];
   const snapshots = snapshotsQuery.data ?? [];
   const syncJobs = syncJobsQuery.data ?? [];
   const verifyJobs = verifyJobsQuery.data ?? [];
+  const tasks = tasksQuery.data ?? [];
 
   const isNotFound =
     dsStatusQuery.isError &&
@@ -139,6 +144,9 @@ export function BackupDashboardPage() {
               <TabsTrigger value="verification">
                 Verification ({verifyJobs.length})
               </TabsTrigger>
+              <TabsTrigger value="tasks">
+                Tasks ({tasks.length})
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6">
@@ -157,7 +165,7 @@ export function BackupDashboardPage() {
             </TabsContent>
 
             <TabsContent value="snapshots" className="space-y-4">
-              <SnapshotTable snapshots={snapshots} />
+              <SnapshotTable snapshots={snapshots} pbsId={activeServerId} />
             </TabsContent>
 
             <TabsContent value="replication" className="space-y-4">
@@ -166,6 +174,10 @@ export function BackupDashboardPage() {
 
             <TabsContent value="verification" className="space-y-4">
               <VerifyJobTable jobs={verifyJobs} pbsId={activeServerId} />
+            </TabsContent>
+
+            <TabsContent value="tasks" className="space-y-4">
+              <PBSTaskTable tasks={tasks} />
             </TabsContent>
           </Tabs>
         </>
