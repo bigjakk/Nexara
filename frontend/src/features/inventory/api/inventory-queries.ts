@@ -1,12 +1,13 @@
 import { useQueries } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useMetricStore } from "@/stores/metric-store";
+import { useDashboardMetrics } from "@/hooks/useMetrics";
 import type {
   ClusterResponse,
   NodeResponse,
   VMResponse,
 } from "@/types/api";
+import type { VmLiveMetric } from "@/types/ws";
 import type { InventoryRow, ResourceStatus, ResourceType } from "../types/inventory";
 
 function normalizeStatus(raw: string): ResourceStatus {
@@ -67,7 +68,9 @@ function vmToRow(
 function nodeToRow(
   node: NodeResponse,
   cluster: ClusterResponse,
+  liveMetrics: Map<string, VmLiveMetric>,
 ): InventoryRow {
+  const live = liveMetrics.get(node.id);
   return {
     key: `${cluster.id}:node:${node.id}`,
     id: node.id,
@@ -86,15 +89,18 @@ function nodeToRow(
     haState: "",
     pool: "",
     template: false,
-    cpuPercent: null,
-    memPercent: null,
+    cpuPercent: live?.cpuPercent ?? null,
+    memPercent: live?.memPercent ?? null,
   };
 }
 
 export function useInventoryData() {
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
-  const metricsMap = useMetricStore((s) => s.metrics);
+  const clusterIds = clusters.map((c) => c.id);
+
+  // Subscribe to live WebSocket metrics for all clusters
+  const metricsMap = useDashboardMetrics(clusterIds);
 
   const nodeQueries = useQueries({
     queries: clusters.map((cluster) => ({
@@ -135,12 +141,12 @@ export function useInventoryData() {
       const vms = vmQueries[i]?.data ?? [];
       const nodeMap = buildNodeMap(nodes);
 
-      // Build live metric lookup from all VM metrics
       const clusterMetrics = metricsMap.get(cluster.id);
-      const liveMetrics = clusterMetrics?.vmMetrics ?? new Map<string, { cpuPercent: number; memPercent: number }>();
+      const vmLive = clusterMetrics?.vmMetrics ?? new Map<string, VmLiveMetric>();
+      const nodeLive = clusterMetrics?.nodeMetrics ?? new Map<string, VmLiveMetric>();
 
-      const vmRows = vms.map((vm) => vmToRow(vm, cluster, nodeMap, liveMetrics));
-      const nodeRows = nodes.map((node) => nodeToRow(node, cluster));
+      const vmRows = vms.map((vm) => vmToRow(vm, cluster, nodeMap, vmLive));
+      const nodeRows = nodes.map((node) => nodeToRow(node, cluster, nodeLive));
       return [...vmRows, ...nodeRows];
     });
   }

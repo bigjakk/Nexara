@@ -17,6 +17,9 @@ import { MigrateDialog } from "../components/MigrateDialog";
 import { DestroyDialog } from "../components/DestroyDialog";
 import { SnapshotPanel } from "../components/SnapshotPanel";
 import { CloudInitPanel } from "../components/CloudInitPanel";
+import { HardwarePanel } from "../components/HardwarePanel";
+import { SchedulePanel } from "../components/SchedulePanel";
+import { InlineVNCViewer } from "../components/InlineVNCViewer";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 
@@ -101,7 +104,7 @@ export function VMDetailPage() {
         clusterID: clusterId,
         node: nodeName,
         vmid: vm.vmid,
-        type: kind === "ct" ? "ct_attach" : "vm_serial",
+        type: kind === "ct" ? "ct_vnc" : "vm_serial",
         label: `${kind === "ct" ? "CT" : "Serial"}: ${vm.name}`,
       });
     }
@@ -148,11 +151,15 @@ export function VMDetailPage() {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          {kind === "vm" && (
+            <TabsTrigger value="hardware">Hardware</TabsTrigger>
+          )}
           <TabsTrigger value="metrics">Metrics</TabsTrigger>
           <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
           {kind === "vm" && (
             <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
           )}
+          <TabsTrigger value="schedules">Schedules</TabsTrigger>
           <TabsTrigger value="console">Console</TabsTrigger>
         </TabsList>
 
@@ -172,6 +179,12 @@ export function VMDetailPage() {
             <InfoCard label="Template" value={vm.template ? "Yes" : "No"} />
           </div>
         </TabsContent>
+
+        {kind === "vm" && (
+          <TabsContent value="hardware" className="mt-4">
+            <HardwarePanel clusterId={clusterId} vmId={vmId} vmStatus={vm.status} />
+          </TabsContent>
+        )}
 
         <TabsContent value="metrics" className="mt-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -214,7 +227,16 @@ export function VMDetailPage() {
           </TabsContent>
         )}
 
-        <TabsContent value="console" className="mt-4">
+        <TabsContent value="schedules" className="mt-4">
+          <SchedulePanel
+            clusterId={clusterId}
+            kind={kind}
+            vmid={vm.vmid}
+            node={nodeName}
+          />
+        </TabsContent>
+
+        <TabsContent value="console" className="mt-4 space-y-4">
           <div className="flex gap-3">
             {kind === "vm" && (
               <Button
@@ -224,7 +246,7 @@ export function VMDetailPage() {
                 disabled={normalizedStatus !== "running"}
               >
                 <Monitor className="h-4 w-4" />
-                Open VNC Console
+                <span className="hidden sm:inline">Open in</span> Dedicated Console
               </Button>
             )}
             <Button
@@ -242,6 +264,14 @@ export function VMDetailPage() {
               </p>
             )}
           </div>
+          {normalizedStatus === "running" && (
+            <InlineVNCViewer
+              clusterId={clusterId}
+              node={nodeName}
+              vmid={vm.vmid}
+              guestType={kind === "ct" ? "lxc" : "qemu"}
+            />
+          )}
         </TabsContent>
       </Tabs>
 

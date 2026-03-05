@@ -33,7 +33,7 @@ export function ConsolePanel() {
           </div>
         ) : (
           tabs.map((tab) =>
-            tab.type === "vm_vnc" ? (
+            tab.type === "vm_vnc" || tab.type === "ct_vnc" ? (
               <VNCViewer
                 key={tab.id}
                 tab={tab}

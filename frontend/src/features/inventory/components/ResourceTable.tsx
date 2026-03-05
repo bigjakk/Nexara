@@ -87,7 +87,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("type", {
       header: "Type",
-      cell: ({ getValue }) => <ResourceTypeBadge type={getValue()} />,
+      cell: ({ row, getValue }) => <ResourceTypeBadge type={getValue()} template={row.original.template} />,
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("name", {
@@ -108,12 +108,14 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
           return <span className="font-medium">{getValue()}</span>;
         }
         return (
-          <Link
-            to={`/inventory/${r.type}/${r.clusterId}/${r.id}`}
-            className="font-medium text-primary hover:underline"
-          >
-            {getValue()}
-          </Link>
+          <span className="flex items-center gap-1.5">
+            <Link
+              to={`/inventory/${r.type}/${r.clusterId}/${r.id}`}
+              className={`font-medium hover:underline ${r.template ? "text-amber-700 dark:text-amber-400" : "text-primary"}`}
+            >
+              {getValue()}
+            </Link>
+          </span>
         );
       },
       enableHiding: true,

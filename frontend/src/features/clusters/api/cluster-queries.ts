@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { ClusterResponse, NodeResponse, StorageResponse } from "@/types/api";
+import type { ClusterResponse, NodeResponse, StorageResponse, VMResponse } from "@/types/api";
 
 export function useCluster(id: string) {
   return useQuery({
@@ -27,6 +27,52 @@ export function useClusterStorage(clusterId: string) {
     queryFn: () =>
       apiClient.get<StorageResponse[]>(
         `/api/v1/clusters/${clusterId}/storage`,
+      ),
+    enabled: clusterId.length > 0,
+  });
+}
+
+export interface BridgeResponse {
+  iface: string;
+  active: boolean;
+  address?: string;
+  cidr?: string;
+}
+
+export function useNodeBridges(clusterId: string, nodeName: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeName, "bridges"],
+    queryFn: () =>
+      apiClient.get<BridgeResponse[]>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/bridges`,
+      ),
+    enabled: clusterId.length > 0 && nodeName.length > 0,
+  });
+}
+
+export interface MachineTypeResponse {
+  id: string;
+  type: string;
+}
+
+export function useMachineTypes(clusterId: string, nodeName: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeName, "machine-types"],
+    queryFn: () =>
+      apiClient.get<MachineTypeResponse[]>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/machine-types`,
+      ),
+    enabled: clusterId.length > 0 && nodeName.length > 0,
+    staleTime: 300_000,
+  });
+}
+
+export function useClusterVMs(clusterId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "vms"],
+    queryFn: () =>
+      apiClient.get<VMResponse[]>(
+        `/api/v1/clusters/${clusterId}/vms`,
       ),
     enabled: clusterId.length > 0,
   });

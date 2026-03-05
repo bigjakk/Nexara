@@ -506,20 +506,26 @@ func (h *ContainerHandler) RollbackSnapshot(c *fiber.Ctx) error {
 // --- Create Container handler ---
 
 type createCTRequest struct {
-	VMID         int    `json:"vmid"`
-	Hostname     string `json:"hostname"`
-	Node         string `json:"node"`
-	OSTemplate   string `json:"ostemplate"`
-	Storage      string `json:"storage"`
-	RootFS       string `json:"rootfs"`
-	Memory       int    `json:"memory"`
-	Swap         int    `json:"swap"`
-	Cores        int    `json:"cores"`
-	Net0         string `json:"net0"`
-	Password     string `json:"password"`
-	SSHKeys      string `json:"ssh_keys"`
-	Unprivileged bool   `json:"unprivileged"`
-	Start        bool   `json:"start"`
+	VMID         int               `json:"vmid"`
+	Hostname     string            `json:"hostname"`
+	Node         string            `json:"node"`
+	OSTemplate   string            `json:"ostemplate"`
+	Storage      string            `json:"storage"`
+	RootFS       string            `json:"rootfs"`
+	Memory       int               `json:"memory"`
+	Swap         int               `json:"swap"`
+	Cores        int               `json:"cores"`
+	Net0         string            `json:"net0"`
+	Password     string            `json:"password"`
+	SSHKeys      string            `json:"ssh_keys"`
+	Unprivileged bool              `json:"unprivileged"`
+	Start        bool              `json:"start"`
+	Description  string            `json:"description"`
+	Tags         string            `json:"tags"`
+	Pool         string            `json:"pool"`
+	Nameserver   string            `json:"nameserver"`
+	Searchdomain string            `json:"searchdomain"`
+	Extra        map[string]string `json:"extra"`
 }
 
 // CreateContainer handles POST /api/v1/clusters/:cluster_id/containers.
@@ -567,6 +573,12 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 		SSHKeys:      req.SSHKeys,
 		Unprivileged: req.Unprivileged,
 		Start:        req.Start,
+		Description:  req.Description,
+		Tags:         req.Tags,
+		Pool:         req.Pool,
+		Nameserver:   req.Nameserver,
+		Searchdomain: req.Searchdomain,
+		Extra:        req.Extra,
 	})
 	if err != nil {
 		return mapProxmoxError(err)
@@ -611,9 +623,8 @@ func (h *ContainerHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID
 
 // auditLog writes an audit log entry for container operations.
 func (h *ContainerHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	userID, _ := c.Locals("user_id").(string)
-	uid, err := uuid.Parse(userID)
-	if err != nil {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
 		return
 	}
 	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{

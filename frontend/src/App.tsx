@@ -12,6 +12,7 @@ import { VMDetailPage } from "@/features/vms/pages/VMDetailPage";
 import { StoragePage } from "@/features/storage/pages/StoragePage";
 import { CephDashboardPage } from "@/features/ceph/pages/CephDashboardPage";
 import { BackupDashboardPage } from "@/features/backup/pages/BackupDashboardPage";
+import { AuditLogPage } from "@/features/audit/pages/AuditLogPage";
 
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
@@ -65,6 +66,10 @@ const router = createBrowserRouter([
           {
             path: "backup",
             element: <BackupDashboardPage />,
+          },
+          {
+            path: "audit-log",
+            element: <AuditLogPage />,
           },
           {
             path: "console",

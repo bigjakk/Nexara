@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronUp,
   ChevronDown,
@@ -10,11 +10,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api-client";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import {
   useTaskHistory,
   useClearTaskHistory,
   useTaskLog,
+  useTaskStatus,
   type TaskHistoryEntry,
 } from "@/features/vms/api/vm-queries";
 
@@ -53,6 +56,39 @@ function formatDuration(startedAt: string, finishedAt: string | null): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}m ${s}s`;
+}
+
+/**
+ * Invisible component that polls Proxmox for a running task's status
+ * and updates the task history DB when it completes.
+ */
+function RunningTaskUpdater({ task }: { task: TaskHistoryEntry }) {
+  const { data: proxmoxTask } = useTaskStatus(task.cluster_id, task.upid);
+  const queryClient = useQueryClient();
+  const updatedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!proxmoxTask) return;
+    const key = `${task.upid}:${proxmoxTask.status}:${proxmoxTask.exit_status ?? ""}:${String(proxmoxTask.progress)}`;
+    if (updatedRef.current === key) return;
+    updatedRef.current = key;
+
+    void apiClient
+      .put(`/api/v1/tasks/${encodeURIComponent(task.upid)}`, {
+        status: proxmoxTask.status,
+        exit_status: proxmoxTask.exit_status ?? "",
+        progress: proxmoxTask.progress ?? null,
+        finished_at: proxmoxTask.status === "stopped" ? new Date().toISOString() : null,
+      })
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+      })
+      .catch(() => {
+        // ignore update failures
+      });
+  }, [proxmoxTask, task.upid, queryClient]);
+
+  return null;
 }
 
 function TaskRow({ task, expanded, onToggle }: {
@@ -248,8 +284,16 @@ export function TaskLogPanel() {
     dragRef.current = null;
   }, []);
 
+  // Poll Proxmox for all running tasks to keep their status up to date.
+  const runningTasks = tasks?.filter((t) => t.status === "running") ?? [];
+
   return (
     <div className="flex flex-col border-t bg-background">
+      {/* Invisible pollers for running tasks */}
+      {runningTasks.map((t) => (
+        <RunningTaskUpdater key={t.upid} task={t} />
+      ))}
+
       {/* Resize handle — only visible when panel is open */}
       {panelOpen && (
         <div

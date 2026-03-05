@@ -529,6 +529,115 @@ func (h *VMHandler) MoveDisk(c *fiber.Ctx) error {
 	})
 }
 
+// --- Disk Attach/Detach ---
+
+type diskAttachRequest struct {
+	Bus     string `json:"bus"`
+	Index   int    `json:"index"`
+	Storage string `json:"storage"`
+	Size    string `json:"size"`
+	Format  string `json:"format"`
+}
+
+type diskDetachRequest struct {
+	Disk string `json:"disk"`
+}
+
+// AttachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach.
+func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var req diskAttachRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Bus == "" || req.Storage == "" || req.Size == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "bus, storage, and size are required")
+	}
+
+	validBus := map[string]bool{"scsi": true, "sata": true, "virtio": true, "ide": true}
+	if !validBus[req.Bus] {
+		return fiber.NewError(fiber.StatusBadRequest, "bus must be one of: scsi, sata, virtio, ide")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.AttachDisk(c.Context(), node.Name, int(vm.Vmid), proxmox.DiskAttachParams{
+		Bus:     req.Bus,
+		Index:   req.Index,
+		Storage: req.Storage,
+		Size:    req.Size,
+		Format:  req.Format,
+	}); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_attach")
+
+	return c.JSON(vmActionResponse{
+		UPID:   "",
+		Status: "completed",
+	})
+}
+
+// DetachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/detach.
+func (h *VMHandler) DetachDisk(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var req diskDetachRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Disk == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "disk is required")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.DetachDisk(c.Context(), node.Name, int(vm.Vmid), req.Disk); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_detach")
+
+	return c.JSON(vmActionResponse{
+		UPID:   "",
+		Status: "completed",
+	})
+}
+
 // resolveVM loads the VM, its node, the cluster, and creates a Proxmox client.
 func (h *VMHandler) resolveVM(c *fiber.Ctx, clusterID, vmID uuid.UUID) (db.Vm, db.Node, db.Cluster, *proxmox.Client, error) {
 	var zeroVM db.Vm
@@ -637,9 +746,8 @@ func splitUPID(upid string) []string {
 
 // auditLog writes an audit log entry. Failures are logged but don't fail the request.
 func (h *VMHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	userID, _ := c.Locals("user_id").(string)
-	uid, err := uuid.Parse(userID)
-	if err != nil {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
 		return
 	}
 	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
@@ -851,6 +959,45 @@ type createVMRequest struct {
 	Boot    string `json:"boot"`
 	CDRom   string `json:"cdrom"`
 	Start   bool   `json:"start"`
+
+	// System
+	BIOS      string `json:"bios,omitempty"`
+	Machine   string `json:"machine,omitempty"`
+	ScsiHW    string `json:"scsihw,omitempty"`
+	EFIDisk0  string `json:"efidisk0,omitempty"`
+	TPMState0 string `json:"tpmstate0,omitempty"`
+	Agent     string `json:"agent,omitempty"`
+
+	// CPU
+	CPUType string `json:"cpu,omitempty"`
+	Numa    *bool  `json:"numa,omitempty"`
+
+	// Memory
+	Balloon *int `json:"balloon,omitempty"`
+
+	// Display
+	VGA string `json:"vga,omitempty"`
+
+	// Boot / Options
+	OnBoot  *bool  `json:"onboot,omitempty"`
+	Hotplug string `json:"hotplug,omitempty"`
+	Tablet  *bool  `json:"tablet,omitempty"`
+
+	// Cloud-Init
+	CIUser       string `json:"ciuser,omitempty"`
+	CIPassword   string `json:"cipassword,omitempty"`
+	SSHKeys      string `json:"sshkeys,omitempty"`
+	IPConfig0    string `json:"ipconfig0,omitempty"`
+	Nameserver   string `json:"nameserver,omitempty"`
+	Searchdomain string `json:"searchdomain,omitempty"`
+
+	// Meta
+	Description string `json:"description,omitempty"`
+	Tags        string `json:"tags,omitempty"`
+	Pool        string `json:"pool,omitempty"`
+
+	// Extra allows arbitrary additional Proxmox config fields (e.g. scsi1, ide0, sata0).
+	Extra map[string]string `json:"extra,omitempty"`
 }
 
 // CreateVM handles POST /api/v1/clusters/:cluster_id/vms.
@@ -894,6 +1041,37 @@ func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
 		Boot:    req.Boot,
 		CDRom:   req.CDRom,
 		Start:   req.Start,
+		// System
+		BIOS:      req.BIOS,
+		Machine:   req.Machine,
+		ScsiHW:    req.ScsiHW,
+		EFIDisk0:  req.EFIDisk0,
+		TPMState0: req.TPMState0,
+		Agent:     req.Agent,
+		// CPU
+		CPUType: req.CPUType,
+		Numa:    req.Numa,
+		// Memory
+		Balloon: req.Balloon,
+		// Display
+		VGA: req.VGA,
+		// Boot / Options
+		OnBoot:  req.OnBoot,
+		Hotplug: req.Hotplug,
+		Tablet:  req.Tablet,
+		// Cloud-Init
+		CIUser:       req.CIUser,
+		CIPassword:   req.CIPassword,
+		SSHKeys:      req.SSHKeys,
+		IPConfig0:    req.IPConfig0,
+		Nameserver:   req.Nameserver,
+		Searchdomain: req.Searchdomain,
+		// Meta
+		Description: req.Description,
+		Tags:        req.Tags,
+		Pool:        req.Pool,
+		// Extra (additional disks, CD-ROMs, etc.)
+		Extra: req.Extra,
 	})
 	if err != nil {
 		return mapProxmoxError(err)
@@ -980,6 +1158,139 @@ func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
+// --- Machine types ---
+
+type machineTypeResponse struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+}
+
+// ListMachineTypes handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/machine-types.
+func (h *VMHandler) ListMachineTypes(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	nodeName := c.Params("node_name")
+	if nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	types, err := pxClient.GetMachineTypes(c.Context(), nodeName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	result := make([]machineTypeResponse, 0, len(types))
+	for _, t := range types {
+		result = append(result, machineTypeResponse{
+			ID:   t.ID,
+			Type: t.Type,
+		})
+	}
+
+	return c.JSON(result)
+}
+
+// --- Resource pools ---
+
+type resourcePoolResponse struct {
+	PoolID  string `json:"poolid"`
+	Comment string `json:"comment,omitempty"`
+}
+
+// ListResourcePools handles GET /api/v1/clusters/:cluster_id/pools.
+func (h *VMHandler) ListResourcePools(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	pools, err := pxClient.GetResourcePools(c.Context())
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	result := make([]resourcePoolResponse, 0, len(pools))
+	for _, p := range pools {
+		result = append(result, resourcePoolResponse{
+			PoolID:  p.PoolID,
+			Comment: p.Comment,
+		})
+	}
+
+	return c.JSON(result)
+}
+
+// --- Network bridges ---
+
+type networkBridgeResponse struct {
+	Iface   string `json:"iface"`
+	Active  bool   `json:"active"`
+	Address string `json:"address,omitempty"`
+	CIDR    string `json:"cidr,omitempty"`
+}
+
+// ListBridges handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/bridges.
+func (h *VMHandler) ListBridges(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	nodeName := c.Params("node_name")
+	if nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	ifaces, err := pxClient.GetNetworkInterfaces(c.Context(), nodeName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	var bridges []networkBridgeResponse
+	for _, iface := range ifaces {
+		if iface.Type == "bridge" {
+			bridges = append(bridges, networkBridgeResponse{
+				Iface:   iface.Iface,
+				Active:  iface.Active == 1,
+				Address: iface.Address,
+				CIDR:    iface.CIDR,
+			})
+		}
+	}
+
+	return c.JSON(bridges)
+}
+
 // mapProxmoxError converts a Proxmox client error to an appropriate Fiber error.
 func mapProxmoxError(err error) error {
 	if errors.Is(err, proxmox.ErrNotFound) {
@@ -995,5 +1306,5 @@ func mapProxmoxError(err error) error {
 	if errors.As(err, &apiErr) {
 		return fiber.NewError(fiber.StatusBadGateway, apiErr.Message)
 	}
-	return fiber.NewError(fiber.StatusInternalServerError, "Proxmox operation failed")
+	return fiber.NewError(fiber.StatusInternalServerError, "Proxmox operation failed: "+err.Error())
 }

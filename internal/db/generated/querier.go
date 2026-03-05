@@ -12,6 +12,7 @@ import (
 )
 
 type Querier interface {
+	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
 	CreatePBSServer(ctx context.Context, arg CreatePBSServerParams) (PbsServer, error)
@@ -21,6 +22,7 @@ type Querier interface {
 	DeleteCompletedTasks(ctx context.Context, userID uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
+	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
@@ -41,6 +43,7 @@ type Querier interface {
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
 	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]PbsDatastoreMetric, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
+	GetScheduledTask(ctx context.Context, id uuid.UUID) (ScheduledTask, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error)
@@ -49,12 +52,17 @@ type Querier interface {
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
 	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
+	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
 	ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error)
+	ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnrichedParams) ([]ListAuditLogEnrichedRow, error)
+	ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilteredParams) ([]AuditLog, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
+	ListDueTasks(ctx context.Context) ([]ScheduledTask, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
 	ListPBSServersByCluster(ctx context.Context, clusterID pgtype.UUID) ([]PbsServer, error)
@@ -62,6 +70,7 @@ type Querier interface {
 	ListPBSSnapshotsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSnapshot, error)
 	ListPBSSyncJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSyncJob, error)
 	ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsVerifyJob, error)
+	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
 	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
@@ -77,8 +86,10 @@ type Querier interface {
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
+	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) error
 	UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error
 	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) error
+	UpdateTaskLastRun(ctx context.Context, arg UpdateTaskLastRunParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)

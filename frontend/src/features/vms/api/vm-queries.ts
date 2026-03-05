@@ -31,6 +31,25 @@ export function useClusterVMIDs(clusterId: string) {
   });
 }
 
+// --- Resource pools in a cluster ---
+
+export interface ResourcePool {
+  poolid: string;
+  comment?: string;
+}
+
+export function useResourcePools(clusterId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "pools"],
+    queryFn: () =>
+      apiClient.get<ResourcePool[]>(
+        `/api/v1/clusters/${clusterId}/pools`,
+      ),
+    enabled: clusterId.length > 0,
+    staleTime: 60_000,
+  });
+}
+
 // --- Single VM/CT fetch ---
 
 export function useVM(clusterId: string, vmId: string, kind: ResourceKind) {
@@ -327,6 +346,38 @@ export function useRollbackSnapshot() {
   });
 }
 
+// --- Disk Resize ---
+
+interface ResizeDiskParams {
+  clusterId: string;
+  vmId: string;
+  disk: string;
+  size: string;
+}
+
+export function useResizeDisk() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, vmId, disk, size }: ResizeDiskParams) =>
+      apiClient.post<VMActionResponse>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/resize`,
+        { disk, size },
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "vms",
+          variables.vmId,
+          "config",
+        ],
+      });
+    },
+  });
+}
+
 // --- Create VM ---
 
 interface CreateVMParams {
@@ -514,6 +565,140 @@ export function useClearTaskHistory() {
     mutationFn: () => apiClient.delete<{ status: string }>("/api/v1/tasks"),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+    },
+  });
+}
+
+// --- Disk Attach/Detach ---
+
+interface AttachDiskParams {
+  clusterId: string;
+  vmId: string;
+  bus: string;
+  index: number;
+  storage: string;
+  size: string;
+  format?: string;
+}
+
+export function useAttachDisk() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, vmId, bus, index, storage, size, format }: AttachDiskParams) =>
+      apiClient.post<VMActionResponse>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/attach`,
+        { bus, index, storage, size, format },
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vms", variables.vmId, "config"],
+      });
+    },
+  });
+}
+
+interface DetachDiskParams {
+  clusterId: string;
+  vmId: string;
+  disk: string;
+}
+
+export function useDetachDisk() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, vmId, disk }: DetachDiskParams) =>
+      apiClient.post<VMActionResponse>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/detach`,
+        { disk },
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vms", variables.vmId, "config"],
+      });
+    },
+  });
+}
+
+// --- Scheduled Tasks ---
+
+export interface ScheduledTask {
+  id: string;
+  cluster_id: string;
+  resource_type: string;
+  resource_id: string;
+  node: string;
+  action: string;
+  schedule: string;
+  params: Record<string, unknown>;
+  enabled: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function useScheduledTasks(clusterId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "schedules"],
+    queryFn: () =>
+      apiClient.get<ScheduledTask[]>(
+        `/api/v1/clusters/${clusterId}/schedules`,
+      ),
+    enabled: clusterId.length > 0,
+  });
+}
+
+interface CreateScheduleParams {
+  clusterId: string;
+  body: {
+    resource_type: string;
+    resource_id: string;
+    node: string;
+    action: string;
+    schedule: string;
+    params: Record<string, unknown>;
+    enabled: boolean;
+  };
+}
+
+export function useCreateSchedule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, body }: CreateScheduleParams) =>
+      apiClient.post<ScheduledTask>(
+        `/api/v1/clusters/${clusterId}/schedules`,
+        body,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "schedules"],
+      });
+    },
+  });
+}
+
+interface DeleteScheduleParams {
+  clusterId: string;
+  scheduleId: string;
+}
+
+export function useDeleteSchedule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, scheduleId }: DeleteScheduleParams) =>
+      apiClient.delete<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/schedules/${scheduleId}`,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "schedules"],
+      });
     },
   });
 }

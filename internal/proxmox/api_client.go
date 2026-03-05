@@ -1,6 +1,7 @@
 package proxmox
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -26,6 +27,7 @@ type apiClient struct {
 	httpClient *http.Client
 	baseURL    string
 	authHeader string
+	tokenID    string // e.g. "user@pam!tokenname" — needed for terminal handshake
 	tlsCfg     *tls.Config
 }
 
@@ -85,6 +87,7 @@ func newAPIClient(cfg ClientConfig, authPrefix string) (*apiClient, error) {
 		},
 		baseURL:    baseURL,
 		authHeader: fmt.Sprintf("%s=%s=%s", authPrefix, cfg.TokenID, cfg.TokenSecret),
+		tokenID:    cfg.TokenID,
 		tlsCfg:     tlsCfg,
 	}, nil
 }
@@ -224,49 +227,61 @@ func (a *apiClient) doPut(ctx context.Context, path string, params url.Values, d
 }
 
 // doMultipart performs an authenticated POST request with multipart form data.
-func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[string]string, fileField, fileName string, fileReader io.Reader, dst interface{}) error {
+// It streams the file directly to Proxmox without buffering the entire file in
+// memory or on disk. Content-Length is pre-computed from the multipart framing
+// overhead + the known file size (Proxmox rejects chunked transfer encoding).
+func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[string]string, fileField, fileName string, fileReader io.Reader, fileSize int64, dst interface{}) error {
 	apiURL := a.baseURL + "/api2/json" + path
 
-	pr, pw := io.Pipe()
-	writer := multipart.NewWriter(pw)
+	// Build the multipart framing (headers/footers) into a buffer,
+	// substituting a placeholder for the actual file content.
+	// This lets us compute Content-Length without reading the file.
+	var prefix bytes.Buffer
+	writer := multipart.NewWriter(&prefix)
 
-	errCh := make(chan error, 1)
-	go func() {
-		defer pw.Close()
-		for k, v := range fields {
-			if err := writer.WriteField(k, v); err != nil {
-				errCh <- fmt.Errorf("write field %s: %w", k, err)
-				return
-			}
+	for k, v := range fields {
+		if err := writer.WriteField(k, v); err != nil {
+			return fmt.Errorf("write field %s: %w", k, err)
 		}
-		part, err := writer.CreateFormFile(fileField, fileName)
-		if err != nil {
-			errCh <- fmt.Errorf("create form file: %w", err)
-			return
-		}
-		if _, err := io.Copy(part, fileReader); err != nil {
-			errCh <- fmt.Errorf("copy file data: %w", err)
-			return
-		}
-		errCh <- writer.Close()
-	}()
+	}
+	// CreateFormFile writes the part header; we capture it in prefix.
+	if _, err := writer.CreateFormFile(fileField, fileName); err != nil {
+		return fmt.Errorf("create form file: %w", err)
+	}
+	// prefix now contains: all field parts + the file part header.
+	// Save prefix bytes before closing writer (which adds the closing boundary).
+	prefixBytes := make([]byte, prefix.Len())
+	copy(prefixBytes, prefix.Bytes())
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, pr)
+	// Close writes the closing boundary.
+	contentType := writer.FormDataContentType()
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	// suffix = everything after the file part header (closing boundary).
+	suffix := prefix.Bytes()[len(prefixBytes):]
+
+	totalSize := int64(len(prefixBytes)) + fileSize + int64(len(suffix))
+	body := io.MultiReader(
+		bytes.NewReader(prefixBytes),
+		fileReader,
+		bytes.NewReader(suffix),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, body)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Authorization", a.authHeader)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", contentType)
+	req.ContentLength = totalSize
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
 	}
 	defer resp.Body.Close()
-
-	if writeErr := <-errCh; writeErr != nil {
-		return fmt.Errorf("multipart write: %w", writeErr)
-	}
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {

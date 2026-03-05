@@ -10,6 +10,8 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { apiClient } from "@/lib/api-client";
+import { useQueryClient } from "@tanstack/react-query";
 import type { StorageContentItem } from "../types/storage";
 import { useDeleteContent } from "../api/storage-queries";
 
@@ -54,6 +56,7 @@ export function StorageContentTable({
   storageId,
 }: StorageContentTableProps) {
   const deleteMutation = useDeleteContent();
+  const queryClient = useQueryClient();
   const [deletingVolid, setDeletingVolid] = useState<string | null>(null);
 
   function handleDelete(volid: string) {
@@ -61,7 +64,28 @@ export function StorageContentTable({
     setDeletingVolid(volid);
     deleteMutation.mutate(
       { clusterId, storageId, volume: volid },
-      { onSettled: () => { setDeletingVolid(null); } },
+      {
+        onSuccess: (data) => {
+          if (data.upid) {
+            void apiClient
+              .post("/api/v1/tasks", {
+                cluster_id: clusterId,
+                upid: data.upid,
+                description: `Delete: ${volid}`,
+                status: "running",
+                node: "",
+                task_type: "delete",
+              })
+              .then(() => {
+                void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+              })
+              .catch(() => {
+                // ignore — task may already exist
+              });
+          }
+        },
+        onSettled: () => { setDeletingVolid(null); },
+      },
     );
   }
 

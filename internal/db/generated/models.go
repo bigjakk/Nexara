@@ -246,6 +246,24 @@ type PbsVerifyJob struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type ScheduledTask struct {
+	ID           uuid.UUID          `json:"id"`
+	ClusterID    uuid.UUID          `json:"cluster_id"`
+	ResourceType string             `json:"resource_type"`
+	ResourceID   string             `json:"resource_id"`
+	Node         string             `json:"node"`
+	Action       string             `json:"action"`
+	Schedule     string             `json:"schedule"`
+	Params       json.RawMessage    `json:"params"`
+	Enabled      bool               `json:"enabled"`
+	LastRunAt    pgtype.Timestamptz `json:"last_run_at"`
+	NextRunAt    pgtype.Timestamptz `json:"next_run_at"`
+	LastStatus   pgtype.Text        `json:"last_status"`
+	LastError    pgtype.Text        `json:"last_error"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+}
+
 type Session struct {
 	ID         uuid.UUID `json:"id"`
 	UserID     uuid.UUID `json:"user_id"`

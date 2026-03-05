@@ -100,8 +100,22 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 		return
 	}
 
-	// Request VNC proxy ticket.
-	vncResp, err := pxClient.VMVNCProxy(ctx, node, vmid)
+	// Request VNC proxy ticket — support both QEMU VMs and LXC containers.
+	guestType := conn.Query("type") // "qemu" or "lxc"; defaults to "qemu"
+	if guestType == "" {
+		guestType = "qemu"
+	}
+
+	var vncResp *proxmox.TermProxyResponse
+	var vncPath string
+	switch guestType {
+	case "lxc":
+		vncResp, err = pxClient.CTVNCProxy(ctx, node, vmid)
+		vncPath = "lxc/" + strconv.Itoa(vmid)
+	default:
+		vncResp, err = pxClient.VMVNCProxy(ctx, node, vmid)
+		vncPath = "qemu/" + strconv.Itoa(vmid)
+	}
 	if err != nil {
 		logger.Error("vncproxy request failed", "error", err)
 		h.writeError(conn, "failed to create VNC session")
@@ -109,7 +123,7 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 	}
 
 	// Connect to Proxmox vncwebsocket endpoint (ticket in URL query params).
-	pxConn, err := pxClient.DialVNCWebSocket(ctx, node, vmid, vncResp.Ticket, int(vncResp.Port))
+	pxConn, err := pxClient.DialVNCWebSocket(ctx, node, vncResp.Ticket, int(vncResp.Port), vncPath)
 	if err != nil {
 		logger.Error("dial VNC websocket failed", "error", err)
 		h.writeError(conn, "failed to connect to VNC")

@@ -78,11 +78,50 @@ func (c *Client) VMVNCProxy(ctx context.Context, node string, vmid int) (*TermPr
 	return &resp, nil
 }
 
+// CTVNCProxy requests a VNC proxy ticket for an LXC container console.
+// Uses websocket=1 so we can connect via the vncwebsocket endpoint.
+// This avoids the termproxy ticket+handshake flow which doesn't work with API tokens.
+func (c *Client) CTVNCProxy(ctx context.Context, node string, vmid int) (*TermProxyResponse, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/vncproxy"
+	params := url.Values{}
+	params.Set("websocket", "1")
+	var resp TermProxyResponse
+	if err := c.doPost(ctx, path, params, &resp); err != nil {
+		return nil, fmt.Errorf("CT %d vncproxy on %s: %w", vmid, node, err)
+	}
+	return &resp, nil
+}
+
+// NodeVNCProxy requests a VNC proxy ticket for a node shell.
+// Uses websocket=1 so we can connect via the vncwebsocket endpoint.
+func (c *Client) NodeVNCProxy(ctx context.Context, node string) (*TermProxyResponse, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/vncproxy"
+	params := url.Values{}
+	params.Set("websocket", "1")
+	var resp TermProxyResponse
+	if err := c.doPost(ctx, path, params, &resp); err != nil {
+		return nil, fmt.Errorf("node vncproxy on %s: %w", node, err)
+	}
+	return &resp, nil
+}
+
 // DialVNCWebSocket opens a WebSocket connection to the Proxmox vncwebsocket
-// endpoint for VNC console access. Unlike DialTerminal (used for shell/terminal),
-// the VNC websocket does not require a ticket+OK handshake — the ticket is passed
-// as a URL query parameter and Proxmox handles authentication from that alone.
-func (c *Client) DialVNCWebSocket(ctx context.Context, node string, vmid int, vncTicket string, port int) (*websocket.Conn, error) {
+// endpoint. The ticket is passed as a URL query parameter and Proxmox handles
+// authentication from the Authorization header + vncticket — no handshake needed.
+// The vncPath controls the resource path:
+//   - "" → /nodes/{node}/vncwebsocket
+//   - "qemu/{vmid}" → /nodes/{node}/qemu/{vmid}/vncwebsocket
+//   - "lxc/{vmid}" → /nodes/{node}/lxc/{vmid}/vncwebsocket
+func (c *Client) DialVNCWebSocket(ctx context.Context, node string, vncTicket string, port int, vncPath string) (*websocket.Conn, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err
 	}
@@ -101,7 +140,11 @@ func (c *Client) DialVNCWebSocket(ctx context.Context, node string, vmid int, vn
 		parsed.Scheme = "wss"
 	}
 
-	parsed.Path = "/api2/json/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/vncwebsocket"
+	basePath := "/api2/json/nodes/" + url.PathEscape(node)
+	if vncPath != "" {
+		basePath += "/" + vncPath
+	}
+	parsed.Path = basePath + "/vncwebsocket"
 	q := url.Values{}
 	q.Set("port", strconv.Itoa(port))
 	q.Set("vncticket", vncTicket)
@@ -109,6 +152,7 @@ func (c *Client) DialVNCWebSocket(ctx context.Context, node string, vmid int, vn
 
 	dialer := websocket.Dialer{
 		TLSClientConfig: c.tlsCfg,
+		Subprotocols:    []string{"binary"},
 	}
 
 	header := http.Header{}
@@ -132,8 +176,11 @@ func (c *Client) DialVNCWebSocket(ctx context.Context, node string, vmid int, vn
 }
 
 // DialTerminal opens a WebSocket connection to the Proxmox vncwebsocket endpoint.
-// It returns the gorilla/websocket connection for bidirectional communication.
-func (c *Client) DialTerminal(ctx context.Context, node string, vncTicket string, port int) (*websocket.Conn, error) {
+// The vncPath must match the resource that issued the termproxy ticket:
+//   - "" or "node" → /nodes/{node}/vncwebsocket
+//   - "lxc/{vmid}" → /nodes/{node}/lxc/{vmid}/vncwebsocket
+//   - "qemu/{vmid}" → /nodes/{node}/qemu/{vmid}/vncwebsocket
+func (c *Client) DialTerminal(ctx context.Context, node string, vncTicket string, port int, vncPath string, user string) (*websocket.Conn, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err
 	}
@@ -154,7 +201,11 @@ func (c *Client) DialTerminal(ctx context.Context, node string, vncTicket string
 		parsed.Scheme = "wss"
 	}
 
-	parsed.Path = "/api2/json/nodes/" + url.PathEscape(node) + "/vncwebsocket"
+	basePath := "/api2/json/nodes/" + url.PathEscape(node)
+	if vncPath != "" {
+		basePath += "/" + vncPath
+	}
+	parsed.Path = basePath + "/vncwebsocket"
 	q := url.Values{}
 	q.Set("port", strconv.Itoa(port))
 	q.Set("vncticket", vncTicket)
@@ -162,6 +213,7 @@ func (c *Client) DialTerminal(ctx context.Context, node string, vncTicket string
 
 	dialer := websocket.Dialer{
 		TLSClientConfig: c.tlsCfg,
+		Subprotocols:    []string{"binary"},
 	}
 
 	header := http.Header{}
@@ -181,13 +233,16 @@ func (c *Client) DialTerminal(ctx context.Context, node string, vncTicket string
 		resp.Body.Close()
 	}
 
-	// Send the vncticket as the first message to authenticate the session.
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(vncTicket)); err != nil {
+	// Authenticate the terminal session.
+	// Proxmox termproxy expects "user@realm:ticket\n" as a single message,
+	// then responds with "OK". The user must match the identity that created
+	// the ticket (from the termproxy response's User field).
+	authMsg := user + ":" + vncTicket + "\n"
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(authMsg)); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("send vnc ticket: %w", err)
+		return nil, fmt.Errorf("send vnc auth: %w", err)
 	}
 
-	// Read the OK response.
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
 		conn.Close()
@@ -195,7 +250,7 @@ func (c *Client) DialTerminal(ctx context.Context, node string, vncTicket string
 	}
 	if !strings.HasPrefix(string(msg), "OK") {
 		conn.Close()
-		return nil, fmt.Errorf("vnc auth failed: %s", string(msg))
+		return nil, fmt.Errorf("vnc auth failed: got %q", string(msg))
 	}
 
 	return conn, nil

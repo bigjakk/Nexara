@@ -9,6 +9,7 @@ import {
   HardDrive,
   TerminalSquare,
   Database,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,6 +29,7 @@ const navItems: NavItem[] = [
   { label: "Storage", to: "/storage", icon: HardDrive },
   { label: "Ceph", to: "/ceph", icon: Database },
   { label: "Backup", to: "/backup", icon: Shield },
+  { label: "Audit Log", to: "/audit-log", icon: ScrollText, adminOnly: true },
   { label: "Users", to: "/users", icon: Users, adminOnly: true },
   { label: "Settings", to: "/settings", icon: Settings, adminOnly: true },
 ];

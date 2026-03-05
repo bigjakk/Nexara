@@ -67,12 +67,17 @@ func (s *Server) setupRoutes() {
 		if s.vmHandler != nil {
 			clusters.Post("/:cluster_id/vms/:vm_id/disks/resize", s.vmHandler.ResizeDisk)
 			clusters.Post("/:cluster_id/vms/:vm_id/disks/move", s.vmHandler.MoveDisk)
+			clusters.Post("/:cluster_id/vms/:vm_id/disks/attach", s.vmHandler.AttachDisk)
+			clusters.Post("/:cluster_id/vms/:vm_id/disks/detach", s.vmHandler.DetachDisk)
+			clusters.Get("/:cluster_id/nodes/:node_name/bridges", s.vmHandler.ListBridges)
+			clusters.Get("/:cluster_id/nodes/:node_name/machine-types", s.vmHandler.ListMachineTypes)
+			clusters.Get("/:cluster_id/pools", s.vmHandler.ListResourcePools)
 		}
 		if s.storageHandler != nil {
 			clusters.Get("/:cluster_id/storage", s.storageHandler.ListByCluster)
 			clusters.Get("/:cluster_id/storage/:storage_id/content", s.storageHandler.GetContent)
 			clusters.Post("/:cluster_id/storage/:storage_id/upload", s.storageHandler.UploadFile)
-			clusters.Delete("/:cluster_id/storage/:storage_id/content/:volume", s.storageHandler.DeleteContent)
+			clusters.Delete("/:cluster_id/storage/:storage_id/content/*", s.storageHandler.DeleteContent)
 		}
 		if s.metricsHandler != nil {
 			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)
@@ -123,6 +128,26 @@ func (s *Server) setupRoutes() {
 	if s.backupHandler != nil && s.clusterHandler != nil {
 		clusters := v1.Group("/clusters", s.authRequired())
 		clusters.Post("/:cluster_id/restore", s.backupHandler.RestoreBackup)
+	}
+
+	// Schedule routes (under clusters).
+	if s.scheduleHandler != nil && s.clusterHandler != nil {
+		schedClusters := v1.Group("/clusters", s.authRequired())
+		schedClusters.Post("/:cluster_id/schedules", s.scheduleHandler.Create)
+		schedClusters.Get("/:cluster_id/schedules", s.scheduleHandler.List)
+		schedClusters.Put("/:cluster_id/schedules/:id", s.scheduleHandler.Update)
+		schedClusters.Delete("/:cluster_id/schedules/:id", s.scheduleHandler.Delete)
+	}
+
+	// Audit log routes.
+	if s.auditHandler != nil {
+		audit := v1.Group("/audit-log", s.authRequired())
+		audit.Get("/", s.auditHandler.List)
+
+		if s.clusterHandler != nil {
+			auditClusters := v1.Group("/clusters", s.authRequired())
+			auditClusters.Get("/:cluster_id/audit-log", s.auditHandler.ListByCluster)
+		}
 	}
 
 	// Task history routes.

@@ -351,7 +351,7 @@ func (c *Client) GetContainers(ctx context.Context, node string) ([]Container, e
 		return nil, err
 	}
 	var cts []Container
-	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/lxc?full=1", &cts); err != nil {
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/lxc", &cts); err != nil {
 		return nil, fmt.Errorf("get containers on %s: %w", node, err)
 	}
 	for i := range cts {
@@ -396,6 +396,27 @@ func (c *Client) GetClusterStatus(ctx context.Context) ([]ClusterStatusEntry, er
 	return entries, nil
 }
 
+// GetMachineTypes returns the available QEMU machine types for a node.
+func (c *Client) GetMachineTypes(ctx context.Context, node string) ([]MachineType, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var types []MachineType
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/capabilities/qemu/machines", &types); err != nil {
+		return nil, fmt.Errorf("get machine types on %s: %w", node, err)
+	}
+	return types, nil
+}
+
+// GetResourcePools returns the list of resource pools from the Proxmox cluster.
+func (c *Client) GetResourcePools(ctx context.Context) ([]ResourcePool, error) {
+	var pools []ResourcePool
+	if err := c.do(ctx, "/pools", &pools); err != nil {
+		return nil, fmt.Errorf("get resource pools: %w", err)
+	}
+	return pools, nil
+}
+
 // GetStorageContent returns the contents of a storage pool on a node.
 func (c *Client) GetStorageContent(ctx context.Context, node, storage string) ([]StorageContent, error) {
 	if err := validateNodeName(node); err != nil {
@@ -410,7 +431,7 @@ func (c *Client) GetStorageContent(ctx context.Context, node, storage string) ([
 }
 
 // UploadToStorage uploads a file (ISO or container template) to a storage pool and returns the task UPID.
-func (c *Client) UploadToStorage(ctx context.Context, node, storage, contentType, filename string, reader io.Reader) (string, error) {
+func (c *Client) UploadToStorage(ctx context.Context, node, storage, contentType, filename string, reader io.Reader, fileSize int64) (string, error) {
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
@@ -419,7 +440,7 @@ func (c *Client) UploadToStorage(ctx context.Context, node, storage, contentType
 		"content": contentType,
 	}
 	var upid string
-	if err := c.doMultipart(ctx, path, fields, "filename", filename, reader, &upid); err != nil {
+	if err := c.doMultipart(ctx, path, fields, "filename", filename, reader, fileSize, &upid); err != nil {
 		return "", fmt.Errorf("upload to %s/%s: %w", node, storage, err)
 	}
 	return upid, nil
@@ -430,7 +451,9 @@ func (c *Client) DeleteStorageContent(ctx context.Context, node, storage, volume
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
-	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/content/" + url.PathEscape(volume)
+	// Volume IDs contain ":" (storage:path) — PathEscape would over-encode it.
+	// Proxmox expects the volume as-is in the URL path.
+	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/content/" + volume
 	var upid string
 	if err := c.doDelete(ctx, path, &upid); err != nil {
 		return "", fmt.Errorf("delete volume %s on %s/%s: %w", volume, node, storage, err)
@@ -596,6 +619,51 @@ func (c *Client) MoveDisk(ctx context.Context, node string, vmid int, params Dis
 		return "", fmt.Errorf("move disk on VM %d: %w", vmid, err)
 	}
 	return upid, nil
+}
+
+// AttachDisk attaches a new disk to a VM by setting the appropriate config key.
+func (c *Client) AttachDisk(ctx context.Context, node string, vmid int, params DiskAttachParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	if params.Bus == "" || params.Storage == "" || params.Size == "" {
+		return fmt.Errorf("bus, storage, and size are required")
+	}
+
+	// Build the volume spec: "storage:size[,format=fmt]"
+	volume := params.Storage + ":" + params.Size
+	if params.Format != "" {
+		volume += ",format=" + params.Format
+	}
+
+	diskKey := params.Bus + strconv.Itoa(params.Index)
+	fields := map[string]string{
+		diskKey: volume,
+	}
+
+	return c.SetVMConfig(ctx, node, vmid, fields)
+}
+
+// DetachDisk detaches (removes) a disk from a VM config.
+func (c *Client) DetachDisk(ctx context.Context, node string, vmid int, disk string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	if disk == "" {
+		return fmt.Errorf("disk name is required")
+	}
+
+	fields := map[string]string{
+		"delete": disk,
+	}
+
+	return c.SetVMConfig(ctx, node, vmid, fields)
 }
 
 // --- PBS Restore Methods (calls PVE API to restore from PBS) ---
@@ -882,6 +950,86 @@ func (c *Client) CreateVM(ctx context.Context, node string, params CreateVMParam
 	if params.CIType != "" {
 		form.Set("citype", params.CIType)
 	}
+	if params.Nameserver != "" {
+		form.Set("nameserver", params.Nameserver)
+	}
+	if params.Searchdomain != "" {
+		form.Set("searchdomain", params.Searchdomain)
+	}
+	// System
+	if params.BIOS != "" {
+		form.Set("bios", params.BIOS)
+	}
+	if params.Machine != "" {
+		form.Set("machine", params.Machine)
+	}
+	if params.ScsiHW != "" {
+		form.Set("scsihw", params.ScsiHW)
+	} else {
+		form.Set("scsihw", "virtio-scsi-pci")
+	}
+	if params.EFIDisk0 != "" {
+		form.Set("efidisk0", params.EFIDisk0)
+	}
+	if params.TPMState0 != "" {
+		form.Set("tpmstate0", params.TPMState0)
+	}
+	if params.Agent != "" {
+		form.Set("agent", params.Agent)
+	}
+	// CPU
+	if params.CPUType != "" {
+		form.Set("cpu", params.CPUType)
+	}
+	if params.Numa != nil {
+		if *params.Numa {
+			form.Set("numa", "1")
+		} else {
+			form.Set("numa", "0")
+		}
+	}
+	// Memory
+	if params.Balloon != nil {
+		form.Set("balloon", strconv.Itoa(*params.Balloon))
+	}
+	// Display
+	if params.VGA != "" {
+		form.Set("vga", params.VGA)
+	}
+	// Boot / Options
+	if params.OnBoot != nil {
+		if *params.OnBoot {
+			form.Set("onboot", "1")
+		} else {
+			form.Set("onboot", "0")
+		}
+	}
+	if params.Hotplug != "" {
+		form.Set("hotplug", params.Hotplug)
+	}
+	if params.Tablet != nil {
+		if *params.Tablet {
+			form.Set("tablet", "1")
+		} else {
+			form.Set("tablet", "0")
+		}
+	}
+	// Description / Tags / Pool
+	if params.Description != "" {
+		form.Set("description", params.Description)
+	}
+	if params.Tags != "" {
+		form.Set("tags", params.Tags)
+	}
+	if params.Pool != "" {
+		form.Set("pool", params.Pool)
+	}
+	// Forward any extra fields (additional disks, CD-ROMs, etc.)
+	for k, v := range params.Extra {
+		if v != "" {
+			form.Set(k, v)
+		}
+	}
 	path := "/nodes/" + url.PathEscape(node) + "/qemu"
 	var upid string
 	if err := c.doPost(ctx, path, form, &upid); err != nil {
@@ -937,12 +1085,47 @@ func (c *Client) CreateCT(ctx context.Context, node string, params CreateCTParam
 	if params.Start {
 		form.Set("start", "1")
 	}
+	if params.Description != "" {
+		form.Set("description", params.Description)
+	}
+	if params.Tags != "" {
+		form.Set("tags", params.Tags)
+	}
+	if params.Pool != "" {
+		form.Set("pool", params.Pool)
+	}
+	if params.Nameserver != "" {
+		form.Set("nameserver", params.Nameserver)
+	}
+	if params.Searchdomain != "" {
+		form.Set("searchdomain", params.Searchdomain)
+	}
+	for k, v := range params.Extra {
+		if v != "" {
+			form.Set(k, v)
+		}
+	}
 	path := "/nodes/" + url.PathEscape(node) + "/lxc"
 	var upid string
 	if err := c.doPost(ctx, path, form, &upid); err != nil {
 		return "", fmt.Errorf("create CT %d on %s: %w", params.VMID, node, err)
 	}
 	return upid, nil
+}
+
+// --- Network Methods ---
+
+// GetNetworkInterfaces returns all network interfaces on a node.
+func (c *Client) GetNetworkInterfaces(ctx context.Context, node string) ([]NetworkInterface, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/network"
+	var ifaces []NetworkInterface
+	if err := c.do(ctx, path, &ifaces); err != nil {
+		return nil, fmt.Errorf("get network interfaces on %s: %w", node, err)
+	}
+	return ifaces, nil
 }
 
 // --- VM Config Methods (Cloud-Init) ---

@@ -85,11 +85,26 @@ export function TaskProgressBanner({
   }, [upid, task, invalidateTaskHistory]);
 
   useEffect(() => {
-    if (isStopped && upid && firedRef.current !== upid) {
+    if (isStopped && upid && task && firedRef.current !== upid) {
       firedRef.current = upid;
-      onComplete?.();
+      // Ensure the final status is persisted to DB before firing onComplete,
+      // which may unmount this component.
+      void apiClient
+        .put(`/api/v1/tasks/${encodeURIComponent(upid)}`, {
+          status: task.status,
+          exit_status: task.exit_status ?? "",
+          progress: task.progress ?? null,
+          finished_at: new Date().toISOString(),
+        })
+        .then(invalidateTaskHistory)
+        .catch(() => {
+          // ignore
+        })
+        .finally(() => {
+          onComplete?.();
+        });
     }
-  }, [isStopped, upid, onComplete]);
+  }, [isStopped, upid, task, onComplete, invalidateTaskHistory]);
 
   if (!upid) return null;
 

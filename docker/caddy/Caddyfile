@@ -1,6 +1,9 @@
 :80 {
     # API routes
     handle /api/* {
+        request_body {
+            max_size 4GB
+        }
         reverse_proxy proxdash-api:8080
     }
 

@@ -206,6 +206,15 @@ export const useMetricStore = create<MetricState & MetricActions>()(
         });
       }
 
+      // Build lookup of node metrics
+      const nodeMetrics = new Map<string, VmLiveMetric>();
+      for (const nd of payload.nodes) {
+        nodeMetrics.set(nd.node_id, {
+          cpuPercent: nd.cpu_usage * 100,
+          memPercent: nd.mem_total > 0 ? (nd.mem_used / nd.mem_total) * 100 : 0,
+        });
+      }
+
       const aggregated: AggregatedMetrics = {
         cpuPercent: avgCpu,
         memPercent,
@@ -221,6 +230,7 @@ export const useMetricStore = create<MetricState & MetricActions>()(
         history: trimmedHistory,
         topConsumers,
         vmMetrics,
+        nodeMetrics,
       };
 
       state.metrics.set(clusterId, aggregated);

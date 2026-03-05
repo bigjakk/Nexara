@@ -551,9 +551,8 @@ func (h *CephHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*p
 
 // auditLog writes an audit log entry.
 func (h *CephHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	userID, _ := c.Locals("user_id").(string)
-	uid, err := uuid.Parse(userID)
-	if err != nil {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
 		return
 	}
 	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{

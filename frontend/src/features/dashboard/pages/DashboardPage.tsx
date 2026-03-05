@@ -1,4 +1,6 @@
 import { useState, useMemo } from "react";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useDashboardData } from "../api/dashboard-queries";
 import type { ClusterSummary } from "../api/dashboard-queries";
 import { useHistoricalMetrics } from "../api/historical-queries";
@@ -14,6 +16,8 @@ import { LiveMetricCards } from "../components/LiveMetricCards";
 import { MetricChart } from "../components/MetricChart";
 import { HealthScore } from "../components/HealthScore";
 import { TopConsumers } from "../components/TopConsumers";
+import { CreateVMDialog } from "@/features/vms/components/CreateVMDialog";
+import { CreateCTDialog } from "@/features/vms/components/CreateCTDialog";
 import type { TimeRange } from "@/types/api";
 import type { AggregatedMetrics } from "@/types/ws";
 
@@ -113,6 +117,8 @@ function ClusterMetricsSection({
 
 export function DashboardPage() {
   const [timeRange, setTimeRange] = useState<TimeRange>("live");
+  const [createVMOpen, setCreateVMOpen] = useState(false);
+  const [createCTOpen, setCreateCTOpen] = useState(false);
   const { data, isLoading, error } = useDashboardData();
   const { status } = useWebSocket();
 
@@ -120,6 +126,9 @@ export function DashboardPage() {
     () => data?.clusters.map((s) => s.cluster.id) ?? [],
     [data?.clusters],
   );
+
+  // Auto-select first cluster for create dialogs
+  const firstClusterId = data?.clusters[0]?.cluster.id ?? "";
 
   const liveMetrics = useDashboardMetrics(clusterIds);
 
@@ -131,6 +140,27 @@ export function DashboardPage() {
           <ConnectionDot status={status} />
         </div>
         <div className="flex items-center gap-3">
+          {firstClusterId && (
+            <>
+              <Button
+                size="sm"
+                className="gap-1"
+                onClick={() => { setCreateVMOpen(true); }}
+              >
+                <Plus className="h-4 w-4" />
+                New VM
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => { setCreateCTOpen(true); }}
+              >
+                <Plus className="h-4 w-4" />
+                New CT
+              </Button>
+            </>
+          )}
           <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
           <RefreshRateSelector />
           <AddClusterDialog />
@@ -176,6 +206,17 @@ export function DashboardPage() {
           )}
         </>
       )}
+
+      <CreateVMDialog
+        open={createVMOpen}
+        onOpenChange={setCreateVMOpen}
+        clusterId={firstClusterId}
+      />
+      <CreateCTDialog
+        open={createCTOpen}
+        onOpenChange={setCreateCTOpen}
+        clusterId={firstClusterId}
+      />
     </div>
   );
 }

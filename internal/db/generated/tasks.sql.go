@@ -14,7 +14,8 @@ import (
 
 const deleteCompletedTasks = `-- name: DeleteCompletedTasks :exec
 DELETE FROM task_history
-WHERE user_id = $1 AND status != 'running'
+WHERE user_id = $1
+  AND (status != 'running' OR started_at < NOW() - INTERVAL '1 hour')
 `
 
 func (q *Queries) DeleteCompletedTasks(ctx context.Context, userID uuid.UUID) error {

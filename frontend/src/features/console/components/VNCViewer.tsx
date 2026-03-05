@@ -13,6 +13,7 @@ function buildVncWsUrl(
   clusterID: string,
   node: string,
   vmid?: number,
+  guestType?: string,
 ): string {
   const token = localStorage.getItem("access_token");
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -24,6 +25,9 @@ function buildVncWsUrl(
   });
   if (vmid !== undefined) {
     params.set("vmid", String(vmid));
+  }
+  if (guestType) {
+    params.set("type", guestType);
   }
   return `${protocol}//${host}/ws/vnc?${params.toString()}`;
 }
@@ -42,8 +46,10 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
   const tabIdRef = useRef(tabId);
   tabIdRef.current = tabId;
 
+  const guestType = tab.type === "ct_vnc" ? "lxc" : undefined;
+
   useEffect(() => {
-    const wsUrl = buildVncWsUrl(clusterID, node, vmid);
+    const wsUrl = buildVncWsUrl(clusterID, node, vmid, guestType);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
@@ -120,7 +126,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     };
     // Only re-run when the actual connection parameters change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabId, clusterID, node, vmid, reconnectKey]);
+  }, [tabId, clusterID, node, vmid, guestType, reconnectKey]);
 
   return (
     <div

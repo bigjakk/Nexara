@@ -230,6 +230,18 @@ type StorageContent struct {
 	VMID    int    `json:"vmid,omitempty"`
 }
 
+// MachineType represents a QEMU machine type from GET /nodes/{node}/capabilities/qemu/machines.
+type MachineType struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+}
+
+// ResourcePool represents a resource pool from GET /pools.
+type ResourcePool struct {
+	PoolID  string `json:"poolid"`
+	Comment string `json:"comment,omitempty"`
+}
+
 // DiskResizeParams holds parameters for a VM disk resize operation.
 type DiskResizeParams struct {
 	Disk string `json:"disk"`
@@ -420,12 +432,46 @@ type CreateVMParams struct {
 	Boot    string `json:"boot,omitempty"`
 	CDRom   string `json:"cdrom,omitempty"`
 	Start   bool   `json:"start,omitempty"`
+
+	// System
+	BIOS      string `json:"bios,omitempty"`
+	Machine   string `json:"machine,omitempty"`
+	ScsiHW    string `json:"scsihw,omitempty"`
+	EFIDisk0  string `json:"efidisk0,omitempty"`
+	TPMState0 string `json:"tpmstate0,omitempty"`
+	Agent     string `json:"agent,omitempty"`
+
+	// CPU
+	CPUType string `json:"cpu,omitempty"`
+	Numa    *bool  `json:"numa,omitempty"`
+
+	// Memory
+	Balloon *int `json:"balloon,omitempty"`
+
+	// Display
+	VGA string `json:"vga,omitempty"`
+
+	// Boot / Options
+	OnBoot  *bool  `json:"onboot,omitempty"`
+	Hotplug string `json:"hotplug,omitempty"`
+	Tablet  *bool  `json:"tablet,omitempty"`
+
 	// Cloud-init fields
-	CIUser     string `json:"ciuser,omitempty"`
-	CIPassword string `json:"cipassword,omitempty"`
-	IPConfig0  string `json:"ipconfig0,omitempty"`
-	SSHKeys    string `json:"sshkeys,omitempty"`
-	CIType     string `json:"citype,omitempty"`
+	CIUser       string `json:"ciuser,omitempty"`
+	CIPassword   string `json:"cipassword,omitempty"`
+	IPConfig0    string `json:"ipconfig0,omitempty"`
+	SSHKeys      string `json:"sshkeys,omitempty"`
+	CIType       string `json:"citype,omitempty"`
+	Nameserver   string `json:"nameserver,omitempty"`
+	Searchdomain string `json:"searchdomain,omitempty"`
+
+	// Description / Tags / Pool
+	Description string `json:"description,omitempty"`
+	Tags        string `json:"tags,omitempty"`
+	Pool        string `json:"pool,omitempty"`
+
+	// Extra allows arbitrary additional Proxmox config fields (e.g. scsi1, ide0, sata0).
+	Extra map[string]string `json:"extra,omitempty"`
 }
 
 // CreateCTParams holds parameters for creating an LXC container.
@@ -443,6 +489,43 @@ type CreateCTParams struct {
 	SSHKeys      string `json:"ssh-public-keys,omitempty"`
 	Unprivileged bool   `json:"unprivileged,omitempty"`
 	Start        bool   `json:"start,omitempty"`
+
+	// Description / Tags / Pool / DNS
+	Description  string `json:"description,omitempty"`
+	Tags         string `json:"tags,omitempty"`
+	Pool         string `json:"pool,omitempty"`
+	Nameserver   string `json:"nameserver,omitempty"`
+	Searchdomain string `json:"searchdomain,omitempty"`
+
+	// Extra allows arbitrary additional Proxmox LXC parameters (features, cpulimit, arch, etc.).
+	Extra map[string]string `json:"extra,omitempty"`
+}
+
+// NetworkInterface represents a network interface from GET /nodes/{node}/network.
+type NetworkInterface struct {
+	Iface     string `json:"iface"`
+	Type      string `json:"type"`
+	Active    int    `json:"active"`
+	Autostart int    `json:"autostart"`
+	Method    string `json:"method,omitempty"`
+	Method6   string `json:"method6,omitempty"`
+	Address   string `json:"address,omitempty"`
+	Netmask   string `json:"netmask,omitempty"`
+	Gateway   string `json:"gateway,omitempty"`
+	CIDR      string `json:"cidr,omitempty"`
+	BridgePorts string `json:"bridge_ports,omitempty"`
+	BridgeSTP   string `json:"bridge_stp,omitempty"`
+	BridgeFD    string `json:"bridge_fd,omitempty"`
+	Comments  string `json:"comments,omitempty"`
+}
+
+// DiskAttachParams holds parameters for attaching a new disk to a VM.
+type DiskAttachParams struct {
+	Bus     string `json:"bus"`     // "scsi", "sata", "virtio", "ide"
+	Index   int    `json:"index"`   // 0, 1, 2...
+	Storage string `json:"storage"` // storage pool
+	Size    string `json:"size"`    // "20G"
+	Format  string `json:"format"`  // "raw", "qcow2" (optional)
 }
 
 // VMConfig represents the full configuration of a QEMU VM from GET /nodes/{node}/qemu/{vmid}/config.

@@ -8,9 +8,29 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countAuditLog = `-- name: CountAuditLog :one
+SELECT count(*) FROM audit_log
+WHERE ($1::uuid IS NULL OR cluster_id = $1)
+  AND ($2::text IS NULL OR resource_type = $2)
+`
+
+type CountAuditLogParams struct {
+	ClusterID    pgtype.UUID `json:"cluster_id"`
+	ResourceType pgtype.Text `json:"resource_type"`
+}
+
+func (q *Queries) CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAuditLog, arg.ClusterID, arg.ResourceType)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const insertAuditLog = `-- name: InsertAuditLog :exec
 INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details)
@@ -38,6 +58,44 @@ func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) 
 	return err
 }
 
+const listAuditLog = `-- name: ListAuditLog :many
+SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at FROM audit_log ORDER BY created_at DESC LIMIT $1 OFFSET $2
+`
+
+type ListAuditLogParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+func (q *Queries) ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, listAuditLog, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditLog{}
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditLogByCluster = `-- name: ListAuditLogByCluster :many
 SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at FROM audit_log WHERE cluster_id = $1 ORDER BY created_at DESC LIMIT $2
 `
@@ -49,6 +107,142 @@ type ListAuditLogByClusterParams struct {
 
 func (q *Queries) ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error) {
 	rows, err := q.db.Query(ctx, listAuditLogByCluster, arg.ClusterID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditLog{}
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditLogEnriched = `-- name: ListAuditLogEnriched :many
+SELECT
+  a.id,
+  a.cluster_id,
+  a.user_id,
+  a.resource_type,
+  a.resource_id,
+  a.action,
+  a.details,
+  a.created_at,
+  u.email AS user_email,
+  u.display_name AS user_display_name,
+  c.name AS cluster_name,
+  COALESCE(v.vmid, 0) AS resource_vmid,
+  COALESCE(v.name, '') AS resource_name
+FROM audit_log a
+JOIN users u ON u.id = a.user_id
+JOIN clusters c ON c.id = a.cluster_id
+LEFT JOIN vms v ON v.id::text = a.resource_id
+WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
+  AND ($4::text IS NULL OR a.resource_type = $4)
+ORDER BY a.created_at DESC
+LIMIT $1 OFFSET $2
+`
+
+type ListAuditLogEnrichedParams struct {
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	ClusterID    pgtype.UUID `json:"cluster_id"`
+	ResourceType pgtype.Text `json:"resource_type"`
+}
+
+type ListAuditLogEnrichedRow struct {
+	ID              uuid.UUID       `json:"id"`
+	ClusterID       uuid.UUID       `json:"cluster_id"`
+	UserID          uuid.UUID       `json:"user_id"`
+	ResourceType    string          `json:"resource_type"`
+	ResourceID      string          `json:"resource_id"`
+	Action          string          `json:"action"`
+	Details         json.RawMessage `json:"details"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UserEmail       string          `json:"user_email"`
+	UserDisplayName string          `json:"user_display_name"`
+	ClusterName     string          `json:"cluster_name"`
+	ResourceVmid    int32           `json:"resource_vmid"`
+	ResourceName    string          `json:"resource_name"`
+}
+
+func (q *Queries) ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnrichedParams) ([]ListAuditLogEnrichedRow, error) {
+	rows, err := q.db.Query(ctx, listAuditLogEnriched,
+		arg.Limit,
+		arg.Offset,
+		arg.ClusterID,
+		arg.ResourceType,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuditLogEnrichedRow{}
+	for rows.Next() {
+		var i ListAuditLogEnrichedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+			&i.UserEmail,
+			&i.UserDisplayName,
+			&i.ClusterName,
+			&i.ResourceVmid,
+			&i.ResourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditLogFiltered = `-- name: ListAuditLogFiltered :many
+SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at FROM audit_log
+WHERE ($3::uuid IS NULL OR cluster_id = $3)
+  AND ($4::text IS NULL OR resource_type = $4)
+ORDER BY created_at DESC
+LIMIT $1 OFFSET $2
+`
+
+type ListAuditLogFilteredParams struct {
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	ClusterID    pgtype.UUID `json:"cluster_id"`
+	ResourceType pgtype.Text `json:"resource_type"`
+}
+
+func (q *Queries) ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilteredParams) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, listAuditLogFiltered,
+		arg.Limit,
+		arg.Offset,
+		arg.ClusterID,
+		arg.ResourceType,
+	)
 	if err != nil {
 		return nil, err
 	}

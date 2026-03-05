@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log"
+	"net/url"
 	"path/filepath"
 	"time"
 
@@ -181,7 +183,7 @@ func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 	}
 	defer file.Close()
 
-	upid, err := pxClient.UploadToStorage(c.Context(), node.Name, pool.Storage, contentType, filename, file)
+	upid, err := pxClient.UploadToStorage(c.Context(), node.Name, pool.Storage, contentType, filename, file, fileHeader.Size)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -210,13 +212,19 @@ func (h *StorageHandler) DeleteContent(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node for storage pool")
 	}
 
-	volume := c.Params("volume")
-	if volume == "" {
+	rawVolume := c.Params("*")
+	if rawVolume == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "volume is required")
 	}
+	volume, err := url.PathUnescape(rawVolume)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid volume ID")
+	}
 
+	log.Printf("DELETE storage content: node=%s storage=%s volume=%q", node.Name, pool.Storage, volume)
 	upid, err := pxClient.DeleteStorageContent(c.Context(), node.Name, pool.Storage, volume)
 	if err != nil {
+		log.Printf("DELETE storage content error: %v", err)
 		return mapProxmoxError(err)
 	}
 
@@ -282,7 +290,7 @@ func (h *StorageHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) 
 		TokenID:        cluster.TokenID,
 		TokenSecret:    tokenSecret,
 		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Second,
+		Timeout:        30 * time.Minute, // large timeout for ISO uploads
 	})
 	if err != nil {
 		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
@@ -293,9 +301,8 @@ func (h *StorageHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) 
 
 // auditLog writes an audit log entry. Failures are logged but don't fail the request.
 func (h *StorageHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	userID, _ := c.Locals("user_id").(string)
-	uid, err := uuid.Parse(userID)
-	if err != nil {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
 		return
 	}
 	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{

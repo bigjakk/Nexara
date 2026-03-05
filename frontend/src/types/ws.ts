@@ -98,6 +98,8 @@ export interface AggregatedMetrics {
   topConsumers: TopConsumer[];
   /** Live metrics for ALL VMs in the cluster, keyed by VM UUID. */
   vmMetrics: Map<string, VmLiveMetric>;
+  /** Live metrics for ALL nodes in the cluster, keyed by node UUID. */
+  nodeMetrics: Map<string, VmLiveMetric>;
 }
 
 /** A VM ranked by resource consumption. */

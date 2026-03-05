@@ -2,13 +2,11 @@ package ws
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -109,40 +107,55 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		return
 	}
 
-	// Call the appropriate termproxy endpoint.
-	var termResp *proxmox.TermProxyResponse
+	// Call the appropriate vncproxy endpoint.
+	// We use vncproxy (not termproxy) because termproxy ticket validation
+	// does not work with API tokens (Proxmox bug #6079).
+	var vncResp *proxmox.TermProxyResponse
+	var vncPath string // resource path for vncwebsocket URL
 	switch consoleType {
 	case "node_shell":
-		termResp, err = pxClient.NodeTermProxy(ctx, node)
+		vncResp, err = pxClient.NodeVNCProxy(ctx, node)
+		// node-level: no extra path
 	case "vm_serial":
 		vmid, parseErr := strconv.Atoi(vmidStr)
 		if parseErr != nil {
 			h.writeError(conn, "invalid vmid")
 			return
 		}
-		termResp, err = pxClient.VMTermProxy(ctx, node, vmid)
+		vncResp, err = pxClient.VMVNCProxy(ctx, node, vmid)
+		vncPath = "qemu/" + strconv.Itoa(vmid)
 	case "ct_attach":
 		vmid, parseErr := strconv.Atoi(vmidStr)
 		if parseErr != nil {
 			h.writeError(conn, "invalid vmid")
 			return
 		}
-		termResp, err = pxClient.CTTermProxy(ctx, node, vmid)
+		vncResp, err = pxClient.CTVNCProxy(ctx, node, vmid)
+		vncPath = "lxc/" + strconv.Itoa(vmid)
 	default:
 		h.writeError(conn, "invalid console type")
 		return
 	}
 	if err != nil {
-		logger.Error("termproxy request failed", "error", err)
-		h.writeError(conn, "failed to create terminal session")
+		logger.Error("vncproxy request failed", "error", err)
+		h.writeError(conn, "failed to create console session")
 		return
 	}
 
-	// Dial the Proxmox vncwebsocket.
-	pxConn, err := pxClient.DialTerminal(ctx, node, termResp.Ticket, int(termResp.Port))
+	logger.Info("vncproxy response",
+		"port", int(vncResp.Port),
+		"user", vncResp.User,
+		"upid", vncResp.UPID,
+		"vncPath", vncPath,
+		"ticket_len", len(vncResp.Ticket),
+	)
+
+	// Dial the Proxmox vncwebsocket — no handshake needed with vncproxy.
+	// The ticket is passed as a query parameter and API token authenticates the upgrade.
+	pxConn, err := pxClient.DialVNCWebSocket(ctx, node, vncResp.Ticket, int(vncResp.Port), vncPath)
 	if err != nil {
-		logger.Error("dial terminal failed", "error", err)
-		h.writeError(conn, "failed to connect to terminal")
+		logger.Error("dial vncwebsocket failed", "error", err)
+		h.writeError(conn, "failed to connect to console")
 		return
 	}
 	defer pxConn.Close()
@@ -152,7 +165,9 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	// Send a connected status to the browser.
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(`{"type":"connected"}`))
 
-	// Bidirectional proxy with protocol translation.
+	// Bidirectional raw proxy — vncproxy uses raw data (no channel encoding).
+	// Resize is still sent as JSON from the browser; we ignore it for vncproxy
+	// since VNC handles its own framebuffer sizing.
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -169,27 +184,18 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 
 			switch msgType {
 			case fiberWs.TextMessage:
-				// Check if it's a resize message.
+				// Check if it's a resize message — skip for vncproxy.
 				var resize consoleResizeMsg
 				if json.Unmarshal(msg, &resize) == nil && resize.Type == "resize" {
-					// Send resize as Proxmox channel 1: "1:<cols>:<rows>:\n"
-					resizeMsg := fmt.Sprintf("1:%d:%d:\n", resize.Cols, resize.Rows)
-					if writeErr := pxConn.WriteMessage(gorillaWs.TextMessage, []byte(resizeMsg)); writeErr != nil {
-						return
-					}
 					continue
 				}
-				// Otherwise treat as terminal input — encode as channel 0.
-				encoded := base64.StdEncoding.EncodeToString(msg)
-				dataMsg := "0:" + encoded + "\n"
-				if writeErr := pxConn.WriteMessage(gorillaWs.TextMessage, []byte(dataMsg)); writeErr != nil {
+				// Terminal input — relay raw.
+				if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, msg); writeErr != nil {
 					return
 				}
 			case fiberWs.BinaryMessage:
-				// Raw binary input — encode as channel 0.
-				encoded := base64.StdEncoding.EncodeToString(msg)
-				dataMsg := "0:" + encoded + "\n"
-				if writeErr := pxConn.WriteMessage(gorillaWs.TextMessage, []byte(dataMsg)); writeErr != nil {
+				// Raw binary input — relay directly.
+				if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, msg); writeErr != nil {
 					return
 				}
 			}
@@ -202,26 +208,17 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		defer conn.WriteMessage(fiberWs.CloseMessage,
 			fiberWs.FormatCloseMessage(fiberWs.CloseNormalClosure, ""))
 		for {
-			_, msg, readErr := pxConn.ReadMessage()
+			msgType, msg, readErr := pxConn.ReadMessage()
 			if readErr != nil {
+				logger.Debug("proxmox read error", "error", readErr)
 				return
 			}
+			logger.Debug("proxmox data", "type", msgType, "len", len(msg), "preview", string(msg[:min(len(msg), 64)]))
 
-			text := string(msg)
-			// Proxmox sends channel-prefixed messages: "0:<base64data>\n"
-			if strings.HasPrefix(text, "0:") {
-				// Strip the "0:" prefix and trailing newline.
-				data := strings.TrimPrefix(text, "0:")
-				data = strings.TrimSuffix(data, "\n")
-				decoded, decErr := base64.StdEncoding.DecodeString(data)
-				if decErr != nil {
-					continue
-				}
-				if writeErr := conn.WriteMessage(fiberWs.BinaryMessage, decoded); writeErr != nil {
-					return
-				}
+			// Relay raw data to browser.
+			if writeErr := conn.WriteMessage(fiberWs.BinaryMessage, msg); writeErr != nil {
+				return
 			}
-			// Ignore other channels (resize acks, etc.)
 		}
 	}()
 

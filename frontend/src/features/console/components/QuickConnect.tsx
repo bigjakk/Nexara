@@ -88,7 +88,7 @@ export function QuickConnect() {
       consoleType === "vnc"
         ? "vm_vnc" as const
         : consoleType === "attach"
-          ? "ct_attach" as const
+          ? "ct_vnc" as const
           : "vm_serial" as const;
 
     const labelPrefix =

@@ -63,13 +63,44 @@ export interface CreateVMRequest {
   memory: number;
   cores: number;
   sockets: number;
-  scsi0: string;
-  ide2: string;
+  scsi0?: string;
+  ide2?: string;
   net0: string;
   ostype: string;
   boot: string;
-  cdrom: string;
+  cdrom?: string;
   start: boolean;
+  // System
+  bios?: string;
+  machine?: string;
+  scsihw?: string;
+  efidisk0?: string;
+  tpmstate0?: string;
+  agent?: string;
+  // CPU
+  cpu?: string;
+  numa?: boolean;
+  // Memory
+  balloon?: number;
+  // Display
+  vga?: string;
+  // Boot / Options
+  onboot?: boolean;
+  hotplug?: string;
+  tablet?: boolean;
+  // Cloud-Init
+  ciuser?: string;
+  cipassword?: string;
+  sshkeys?: string;
+  ipconfig0?: string;
+  nameserver?: string;
+  searchdomain?: string;
+  // Meta
+  description?: string;
+  tags?: string;
+  pool?: string;
+  // Extra fields forwarded to Proxmox (additional disks, CD-ROMs, etc.)
+  extra?: Record<string, string>;
 }
 
 export interface CreateCTRequest {
@@ -87,6 +118,12 @@ export interface CreateCTRequest {
   ssh_keys: string;
   unprivileged: boolean;
   start: boolean;
+  description?: string | undefined;
+  tags?: string | undefined;
+  pool?: string | undefined;
+  nameserver?: string | undefined;
+  searchdomain?: string | undefined;
+  extra?: Record<string, string> | undefined;
 }
 
 export type VMConfig = Record<string, unknown>;

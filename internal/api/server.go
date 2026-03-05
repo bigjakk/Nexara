@@ -29,8 +29,10 @@ type Server struct {
 	storageHandler   *handlers.StorageHandler
 	metricsHandler *handlers.MetricsHandler
 	cephHandler    *handlers.CephHandler
-	backupHandler  *handlers.BackupHandler
-	taskHandler    *handlers.TaskHandler
+	backupHandler   *handlers.BackupHandler
+	taskHandler     *handlers.TaskHandler
+	scheduleHandler *handlers.ScheduleHandler
+	auditHandler    *handlers.AuditHandler
 }
 
 // New creates a new API server with the given dependencies.
@@ -81,11 +83,14 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil {
 		s.taskHandler = handlers.NewTaskHandler(s.queries)
+		s.scheduleHandler = handlers.NewScheduleHandler(s.queries)
+		s.auditHandler = handlers.NewAuditHandler(s.queries)
 	}
 
 	s.app = fiber.New(fiber.Config{
 		ErrorHandler:          errorHandler,
 		DisableStartupMessage: true,
+		BodyLimit:             4 * 1024 * 1024 * 1024, // 4 GB for ISO uploads
 	})
 
 	s.setupMiddleware()
