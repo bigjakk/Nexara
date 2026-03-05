@@ -83,6 +83,53 @@ func (h *MetricsHandler) GetClusterHistorical(c *fiber.Ctx) error {
 	return c.JSON(points)
 }
 
+// GetVMHistorical handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics.
+func (h *MetricsHandler) GetVMHistorical(c *fiber.Ctx) error {
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	rangeParam := c.Query("range", "1h")
+	duration, ok := rangeDurations[rangeParam]
+	if !ok {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid range: must be 1h, 6h, 24h, or 7d")
+	}
+
+	since := time.Now().Add(-duration)
+
+	var points []metricPoint
+
+	switch rangeParam {
+	case "1h", "6h":
+		rows, qErr := h.queries.GetVMMetrics5m(c.Context(), db.GetVMMetrics5mParams{
+			VmID:   vmID,
+			Bucket: since,
+		})
+		if qErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query VM metrics")
+		}
+		points = make([]metricPoint, len(rows))
+		for i, r := range rows {
+			points[i] = toMetricPoint(r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut)
+		}
+	case "24h", "7d":
+		rows, qErr := h.queries.GetVMMetrics1h(c.Context(), db.GetVMMetrics1hParams{
+			VmID:   vmID,
+			Bucket: since,
+		})
+		if qErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to query VM metrics")
+		}
+		points = make([]metricPoint, len(rows))
+		for i, r := range rows {
+			points[i] = toMetricPoint(r.Bucket, r.Cpu, r.MemUsed, r.MemTotal, r.DiskRead, r.DiskWrite, r.NetIn, r.NetOut)
+		}
+	}
+
+	return c.JSON(points)
+}
+
 func toMetricPoint(bucket time.Time, cpu, memUsed, memTotal, diskRead, diskWrite, netIn, netOut float64) metricPoint {
 	var memPercent float64
 	if memTotal > 0 {

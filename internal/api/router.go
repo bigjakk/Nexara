@@ -81,6 +81,7 @@ func (s *Server) setupRoutes() {
 		}
 		if s.metricsHandler != nil {
 			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)
+			clusters.Get("/:cluster_id/vms/:vm_id/metrics", s.metricsHandler.GetVMHistorical)
 		}
 		if s.cephHandler != nil {
 			ceph := clusters.Group("/:cluster_id/ceph")

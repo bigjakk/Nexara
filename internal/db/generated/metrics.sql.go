@@ -136,6 +136,126 @@ func (q *Queries) GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics
 	return items, nil
 }
 
+const getVMMetrics1h = `-- name: GetVMMetrics1h :many
+SELECT
+  m.bucket::timestamptz                   AS bucket,
+  m.avg_cpu_usage::double precision       AS cpu,
+  m.avg_mem_used::double precision        AS mem_used,
+  m.avg_mem_total::double precision       AS mem_total,
+  m.avg_disk_read::double precision       AS disk_read,
+  m.avg_disk_write::double precision      AS disk_write,
+  m.avg_net_in::double precision          AS net_in,
+  m.avg_net_out::double precision         AS net_out
+FROM vm_metrics_1h m
+WHERE m.vm_id = $1 AND m.bucket >= $2
+ORDER BY m.bucket
+`
+
+type GetVMMetrics1hParams struct {
+	VmID   uuid.UUID   `json:"vm_id"`
+	Bucket interface{} `json:"bucket"`
+}
+
+type GetVMMetrics1hRow struct {
+	Bucket    time.Time `json:"bucket"`
+	Cpu       float64   `json:"cpu"`
+	MemUsed   float64   `json:"mem_used"`
+	MemTotal  float64   `json:"mem_total"`
+	DiskRead  float64   `json:"disk_read"`
+	DiskWrite float64   `json:"disk_write"`
+	NetIn     float64   `json:"net_in"`
+	NetOut    float64   `json:"net_out"`
+}
+
+func (q *Queries) GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error) {
+	rows, err := q.db.Query(ctx, getVMMetrics1h, arg.VmID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetVMMetrics1hRow{}
+	for rows.Next() {
+		var i GetVMMetrics1hRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Cpu,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getVMMetrics5m = `-- name: GetVMMetrics5m :many
+SELECT
+  m.bucket::timestamptz                   AS bucket,
+  m.avg_cpu_usage::double precision       AS cpu,
+  m.avg_mem_used::double precision        AS mem_used,
+  m.avg_mem_total::double precision       AS mem_total,
+  m.avg_disk_read::double precision       AS disk_read,
+  m.avg_disk_write::double precision      AS disk_write,
+  m.avg_net_in::double precision          AS net_in,
+  m.avg_net_out::double precision         AS net_out
+FROM vm_metrics_5m m
+WHERE m.vm_id = $1 AND m.bucket >= $2
+ORDER BY m.bucket
+`
+
+type GetVMMetrics5mParams struct {
+	VmID   uuid.UUID   `json:"vm_id"`
+	Bucket interface{} `json:"bucket"`
+}
+
+type GetVMMetrics5mRow struct {
+	Bucket    time.Time `json:"bucket"`
+	Cpu       float64   `json:"cpu"`
+	MemUsed   float64   `json:"mem_used"`
+	MemTotal  float64   `json:"mem_total"`
+	DiskRead  float64   `json:"disk_read"`
+	DiskWrite float64   `json:"disk_write"`
+	NetIn     float64   `json:"net_in"`
+	NetOut    float64   `json:"net_out"`
+}
+
+func (q *Queries) GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error) {
+	rows, err := q.db.Query(ctx, getVMMetrics5m, arg.VmID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetVMMetrics5mRow{}
+	for rows.Next() {
+		var i GetVMMetrics5mRow
+		if err := rows.Scan(
+			&i.Bucket,
+			&i.Cpu,
+			&i.MemUsed,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markNodeOffline = `-- name: MarkNodeOffline :exec
 UPDATE nodes SET status = 'offline' WHERE id = $1 AND status != 'offline'
 `

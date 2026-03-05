@@ -51,6 +51,8 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
+	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
+	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
