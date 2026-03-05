@@ -42,12 +42,18 @@ export function DeployTemplateDialog({
   const { data: nodes } = useClusterNodes(clusterId);
   const { data: storages } = useClusterStorage(clusterId);
 
-  // Filter to active storages that support disk images or rootdir
-  const diskStorages = storages?.filter((s) => {
-    if (!s.active || !s.enabled) return false;
-    const content = s.content.split(",").map((c) => c.trim());
-    return content.includes("images") || content.includes("rootdir");
-  });
+  // Filter to active storages that support disk images or rootdir, deduplicate shared storage
+  const diskStorages = (() => {
+    if (!storages) return undefined;
+    const seen = new Set<string>();
+    return storages.filter((s) => {
+      if (!s.active || !s.enabled) return false;
+      if (seen.has(s.storage)) return false;
+      seen.add(s.storage);
+      const content = s.content.split(",").map((c) => c.trim());
+      return content.includes("images") || content.includes("rootdir");
+    });
+  })();
 
   const [newId, setNewId] = useState("");
   const [newName, setNewName] = useState("");
