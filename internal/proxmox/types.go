@@ -55,6 +55,7 @@ type CPUInfo struct {
 	Model   string `json:"model"`
 	Sockets int    `json:"sockets"`
 	Threads int    `json:"threads"`
+	Flags   string `json:"flags"`
 }
 
 // Memory represents memory usage from a node status response.
@@ -563,3 +564,126 @@ type DiskAttachParams struct {
 
 // VMConfig represents the full configuration of a QEMU VM from GET /nodes/{node}/qemu/{vmid}/config.
 type VMConfig map[string]interface{}
+
+// TargetEndpoint describes a remote Proxmox API endpoint for cross-cluster migration.
+type TargetEndpoint struct {
+	Host        string `json:"host"`
+	APIToken    string `json:"apitoken"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+// RemoteMigrateVMParams holds parameters for cross-cluster VM migration via remote_migrate.
+type RemoteMigrateVMParams struct {
+	TargetBridge  string         `json:"target-bridge,omitempty"`
+	TargetStorage string         `json:"target-storage,omitempty"`
+	TargetVMID    int            `json:"target-vmid,omitempty"`
+	TargetEndpoint TargetEndpoint `json:"target-endpoint"`
+	BWLimit       int            `json:"bwlimit,omitempty"`
+	Online        bool           `json:"online,omitempty"`
+	Delete        bool           `json:"delete,omitempty"`
+}
+
+// RemoteMigrateCTParams holds parameters for cross-cluster container migration via remote_migrate.
+type RemoteMigrateCTParams struct {
+	TargetBridge  string         `json:"target-bridge,omitempty"`
+	TargetStorage string         `json:"target-storage,omitempty"`
+	TargetVMID    int            `json:"target-vmid,omitempty"`
+	TargetEndpoint TargetEndpoint `json:"target-endpoint"`
+	BWLimit       int            `json:"bwlimit,omitempty"`
+	Restart       bool           `json:"restart,omitempty"`
+	Delete        bool           `json:"delete,omitempty"`
+}
+
+// FirewallRule represents a firewall rule from the Proxmox API.
+type FirewallRule struct {
+	Pos     int    `json:"pos"`
+	Type    string `json:"type"`
+	Action  string `json:"action"`
+	Source  string `json:"source,omitempty"`
+	Dest    string `json:"dest,omitempty"`
+	Sport   string `json:"sport,omitempty"`
+	Dport   string `json:"dport,omitempty"`
+	Proto   string `json:"proto,omitempty"`
+	Enable  int    `json:"enable"`
+	Comment string `json:"comment,omitempty"`
+	Macro   string `json:"macro,omitempty"`
+	Log     string `json:"log,omitempty"`
+	Iface   string `json:"iface,omitempty"`
+}
+
+// FirewallRuleParams holds parameters for creating/updating a firewall rule.
+type FirewallRuleParams struct {
+	Type    string `json:"type"`
+	Action  string `json:"action"`
+	Source  string `json:"source,omitempty"`
+	Dest    string `json:"dest,omitempty"`
+	Sport   string `json:"sport,omitempty"`
+	Dport   string `json:"dport,omitempty"`
+	Proto   string `json:"proto,omitempty"`
+	Enable  int    `json:"enable"`
+	Comment string `json:"comment,omitempty"`
+	Macro   string `json:"macro,omitempty"`
+	Log     string `json:"log,omitempty"`
+	Iface   string `json:"iface,omitempty"`
+}
+
+// FirewallOptions represents firewall options for cluster/node/VM.
+type FirewallOptions struct {
+	Enable     *int   `json:"enable,omitempty"`
+	PolicyIn   string `json:"policy_in,omitempty"`
+	PolicyOut  string `json:"policy_out,omitempty"`
+	LogLevelIn string `json:"log_level_in,omitempty"`
+	LogLevelOut string `json:"log_level_out,omitempty"`
+}
+
+// SDNZone represents an SDN zone from GET /cluster/sdn/zones.
+type SDNZone struct {
+	Zone       string `json:"zone"`
+	Type       string `json:"type"`
+	Nodes      string `json:"nodes,omitempty"`
+	IPAM       string `json:"ipam,omitempty"`
+	DNS        string `json:"dns,omitempty"`
+	ReverseDNS string `json:"reversedns,omitempty"`
+	DNSZone    string `json:"dnszone,omitempty"`
+}
+
+// SDNVNet represents an SDN VNet from GET /cluster/sdn/vnets.
+type SDNVNet struct {
+	VNet  string `json:"vnet"`
+	Zone  string `json:"zone"`
+	Tag   int    `json:"tag,omitempty"`
+	Alias string `json:"alias,omitempty"`
+}
+
+// CreateNetworkInterfaceParams holds parameters for creating a network interface.
+type CreateNetworkInterfaceParams struct {
+	Iface       string `json:"iface"`
+	Type        string `json:"type"`
+	Address     string `json:"address,omitempty"`
+	Netmask     string `json:"netmask,omitempty"`
+	Gateway     string `json:"gateway,omitempty"`
+	CIDR        string `json:"cidr,omitempty"`
+	Autostart   int    `json:"autostart,omitempty"`
+	BridgePorts string `json:"bridge_ports,omitempty"`
+	BridgeSTP   string `json:"bridge_stp,omitempty"`
+	BridgeFD    string `json:"bridge_fd,omitempty"`
+	Comments    string `json:"comments,omitempty"`
+	Method      string `json:"method,omitempty"`
+	Method6     string `json:"method6,omitempty"`
+}
+
+// UpdateNetworkInterfaceParams holds parameters for updating a network interface.
+type UpdateNetworkInterfaceParams struct {
+	Type        string `json:"type"`
+	Address     string `json:"address,omitempty"`
+	Netmask     string `json:"netmask,omitempty"`
+	Gateway     string `json:"gateway,omitempty"`
+	CIDR        string `json:"cidr,omitempty"`
+	Autostart   int    `json:"autostart,omitempty"`
+	BridgePorts string `json:"bridge_ports,omitempty"`
+	BridgeSTP   string `json:"bridge_stp,omitempty"`
+	BridgeFD    string `json:"bridge_fd,omitempty"`
+	Comments    string `json:"comments,omitempty"`
+	Method      string `json:"method,omitempty"`
+	Method6     string `json:"method6,omitempty"`
+}

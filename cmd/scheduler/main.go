@@ -44,21 +44,27 @@ func main() {
 	queries := db.New(pool)
 	sched := scheduler.New(queries, cfg.EncryptionKey, logger)
 
-	logger.Info("ProxDash scheduler started", "interval", "60s")
+	logger.Info("ProxDash scheduler started", "task_interval", "60s", "drs_interval", "60s")
 
-	// Run initial check immediately.
+	// Run initial checks immediately.
 	sched.Run(ctx)
+	sched.RunDRS(ctx)
 
-	ticker := time.NewTicker(60 * time.Second)
-	defer ticker.Stop()
+	taskTicker := time.NewTicker(60 * time.Second)
+	defer taskTicker.Stop()
+
+	drsTicker := time.NewTicker(60 * time.Second)
+	defer drsTicker.Stop()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	for {
 		select {
-		case <-ticker.C:
+		case <-taskTicker.C:
 			sched.Run(ctx)
+		case <-drsTicker.C:
+			sched.RunDRS(ctx)
 		case sig := <-sigCh:
 			logger.Info("received signal, shutting down", "signal", sig)
 			cancel()

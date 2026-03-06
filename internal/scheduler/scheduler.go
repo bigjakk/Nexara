@@ -12,6 +12,7 @@ import (
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/drs"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -20,6 +21,8 @@ type Scheduler struct {
 	queries       *db.Queries
 	encryptionKey string
 	logger        *slog.Logger
+	drsEngine     *drs.Engine
+	drsExecutor   *drs.Executor
 }
 
 // New creates a new Scheduler.
@@ -28,6 +31,8 @@ func New(queries *db.Queries, encryptionKey string, logger *slog.Logger) *Schedu
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		logger:        logger,
+		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
+		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor")),
 	}
 }
 
@@ -64,6 +69,47 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 		for _, t := range clusterTasks {
 			s.executeTask(ctx, client, t)
+		}
+	}
+}
+
+// RunDRS evaluates DRS for all enabled clusters.
+func (s *Scheduler) RunDRS(ctx context.Context) {
+	configs, err := s.queries.ListEnabledDRSConfigs(ctx)
+	if err != nil {
+		s.logger.Error("failed to list enabled DRS configs", "error", err)
+		return
+	}
+
+	if len(configs) == 0 {
+		return
+	}
+
+	for _, cfg := range configs {
+		recommendations, err := s.drsEngine.Evaluate(ctx, cfg.ClusterID)
+		if err != nil {
+			s.logger.Error("DRS evaluation failed",
+				"cluster_id", cfg.ClusterID, "error", err)
+			continue
+		}
+
+		if len(recommendations) == 0 {
+			continue
+		}
+
+		s.logger.Info("DRS produced recommendations",
+			"cluster_id", cfg.ClusterID, "count", len(recommendations))
+
+		client, err := s.createClient(ctx, cfg.ClusterID)
+		if err != nil {
+			s.logger.Error("failed to create proxmox client for DRS",
+				"cluster_id", cfg.ClusterID, "error", err)
+			continue
+		}
+
+		if err := s.drsExecutor.Execute(ctx, client, cfg.ClusterID, cfg.Mode, recommendations); err != nil {
+			s.logger.Error("DRS execution failed",
+				"cluster_id", cfg.ClusterID, "error", err)
 		}
 	}
 }

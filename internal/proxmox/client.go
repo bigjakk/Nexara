@@ -2,6 +2,7 @@ package proxmox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -262,6 +263,32 @@ func (c *Client) MigrateCT(ctx context.Context, node string, vmid int, params Mi
 	var upid string
 	if err := c.doPost(ctx, path, form, &upid); err != nil {
 		return "", fmt.Errorf("migrate CT %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// MigrateVM migrates a QEMU VM to another node and returns the task UPID.
+func (c *Client) MigrateVM(ctx context.Context, node string, vmid int, params MigrateParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	if params.Target == "" {
+		return "", fmt.Errorf("migrate requires a target node")
+	}
+
+	form := url.Values{}
+	form.Set("target", params.Target)
+	if params.Online {
+		form.Set("online", "1")
+	}
+
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/migrate"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("migrate VM %d on %s: %w", vmid, node, err)
 	}
 	return upid, nil
 }
@@ -1152,6 +1179,109 @@ func (c *Client) CreateCT(ctx context.Context, node string, params CreateCTParam
 	return upid, nil
 }
 
+// --- Remote Migration Methods ---
+
+// RemoteMigrateVM migrates a VM to a remote cluster and returns the task UPID.
+func (c *Client) RemoteMigrateVM(ctx context.Context, node string, vmid int, params RemoteMigrateVMParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+
+	endpointJSON, err := json.Marshal(params.TargetEndpoint)
+	if err != nil {
+		return "", fmt.Errorf("marshal target endpoint: %w", err)
+	}
+
+	form := url.Values{}
+	form.Set("target-endpoint", string(endpointJSON))
+	if params.TargetBridge != "" {
+		form.Set("target-bridge", params.TargetBridge)
+	}
+	if params.TargetStorage != "" {
+		form.Set("target-storage", params.TargetStorage)
+	}
+	if params.TargetVMID > 0 {
+		form.Set("target-vmid", strconv.Itoa(params.TargetVMID))
+	}
+	if params.BWLimit > 0 {
+		form.Set("bwlimit", strconv.Itoa(params.BWLimit))
+	}
+	if params.Online {
+		form.Set("online", "1")
+	}
+	if params.Delete {
+		form.Set("delete", "1")
+	}
+
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/remote_migrate"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("remote migrate VM %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// RemoteMigrateCT migrates a container to a remote cluster and returns the task UPID.
+func (c *Client) RemoteMigrateCT(ctx context.Context, node string, vmid int, params RemoteMigrateCTParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+
+	endpointJSON, err := json.Marshal(params.TargetEndpoint)
+	if err != nil {
+		return "", fmt.Errorf("marshal target endpoint: %w", err)
+	}
+
+	form := url.Values{}
+	form.Set("target-endpoint", string(endpointJSON))
+	if params.TargetBridge != "" {
+		form.Set("target-bridge", params.TargetBridge)
+	}
+	if params.TargetStorage != "" {
+		form.Set("target-storage", params.TargetStorage)
+	}
+	if params.TargetVMID > 0 {
+		form.Set("target-vmid", strconv.Itoa(params.TargetVMID))
+	}
+	if params.BWLimit > 0 {
+		form.Set("bwlimit", strconv.Itoa(params.BWLimit))
+	}
+	if params.Restart {
+		form.Set("restart", "1")
+	}
+	if params.Delete {
+		form.Set("delete", "1")
+	}
+
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/remote_migrate"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("remote migrate CT %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// GetNetworkBridges returns only bridge-type network interfaces on a node.
+func (c *Client) GetNetworkBridges(ctx context.Context, node string) ([]NetworkInterface, error) {
+	ifaces, err := c.GetNetworkInterfaces(ctx, node)
+	if err != nil {
+		return nil, err
+	}
+	bridges := make([]NetworkInterface, 0)
+	for _, iface := range ifaces {
+		if iface.Type == "bridge" {
+			bridges = append(bridges, iface)
+		}
+	}
+	return bridges, nil
+}
+
 // --- Network Methods ---
 
 // GetNetworkInterfaces returns all network interfaces on a node.
@@ -1165,6 +1295,349 @@ func (c *Client) GetNetworkInterfaces(ctx context.Context, node string) ([]Netwo
 		return nil, fmt.Errorf("get network interfaces on %s: %w", node, err)
 	}
 	return ifaces, nil
+}
+
+// --- Firewall Methods ---
+
+// GetClusterFirewallRules returns firewall rules at the cluster level.
+func (c *Client) GetClusterFirewallRules(ctx context.Context) ([]FirewallRule, error) {
+	var rules []FirewallRule
+	if err := c.do(ctx, "/cluster/firewall/rules", &rules); err != nil {
+		return nil, fmt.Errorf("get cluster firewall rules: %w", err)
+	}
+	return rules, nil
+}
+
+// CreateClusterFirewallRule creates a new cluster-level firewall rule.
+func (c *Client) CreateClusterFirewallRule(ctx context.Context, rule FirewallRuleParams) error {
+	form := firewallRuleToForm(rule)
+	if err := c.doPost(ctx, "/cluster/firewall/rules", form, nil); err != nil {
+		return fmt.Errorf("create cluster firewall rule: %w", err)
+	}
+	return nil
+}
+
+// UpdateClusterFirewallRule updates a cluster-level firewall rule by position.
+func (c *Client) UpdateClusterFirewallRule(ctx context.Context, pos int, rule FirewallRuleParams) error {
+	form := firewallRuleToForm(rule)
+	path := "/cluster/firewall/rules/" + strconv.Itoa(pos)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update cluster firewall rule %d: %w", pos, err)
+	}
+	return nil
+}
+
+// DeleteClusterFirewallRule deletes a cluster-level firewall rule by position.
+func (c *Client) DeleteClusterFirewallRule(ctx context.Context, pos int) error {
+	path := "/cluster/firewall/rules/" + strconv.Itoa(pos)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete cluster firewall rule %d: %w", pos, err)
+	}
+	return nil
+}
+
+// GetNodeFirewallRules returns firewall rules for a specific node.
+func (c *Client) GetNodeFirewallRules(ctx context.Context, node string) ([]FirewallRule, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/firewall/rules"
+	var rules []FirewallRule
+	if err := c.do(ctx, path, &rules); err != nil {
+		return nil, fmt.Errorf("get firewall rules on %s: %w", node, err)
+	}
+	return rules, nil
+}
+
+// GetVMFirewallRules returns firewall rules for a specific VM.
+func (c *Client) GetVMFirewallRules(ctx context.Context, node string, vmid int) ([]FirewallRule, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/firewall/rules"
+	var rules []FirewallRule
+	if err := c.do(ctx, path, &rules); err != nil {
+		return nil, fmt.Errorf("get firewall rules for VM %d on %s: %w", vmid, node, err)
+	}
+	return rules, nil
+}
+
+// CreateVMFirewallRule creates a firewall rule for a specific VM.
+func (c *Client) CreateVMFirewallRule(ctx context.Context, node string, vmid int, rule FirewallRuleParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	form := firewallRuleToForm(rule)
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/firewall/rules"
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("create firewall rule for VM %d on %s: %w", vmid, node, err)
+	}
+	return nil
+}
+
+// UpdateVMFirewallRule updates a firewall rule for a specific VM by position.
+func (c *Client) UpdateVMFirewallRule(ctx context.Context, node string, vmid int, pos int, rule FirewallRuleParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	form := firewallRuleToForm(rule)
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/firewall/rules/" + strconv.Itoa(pos)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update firewall rule %d for VM %d on %s: %w", pos, vmid, node, err)
+	}
+	return nil
+}
+
+// DeleteVMFirewallRule deletes a firewall rule for a specific VM by position.
+func (c *Client) DeleteVMFirewallRule(ctx context.Context, node string, vmid int, pos int) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/firewall/rules/" + strconv.Itoa(pos)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete firewall rule %d for VM %d on %s: %w", pos, vmid, node, err)
+	}
+	return nil
+}
+
+// GetClusterFirewallOptions returns the cluster-level firewall options.
+func (c *Client) GetClusterFirewallOptions(ctx context.Context) (*FirewallOptions, error) {
+	var opts FirewallOptions
+	if err := c.do(ctx, "/cluster/firewall/options", &opts); err != nil {
+		return nil, fmt.Errorf("get cluster firewall options: %w", err)
+	}
+	return &opts, nil
+}
+
+// SetClusterFirewallOptions sets cluster-level firewall options.
+func (c *Client) SetClusterFirewallOptions(ctx context.Context, opts FirewallOptions) error {
+	form := firewallOptionsToForm(opts)
+	if err := c.doPut(ctx, "/cluster/firewall/options", form, nil); err != nil {
+		return fmt.Errorf("set cluster firewall options: %w", err)
+	}
+	return nil
+}
+
+// --- SDN Methods ---
+
+// GetSDNZones returns all SDN zones.
+func (c *Client) GetSDNZones(ctx context.Context) ([]SDNZone, error) {
+	var zones []SDNZone
+	if err := c.do(ctx, "/cluster/sdn/zones", &zones); err != nil {
+		return nil, fmt.Errorf("get SDN zones: %w", err)
+	}
+	return zones, nil
+}
+
+// GetSDNVNets returns all SDN VNets.
+func (c *Client) GetSDNVNets(ctx context.Context) ([]SDNVNet, error) {
+	var vnets []SDNVNet
+	if err := c.do(ctx, "/cluster/sdn/vnets", &vnets); err != nil {
+		return nil, fmt.Errorf("get SDN vnets: %w", err)
+	}
+	return vnets, nil
+}
+
+// --- Network Interface CRUD Methods ---
+
+// CreateNetworkInterface creates a new network interface on a node.
+func (c *Client) CreateNetworkInterface(ctx context.Context, node string, params CreateNetworkInterfaceParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form := url.Values{}
+	form.Set("iface", params.Iface)
+	form.Set("type", params.Type)
+	if params.Address != "" {
+		form.Set("address", params.Address)
+	}
+	if params.Netmask != "" {
+		form.Set("netmask", params.Netmask)
+	}
+	if params.Gateway != "" {
+		form.Set("gateway", params.Gateway)
+	}
+	if params.CIDR != "" {
+		form.Set("cidr", params.CIDR)
+	}
+	if params.BridgePorts != "" {
+		form.Set("bridge_ports", params.BridgePorts)
+	}
+	if params.BridgeSTP != "" {
+		form.Set("bridge_stp", params.BridgeSTP)
+	}
+	if params.BridgeFD != "" {
+		form.Set("bridge_fd", params.BridgeFD)
+	}
+	if params.Comments != "" {
+		form.Set("comments", params.Comments)
+	}
+	if params.Method != "" {
+		form.Set("method", params.Method)
+	}
+	if params.Method6 != "" {
+		form.Set("method6", params.Method6)
+	}
+	form.Set("autostart", strconv.Itoa(params.Autostart))
+	path := "/nodes/" + url.PathEscape(node) + "/network"
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("create network interface %s on %s: %w", params.Iface, node, err)
+	}
+	return nil
+}
+
+// UpdateNetworkInterface updates a network interface on a node.
+func (c *Client) UpdateNetworkInterface(ctx context.Context, node string, iface string, params UpdateNetworkInterfaceParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form := url.Values{}
+	form.Set("type", params.Type)
+	if params.Address != "" {
+		form.Set("address", params.Address)
+	}
+	if params.Netmask != "" {
+		form.Set("netmask", params.Netmask)
+	}
+	if params.Gateway != "" {
+		form.Set("gateway", params.Gateway)
+	}
+	if params.CIDR != "" {
+		form.Set("cidr", params.CIDR)
+	}
+	if params.BridgePorts != "" {
+		form.Set("bridge_ports", params.BridgePorts)
+	}
+	if params.BridgeSTP != "" {
+		form.Set("bridge_stp", params.BridgeSTP)
+	}
+	if params.BridgeFD != "" {
+		form.Set("bridge_fd", params.BridgeFD)
+	}
+	if params.Comments != "" {
+		form.Set("comments", params.Comments)
+	}
+	if params.Method != "" {
+		form.Set("method", params.Method)
+	}
+	if params.Method6 != "" {
+		form.Set("method6", params.Method6)
+	}
+	form.Set("autostart", strconv.Itoa(params.Autostart))
+	path := "/nodes/" + url.PathEscape(node) + "/network/" + url.PathEscape(iface)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update network interface %s on %s: %w", iface, node, err)
+	}
+	return nil
+}
+
+// DeleteNetworkInterface deletes a network interface on a node.
+func (c *Client) DeleteNetworkInterface(ctx context.Context, node string, iface string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/network/" + url.PathEscape(iface)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete network interface %s on %s: %w", iface, node, err)
+	}
+	return nil
+}
+
+// ApplyNetworkConfig applies pending network configuration changes on a node.
+func (c *Client) ApplyNetworkConfig(ctx context.Context, node string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/network"
+	if err := c.doPut(ctx, path, nil, nil); err != nil {
+		return fmt.Errorf("apply network config on %s: %w", node, err)
+	}
+	return nil
+}
+
+// RevertNetworkConfig reverts pending network configuration changes on a node.
+func (c *Client) RevertNetworkConfig(ctx context.Context, node string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/network"
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("revert network config on %s: %w", node, err)
+	}
+	return nil
+}
+
+// firewallRuleToForm converts a FirewallRuleParams to url.Values for the Proxmox API.
+func firewallRuleToForm(rule FirewallRuleParams) url.Values {
+	form := url.Values{}
+	if rule.Type != "" {
+		form.Set("type", rule.Type)
+	}
+	if rule.Action != "" {
+		form.Set("action", rule.Action)
+	}
+	if rule.Source != "" {
+		form.Set("source", rule.Source)
+	}
+	if rule.Dest != "" {
+		form.Set("dest", rule.Dest)
+	}
+	if rule.Sport != "" {
+		form.Set("sport", rule.Sport)
+	}
+	if rule.Dport != "" {
+		form.Set("dport", rule.Dport)
+	}
+	if rule.Proto != "" {
+		form.Set("proto", rule.Proto)
+	}
+	form.Set("enable", strconv.Itoa(rule.Enable))
+	if rule.Comment != "" {
+		form.Set("comment", rule.Comment)
+	}
+	if rule.Macro != "" {
+		form.Set("macro", rule.Macro)
+	}
+	if rule.Log != "" {
+		form.Set("log", rule.Log)
+	}
+	if rule.Iface != "" {
+		form.Set("iface", rule.Iface)
+	}
+	return form
+}
+
+// firewallOptionsToForm converts FirewallOptions to url.Values.
+func firewallOptionsToForm(opts FirewallOptions) url.Values {
+	form := url.Values{}
+	if opts.Enable != nil {
+		form.Set("enable", strconv.Itoa(*opts.Enable))
+	}
+	if opts.PolicyIn != "" {
+		form.Set("policy_in", opts.PolicyIn)
+	}
+	if opts.PolicyOut != "" {
+		form.Set("policy_out", opts.PolicyOut)
+	}
+	if opts.LogLevelIn != "" {
+		form.Set("log_level_in", opts.LogLevelIn)
+	}
+	if opts.LogLevelOut != "" {
+		form.Set("log_level_out", opts.LogLevelOut)
+	}
+	return form
 }
 
 // --- VM Config Methods (Cloud-Init) ---

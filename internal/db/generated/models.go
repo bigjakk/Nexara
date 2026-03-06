@@ -114,6 +114,80 @@ type Cluster struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
+type DrsConfig struct {
+	ID                  uuid.UUID       `json:"id"`
+	ClusterID           uuid.UUID       `json:"cluster_id"`
+	Mode                string          `json:"mode"`
+	Enabled             bool            `json:"enabled"`
+	Weights             json.RawMessage `json:"weights"`
+	ImbalanceThreshold  float64         `json:"imbalance_threshold"`
+	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+}
+
+type DrsHistory struct {
+	ID          uuid.UUID          `json:"id"`
+	ClusterID   uuid.UUID          `json:"cluster_id"`
+	SourceNode  string             `json:"source_node"`
+	TargetNode  string             `json:"target_node"`
+	VmID        int32              `json:"vm_id"`
+	VmType      string             `json:"vm_type"`
+	Reason      string             `json:"reason"`
+	ScoreBefore float64            `json:"score_before"`
+	ScoreAfter  float64            `json:"score_after"`
+	Status      string             `json:"status"`
+	ExecutedAt  pgtype.Timestamptz `json:"executed_at"`
+	CreatedAt   time.Time          `json:"created_at"`
+}
+
+type DrsRule struct {
+	ID        uuid.UUID       `json:"id"`
+	ClusterID uuid.UUID       `json:"cluster_id"`
+	RuleType  string          `json:"rule_type"`
+	VmIds     json.RawMessage `json:"vm_ids"`
+	NodeNames json.RawMessage `json:"node_names"`
+	Enabled   bool            `json:"enabled"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+type FirewallTemplate struct {
+	ID          uuid.UUID       `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Rules       json.RawMessage `json:"rules"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type MigrationJob struct {
+	ID              uuid.UUID          `json:"id"`
+	SourceClusterID uuid.UUID          `json:"source_cluster_id"`
+	TargetClusterID uuid.UUID          `json:"target_cluster_id"`
+	SourceNode      string             `json:"source_node"`
+	TargetNode      string             `json:"target_node"`
+	Vmid            int32              `json:"vmid"`
+	VmType          string             `json:"vm_type"`
+	MigrationType   string             `json:"migration_type"`
+	StorageMap      json.RawMessage    `json:"storage_map"`
+	NetworkMap      json.RawMessage    `json:"network_map"`
+	Online          bool               `json:"online"`
+	BwlimitKib      int32              `json:"bwlimit_kib"`
+	DeleteSource    bool               `json:"delete_source"`
+	TargetVmid      int32              `json:"target_vmid"`
+	Status          string             `json:"status"`
+	Upid            string             `json:"upid"`
+	Progress        float64            `json:"progress"`
+	CheckResults    []byte             `json:"check_results"`
+	ErrorMessage    string             `json:"error_message"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	StartedAt       pgtype.Timestamptz `json:"started_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
 type Node struct {
 	ID             uuid.UUID `json:"id"`
 	ClusterID      uuid.UUID `json:"cluster_id"`

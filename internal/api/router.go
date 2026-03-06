@@ -102,6 +102,68 @@ func (s *Server) setupRoutes() {
 		}
 	}
 
+	// Network, Firewall, SDN routes under clusters.
+	if s.networkHandler != nil && s.clusterHandler != nil {
+		netClusters := v1.Group("/clusters", s.authRequired())
+		netClusters.Get("/:cluster_id/networks", s.networkHandler.ListNetworkInterfaces)
+		netClusters.Get("/:cluster_id/networks/:node_name", s.networkHandler.ListNodeNetworkInterfaces)
+		netClusters.Post("/:cluster_id/networks/:node_name", s.networkHandler.CreateNetworkInterface)
+		netClusters.Put("/:cluster_id/networks/:node_name/:iface", s.networkHandler.UpdateNetworkInterface)
+		netClusters.Delete("/:cluster_id/networks/:node_name/:iface", s.networkHandler.DeleteNetworkInterface)
+		netClusters.Post("/:cluster_id/networks/:node_name/apply", s.networkHandler.ApplyNetworkConfig)
+		netClusters.Post("/:cluster_id/networks/:node_name/revert", s.networkHandler.RevertNetworkConfig)
+
+		netClusters.Get("/:cluster_id/firewall/rules", s.networkHandler.ListClusterFirewallRules)
+		netClusters.Post("/:cluster_id/firewall/rules", s.networkHandler.CreateClusterFirewallRule)
+		netClusters.Put("/:cluster_id/firewall/rules/:pos", s.networkHandler.UpdateClusterFirewallRule)
+		netClusters.Delete("/:cluster_id/firewall/rules/:pos", s.networkHandler.DeleteClusterFirewallRule)
+		netClusters.Get("/:cluster_id/firewall/options", s.networkHandler.GetFirewallOptions)
+		netClusters.Put("/:cluster_id/firewall/options", s.networkHandler.SetFirewallOptions)
+
+		netClusters.Get("/:cluster_id/vms/:vm_id/firewall/rules", s.networkHandler.ListVMFirewallRules)
+		netClusters.Post("/:cluster_id/vms/:vm_id/firewall/rules", s.networkHandler.CreateVMFirewallRule)
+		netClusters.Put("/:cluster_id/vms/:vm_id/firewall/rules/:pos", s.networkHandler.UpdateVMFirewallRule)
+		netClusters.Delete("/:cluster_id/vms/:vm_id/firewall/rules/:pos", s.networkHandler.DeleteVMFirewallRule)
+
+		netClusters.Get("/:cluster_id/sdn/zones", s.networkHandler.ListSDNZones)
+		netClusters.Get("/:cluster_id/sdn/vnets", s.networkHandler.ListSDNVNets)
+
+		netClusters.Post("/:cluster_id/firewall-templates/:id/apply", s.networkHandler.ApplyTemplate)
+	}
+
+	// Firewall template routes (not cluster-scoped).
+	if s.networkHandler != nil {
+		templates := v1.Group("/firewall-templates", s.authRequired())
+		templates.Get("/", s.networkHandler.ListTemplates)
+		templates.Post("/", s.networkHandler.CreateTemplate)
+		templates.Get("/:id", s.networkHandler.GetTemplate)
+		templates.Put("/:id", s.networkHandler.UpdateTemplate)
+		templates.Delete("/:id", s.networkHandler.DeleteTemplate)
+	}
+
+	// Migration routes.
+	if s.migrationHandler != nil {
+		migrations := v1.Group("/migrations", s.authRequired())
+		migrations.Post("/", s.migrationHandler.Create)
+		migrations.Get("/", s.migrationHandler.List)
+		migrations.Get("/:id", s.migrationHandler.Get)
+		migrations.Post("/:id/check", s.migrationHandler.RunCheck)
+		migrations.Post("/:id/execute", s.migrationHandler.Execute)
+		migrations.Post("/:id/cancel", s.migrationHandler.Cancel)
+	}
+
+	// DRS routes.
+	if s.drsHandler != nil && s.clusterHandler != nil {
+		drsClusters := v1.Group("/clusters", s.authRequired())
+		drsClusters.Get("/:cluster_id/drs/config", s.drsHandler.GetConfig)
+		drsClusters.Put("/:cluster_id/drs/config", s.drsHandler.UpdateConfig)
+		drsClusters.Get("/:cluster_id/drs/rules", s.drsHandler.ListRules)
+		drsClusters.Post("/:cluster_id/drs/rules", s.drsHandler.CreateRule)
+		drsClusters.Delete("/:cluster_id/drs/rules/:rule_id", s.drsHandler.DeleteRule)
+		drsClusters.Post("/:cluster_id/drs/evaluate", s.drsHandler.TriggerEvaluate)
+		drsClusters.Get("/:cluster_id/drs/history", s.drsHandler.ListHistory)
+	}
+
 	// PBS server routes.
 	if s.pbsHandler != nil {
 		pbs := v1.Group("/pbs-servers", s.authRequired())
@@ -126,6 +188,12 @@ func (s *Server) setupRoutes() {
 			pbs.Get("/:pbs_id/tasks/:upid", s.backupHandler.GetTaskStatus)
 			pbs.Get("/:pbs_id/metrics", s.backupHandler.GetDatastoreMetrics)
 		}
+	}
+
+	// Migration routes under clusters.
+	if s.migrationHandler != nil && s.clusterHandler != nil {
+		migClusters := v1.Group("/clusters", s.authRequired())
+		migClusters.Get("/:cluster_id/migrations", s.migrationHandler.ListByCluster)
 	}
 
 	// Restore route under clusters.

@@ -33,6 +33,9 @@ type Server struct {
 	taskHandler     *handlers.TaskHandler
 	scheduleHandler *handlers.ScheduleHandler
 	auditHandler    *handlers.AuditHandler
+	drsHandler       *handlers.DRSHandler
+	migrationHandler *handlers.MigrationHandler
+	networkHandler   *handlers.NetworkHandler
 }
 
 // New creates a new API server with the given dependencies.
@@ -85,6 +88,12 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.taskHandler = handlers.NewTaskHandler(s.queries)
 		s.scheduleHandler = handlers.NewScheduleHandler(s.queries)
 		s.auditHandler = handlers.NewAuditHandler(s.queries)
+	}
+
+	if s.queries != nil && cfg.EncryptionKey != "" {
+		s.drsHandler = handlers.NewDRSHandler(s.queries, cfg.EncryptionKey)
+		s.migrationHandler = handlers.NewMigrationHandler(s.queries, cfg.EncryptionKey)
+		s.networkHandler = handlers.NewNetworkHandler(s.queries, cfg.EncryptionKey)
 	}
 
 	s.app = fiber.New(fiber.Config{

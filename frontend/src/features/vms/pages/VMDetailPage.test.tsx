@@ -66,6 +66,82 @@ vi.mock("../api/vm-queries", () => ({
     mutate: vi.fn(),
     isPending: false,
   }),
+  useSetResourceConfig: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useSetVMConfig: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useVMConfig: () => ({
+    data: null,
+    isLoading: false,
+  }),
+  useSnapshots: () => ({
+    data: [],
+    isLoading: false,
+  }),
+  useCreateSnapshot: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useDeleteSnapshot: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useRollbackSnapshot: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useResizeDisk: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useCreateVM: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useCreateContainer: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useResourcePools: () => ({
+    data: [],
+    isLoading: false,
+  }),
+  useTaskHistory: () => ({
+    data: [],
+    isLoading: false,
+  }),
+  useClearTaskHistory: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useAttachDisk: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useDetachDisk: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useScheduledTasks: () => ({
+    data: [],
+    isLoading: false,
+  }),
+  useCreateSchedule: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useDeleteSchedule: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useTaskLog: () => ({
+    data: null,
+    isLoading: false,
+  }),
 }));
 
 vi.mock("@/features/clusters/api/cluster-queries", () => ({

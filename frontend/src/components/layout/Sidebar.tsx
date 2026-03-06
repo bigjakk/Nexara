@@ -8,6 +8,10 @@ import {
   TerminalSquare,
   Database,
   ScrollText,
+  Brain,
+  ArrowLeftRight,
+  Network,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
@@ -27,6 +31,10 @@ const navItems: NavItem[] = [
   { label: "Storage", to: "/storage", icon: HardDrive },
   { label: "Ceph", to: "/ceph", icon: Database },
   { label: "Backup", to: "/backup", icon: Shield },
+  { label: "Networks", to: "/networks", icon: Network, adminOnly: true },
+  { label: "Firewall", to: "/firewall", icon: ShieldCheck, adminOnly: true },
+  { label: "Migrations", to: "/migrations", icon: ArrowLeftRight, adminOnly: true },
+  { label: "DRS", to: "/drs", icon: Brain, adminOnly: true },
   { label: "Audit Log", to: "/audit-log", icon: ScrollText, adminOnly: true },
 ];
 

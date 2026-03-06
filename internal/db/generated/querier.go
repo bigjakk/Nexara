@@ -12,15 +12,21 @@ import (
 )
 
 type Querier interface {
+	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
+	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
+	CreateFirewallTemplate(ctx context.Context, arg CreateFirewallTemplateParams) (FirewallTemplate, error)
+	CreateMigrationJob(ctx context.Context, arg CreateMigrationJobParams) (MigrationJob, error)
 	CreatePBSServer(ctx context.Context, arg CreatePBSServerParams) (PbsServer, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
 	DeleteCompletedTasks(ctx context.Context, userID uuid.UUID) error
+	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
+	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
@@ -35,10 +41,14 @@ type Querier interface {
 	GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error)
 	GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
+	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
+	GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
+	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
 	GetLatestCephClusterMetrics(ctx context.Context, clusterID uuid.UUID) (CephClusterMetric, error)
 	GetLatestCephOSDMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephOsdMetric, error)
 	GetLatestCephPoolMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephPoolMetric, error)
 	GetLatestPBSDatastoreMetrics(ctx context.Context, pbsServerID uuid.UUID) ([]PbsDatastoreMetric, error)
+	GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJob, error)
 	GetNode(ctx context.Context, id uuid.UUID) (Node, error)
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
 	GetNodeMetrics1h(ctx context.Context, arg GetNodeMetrics1hParams) ([]GetNodeMetrics1hRow, error)
@@ -56,6 +66,8 @@ type Querier interface {
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertDRSHistory(ctx context.Context, arg InsertDRSHistoryParams) (DrsHistory, error)
+	InsertDRSRule(ctx context.Context, arg InsertDRSRuleParams) (DrsRule, error)
 	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
@@ -66,7 +78,13 @@ type Querier interface {
 	ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilteredParams) ([]AuditLog, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
+	ListDRSHistory(ctx context.Context, arg ListDRSHistoryParams) ([]DrsHistory, error)
+	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsRule, error)
 	ListDueTasks(ctx context.Context) ([]ScheduledTask, error)
+	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
+	ListFirewallTemplates(ctx context.Context) ([]FirewallTemplate, error)
+	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
+	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
 	ListPBSServersByCluster(ctx context.Context, clusterID pgtype.UUID) ([]PbsServer, error)
@@ -87,7 +105,14 @@ type Querier interface {
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
+	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
+	UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHistoryStatusParams) error
+	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error
+	UpdateFirewallTemplate(ctx context.Context, arg UpdateFirewallTemplateParams) (FirewallTemplate, error)
+	UpdateMigrationJobChecks(ctx context.Context, arg UpdateMigrationJobChecksParams) error
+	UpdateMigrationJobProgress(ctx context.Context, arg UpdateMigrationJobProgressParams) error
+	UpdateMigrationJobStatus(ctx context.Context, arg UpdateMigrationJobStatusParams) error
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
 	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) error
@@ -95,6 +120,7 @@ type Querier interface {
 	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) error
 	UpdateTaskLastRun(ctx context.Context, arg UpdateTaskLastRunParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
+	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)
 	UpsertPBSSyncJob(ctx context.Context, arg UpsertPBSSyncJobParams) (PbsSyncJob, error)
