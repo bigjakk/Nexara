@@ -171,7 +171,9 @@ func (fi *FlexInt) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &s); err == nil {
 		parsed, err := strconv.Atoi(s)
 		if err != nil {
-			return fmt.Errorf("FlexInt: cannot parse %q as int: %w", s, err)
+			// Non-numeric string (e.g. CRUSH tree node names) — default to 0.
+			*fi = 0
+			return nil
 		}
 		*fi = FlexInt(parsed)
 		return nil
@@ -300,8 +302,33 @@ type CephOSDMap struct {
 }
 
 // CephMonMap represents Ceph monitor map summary.
+// Proxmox may return num_mons at the top level or nested under a "monmap" sub-object.
 type CephMonMap struct {
-	NumMons int `json:"num_mons"`
+	NumMons   int              `json:"num_mons"`
+	Mons      []json.RawMessage `json:"mons,omitempty"`
+	SubMonMap *cephSubMonMap   `json:"monmap,omitempty"`
+}
+
+type cephSubMonMap struct {
+	NumMons int               `json:"num_mons"`
+	Mons    []json.RawMessage `json:"mons,omitempty"`
+}
+
+// MonCount returns the number of monitors, checking multiple locations.
+func (m *CephMonMap) MonCount() int {
+	if m.NumMons > 0 {
+		return m.NumMons
+	}
+	if m.SubMonMap != nil && m.SubMonMap.NumMons > 0 {
+		return m.SubMonMap.NumMons
+	}
+	if len(m.Mons) > 0 {
+		return len(m.Mons)
+	}
+	if m.SubMonMap != nil && len(m.SubMonMap.Mons) > 0 {
+		return len(m.SubMonMap.Mons)
+	}
+	return 0
 }
 
 // CephOSD represents a single OSD from GET /nodes/{node}/ceph/osd.
@@ -318,8 +345,11 @@ type CephOSD struct {
 }
 
 // CephOSDTreeNode represents a node in the OSD tree from the Proxmox response.
+// The "id" field is json.Number because Proxmox returns negative integers for
+// non-OSD nodes (root, host, rack) and positive integers for OSDs, but some
+// versions return them as strings.
 type CephOSDTreeNode struct {
-	ID       int               `json:"id"`
+	ID       FlexInt           `json:"id"`
 	Name     string            `json:"name"`
 	Type     string            `json:"type"`
 	Status   string            `json:"status,omitempty"`
@@ -328,20 +358,22 @@ type CephOSDTreeNode struct {
 	CrushWeight float64        `json:"crush_weight,omitempty"`
 }
 
+
 // CephOSDResponse wraps the response from GET /nodes/{node}/ceph/osd.
 type CephOSDResponse struct {
 	Root CephOSDTreeNode `json:"root"`
 }
 
-// CephPool represents a Ceph pool from GET /nodes/{node}/ceph/pools.
+// CephPool represents a Ceph pool from GET /nodes/{node}/ceph/pool.
+// Many fields use FlexInt because some Proxmox versions return them as strings.
 type CephPool struct {
 	PoolName     string  `json:"pool_name"`
-	Pool         int     `json:"pool"`
-	Size         int     `json:"size"`
-	MinSize      int     `json:"min_size"`
-	PGNum        int     `json:"pg_num"`
+	Pool         FlexInt `json:"pool"`
+	Size         FlexInt `json:"size"`
+	MinSize      FlexInt `json:"min_size"`
+	PGNum        FlexInt `json:"pg_num"`
 	PGAutoScale  string  `json:"pg_autoscale_mode,omitempty"`
-	CrushRule    int     `json:"crush_rule"`
+	CrushRule    FlexInt `json:"crush_rule"`
 	Type         string  `json:"type,omitempty"`
 	BytesUsed    int64   `json:"bytes_used"`
 	PercentUsed  float64 `json:"percent_used"`
@@ -379,12 +411,13 @@ type CephCrushRule struct {
 }
 
 // CephMon represents a Ceph monitor from GET /nodes/{node}/ceph/mon.
+// Uses json.RawMessage for initial parse to handle varying response formats.
 type CephMon struct {
-	Name    string `json:"name"`
-	Addr    string `json:"addr,omitempty"`
-	Host    string `json:"host,omitempty"`
-	Rank    int    `json:"rank,omitempty"`
-	Quorum  bool   `json:"quorum,omitempty"`
+	Name    string  `json:"name"`
+	Addr    string  `json:"addr,omitempty"`
+	Host    string  `json:"host,omitempty"`
+	Rank    FlexInt `json:"rank,omitempty"`
+	Quorum  bool    `json:"quorum,omitempty"`
 }
 
 // ClusterStatusEntry represents an entry from GET /cluster/status.

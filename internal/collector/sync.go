@@ -452,11 +452,11 @@ func (s *Syncer) syncCeph(ctx context.Context, client ProxmoxClient, clusterID u
 		for _, p := range pools {
 			result.CephPools = append(result.CephPools, cephPoolMetricSnapshot{
 				ClusterID:    clusterID,
-				PoolID:       p.Pool,
+				PoolID:       int(p.Pool),
 				PoolName:     p.PoolName,
-				Size:         p.Size,
-				MinSize:      p.MinSize,
-				PGNum:        p.PGNum,
+				Size:         int(p.Size),
+				MinSize:      int(p.MinSize),
+				PGNum:        int(p.PGNum),
 				BytesUsed:    p.BytesUsed,
 				PercentUsed:  p.PercentUsed,
 				ReadOpsSec:   p.ReadOpPerSec,
@@ -476,7 +476,7 @@ func flattenOSDs(clusterID uuid.UUID, node *proxmox.CephOSDTreeNode) []cephOSDMe
 	if node.Type == "osd" {
 		result = append(result, cephOSDMetricSnapshot{
 			ClusterID:   clusterID,
-			OSDID:       node.ID,
+			OSDID:       int(node.ID),
 			OSDName:     node.Name,
 			Host:        node.Host,
 			StatusUp:    node.Status == "up",

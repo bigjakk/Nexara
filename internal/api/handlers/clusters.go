@@ -2,8 +2,15 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"net"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -342,6 +349,81 @@ func requireAdmin(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Admin access required")
 	}
 	return nil
+}
+
+type fetchFingerprintRequest struct {
+	APIURL string `json:"api_url"`
+}
+
+type fetchFingerprintResponse struct {
+	Fingerprint string `json:"fingerprint"`
+	SelfSigned  bool   `json:"self_signed"`
+}
+
+// FetchFingerprint handles POST /api/v1/clusters/fetch-fingerprint.
+// It connects to the Proxmox host, retrieves the TLS certificate, and returns the SHA-256 fingerprint.
+func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	var req fetchFingerprintRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.APIURL == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "api_url is required")
+	}
+	if err := validateURL(req.APIURL); err != nil {
+		return err
+	}
+
+	u, _ := url.Parse(req.APIURL)
+	host := u.Host
+	if !strings.Contains(host, ":") {
+		host += ":443"
+	}
+
+	// Connect with InsecureSkipVerify to get the certificate regardless of CA trust.
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", host, &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec // Intentional: we're fetching the fingerprint for user verification
+		MinVersion:         tls.VersionTLS12,
+	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("Failed to connect to %s: %s", u.Host, err.Error()))
+	}
+	defer conn.Close()
+
+	certs := conn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return fiber.NewError(fiber.StatusBadGateway, "Server presented no TLS certificates")
+	}
+
+	// SHA-256 fingerprint of the leaf certificate in colon-separated hex format.
+	sum := sha256.Sum256(certs[0].Raw)
+	hexStr := hex.EncodeToString(sum[:])
+	var parts []string
+	for i := 0; i < len(hexStr); i += 2 {
+		parts = append(parts, strings.ToUpper(hexStr[i:i+2]))
+	}
+	fingerprint := strings.Join(parts, ":")
+
+	// Check if the cert is trusted by the system CA pool.
+	// Proxmox typically uses an internal CA (not self-signed leaf, but still untrusted).
+	systemPool, _ := x509.SystemCertPool()
+	untrusted := true
+	if systemPool != nil {
+		_, verifyErr := certs[0].Verify(x509.VerifyOptions{
+			Roots: systemPool,
+		})
+		untrusted = verifyErr != nil
+	}
+
+	return c.JSON(fetchFingerprintResponse{
+		Fingerprint: fingerprint,
+		SelfSigned:  untrusted,
+	})
 }
 
 // validateURL checks that a string is a valid HTTPS URL with scheme and host.

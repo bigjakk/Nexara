@@ -176,6 +176,11 @@ async function request<T>(
     throw new ApiClientError(res.status, errorBody);
   }
 
+  // Handle 204 No Content (e.g. DELETE responses)
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
+
   return (await res.json()) as T;
 }
 

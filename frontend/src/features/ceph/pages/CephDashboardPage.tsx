@@ -125,7 +125,7 @@ export function CephDashboardPage() {
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6">
-              <CephMetricsChart clusterId={activeClusterId} />
+              <CephMetricsChart clusterId={activeClusterId} status={status} />
               {osds.length > 0 && (
                 <CrushTree osds={osds} crushRules={crushRules} />
               )}

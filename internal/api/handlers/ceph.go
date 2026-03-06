@@ -155,7 +155,7 @@ func (h *CephHandler) GetStatus(c *fiber.Ctx) error {
 			Full:      status.OSDMap.Full,
 			NearFull:  status.OSDMap.NearFull,
 		},
-		MonMap: cephMonMapResponse{NumMons: status.MonMap.NumMons},
+		MonMap: cephMonMapResponse{NumMons: status.MonMap.MonCount()},
 	})
 }
 
@@ -184,7 +184,7 @@ func flattenOSDTree(node *proxmox.CephOSDTreeNode) []cephOSDResponse {
 	var result []cephOSDResponse
 	if node.Type == "osd" {
 		result = append(result, cephOSDResponse{
-			ID:          node.ID,
+			ID:          int(node.ID),
 			Name:        node.Name,
 			Host:        node.Host,
 			Up:          boolToInt(node.Status == "up"),
@@ -233,12 +233,12 @@ func (h *CephHandler) ListPools(c *fiber.Ctx) error {
 	for i, p := range pools {
 		resp[i] = cephPoolResponse{
 			PoolName:     p.PoolName,
-			Pool:         p.Pool,
-			Size:         p.Size,
-			MinSize:      p.MinSize,
-			PGNum:        p.PGNum,
+			Pool:         int(p.Pool),
+			Size:         int(p.Size),
+			MinSize:      int(p.MinSize),
+			PGNum:        int(p.PGNum),
 			PGAutoScale:  p.PGAutoScale,
-			CrushRule:    p.CrushRule,
+			CrushRule:    int(p.CrushRule),
 			BytesUsed:    p.BytesUsed,
 			PercentUsed:  p.PercentUsed,
 			ReadBytesSec: p.ReadBytesSec,
@@ -272,7 +272,7 @@ func (h *CephHandler) ListMonitors(c *fiber.Ctx) error {
 			Name: m.Name,
 			Addr: m.Addr,
 			Host: m.Host,
-			Rank: m.Rank,
+			Rank: int(m.Rank),
 		}
 	}
 	return c.JSON(resp)

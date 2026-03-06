@@ -94,6 +94,7 @@ export function useCephMetrics(clusterId: string, timeframe: string) {
         `/api/v1/clusters/${clusterId}/ceph/metrics?timeframe=${timeframe}`,
       ),
     enabled: clusterId.length > 0,
+    refetchInterval: 30000,
   });
 }
 

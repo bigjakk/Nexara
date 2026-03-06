@@ -488,27 +488,66 @@ func (c *Client) GetCephOSDs(ctx context.Context, node string) (*CephOSDResponse
 }
 
 // GetCephPools returns all Ceph pools visible from a node.
+// Tries /ceph/pool first (PVE 8.x), falls back to /ceph/pools (PVE 7.x).
 func (c *Client) GetCephPools(ctx context.Context, node string) ([]CephPool, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err
 	}
 	var pools []CephPool
-	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/ceph/pools", &pools); err != nil {
-		return nil, fmt.Errorf("get ceph pools on %s: %w", node, err)
+	nodePath := "/nodes/" + url.PathEscape(node)
+	if err := c.do(ctx, nodePath+"/ceph/pool", &pools); err != nil {
+		// Fall back to plural form.
+		var pools2 []CephPool
+		if err2 := c.do(ctx, nodePath+"/ceph/pools", &pools2); err2 != nil {
+			return nil, fmt.Errorf("get ceph pools on %s: %w", node, err)
+		}
+		return pools2, nil
 	}
 	return pools, nil
 }
 
 // GetCephMonitors returns all Ceph monitors from a node.
+// The Proxmox API returns monitor entries with varying fields; we parse
+// flexibly and extract what we need.
 func (c *Client) GetCephMonitors(ctx context.Context, node string) ([]CephMon, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err
 	}
-	var mons []CephMon
-	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/ceph/mon", &mons); err != nil {
+	// Parse as raw JSON first since Proxmox versions differ in response shape.
+	var raw []map[string]interface{}
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/ceph/mon", &raw); err != nil {
 		return nil, fmt.Errorf("get ceph monitors on %s: %w", node, err)
 	}
+
+	mons := make([]CephMon, 0, len(raw))
+	for _, entry := range raw {
+		mon := CephMon{
+			Name: stringVal(entry, "name"),
+			Host: stringVal(entry, "host"),
+			Addr: stringVal(entry, "addr"),
+		}
+		if r, ok := entry["rank"]; ok {
+			switch v := r.(type) {
+			case float64:
+				mon.Rank = FlexInt(int(v))
+			}
+		}
+		mons = append(mons, mon)
+	}
 	return mons, nil
+}
+
+// stringVal safely extracts a string from a map entry.
+func stringVal(m map[string]interface{}, key string) string {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	s, ok := v.(string)
+	if ok {
+		return s
+	}
+	return fmt.Sprintf("%v", v)
 }
 
 // GetCephFS returns CephFS filesystems from a node.

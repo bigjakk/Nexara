@@ -33,11 +33,11 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Health</CardTitle>
-          <Activity className="h-4 w-4 text-muted-foreground" />
+          <Activity className="h-4 w-4 text-foreground/50" />
         </CardHeader>
         <CardContent>
           <CephHealthBadge status={status.health.status} />
-          <p className="mt-2 text-xs text-muted-foreground">
+          <p className="mt-2 text-xs text-foreground/60">
             {status.osdmap.num_osds} OSDs, {status.pgmap.num_pgs} PGs
           </p>
         </CardContent>
@@ -46,13 +46,13 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Capacity</CardTitle>
-          <Database className="h-4 w-4 text-muted-foreground" />
+          <Database className="h-4 w-4 text-foreground/50" />
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">
             {formatBytes(status.pgmap.bytes_used)}
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-foreground/60">
             {usedPct}% of{" "}
             {formatBytes(status.pgmap.bytes_total)}
           </p>
@@ -68,7 +68,7 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">IOPS</CardTitle>
-          <Gauge className="h-4 w-4 text-muted-foreground" />
+          <Gauge className="h-4 w-4 text-foreground/50" />
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">
@@ -76,7 +76,7 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
               status.pgmap.read_op_per_sec + status.pgmap.write_op_per_sec,
             )}
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-foreground/60">
             R: {formatOps(status.pgmap.read_op_per_sec)} / W:{" "}
             {formatOps(status.pgmap.write_op_per_sec)}
           </p>
@@ -86,7 +86,7 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium">Throughput</CardTitle>
-          <HardDrive className="h-4 w-4 text-muted-foreground" />
+          <HardDrive className="h-4 w-4 text-foreground/50" />
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">
@@ -95,7 +95,7 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
             )}
             /s
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-foreground/60">
             R: {formatBytes(status.pgmap.read_bytes_sec)}/s / W:{" "}
             {formatBytes(status.pgmap.write_bytes_sec)}/s
           </p>
