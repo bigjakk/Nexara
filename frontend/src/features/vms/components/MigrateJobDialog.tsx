@@ -1,15 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api-client";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -17,8 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useClusterNodes,
@@ -30,20 +32,21 @@ import {
   useRunPreFlightCheck,
   useExecuteMigration,
   useMigrationJob,
-} from "../api/migration-queries";
+} from "@/features/migrations/api/migration-queries";
+import type { TaskLogLine } from "../api/vm-queries";
 import type {
   CreateMigrationRequest,
   MigrationType,
   VMType,
   CheckSeverity,
-} from "../types/migration";
+} from "@/features/migrations/types/migration";
+import type { ResourceKind } from "../types/vm";
 import {
   ArrowLeftRight,
   CheckCircle2,
   XCircle,
   AlertTriangle,
   Loader2,
-  Plus,
 } from "lucide-react";
 
 type WizardStep = "config" | "preflight" | "progress";
@@ -54,21 +57,46 @@ const severityIcon: Record<CheckSeverity, React.ReactNode> = {
   fail: <XCircle className="h-4 w-4 text-red-500" />,
 };
 
-export function MigrateWizard() {
-  const [open, setOpen] = useState(false);
+const statusColors: Record<string, string> = {
+  pending: "bg-gray-100 text-gray-700",
+  checking: "bg-blue-100 text-blue-700",
+  migrating: "bg-yellow-100 text-yellow-700",
+  completed: "bg-green-100 text-green-700",
+  failed: "bg-red-100 text-red-700",
+  cancelled: "bg-gray-100 text-gray-500",
+};
+
+interface MigrateJobDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  clusterId: string;
+  vmid: number;
+  vmName: string;
+  kind: ResourceKind;
+  currentNode: string;
+  status: string;
+}
+
+export function MigrateJobDialog({
+  open,
+  onOpenChange,
+  clusterId,
+  vmid,
+  vmName,
+  kind,
+  currentNode,
+  status,
+}: MigrateJobDialogProps) {
+  const isRunning = status.toLowerCase() === "running";
   const [step, setStep] = useState<WizardStep>("config");
   const [jobId, setJobId] = useState("");
 
-  // Form state.
-  const [sourceClusterId, setSourceClusterId] = useState("");
-  const [targetClusterId, setTargetClusterId] = useState("");
-  const [sourceNode, setSourceNode] = useState("");
-  const [targetNode, setTargetNode] = useState("");
-  const [vmid, setVmid] = useState("");
-  const [vmType, setVmType] = useState<VMType>("qemu");
+  // Form state
   const [migrationType, setMigrationType] =
     useState<MigrationType>("intra-cluster");
-  const [online, setOnline] = useState(false);
+  const [targetClusterId, setTargetClusterId] = useState("");
+  const [targetNode, setTargetNode] = useState("");
+  const [online, setOnline] = useState(isRunning);
   const [bwlimit, setBwlimit] = useState([0]);
   const [deleteSource, setDeleteSource] = useState(false);
   const [targetVmid, setTargetVmid] = useState("");
@@ -76,14 +104,15 @@ export function MigrateWizard() {
 
   // Data hooks
   const { data: clusters } = useClusters();
-  const targetNodeClusterId =
-    migrationType === "cross-cluster" ? targetClusterId : sourceClusterId;
-  const { data: sourceNodes } = useClusterNodes(sourceClusterId);
-  const { data: targetNodes } = useClusterNodes(targetNodeClusterId);
-  const { data: sourceStorage } = useClusterStorage(sourceClusterId);
+  const effectiveTargetClusterId =
+    migrationType === "cross-cluster" ? targetClusterId : clusterId;
+  const { data: targetNodes } = useClusterNodes(effectiveTargetClusterId);
+  const { data: sourceStorage } = useClusterStorage(clusterId);
   const { data: targetStorage } = useClusterStorage(
     migrationType === "cross-cluster" ? targetClusterId : "",
   );
+
+  const queryClient = useQueryClient();
 
   // Mutation hooks
   const createMutation = useCreateMigration();
@@ -91,45 +120,52 @@ export function MigrateWizard() {
   const executeMutation = useExecuteMigration();
   const { data: job } = useMigrationJob(jobId);
 
-  // Deduplicate storage pools by name
-  const uniqueSourceStorage = sourceStorage
-    ? Array.from(
-        new Map(sourceStorage.map((s) => [s.storage, s])).values(),
-      )
-    : [];
-  const uniqueTargetStorage = targetStorage
-    ? Array.from(
-        new Map(targetStorage.map((s) => [s.storage, s])).values(),
-      )
-    : [];
+  const vmType: VMType = kind === "ct" ? "lxc" : "qemu";
+
+  // Invalidate VM/node caches when migration completes or fails so the
+  // VM detail page reflects the new node and doesn't show "not found".
+  const prevJobStatus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const status = job?.status;
+    if (
+      prevJobStatus.current !== status &&
+      (status === "completed" || status === "failed")
+    ) {
+      void queryClient.invalidateQueries({ queryKey: ["clusters", clusterId] });
+      void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+    }
+    prevJobStatus.current = status;
+  }, [job?.status, clusterId, queryClient]);
 
   function resetForm() {
     setStep("config");
     setJobId("");
-    setSourceClusterId("");
-    setTargetClusterId("");
-    setSourceNode("");
-    setTargetNode("");
-    setVmid("");
-    setVmType("qemu");
     setMigrationType("intra-cluster");
-    setOnline(false);
+    setTargetClusterId("");
+    setTargetNode("");
+    setOnline(isRunning);
     setBwlimit([0]);
     setDeleteSource(false);
     setTargetVmid("");
     setStorageMap({});
   }
 
+  function handleClose() {
+    resetForm();
+    createMutation.reset();
+    checkMutation.reset();
+    executeMutation.reset();
+    onOpenChange(false);
+  }
+
   function handleCreate() {
     const req: CreateMigrationRequest = {
-      source_cluster_id: sourceClusterId,
+      source_cluster_id: clusterId,
       target_cluster_id:
-        migrationType === "intra-cluster"
-          ? sourceClusterId
-          : targetClusterId,
-      source_node: sourceNode,
+        migrationType === "intra-cluster" ? clusterId : targetClusterId,
+      source_node: currentNode,
       target_node: targetNode,
-      vmid: parseInt(vmid, 10),
+      vmid,
       vm_type: vmType,
       migration_type: migrationType,
       storage_map: migrationType === "cross-cluster" ? storageMap : {},
@@ -158,71 +194,85 @@ export function MigrateWizard() {
     setStorageMap((prev) => ({ ...prev, [sourcePool]: targetPool }));
   }
 
-  // Auto-select best target node (lowest combined CPU + memory usage)
+  // Filter out current node for intra-cluster migration
+  const availableTargetNodes =
+    migrationType === "intra-cluster"
+      ? targetNodes?.filter((n) => n.name !== currentNode)
+      : targetNodes;
+
+  // Auto-select the best node (lowest combined CPU + memory usage).
   const metricsMap = useMetricStore((s) => s.metrics);
-  const targetClusterMetrics = metricsMap.get(targetNodeClusterId);
-  const availableTargetNodes = targetNodes?.filter(
-    (n) => migrationType === "cross-cluster" || n.name !== sourceNode,
-  );
+  const clusterMetrics = metricsMap.get(effectiveTargetClusterId);
 
   useEffect(() => {
     if (!availableTargetNodes || availableTargetNodes.length === 0) return;
+    // Only auto-select when no node is chosen yet
     if (targetNode.length > 0) return;
 
-    const nodeMetrics = targetClusterMetrics?.nodeMetrics;
+    const nodeMetrics = clusterMetrics?.nodeMetrics;
+
+    // Score each online node — lower is better (less loaded)
     let bestNode = "";
     let bestScore = Infinity;
 
     for (const node of availableTargetNodes) {
       if (node.status !== "online") continue;
+
       const live = nodeMetrics?.get(node.id);
+      // If live metrics available, use them; otherwise fall back to 50% (neutral)
       const cpu = live?.cpuPercent ?? 50;
       const mem = live?.memPercent ?? 50;
-      const score = cpu + mem;
+      const score = cpu + mem; // simple combined load
+
       if (score < bestScore) {
         bestScore = score;
         bestNode = node.name;
       }
     }
+
+    // Fallback: just pick the first online node if no metrics
     if (bestNode === "") {
       const firstOnline = availableTargetNodes.find((n) => n.status === "online");
       if (firstOnline) bestNode = firstOnline.name;
     }
-    if (bestNode !== "") setTargetNode(bestNode);
-  }, [availableTargetNodes, targetClusterMetrics?.nodeMetrics, targetNode.length]);
+
+    if (bestNode !== "") {
+      setTargetNode(bestNode);
+    }
+  }, [availableTargetNodes, clusterMetrics?.nodeMetrics, targetNode.length]);
+
+  // Deduplicate storage pools by name
+  const uniqueSourceStorage = sourceStorage
+    ? Array.from(
+        new Map(sourceStorage.map((s) => [s.storage, s])).values(),
+      )
+    : [];
+  const uniqueTargetStorage = targetStorage
+    ? Array.from(
+        new Map(targetStorage.map((s) => [s.storage, s])).values(),
+      )
+    : [];
 
   const isFormValid =
-    sourceClusterId &&
-    sourceNode &&
-    vmid &&
-    (migrationType === "intra-cluster"
-      ? targetNode.length > 0
-      : targetClusterId.length > 0);
+    targetNode.length > 0 &&
+    (migrationType === "intra-cluster" || targetClusterId.length > 0);
 
   const bwlimitValue = bwlimit[0] ?? 0;
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) resetForm();
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          New Migration
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-xl">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
+      <DialogContent className="max-w-xl overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ArrowLeftRight className="h-5 w-5" />
-            {step === "config" && "Create Migration Job"}
+            {step === "config" && "Migrate"}
             {step === "preflight" && "Pre-Flight Checks"}
             {step === "progress" && "Migration Progress"}
           </DialogTitle>
+          <DialogDescription>
+            Migrate <strong>{vmName}</strong> (VMID {String(vmid)}) from{" "}
+            <strong>{currentNode}</strong>
+          </DialogDescription>
         </DialogHeader>
 
         {step === "config" && (
@@ -235,6 +285,7 @@ export function MigrateWizard() {
                 onValueChange={(v) => {
                   setMigrationType(v as MigrationType);
                   setTargetNode("");
+                  setTargetClusterId("");
                   setStorageMap({});
                 }}
               >
@@ -248,31 +299,6 @@ export function MigrateWizard() {
                   <SelectItem value="cross-cluster">
                     Cross-Cluster (different clusters)
                   </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Source Cluster */}
-            <div className="space-y-2">
-              <Label>Source Cluster</Label>
-              <Select
-                value={sourceClusterId}
-                onValueChange={(v) => {
-                  setSourceClusterId(v);
-                  setSourceNode("");
-                  setTargetNode("");
-                  setStorageMap({});
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select source cluster" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clusters?.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -294,7 +320,7 @@ export function MigrateWizard() {
                   </SelectTrigger>
                   <SelectContent>
                     {clusters
-                      ?.filter((c) => c.id !== sourceClusterId)
+                      ?.filter((c) => c.id !== clusterId)
                       .map((c) => (
                         <SelectItem key={c.id} value={c.id}>
                           {c.name}
@@ -305,109 +331,39 @@ export function MigrateWizard() {
               </div>
             )}
 
-            {/* VM Info */}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-2">
-                <Label>VMID</Label>
-                <Input
-                  type="number"
-                  value={vmid}
-                  onChange={(e) => {
-                    setVmid(e.target.value);
-                  }}
-                  placeholder="100"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select
-                  value={vmType}
-                  onValueChange={(v) => {
-                    setVmType(v as VMType);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="qemu">QEMU VM</SelectItem>
-                    <SelectItem value="lxc">LXC Container</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {migrationType === "cross-cluster" && (
-                <div className="space-y-2">
-                  <Label>Target VMID</Label>
-                  <Input
-                    type="number"
-                    value={targetVmid}
-                    onChange={(e) => {
-                      setTargetVmid(e.target.value);
-                    }}
-                    placeholder="Auto"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Source / Target Node */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Source Node</Label>
-                <Select
-                  value={sourceNode}
-                  onValueChange={setSourceNode}
-                  disabled={sourceClusterId.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select source node" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sourceNodes?.map((n) => (
+            {/* Target Node */}
+            <div className="space-y-2">
+              <Label>Target Node</Label>
+              <Select value={targetNode} onValueChange={setTargetNode}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select target node" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableTargetNodes?.map((n) => {
+                    const live = clusterMetrics?.nodeMetrics?.get(n.id);
+                    const cpuLabel = live ? `${Math.round(live.cpuPercent)}%` : null;
+                    const memLabel = live ? `${Math.round(live.memPercent)}%` : null;
+                    return (
                       <SelectItem key={n.id} value={n.name}>
-                        {n.name}
+                        <span className="flex items-center gap-2">
+                          {n.name}
+                          {n.status !== "online" && (
+                            <span className="text-muted-foreground">({n.status})</span>
+                          )}
+                          {cpuLabel && memLabel && (
+                            <span className="text-[10px] text-muted-foreground">
+                              CPU {cpuLabel} · Mem {memLabel}
+                            </span>
+                          )}
+                        </span>
                       </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Target Node</Label>
-                <Select
-                  value={targetNode}
-                  onValueChange={setTargetNode}
-                  disabled={targetNodeClusterId.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select target node" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableTargetNodes?.map((n) => {
-                      const live = targetClusterMetrics?.nodeMetrics?.get(n.id);
-                      const cpuLabel = live ? `${Math.round(live.cpuPercent)}%` : null;
-                      const memLabel = live ? `${Math.round(live.memPercent)}%` : null;
-                      return (
-                        <SelectItem key={n.id} value={n.name}>
-                          <span className="flex items-center gap-2">
-                            {n.name}
-                            {n.status !== "online" && (
-                              <span className="text-muted-foreground">({n.status})</span>
-                            )}
-                            {cpuLabel && memLabel && (
-                              <span className="text-[10px] text-muted-foreground">
-                                CPU {cpuLabel} · Mem {memLabel}
-                              </span>
-                            )}
-                          </span>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-                <p className="text-[11px] text-muted-foreground">
-                  Auto-selects the least loaded node
-                </p>
-              </div>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Auto-selects the least loaded node
+              </p>
             </div>
 
             {/* Storage Mapping (cross-cluster only) */}
@@ -422,9 +378,7 @@ export function MigrateWizard() {
                         key={src.storage}
                         className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
                       >
-                        <span className="truncate text-sm">
-                          {src.storage} ({src.type})
-                        </span>
+                        <span className="truncate text-sm">{src.storage}</span>
                         <ArrowLeftRight className="h-3 w-3 text-muted-foreground" />
                         <Select
                           value={storageMap[src.storage] ?? ""}
@@ -451,6 +405,19 @@ export function MigrateWizard() {
                   </div>
                 </div>
               )}
+
+            {/* Target VMID (cross-cluster only) */}
+            {migrationType === "cross-cluster" && (
+              <div className="space-y-2">
+                <Label>Target VMID (optional)</Label>
+                <Input
+                  type="number"
+                  value={targetVmid}
+                  onChange={(e) => { setTargetVmid(e.target.value); }}
+                  placeholder="Auto"
+                />
+              </div>
+            )}
 
             {/* Options */}
             <div className="space-y-3">
@@ -483,6 +450,12 @@ export function MigrateWizard() {
                 />
               </div>
             </div>
+
+            {(createMutation.isError || checkMutation.isError) && (
+              <p className="text-sm text-destructive">
+                {createMutation.error?.message ?? checkMutation.error?.message}
+              </p>
+            )}
 
             <Button
               onClick={handleCreate}
@@ -535,16 +508,10 @@ export function MigrateWizard() {
                     </Button>
                   ) : (
                     <p className="text-sm text-red-500">
-                      Pre-flight checks failed. Fix issues and create a new job.
+                      Pre-flight checks failed. Fix issues and try again.
                     </p>
                   )}
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setOpen(false);
-                      resetForm();
-                    }}
-                  >
+                  <Button variant="outline" onClick={handleClose}>
                     Close
                   </Button>
                 </div>
@@ -559,67 +526,107 @@ export function MigrateWizard() {
         )}
 
         {step === "progress" && job && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Status</span>
-              <StatusBadge status={job.status} />
-            </div>
-            {(job.status === "pending" || job.status === "migrating") && (
-              <div className="space-y-2">
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-primary transition-all"
-                    style={{
-                      width: `${String(Math.max(job.progress * 100, 5))}%`,
-                    }}
-                  />
-                </div>
-                <p className="text-center text-xs text-muted-foreground">
-                  {job.status === "pending"
-                    ? "Starting migration..."
-                    : "Migration in progress..."}
-                </p>
-              </div>
-            )}
-            {job.status === "completed" && (
-              <p className="text-sm text-green-600">
-                Migration completed successfully.
-              </p>
-            )}
-            {job.status === "failed" && (
-              <p className="text-sm text-red-500">
-                Migration failed: {job.error_message}
-              </p>
-            )}
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOpen(false);
-                resetForm();
-              }}
-            >
-              Close
-            </Button>
-          </div>
+          <MigrationProgress
+            job={job}
+            clusterId={clusterId}
+            onClose={handleClose}
+          />
         )}
       </DialogContent>
     </Dialog>
   );
 }
 
-const statusColors: Record<string, string> = {
-  pending: "bg-gray-100 text-gray-700",
-  checking: "bg-blue-100 text-blue-700",
-  migrating: "bg-yellow-100 text-yellow-700",
-  completed: "bg-green-100 text-green-700",
-  failed: "bg-red-100 text-red-700",
-  cancelled: "bg-gray-100 text-gray-500",
-};
+/** Progress step with live task log showing speed/throughput. */
+function MigrationProgress({
+  job,
+  clusterId,
+  onClose,
+}: {
+  job: { status: string; progress: number; upid: string; error_message: string };
+  clusterId: string;
+  onClose: () => void;
+}) {
+  const isActive = job.status === "pending" || job.status === "migrating";
+  const hasUpid = job.upid.length > 0;
+  const { data: logLines } = useQuery({
+    queryKey: ["migration-log", clusterId, job.upid],
+    queryFn: () =>
+      apiClient.get<TaskLogLine[]>(
+        `/api/v1/clusters/${clusterId}/tasks/${encodeURIComponent(job.upid)}/log`,
+      ),
+    enabled: hasUpid,
+    refetchInterval: isActive ? 3000 : false,
+  });
 
-export function StatusBadge({ status }: { status: string }) {
+  // Extract speed/throughput from log lines (Proxmox includes lines like
+  // "transferred 1.23 GiB in 45s (28.0 MiB/s)" or similar).
+  const speedLines = logLines
+    ?.map((l) => l.t)
+    .filter((t) => /\b(MiB\/s|GiB\/s|KiB\/s|MB\/s|GB\/s|transferred)\b/i.test(t));
+  const speedLine = speedLines && speedLines.length > 0
+    ? speedLines[speedLines.length - 1]
+    : undefined;
+
   return (
-    <Badge variant="outline" className={statusColors[status] ?? ""}>
-      {status}
-    </Badge>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Status</span>
+        <Badge
+          variant="outline"
+          className={statusColors[job.status] ?? ""}
+        >
+          {job.status}
+        </Badge>
+      </div>
+
+      {isActive && (
+        <div className="space-y-2">
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-all"
+              style={{
+                width: `${String(Math.max(job.progress * 100, 5))}%`,
+              }}
+            />
+          </div>
+          <p className="text-center text-xs text-muted-foreground">
+            {job.status === "pending"
+              ? "Starting migration..."
+              : "Migration in progress..."}
+          </p>
+          {speedLine && (
+            <p className="text-center text-xs font-medium text-blue-600 dark:text-blue-400 break-all">
+              {speedLine}
+            </p>
+          )}
+        </div>
+      )}
+
+      {job.status === "completed" && (
+        <p className="text-sm text-green-600">
+          Migration completed successfully.
+        </p>
+      )}
+      {job.status === "failed" && (
+        <p className="text-sm text-red-500">
+          Migration failed: {job.error_message}
+        </p>
+      )}
+
+      {/* Task Log */}
+      {logLines && logLines.length > 0 && (
+        <div className="space-y-1">
+          <span className="text-xs font-medium text-muted-foreground">Task Log</span>
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
+            {logLines.map((line) => line.t).join("\n")}
+          </pre>
+        </div>
+      )}
+
+      <Button variant="outline" onClick={onClose}>
+        Close
+      </Button>
+    </div>
   );
 }

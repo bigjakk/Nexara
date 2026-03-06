@@ -35,6 +35,15 @@ func NewOrchestrator(queries *db.Queries, encryptionKey string, logger *slog.Log
 	}
 }
 
+// migrationContext holds resolved metadata used for task tracking and audit logging.
+type migrationContext struct {
+	job       db.MigrationJob
+	vmDBID    string // VM's database UUID (for audit log resource linking)
+	vmName    string // Human-readable VM name
+	vmLabel   string // e.g. "VM 100 (my-vm)" or "CT 200 (my-ct)"
+	userID    uuid.UUID
+}
+
 // clientForCluster creates a Proxmox client from stored cluster credentials.
 func (o *Orchestrator) clientForCluster(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, db.Cluster, error) {
 	cluster, err := o.queries.GetCluster(ctx, clusterID)
@@ -59,6 +68,35 @@ func (o *Orchestrator) clientForCluster(ctx context.Context, clusterID uuid.UUID
 	}
 
 	return client, cluster, nil
+}
+
+// resolveMigrationContext looks up the VM in the DB to get its name and UUID for audit/task logging.
+func (o *Orchestrator) resolveMigrationContext(ctx context.Context, job db.MigrationJob, userID uuid.UUID) migrationContext {
+	mc := migrationContext{
+		job:    job,
+		userID: userID,
+	}
+
+	typeLabel := "VM"
+	if job.VmType == VMTypeLXC {
+		typeLabel = "CT"
+	}
+
+	// Try to look up the VM in the DB for its name and UUID.
+	vm, err := o.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
+		ClusterID: job.SourceClusterID,
+		Vmid:      job.Vmid,
+	})
+	if err == nil {
+		mc.vmDBID = vm.ID.String()
+		mc.vmName = vm.Name
+		mc.vmLabel = fmt.Sprintf("%s %d (%s)", typeLabel, job.Vmid, vm.Name)
+	} else {
+		mc.vmDBID = ""
+		mc.vmLabel = fmt.Sprintf("%s %d", typeLabel, job.Vmid)
+	}
+
+	return mc
 }
 
 // RunPreFlight runs pre-flight checks for a migration job and updates the DB.
@@ -125,16 +163,18 @@ func (o *Orchestrator) RunPreFlight(ctx context.Context, jobID uuid.UUID) (*PreF
 }
 
 // Execute runs the migration for a job. This is intended to be called in a goroutine.
-func (o *Orchestrator) Execute(ctx context.Context, jobID uuid.UUID) {
+func (o *Orchestrator) Execute(ctx context.Context, jobID uuid.UUID, userID uuid.UUID) {
 	job, err := o.queries.GetMigrationJob(ctx, jobID)
 	if err != nil {
-		o.failJob(ctx, jobID, fmt.Sprintf("get migration job: %v", err))
+		o.failJob(ctx, jobID, fmt.Sprintf("get migration job: %v", err), nil)
 		return
 	}
 
+	mc := o.resolveMigrationContext(ctx, job, userID)
+
 	srcClient, srcCluster, err := o.clientForCluster(ctx, job.SourceClusterID)
 	if err != nil {
-		o.failJob(ctx, jobID, fmt.Sprintf("source cluster client: %v", err))
+		o.failJob(ctx, jobID, fmt.Sprintf("source cluster client: %v", err), &mc)
 		return
 	}
 
@@ -146,12 +186,12 @@ func (o *Orchestrator) Execute(ctx context.Context, jobID uuid.UUID) {
 	case TypeCrossCluster:
 		upid, err = o.executeCrossCluster(ctx, srcClient, srcCluster, job)
 	default:
-		o.failJob(ctx, jobID, fmt.Sprintf("unknown migration type: %s", job.MigrationType))
+		o.failJob(ctx, jobID, fmt.Sprintf("unknown migration type: %s", job.MigrationType), &mc)
 		return
 	}
 
 	if err != nil {
-		o.failJob(ctx, jobID, err.Error())
+		o.failJob(ctx, jobID, err.Error(), &mc)
 		return
 	}
 
@@ -164,8 +204,23 @@ func (o *Orchestrator) Execute(ctx context.Context, jobID uuid.UUID) {
 		o.logger.Error("failed to set job started", "job_id", jobID, "error", err)
 	}
 
+	// Insert task history so the task shows in the Tasks panel.
+	description := fmt.Sprintf("Migrate %s: %s → %s", mc.vmLabel, job.SourceNode, job.TargetNode)
+	_, taskErr := o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
+		ClusterID:   job.SourceClusterID,
+		UserID:      userID,
+		Upid:        upid,
+		Description: description,
+		Status:      "running",
+		Node:        job.SourceNode,
+		TaskType:    "migrate",
+	})
+	if taskErr != nil {
+		o.logger.Warn("failed to insert task history", "job_id", jobID, "error", taskErr)
+	}
+
 	// Poll task status.
-	o.pollTaskStatus(ctx, srcClient, job.SourceNode, upid, jobID)
+	o.pollTaskStatus(ctx, srcClient, job.SourceNode, upid, jobID, &mc)
 }
 
 func (o *Orchestrator) executeIntraCluster(ctx context.Context, client *proxmox.Client, job db.MigrationJob) (string, error) {
@@ -252,14 +307,14 @@ func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxm
 	}
 }
 
-func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Client, node, upid string, jobID uuid.UUID) {
+func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Client, node, upid string, jobID uuid.UUID, mc *migrationContext) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			o.failJob(ctx, jobID, "context cancelled")
+			o.failJob(ctx, jobID, "context cancelled", mc)
 			return
 		case <-ticker.C:
 			status, err := client.GetTaskStatus(ctx, node, upid)
@@ -278,8 +333,22 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 				continue
 			}
 
-			// Task completed.
+			// Task completed — update both migration job and task history.
 			now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+
+			// Update task history record.
+			_ = o.queries.UpdateTaskHistory(ctx, db.UpdateTaskHistoryParams{
+				Upid:       upid,
+				Status:     "stopped",
+				ExitStatus: status.ExitStatus,
+				FinishedAt: now,
+			})
+
+			job := mc.job
+			typeLabel := "VM"
+			if job.VmType == VMTypeLXC {
+				typeLabel = "CT"
+			}
 
 			if status.ExitStatus == "OK" {
 				_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
@@ -288,27 +357,69 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 					CompletedAt: now,
 				})
 				o.logger.Info("migration completed", "job_id", jobID)
+				o.auditLog(ctx, mc, "migrate",
+					fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"status":"completed"}`,
+						job.Vmid, typeLabel, job.SourceNode, job.TargetNode))
 			} else {
+				errMsg := fmt.Sprintf("Task exit status: %s", status.ExitStatus)
 				_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
 					ID:           jobID,
 					Status:       StatusFailed,
 					CompletedAt:  now,
-					ErrorMessage: fmt.Sprintf("Task exit status: %s", status.ExitStatus),
+					ErrorMessage: errMsg,
 				})
 				o.logger.Error("migration failed", "job_id", jobID, "exit_status", status.ExitStatus)
+				o.auditLog(ctx, mc, "migrate_failed",
+					fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"error":%q}`,
+						job.Vmid, typeLabel, job.SourceNode, job.TargetNode, status.ExitStatus))
 			}
 			return
 		}
 	}
 }
 
-func (o *Orchestrator) failJob(ctx context.Context, jobID uuid.UUID, errMsg string) {
+func (o *Orchestrator) failJob(ctx context.Context, jobID uuid.UUID, errMsg string, mc *migrationContext) {
 	o.logger.Error("migration job failed", "job_id", jobID, "error", errMsg)
 	_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
 		ID:           jobID,
 		Status:       StatusFailed,
 		CompletedAt:  pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		ErrorMessage: errMsg,
+	})
+	if mc != nil {
+		job := mc.job
+		typeLabel := "VM"
+		if job.VmType == VMTypeLXC {
+			typeLabel = "CT"
+		}
+		o.auditLog(ctx, mc, "migrate_failed",
+			fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"error":%q}`,
+				job.Vmid, typeLabel, job.SourceNode, job.TargetNode, errMsg))
+	}
+}
+
+// auditLog inserts an audit log entry using the VM's DB ID as resource_id
+// so the enriched query can resolve the VM name and VMID.
+func (o *Orchestrator) auditLog(ctx context.Context, mc *migrationContext, action, detailsJSON string) {
+	if mc.userID == uuid.Nil {
+		return
+	}
+	// Use "vm" resource_type with the VM's DB ID so the enriched audit query
+	// can JOIN on vms.id and show the VM name / VMID.
+	resourceType := "vm"
+	resourceID := mc.vmDBID
+	if resourceID == "" {
+		// Fallback if VM wasn't found in DB — use the job ID.
+		resourceType = "migration"
+		resourceID = mc.job.ID.String()
+	}
+	_ = o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		ClusterID:    mc.job.SourceClusterID,
+		UserID:       mc.userID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      json.RawMessage(detailsJSON),
 	})
 }
 

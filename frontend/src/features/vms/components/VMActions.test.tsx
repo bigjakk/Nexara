@@ -40,7 +40,7 @@ describe("VMActions", () => {
     expect(screen.queryByRole("button", { name: /reset/i })).toBeNull();
   });
 
-  it("shows migrate button only for CT", () => {
+  it("shows migrate button for both VMs and CTs", () => {
     const { unmount } = renderWithProviders(
       <VMActions {...defaultProps} kind="ct" />,
     );
@@ -48,7 +48,7 @@ describe("VMActions", () => {
     unmount();
 
     renderWithProviders(<VMActions {...defaultProps} kind="vm" />);
-    expect(screen.queryByRole("button", { name: /migrate/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /migrate/i })).toBeInTheDocument();
   });
 
   it("disables destroy when running", () => {

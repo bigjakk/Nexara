@@ -24,8 +24,11 @@ export function useMigrationJob(id: string) {
     enabled: id.length > 0,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      if (status === "migrating" || status === "checking") return 3000;
-      return false;
+      // Poll for any non-terminal status (pending, checking, migrating).
+      if (status === "completed" || status === "failed" || status === "cancelled") {
+        return false;
+      }
+      return 3000;
     },
   });
 }

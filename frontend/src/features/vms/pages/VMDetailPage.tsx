@@ -15,7 +15,7 @@ import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useVM, useSetResourceConfig } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
 import { CloneDialog } from "../components/CloneDialog";
-import { MigrateDialog } from "../components/MigrateDialog";
+import { MigrateJobDialog } from "../components/MigrateJobDialog";
 import { DestroyDialog } from "../components/DestroyDialog";
 import { SnapshotPanel } from "../components/SnapshotPanel";
 import { CloudInitPanel } from "../components/CloudInitPanel";
@@ -305,15 +305,16 @@ export function VMDetailPage() {
         kind={kind}
         sourceName={vm.name}
       />
-      {kind === "ct" && (
-        <MigrateDialog
-          open={migrateOpen}
-          onOpenChange={setMigrateOpen}
-          clusterId={clusterId}
-          containerId={vmId}
-          containerName={vm.name}
-        />
-      )}
+      <MigrateJobDialog
+        open={migrateOpen}
+        onOpenChange={setMigrateOpen}
+        clusterId={clusterId}
+        vmid={vm.vmid}
+        vmName={vm.name}
+        kind={kind}
+        currentNode={nodeName}
+        status={vm.status}
+      />
       <DestroyDialog
         open={destroyOpen}
         onOpenChange={setDestroyOpen}

@@ -1,9 +1,13 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useAuditLog } from "../api/audit-queries";
+import { useAuditLog, type AuditLogEntry } from "../api/audit-queries";
 
 const PAGE_SIZE = 25;
 
@@ -12,16 +16,242 @@ const selectClass =
 
 const resourceTypes = [
   { value: "", label: "All Types" },
-  { value: "vm", label: "VM" },
-  { value: "ct", label: "Container" },
+  { value: "vm", label: "VM / CT" },
+  { value: "container", label: "Container" },
+  { value: "migration", label: "Migration" },
   { value: "cluster", label: "Cluster" },
   { value: "storage", label: "Storage" },
+  { value: "ceph_pool", label: "Ceph Pool" },
 ] as const;
+
+/** Convert snake_case action names to human-readable labels. */
+function formatAction(action: string): string {
+  return action
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Resource type badge labels. */
+function resourceTypeLabel(type: string): string {
+  switch (type) {
+    case "vm": return "VM";
+    case "container": return "CT";
+    case "migration": return "Migration";
+    case "ceph_pool": return "Ceph";
+    case "storage": return "Storage";
+    default: return type;
+  }
+}
+
+/** Parse the details JSON and render key human-readable summary parts. */
+function formatDetailsSummary(entry: AuditLogEntry): string | null {
+  if (!entry.details || entry.details === "{}" || entry.details === "null") {
+    return null;
+  }
+  try {
+    const d = JSON.parse(entry.details) as Record<string, unknown>;
+    const parts: string[] = [];
+
+    if (typeof d["vm_type"] === "string") {
+      parts.push(d["vm_type"] as string);
+    }
+    if (typeof d["source_node"] === "string" && typeof d["target_node"] === "string") {
+      parts.push(`${d["source_node"] as string} → ${d["target_node"] as string}`);
+    }
+    if (typeof d["migration_type"] === "string") {
+      parts.push(d["migration_type"] as string);
+    }
+    if (d["online"] === true) {
+      parts.push("live");
+    }
+    if (typeof d["error"] === "string") {
+      parts.push(`Error: ${d["error"] as string}`);
+    }
+    if (typeof d["status"] === "string" && d["status"] !== "completed") {
+      parts.push(d["status"] as string);
+    }
+
+    return parts.length > 0 ? parts.join(" · ") : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Pretty-print label for detail keys. */
+function detailKeyLabel(key: string): string {
+  switch (key) {
+    case "vm_type": return "Type";
+    case "vmid": return "VMID";
+    case "source_node": return "Source Node";
+    case "target_node": return "Target Node";
+    case "migration_type": return "Migration Type";
+    case "online": return "Live Migration";
+    case "error": return "Error";
+    case "status": return "Status";
+    case "bwlimit_kib": return "BW Limit (KiB)";
+    case "delete_source": return "Delete Source";
+    case "target_vmid": return "Target VMID";
+    case "storage": return "Storage";
+    case "pool": return "Pool";
+    case "name": return "Name";
+    case "size": return "Size";
+    default: return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+}
+
+/** Format detail values for display. */
+function detailValue(_key: string, val: unknown): string {
+  if (typeof val === "boolean") return val ? "Yes" : "No";
+  if (typeof val === "number") return String(val);
+  if (typeof val === "string") return val;
+  if (val === null || val === undefined) return "-";
+  return JSON.stringify(val);
+}
+
+/** Parse details JSON into key-value pairs. */
+function parseDetails(entry: AuditLogEntry): Array<[string, string]> | null {
+  if (!entry.details || entry.details === "{}" || entry.details === "null") {
+    return null;
+  }
+  try {
+    const d = JSON.parse(entry.details) as Record<string, unknown>;
+    const pairs: Array<[string, string]> = [];
+    for (const [k, v] of Object.entries(d)) {
+      pairs.push([detailKeyLabel(k), detailValue(k, v)]);
+    }
+    return pairs.length > 0 ? pairs : null;
+  } catch {
+    return null;
+  }
+}
+
+function AuditRow({
+  entry,
+  expanded,
+  onToggle,
+}: {
+  entry: AuditLogEntry;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const summary = formatDetailsSummary(entry);
+  const details = expanded ? parseDetails(entry) : null;
+
+  return (
+    <>
+      <tr
+        className="cursor-pointer border-b hover:bg-muted/20"
+        onClick={onToggle}
+      >
+        <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">
+          <div className="flex items-center gap-1.5">
+            <ChevronDown
+              className={`h-3 w-3 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`}
+            />
+            {new Date(entry.created_at).toLocaleString()}
+          </div>
+        </td>
+        <td className="px-4 py-2">{entry.cluster_name}</td>
+        <td className="px-4 py-2">
+          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+            {resourceTypeLabel(entry.resource_type)}
+          </span>
+          {entry.resource_name ? (
+            <span className="ml-2 text-xs">
+              {entry.resource_name}
+              {entry.resource_vmid > 0 && (
+                <span className="text-muted-foreground"> ({String(entry.resource_vmid)})</span>
+              )}
+            </span>
+          ) : (
+            <span className="ml-2 text-xs text-muted-foreground">
+              {entry.resource_id.slice(0, 8)}
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-2 font-medium">
+          {formatAction(entry.action)}
+        </td>
+        <td className="px-4 py-2 text-xs text-muted-foreground">
+          {summary ?? ""}
+        </td>
+        <td className="px-4 py-2">
+          {entry.user_display_name || entry.user_email}
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="border-b bg-muted/10">
+          <td colSpan={6} className="px-4 py-3">
+            <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+              <span className="text-muted-foreground">Timestamp</span>
+              <span>{new Date(entry.created_at).toLocaleString()}</span>
+
+              <span className="text-muted-foreground">Cluster</span>
+              <span>{entry.cluster_name}</span>
+
+              <span className="text-muted-foreground">Resource Type</span>
+              <span>{resourceTypeLabel(entry.resource_type)}</span>
+
+              {entry.resource_name && (
+                <>
+                  <span className="text-muted-foreground">Resource Name</span>
+                  <span>
+                    {entry.resource_name}
+                    {entry.resource_vmid > 0 && ` (VMID ${String(entry.resource_vmid)})`}
+                  </span>
+                </>
+              )}
+
+              <span className="text-muted-foreground">Resource ID</span>
+              <span className="break-all font-mono text-[10px]">{entry.resource_id}</span>
+
+              <span className="text-muted-foreground">Action</span>
+              <span className="font-medium">{formatAction(entry.action)}</span>
+
+              <span className="text-muted-foreground">User</span>
+              <span>
+                {entry.user_display_name || entry.user_email}
+                {entry.user_display_name && entry.user_email && (
+                  <span className="ml-1 text-muted-foreground">({entry.user_email})</span>
+                )}
+              </span>
+
+              <span className="text-muted-foreground">User ID</span>
+              <span className="break-all font-mono text-[10px]">{entry.user_id}</span>
+            </div>
+
+            {/* Expanded details from JSON */}
+            {details && details.length > 0 && (
+              <div className="mt-2 border-t pt-2">
+                <span className="text-xs font-medium text-muted-foreground">Details</span>
+                <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                  {details.map(([label, value]) => (
+                    <div key={label} className="contents">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className={
+                        label === "Error"
+                          ? "text-red-500 break-all"
+                          : "break-all"
+                      }>
+                        {value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
 
 export function AuditLogPage() {
   const [page, setPage] = useState(0);
   const [clusterFilter, setClusterFilter] = useState("");
   const [resourceFilter, setResourceFilter] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data: clusters } = useClusters();
   const { data, isLoading, error } = useAuditLog({
@@ -90,42 +320,24 @@ export function AuditLogPage() {
                   <th className="px-4 py-2 text-left font-medium">Cluster</th>
                   <th className="px-4 py-2 text-left font-medium">Resource</th>
                   <th className="px-4 py-2 text-left font-medium">Action</th>
+                  <th className="px-4 py-2 text-left font-medium">Details</th>
                   <th className="px-4 py-2 text-left font-medium">User</th>
                 </tr>
               </thead>
               <tbody>
                 {data?.items.map((entry) => (
-                  <tr key={entry.id} className="border-b">
-                    <td className="px-4 py-2 text-muted-foreground">
-                      {new Date(entry.created_at).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-2">{entry.cluster_name}</td>
-                    <td className="px-4 py-2">
-                      <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
-                        {entry.resource_type}
-                      </span>
-                      {entry.resource_name ? (
-                        <span className="ml-2 text-xs">
-                          {entry.resource_name}
-                          {entry.resource_vmid > 0 && (
-                            <span className="text-muted-foreground"> ({String(entry.resource_vmid)})</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          {entry.resource_id.slice(0, 8)}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 font-medium">{entry.action}</td>
-                    <td className="px-4 py-2">
-                      {entry.user_display_name || entry.user_email}
-                    </td>
-                  </tr>
+                  <AuditRow
+                    key={entry.id}
+                    entry={entry}
+                    expanded={expandedId === entry.id}
+                    onToggle={() => {
+                      setExpandedId(expandedId === entry.id ? null : entry.id);
+                    }}
+                  />
                 ))}
                 {data?.items.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                    <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                       No audit log entries found.
                     </td>
                   </tr>

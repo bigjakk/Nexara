@@ -218,18 +218,16 @@ export function VMActions({
           Clone
         </Button>
 
-        {kind === "ct" && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={isPending}
-            onClick={onMigrate}
-          >
-            <ArrowRightLeft className="h-4 w-4" />
-            Migrate
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          disabled={isPending}
+          onClick={onMigrate}
+        >
+          <ArrowRightLeft className="h-4 w-4" />
+          Migrate
+        </Button>
 
         <Button
           variant="outline"

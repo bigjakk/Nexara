@@ -106,6 +106,24 @@ func toMigrationJobResponse(j db.MigrationJob) migrationJobResponse {
 	return r
 }
 
+func (h *MigrationHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return
+	}
+	if details == nil {
+		details = json.RawMessage(`{}`)
+	}
+	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+		ClusterID:    clusterID,
+		UserID:       uid,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      details,
+	})
+}
+
 // --- Handlers ---
 
 var validMigrationTypes = map[string]bool{
@@ -194,6 +212,29 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create migration job")
 	}
+
+	typeLabel := "VM"
+	if req.VMType == migration.VMTypeLXC {
+		typeLabel = "CT"
+	}
+	detailsJSON, _ := json.Marshal(map[string]interface{}{
+		"vmid":           req.VMID,
+		"vm_type":        typeLabel,
+		"migration_type": req.MigrationType,
+		"source_node":    req.SourceNode,
+		"target_node":    req.TargetNode,
+		"online":         req.Online,
+	})
+	// Use the VM's DB ID so the enriched audit query can resolve name/vmid.
+	resourceType := "vm"
+	resourceID := job.ID.String() // fallback to job ID
+	if vm, err := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
+		ClusterID: srcClusterID,
+		Vmid:      req.VMID,
+	}); err == nil {
+		resourceID = vm.ID.String()
+	}
+	h.auditLog(c, srcClusterID, resourceType, resourceID, "migrate_created", detailsJSON)
 
 	return c.Status(fiber.StatusCreated).JSON(toMigrationJobResponse(job))
 }
@@ -285,10 +326,26 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusConflict, "Job is not in a state that can be executed (status: "+job.Status+")")
 	}
 
+	// Get user ID to pass to the orchestrator for audit logging.
+	var userID uuid.UUID
+	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
+		userID = uid
+	}
+
 	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil)
 
 	// Launch execution in background goroutine.
-	go orch.Execute(context.Background(), jobID)
+	go orch.Execute(context.Background(), jobID, userID)
+
+	// Audit log with the VM's DB ID.
+	resourceID := jobID.String()
+	if vm, err := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
+		ClusterID: job.SourceClusterID,
+		Vmid:      job.Vmid,
+	}); err == nil {
+		resourceID = vm.ID.String()
+	}
+	h.auditLog(c, job.SourceClusterID, "vm", resourceID, "migrate_started", nil)
 
 	return c.JSON(fiber.Map{
 		"status":  "started",
@@ -308,10 +365,24 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
 	}
 
+	job, err := h.queries.GetMigrationJob(c.Context(), jobID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
+	}
+
 	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil)
 	if err := orch.Cancel(c.Context(), jobID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to cancel migration job")
 	}
+
+	resourceIDCancel := jobID.String()
+	if vm, err := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
+		ClusterID: job.SourceClusterID,
+		Vmid:      job.Vmid,
+	}); err == nil {
+		resourceIDCancel = vm.ID.String()
+	}
+	h.auditLog(c, job.SourceClusterID, "vm", resourceIDCancel, "migrate_cancelled", nil)
 
 	return c.JSON(fiber.Map{"status": "cancelled"})
 }
