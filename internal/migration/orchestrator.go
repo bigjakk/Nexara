@@ -382,7 +382,7 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 				actionPrefix = "cross_cluster_migrate"
 			}
 
-			if status.ExitStatus == "OK" {
+			if migrationSucceeded(status.ExitStatus) {
 				_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
 					ID:          jobID,
 					Status:      StatusCompleted,
@@ -450,7 +450,7 @@ func (o *Orchestrator) auditLog(ctx context.Context, mc *migrationContext, actio
 		resourceID = mc.job.ID.String()
 	}
 	_ = o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
-		ClusterID:    mc.job.SourceClusterID,
+		ClusterID:    pgtype.UUID{Bytes: mc.job.SourceClusterID, Valid: true},
 		UserID:       mc.userID,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
@@ -462,6 +462,12 @@ func (o *Orchestrator) auditLog(ctx context.Context, mc *migrationContext, actio
 // Cancel cancels a pending or checking job.
 func (o *Orchestrator) Cancel(ctx context.Context, jobID uuid.UUID) error {
 	return o.queries.CancelMigrationJob(ctx, jobID)
+}
+
+// migrationSucceeded returns true if a Proxmox task exit status indicates success.
+func migrationSucceeded(exitStatus string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(exitStatus))
+	return upper == "" || upper == "OK" || strings.HasPrefix(upper, "OK ") || upper == "WARNINGS"
 }
 
 // formatMapping converts a map to Proxmox's "src:tgt,src2:tgt2" format.

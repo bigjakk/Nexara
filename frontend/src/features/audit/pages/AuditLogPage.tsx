@@ -22,6 +22,14 @@ const resourceTypes = [
   { value: "cluster", label: "Cluster" },
   { value: "storage", label: "Storage" },
   { value: "ceph_pool", label: "Ceph Pool" },
+  { value: "auth", label: "Auth" },
+  { value: "task", label: "Task" },
+  { value: "drs", label: "DRS" },
+  { value: "firewall", label: "Firewall" },
+  { value: "sdn", label: "SDN" },
+  { value: "schedule", label: "Schedule" },
+  { value: "pbs", label: "PBS" },
+  { value: "backup", label: "Backup" },
 ] as const;
 
 /** Convert snake_case action names to human-readable labels. */
@@ -39,6 +47,16 @@ function resourceTypeLabel(type: string): string {
     case "migration": return "Migration";
     case "ceph_pool": return "Ceph";
     case "storage": return "Storage";
+    case "auth": return "Auth";
+    case "task": return "Task";
+    case "drs": return "DRS";
+    case "firewall": return "Firewall";
+    case "sdn": return "SDN";
+    case "schedule": return "Schedule";
+    case "pbs": return "PBS";
+    case "backup": return "Backup";
+    case "cluster": return "Cluster";
+    case "network": return "Network";
     default: return type;
   }
 }
@@ -175,7 +193,7 @@ function AuditRow({
             {new Date(entry.created_at).toLocaleString()}
           </div>
         </td>
-        <td className="px-4 py-2">{entry.cluster_name}</td>
+        <td className="px-4 py-2">{entry.cluster_name || "System"}</td>
         <td className="px-4 py-2">
           <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
             {resourceTypeLabel(entry.resource_type)}
@@ -209,7 +227,7 @@ function AuditRow({
               <span>{new Date(entry.created_at).toLocaleString()}</span>
 
               <span className="text-muted-foreground">Cluster</span>
-              <span>{entry.cluster_name}</span>
+              <span>{entry.cluster_name || "System"}</span>
 
               <span className="text-muted-foreground">Resource Type</span>
               <span>{resourceTypeLabel(entry.resource_type)}</span>

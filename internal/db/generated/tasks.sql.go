@@ -14,12 +14,11 @@ import (
 
 const deleteCompletedTasks = `-- name: DeleteCompletedTasks :exec
 DELETE FROM task_history
-WHERE user_id = $1
-  AND (status != 'running' OR started_at < NOW() - INTERVAL '1 hour')
+WHERE status != 'running' OR started_at < NOW() - INTERVAL '1 hour'
 `
 
-func (q *Queries) DeleteCompletedTasks(ctx context.Context, userID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCompletedTasks, userID)
+func (q *Queries) DeleteCompletedTasks(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteCompletedTasks)
 	return err
 }
 

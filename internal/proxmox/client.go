@@ -423,6 +423,67 @@ func (c *Client) GetClusterStatus(ctx context.Context) ([]ClusterStatusEntry, er
 	return entries, nil
 }
 
+// GetHAResources returns all HA-managed resources from GET /cluster/ha/resources.
+func (c *Client) GetHAResources(ctx context.Context) ([]HAResource, error) {
+	var resources []HAResource
+	if err := c.do(ctx, "/cluster/ha/resources", &resources); err != nil {
+		return nil, fmt.Errorf("get HA resources: %w", err)
+	}
+	return resources, nil
+}
+
+// GetHAGroups returns all HA groups from GET /cluster/ha/groups.
+func (c *Client) GetHAGroups(ctx context.Context) ([]HAGroup, error) {
+	var groups []HAGroup
+	if err := c.do(ctx, "/cluster/ha/groups", &groups); err != nil {
+		return nil, fmt.Errorf("get HA groups: %w", err)
+	}
+	return groups, nil
+}
+
+// GetHARules returns all HA rules from GET /cluster/ha/rules (PVE 9+).
+func (c *Client) GetHARules(ctx context.Context) ([]HARuleEntry, error) {
+	var rules []HARuleEntry
+	if err := c.do(ctx, "/cluster/ha/rules", &rules); err != nil {
+		return nil, fmt.Errorf("get HA rules: %w", err)
+	}
+	return rules, nil
+}
+
+// CreateHARule creates a new HA rule via POST /cluster/ha/rules.
+// The ruleType ("node-affinity" or "resource-affinity") is sent as the "type" form parameter.
+func (c *Client) CreateHARule(ctx context.Context, ruleType string, params CreateHARuleParams) error {
+	form := url.Values{}
+	form.Set("rule", params.Rule)
+	form.Set("type", ruleType)
+	form.Set("resources", params.Resources)
+	if params.Nodes != "" {
+		form.Set("nodes", params.Nodes)
+	}
+	if params.Strict != 0 {
+		form.Set("strict", strconv.Itoa(params.Strict))
+	}
+	if params.Affinity != "" {
+		form.Set("affinity", params.Affinity)
+	}
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	if err := c.doPost(ctx, "/cluster/ha/rules", form, nil); err != nil {
+		return fmt.Errorf("create HA rule %q: %w", params.Rule, err)
+	}
+	return nil
+}
+
+// DeleteHARule deletes an HA rule via DELETE /cluster/ha/rules/{ruleID}.
+func (c *Client) DeleteHARule(ctx context.Context, ruleID string) error {
+	path := "/cluster/ha/rules/" + url.PathEscape(ruleID)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete HA rule %q: %w", ruleID, err)
+	}
+	return nil
+}
+
 // GetMachineTypes returns the available QEMU machine types for a node.
 func (c *Client) GetMachineTypes(ctx context.Context, node string) ([]MachineType, error) {
 	if err := validateNodeName(node); err != nil {
@@ -1456,6 +1517,181 @@ func (c *Client) GetSDNVNets(ctx context.Context) ([]SDNVNet, error) {
 		return nil, fmt.Errorf("get SDN vnets: %w", err)
 	}
 	return vnets, nil
+}
+
+// CreateSDNZone creates a new SDN zone.
+func (c *Client) CreateSDNZone(ctx context.Context, params CreateSDNZoneParams) error {
+	form := sdnZoneToForm(params.Zone, params.Type, params.Bridge, params.Peers, params.Nodes, params.IPAM, params.VLANProtocol, params.Tag, params.MTU)
+	if err := c.doPost(ctx, "/cluster/sdn/zones", form, nil); err != nil {
+		return fmt.Errorf("create SDN zone %s: %w", params.Zone, err)
+	}
+	return nil
+}
+
+// UpdateSDNZone updates an existing SDN zone.
+func (c *Client) UpdateSDNZone(ctx context.Context, zone string, params UpdateSDNZoneParams) error {
+	form := sdnZoneToForm("", "", params.Bridge, params.Peers, params.Nodes, params.IPAM, params.VLANProtocol, params.Tag, params.MTU)
+	path := "/cluster/sdn/zones/" + url.PathEscape(zone)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update SDN zone %s: %w", zone, err)
+	}
+	return nil
+}
+
+// DeleteSDNZone deletes an SDN zone.
+func (c *Client) DeleteSDNZone(ctx context.Context, zone string) error {
+	path := "/cluster/sdn/zones/" + url.PathEscape(zone)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete SDN zone %s: %w", zone, err)
+	}
+	return nil
+}
+
+// CreateSDNVNet creates a new SDN VNet.
+func (c *Client) CreateSDNVNet(ctx context.Context, params CreateSDNVNetParams) error {
+	form := sdnVNetToForm(params.VNet, params.Zone, params.Alias, params.Tag, params.VLANAware)
+	if err := c.doPost(ctx, "/cluster/sdn/vnets", form, nil); err != nil {
+		return fmt.Errorf("create SDN vnet %s: %w", params.VNet, err)
+	}
+	return nil
+}
+
+// UpdateSDNVNet updates an existing SDN VNet.
+func (c *Client) UpdateSDNVNet(ctx context.Context, vnet string, params UpdateSDNVNetParams) error {
+	form := sdnVNetToForm("", params.Zone, params.Alias, params.Tag, params.VLANAware)
+	path := "/cluster/sdn/vnets/" + url.PathEscape(vnet)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update SDN vnet %s: %w", vnet, err)
+	}
+	return nil
+}
+
+// DeleteSDNVNet deletes an SDN VNet.
+func (c *Client) DeleteSDNVNet(ctx context.Context, vnet string) error {
+	path := "/cluster/sdn/vnets/" + url.PathEscape(vnet)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete SDN vnet %s: %w", vnet, err)
+	}
+	return nil
+}
+
+// GetSDNSubnets returns all subnets for a VNet.
+func (c *Client) GetSDNSubnets(ctx context.Context, vnet string) ([]SDNSubnet, error) {
+	path := "/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets"
+	var subnets []SDNSubnet
+	if err := c.do(ctx, path, &subnets); err != nil {
+		return nil, fmt.Errorf("get SDN subnets for %s: %w", vnet, err)
+	}
+	return subnets, nil
+}
+
+// CreateSDNSubnet creates a new subnet under a VNet.
+func (c *Client) CreateSDNSubnet(ctx context.Context, vnet string, params CreateSDNSubnetParams) error {
+	form := sdnSubnetToForm(params.Subnet, params.Gateway, params.Type, params.SNAT)
+	path := "/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets"
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("create SDN subnet %s on %s: %w", params.Subnet, vnet, err)
+	}
+	return nil
+}
+
+// UpdateSDNSubnet updates an existing subnet under a VNet.
+func (c *Client) UpdateSDNSubnet(ctx context.Context, vnet string, subnet string, params UpdateSDNSubnetParams) error {
+	form := sdnSubnetToForm("", params.Gateway, "", params.SNAT)
+	path := "/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets/" + url.PathEscape(subnet)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update SDN subnet %s on %s: %w", subnet, vnet, err)
+	}
+	return nil
+}
+
+// DeleteSDNSubnet deletes a subnet under a VNet.
+func (c *Client) DeleteSDNSubnet(ctx context.Context, vnet string, subnet string) error {
+	path := "/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets/" + url.PathEscape(subnet)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete SDN subnet %s on %s: %w", subnet, vnet, err)
+	}
+	return nil
+}
+
+// ApplySDN applies pending SDN configuration changes.
+func (c *Client) ApplySDN(ctx context.Context) error {
+	if err := c.doPut(ctx, "/cluster/sdn", nil, nil); err != nil {
+		return fmt.Errorf("apply SDN config: %w", err)
+	}
+	return nil
+}
+
+// sdnZoneToForm converts SDN zone parameters to url.Values.
+func sdnZoneToForm(zone, zoneType, bridge, peers, nodes, ipam, vlanProtocol string, tag, mtu int) url.Values {
+	form := url.Values{}
+	if zone != "" {
+		form.Set("zone", zone)
+	}
+	if zoneType != "" {
+		form.Set("type", zoneType)
+	}
+	if bridge != "" {
+		form.Set("bridge", bridge)
+	}
+	if peers != "" {
+		form.Set("peers", peers)
+	}
+	if nodes != "" {
+		form.Set("nodes", nodes)
+	}
+	if ipam != "" {
+		form.Set("ipam", ipam)
+	}
+	if vlanProtocol != "" {
+		form.Set("vlan-protocol", vlanProtocol)
+	}
+	if tag != 0 {
+		form.Set("tag", strconv.Itoa(tag))
+	}
+	if mtu != 0 {
+		form.Set("mtu", strconv.Itoa(mtu))
+	}
+	return form
+}
+
+// sdnVNetToForm converts SDN VNet parameters to url.Values.
+func sdnVNetToForm(vnet, zone, alias string, tag, vlanAware int) url.Values {
+	form := url.Values{}
+	if vnet != "" {
+		form.Set("vnet", vnet)
+	}
+	if zone != "" {
+		form.Set("zone", zone)
+	}
+	if alias != "" {
+		form.Set("alias", alias)
+	}
+	if tag != 0 {
+		form.Set("tag", strconv.Itoa(tag))
+	}
+	if vlanAware != 0 {
+		form.Set("vlanaware", strconv.Itoa(vlanAware))
+	}
+	return form
+}
+
+// sdnSubnetToForm converts SDN subnet parameters to url.Values.
+func sdnSubnetToForm(subnet, gateway, subnetType string, snat int) url.Values {
+	form := url.Values{}
+	if subnet != "" {
+		form.Set("subnet", subnet)
+	}
+	if gateway != "" {
+		form.Set("gateway", gateway)
+	}
+	if subnetType != "" {
+		form.Set("type", subnetType)
+	}
+	if snat != 0 {
+		form.Set("snat", strconv.Itoa(snat))
+	}
+	return form
 }
 
 // --- Network Interface CRUD Methods ---

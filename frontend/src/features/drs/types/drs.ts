@@ -5,7 +5,6 @@ export type RuleType = "affinity" | "anti-affinity" | "pin";
 export interface DRSWeights {
   cpu: number;
   memory: number;
-  network: number;
 }
 
 export interface DRSConfig {
@@ -28,6 +27,8 @@ export interface DRSConfigRequest {
   eval_interval_seconds: number;
 }
 
+export type RuleSource = "manual" | "ha";
+
 export interface DRSRule {
   id: string;
   cluster_id: string;
@@ -35,11 +36,21 @@ export interface DRSRule {
   vm_ids: number[];
   node_names: string[];
   enabled: boolean;
+  source: RuleSource;
+  ha_rule_name?: string;
   created_at: string;
   updated_at: string;
 }
 
 export interface CreateRuleRequest {
+  rule_type: RuleType;
+  vm_ids: number[];
+  node_names: string[];
+  enabled: boolean;
+}
+
+export interface CreateHARuleRequest {
+  rule_name: string;
   rule_type: RuleType;
   vm_ids: number[];
   node_names: string[];

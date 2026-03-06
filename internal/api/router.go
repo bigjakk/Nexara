@@ -128,7 +128,18 @@ func (s *Server) setupRoutes() {
 		netClusters.Delete("/:cluster_id/vms/:vm_id/firewall/rules/:pos", s.networkHandler.DeleteVMFirewallRule)
 
 		netClusters.Get("/:cluster_id/sdn/zones", s.networkHandler.ListSDNZones)
+		netClusters.Post("/:cluster_id/sdn/zones", s.networkHandler.CreateSDNZone)
+		netClusters.Put("/:cluster_id/sdn/zones/:zone", s.networkHandler.UpdateSDNZone)
+		netClusters.Delete("/:cluster_id/sdn/zones/:zone", s.networkHandler.DeleteSDNZone)
 		netClusters.Get("/:cluster_id/sdn/vnets", s.networkHandler.ListSDNVNets)
+		netClusters.Post("/:cluster_id/sdn/vnets", s.networkHandler.CreateSDNVNet)
+		netClusters.Put("/:cluster_id/sdn/vnets/:vnet", s.networkHandler.UpdateSDNVNet)
+		netClusters.Delete("/:cluster_id/sdn/vnets/:vnet", s.networkHandler.DeleteSDNVNet)
+		netClusters.Get("/:cluster_id/sdn/vnets/:vnet/subnets", s.networkHandler.ListSDNSubnets)
+		netClusters.Post("/:cluster_id/sdn/vnets/:vnet/subnets", s.networkHandler.CreateSDNSubnet)
+		netClusters.Put("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.UpdateSDNSubnet)
+		netClusters.Delete("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.DeleteSDNSubnet)
+		netClusters.Put("/:cluster_id/sdn/apply", s.networkHandler.ApplySDN)
 
 		netClusters.Post("/:cluster_id/firewall-templates/:id/apply", s.networkHandler.ApplyTemplate)
 	}
@@ -164,6 +175,9 @@ func (s *Server) setupRoutes() {
 		drsClusters.Delete("/:cluster_id/drs/rules/:rule_id", s.drsHandler.DeleteRule)
 		drsClusters.Post("/:cluster_id/drs/evaluate", s.drsHandler.TriggerEvaluate)
 		drsClusters.Get("/:cluster_id/drs/history", s.drsHandler.ListHistory)
+		drsClusters.Get("/:cluster_id/drs/ha-rules", s.drsHandler.ListHARules)
+		drsClusters.Post("/:cluster_id/drs/ha-rules", s.drsHandler.CreateHARule)
+		drsClusters.Delete("/:cluster_id/drs/ha-rules/:rule_name", s.drsHandler.DeleteHARule)
 	}
 
 	// PBS server routes.

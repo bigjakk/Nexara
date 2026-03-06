@@ -241,3 +241,24 @@ export function useDeletePBSServer() {
     },
   });
 }
+
+interface UpdatePBSServerRequest {
+  name?: string;
+  api_url?: string;
+  token_id?: string;
+  token_secret?: string;
+  tls_fingerprint?: string;
+  cluster_id?: string;
+}
+
+export function useUpdatePBSServer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, ...body }: UpdatePBSServerRequest & { id: string }) =>
+      apiClient.put<PBSServer>(`/api/v1/pbs-servers/${id}`, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["pbs-servers"] });
+    },
+  });
+}

@@ -24,7 +24,7 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
-	DeleteCompletedTasks(ctx context.Context, userID uuid.UUID) error
+	DeleteCompletedTasks(ctx context.Context) error
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error

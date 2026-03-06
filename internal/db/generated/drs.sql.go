@@ -16,7 +16,7 @@ import (
 const cleanupStaleDRSHistory = `-- name: CleanupStaleDRSHistory :exec
 UPDATE drs_history
 SET status = 'cancelled', executed_at = now()
-WHERE status = 'pending' AND created_at < now() - interval '10 minutes'
+WHERE status = 'pending' AND created_at < now() - interval '60 minutes'
 `
 
 func (q *Queries) CleanupStaleDRSHistory(ctx context.Context) error {

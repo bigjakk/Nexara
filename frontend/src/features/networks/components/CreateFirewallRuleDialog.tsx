@@ -38,8 +38,12 @@ export function CreateFirewallRuleDialog({
   const [enable, setEnable] = useState(true);
 
   const create = useCreateClusterFirewallRule(clusterId);
+  const errorMessage = create.error instanceof Error ? create.error.message : "";
+
+  const needsProto = dport.length > 0 && proto.length === 0;
 
   const handleSubmit = () => {
+    if (needsProto) return;
     const req: FirewallRuleRequest = {
       type,
       action,
@@ -107,9 +111,11 @@ export function CreateFirewallRuleDialog({
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Protocol (optional)</Label>
+            <Label>
+              Protocol{dport.length > 0 ? "" : " (optional)"}
+            </Label>
             <Select value={proto} onValueChange={setProto}>
-              <SelectTrigger>
+              <SelectTrigger className={needsProto ? "border-destructive" : ""}>
                 <SelectValue placeholder="Any" />
               </SelectTrigger>
               <SelectContent>
@@ -118,6 +124,11 @@ export function CreateFirewallRuleDialog({
                 <SelectItem value="icmp">ICMP</SelectItem>
               </SelectContent>
             </Select>
+            {needsProto && (
+              <p className="text-xs text-destructive">
+                Protocol is required when a destination port is specified.
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -163,6 +174,9 @@ export function CreateFirewallRuleDialog({
             />
             <Label htmlFor="enable-rule">Enable rule</Label>
           </div>
+          {errorMessage && (
+            <p className="text-sm text-destructive">{errorMessage}</p>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => { setOpen(false); }}>
               Cancel

@@ -10,6 +10,13 @@ import type {
   FirewallOptions,
   SDNZone,
   SDNVNet,
+  SDNSubnet,
+  CreateSDNZoneRequest,
+  UpdateSDNZoneRequest,
+  CreateSDNVNetRequest,
+  UpdateSDNVNetRequest,
+  CreateSDNSubnetRequest,
+  UpdateSDNSubnetRequest,
   FirewallTemplate,
   CreateTemplateRequest,
   ApplyTemplateResponse,
@@ -288,6 +295,191 @@ export function useSDNVNets(clusterId: string) {
         `/api/v1/clusters/${clusterId}/sdn/vnets`,
       ),
     enabled: clusterId.length > 0,
+  });
+}
+
+export function useCreateSDNZone(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: CreateSDNZoneRequest) =>
+      apiClient.post<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/zones`,
+        params,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "zones", clusterId],
+      });
+    },
+  });
+}
+
+export function useUpdateSDNZone(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      zone,
+      params,
+    }: {
+      zone: string;
+      params: UpdateSDNZoneRequest;
+    }) =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/zones/${zone}`,
+        params,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "zones", clusterId],
+      });
+    },
+  });
+}
+
+export function useDeleteSDNZone(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (zone: string) =>
+      apiClient.delete<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/zones/${zone}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "zones", clusterId],
+      });
+    },
+  });
+}
+
+export function useCreateSDNVNet(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: CreateSDNVNetRequest) =>
+      apiClient.post<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/vnets`,
+        params,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "vnets", clusterId],
+      });
+    },
+  });
+}
+
+export function useUpdateSDNVNet(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      vnet,
+      params,
+    }: {
+      vnet: string;
+      params: UpdateSDNVNetRequest;
+    }) =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}`,
+        params,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "vnets", clusterId],
+      });
+    },
+  });
+}
+
+export function useDeleteSDNVNet(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vnet: string) =>
+      apiClient.delete<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "vnets", clusterId],
+      });
+    },
+  });
+}
+
+export function useSDNSubnets(clusterId: string, vnet: string) {
+  return useQuery({
+    queryKey: ["sdn", "subnets", clusterId, vnet],
+    queryFn: () =>
+      apiClient.get<SDNSubnet[]>(
+        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets`,
+      ),
+    enabled: clusterId.length > 0 && vnet.length > 0,
+  });
+}
+
+export function useCreateSDNSubnet(clusterId: string, vnet: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: CreateSDNSubnetRequest) =>
+      apiClient.post<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets`,
+        params,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "subnets", clusterId, vnet],
+      });
+    },
+  });
+}
+
+export function useUpdateSDNSubnet(clusterId: string, vnet: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      subnet,
+      params,
+    }: {
+      subnet: string;
+      params: UpdateSDNSubnetRequest;
+    }) =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets/${subnet}`,
+        params,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "subnets", clusterId, vnet],
+      });
+    },
+  });
+}
+
+export function useDeleteSDNSubnet(clusterId: string, vnet: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (subnet: string) =>
+      apiClient.delete<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets/${subnet}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "subnets", clusterId, vnet],
+      });
+    },
+  });
+}
+
+export function useApplySDN(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/apply`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn"],
+      });
+    },
   });
 }
 

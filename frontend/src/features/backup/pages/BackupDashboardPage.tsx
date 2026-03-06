@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Shield } from "lucide-react";
+import { Shield, Pencil, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiClientError } from "@/lib/api-client";
@@ -19,11 +20,15 @@ import { PBSTaskTable } from "../components/PBSTaskTable";
 import { GCDialog } from "../components/GCDialog";
 import { DatastoreChart } from "../components/DatastoreChart";
 import { AddPBSServerDialog } from "../components/AddPBSServerDialog";
+import { EditPBSServerDialog } from "../components/EditPBSServerDialog";
+import { DeletePBSServerDialog } from "../components/DeletePBSServerDialog";
 
 export function BackupDashboardPage() {
   const serversQuery = usePBSServers();
   const servers = serversQuery.data ?? [];
   const [selectedServerId, setSelectedServerId] = useState<string>("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const activeServerId =
     selectedServerId || (servers.length > 0 ? servers[0]?.id ?? "" : "");
@@ -55,8 +60,45 @@ export function BackupDashboardPage() {
           <Shield className="h-6 w-6 text-primary" />
           <h1 className="text-2xl font-semibold">Backup</h1>
         </div>
-        <AddPBSServerDialog />
+        <div className="flex items-center gap-2">
+          {activeServer && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setEditOpen(true); }}
+              >
+                <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                Edit
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setDeleteOpen(true); }}
+              >
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                Delete
+              </Button>
+            </>
+          )}
+          <AddPBSServerDialog />
+        </div>
       </div>
+
+      {activeServer && (
+        <>
+          <EditPBSServerDialog
+            server={activeServer}
+            open={editOpen}
+            onOpenChange={setEditOpen}
+          />
+          <DeletePBSServerDialog
+            server={activeServer}
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+          />
+        </>
+      )}
 
       {serversQuery.isLoading && (
         <div className="grid gap-4 md:grid-cols-3">

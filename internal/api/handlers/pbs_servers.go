@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -74,6 +75,25 @@ func toPBSResponse(p db.PbsServer) pbsResponse {
 	return resp
 }
 
+// auditLog writes an audit log entry. Failures are logged but don't fail the request.
+func (h *PBSHandler) auditLog(c *fiber.Ctx, resourceType, resourceID, action string, details json.RawMessage, clusterID pgtype.UUID) {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return
+	}
+	if details == nil {
+		details = json.RawMessage(`{}`)
+	}
+	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+		ClusterID:    clusterID,
+		UserID:       uid,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      details,
+	})
+}
+
 // Create handles POST /api/v1/pbs-servers.
 func (h *PBSHandler) Create(c *fiber.Ctx) error {
 	if err := requireAdmin(c); err != nil {
@@ -122,6 +142,9 @@ func (h *PBSHandler) Create(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create PBS server")
 	}
+
+	h.auditLog(c, "pbs_server", pbs.ID.String(), "pbs_created",
+		json.RawMessage(`{"name":"`+pbs.Name+`"}`), pbs.ClusterID)
 
 	return c.Status(fiber.StatusCreated).JSON(toPBSResponse(pbs))
 }
@@ -263,6 +286,9 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update PBS server")
 	}
 
+	h.auditLog(c, "pbs_server", pbs.ID.String(), "pbs_updated",
+		json.RawMessage(`{"name":"`+pbs.Name+`"}`), pbs.ClusterID)
+
 	return c.JSON(toPBSResponse(pbs))
 }
 
@@ -277,13 +303,16 @@ func (h *PBSHandler) Delete(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
 	}
 
-	_, err = h.queries.GetPBSServer(c.Context(), id)
+	existing, err := h.queries.GetPBSServer(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusNotFound, "PBS server not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get PBS server")
 	}
+
+	h.auditLog(c, "pbs_server", id.String(), "pbs_deleted",
+		json.RawMessage(`{"name":"`+existing.Name+`"}`), existing.ClusterID)
 
 	if err := h.queries.DeletePBSServer(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete PBS server")

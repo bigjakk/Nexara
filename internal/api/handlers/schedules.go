@@ -87,6 +87,24 @@ func toScheduleResponse(t db.ScheduledTask) scheduleResponse {
 	return r
 }
 
+func (h *ScheduleHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return
+	}
+	if details == nil {
+		details = json.RawMessage(`{}`)
+	}
+	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
+		UserID:       uid,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      details,
+	})
+}
+
 var validScheduleActions = map[string]bool{
 	"snapshot": true,
 	"reboot":   true,
@@ -143,6 +161,14 @@ func (h *ScheduleHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create schedule")
 	}
 
+	details, _ := json.Marshal(map[string]string{
+		"action":        req.Action,
+		"resource_type": req.ResourceType,
+		"resource_id":   req.ResourceID,
+		"schedule":      req.Schedule,
+	})
+	h.auditLog(c, clusterID, "schedule", task.ID.String(), "schedule_created", details)
+
 	return c.Status(fiber.StatusCreated).JSON(toScheduleResponse(task))
 }
 
@@ -194,6 +220,11 @@ func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
 		req.Params = json.RawMessage(`{}`)
 	}
 
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
 	if err := h.queries.UpdateScheduledTask(c.Context(), db.UpdateScheduledTaskParams{
 		ID:       taskID,
 		Schedule: req.Schedule,
@@ -202,6 +233,11 @@ func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
 	}); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update schedule")
 	}
+
+	details, _ := json.Marshal(map[string]string{
+		"schedule": req.Schedule,
+	})
+	h.auditLog(c, clusterID, "schedule", taskID.String(), "schedule_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -212,6 +248,11 @@ func (h *ScheduleHandler) Delete(c *fiber.Ctx) error {
 		return err
 	}
 
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
 	taskID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
@@ -220,6 +261,8 @@ func (h *ScheduleHandler) Delete(c *fiber.Ctx) error {
 	if err := h.queries.DeleteScheduledTask(c.Context(), taskID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete schedule")
 	}
+
+	h.auditLog(c, clusterID, "schedule", taskID.String(), "schedule_deleted", nil)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

@@ -428,6 +428,24 @@ type CephMon struct {
 	Quorum  bool    `json:"quorum,omitempty"`
 }
 
+// HAResource represents an HA-managed resource from GET /cluster/ha/resources.
+type HAResource struct {
+	SID         string `json:"sid"`          // "vm:101" or "ct:200"
+	Type        string `json:"type"`         // "vm" or "ct"
+	State       string `json:"state"`        // "started", "stopped", "enabled", etc.
+	Group       string `json:"group"`        // HA group name (may be empty)
+	Status      string `json:"status"`
+	MaxRelocate int    `json:"max_relocate"`
+}
+
+// HAGroup represents an HA group from GET /cluster/ha/groups.
+type HAGroup struct {
+	Group      string `json:"group"`      // group name
+	Nodes      string `json:"nodes"`      // "node1:100,node2:50" or "node1,node2"
+	Restricted int    `json:"restricted"` // 1 = VMs can ONLY run on group nodes
+	NoFailback int    `json:"nofailback"`
+}
+
 // ClusterStatusEntry represents an entry from GET /cluster/status.
 type ClusterStatusEntry struct {
 	Type    string `json:"type"`
@@ -681,21 +699,113 @@ type FirewallOptions struct {
 
 // SDNZone represents an SDN zone from GET /cluster/sdn/zones.
 type SDNZone struct {
-	Zone       string `json:"zone"`
-	Type       string `json:"type"`
-	Nodes      string `json:"nodes,omitempty"`
-	IPAM       string `json:"ipam,omitempty"`
-	DNS        string `json:"dns,omitempty"`
-	ReverseDNS string `json:"reversedns,omitempty"`
-	DNSZone    string `json:"dnszone,omitempty"`
+	Zone         string `json:"zone"`
+	Type         string `json:"type"`
+	Nodes        string `json:"nodes,omitempty"`
+	IPAM         string `json:"ipam,omitempty"`
+	DNS          string `json:"dns,omitempty"`
+	ReverseDNS   string `json:"reversedns,omitempty"`
+	DNSZone      string `json:"dnszone,omitempty"`
+	Bridge       string `json:"bridge,omitempty"`
+	Tag          int    `json:"tag,omitempty"`
+	VLANProtocol string `json:"vlan-protocol,omitempty"`
+	Peers        string `json:"peers,omitempty"`
+	MTU          int    `json:"mtu,omitempty"`
 }
 
 // SDNVNet represents an SDN VNet from GET /cluster/sdn/vnets.
 type SDNVNet struct {
-	VNet  string `json:"vnet"`
-	Zone  string `json:"zone"`
-	Tag   int    `json:"tag,omitempty"`
-	Alias string `json:"alias,omitempty"`
+	VNet      string `json:"vnet"`
+	Zone      string `json:"zone"`
+	Tag       int    `json:"tag,omitempty"`
+	Alias     string `json:"alias,omitempty"`
+	VLANAware int    `json:"vlanaware,omitempty"`
+}
+
+// SDNSubnet represents an SDN subnet from GET /cluster/sdn/vnets/{vnet}/subnets.
+type SDNSubnet struct {
+	Subnet  string `json:"subnet"`
+	Type    string `json:"type,omitempty"`
+	Gateway string `json:"gateway,omitempty"`
+	SNAT    int    `json:"snat,omitempty"`
+	VNet    string `json:"vnet,omitempty"`
+}
+
+// CreateSDNZoneParams holds parameters for creating an SDN zone.
+type CreateSDNZoneParams struct {
+	Zone         string `json:"zone"`
+	Type         string `json:"type"`
+	Bridge       string `json:"bridge,omitempty"`
+	Tag          int    `json:"tag,omitempty"`
+	VLANProtocol string `json:"vlan-protocol,omitempty"`
+	Peers        string `json:"peers,omitempty"`
+	MTU          int    `json:"mtu,omitempty"`
+	Nodes        string `json:"nodes,omitempty"`
+	IPAM         string `json:"ipam,omitempty"`
+}
+
+// UpdateSDNZoneParams holds parameters for updating an SDN zone.
+type UpdateSDNZoneParams struct {
+	Bridge       string `json:"bridge,omitempty"`
+	Tag          int    `json:"tag,omitempty"`
+	VLANProtocol string `json:"vlan-protocol,omitempty"`
+	Peers        string `json:"peers,omitempty"`
+	MTU          int    `json:"mtu,omitempty"`
+	Nodes        string `json:"nodes,omitempty"`
+	IPAM         string `json:"ipam,omitempty"`
+}
+
+// CreateSDNVNetParams holds parameters for creating an SDN VNet.
+type CreateSDNVNetParams struct {
+	VNet      string `json:"vnet"`
+	Zone      string `json:"zone"`
+	Tag       int    `json:"tag,omitempty"`
+	Alias     string `json:"alias,omitempty"`
+	VLANAware int    `json:"vlanaware,omitempty"`
+}
+
+// UpdateSDNVNetParams holds parameters for updating an SDN VNet.
+type UpdateSDNVNetParams struct {
+	Zone      string `json:"zone,omitempty"`
+	Tag       int    `json:"tag,omitempty"`
+	Alias     string `json:"alias,omitempty"`
+	VLANAware int    `json:"vlanaware,omitempty"`
+}
+
+// CreateSDNSubnetParams holds parameters for creating an SDN subnet.
+type CreateSDNSubnetParams struct {
+	Subnet  string `json:"subnet"`
+	Gateway string `json:"gateway,omitempty"`
+	SNAT    int    `json:"snat,omitempty"`
+	Type    string `json:"type,omitempty"`
+}
+
+// UpdateSDNSubnetParams holds parameters for updating an SDN subnet.
+type UpdateSDNSubnetParams struct {
+	Gateway string `json:"gateway,omitempty"`
+	SNAT    int    `json:"snat,omitempty"`
+}
+
+// HARuleEntry represents an HA rule from GET /cluster/ha/rules (PVE 9+).
+type HARuleEntry struct {
+	Rule      string `json:"rule"`
+	Type      string `json:"type"`      // "node-affinity" or "resource-affinity"
+	Resources string `json:"resources"` // "vm:100,ct:101"
+	Nodes     string `json:"nodes"`     // node-affinity only
+	Strict    int    `json:"strict"`
+	Affinity  string `json:"affinity"` // resource-affinity: "positive" or "negative"
+	Comment   string `json:"comment"`
+	Disable   int    `json:"disable"`
+}
+
+// CreateHARuleParams holds parameters for creating an HA rule via POST /cluster/ha/rules/{type}.
+type CreateHARuleParams struct {
+	Rule      string `json:"rule"`
+	Resources string `json:"resources"`
+	Nodes     string `json:"nodes,omitempty"`
+	Strict    int    `json:"strict,omitempty"`
+	Affinity  string `json:"affinity,omitempty"`
+	Comment   string `json:"comment,omitempty"`
 }
 
 // CreateNetworkInterfaceParams holds parameters for creating a network interface.

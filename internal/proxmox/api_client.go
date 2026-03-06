@@ -86,10 +86,21 @@ func newAPIClient(cfg ClientConfig, authPrefix string) (*apiClient, error) {
 			Timeout:   cfg.Timeout,
 		},
 		baseURL:    baseURL,
-		authHeader: fmt.Sprintf("%s=%s=%s", authPrefix, cfg.TokenID, cfg.TokenSecret),
+		authHeader: buildAuthHeader(authPrefix, cfg.TokenID, cfg.TokenSecret),
 		tokenID:    cfg.TokenID,
 		tlsCfg:     tlsCfg,
 	}, nil
+}
+
+// buildAuthHeader constructs the Authorization header value.
+// PVE uses "PVEAPIToken=user@realm!token=secret" (equals separator).
+// PBS uses "PBSAPIToken=user@realm!token:secret" (colon separator).
+func buildAuthHeader(prefix, tokenID, tokenSecret string) string {
+	sep := "="
+	if prefix == "PBSAPIToken" {
+		sep = ":"
+	}
+	return fmt.Sprintf("%s=%s%s%s", prefix, tokenID, sep, tokenSecret)
 }
 
 // formatFingerprint returns the lowercase hex SHA-256 digest of a DER-encoded certificate.

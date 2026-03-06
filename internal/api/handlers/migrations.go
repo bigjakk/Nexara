@@ -115,7 +115,7 @@ func (h *MigrationHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceT
 		details = json.RawMessage(`{}`)
 	}
 	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    clusterID,
+		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
 		UserID:       uid,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
@@ -301,6 +301,11 @@ func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
 	report, err := orch.RunPreFlight(c.Context(), jobID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+
+	// Look up the job to get the cluster ID for audit logging.
+	if job, jobErr := h.queries.GetMigrationJob(c.Context(), jobID); jobErr == nil {
+		h.auditLog(c, job.SourceClusterID, "migration", jobID.String(), "preflight_check", nil)
 	}
 
 	return c.JSON(report)

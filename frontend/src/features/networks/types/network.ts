@@ -98,6 +98,11 @@ export interface SDNZone {
   dns?: string;
   reversedns?: string;
   dnszone?: string;
+  bridge?: string;
+  tag?: number;
+  "vlan-protocol"?: string;
+  peers?: string;
+  mtu?: number;
 }
 
 export interface SDNVNet {
@@ -105,6 +110,64 @@ export interface SDNVNet {
   zone: string;
   tag?: number;
   alias?: string;
+  vlanaware?: number;
+}
+
+export interface SDNSubnet {
+  subnet: string;
+  type?: string;
+  gateway?: string;
+  snat?: number;
+  vnet?: string;
+}
+
+export interface CreateSDNZoneRequest {
+  zone: string;
+  type: string;
+  bridge?: string;
+  tag?: number;
+  "vlan-protocol"?: string;
+  peers?: string;
+  mtu?: number;
+  nodes?: string;
+  ipam?: string;
+}
+
+export interface UpdateSDNZoneRequest {
+  bridge?: string;
+  tag?: number;
+  "vlan-protocol"?: string;
+  peers?: string;
+  mtu?: number;
+  nodes?: string;
+  ipam?: string;
+}
+
+export interface CreateSDNVNetRequest {
+  vnet: string;
+  zone: string;
+  tag?: number;
+  alias?: string;
+  vlanaware?: number;
+}
+
+export interface UpdateSDNVNetRequest {
+  zone?: string;
+  tag?: number;
+  alias?: string;
+  vlanaware?: number;
+}
+
+export interface CreateSDNSubnetRequest {
+  subnet: string;
+  gateway?: string;
+  snat?: number;
+  type?: string;
+}
+
+export interface UpdateSDNSubnetRequest {
+  gateway?: string;
+  snat?: number;
 }
 
 export interface FirewallTemplate {

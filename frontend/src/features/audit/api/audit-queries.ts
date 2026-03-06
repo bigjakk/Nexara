@@ -3,7 +3,7 @@ import { apiClient } from "@/lib/api-client";
 
 export interface AuditLogEntry {
   id: string;
-  cluster_id: string;
+  cluster_id: string | null;
   user_id: string;
   resource_type: string;
   resource_id: string;

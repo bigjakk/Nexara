@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
@@ -34,6 +36,24 @@ func NewClusterHandler(queries *db.Queries, encryptionKey string) *ClusterHandle
 		queries:       queries,
 		encryptionKey: encryptionKey,
 	}
+}
+
+func (h *ClusterHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return
+	}
+	if details == nil {
+		details = json.RawMessage(`{}`)
+	}
+	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
+		UserID:       uid,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      details,
+	})
 }
 
 type createClusterRequest struct {
@@ -144,6 +164,9 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create cluster")
 	}
+
+	details, _ := json.Marshal(map[string]string{"name": cluster.Name})
+	h.auditLog(c, cluster.ID, "cluster", cluster.ID.String(), "cluster_created", details)
 
 	connectivity := testClusterConnectivity(req.APIURL, req.TokenID, req.TokenSecret, req.TLSFingerprint)
 
@@ -270,6 +293,9 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update cluster")
 	}
 
+	updateDetails, _ := json.Marshal(map[string]string{"name": cluster.Name})
+	h.auditLog(c, cluster.ID, "cluster", cluster.ID.String(), "cluster_updated", updateDetails)
+
 	// Determine the token secret for connectivity test.
 	var tokenSecret string
 	if req.TokenSecret != nil {
@@ -305,6 +331,8 @@ func (h *ClusterHandler) Delete(c *fiber.Ctx) error {
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
 	}
+
+	h.auditLog(c, id, "cluster", id.String(), "cluster_deleted", nil)
 
 	if err := h.queries.DeleteCluster(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete cluster")

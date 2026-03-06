@@ -20,7 +20,7 @@ func NewAuditHandler(queries *db.Queries) *AuditHandler {
 
 type auditLogResponse struct {
 	ID              uuid.UUID `json:"id"`
-	ClusterID       uuid.UUID `json:"cluster_id"`
+	ClusterID       *string   `json:"cluster_id"`
 	UserID          uuid.UUID `json:"user_id"`
 	ResourceType    string    `json:"resource_type"`
 	ResourceID      string    `json:"resource_id"`
@@ -35,9 +35,8 @@ type auditLogResponse struct {
 }
 
 func toEnrichedAuditResponse(a db.ListAuditLogEnrichedRow) auditLogResponse {
-	return auditLogResponse{
+	resp := auditLogResponse{
 		ID:              a.ID,
-		ClusterID:       a.ClusterID,
 		UserID:          a.UserID,
 		ResourceType:    a.ResourceType,
 		ResourceID:      a.ResourceID,
@@ -50,6 +49,11 @@ func toEnrichedAuditResponse(a db.ListAuditLogEnrichedRow) auditLogResponse {
 		ResourceVMID:    a.ResourceVmid,
 		ResourceName:    a.ResourceName,
 	}
+	if a.ClusterID.Valid {
+		s := uuid.UUID(a.ClusterID.Bytes).String()
+		resp.ClusterID = &s
+	}
+	return resp
 }
 
 type auditListResponse struct {

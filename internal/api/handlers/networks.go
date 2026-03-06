@@ -3,12 +3,14 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
@@ -53,6 +55,25 @@ func (h *NetworkHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) 
 	}
 
 	return pxClient, nil
+}
+
+// auditLog records an audit log entry for a mutating network/firewall/SDN operation.
+func (h *NetworkHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return
+	}
+	if details == nil {
+		details = json.RawMessage(`{}`)
+	}
+	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
+		UserID:       uid,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      details,
+	})
 }
 
 // --- Network Interface Endpoints ---
@@ -161,6 +182,9 @@ func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create network interface")
 	}
 
+	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": req.Iface, "type": req.Type})
+	h.auditLog(c, clusterID, "network", fmt.Sprintf("%s/%s", nodeName, req.Iface), "interface_created", details)
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -199,6 +223,9 @@ func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update network interface")
 	}
 
+	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": ifaceName, "type": req.Type})
+	h.auditLog(c, clusterID, "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_updated", details)
+
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -228,6 +255,9 @@ func (h *NetworkHandler) DeleteNetworkInterface(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete network interface")
 	}
 
+	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": ifaceName})
+	h.auditLog(c, clusterID, "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_deleted", details)
+
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -256,6 +286,9 @@ func (h *NetworkHandler) ApplyNetworkConfig(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to apply network config")
 	}
 
+	details, _ := json.Marshal(map[string]string{"node": nodeName})
+	h.auditLog(c, clusterID, "network", nodeName, "network_applied", details)
+
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -283,6 +316,9 @@ func (h *NetworkHandler) RevertNetworkConfig(c *fiber.Ctx) error {
 	if err := pxClient.RevertNetworkConfig(c.Context(), nodeName); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revert network config")
 	}
+
+	details, _ := json.Marshal(map[string]string{"node": nodeName})
+	h.auditLog(c, clusterID, "network", nodeName, "network_reverted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -339,8 +375,11 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.CreateClusterFirewallRule(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create firewall rule")
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create firewall rule: "+err.Error())
 	}
+
+	details, _ := json.Marshal(map[string]string{"action": req.Action, "type": req.Type})
+	h.auditLog(c, clusterID, "firewall", "cluster", "firewall_rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -375,6 +414,9 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update firewall rule")
 	}
 
+	details, _ := json.Marshal(map[string]interface{}{"position": pos, "action": req.Action, "type": req.Type})
+	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_updated", details)
+
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -402,6 +444,9 @@ func (h *NetworkHandler) DeleteClusterFirewallRule(c *fiber.Ctx) error {
 	if err := pxClient.DeleteClusterFirewallRule(c.Context(), pos); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete firewall rule")
 	}
+
+	details, _ := json.Marshal(map[string]interface{}{"position": pos})
+	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -502,6 +547,9 @@ func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create VM firewall rule")
 	}
 
+	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "action": req.Action, "type": req.Type})
+	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("vm/%d", vmid), "firewall_rule_created", details)
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -545,6 +593,9 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update VM firewall rule")
 	}
 
+	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos, "action": req.Action, "type": req.Type})
+	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_updated", details)
+
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -582,6 +633,9 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
 	if err := pxClient.DeleteVMFirewallRule(c.Context(), nodeName, vmid, pos); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete VM firewall rule")
 	}
+
+	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos})
+	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -637,6 +691,9 @@ func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to set firewall options")
 	}
 
+	details, _ := json.Marshal(req)
+	h.auditLog(c, clusterID, "firewall", "cluster/options", "firewall_options_updated", details)
+
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -688,6 +745,375 @@ func (h *NetworkHandler) ListSDNVNets(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(vnets)
+}
+
+// --- SDN CRUD Endpoints ---
+
+// CreateSDNZone handles POST /clusters/:cluster_id/sdn/zones.
+func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	var req proxmox.CreateSDNZoneParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Zone == "" || req.Type == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "zone and type are required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.CreateSDNZone(c.Context(), req); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create SDN zone: "+err.Error())
+	}
+
+	details, _ := json.Marshal(map[string]string{"zone": req.Zone, "type": req.Type})
+	h.auditLog(c, clusterID, "sdn", req.Zone, "sdn_zone_created", details)
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// UpdateSDNZone handles PUT /clusters/:cluster_id/sdn/zones/:zone.
+func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	zone := c.Params("zone")
+	if zone == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "zone is required")
+	}
+
+	var req proxmox.UpdateSDNZoneParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.UpdateSDNZone(c.Context(), zone, req); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update SDN zone: "+err.Error())
+	}
+
+	details, _ := json.Marshal(map[string]string{"zone": zone})
+	h.auditLog(c, clusterID, "sdn", zone, "sdn_zone_updated", details)
+
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteSDNZone handles DELETE /clusters/:cluster_id/sdn/zones/:zone.
+func (h *NetworkHandler) DeleteSDNZone(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	zone := c.Params("zone")
+	if zone == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "zone is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.DeleteSDNZone(c.Context(), zone); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete SDN zone: "+err.Error())
+	}
+
+	details, _ := json.Marshal(map[string]string{"zone": zone})
+	h.auditLog(c, clusterID, "sdn", zone, "sdn_zone_deleted", details)
+
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// CreateSDNVNet handles POST /clusters/:cluster_id/sdn/vnets.
+func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	var req proxmox.CreateSDNVNetParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.VNet == "" || req.Zone == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "vnet and zone are required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.CreateSDNVNet(c.Context(), req); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create SDN VNet: "+err.Error())
+	}
+
+	details, _ := json.Marshal(map[string]string{"vnet": req.VNet, "zone": req.Zone})
+	h.auditLog(c, clusterID, "sdn", req.VNet, "sdn_vnet_created", details)
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// UpdateSDNVNet handles PUT /clusters/:cluster_id/sdn/vnets/:vnet.
+func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vnet := c.Params("vnet")
+	if vnet == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "vnet is required")
+	}
+
+	var req proxmox.UpdateSDNVNetParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.UpdateSDNVNet(c.Context(), vnet, req); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update SDN VNet: "+err.Error())
+	}
+
+	details, _ := json.Marshal(map[string]string{"vnet": vnet})
+	h.auditLog(c, clusterID, "sdn", vnet, "sdn_vnet_updated", details)
+
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteSDNVNet handles DELETE /clusters/:cluster_id/sdn/vnets/:vnet.
+func (h *NetworkHandler) DeleteSDNVNet(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vnet := c.Params("vnet")
+	if vnet == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "vnet is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.DeleteSDNVNet(c.Context(), vnet); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete SDN VNet: "+err.Error())
+	}
+
+	details, _ := json.Marshal(map[string]string{"vnet": vnet})
+	h.auditLog(c, clusterID, "sdn", vnet, "sdn_vnet_deleted", details)
+
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// ListSDNSubnets handles GET /clusters/:cluster_id/sdn/vnets/:vnet/subnets.
+func (h *NetworkHandler) ListSDNSubnets(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vnet := c.Params("vnet")
+	if vnet == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "vnet is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	subnets, err := pxClient.GetSDNSubnets(c.Context(), vnet)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get SDN subnets: "+err.Error())
+	}
+
+	return c.JSON(subnets)
+}
+
+// CreateSDNSubnet handles POST /clusters/:cluster_id/sdn/vnets/:vnet/subnets.
+func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vnet := c.Params("vnet")
+	if vnet == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "vnet is required")
+	}
+
+	var req proxmox.CreateSDNSubnetParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Subnet == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "subnet is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.CreateSDNSubnet(c.Context(), vnet, req); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create SDN subnet: "+err.Error())
+	}
+
+	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": req.Subnet})
+	h.auditLog(c, clusterID, "sdn", fmt.Sprintf("%s/%s", vnet, req.Subnet), "sdn_subnet_created", details)
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// UpdateSDNSubnet handles PUT /clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet.
+func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vnet := c.Params("vnet")
+	subnet := c.Params("subnet")
+	if vnet == "" || subnet == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "vnet and subnet are required")
+	}
+
+	var req proxmox.UpdateSDNSubnetParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.UpdateSDNSubnet(c.Context(), vnet, subnet, req); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update SDN subnet: "+err.Error())
+	}
+
+	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
+	h.auditLog(c, clusterID, "sdn", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_updated", details)
+
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteSDNSubnet handles DELETE /clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet.
+func (h *NetworkHandler) DeleteSDNSubnet(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vnet := c.Params("vnet")
+	subnet := c.Params("subnet")
+	if vnet == "" || subnet == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "vnet and subnet are required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.DeleteSDNSubnet(c.Context(), vnet, subnet); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete SDN subnet: "+err.Error())
+	}
+
+	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
+	h.auditLog(c, clusterID, "sdn", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_deleted", details)
+
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// ApplySDN handles PUT /clusters/:cluster_id/sdn/apply.
+func (h *NetworkHandler) ApplySDN(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.ApplySDN(c.Context()); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to apply SDN config: "+err.Error())
+	}
+
+	h.auditLog(c, clusterID, "sdn", "cluster", "sdn_applied", nil)
+
+	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // --- Firewall Template Endpoints ---
@@ -787,6 +1213,9 @@ func (h *NetworkHandler) CreateTemplate(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create template")
 	}
 
+	details, _ := json.Marshal(map[string]string{"name": req.Name, "template_id": tmpl.ID.String()})
+	h.auditLog(c, uuid.Nil, "firewall_template", tmpl.ID.String(), "template_created", details)
+
 	return c.Status(fiber.StatusCreated).JSON(toTemplateResponse(tmpl))
 }
 
@@ -827,6 +1256,9 @@ func (h *NetworkHandler) UpdateTemplate(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update template")
 	}
 
+	details, _ := json.Marshal(map[string]string{"name": req.Name, "template_id": templateID.String()})
+	h.auditLog(c, uuid.Nil, "firewall_template", templateID.String(), "template_updated", details)
+
 	return c.JSON(toTemplateResponse(tmpl))
 }
 
@@ -844,6 +1276,9 @@ func (h *NetworkHandler) DeleteTemplate(c *fiber.Ctx) error {
 	if err := h.queries.DeleteFirewallTemplate(c.Context(), templateID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete template")
 	}
+
+	details, _ := json.Marshal(map[string]string{"template_id": templateID.String()})
+	h.auditLog(c, uuid.Nil, "firewall_template", templateID.String(), "template_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -889,6 +1324,14 @@ func (h *NetworkHandler) ApplyTemplate(c *fiber.Ctx) error {
 		}
 		applied++
 	}
+
+	details, _ := json.Marshal(map[string]interface{}{
+		"template_id":   templateID.String(),
+		"template_name": tmpl.Name,
+		"applied":       applied,
+		"total":         len(rules),
+	})
+	h.auditLog(c, clusterID, "firewall_template", templateID.String(), "template_applied", details)
 
 	return c.JSON(fiber.Map{
 		"status":  "ok",

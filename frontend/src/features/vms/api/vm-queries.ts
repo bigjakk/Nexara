@@ -530,7 +530,7 @@ export function useTaskHistory(): UseQueryResult<TaskHistoryEntry[]> {
     refetchInterval: (query) => {
       const data = query.state.data;
       if (data && data.some((t) => t.status === "running")) return 3000;
-      return false;
+      return 30000;
     },
   });
 }

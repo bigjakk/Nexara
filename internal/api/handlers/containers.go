@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/proxdash/proxdash/internal/crypto"
@@ -688,7 +689,7 @@ func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
 	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
 		details, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
 		_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-			ClusterID:    cluster.ID,
+			ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
 			UserID:       uid,
 			ResourceType: "container",
 			ResourceID:   ct.ID.String(),
@@ -736,7 +737,7 @@ func (h *ContainerHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceT
 		return
 	}
 	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    clusterID,
+		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
 		UserID:       uid,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,6 +47,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			ScoreBefore: rec.ScoreBefore,
 			ScoreAfter:  rec.ScoreAfter,
 			Status:      "pending",
+			ExecutedAt:  pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		})
 		if err != nil {
 			e.logger.Error("failed to record DRS history", "error", err)
@@ -150,26 +152,50 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 	return nil
 }
 
+// taskSucceeded returns true if a Proxmox task exit status indicates success.
+// Proxmox uses "OK" for clean exits but can also return statuses like
+// "WARNINGS" or "OK (with warnings)" which still mean the task completed.
+// An empty exit status with a stopped task also indicates success on some
+// Proxmox versions.
+func taskSucceeded(exitStatus string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(exitStatus))
+	return upper == "" || upper == "OK" || strings.HasPrefix(upper, "OK ") || upper == "WARNINGS"
+}
+
 func (e *Executor) waitForTask(ctx context.Context, client *proxmox.Client, node string, upid string) (string, string) {
+	// Use a dedicated timeout context so that scheduler shutdown doesn't
+	// prematurely mark in-flight migrations as cancelled. Live migrations
+	// can take 15+ minutes for large VMs.
+	pollCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	timeout := time.After(10 * time.Minute)
 
 	for {
 		select {
-		case <-ctx.Done():
-			return "cancelled", "context cancelled"
-		case <-timeout:
-			return "timeout", "task timed out after 10 minutes"
+		case <-pollCtx.Done():
+			// Do one final check — the migration may have finished while we
+			// were waiting. Use a short independent context for the API call.
+			finalCtx, finalCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer finalCancel()
+			ts, err := client.GetTaskStatus(finalCtx, node, upid)
+			if err == nil && ts.Status == "stopped" {
+				if taskSucceeded(ts.ExitStatus) {
+					return "completed", ts.ExitStatus
+				}
+				return "failed", ts.ExitStatus
+			}
+			return "timeout", "task timed out after 30 minutes"
 		case <-ticker.C:
-			ts, err := client.GetTaskStatus(ctx, node, upid)
+			ts, err := client.GetTaskStatus(pollCtx, node, upid)
 			if err != nil {
 				e.logger.Warn("failed to poll task status", "upid", upid, "error", err)
 				continue
 			}
 			if ts.Status == "stopped" {
-				if ts.ExitStatus == "OK" {
-					return "completed", "OK"
+				if taskSucceeded(ts.ExitStatus) {
+					return "completed", ts.ExitStatus
 				}
 				return "failed", ts.ExitStatus
 			}
@@ -205,7 +231,7 @@ func (e *Executor) auditLog(ctx context.Context, clusterID uuid.UUID, resourceID
 	}
 
 	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
-		ClusterID:    clusterID,
+		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
 		UserID:       SystemUserID,
 		ResourceType: "vm",
 		ResourceID:   resourceID,

@@ -38,7 +38,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type InsertAuditLogParams struct {
-	ClusterID    uuid.UUID       `json:"cluster_id"`
+	ClusterID    pgtype.UUID     `json:"cluster_id"`
 	UserID       uuid.UUID       `json:"user_id"`
 	ResourceType string          `json:"resource_type"`
 	ResourceID   string          `json:"resource_id"`
@@ -101,8 +101,8 @@ SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, cre
 `
 
 type ListAuditLogByClusterParams struct {
-	ClusterID uuid.UUID `json:"cluster_id"`
-	Limit     int32     `json:"limit"`
+	ClusterID pgtype.UUID `json:"cluster_id"`
+	Limit     int32       `json:"limit"`
 }
 
 func (q *Queries) ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error) {
@@ -146,12 +146,12 @@ SELECT
   a.created_at,
   u.email AS user_email,
   u.display_name AS user_display_name,
-  c.name AS cluster_name,
+  COALESCE(c.name, '') AS cluster_name,
   COALESCE(v.vmid, 0) AS resource_vmid,
   COALESCE(v.name, '') AS resource_name
 FROM audit_log a
 JOIN users u ON u.id = a.user_id
-JOIN clusters c ON c.id = a.cluster_id
+LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
   AND ($4::text IS NULL OR a.resource_type = $4)
@@ -168,7 +168,7 @@ type ListAuditLogEnrichedParams struct {
 
 type ListAuditLogEnrichedRow struct {
 	ID              uuid.UUID       `json:"id"`
-	ClusterID       uuid.UUID       `json:"cluster_id"`
+	ClusterID       pgtype.UUID     `json:"cluster_id"`
 	UserID          uuid.UUID       `json:"user_id"`
 	ResourceType    string          `json:"resource_type"`
 	ResourceID      string          `json:"resource_id"`

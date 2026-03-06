@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/mail"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/proxdash/proxdash/internal/auth"
 	db "github.com/proxdash/proxdash/internal/db/generated"
@@ -60,6 +62,22 @@ type userResponse struct {
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
 	Role        string    `json:"role"`
+}
+
+// authAuditLog writes an audit log entry for auth events. Uses the provided userID
+// directly since auth events happen before/outside normal auth middleware.
+func (h *AuthHandler) authAuditLog(c *fiber.Ctx, userID uuid.UUID, action string, details json.RawMessage) {
+	if details == nil {
+		details = json.RawMessage(`{}`)
+	}
+	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{},
+		UserID:       userID,
+		ResourceType: "auth",
+		ResourceID:   userID.String(),
+		Action:       action,
+		Details:      details,
+	})
 }
 
 // Register handles user registration.
@@ -141,6 +159,9 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create session")
 	}
 
+	details, _ := json.Marshal(map[string]string{"email": user.Email, "role": user.Role})
+	h.authAuditLog(c, user.ID, "register", details)
+
 	return c.Status(fiber.StatusCreated).JSON(authResponse{
 		User: userResponse{
 			ID:          user.ID,
@@ -201,6 +222,9 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create session")
 	}
+
+	details, _ := json.Marshal(map[string]string{"email": user.Email, "ip": c.IP()})
+	h.authAuditLog(c, user.ID, "login", details)
 
 	return c.JSON(authResponse{
 		User: userResponse{
@@ -295,6 +319,8 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revoke session")
 	}
 
+	h.authAuditLog(c, userID, "logout", nil)
+
 	return c.JSON(fiber.Map{"message": "Logged out successfully"})
 }
 
@@ -308,6 +334,8 @@ func (h *AuthHandler) LogoutAll(c *fiber.Ctx) error {
 	if err := h.sessionManager.RevokeAllUserSessions(c.Context(), userID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revoke sessions")
 	}
+
+	h.authAuditLog(c, userID, "logout_all", nil)
 
 	return c.JSON(fiber.Map{"message": "All sessions revoked"})
 }

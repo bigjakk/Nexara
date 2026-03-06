@@ -5,6 +5,7 @@ import type {
   DRSConfigRequest,
   DRSRule,
   CreateRuleRequest,
+  CreateHARuleRequest,
   EvaluateResponse,
   DRSHistoryEntry,
 } from "../types/drs";
@@ -73,6 +74,48 @@ export function useDeleteDRSRule(clusterId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["drs", "rules", clusterId],
+      });
+    },
+  });
+}
+
+export function useHARules(clusterId: string) {
+  return useQuery({
+    queryKey: ["drs", "ha-rules", clusterId],
+    queryFn: () =>
+      apiClient.get<DRSRule[]>(
+        `/api/v1/clusters/${clusterId}/drs/ha-rules`,
+      ),
+    enabled: clusterId.length > 0,
+  });
+}
+
+export function useCreateHARule(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (rule: CreateHARuleRequest) =>
+      apiClient.post<{ status: string; rule_name: string }>(
+        `/api/v1/clusters/${clusterId}/drs/ha-rules`,
+        rule,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["drs", "ha-rules", clusterId],
+      });
+    },
+  });
+}
+
+export function useDeleteHARule(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ruleName: string) =>
+      apiClient.delete<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/drs/ha-rules/${ruleName}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["drs", "ha-rules", clusterId],
       });
     },
   });

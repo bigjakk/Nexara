@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/url"
 	"time"
 
@@ -10,6 +11,25 @@ import (
 
 	db "github.com/proxdash/proxdash/internal/db/generated"
 )
+
+// auditLog writes an audit log entry for task operations.
+func (h *TaskHandler) auditLog(c *fiber.Ctx, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return
+	}
+	if details == nil {
+		details = json.RawMessage(`{}`)
+	}
+	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+		ClusterID:    clusterID,
+		UserID:       uid,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      details,
+	})
+}
 
 // TaskHandler handles task history CRUD operations.
 type TaskHandler struct {
@@ -134,6 +154,9 @@ func (h *TaskHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create task record")
 	}
 
+	details, _ := json.Marshal(map[string]string{"upid": req.UPID, "task_type": req.TaskType, "description": req.Description})
+	h.auditLog(c, pgtype.UUID{Bytes: clusterID, Valid: true}, "task", task.ID.String(), "create", details)
+
 	return c.Status(fiber.StatusCreated).JSON(mapTaskHistory(task))
 }
 
@@ -185,20 +208,17 @@ func (h *TaskHandler) Update(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// ClearCompleted deletes all completed/failed tasks for the current user.
+// ClearCompleted deletes all completed/failed tasks.
 func (h *TaskHandler) ClearCompleted(c *fiber.Ctx) error {
 	if err := requireAdmin(c); err != nil {
 		return err
 	}
 
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return fiber.NewError(fiber.StatusUnauthorized, "Invalid user")
-	}
-
-	if err := h.queries.DeleteCompletedTasks(c.Context(), uid); err != nil {
+	if err := h.queries.DeleteCompletedTasks(c.Context()); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to clear tasks")
 	}
+
+	h.auditLog(c, pgtype.UUID{}, "task", "all", "clear_completed", nil)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

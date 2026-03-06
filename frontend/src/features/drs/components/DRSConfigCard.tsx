@@ -27,19 +27,29 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
 
   const [mode, setMode] = useState<DRSMode>("disabled");
   const [enabled, setEnabled] = useState(false);
-  const [cpuWeight, setCpuWeight] = useState(0.4);
-  const [memWeight, setMemWeight] = useState(0.4);
-  const [netWeight, setNetWeight] = useState(0.2);
+  const [cpuWeight, setCpuWeight] = useState(0.5);
+  const [memWeight, setMemWeight] = useState(0.5);
   const [threshold, setThreshold] = useState(0.25);
   const [evalInterval, setEvalInterval] = useState(300);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">(
+    "idle",
+  );
 
   useEffect(() => {
     if (config) {
       setMode(config.mode);
       setEnabled(config.enabled);
-      setCpuWeight(config.weights.cpu);
-      setMemWeight(config.weights.memory);
-      setNetWeight(config.weights.network);
+      // Normalize legacy configs that included a network weight.
+      const rawCpu = config.weights.cpu;
+      const rawMem = config.weights.memory;
+      const sum = rawCpu + rawMem;
+      if (sum > 0 && Math.abs(sum - 1.0) > 0.01) {
+        setCpuWeight(Math.round((rawCpu / sum) * 20) / 20);
+        setMemWeight(Math.round((rawMem / sum) * 20) / 20);
+      } else {
+        setCpuWeight(rawCpu);
+        setMemWeight(rawMem);
+      }
       setThreshold(config.imbalance_threshold);
       setEvalInterval(config.eval_interval_seconds);
     }
@@ -50,17 +60,26 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   }
 
   const handleSave = () => {
+    setSaveStatus("idle");
     const request: DRSConfigRequest = {
       mode,
       enabled,
-      weights: { cpu: cpuWeight, memory: memWeight, network: netWeight },
+      weights: { cpu: cpuWeight, memory: memWeight },
       imbalance_threshold: threshold,
       eval_interval_seconds: evalInterval,
     };
-    updateConfig.mutate(request);
+    updateConfig.mutate(request, {
+      onSuccess: () => {
+        setSaveStatus("saved");
+        setTimeout(() => { setSaveStatus("idle"); }, 3000);
+      },
+      onError: () => {
+        setSaveStatus("error");
+      },
+    });
   };
 
-  const weightSum = cpuWeight + memWeight + netWeight;
+  const weightSum = cpuWeight + memWeight;
 
   return (
     <Card>
@@ -131,23 +150,6 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
                 step={0.05}
               />
             </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-sm">
-                <span>Network</span>
-                <span className="text-muted-foreground">
-                  {netWeight.toFixed(2)}
-                </span>
-              </div>
-              <Slider
-                value={[netWeight]}
-                onValueChange={([v]) => {
-                  if (v !== undefined) setNetWeight(v);
-                }}
-                min={0}
-                max={1}
-                step={0.05}
-              />
-            </div>
             {Math.abs(weightSum - 1.0) > 0.01 && (
               <p className="text-sm text-destructive">
                 Weights must sum to 1.0 (current: {weightSum.toFixed(2)})
@@ -185,14 +187,26 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           />
         </div>
 
-        <Button
-          onClick={handleSave}
-          disabled={
-            updateConfig.isPending || Math.abs(weightSum - 1.0) > 0.01
-          }
-        >
-          {updateConfig.isPending ? "Saving..." : "Save Configuration"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={handleSave}
+            disabled={
+              updateConfig.isPending || Math.abs(weightSum - 1.0) > 0.01
+            }
+          >
+            {updateConfig.isPending ? "Saving..." : "Save Configuration"}
+          </Button>
+          {saveStatus === "saved" && (
+            <span className="text-sm text-green-600">Saved successfully</span>
+          )}
+          {saveStatus === "error" && (
+            <span className="text-sm text-destructive">
+              {updateConfig.error instanceof Error
+                ? updateConfig.error.message
+                : "Failed to save"}
+            </span>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

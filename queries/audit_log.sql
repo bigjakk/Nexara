@@ -27,12 +27,12 @@ SELECT
   a.created_at,
   u.email AS user_email,
   u.display_name AS user_display_name,
-  c.name AS cluster_name,
+  COALESCE(c.name, '') AS cluster_name,
   COALESCE(v.vmid, 0) AS resource_vmid,
   COALESCE(v.name, '') AS resource_name
 FROM audit_log a
 JOIN users u ON u.id = a.user_id
-JOIN clusters c ON c.id = a.cluster_id
+LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluster_id'))
   AND (sqlc.narg('resource_type')::text IS NULL OR a.resource_type = sqlc.narg('resource_type'))

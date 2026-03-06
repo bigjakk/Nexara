@@ -78,7 +78,7 @@ func TestPBSClient_GetDatastores(t *testing.T) {
 			client := &PBSClient{apiClient: &apiClient{
 				httpClient: srv.Client(),
 				baseURL:    srv.URL,
-				authHeader: "PBSAPIToken=test@pam!token=secret",
+				authHeader: "PBSAPIToken=test@pam!token:secret",
 			}}
 
 			stores, err := client.GetDatastores(context.Background())
@@ -105,7 +105,7 @@ func TestPBSClient_GetDatastoreStatus(t *testing.T) {
 	client := &PBSClient{apiClient: &apiClient{
 		httpClient: srv.Client(),
 		baseURL:    srv.URL,
-		authHeader: "PBSAPIToken=test@pam!token=secret",
+		authHeader: "PBSAPIToken=test@pam!token:secret",
 	}}
 
 	status, err := client.GetDatastoreStatus(context.Background())
@@ -134,7 +134,7 @@ func TestPBSClient_GetSnapshots(t *testing.T) {
 	client := &PBSClient{apiClient: &apiClient{
 		httpClient: srv.Client(),
 		baseURL:    srv.URL,
-		authHeader: "PBSAPIToken=test@pam!token=secret",
+		authHeader: "PBSAPIToken=test@pam!token:secret",
 	}}
 
 	snaps, err := client.GetSnapshots(context.Background(), "store1")
@@ -162,7 +162,7 @@ func TestPBSClient_GetSyncJobs(t *testing.T) {
 	client := &PBSClient{apiClient: &apiClient{
 		httpClient: srv.Client(),
 		baseURL:    srv.URL,
-		authHeader: "PBSAPIToken=test@pam!token=secret",
+		authHeader: "PBSAPIToken=test@pam!token:secret",
 	}}
 
 	jobs, err := client.GetSyncJobs(context.Background())
@@ -190,7 +190,7 @@ func TestPBSClient_GetVerifyJobs(t *testing.T) {
 	client := &PBSClient{apiClient: &apiClient{
 		httpClient: srv.Client(),
 		baseURL:    srv.URL,
-		authHeader: "PBSAPIToken=test@pam!token=secret",
+		authHeader: "PBSAPIToken=test@pam!token:secret",
 	}}
 
 	jobs, err := client.GetVerifyJobs(context.Background())
@@ -215,7 +215,7 @@ func TestPBSClient_GetTasks(t *testing.T) {
 	client := &PBSClient{apiClient: &apiClient{
 		httpClient: srv.Client(),
 		baseURL:    srv.URL,
-		authHeader: "PBSAPIToken=test@pam!token=secret",
+		authHeader: "PBSAPIToken=test@pam!token:secret",
 	}}
 
 	tasks, err := client.GetTasks(context.Background(), 0)
@@ -230,7 +230,7 @@ func TestPBSClient_GetTasks(t *testing.T) {
 func TestPBSClient_EmptyStoreName(t *testing.T) {
 	client := &PBSClient{apiClient: &apiClient{
 		baseURL:    "https://example.com",
-		authHeader: "PBSAPIToken=test@pam!token=secret",
+		authHeader: "PBSAPIToken=test@pam!token:secret",
 	}}
 
 	_, err := client.GetSnapshots(context.Background(), "")

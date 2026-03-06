@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/proxdash/proxdash/internal/crypto"
@@ -23,6 +26,25 @@ type BackupHandler struct {
 // NewBackupHandler creates a new backup handler.
 func NewBackupHandler(queries *db.Queries, encryptionKey string) *BackupHandler {
 	return &BackupHandler{queries: queries, encryptionKey: encryptionKey}
+}
+
+// auditLog records an audit log entry for backup-related actions.
+func (h *BackupHandler) auditLog(c *fiber.Ctx, resourceType, resourceID, action string, details json.RawMessage) {
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return
+	}
+	if details == nil {
+		details = json.RawMessage(`{}`)
+	}
+	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{},
+		UserID:       uid,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      details,
+	})
 }
 
 // createPBSClient creates a PBS client for the given server ID.
@@ -106,6 +128,7 @@ func (h *BackupHandler) GetDatastoreStatus(c *fiber.Ctx) error {
 
 	status, err := client.GetDatastoreStatus(c.Context())
 	if err != nil {
+		slog.Warn("PBS GetDatastoreStatus failed", "pbs_id", pbsID, "error", err)
 		return mapProxmoxError(err)
 	}
 
@@ -137,6 +160,8 @@ func (h *BackupHandler) TriggerGC(c *fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
+
+	h.auditLog(c, "backup", store, "gc_triggered", nil)
 
 	return c.JSON(fiber.Map{"upid": upid})
 }
@@ -180,6 +205,14 @@ func (h *BackupHandler) DeleteSnapshot(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
+	details, _ := json.Marshal(map[string]interface{}{
+		"store":       store,
+		"backup_type": req.BackupType,
+		"backup_id":   req.BackupID,
+		"backup_time": req.BackupTime,
+	})
+	h.auditLog(c, "backup", store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_deleted", details)
+
 	return c.JSON(fiber.Map{"status": "deleted"})
 }
 
@@ -208,6 +241,8 @@ func (h *BackupHandler) RunSyncJob(c *fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
+
+	h.auditLog(c, "backup", jobID, "sync_job_triggered", nil)
 
 	return c.JSON(fiber.Map{"upid": upid})
 }
@@ -238,6 +273,8 @@ func (h *BackupHandler) RunVerifyJob(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
+	h.auditLog(c, "backup", jobID, "verify_job_triggered", nil)
+
 	return c.JSON(fiber.Map{"upid": upid})
 }
 
@@ -266,6 +303,7 @@ func (h *BackupHandler) ListTasks(c *fiber.Ctx) error {
 
 	tasks, err := client.GetTasks(c.Context(), limit)
 	if err != nil {
+		slog.Warn("PBS GetTasks failed", "pbs_id", pbsID, "error", err)
 		return mapProxmoxError(err)
 	}
 
@@ -517,6 +555,17 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
+
+	details, _ := json.Marshal(map[string]interface{}{
+		"pbs_server_id": req.PBSServerID,
+		"backup_type":   req.BackupType,
+		"backup_id":     req.BackupID,
+		"datastore":     req.Datastore,
+		"target_node":   req.TargetNode,
+		"vmid":          req.VMID,
+		"storage":       req.Storage,
+	})
+	h.auditLog(c, "backup", strconv.Itoa(req.VMID)+"/"+req.BackupType, "backup_restored", details)
 
 	return c.JSON(fiber.Map{
 		"upid":   upid,

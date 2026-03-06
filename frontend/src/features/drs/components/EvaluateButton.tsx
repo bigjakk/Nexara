@@ -14,13 +14,23 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   const evaluation = useTriggerEvaluation(clusterId);
   const [results, setResults] = useState<DRSRecommendation[] | null>(null);
 
+  const [evaluated, setEvaluated] = useState(false);
+
   const handleEvaluate = () => {
     evaluation.mutate(undefined, {
       onSuccess: (data) => {
-        setResults(data.recommendations);
+        setResults(data.recommendations ?? []);
+        setEvaluated(true);
+      },
+      onError: () => {
+        setResults([]);
+        setEvaluated(true);
       },
     });
   };
+
+  const errorMessage =
+    evaluation.error instanceof Error ? evaluation.error.message : "";
 
   return (
     <div className="space-y-4">
@@ -37,7 +47,11 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
         Run Evaluation
       </Button>
 
-      {results !== null && (
+      {errorMessage && (
+        <p className="text-sm text-destructive">{errorMessage}</p>
+      )}
+
+      {evaluated && results !== null && (
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">

@@ -52,7 +52,7 @@ UPDATE drs_history SET status = $2, executed_at = $3 WHERE id = $1;
 -- name: CleanupStaleDRSHistory :exec
 UPDATE drs_history
 SET status = 'cancelled', executed_at = now()
-WHERE status = 'pending' AND created_at < now() - interval '10 minutes';
+WHERE status = 'pending' AND created_at < now() - interval '60 minutes';
 
 -- name: GetLastDRSMigrationForVM :one
 SELECT * FROM drs_history
