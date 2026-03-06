@@ -13,6 +13,7 @@ import {
 import { StorageCapacityBar } from "../components/StorageCapacityBar";
 import { StorageContentTable } from "../components/StorageContentTable";
 import { UploadDialog } from "../components/UploadDialog";
+import { BulkMoveDialog } from "../components/BulkMoveDialog";
 import type { StorageResponse, NodeResponse } from "@/types/api";
 import type { StorageContentItem } from "../types/storage";
 
@@ -159,6 +160,7 @@ export function StoragePage() {
         <StoragePoolDetail
           pool={selectedPool}
           clusterId={activeClusterId}
+          allPools={pools}
           onBack={() => { setSelectedPool(null); }}
         />
       )}
@@ -241,21 +243,37 @@ function StorageGroupSection({ group, onSelectPool }: StorageGroupSectionProps) 
 interface StoragePoolDetailProps {
   pool: StorageResponse;
   clusterId: string;
+  allPools: StorageResponse[];
   onBack: () => void;
 }
 
 function StoragePoolDetail({
   pool,
   clusterId,
+  allPools,
   onBack,
 }: StoragePoolDetailProps) {
   const contentQuery = useStorageContent(clusterId, pool.id);
   const items = contentQuery.data ?? [];
 
   const contentTypes = pool.content.split(",").map((s) => s.trim());
+  const hasImages = contentTypes.includes("images");
   const filterableTypes = contentTypes.filter(
     (t) => t === "iso" || t === "vztmpl" || t === "images" || t === "backup" || t === "rootdir" || t === "snippets",
   );
+
+  // Deduplicated target storage options (other image-capable pools)
+  const evacuateTargets = useMemo(() => {
+    const seen = new Set<string>();
+    return allPools
+      .filter((p) => p.content.includes("images") && p.storage !== pool.storage && p.active && p.enabled)
+      .filter((p) => {
+        if (seen.has(p.storage)) return false;
+        seen.add(p.storage);
+        return true;
+      })
+      .map((p) => p.storage);
+  }, [allPools, pool.storage]);
 
   // Group items by content type.
   function filterByType(type: string): StorageContentItem[] {
@@ -275,11 +293,21 @@ function StoragePoolDetail({
           <h2 className="text-xl font-semibold">{pool.storage}</h2>
           <Badge variant="outline">{pool.type}</Badge>
         </div>
-        <UploadDialog
-          clusterId={clusterId}
-          storageId={pool.id}
-          supportedContent={pool.content}
-        />
+        <div className="flex items-center gap-2">
+          {hasImages && evacuateTargets.length > 0 && (
+            <BulkMoveDialog
+              clusterId={clusterId}
+              storageId={pool.id}
+              storageName={pool.storage}
+              targetOptions={evacuateTargets}
+            />
+          )}
+          <UploadDialog
+            clusterId={clusterId}
+            storageId={pool.id}
+            supportedContent={pool.content}
+          />
+        </div>
       </div>
 
       <StorageCapacityBar used={pool.used} total={pool.total} />

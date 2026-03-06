@@ -12,7 +12,7 @@ import { useVMHistoricalMetrics } from "@/features/dashboard/api/historical-quer
 import { useMetricStore } from "@/stores/metric-store";
 import { useConsoleStore } from "@/stores/console-store";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
-import { useVM, useSetResourceConfig } from "../api/vm-queries";
+import { useVM, useSetResourceConfig, useGuestAgentInfo } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
 import { CloneDialog } from "../components/CloneDialog";
 import { MigrateJobDialog } from "../components/MigrateJobDialog";
@@ -60,9 +60,20 @@ export function VMDetailPage() {
 
   const { data: nodes } = useClusterNodes(clusterId);
   const addTab = useConsoleStore((s) => s.addTab);
+  const updateTabNode = useConsoleStore((s) => s.updateTabNode);
 
   // Resolve node name from node_id
   const nodeName = nodes?.find((n) => n.id === vm?.node_id)?.name ?? "";
+
+  // When VM migrates to a different node, update any open console tabs
+  // so they reconnect to the new node automatically.
+  const prevNodeRef = useRef(nodeName);
+  useEffect(() => {
+    if (nodeName && prevNodeRef.current && nodeName !== prevNodeRef.current && vm) {
+      updateTabNode(clusterId, vm.vmid, nodeName);
+    }
+    prevNodeRef.current = nodeName;
+  }, [nodeName, clusterId, vm, updateTabNode]);
 
   const [cloneOpen, setCloneOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
@@ -194,7 +205,6 @@ export function VMDetailPage() {
           {kind === "vm" && (
             <TabsTrigger value="hardware">Hardware</TabsTrigger>
           )}
-          <TabsTrigger value="metrics">Metrics</TabsTrigger>
           <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
           {kind === "vm" && (
             <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
@@ -203,7 +213,8 @@ export function VMDetailPage() {
           <TabsTrigger value="console">Console</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="mt-4">
+        <TabsContent value="overview" className="mt-4 space-y-6">
+          {/* Summary */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <InfoCard label="Status" value={vm.status} />
             <InfoCard label="VMID" value={String(vm.vmid)} />
@@ -218,6 +229,18 @@ export function VMDetailPage() {
             <InfoCard label="Pool" value={vm.pool || "--"} />
             <InfoCard label="Template" value={vm.template ? "Yes" : "No"} />
           </div>
+
+          {/* Guest Agent — QEMU VMs only, when running */}
+          {kind === "vm" && normalizedStatus === "running" && (
+            <GuestAgentSection clusterId={clusterId} vmId={vmId} />
+          )}
+
+          {/* Metrics */}
+          <VMMetricsPanel
+            clusterId={clusterId}
+            vmId={vmId}
+            liveMetric={liveMetric}
+          />
         </TabsContent>
 
         {kind === "vm" && (
@@ -225,14 +248,6 @@ export function VMDetailPage() {
             <HardwarePanel clusterId={clusterId} vmId={vmId} vmStatus={vm.status} />
           </TabsContent>
         )}
-
-        <TabsContent value="metrics" className="mt-4">
-          <VMMetricsPanel
-            clusterId={clusterId}
-            vmId={vmId}
-            liveMetric={liveMetric}
-          />
-        </TabsContent>
 
         <TabsContent value="snapshots" className="mt-4">
           <SnapshotPanel
@@ -323,6 +338,79 @@ export function VMDetailPage() {
         kind={kind}
         resourceName={vm.name}
       />
+    </div>
+  );
+}
+
+function GuestAgentSection({ clusterId, vmId }: { clusterId: string; vmId: string }) {
+  const { data, isLoading } = useGuestAgentInfo(clusterId, vmId, true);
+
+  return (
+    <div className="rounded-lg border p-4">
+      <h3 className="mb-3 text-sm font-semibold">QEMU Guest Agent</h3>
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Checking...</p>
+      ) : !data?.running ? (
+        <p className="text-sm text-muted-foreground">Not running</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {data.os_info?.["pretty-name"] && (
+              <div>
+                <p className="text-xs text-muted-foreground">OS</p>
+                <p className="text-sm">{data.os_info["pretty-name"]}</p>
+              </div>
+            )}
+            {data.os_info?.["kernel-release"] && (
+              <div>
+                <p className="text-xs text-muted-foreground">Kernel</p>
+                <p className="text-sm">{data.os_info["kernel-release"]}</p>
+              </div>
+            )}
+            {data.os_info?.machine && (
+              <div>
+                <p className="text-xs text-muted-foreground">Architecture</p>
+                <p className="text-sm">{data.os_info.machine}</p>
+              </div>
+            )}
+            {data.os_info?.name && (
+              <div>
+                <p className="text-xs text-muted-foreground">Hostname</p>
+                <p className="text-sm">{data.os_info.name}</p>
+              </div>
+            )}
+          </div>
+          {data.network_interfaces && data.network_interfaces.length > 0 && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Network Interfaces</p>
+              <div className="space-y-2">
+                {data.network_interfaces
+                  .filter((iface) => iface.name !== "lo")
+                  .slice(0, 1)
+                  .map((iface) => (
+                    <div key={iface.name} className="rounded border p-2 text-sm">
+                      <span className="font-medium">{iface.name}</span>
+                      {iface["hardware-address"] && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          ({iface["hardware-address"]})
+                        </span>
+                      )}
+                      {iface["ip-addresses"] && iface["ip-addresses"].length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          {iface["ip-addresses"].map((ip) => (
+                            <Badge key={`${ip["ip-address"]}/${String(ip.prefix)}`} variant="secondary" className="font-mono text-xs">
+                              {ip["ip-address"]}/{String(ip.prefix)}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

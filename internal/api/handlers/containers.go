@@ -53,6 +53,12 @@ type ctMigrateRequest struct {
 	Online bool   `json:"online"`
 }
 
+type ctVolumeMoveRequest struct {
+	Volume  string `json:"volume"`
+	Storage string `json:"storage"`
+	Delete  bool   `json:"delete"`
+}
+
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/containers.
 func (h *ContainerHandler) ListByCluster(c *fiber.Ctx) error {
 	if err := requireAdmin(c); err != nil {
@@ -593,6 +599,53 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 }
 
 // --- Container Config handlers ---
+
+// MoveVolume handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/volumes/move.
+func (h *ContainerHandler) MoveVolume(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	var req ctVolumeMoveRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Volume == "" || req.Storage == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "volume and storage are required")
+	}
+
+	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.MoveCTVolume(c.Context(), node.Name, int(ct.Vmid), proxmox.CTVolumeMoveParams{
+		Volume:  req.Volume,
+		Storage: req.Storage,
+		Delete:  req.Delete,
+	})
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "volume_move")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
 
 type setCTConfigRequest struct {
 	Fields map[string]string `json:"fields"`

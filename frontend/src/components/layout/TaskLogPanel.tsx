@@ -91,10 +91,11 @@ function RunningTaskUpdater({ task }: { task: TaskHistoryEntry }) {
   return null;
 }
 
-function TaskRow({ task, expanded, onToggle }: {
+function TaskRow({ task, expanded, onToggle, onFocus }: {
   task: TaskHistoryEntry;
   expanded: boolean;
   onToggle: () => void;
+  onFocus: () => void;
 }) {
   const isRunning = task.status === "running";
   const isOk = task.status === "stopped" && isTaskOk(task.exit_status);
@@ -112,6 +113,7 @@ function TaskRow({ task, expanded, onToggle }: {
       <tr
         className="cursor-pointer border-b hover:bg-muted/20"
         onClick={onToggle}
+        onDoubleClick={(e) => { e.stopPropagation(); onFocus(); }}
       >
         <td className="px-2 py-1">
           <div className="flex items-center gap-1">
@@ -247,6 +249,7 @@ export function TaskLogPanel() {
   const panelHeight = useTaskLogStore((s) => s.panelHeight);
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setPanelHeight = useTaskLogStore((s) => s.setPanelHeight);
+  const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
   const { data: tasks } = useTaskHistory();
   const clearMutation = useClearTaskHistory();
@@ -371,6 +374,13 @@ export function TaskLogPanel() {
                     expanded={expandedId === task.id}
                     onToggle={() => {
                       setExpandedId(expandedId === task.id ? null : task.id);
+                    }}
+                    onFocus={() => {
+                      setFocusedTask({
+                        clusterId: task.cluster_id,
+                        upid: task.upid,
+                        description: task.description || task.task_type || "Task",
+                      });
                     }}
                   />
                 ))}

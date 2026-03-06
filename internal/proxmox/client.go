@@ -2,7 +2,7 @@ package proxmox
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -687,6 +687,28 @@ func (c *Client) MoveDisk(ctx context.Context, node string, vmid int, params Dis
 	return upid, nil
 }
 
+// MoveCTVolume moves a container volume to another storage and returns the task UPID.
+func (c *Client) MoveCTVolume(ctx context.Context, node string, vmid int, params CTVolumeMoveParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	form.Set("volume", params.Volume)
+	form.Set("storage", params.Storage)
+	if params.Delete {
+		form.Set("delete", "1")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/move_volume"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("move volume on CT %d: %w", vmid, err)
+	}
+	return upid, nil
+}
+
 // AttachDisk attaches a new disk to a VM by setting the appropriate config key.
 func (c *Client) AttachDisk(ctx context.Context, node string, vmid int, params DiskAttachParams) error {
 	if err := validateNodeName(node); err != nil {
@@ -1190,16 +1212,9 @@ func (c *Client) RemoteMigrateVM(ctx context.Context, node string, vmid int, par
 		return "", err
 	}
 
-	endpointJSON, err := json.Marshal(params.TargetEndpoint)
-	if err != nil {
-		return "", fmt.Errorf("marshal target endpoint: %w", err)
-	}
-
 	form := url.Values{}
-	form.Set("target-endpoint", string(endpointJSON))
-	if params.TargetBridge != "" {
-		form.Set("target-bridge", params.TargetBridge)
-	}
+	form.Set("target-endpoint", params.TargetEndpoint.String())
+	form.Set("target-bridge", params.TargetBridge)
 	if params.TargetStorage != "" {
 		form.Set("target-storage", params.TargetStorage)
 	}
@@ -1233,16 +1248,9 @@ func (c *Client) RemoteMigrateCT(ctx context.Context, node string, vmid int, par
 		return "", err
 	}
 
-	endpointJSON, err := json.Marshal(params.TargetEndpoint)
-	if err != nil {
-		return "", fmt.Errorf("marshal target endpoint: %w", err)
-	}
-
 	form := url.Values{}
-	form.Set("target-endpoint", string(endpointJSON))
-	if params.TargetBridge != "" {
-		form.Set("target-bridge", params.TargetBridge)
-	}
+	form.Set("target-endpoint", params.TargetEndpoint.String())
+	form.Set("target-bridge", params.TargetBridge)
 	if params.TargetStorage != "" {
 		form.Set("target-storage", params.TargetStorage)
 	}
@@ -1654,6 +1662,79 @@ func (c *Client) GetVMConfig(ctx context.Context, node string, vmid int) (VMConf
 	var config VMConfig
 	if err := c.do(ctx, path, &config); err != nil {
 		return nil, fmt.Errorf("get VM %d config on %s: %w", vmid, node, err)
+	}
+	return config, nil
+}
+
+// GetGuestAgentOSInfo returns OS information from the QEMU guest agent.
+// Returns nil, nil when the agent is not running.
+// Proxmox wraps agent responses: {"data": {"result": {...}}}.
+func (c *Client) GetGuestAgentOSInfo(ctx context.Context, node string, vmid int) (*GuestOSInfo, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/agent/get-osinfo"
+	var wrapper struct {
+		Result GuestOSInfo `json:"result"`
+	}
+	if err := c.do(ctx, path, &wrapper); err != nil {
+		if isAgentNotRunning(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get guest agent OS info for VM %d on %s: %w", vmid, node, err)
+	}
+	return &wrapper.Result, nil
+}
+
+// GetGuestAgentNetworkInterfaces returns network interfaces from the QEMU guest agent.
+// Returns nil, nil when the agent is not running.
+// Proxmox wraps agent responses: {"data": {"result": [...]}}.
+func (c *Client) GetGuestAgentNetworkInterfaces(ctx context.Context, node string, vmid int) ([]GuestNetworkInterface, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/agent/network-get-interfaces"
+	var wrapper struct {
+		Result []GuestNetworkInterface `json:"result"`
+	}
+	if err := c.do(ctx, path, &wrapper); err != nil {
+		if isAgentNotRunning(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get guest agent network interfaces for VM %d on %s: %w", vmid, node, err)
+	}
+	return wrapper.Result, nil
+}
+
+// isAgentNotRunning checks if the error indicates the QEMU guest agent is not running.
+func isAgentNotRunning(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == 500 {
+		return strings.Contains(apiErr.Message, "QEMU guest agent is not running") ||
+			strings.Contains(apiErr.Message, "guest agent") ||
+			strings.Contains(apiErr.Message, "not running")
+	}
+	return false
+}
+
+// GetCTConfig returns the full configuration of a container.
+func (c *Client) GetCTConfig(ctx context.Context, node string, vmid int) (VMConfig, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/config"
+	var config VMConfig
+	if err := c.do(ctx, path, &config); err != nil {
+		return nil, fmt.Errorf("get CT %d config on %s: %w", vmid, node, err)
 	}
 	return config, nil
 }

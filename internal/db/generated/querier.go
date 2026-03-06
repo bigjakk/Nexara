@@ -13,6 +13,7 @@ import (
 
 type Querier interface {
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
+	CleanupStaleDRSHistory(ctx context.Context) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -44,6 +45,7 @@ type Querier interface {
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
 	GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
+	GetLastDRSMigrationForVM(ctx context.Context, arg GetLastDRSMigrationForVMParams) (DrsHistory, error)
 	GetLatestCephClusterMetrics(ctx context.Context, clusterID uuid.UUID) (CephClusterMetric, error)
 	GetLatestCephOSDMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephOsdMetric, error)
 	GetLatestCephPoolMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephPoolMetric, error)
@@ -72,6 +74,7 @@ type Querier interface {
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
 	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
+	ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error)
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
 	ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error)
 	ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnrichedParams) ([]ListAuditLogEnrichedRow, error)

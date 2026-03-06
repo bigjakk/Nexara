@@ -125,6 +125,30 @@ function parseDetails(entry: AuditLogEntry): Array<[string, string]> | null {
   }
 }
 
+/** When the VM record no longer exists (e.g. cross-cluster migration changed the UUID),
+ *  extract VMID/name from the details JSON so the row isn't just a truncated UUID. */
+function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
+  try {
+    const d = JSON.parse(entry.details) as Record<string, unknown>;
+    const vmid = typeof d["vmid"] === "number" ? d["vmid"] : null;
+    const vmType = typeof d["vm_type"] === "string" ? (d["vm_type"] as string) : null;
+    if (vmid != null) {
+      return (
+        <span className="ml-2 text-xs">
+          {vmType ?? "VM"} {String(vmid)}
+        </span>
+      );
+    }
+  } catch {
+    // ignore
+  }
+  return (
+    <span className="ml-2 text-xs text-muted-foreground">
+      {entry.resource_id.slice(0, 8)}
+    </span>
+  );
+}
+
 function AuditRow({
   entry,
   expanded,
@@ -164,9 +188,7 @@ function AuditRow({
               )}
             </span>
           ) : (
-            <span className="ml-2 text-xs text-muted-foreground">
-              {entry.resource_id.slice(0, 8)}
-            </span>
+            <ResourceFallback entry={entry} />
           )}
         </td>
         <td className="px-4 py-2 font-medium">

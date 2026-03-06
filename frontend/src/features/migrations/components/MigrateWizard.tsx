@@ -23,6 +23,7 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useClusterNodes,
   useClusterStorage,
+  useNodeBridges,
 } from "@/features/clusters/api/cluster-queries";
 import { useMetricStore } from "@/stores/metric-store";
 import {
@@ -73,6 +74,7 @@ export function MigrateWizard() {
   const [deleteSource, setDeleteSource] = useState(false);
   const [targetVmid, setTargetVmid] = useState("");
   const [storageMap, setStorageMap] = useState<Record<string, string>>({});
+  const [networkMap, setNetworkMap] = useState<Record<string, string>>({});
 
   // Data hooks
   const { data: clusters } = useClusters();
@@ -83,6 +85,14 @@ export function MigrateWizard() {
   const { data: sourceStorage } = useClusterStorage(sourceClusterId);
   const { data: targetStorage } = useClusterStorage(
     migrationType === "cross-cluster" ? targetClusterId : "",
+  );
+  const { data: sourceBridges } = useNodeBridges(
+    migrationType === "cross-cluster" ? sourceClusterId : "",
+    migrationType === "cross-cluster" ? sourceNode : "",
+  );
+  const { data: targetBridges } = useNodeBridges(
+    migrationType === "cross-cluster" ? targetClusterId : "",
+    migrationType === "cross-cluster" ? targetNode : "",
   );
 
   // Mutation hooks
@@ -118,6 +128,7 @@ export function MigrateWizard() {
     setDeleteSource(false);
     setTargetVmid("");
     setStorageMap({});
+    setNetworkMap({});
   }
 
   function handleCreate() {
@@ -133,7 +144,7 @@ export function MigrateWizard() {
       vm_type: vmType,
       migration_type: migrationType,
       storage_map: migrationType === "cross-cluster" ? storageMap : {},
-      network_map: {},
+      network_map: migrationType === "cross-cluster" ? networkMap : {},
       online,
       bwlimit_kib: bwlimit[0] ?? 0,
       delete_source: deleteSource,
@@ -156,6 +167,10 @@ export function MigrateWizard() {
 
   function updateStorageMapping(sourcePool: string, targetPool: string) {
     setStorageMap((prev) => ({ ...prev, [sourcePool]: targetPool }));
+  }
+
+  function updateNetworkMapping(sourceBridge: string, targetBridge: string) {
+    setNetworkMap((prev) => ({ ...prev, [sourceBridge]: targetBridge }));
   }
 
   // Auto-select best target node (lowest combined CPU + memory usage)
@@ -442,6 +457,45 @@ export function MigrateWizard() {
                                 value={tgt.storage}
                               >
                                 {tgt.storage} ({tgt.type})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            {/* Network Mapping (cross-cluster only) */}
+            {migrationType === "cross-cluster" &&
+              targetClusterId.length > 0 &&
+              targetNode.length > 0 &&
+              sourceBridges &&
+              sourceBridges.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Network Mapping</Label>
+                  <div className="space-y-2 rounded-md border p-3">
+                    {sourceBridges.map((src) => (
+                      <div
+                        key={src.iface}
+                        className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
+                      >
+                        <span className="truncate text-sm">{src.iface}</span>
+                        <ArrowLeftRight className="h-3 w-3 text-muted-foreground" />
+                        <Select
+                          value={networkMap[src.iface] ?? ""}
+                          onValueChange={(v) => {
+                            updateNetworkMapping(src.iface, v);
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Same name" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {targetBridges?.map((tgt) => (
+                              <SelectItem key={tgt.iface} value={tgt.iface}>
+                                {tgt.iface}
                               </SelectItem>
                             ))}
                           </SelectContent>

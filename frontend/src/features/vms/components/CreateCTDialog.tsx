@@ -14,7 +14,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   useClusterNodes,
   useClusterStorage,
+  useClusterVMs,
 } from "@/features/clusters/api/cluster-queries";
+import type { NodeResponse } from "@/types/api";
 import { useStorageContent } from "@/features/storage/api/storage-queries";
 import {
   useClusterVMIDs,
@@ -73,6 +75,7 @@ export function CreateCTDialog({
   const { data: storageList } = useClusterStorage(clusterId);
   const { data: usedVMIDs } = useClusterVMIDs(clusterId);
   const { data: pools } = useResourcePools(clusterId);
+  const { data: clusterVMs } = useClusterVMs(clusterId);
   const createMutation = useCreateContainer();
 
   // Template storage selection for browsing vztmpl content
@@ -116,6 +119,37 @@ export function CreateCTDialog({
       })
       .sort((a, b) => a.storage.localeCompare(b.storage));
   }, [storageList]);
+
+  // Best available node: sort by available resources (total - allocated)
+  const bestNode = useMemo(() => {
+    if (!nodes || nodes.length === 0) return "";
+    if (!clusterVMs) return "";
+
+    const allocated = new Map<string, { cpu: number; mem: number }>();
+    for (const vm of clusterVMs) {
+      const nodeEntry = nodes.find((n: NodeResponse) => n.id === vm.node_id);
+      if (!nodeEntry) continue;
+      const existing = allocated.get(nodeEntry.name) ?? { cpu: 0, mem: 0 };
+      existing.cpu += vm.cpu_count;
+      existing.mem += vm.mem_total;
+      allocated.set(nodeEntry.name, existing);
+    }
+
+    let best = nodes[0];
+    let bestScore = -1;
+    for (const n of nodes) {
+      if (n.status !== "online") continue;
+      const alloc = allocated.get(n.name) ?? { cpu: 0, mem: 0 };
+      const cpuFree = n.cpu_count > 0 ? (n.cpu_count - alloc.cpu) / n.cpu_count : 0;
+      const memFree = n.mem_total > 0 ? (n.mem_total - alloc.mem) / n.mem_total : 0;
+      const score = cpuFree * 0.5 + memFree * 0.5;
+      if (score > bestScore) {
+        bestScore = score;
+        best = n;
+      }
+    }
+    return best?.name ?? "";
+  }, [nodes, clusterVMs]);
 
   const nextAvailableId = useMemo(() => {
     if (!usedVMIDs || usedVMIDs.size === 0) return 100;
@@ -184,10 +218,10 @@ export function CreateCTDialog({
     if (open && vmid === "" && usedVMIDs) {
       setVmid(String(nextAvailableId));
     }
-    if (open && node === "" && nodes && nodes.length > 0 && nodes[0]) {
-      setNode(nodes[0].name);
+    if (open && node === "" && bestNode) {
+      setNode(bestNode);
     }
-  }, [open, usedVMIDs, nextAvailableId, vmid, nodes, node]);
+  }, [open, usedVMIDs, nextAvailableId, vmid, bestNode, node]);
 
   const isDuplicate = usedVMIDs ? usedVMIDs.has(Number(vmid)) : false;
   const stepIdx = steps.indexOf(step);

@@ -49,6 +49,7 @@ func (s *Server) setupRoutes() {
 			clusters.Post("/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback", s.vmHandler.RollbackSnapshot)
 			clusters.Get("/:cluster_id/vms/:vm_id/config", s.vmHandler.GetVMConfig)
 			clusters.Put("/:cluster_id/vms/:vm_id/config", s.vmHandler.SetVMConfig)
+			clusters.Get("/:cluster_id/vms/:vm_id/agent", s.vmHandler.GetGuestAgentInfo)
 			clusters.Get("/:cluster_id/tasks/:upid", s.vmHandler.GetTaskStatus)
 			clusters.Get("/:cluster_id/tasks/:upid/log", s.vmHandler.GetTaskLog)
 		}
@@ -65,6 +66,7 @@ func (s *Server) setupRoutes() {
 			clusters.Delete("/:cluster_id/containers/:ct_id/snapshots/:snap_name", s.containerHandler.DeleteSnapshot)
 			clusters.Post("/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback", s.containerHandler.RollbackSnapshot)
 			clusters.Put("/:cluster_id/containers/:ct_id/config", s.containerHandler.SetContainerConfig)
+			clusters.Post("/:cluster_id/containers/:ct_id/volumes/move", s.containerHandler.MoveVolume)
 		}
 		if s.vmHandler != nil {
 			clusters.Post("/:cluster_id/vms/:vm_id/disks/resize", s.vmHandler.ResizeDisk)

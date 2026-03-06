@@ -9,7 +9,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { useResizeDisk, useMoveDisk } from "../api/storage-queries";
+import { useResizeDisk, useMoveDisk, useAddTaskHistory } from "@/features/vms/api/vm-queries";
+import { useTaskLogStore } from "@/stores/task-log-store";
 
 // --- Resize Disk Dialog ---
 
@@ -31,7 +32,7 @@ export function ResizeDiskDialog({
   function handleResize() {
     if (!size) return;
     resizeMutation.mutate(
-      { clusterId, vmId, body: { disk: diskName, size } },
+      { clusterId, vmId, disk: diskName, size },
       {
         onSuccess: () => {
           setOpen(false);
@@ -89,6 +90,7 @@ interface MoveDiskDialogProps {
   vmId: string;
   diskName: string;
   storageOptions: string[];
+  currentStorage?: string;
 }
 
 export function MoveDiskDialog({
@@ -96,11 +98,19 @@ export function MoveDiskDialog({
   vmId,
   diskName,
   storageOptions,
+  currentStorage,
 }: MoveDiskDialogProps) {
   const [open, setOpen] = useState(false);
   const [targetStorage, setTargetStorage] = useState("");
   const [deleteOriginal, setDeleteOriginal] = useState(true);
   const moveMutation = useMoveDisk();
+  const addTask = useAddTaskHistory();
+  const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
+
+  // Filter out current storage from options
+  const filteredOptions = currentStorage
+    ? storageOptions.filter((s) => s !== currentStorage)
+    : storageOptions;
 
   function handleMove() {
     if (!targetStorage) return;
@@ -108,14 +118,27 @@ export function MoveDiskDialog({
       {
         clusterId,
         vmId,
-        body: {
-          disk: diskName,
-          storage: targetStorage,
-          delete: deleteOriginal,
-        },
+        disk: diskName,
+        storage: targetStorage,
+        deleteOriginal,
       },
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
+          const desc = `Move disk ${diskName} → ${targetStorage}`;
+          if (data.upid) {
+            addTask.mutate({
+              clusterId,
+              upid: data.upid,
+              description: desc,
+              taskType: "move_disk",
+            });
+            // Open the progress dialog
+            setFocusedTask({
+              clusterId,
+              upid: data.upid,
+              description: desc,
+            });
+          }
           setOpen(false);
           setTargetStorage("");
         },
@@ -144,7 +167,7 @@ export function MoveDiskDialog({
               onChange={(e) => { setTargetStorage(e.target.value); }}
             >
               <option value="">Select storage...</option>
-              {storageOptions.map((s) => (
+              {filteredOptions.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
@@ -159,14 +182,16 @@ export function MoveDiskDialog({
               onChange={(e) => { setDeleteOriginal(e.target.checked); }}
               className="h-4 w-4 rounded border-gray-300"
             />
-            <Label htmlFor="delete-original">Delete original after move</Label>
+            <Label htmlFor="delete-original">
+              Delete original after move completes
+            </Label>
           </div>
           <Button
             onClick={handleMove}
             disabled={!targetStorage || moveMutation.isPending}
             className="w-full"
           >
-            {moveMutation.isPending ? "Moving..." : "Move Disk"}
+            {moveMutation.isPending ? "Moving disk..." : "Move Disk"}
           </Button>
           {moveMutation.isError && (
             <p className="text-sm text-destructive">

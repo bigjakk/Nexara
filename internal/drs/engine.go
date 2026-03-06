@@ -19,22 +19,19 @@ import (
 type Weights struct {
 	CPU     float64 `json:"cpu"`
 	Memory  float64 `json:"memory"`
-	Network float64 `json:"network"`
 }
 
 // DefaultWeights returns the default scoring weights.
 func DefaultWeights() Weights {
-	return Weights{CPU: 0.4, Memory: 0.4, Network: 0.2}
+	return Weights{CPU: 0.5, Memory: 0.5}
 }
 
 // NodeScore holds the computed load score for a node.
 type NodeScore struct {
-	Node     string
-	Score    float64
-	CPULoad  float64
-	MemLoad  float64
-	NetLoad  float64
-	VMCount  int
+	Node    string
+	Score   float64
+	CPULoad float64
+	MemLoad float64
 }
 
 // Workload represents a VM or CT running on a node.
@@ -165,19 +162,9 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) ([]Recommend
 
 	// Score nodes.
 	scores := make(map[string]NodeScore)
-	var totalNet int64
-	for _, n := range nodeEntries {
-		for _, w := range nodeWorkloads[n.Node] {
-			totalNet += w.NetIn + w.NetOut
-		}
-	}
-	if totalNet == 0 {
-		totalNet = 1 // avoid division by zero
-	}
-
 	for name, n := range nodeEntries {
 		wl := nodeWorkloads[name]
-		scores[name] = ScoreNode(n, wl, totalNet, weights)
+		scores[name] = ScoreNode(n, wl, weights)
 	}
 
 	imbalance := CalculateImbalance(scores)
@@ -197,43 +184,46 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) ([]Recommend
 	rules := parseDBRules(dbRules)
 
 	// Plan migrations.
-	recommendations := Plan(scores, nodeWorkloads, nodeEntries, rules, weights, cfg.ImbalanceThreshold, totalNet)
+	recommendations := Plan(scores, nodeWorkloads, nodeEntries, rules, weights, cfg.ImbalanceThreshold)
 
 	return recommendations, nil
 }
 
 // ScoreNode computes a weighted load score for a node (0.0 = idle, 1.0 = fully loaded).
-func ScoreNode(node proxmox.NodeListEntry, workloads []Workload, totalClusterNet int64, weights Weights) NodeScore {
-	cpuLoad := node.CPU // already a 0-1 fraction
-	if node.MaxCPU == 0 {
-		cpuLoad = 0
+// CPU and memory are derived from the workloads placed on the node (not node-level metrics)
+// so that the planner's move simulation produces accurate score changes.
+func ScoreNode(node proxmox.NodeListEntry, workloads []Workload, weights Weights) NodeScore {
+	var cpuLoad float64
+	if node.MaxCPU > 0 {
+		var totalCPU float64
+		for _, w := range workloads {
+			totalCPU += w.CPUUsage * float64(w.CPUs)
+		}
+		cpuLoad = totalCPU / float64(node.MaxCPU)
+		if cpuLoad > 1.0 {
+			cpuLoad = 1.0
+		}
 	}
 
 	var memLoad float64
 	if node.MaxMem > 0 {
-		memLoad = float64(node.Mem) / float64(node.MaxMem)
+		var totalMem int64
+		for _, w := range workloads {
+			totalMem += w.Mem
+		}
+		memLoad = float64(totalMem) / float64(node.MaxMem)
+		if memLoad > 1.0 {
+			memLoad = 1.0
+		}
 	}
 
-	var nodeNet int64
-	for _, w := range workloads {
-		nodeNet += w.NetIn + w.NetOut
-	}
-	var netLoad float64
-	if totalClusterNet > 0 {
-		// Normalize per-node network relative to total cluster network.
-		nodeCount := 1.0 // will be adjusted by caller context
-		netLoad = (float64(nodeNet) / float64(totalClusterNet)) * nodeCount
-	}
-
-	score := weights.CPU*cpuLoad + weights.Memory*memLoad + weights.Network*netLoad
+	score := weights.CPU*cpuLoad + weights.Memory*memLoad
 
 	return NodeScore{
 		Node:    node.Node,
 		Score:   score,
 		CPULoad: cpuLoad,
 		MemLoad: memLoad,
-		NetLoad: netLoad,
-		VMCount: len(workloads),
 	}
 }
 

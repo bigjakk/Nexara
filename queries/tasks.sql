@@ -15,6 +15,11 @@ WHERE user_id = $1
 ORDER BY started_at DESC
 LIMIT $2;
 
+-- name: ListAllTaskHistory :many
+SELECT * FROM task_history
+ORDER BY started_at DESC
+LIMIT $1;
+
 -- name: ListTaskHistoryByCluster :many
 SELECT * FROM task_history
 WHERE cluster_id = $1

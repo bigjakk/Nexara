@@ -13,6 +13,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cleanupStaleDRSHistory = `-- name: CleanupStaleDRSHistory :exec
+UPDATE drs_history
+SET status = 'cancelled', executed_at = now()
+WHERE status = 'pending' AND created_at < now() - interval '10 minutes'
+`
+
+func (q *Queries) CleanupStaleDRSHistory(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, cleanupStaleDRSHistory)
+	return err
+}
+
 const deleteDRSRule = `-- name: DeleteDRSRule :exec
 DELETE FROM drs_rules WHERE id = $1
 `
@@ -59,6 +70,38 @@ func (q *Queries) GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLastDRSMigrationForVM = `-- name: GetLastDRSMigrationForVM :one
+SELECT id, cluster_id, source_node, target_node, vm_id, vm_type, reason, score_before, score_after, status, executed_at, created_at FROM drs_history
+WHERE cluster_id = $1 AND vm_id = $2 AND status IN ('completed', 'pending')
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetLastDRSMigrationForVMParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	VmID      int32     `json:"vm_id"`
+}
+
+func (q *Queries) GetLastDRSMigrationForVM(ctx context.Context, arg GetLastDRSMigrationForVMParams) (DrsHistory, error) {
+	row := q.db.QueryRow(ctx, getLastDRSMigrationForVM, arg.ClusterID, arg.VmID)
+	var i DrsHistory
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.SourceNode,
+		&i.TargetNode,
+		&i.VmID,
+		&i.VmType,
+		&i.Reason,
+		&i.ScoreBefore,
+		&i.ScoreAfter,
+		&i.Status,
+		&i.ExecutedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }

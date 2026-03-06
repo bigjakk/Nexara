@@ -16,6 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useWebSocketStore } from "@/stores/websocket-store";
 import { Sidebar } from "./Sidebar";
 import { TaskLogPanel } from "./TaskLogPanel";
+import { TaskProgressDialog } from "./TaskProgressDialog";
 
 function getInitials(name: string): string {
   return name
@@ -48,7 +49,7 @@ export function AppShell() {
   return (
     <div className="flex h-screen">
       <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden transition-all duration-200">
         <header className="flex h-14 items-center justify-end border-b px-4">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -90,6 +91,7 @@ export function AppShell() {
           <Outlet />
         </main>
         <TaskLogPanel />
+        <TaskProgressDialog />
       </div>
     </div>
   );

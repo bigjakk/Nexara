@@ -23,12 +23,26 @@ vi.mock("../api/cluster-queries", () => ({
     mockUseClusterNodes(...args) as unknown,
 }));
 
+// Mock tab components to avoid pulling in their dependencies
+vi.mock("../components/ClusterCephTab", () => ({
+  ClusterCephTab: () => <div data-testid="ceph-tab">Ceph Tab</div>,
+}));
+vi.mock("../components/ClusterNetworksTab", () => ({
+  ClusterNetworksTab: () => <div data-testid="networks-tab">Networks Tab</div>,
+}));
+vi.mock("../components/ClusterFirewallTab", () => ({
+  ClusterFirewallTab: () => <div data-testid="firewall-tab">Firewall Tab</div>,
+}));
+vi.mock("../components/ClusterDRSTab", () => ({
+  ClusterDRSTab: () => <div data-testid="drs-tab">DRS Tab</div>,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 describe("ClusterDetailPage", () => {
-  it("renders cluster name and nodes", () => {
+  it("renders cluster name, nodes, and tab triggers", () => {
     mockUseCluster.mockReturnValue({
       data: {
         id: "test-cluster-id",
@@ -72,6 +86,13 @@ describe("ClusterDetailPage", () => {
     expect(screen.getByText("64.0 GB")).toBeInTheDocument();
     expect(screen.getByText("8.1.3")).toBeInTheDocument();
     expect(screen.getByText("10d 0h")).toBeInTheDocument();
+
+    // Tab triggers should be present
+    expect(screen.getByRole("tab", { name: "Nodes" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Ceph" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Networks" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Firewall" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "DRS" })).toBeInTheDocument();
   });
 
   it("shows error state", () => {

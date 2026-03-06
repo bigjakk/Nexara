@@ -62,6 +62,7 @@ export function useVM(clusterId: string, vmId: string, kind: ResourceKind) {
     queryKey: ["clusters", clusterId, kind === "ct" ? "containers" : "vms", vmId],
     queryFn: () => apiClient.get<VMResponse>(endpoint),
     enabled: clusterId.length > 0 && vmId.length > 0,
+    refetchInterval: 10_000,
   });
 }
 
@@ -596,6 +597,86 @@ export function useClearTaskHistory() {
     mutationFn: () => apiClient.delete<{ status: string }>("/api/v1/tasks"),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+    },
+  });
+}
+
+// --- Guest Agent ---
+
+export interface GuestIPAddress {
+  "ip-address": string;
+  "ip-address-type": string;
+  prefix: number;
+}
+
+export interface GuestNetworkInterface {
+  name: string;
+  "hardware-address": string;
+  "ip-addresses": GuestIPAddress[];
+}
+
+export interface GuestOSInfo {
+  name: string;
+  "kernel-version": string;
+  "kernel-release": string;
+  machine: string;
+  id: string;
+  "pretty-name": string;
+  version: string;
+  "version-id": string;
+}
+
+export interface GuestAgentResponse {
+  running: boolean;
+  os_info?: GuestOSInfo;
+  network_interfaces?: GuestNetworkInterface[];
+}
+
+export function useGuestAgentInfo(
+  clusterId: string,
+  vmId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "vms", vmId, "agent"],
+    queryFn: () =>
+      apiClient.get<GuestAgentResponse>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/agent`,
+      ),
+    enabled: enabled && clusterId.length > 0 && vmId.length > 0,
+    refetchInterval: 30_000,
+  });
+}
+
+// --- Disk Move ---
+
+interface MoveDiskParams {
+  clusterId: string;
+  vmId: string;
+  disk: string;
+  storage: string;
+  deleteOriginal: boolean;
+}
+
+export function useMoveDisk() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, vmId, disk, storage, deleteOriginal }: MoveDiskParams) =>
+      apiClient.post<VMActionResponse>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/move`,
+        { disk, storage, delete: deleteOriginal },
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vms", variables.vmId, "config"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vms"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "storage"],
+      });
     },
   });
 }

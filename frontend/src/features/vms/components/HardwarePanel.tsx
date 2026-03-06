@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useVMConfig, useSetVMConfig, useResizeDisk } from "../api/vm-queries";
 import { useClusterStorage, useStorageContent } from "@/features/storage/api/storage-queries";
+import { MoveDiskDialog } from "@/features/storage/components/DiskActions";
 import {
   cpuTypes,
   scsiControllers,
@@ -1092,10 +1093,22 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
                 <div key={key} className="rounded border p-2">
                   <div className="mb-1.5 flex items-center gap-2">
                     <span className="font-mono text-xs font-medium">{key}</span>
-                    <span className="text-[10px] text-muted-foreground">{parsed.storage} &middot; {parsed.size || "--"} &middot; {parsed.format || "raw"}</span>
-                    <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDisk(key); }}>
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
+                    {parsed.storage && (
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">{parsed.storage}</span>
+                    )}
+                    <span className="text-[10px] text-muted-foreground">{parsed.size || "--"} &middot; {parsed.format || "raw"}</span>
+                    <div className="ml-auto flex items-center gap-1">
+                      <MoveDiskDialog
+                        clusterId={clusterId}
+                        vmId={vmId}
+                        diskName={key}
+                        storageOptions={diskStorages.map((s) => s.storage)}
+                        currentStorage={parsed.storage}
+                      />
+                      <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDisk(key); }}>
+                        <Trash2 className="h-3 w-3" /> Remove
+                      </Button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
                     <div className="space-y-0.5">

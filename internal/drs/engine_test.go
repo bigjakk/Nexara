@@ -13,62 +13,54 @@ func TestScoreNode(t *testing.T) {
 		name      string
 		node      proxmox.NodeListEntry
 		workloads []Workload
-		totalNet  int64
 		wantMin   float64
 		wantMax   float64
 	}{
 		{
-			name: "idle node",
+			name: "idle node with no workloads",
 			node: proxmox.NodeListEntry{
 				Node:   "node1",
 				Status: "online",
-				CPU:    0.0,
 				MaxCPU: 8,
-				Mem:    0,
 				MaxMem: 16 * 1024 * 1024 * 1024,
 			},
 			workloads: nil,
-			totalNet:  1,
 			wantMin:   0.0,
-			wantMax:   0.01,
+			wantMax:   0.0,
 		},
 		{
-			name: "fully loaded node",
+			name: "node with heavy workload",
 			node: proxmox.NodeListEntry{
 				Node:   "node1",
 				Status: "online",
-				CPU:    1.0,
 				MaxCPU: 8,
-				Mem:    16 * 1024 * 1024 * 1024,
 				MaxMem: 16 * 1024 * 1024 * 1024,
 			},
 			workloads: []Workload{
-				{VMID: 100, NetIn: 1000000, NetOut: 1000000},
+				{VMID: 100, CPUUsage: 1.0, CPUs: 8, Mem: 16 * 1024 * 1024 * 1024, MaxMem: 16 * 1024 * 1024 * 1024},
 			},
-			totalNet: 2000000,
-			wantMin:  0.8,  // cpu 0.4 + mem 0.4
-			wantMax:  1.05, // plus some network
+			wantMin: 0.95, // cpu 0.5 + mem 0.5
+			wantMax: 1.05,
 		},
 		{
-			name: "50% loaded node",
+			name: "node with 50% workload",
 			node: proxmox.NodeListEntry{
 				Node:   "node1",
 				Status: "online",
-				CPU:    0.5,
 				MaxCPU: 8,
-				Mem:    8 * 1024 * 1024 * 1024,
 				MaxMem: 16 * 1024 * 1024 * 1024,
 			},
-			workloads: nil,
-			totalNet:  1,
-			wantMin:   0.35,
-			wantMax:   0.45,
+			workloads: []Workload{
+				{VMID: 101, CPUUsage: 0.5, CPUs: 8, Mem: 8 * 1024 * 1024 * 1024, MaxMem: 8 * 1024 * 1024 * 1024},
+			},
+			wantMin: 0.45,
+			wantMax: 0.55,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			score := ScoreNode(tt.node, tt.workloads, tt.totalNet, weights)
+			score := ScoreNode(tt.node, tt.workloads, weights)
 			if score.Score < tt.wantMin || score.Score > tt.wantMax {
 				t.Errorf("ScoreNode() = %f, want between %f and %f", score.Score, tt.wantMin, tt.wantMax)
 			}
@@ -134,22 +126,21 @@ func TestPlanProducesMigrations(t *testing.T) {
 	weights := DefaultWeights()
 
 	nodeEntries := map[string]proxmox.NodeListEntry{
-		"node1": {Node: "node1", Status: "online", CPU: 0.9, MaxCPU: 8, Mem: 15e9, MaxMem: 16e9},
-		"node2": {Node: "node2", Status: "online", CPU: 0.1, MaxCPU: 8, Mem: 2e9, MaxMem: 16e9},
+		"node1": {Node: "node1", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+		"node2": {Node: "node2", Status: "online", MaxCPU: 8, MaxMem: 16e9},
 	}
 
 	nodeWorkloads := map[string][]Workload{
 		"node1": {
-			{VMID: 100, Type: "qemu", Node: "node1", CPUUsage: 0.5, CPUs: 4, Mem: 4e9, MaxMem: 4e9, NetIn: 1000, NetOut: 1000},
-			{VMID: 101, Type: "qemu", Node: "node1", CPUUsage: 0.3, CPUs: 2, Mem: 2e9, MaxMem: 2e9, NetIn: 500, NetOut: 500},
+			{VMID: 100, Type: "qemu", Node: "node1", CPUUsage: 0.5, CPUs: 4, Mem: 4e9, MaxMem: 4e9},
+			{VMID: 101, Type: "qemu", Node: "node1", CPUUsage: 0.3, CPUs: 2, Mem: 2e9, MaxMem: 2e9},
 		},
 		"node2": {},
 	}
 
 	scores := make(map[string]NodeScore)
-	var totalNet int64 = 3000
 	for name, n := range nodeEntries {
-		scores[name] = ScoreNode(n, nodeWorkloads[name], totalNet, weights)
+		scores[name] = ScoreNode(n, nodeWorkloads[name], weights)
 	}
 
 	imbalance := CalculateImbalance(scores)
@@ -157,7 +148,7 @@ func TestPlanProducesMigrations(t *testing.T) {
 		t.Fatalf("expected imbalanced cluster, got %f", imbalance)
 	}
 
-	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25, totalNet)
+	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25)
 
 	if len(recommendations) == 0 {
 		t.Fatal("expected at least one migration recommendation")
@@ -173,6 +164,94 @@ func TestPlanProducesMigrations(t *testing.T) {
 		if r.ExpectedImprovement <= 0 {
 			t.Errorf("expected positive improvement, got %f", r.ExpectedImprovement)
 		}
+	}
+}
+
+func TestPlanRejectsSingleVMThrashing(t *testing.T) {
+	weights := DefaultWeights()
+
+	// 1 VM on 3 nodes — moving it just relocates the imbalance, shouldn't produce recommendations.
+	nodeEntries := map[string]proxmox.NodeListEntry{
+		"node1": {Node: "node1", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+		"node2": {Node: "node2", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+		"node3": {Node: "node3", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+	}
+
+	nodeWorkloads := map[string][]Workload{
+		"node1": {
+			{VMID: 100, Type: "qemu", Node: "node1", CPUUsage: 0.5, CPUs: 4, Mem: 4e9, MaxMem: 4e9},
+		},
+		"node2": {},
+		"node3": {},
+	}
+
+	scores := make(map[string]NodeScore)
+	for name, n := range nodeEntries {
+		scores[name] = ScoreNode(n, nodeWorkloads[name], weights)
+	}
+
+	imbalance := CalculateImbalance(scores)
+	if imbalance <= 0.25 {
+		t.Fatalf("expected imbalanced cluster, got %f", imbalance)
+	}
+
+	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25)
+
+	if len(recommendations) != 0 {
+		t.Errorf("expected no recommendations for single VM on 3 nodes, got %d: %+v",
+			len(recommendations), recommendations)
+	}
+}
+
+func TestPlanThreeNodesWithEmptyNode(t *testing.T) {
+	weights := DefaultWeights()
+
+	// 2 VMs on node1, 1 VM on node2, node3 empty — should move a VM to node3.
+	nodeEntries := map[string]proxmox.NodeListEntry{
+		"node1": {Node: "node1", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+		"node2": {Node: "node2", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+		"node3": {Node: "node3", Status: "online", MaxCPU: 8, MaxMem: 16e9},
+	}
+
+	nodeWorkloads := map[string][]Workload{
+		"node1": {
+			{VMID: 100, Type: "qemu", Node: "node1", CPUUsage: 0.3, CPUs: 2, Mem: 2e9, MaxMem: 2e9},
+			{VMID: 101, Type: "qemu", Node: "node1", CPUUsage: 0.2, CPUs: 2, Mem: 2e9, MaxMem: 2e9},
+		},
+		"node2": {
+			{VMID: 102, Type: "qemu", Node: "node2", CPUUsage: 0.4, CPUs: 4, Mem: 4e9, MaxMem: 4e9},
+		},
+		"node3": {},
+	}
+
+	scores := make(map[string]NodeScore)
+	for name, n := range nodeEntries {
+		scores[name] = ScoreNode(n, nodeWorkloads[name], weights)
+	}
+
+	imbalance := CalculateImbalance(scores)
+	if imbalance <= 0.25 {
+		t.Fatalf("expected imbalanced cluster, got %f", imbalance)
+	}
+
+	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25)
+
+	if len(recommendations) == 0 {
+		t.Fatal("expected at least one migration recommendation to spread VMs to empty node3")
+	}
+
+	// At least one VM should move to node3.
+	movedToNode3 := false
+	for _, r := range recommendations {
+		if r.TargetNode == "node3" {
+			movedToNode3 = true
+		}
+		if r.ExpectedImprovement <= 0 {
+			t.Errorf("expected positive improvement, got %f", r.ExpectedImprovement)
+		}
+	}
+	if !movedToNode3 {
+		t.Errorf("expected at least one VM to move to node3, got: %+v", recommendations)
 	}
 }
 

@@ -142,6 +142,10 @@ vi.mock("../api/vm-queries", () => ({
     data: null,
     isLoading: false,
   }),
+  useGuestAgentInfo: () => ({
+    data: { running: false },
+    isLoading: false,
+  }),
 }));
 
 vi.mock("@/features/clusters/api/cluster-queries", () => ({
@@ -149,6 +153,12 @@ vi.mock("@/features/clusters/api/cluster-queries", () => ({
     data: [],
   }),
   useClusterStorage: () => ({
+    data: [],
+  }),
+  useClusterVMs: () => ({
+    data: [],
+  }),
+  useNodeBridges: () => ({
     data: [],
   }),
 }));
@@ -190,10 +200,10 @@ describe("VMDetailPage", () => {
     expect(screen.getByText("QEMU VM")).toBeInTheDocument();
   });
 
-  it("renders tabs for Overview, Metrics, Console", () => {
+  it("renders tabs for Overview, Snapshots, Console", () => {
     renderPage();
     expect(screen.getByRole("tab", { name: /overview/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /metrics/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /snapshots/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /console/i })).toBeInTheDocument();
   });
 

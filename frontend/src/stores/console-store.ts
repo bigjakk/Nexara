@@ -17,6 +17,8 @@ interface ConsoleActions {
   setActiveTab: (id: string) => void;
   updateTabStatus: (id: string, status: ConsoleStatus) => void;
   reconnectTab: (id: string) => void;
+  /** Update node for all tabs matching a VM and trigger reconnect. */
+  updateTabNode: (clusterID: string, vmid: number, newNode: string) => void;
 }
 
 let nextId = Date.now();
@@ -70,6 +72,16 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
           tabs: state.tabs.map((t) =>
             t.id === id
               ? { ...t, status: "connecting" as ConsoleStatus, reconnectKey: t.reconnectKey + 1 }
+              : t,
+          ),
+        }));
+      },
+
+      updateTabNode: (clusterID, vmid, newNode) => {
+        set((state) => ({
+          tabs: state.tabs.map((t) =>
+            t.clusterID === clusterID && t.vmid === vmid && t.node !== newNode
+              ? { ...t, node: newNode, status: "connecting" as ConsoleStatus, reconnectKey: t.reconnectKey + 1 }
               : t,
           ),
         }));

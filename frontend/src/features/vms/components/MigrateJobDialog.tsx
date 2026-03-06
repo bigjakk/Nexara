@@ -25,6 +25,8 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useClusterNodes,
   useClusterStorage,
+  useClusterVMs,
+  useNodeBridges,
 } from "@/features/clusters/api/cluster-queries";
 import { useMetricStore } from "@/stores/metric-store";
 import {
@@ -41,6 +43,7 @@ import type {
   CheckSeverity,
 } from "@/features/migrations/types/migration";
 import type { ResourceKind } from "../types/vm";
+import { useTaskLogStore } from "@/stores/task-log-store";
 import {
   ArrowLeftRight,
   CheckCircle2,
@@ -101,6 +104,7 @@ export function MigrateJobDialog({
   const [deleteSource, setDeleteSource] = useState(false);
   const [targetVmid, setTargetVmid] = useState("");
   const [storageMap, setStorageMap] = useState<Record<string, string>>({});
+  const [networkMap, setNetworkMap] = useState<Record<string, string>>({});
 
   // Data hooks
   const { data: clusters } = useClusters();
@@ -111,8 +115,17 @@ export function MigrateJobDialog({
   const { data: targetStorage } = useClusterStorage(
     migrationType === "cross-cluster" ? targetClusterId : "",
   );
+  const { data: sourceBridges } = useNodeBridges(
+    migrationType === "cross-cluster" ? clusterId : "",
+    migrationType === "cross-cluster" ? currentNode : "",
+  );
+  const { data: targetBridges } = useNodeBridges(
+    migrationType === "cross-cluster" ? targetClusterId : "",
+    migrationType === "cross-cluster" ? targetNode : "",
+  );
 
   const queryClient = useQueryClient();
+  const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
   // Mutation hooks
   const createMutation = useCreateMigration();
@@ -148,9 +161,19 @@ export function MigrateJobDialog({
     setDeleteSource(false);
     setTargetVmid("");
     setStorageMap({});
+    setNetworkMap({});
   }
 
   function handleClose() {
+    // If migration is still running, open the global progress dialog
+    // so the user can re-check from the task bar.
+    if (step === "progress" && job && job.upid && (job.status === "pending" || job.status === "migrating")) {
+      setFocusedTask({
+        clusterId,
+        upid: job.upid,
+        description: `Migrate ${vmName} (VMID ${String(vmid)})`,
+      });
+    }
     resetForm();
     createMutation.reset();
     checkMutation.reset();
@@ -169,7 +192,7 @@ export function MigrateJobDialog({
       vm_type: vmType,
       migration_type: migrationType,
       storage_map: migrationType === "cross-cluster" ? storageMap : {},
-      network_map: {},
+      network_map: migrationType === "cross-cluster" ? networkMap : {},
       online,
       bwlimit_kib: bwlimit[0] ?? 0,
       delete_source: deleteSource,
@@ -187,11 +210,17 @@ export function MigrateJobDialog({
   function handleExecute() {
     void executeMutation.mutateAsync(jobId).then(() => {
       setStep("progress");
+      // Trigger task panel to pick up the new task_history entry from the backend.
+      void queryClient.invalidateQueries({ queryKey: ["task-history"] });
     });
   }
 
   function updateStorageMapping(sourcePool: string, targetPool: string) {
     setStorageMap((prev) => ({ ...prev, [sourcePool]: targetPool }));
+  }
+
+  function updateNetworkMapping(sourceBridge: string, targetBridge: string) {
+    setNetworkMap((prev) => ({ ...prev, [sourceBridge]: targetBridge }));
   }
 
   // Filter out current node for intra-cluster migration
@@ -200,9 +229,20 @@ export function MigrateJobDialog({
       ? targetNodes?.filter((n) => n.name !== currentNode)
       : targetNodes;
 
-  // Auto-select the best node (lowest combined CPU + memory usage).
+  // Auto-select the best node (lowest combined CPU + memory + VM count).
   const metricsMap = useMetricStore((s) => s.metrics);
   const clusterMetrics = metricsMap.get(effectiveTargetClusterId);
+  const { data: clusterVMs } = useClusterVMs(effectiveTargetClusterId);
+
+  // Build a VM count per node_id (DB UUID) for scoring
+  const vmCountByNodeId = new Map<string, number>();
+  if (clusterVMs) {
+    for (const vm of clusterVMs) {
+      if (vm.status === "running") {
+        vmCountByNodeId.set(vm.node_id, (vmCountByNodeId.get(vm.node_id) ?? 0) + 1);
+      }
+    }
+  }
 
   useEffect(() => {
     if (!availableTargetNodes || availableTargetNodes.length === 0) return;
@@ -211,7 +251,9 @@ export function MigrateJobDialog({
 
     const nodeMetrics = clusterMetrics?.nodeMetrics;
 
-    // Score each online node — lower is better (less loaded)
+    // Score each online node — lower is better (less loaded).
+    // VM count is used as the primary signal (nodes with fewer VMs are preferred),
+    // with live CPU+mem as a tiebreaker.
     let bestNode = "";
     let bestScore = Infinity;
 
@@ -219,10 +261,12 @@ export function MigrateJobDialog({
       if (node.status !== "online") continue;
 
       const live = nodeMetrics?.get(node.id);
-      // If live metrics available, use them; otherwise fall back to 50% (neutral)
-      const cpu = live?.cpuPercent ?? 50;
-      const mem = live?.memPercent ?? 50;
-      const score = cpu + mem; // simple combined load
+      // If no live metrics, assume idle (0%) — don't penalize nodes missing metrics
+      const cpu = live?.cpuPercent ?? 0;
+      const mem = live?.memPercent ?? 0;
+      const vms = vmCountByNodeId.get(node.id) ?? 0;
+      // VM count * 100 dominates, CPU+mem (0-200 range) breaks ties
+      const score = vms * 100 + cpu + mem;
 
       if (score < bestScore) {
         bestScore = score;
@@ -239,7 +283,7 @@ export function MigrateJobDialog({
     if (bestNode !== "") {
       setTargetNode(bestNode);
     }
-  }, [availableTargetNodes, clusterMetrics?.nodeMetrics, targetNode.length]);
+  }, [availableTargetNodes, clusterMetrics?.nodeMetrics, targetNode.length, vmCountByNodeId]);
 
   // Deduplicate storage pools by name
   const uniqueSourceStorage = sourceStorage
@@ -287,6 +331,7 @@ export function MigrateJobDialog({
                   setTargetNode("");
                   setTargetClusterId("");
                   setStorageMap({});
+                  setNetworkMap({});
                 }}
               >
                 <SelectTrigger>
@@ -313,6 +358,7 @@ export function MigrateJobDialog({
                     setTargetClusterId(v);
                     setTargetNode("");
                     setStorageMap({});
+                    setNetworkMap({});
                   }}
                 >
                   <SelectTrigger>
@@ -396,6 +442,45 @@ export function MigrateJobDialog({
                                 value={tgt.storage}
                               >
                                 {tgt.storage} ({tgt.type})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            {/* Network Mapping (cross-cluster only) */}
+            {migrationType === "cross-cluster" &&
+              targetClusterId.length > 0 &&
+              targetNode.length > 0 &&
+              sourceBridges &&
+              sourceBridges.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Network Mapping</Label>
+                  <div className="space-y-2 rounded-md border p-3">
+                    {sourceBridges.map((src) => (
+                      <div
+                        key={src.iface}
+                        className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
+                      >
+                        <span className="truncate text-sm">{src.iface}</span>
+                        <ArrowLeftRight className="h-3 w-3 text-muted-foreground" />
+                        <Select
+                          value={networkMap[src.iface] ?? ""}
+                          onValueChange={(v) => {
+                            updateNetworkMapping(src.iface, v);
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Same name" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {targetBridges?.map((tgt) => (
+                              <SelectItem key={tgt.iface} value={tgt.iface}>
+                                {tgt.iface}
                               </SelectItem>
                             ))}
                           </SelectContent>

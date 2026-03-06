@@ -1,13 +1,21 @@
 import { create } from "zustand";
 
+export interface FocusedTask {
+  clusterId: string;
+  upid: string;
+  description: string;
+}
+
 interface TaskLogState {
   panelOpen: boolean;
   panelHeight: number;
+  focusedTask: FocusedTask | null;
 }
 
 interface TaskLogActions {
   setPanelOpen: (open: boolean) => void;
   setPanelHeight: (height: number) => void;
+  setFocusedTask: (task: FocusedTask | null) => void;
 }
 
 const STORAGE_KEY = "proxdash-task-log";
@@ -42,6 +50,7 @@ function persist(state: Pick<TaskLogState, "panelOpen" | "panelHeight">) {
 export const useTaskLogStore = create<TaskLogState & TaskLogActions>()(
   (set, get) => ({
     ...loadPersistedState(),
+    focusedTask: null,
     setPanelOpen: (open: boolean) => {
       set({ panelOpen: open });
       persist({ panelOpen: open, panelHeight: get().panelHeight });
@@ -50,6 +59,9 @@ export const useTaskLogStore = create<TaskLogState & TaskLogActions>()(
       const clamped = Math.max(100, Math.min(height, window.innerHeight * 0.5));
       set({ panelHeight: clamped });
       persist({ panelOpen: get().panelOpen, panelHeight: clamped });
+    },
+    setFocusedTask: (task: FocusedTask | null) => {
+      set({ focusedTask: task });
     },
   }),
 );

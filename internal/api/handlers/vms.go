@@ -1302,6 +1302,56 @@ func (h *VMHandler) ListBridges(c *fiber.Ctx) error {
 	return c.JSON(bridges)
 }
 
+// --- Guest Agent ---
+
+type guestAgentResponse struct {
+	Running           bool                           `json:"running"`
+	OSInfo            *proxmox.GuestOSInfo           `json:"os_info,omitempty"`
+	NetworkInterfaces []proxmox.GuestNetworkInterface `json:"network_interfaces,omitempty"`
+}
+
+// GetGuestAgentInfo handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/agent.
+func (h *VMHandler) GetGuestAgentInfo(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	vm, node, _, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	osInfo, err := pxClient.GetGuestAgentOSInfo(c.Context(), node.Name, int(vm.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	if osInfo == nil {
+		return c.JSON(guestAgentResponse{Running: false})
+	}
+
+	ifaces, err := pxClient.GetGuestAgentNetworkInterfaces(c.Context(), node.Name, int(vm.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	return c.JSON(guestAgentResponse{
+		Running:           true,
+		OSInfo:            osInfo,
+		NetworkInterfaces: ifaces,
+	})
+}
+
 // mapProxmoxError converts a Proxmox client error to an appropriate Fiber error.
 func mapProxmoxError(err error) error {
 	if errors.Is(err, proxmox.ErrNotFound) {

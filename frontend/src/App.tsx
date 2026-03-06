@@ -11,13 +11,9 @@ import { NodeDetailPage } from "@/features/clusters/pages/NodeDetailPage";
 import { InventoryPage } from "@/features/inventory/pages/InventoryPage";
 import { VMDetailPage } from "@/features/vms/pages/VMDetailPage";
 import { StoragePage } from "@/features/storage/pages/StoragePage";
-import { CephDashboardPage } from "@/features/ceph/pages/CephDashboardPage";
 import { BackupDashboardPage } from "@/features/backup/pages/BackupDashboardPage";
 import { AuditLogPage } from "@/features/audit/pages/AuditLogPage";
-import { DRSPage } from "@/features/drs/pages/DRSPage";
 import { MigrationsPage } from "@/features/migrations/pages/MigrationsPage";
-import { NetworksPage } from "@/features/networks/pages/NetworksPage";
-import { FirewallPage } from "@/features/networks/pages/FirewallPage";
 
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
@@ -69,24 +65,8 @@ const router = createBrowserRouter([
             element: <StoragePage />,
           },
           {
-            path: "ceph",
-            element: <CephDashboardPage />,
-          },
-          {
             path: "backup",
             element: <BackupDashboardPage />,
-          },
-          {
-            path: "networks",
-            element: <NetworksPage />,
-          },
-          {
-            path: "firewall",
-            element: <FirewallPage />,
-          },
-          {
-            path: "drs",
-            element: <DRSPage />,
           },
           {
             path: "migrations",

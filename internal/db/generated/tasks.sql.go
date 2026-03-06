@@ -70,6 +70,47 @@ func (q *Queries) InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryPa
 	return i, err
 }
 
+const listAllTaskHistory = `-- name: ListAllTaskHistory :many
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+ORDER BY started_at DESC
+LIMIT $1
+`
+
+func (q *Queries) ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error) {
+	rows, err := q.db.Query(ctx, listAllTaskHistory, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskHistory{}
+	for rows.Next() {
+		var i TaskHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.Upid,
+			&i.Description,
+			&i.Status,
+			&i.ExitStatus,
+			&i.Node,
+			&i.TaskType,
+			&i.Progress,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskHistory = `-- name: ListTaskHistory :many
 SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
 WHERE user_id = $1

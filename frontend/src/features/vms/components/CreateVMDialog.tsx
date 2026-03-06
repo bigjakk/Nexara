@@ -147,7 +147,7 @@ export function CreateVMDialog({
   // Best available node: sort by available resources (total - allocated)
   const bestNode = useMemo(() => {
     if (!nodes || nodes.length === 0) return "";
-    if (!clusterVMs) return nodes[0]?.name ?? "";
+    if (!clusterVMs) return "";
 
     // Calculate allocated CPU/mem per node
     const allocated = new Map<string, { cpu: number; mem: number }>();

@@ -75,5 +75,6 @@ export function useClusterVMs(clusterId: string) {
         `/api/v1/clusters/${clusterId}/vms`,
       ),
     enabled: clusterId.length > 0,
+    refetchInterval: 30_000,
   });
 }

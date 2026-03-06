@@ -73,21 +73,13 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 	return resp
 }
 
-// List returns task history for the current user.
+// List returns task history for all users (includes DRS/system tasks).
 func (h *TaskHandler) List(c *fiber.Ctx) error {
 	if err := requireAdmin(c); err != nil {
 		return err
 	}
 
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return fiber.NewError(fiber.StatusUnauthorized, "Invalid user")
-	}
-
-	tasks, err := h.queries.ListTaskHistory(c.Context(), db.ListTaskHistoryParams{
-		UserID: uid,
-		Limit:  100,
-	})
+	tasks, err := h.queries.ListAllTaskHistory(c.Context(), 100)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list tasks")
 	}

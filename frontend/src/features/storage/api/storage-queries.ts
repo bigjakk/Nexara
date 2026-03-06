@@ -4,8 +4,6 @@ import type { StorageResponse } from "@/types/api";
 import type {
   StorageContentItem,
   StorageActionResponse,
-  DiskResizeRequest,
-  DiskMoveRequest,
 } from "../types/storage";
 
 // --- Storage pools for a cluster ---
@@ -18,6 +16,8 @@ export function useClusterStorage(clusterId: string) {
         `/api/v1/clusters/${clusterId}/storage`,
       ),
     enabled: clusterId.length > 0,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 }
 
@@ -141,52 +141,3 @@ export function useDeleteContent() {
   });
 }
 
-// --- Disk resize ---
-
-interface ResizeDiskParams {
-  clusterId: string;
-  vmId: string;
-  body: DiskResizeRequest;
-}
-
-export function useResizeDisk() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ clusterId, vmId, body }: ResizeDiskParams) =>
-      apiClient.post<StorageActionResponse>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/resize`,
-        body,
-      ),
-    onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
-    },
-  });
-}
-
-// --- Disk move ---
-
-interface MoveDiskParams {
-  clusterId: string;
-  vmId: string;
-  body: DiskMoveRequest;
-}
-
-export function useMoveDisk() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ clusterId, vmId, body }: MoveDiskParams) =>
-      apiClient.post<StorageActionResponse>(
-        `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/move`,
-        body,
-      ),
-    onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
-    },
-  });
-}

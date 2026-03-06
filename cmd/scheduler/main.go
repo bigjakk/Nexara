@@ -46,6 +46,11 @@ func main() {
 
 	logger.Info("ProxDash scheduler started", "task_interval", "60s", "drs_interval", "60s")
 
+	// Clean up stale DRS history entries from previous interrupted runs.
+	if err := queries.CleanupStaleDRSHistory(ctx); err != nil {
+		logger.Warn("failed to cleanup stale DRS history", "error", err)
+	}
+
 	// Run initial checks immediately.
 	sched.Run(ctx)
 	sched.RunDRS(ctx)

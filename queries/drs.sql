@@ -48,3 +48,14 @@ LIMIT $2;
 
 -- name: UpdateDRSHistoryStatus :exec
 UPDATE drs_history SET status = $2, executed_at = $3 WHERE id = $1;
+
+-- name: CleanupStaleDRSHistory :exec
+UPDATE drs_history
+SET status = 'cancelled', executed_at = now()
+WHERE status = 'pending' AND created_at < now() - interval '10 minutes';
+
+-- name: GetLastDRSMigrationForVM :one
+SELECT * FROM drs_history
+WHERE cluster_id = $1 AND vm_id = $2 AND status IN ('completed', 'pending')
+ORDER BY created_at DESC
+LIMIT 1;

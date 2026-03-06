@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -250,8 +251,14 @@ func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxm
 		return "", fmt.Errorf("decrypt target credentials: %w", err)
 	}
 
+	// Proxmox expects just the hostname/IP — port 8006 is the default.
+	targetHost := tgtCluster.ApiUrl
+	if u, err := url.Parse(tgtCluster.ApiUrl); err == nil && u.Hostname() != "" {
+		targetHost = u.Hostname()
+	}
+
 	endpoint := proxmox.TargetEndpoint{
-		Host:        tgtCluster.ApiUrl,
+		Host:        targetHost,
 		APIToken:    fmt.Sprintf("%s=%s", tgtCluster.TokenID, tgtTokenSecret),
 		Fingerprint: tgtCluster.TlsFingerprint,
 	}
@@ -261,44 +268,64 @@ func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxm
 	_ = json.Unmarshal(job.StorageMap, &storageMap)
 	_ = json.Unmarshal(job.NetworkMap, &networkMap)
 
+	// Auto-detect bridge mapping from VM config when none provided.
+	// Proxmox requires target-bridge even for same-name bridges.
+	if len(networkMap) == 0 {
+		bridges := detectBridges(ctx, srcClient, job.SourceNode, int(job.Vmid), job.VmType)
+		if len(bridges) > 0 {
+			networkMap = make(NetworkMapping, len(bridges))
+			for _, b := range bridges {
+				networkMap[b] = b // map each bridge to itself on the target
+			}
+		}
+	}
+
+	bridgeMapping := formatMapping(networkMap)
+
+	// Auto-pick a free VMID on the target cluster when none specified,
+	// since Proxmox reuses the source VMID which may already exist.
+	targetVMID := int(job.TargetVmid)
+	if targetVMID <= 0 {
+		tgtClient, _, err := o.clientForCluster(ctx, job.TargetClusterID)
+		if err == nil {
+			targetVMID = findFreeVMID(ctx, tgtClient, int(job.Vmid))
+		}
+	}
+
 	switch job.VmType {
 	case VMTypeQEMU:
 		params := proxmox.RemoteMigrateVMParams{
 			TargetEndpoint: endpoint,
+			TargetBridge:   bridgeMapping,
 			Online:         job.Online,
 			Delete:         job.DeleteSource,
 		}
-		if job.TargetVmid > 0 {
-			params.TargetVMID = int(job.TargetVmid)
+		if targetVMID > 0 {
+			params.TargetVMID = targetVMID
 		}
 		if job.BwlimitKib > 0 {
 			params.BWLimit = int(job.BwlimitKib)
 		}
 		if len(storageMap) > 0 {
 			params.TargetStorage = formatMapping(storageMap)
-		}
-		if len(networkMap) > 0 {
-			params.TargetBridge = formatMapping(networkMap)
 		}
 		return srcClient.RemoteMigrateVM(ctx, job.SourceNode, int(job.Vmid), params)
 
 	case VMTypeLXC:
 		params := proxmox.RemoteMigrateCTParams{
 			TargetEndpoint: endpoint,
+			TargetBridge:   bridgeMapping,
 			Restart:        job.Online,
 			Delete:         job.DeleteSource,
 		}
-		if job.TargetVmid > 0 {
-			params.TargetVMID = int(job.TargetVmid)
+		if targetVMID > 0 {
+			params.TargetVMID = targetVMID
 		}
 		if job.BwlimitKib > 0 {
 			params.BWLimit = int(job.BwlimitKib)
 		}
 		if len(storageMap) > 0 {
 			params.TargetStorage = formatMapping(storageMap)
-		}
-		if len(networkMap) > 0 {
-			params.TargetBridge = formatMapping(networkMap)
 		}
 		return srcClient.RemoteMigrateCT(ctx, job.SourceNode, int(job.Vmid), params)
 
@@ -350,6 +377,11 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 				typeLabel = "CT"
 			}
 
+			actionPrefix := "migrate"
+			if job.MigrationType == TypeCrossCluster {
+				actionPrefix = "cross_cluster_migrate"
+			}
+
 			if status.ExitStatus == "OK" {
 				_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
 					ID:          jobID,
@@ -357,9 +389,9 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 					CompletedAt: now,
 				})
 				o.logger.Info("migration completed", "job_id", jobID)
-				o.auditLog(ctx, mc, "migrate",
-					fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"status":"completed"}`,
-						job.Vmid, typeLabel, job.SourceNode, job.TargetNode))
+				o.auditLog(ctx, mc, actionPrefix,
+					fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"migration_type":%q,"status":"completed"}`,
+						job.Vmid, typeLabel, job.SourceNode, job.TargetNode, job.MigrationType))
 			} else {
 				errMsg := fmt.Sprintf("Task exit status: %s", status.ExitStatus)
 				_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
@@ -369,9 +401,9 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 					ErrorMessage: errMsg,
 				})
 				o.logger.Error("migration failed", "job_id", jobID, "exit_status", status.ExitStatus)
-				o.auditLog(ctx, mc, "migrate_failed",
-					fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"error":%q}`,
-						job.Vmid, typeLabel, job.SourceNode, job.TargetNode, status.ExitStatus))
+				o.auditLog(ctx, mc, actionPrefix+"_failed",
+					fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"migration_type":%q,"error":%q}`,
+						job.Vmid, typeLabel, job.SourceNode, job.TargetNode, job.MigrationType, status.ExitStatus))
 			}
 			return
 		}
@@ -392,9 +424,13 @@ func (o *Orchestrator) failJob(ctx context.Context, jobID uuid.UUID, errMsg stri
 		if job.VmType == VMTypeLXC {
 			typeLabel = "CT"
 		}
-		o.auditLog(ctx, mc, "migrate_failed",
-			fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"error":%q}`,
-				job.Vmid, typeLabel, job.SourceNode, job.TargetNode, errMsg))
+		actionPrefix := "migrate"
+		if job.MigrationType == TypeCrossCluster {
+			actionPrefix = "cross_cluster_migrate"
+		}
+		o.auditLog(ctx, mc, actionPrefix+"_failed",
+			fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"migration_type":%q,"error":%q}`,
+				job.Vmid, typeLabel, job.SourceNode, job.TargetNode, job.MigrationType, errMsg))
 	}
 }
 
@@ -435,4 +471,72 @@ func formatMapping(m map[string]string) string {
 		pairs = append(pairs, src+":"+tgt)
 	}
 	return strings.Join(pairs, ",")
+}
+
+// findFreeVMID returns a VMID that's available on the target cluster.
+// It tries the preferred VMID first, then scans upward from 100.
+func findFreeVMID(ctx context.Context, client *proxmox.Client, preferred int) int {
+	resources, err := client.GetClusterResources(ctx, "vm")
+	if err != nil {
+		return 0 // let Proxmox handle it
+	}
+
+	used := make(map[int]bool, len(resources))
+	for _, r := range resources {
+		used[r.VMID] = true
+	}
+
+	// Try the preferred VMID first (same as source).
+	if preferred > 0 && !used[preferred] {
+		return preferred
+	}
+
+	// Scan from 100 upward for the next free VMID.
+	for id := 100; id < 1000000; id++ {
+		if !used[id] {
+			return id
+		}
+	}
+	return 0
+}
+
+// detectBridges extracts bridge names from a VM/CT config's net* properties.
+// Values look like "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,firewall=1".
+func detectBridges(ctx context.Context, client *proxmox.Client, node string, vmid int, vmType string) []string {
+	var cfg map[string]interface{}
+	var err error
+
+	switch vmType {
+	case VMTypeQEMU:
+		cfg, err = client.GetVMConfig(ctx, node, vmid)
+	case VMTypeLXC:
+		cfg, err = client.GetCTConfig(ctx, node, vmid)
+	default:
+		return nil
+	}
+	if err != nil {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var bridges []string
+	for key, val := range cfg {
+		if !strings.HasPrefix(key, "net") {
+			continue
+		}
+		s, ok := val.(string)
+		if !ok {
+			continue
+		}
+		for _, part := range strings.Split(s, ",") {
+			if strings.HasPrefix(part, "bridge=") {
+				bridge := strings.TrimPrefix(part, "bridge=")
+				if bridge != "" && !seen[bridge] {
+					seen[bridge] = true
+					bridges = append(bridges, bridge)
+				}
+			}
+		}
+	}
+	return bridges
 }

@@ -40,9 +40,12 @@ export function TaskProgressBanner({
   // Track the last update key to avoid duplicate updates.
   const lastUpdateRef = useRef<string | null>(null);
 
-  const invalidateTaskHistory = useCallback(() => {
+  const invalidateAll = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["task-history"] });
-  }, [queryClient]);
+    // Refresh cluster VMs/containers so the inventory tree updates immediately.
+    void queryClient.invalidateQueries({ queryKey: ["clusters", clusterId, "vms"] });
+    void queryClient.invalidateQueries({ queryKey: ["clusters", clusterId, "containers"] });
+  }, [queryClient, clusterId]);
 
   // Persist task to DB when UPID becomes available.
   useEffect(() => {
@@ -57,12 +60,12 @@ export function TaskProgressBanner({
           node: "",
           task_type: "",
         })
-        .then(invalidateTaskHistory)
+        .then(invalidateAll)
         .catch(() => {
           // ignore — task may already exist (ON CONFLICT)
         });
     }
-  }, [upid, clusterId, description, invalidateTaskHistory]);
+  }, [upid, clusterId, description, invalidateAll]);
 
   // Update task status on each poll result.
   useEffect(() => {
@@ -78,11 +81,11 @@ export function TaskProgressBanner({
         progress: task.progress ?? null,
         finished_at: task.status === "stopped" ? new Date().toISOString() : null,
       })
-      .then(invalidateTaskHistory)
+      .then(invalidateAll)
       .catch(() => {
         // ignore update failures
       });
-  }, [upid, task, invalidateTaskHistory]);
+  }, [upid, task, invalidateAll]);
 
   useEffect(() => {
     if (isStopped && upid && task && firedRef.current !== upid) {
@@ -96,7 +99,7 @@ export function TaskProgressBanner({
           progress: task.progress ?? null,
           finished_at: new Date().toISOString(),
         })
-        .then(invalidateTaskHistory)
+        .then(invalidateAll)
         .catch(() => {
           // ignore
         })
@@ -104,7 +107,7 @@ export function TaskProgressBanner({
           onComplete?.();
         });
     }
-  }, [isStopped, upid, task, onComplete, invalidateTaskHistory]);
+  }, [isStopped, upid, task, onComplete, invalidateAll]);
 
   if (!upid) return null;
 

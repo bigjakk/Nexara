@@ -258,6 +258,13 @@ type DiskMoveParams struct {
 	Delete  bool   `json:"delete,omitempty"`
 }
 
+// CTVolumeMoveParams holds parameters for an LXC container volume move.
+type CTVolumeMoveParams struct {
+	Volume  string `json:"volume"`
+	Storage string `json:"storage"`
+	Delete  bool   `json:"delete,omitempty"`
+}
+
 // CephStatus represents the cluster-wide Ceph status from GET /nodes/{node}/ceph/status.
 type CephStatus struct {
 	Health  CephHealth  `json:"health"`
@@ -572,6 +579,16 @@ type TargetEndpoint struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
+// String formats the endpoint as a Proxmox property string:
+// apitoken=PVEAPIToken=user@realm!token=SECRET,host=ADDRESS[,fingerprint=HEX]
+func (e TargetEndpoint) String() string {
+	s := "apitoken=PVEAPIToken=" + e.APIToken + ",host=" + e.Host
+	if e.Fingerprint != "" {
+		s += ",fingerprint=" + e.Fingerprint
+	}
+	return s
+}
+
 // RemoteMigrateVMParams holds parameters for cross-cluster VM migration via remote_migrate.
 type RemoteMigrateVMParams struct {
 	TargetBridge  string         `json:"target-bridge,omitempty"`
@@ -592,6 +609,32 @@ type RemoteMigrateCTParams struct {
 	BWLimit       int            `json:"bwlimit,omitempty"`
 	Restart       bool           `json:"restart,omitempty"`
 	Delete        bool           `json:"delete,omitempty"`
+}
+
+// GuestOSInfo represents the OS information returned by the QEMU guest agent.
+type GuestOSInfo struct {
+	Name          string `json:"name"`
+	KernelVersion string `json:"kernel-version"`
+	KernelRelease string `json:"kernel-release"`
+	Machine       string `json:"machine"`
+	ID            string `json:"id"`
+	PrettyName    string `json:"pretty-name"`
+	Version       string `json:"version"`
+	VersionID     string `json:"version-id"`
+}
+
+// GuestIPAddress represents a single IP address on a guest network interface.
+type GuestIPAddress struct {
+	IPAddress     string `json:"ip-address"`
+	IPAddressType string `json:"ip-address-type"`
+	Prefix        int    `json:"prefix"`
+}
+
+// GuestNetworkInterface represents a network interface reported by the QEMU guest agent.
+type GuestNetworkInterface struct {
+	Name            string           `json:"name"`
+	HardwareAddress string           `json:"hardware-address"`
+	IPAddresses     []GuestIPAddress `json:"ip-addresses"`
 }
 
 // FirewallRule represents a firewall rule from the Proxmox API.

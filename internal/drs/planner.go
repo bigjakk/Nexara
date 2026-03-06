@@ -16,7 +16,6 @@ func Plan(
 	rules []Rule,
 	weights Weights,
 	threshold float64,
-	totalClusterNet int64,
 ) []Recommendation {
 	if len(scores) < 2 {
 		return nil
@@ -43,111 +42,142 @@ func Plan(
 			break
 		}
 
-		// Find highest and lowest scored nodes.
-		source, target := findSourceTarget(currentScores)
-		if source == "" || target == "" {
+		// Build a ranked list of source-target pairs to try.
+		// Primary: highest-scored → lowest-scored.
+		// Fallback: try all above-average → below-average combinations.
+		pairs := findSourceTargetPairs(currentScores)
+		if len(pairs) == 0 {
 			break
 		}
 
-		// Pick the best VM to move from source to target.
 		moved := false
-		workloads := currentWorkloads[source]
+		for _, pair := range pairs {
+			source, target := pair[0], pair[1]
 
-		// Sort by estimated impact (largest contributors first).
-		sort.Slice(workloads, func(a, b int) bool {
-			return estimateWorkloadImpact(workloads[a], weights) > estimateWorkloadImpact(workloads[b], weights)
-		})
-
-		for j, w := range workloads {
-			migration := Recommendation{
-				VMID:       w.VMID,
-				VMType:     w.Type,
-				SourceNode: source,
-				TargetNode: target,
-			}
-
-			// Check rules.
-			if !IsMigrationAllowed(migration, currentWorkloads, rules) {
+			workloads := currentWorkloads[source]
+			if len(workloads) == 0 {
 				continue
 			}
 
-			scoreBefore := CalculateImbalance(currentScores)
+			// Sort by estimated impact (largest contributors first).
+			sort.Slice(workloads, func(a, b int) bool {
+				return estimateWorkloadImpact(workloads[a], weights) > estimateWorkloadImpact(workloads[b], weights)
+			})
 
-			// Simulate the move.
-			currentWorkloads[source] = append(workloads[:j], workloads[j+1:]...)
-			w.Node = target
-			currentWorkloads[target] = append(currentWorkloads[target], w)
+			for j, w := range workloads {
+				migration := Recommendation{
+					VMID:       w.VMID,
+					VMType:     w.Type,
+					SourceNode: source,
+					TargetNode: target,
+				}
 
-			// Rescore affected nodes.
-			if entry, ok := nodeEntries[source]; ok {
-				currentScores[source] = ScoreNode(entry, currentWorkloads[source], totalClusterNet, weights)
+				if !IsMigrationAllowed(migration, currentWorkloads, rules) {
+					continue
+				}
+
+				scoreBefore := CalculateImbalance(currentScores)
+
+				// Simulate the move.
+				currentWorkloads[source] = append(workloads[:j], workloads[j+1:]...)
+				w.Node = target
+				currentWorkloads[target] = append(currentWorkloads[target], w)
+
+				if entry, ok := nodeEntries[source]; ok {
+					currentScores[source] = ScoreNode(entry, currentWorkloads[source], weights)
+				}
+				if entry, ok := nodeEntries[target]; ok {
+					currentScores[target] = ScoreNode(entry, currentWorkloads[target], weights)
+				}
+
+				scoreAfter := CalculateImbalance(currentScores)
+
+				if scoreAfter >= scoreBefore {
+					// Undo the move.
+					currentWorkloads[target] = currentWorkloads[target][:len(currentWorkloads[target])-1]
+					w.Node = source
+					currentWorkloads[source] = append(currentWorkloads[source][:j], append([]Workload{w}, currentWorkloads[source][j:]...)...)
+					currentScores[source] = ScoreNode(nodeEntries[source], currentWorkloads[source], weights)
+					currentScores[target] = ScoreNode(nodeEntries[target], currentWorkloads[target], weights)
+					continue
+				}
+
+				migration.ScoreBefore = scoreBefore
+				migration.ScoreAfter = scoreAfter
+				migration.ExpectedImprovement = scoreBefore - scoreAfter
+				migration.Reason = fmt.Sprintf(
+					"rebalance: node %s score %.3f -> move %s %d to %s (score %.3f)",
+					source, scores[source].Score, w.Type, w.VMID, target, scores[target].Score,
+				)
+
+				recommendations = append(recommendations, migration)
+				moved = true
+				break
 			}
-			if entry, ok := nodeEntries[target]; ok {
-				currentScores[target] = ScoreNode(entry, currentWorkloads[target], totalClusterNet, weights)
+
+			if moved {
+				break
 			}
-
-			scoreAfter := CalculateImbalance(currentScores)
-
-			// Only accept if it actually improves balance.
-			if scoreAfter >= scoreBefore {
-				// Undo the move.
-				currentWorkloads[target] = currentWorkloads[target][:len(currentWorkloads[target])-1]
-				w.Node = source
-				currentWorkloads[source] = append(currentWorkloads[source][:j], append([]Workload{w}, currentWorkloads[source][j:]...)...)
-				currentScores[source] = ScoreNode(nodeEntries[source], currentWorkloads[source], totalClusterNet, weights)
-				currentScores[target] = ScoreNode(nodeEntries[target], currentWorkloads[target], totalClusterNet, weights)
-				continue
-			}
-
-			migration.ScoreBefore = scoreBefore
-			migration.ScoreAfter = scoreAfter
-			migration.ExpectedImprovement = scoreBefore - scoreAfter
-			migration.Reason = fmt.Sprintf(
-				"rebalance: node %s score %.3f -> move %s %d to %s (score %.3f)",
-				source, scores[source].Score, w.Type, w.VMID, target, scores[target].Score,
-			)
-
-			recommendations = append(recommendations, migration)
-			moved = true
-			break
 		}
 
 		if !moved {
-			break // no valid migration found
+			break // no valid migration found in any pair
 		}
 	}
 
 	return recommendations
 }
 
-func findSourceTarget(scores map[string]NodeScore) (string, string) {
-	var source, target string
-	var maxScore, minScore float64
-	first := true
+// findSourceTargetPairs returns candidate source→target pairs ordered by priority.
+// Pairs are all combinations where source score > target score, ordered by
+// score difference (largest gap first). The scoreAfter >= scoreBefore check
+// in the main loop prevents bad moves, so we cast a wide net here.
+func findSourceTargetPairs(scores map[string]NodeScore) [][2]string {
+	if len(scores) < 2 {
+		return nil
+	}
 
+	type nodeEntry struct {
+		name  string
+		score float64
+	}
+	sorted := make([]nodeEntry, 0, len(scores))
 	for name, s := range scores {
-		if first {
-			source = name
-			target = name
-			maxScore = s.Score
-			minScore = s.Score
-			first = false
-			continue
-		}
-		if s.Score > maxScore {
-			maxScore = s.Score
-			source = name
-		}
-		if s.Score < minScore {
-			minScore = s.Score
-			target = name
+		sorted = append(sorted, nodeEntry{name, s.Score})
+	}
+
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].score > sorted[j].score
+	})
+
+	// Generate all pairs where source has a higher score than target.
+	type scoredPair struct {
+		pair [2]string
+		diff float64
+	}
+	var candidates []scoredPair
+	for i := 0; i < len(sorted); i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			if sorted[i].score <= sorted[j].score {
+				continue
+			}
+			candidates = append(candidates, scoredPair{
+				pair: [2]string{sorted[i].name, sorted[j].name},
+				diff: sorted[i].score - sorted[j].score,
+			})
 		}
 	}
 
-	if source == target {
-		return "", ""
+	// Sort by score difference descending (biggest gap first).
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].diff > candidates[j].diff
+	})
+
+	pairs := make([][2]string, len(candidates))
+	for i, c := range candidates {
+		pairs[i] = c.pair
 	}
-	return source, target
+	return pairs
 }
 
 func estimateWorkloadImpact(w Workload, weights Weights) float64 {
@@ -158,6 +188,5 @@ func estimateWorkloadImpact(w Workload, weights Weights) float64 {
 	if w.MaxMem > 0 {
 		impact += weights.Memory * (float64(w.Mem) / float64(w.MaxMem))
 	}
-	impact += weights.Network * float64(w.NetIn+w.NetOut)
 	return impact
 }

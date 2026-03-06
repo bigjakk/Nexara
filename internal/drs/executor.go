@@ -2,6 +2,7 @@ package drs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -12,6 +13,10 @@ import (
 	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
+
+// SystemUserID is the well-known UUID for the DRS scheduler system user.
+// Created by migration 000013_system_user.
+var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // Executor handles DRS migration execution and history recording.
 type Executor struct {
@@ -47,6 +52,9 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			continue
 		}
 
+		// Resolve VM database ID for audit log linking.
+		vmDBID := e.resolveVMDBID(ctx, clusterID, rec.VMID)
+
 		if mode == "advisory" {
 			e.logger.Info("DRS advisory recommendation",
 				"vmid", rec.VMID, "type", rec.VMType,
@@ -57,6 +65,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 				Status:     "advisory",
 				ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			})
+			e.auditLog(ctx, clusterID, vmDBID, "drs_advisory", rec)
 			continue
 		}
 
@@ -90,16 +99,49 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 				Status:     "failed",
 				ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			})
+			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate_failed", rec)
 			continue
 		}
 
+		// Insert into task_history so the task panel shows this migration.
+		description := fmt.Sprintf("DRS Migrate %s %d: %s → %s",
+			rec.VMType, rec.VMID, rec.SourceNode, rec.TargetNode)
+		_, taskErr := e.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
+			ClusterID:   clusterID,
+			UserID:      SystemUserID,
+			Upid:        upid,
+			Description: description,
+			Status:      "running",
+			Node:        rec.SourceNode,
+			TaskType:    "drs_migrate",
+		})
+		if taskErr != nil {
+			e.logger.Warn("failed to insert task history for DRS migration",
+				"upid", upid, "error", taskErr)
+		}
+
 		// Poll task status until completion.
-		status := e.waitForTask(ctx, client, rec.SourceNode, upid)
+		status, exitStatus := e.waitForTask(ctx, client, rec.SourceNode, upid)
 		_ = e.queries.UpdateDRSHistoryStatus(ctx, db.UpdateDRSHistoryStatusParams{
 			ID:         history.ID,
 			Status:     status,
 			ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		})
+
+		// Update task_history with final status.
+		_ = e.queries.UpdateTaskHistory(ctx, db.UpdateTaskHistoryParams{
+			Upid:       upid,
+			Status:     "stopped",
+			ExitStatus: exitStatus,
+			FinishedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		})
+
+		// Audit log the result.
+		if status == "completed" {
+			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate", rec)
+		} else {
+			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate_failed", rec)
+		}
 
 		e.logger.Info("DRS migration completed",
 			"vmid", rec.VMID, "status", status, "upid", upid)
@@ -108,7 +150,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 	return nil
 }
 
-func (e *Executor) waitForTask(ctx context.Context, client *proxmox.Client, node string, upid string) string {
+func (e *Executor) waitForTask(ctx context.Context, client *proxmox.Client, node string, upid string) (string, string) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	timeout := time.After(10 * time.Minute)
@@ -116,9 +158,9 @@ func (e *Executor) waitForTask(ctx context.Context, client *proxmox.Client, node
 	for {
 		select {
 		case <-ctx.Done():
-			return "cancelled"
+			return "cancelled", "context cancelled"
 		case <-timeout:
-			return "timeout"
+			return "timeout", "task timed out after 10 minutes"
 		case <-ticker.C:
 			ts, err := client.GetTaskStatus(ctx, node, upid)
 			if err != nil {
@@ -127,10 +169,50 @@ func (e *Executor) waitForTask(ctx context.Context, client *proxmox.Client, node
 			}
 			if ts.Status == "stopped" {
 				if ts.ExitStatus == "OK" {
-					return "completed"
+					return "completed", "OK"
 				}
-				return "failed"
+				return "failed", ts.ExitStatus
 			}
 		}
+	}
+}
+
+// resolveVMDBID looks up the VM's database UUID for audit log linking.
+func (e *Executor) resolveVMDBID(ctx context.Context, clusterID uuid.UUID, vmid int) string {
+	vm, err := e.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
+		ClusterID: clusterID,
+		Vmid:      int32(vmid),
+	})
+	if err != nil {
+		return ""
+	}
+	return vm.ID.String()
+}
+
+// auditLog inserts an audit log entry for a DRS action.
+func (e *Executor) auditLog(ctx context.Context, clusterID uuid.UUID, resourceID, action string, rec Recommendation) {
+	details, _ := json.Marshal(map[string]interface{}{
+		"vmid":        rec.VMID,
+		"vm_type":     rec.VMType,
+		"source_node": rec.SourceNode,
+		"target_node": rec.TargetNode,
+		"reason":      rec.Reason,
+		"improvement": fmt.Sprintf("%.1f%%", rec.ExpectedImprovement*100),
+	})
+
+	if resourceID == "" {
+		resourceID = fmt.Sprintf("vmid:%d", rec.VMID)
+	}
+
+	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		ClusterID:    clusterID,
+		UserID:       SystemUserID,
+		ResourceType: "vm",
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      details,
+	})
+	if err != nil {
+		e.logger.Warn("failed to insert DRS audit log", "action", action, "error", err)
 	}
 }
