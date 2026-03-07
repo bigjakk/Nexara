@@ -1,4 +1,4 @@
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,10 +23,10 @@ import { ClusterDRSTab } from "../components/ClusterDRSTab";
 
 export function ClusterDetailPage() {
   const { clusterId } = useParams<{ clusterId: string }>();
-  const navigate = useNavigate();
   const clusterQuery = useCluster(clusterId ?? "");
   const nodesQuery = useClusterNodes(clusterId ?? "");
   const addTab = useConsoleStore((s) => s.addTab);
+  const showConsole = useConsoleStore((s) => s.showConsole);
 
   const cluster = clusterQuery.data;
   const nodes = nodesQuery.data ?? [];
@@ -41,7 +41,7 @@ export function ClusterDetailPage() {
       type: "node_shell",
       label: `Shell: ${nodeName}`,
     });
-    void navigate("/console");
+    showConsole();
   }
 
   return (

@@ -22,6 +22,7 @@ interface VMEntry {
   name: string;
   type: string;
   status: string;
+  resourceId: string;
 }
 
 export function QuickConnect() {
@@ -77,6 +78,7 @@ export function QuickConnect() {
           name: vm.name,
           type: vm.type,
           status: vm.status.toLowerCase(),
+          resourceId: vm.id,
         });
       }
     }
@@ -105,6 +107,8 @@ export function QuickConnect() {
       vmid: vm.vmid,
       type,
       label: `${labelPrefix}: ${vm.name}`,
+      resourceId: vm.resourceId,
+      kind: vm.type === "qemu" ? "vm" : "ct",
     });
     showConsole();
     setOpen(false);
@@ -148,7 +152,7 @@ export function QuickConnect() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span
-                            className={`inline-block h-2 w-2 rounded-full ${isRunning ? "bg-green-500" : "bg-gray-400"}`}
+                            className={`inline-block h-2 w-2 rounded-full ${isRunning ? "bg-green-500" : vm.status === "suspended" ? "bg-yellow-500" : "bg-gray-400"}`}
                           />
                           <span className="truncate text-sm font-medium">
                             {vm.name}

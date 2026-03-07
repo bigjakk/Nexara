@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +26,8 @@ export function NodeDetailPage() {
     clusterId: string;
     nodeId: string;
   }>();
-  const navigate = useNavigate();
   const addTab = useConsoleStore((s) => s.addTab);
+  const showConsole = useConsoleStore((s) => s.showConsole);
 
   const { data: nodes, isLoading } = useClusterNodes(clusterId);
   const node = nodes?.find((n) => n.id === nodeId);
@@ -43,7 +43,7 @@ export function NodeDetailPage() {
       type: "node_shell",
       label: `Shell: ${node.name}`,
     });
-    void navigate("/console");
+    showConsole();
   }
 
   if (isLoading) {

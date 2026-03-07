@@ -82,6 +82,8 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
       vmid: target.vmid,
       type,
       label: `${labelPrefix}: ${target.name}`,
+      resourceId: target.resourceId,
+      kind: target.kind,
     });
     showConsole();
   }

@@ -161,8 +161,8 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       className="flex h-full flex-col"
       style={{ display: visible ? "flex" : "none" }}
     >
-      <VNCToolbar rfb={rfb} />
-      <div ref={containerRef} className="flex-1 bg-black" />
+      <VNCToolbar rfb={rfb} tab={tab} />
+      <div ref={containerRef} className="flex-1 bg-black" data-tab-id={tab.id} />
     </div>
   );
 }

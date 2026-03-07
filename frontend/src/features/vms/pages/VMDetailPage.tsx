@@ -114,6 +114,8 @@ export function VMDetailPage() {
         vmid: vm.vmid,
         type: "vm_vnc",
         label: `VNC: ${vm.name}`,
+        resourceId: vmId,
+        kind,
       });
     } else {
       addTab({
@@ -122,6 +124,8 @@ export function VMDetailPage() {
         vmid: vm.vmid,
         type: kind === "ct" ? "ct_vnc" : "vm_serial",
         label: `${kind === "ct" ? "CT" : "Serial"}: ${vm.name}`,
+        resourceId: vmId,
+        kind,
       });
     }
     showConsole();
