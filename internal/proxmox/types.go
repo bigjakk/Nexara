@@ -669,6 +669,34 @@ type DiskAttachParams struct {
 	Format  string `json:"format"`  // "raw", "qcow2" (optional)
 }
 
+// NodeUSBDevice represents a USB device from GET /nodes/{node}/hardware/usb.
+type NodeUSBDevice struct {
+	Busnum       int    `json:"busnum"`
+	Devnum       int    `json:"devnum"`
+	Port         string `json:"port"`
+	Prodid       string `json:"prodid"`
+	Vendid       string `json:"vendid"`
+	Product      string `json:"product"`
+	Manufacturer string `json:"manufacturer"`
+	Speed        string `json:"speed"`
+	Class        int    `json:"class"`
+	Usbpath      string `json:"usbpath"`
+	Level        int    `json:"level"`
+}
+
+// NodePCIDevice represents a PCI device from GET /nodes/{node}/hardware/pci.
+type NodePCIDevice struct {
+	ID              string `json:"id"`
+	Class           string `json:"class"`
+	DeviceName      string `json:"device_name"`
+	VendorName      string `json:"vendor_name"`
+	Device          string `json:"device"`
+	Vendor          string `json:"vendor"`
+	IOMMUGroup      int    `json:"iommugroup"`
+	SubsystemDevice string `json:"subsystem_device,omitempty"`
+	SubsystemVendor string `json:"subsystem_vendor,omitempty"`
+}
+
 // VMConfig represents the full configuration of a QEMU VM from GET /nodes/{node}/qemu/{vmid}/config.
 type VMConfig map[string]interface{}
 

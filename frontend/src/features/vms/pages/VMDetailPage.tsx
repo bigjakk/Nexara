@@ -272,7 +272,7 @@ export function VMDetailPage() {
 
         {kind === "vm" && (
           <TabsContent value="hardware" className="mt-4">
-            <HardwarePanel clusterId={clusterId} vmId={vmId} vmStatus={vm.status} />
+            <HardwarePanel clusterId={clusterId} vmId={vmId} vmStatus={vm.status} nodeName={nodeName} />
           </TabsContent>
         )}
 

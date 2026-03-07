@@ -1402,6 +1402,30 @@ func (c *Client) RemoteMigrateCT(ctx context.Context, node string, vmid int, par
 	return upid, nil
 }
 
+// ListNodeUSBDevices returns USB devices on the given node.
+func (c *Client) ListNodeUSBDevices(ctx context.Context, node string) ([]NodeUSBDevice, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var devices []NodeUSBDevice
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/hardware/usb", &devices); err != nil {
+		return nil, fmt.Errorf("list USB devices on %s: %w", node, err)
+	}
+	return devices, nil
+}
+
+// ListNodePCIDevices returns PCI devices on the given node.
+func (c *Client) ListNodePCIDevices(ctx context.Context, node string) ([]NodePCIDevice, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var devices []NodePCIDevice
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/hardware/pci", &devices); err != nil {
+		return nil, fmt.Errorf("list PCI devices on %s: %w", node, err)
+	}
+	return devices, nil
+}
+
 // GetNetworkBridges returns only bridge-type network interfaces on a node.
 func (c *Client) GetNetworkBridges(ctx context.Context, node string) ([]NetworkInterface, error) {
 	ifaces, err := c.GetNetworkInterfaces(ctx, node)

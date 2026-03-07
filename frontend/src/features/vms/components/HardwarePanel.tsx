@@ -4,10 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useVMConfig, useSetVMConfig, useResizeDisk } from "../api/vm-queries";
+import { useVMConfig, useSetVMConfig, useResizeDisk, useNodeUSBDevices, useNodePCIDevices } from "../api/vm-queries";
 import { useClusterStorage, useStorageContent } from "@/features/storage/api/storage-queries";
+import { useNodeBridges } from "@/features/clusters/api/cluster-queries";
 import { MoveDiskDialog } from "@/features/storage/components/DiskActions";
+import { AddDeviceMenu } from "./hardware/AddDeviceMenu";
 import {
   cpuTypes,
   scsiControllers,
@@ -21,8 +24,8 @@ import {
   audioDevices,
 } from "../lib/vm-config-constants";
 import {
-  parseNet0,
-  buildNet0,
+  parseNet,
+  buildNet,
   parseAgent,
   buildAgent,
   parseVGA,
@@ -34,6 +37,12 @@ import {
   buildStartup,
   parseBootOrder,
   buildBootOrder,
+  parseUSB,
+  parsePCI,
+  parseRNG,
+  parseVirtioFS,
+  parseEFIDisk,
+  parseTPMState,
 } from "../lib/vm-config-parsers";
 import type { VMConfig } from "../types/vm";
 
@@ -53,6 +62,7 @@ interface HardwarePanelProps {
   clusterId: string;
   vmId: string;
   vmStatus: string;
+  nodeName: string;
 }
 
 function str(val: unknown): string {
@@ -68,6 +78,18 @@ function num(val: unknown): number {
 
 function bool01(val: unknown): boolean {
   return Number(val) === 1;
+}
+
+/** Multi-NIC state keyed by device name. */
+interface NICEdit {
+  model: string;
+  mac: string;
+  bridge: string;
+  firewall: boolean;
+  vlanTag: string;
+  rateLimit: string;
+  mtu: string;
+  linkDown: boolean;
 }
 
 interface SectionProps {
@@ -103,13 +125,26 @@ interface DiskEdit {
   newSize: string;
 }
 
-export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps) {
+export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwarePanelProps) {
   const { data: config, isLoading } = useVMConfig(clusterId, vmId);
   const setConfigMutation = useSetVMConfig();
   const resizeMutation = useResizeDisk();
 
+  // USB/PCI device listing from node
+  const { data: usbDevices } = useNodeUSBDevices(clusterId, nodeName);
+  const { data: pciDevices } = useNodePCIDevices(clusterId, nodeName);
+  const { data: bridges } = useNodeBridges(clusterId, nodeName);
+  const bridgeNames = useMemo(() => bridges?.map((b) => b.iface) ?? [], [bridges]);
+
   // --- Original config snapshot for diff comparison ---
   const [original, setOriginal] = useState<VMConfig | null>(null);
+
+  // --- Generic device state for new device types ---
+  const [pendingDeviceAdds, setPendingDeviceAdds] = useState<Record<string, string>>({});
+  const [deviceRemovals, setDeviceRemovals] = useState<Set<string>>(new Set());
+
+  // --- Multi-NIC state ---
+  const [nicEdits, setNicEdits] = useState<Record<string, NICEdit>>({});
 
   // --- CPU ---
   const [cores, setCores] = useState("1");
@@ -131,7 +166,6 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
   const [scsihw, setScsihw] = useState("virtio-scsi-pci");
   const [agentEnabled, setAgentEnabled] = useState(false);
   const [agentFstrim, setAgentFstrim] = useState(false);
-  const [hasTpm, setHasTpm] = useState(false);
   const [kvmEnabled, setKvmEnabled] = useState(true);
   const [acpi, setAcpi] = useState(true);
 
@@ -147,23 +181,16 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
   const [startupUp, setStartupUp] = useState("");
   const [startupDown, setStartupDown] = useState("");
 
-  // --- Network (net0 only) ---
-  const [netModel, setNetModel] = useState("virtio");
-  const [netMac, setNetMac] = useState("");
-  const [netBridge, setNetBridge] = useState("");
-  const [netFirewall, setNetFirewall] = useState(false);
-  const [netVlan, setNetVlan] = useState("");
-  const [netRate, setNetRate] = useState("");
-  const [netMtu, setNetMtu] = useState("");
-  const [netLinkDown, setNetLinkDown] = useState(false);
+  // --- Network is handled by nicEdits state ---
 
   // --- Display ---
   const [vgaType, setVgaType] = useState("std");
   const [vgaMemory, setVgaMemory] = useState("");
   const [audioDevice, setAudioDevice] = useState("");
 
-  // --- CD/DVD (ide2) ---
+  // --- CD/DVD (any bus with media=cdrom) ---
   const [cdromValue, setCdromValue] = useState("none");
+  const [cdromKey, setCdromKey] = useState("ide2"); // device key (ide2, sata0, etc.)
   const [cdromStorageId, setCdromStorageId] = useState("");
 
   // --- Meta ---
@@ -229,12 +256,21 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
     return isoContent.filter((item) => item.content === "iso");
   }, [isoContent]);
 
-  // Auto-select first ISO storage when storages load (for browsing ISOs)
+  // Auto-select ISO storage: prefer the one matching the mounted ISO, else first available
   useEffect(() => {
-    if (isoStorages.length > 0 && !cdromStorageId) {
-      setCdromStorageId(isoStorages[0]?.id ?? "");
+    if (isoStorages.length === 0) return;
+    if (cdromStorageId) return;
+    // If an ISO is mounted (e.g. "local:iso/ubuntu.iso"), match by storage name prefix
+    if (cdromValue !== "none" && cdromValue.includes(":")) {
+      const storageName = cdromValue.split(":")[0];
+      const match = isoStorages.find((s) => s.storage === storageName);
+      if (match) {
+        setCdromStorageId(match.id);
+        return;
+      }
     }
-  }, [isoStorages, cdromStorageId]);
+    setCdromStorageId(isoStorages[0]?.id ?? "");
+  }, [isoStorages, cdromStorageId, cdromValue]);
 
   function updateDiskEdit(key: string, partial: Partial<DiskEdit>) {
     setDiskEdits((prev) => ({
@@ -336,7 +372,6 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
     const agent = parseAgent(str(config["agent"] ?? ""));
     setAgentEnabled(agent.enabled);
     setAgentFstrim(agent.fstrimClonedDisks);
-    setHasTpm(config["tpmstate0"] != null && str(config["tpmstate0"]) !== "");
     setKvmEnabled(config["kvm"] != null ? bool01(config["kvm"]) : true);
     setAcpi(config["acpi"] != null ? bool01(config["acpi"]) : true);
 
@@ -370,18 +405,25 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
     setStartupUp(startup.up);
     setStartupDown(startup.down);
 
-    // Network
-    const net = parseNet0(str(config["net0"] ?? ""));
-    setNetModel(net.model);
-    setNetMac(net.mac);
-    setNetBridge(net.bridge);
-    setNetFirewall(net.firewall);
-    setNetVlan(net.vlanTag);
-    setNetRate(net.rateLimit);
-    setNetMtu(net.mtu);
-    // link_down is a sub-param of net0 — check raw string
-    const net0Raw = str(config["net0"] ?? "");
-    setNetLinkDown(net0Raw.includes("link_down=1"));
+    // Network (multi-NIC)
+    const nics: Record<string, NICEdit> = {};
+    for (const [cfgKey, cfgVal] of Object.entries(config)) {
+      if (/^net\d+$/.test(cfgKey)) {
+        const raw = str(cfgVal);
+        const parsed = parseNet(raw);
+        nics[cfgKey] = {
+          model: parsed.model,
+          mac: parsed.mac,
+          bridge: parsed.bridge,
+          firewall: parsed.firewall,
+          vlanTag: parsed.vlanTag,
+          rateLimit: parsed.rateLimit,
+          mtu: parsed.mtu,
+          linkDown: parsed.linkDown,
+        };
+      }
+    }
+    setNicEdits(nics);
 
     // Display
     const vga = parseVGA(str(config["vga"] ?? ""));
@@ -390,62 +432,93 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
     const audio = parseAudio(str(config["audio0"] ?? ""));
     setAudioDevice(audio.device);
 
-    // CD/DVD (ide2)
-    const ide2Val = str(config["ide2"] ?? "");
-    if (ide2Val && ide2Val !== "none,media=cdrom") {
-      // Extract the volid — e.g. "local:iso/ubuntu.iso,media=cdrom" -> "local:iso/ubuntu.iso"
-      const parts = ide2Val.split(",");
-      setCdromValue(parts[0] ?? "none");
-    } else {
-      setCdromValue("none");
+    // CD/DVD — scan all config keys for media=cdrom (ide*, sata*, etc.)
+    let foundCdromKey = "";
+    let foundCdromVal = "none";
+    for (const [cfgKey, cfgVal] of Object.entries(config)) {
+      if (!DISK_KEY_RE.test(cfgKey)) continue;
+      const v = str(cfgVal);
+      if (v.includes("media=cdrom")) {
+        foundCdromKey = cfgKey;
+        if (v !== "none,media=cdrom") {
+          const parts = v.split(",");
+          foundCdromVal = parts[0] ?? "none";
+        }
+        break;
+      }
     }
+    setCdromKey(foundCdromKey || "ide2");
+    setCdromValue(foundCdromVal);
 
     // Meta
     setDescription(str(config["description"] ?? ""));
     setTags(str(config["tags"] ?? ""));
   }, [config]);
 
-  // Discover disk keys from config (exclude ide2 cdrom)
+  // Discover disk keys from config (exclude any CD-ROM device)
   const diskEntries = useMemo(() => {
     if (!config) return [];
     return Object.entries(config)
       .filter(([key, val]) => {
         if (!DISK_KEY_RE.test(key)) return false;
-        // Exclude CD/DVD drives (ide2 with media=cdrom or "none")
-        if (key === "ide2") {
-          const v = str(val);
-          if (v.includes("media=cdrom") || v === "none,media=cdrom" || v === "none") return false;
-        }
+        // Exclude CD/DVD drives on any bus
+        const v = str(val);
+        if (v.includes("media=cdrom")) return false;
         return true;
       })
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, val]) => ({ key, parsed: parseDisk(str(val)) }));
   }, [config]);
 
-  // Discover additional NICs (net1, net2, ...)
-  const extraNics = useMemo(() => {
+  // Discover all NIC keys from config
+  const nicKeys = useMemo(() => {
     if (!config) return [];
-    return Object.entries(config)
-      .filter(([key]) => /^net\d+$/.test(key) && key !== "net0")
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, val]) => ({ key, raw: str(val) }));
+    return Object.keys(config)
+      .filter((key) => /^net\d+$/.test(key))
+      .sort((a, b) => a.localeCompare(b));
   }, [config]);
+
+  // Discover USB, PCI, Serial, RNG, VirtioFS devices from config
+  const usbKeys = useMemo(() => !config ? [] : Object.keys(config).filter((k) => /^usb\d+$/.test(k)).sort(), [config]);
+  const pciKeys = useMemo(() => !config ? [] : Object.keys(config).filter((k) => /^hostpci\d+$/.test(k)).sort(), [config]);
+  const serialKeys = useMemo(() => !config ? [] : Object.keys(config).filter((k) => /^serial\d+$/.test(k)).sort(), [config]);
+  const virtiofsKeys = useMemo(() => !config ? [] : Object.keys(config).filter((k) => /^virtiofs\d+$/.test(k)).sort(), [config]);
 
   const isRunning = vmStatus.toLowerCase() === "running";
 
-  function buildCurrentNet0(): string {
-    let net0 = buildNet0({
-      model: netModel,
-      mac: netMac,
-      bridge: netBridge,
-      firewall: netFirewall,
-      vlanTag: netVlan,
-      rateLimit: netRate,
-      mtu: netMtu,
-      multiqueue: "",
+  function updateNicEdit(key: string, partial: Partial<NICEdit>) {
+    setNicEdits((prev) => ({
+      ...prev,
+      [key]: { ...(prev[key] ?? { model: "virtio", mac: "", bridge: "", firewall: false, vlanTag: "", rateLimit: "", mtu: "", linkDown: false }), ...partial },
+    }));
+  }
+
+  function buildNicString(nic: NICEdit): string {
+    return buildNet({ ...nic, multiqueue: "" });
+  }
+
+  function handleAddDevice(key: string, value: string) {
+    setPendingDeviceAdds((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleRemoveDevice(key: string) {
+    setDeviceRemovals((prev) => new Set(prev).add(key));
+  }
+
+  function handleUndoRemoveDevice(key: string) {
+    setDeviceRemovals((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
     });
-    if (netLinkDown) net0 += ",link_down=1";
-    return net0;
+  }
+
+  function handleCancelPendingDevice(key: string) {
+    setPendingDeviceAdds((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   }
 
   function handleSave() {
@@ -485,16 +558,6 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
     const newAgent = buildAgent({ enabled: agentEnabled, fstrimClonedDisks: agentFstrim });
     const origAgent = buildAgent(parseAgent(str(original["agent"] ?? "")));
     if (newAgent !== origAgent) fields["agent"] = newAgent;
-    const origHasTpm = original["tpmstate0"] != null && str(original["tpmstate0"]) !== "";
-    if (hasTpm !== origHasTpm) {
-      if (hasTpm) {
-        const firstDisk = Object.entries(original).find(([k]) => /^scsi\d+$/.test(k));
-        const tpmStorage = firstDisk ? parseDisk(str(firstDisk[1])).storage : "local-lvm";
-        fields["tpmstate0"] = `${tpmStorage}:1,version=v2.0`;
-      } else {
-        deleteFields.push("tpmstate0");
-      }
-    }
     const origKvm = original["kvm"] != null ? bool01(original["kvm"]) : true;
     if (kvmEnabled !== origKvm) fields["kvm"] = kvmEnabled ? "1" : "0";
     const origAcpi = original["acpi"] != null ? bool01(original["acpi"]) : true;
@@ -558,10 +621,26 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
       if (newStartup) { fields["startup"] = newStartup; } else { deleteFields.push("startup"); }
     }
 
-    // Network
-    const newNet0 = buildCurrentNet0();
-    const origNet0 = str(original["net0"] ?? "");
-    if (newNet0 !== origNet0) fields["net0"] = newNet0;
+    // Network (multi-NIC)
+    for (const [nicKey, nic] of Object.entries(nicEdits)) {
+      const newVal = buildNicString(nic);
+      const origVal = str(original[nicKey] ?? "");
+      if (newVal !== origVal) fields[nicKey] = newVal;
+    }
+
+    // Generic device additions
+    for (const [key, val] of Object.entries(pendingDeviceAdds)) {
+      fields[key] = val;
+      // If adding an EFI disk, auto-set BIOS to OVMF
+      if (key === "efidisk0" && bios !== "ovmf") {
+        fields["bios"] = "ovmf";
+      }
+    }
+
+    // Generic device removals
+    for (const key of deviceRemovals) {
+      deleteFields.push(key);
+    }
 
     // Display
     const newVga = buildVGA({ type: vgaType, memory: vgaMemory });
@@ -573,16 +652,16 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
       if (newAudio) { fields["audio0"] = newAudio; } else { deleteFields.push("audio0"); }
     }
 
-    // CD/DVD (ide2)
-    const origIde2 = str(original["ide2"] ?? "");
-    const origCdrom = origIde2 && origIde2 !== "none,media=cdrom"
-      ? (origIde2.split(",")[0] ?? "none")
+    // CD/DVD (dynamic key — ide2, sata0, etc.)
+    const origCdromRaw = str(original[cdromKey] ?? "");
+    const origCdrom = origCdromRaw && origCdromRaw !== "none,media=cdrom"
+      ? (origCdromRaw.split(",")[0] ?? "none")
       : "none";
     if (cdromValue !== origCdrom) {
       if (cdromValue === "none") {
-        fields["ide2"] = "none,media=cdrom";
+        fields[cdromKey] = "none,media=cdrom";
       } else {
-        fields["ide2"] = `${cdromValue},media=cdrom`;
+        fields[cdromKey] = `${cdromValue},media=cdrom`;
       }
     }
 
@@ -627,6 +706,8 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
         // Clear pending state after successful save
         setDisksToRemove(new Set());
         setPendingNewDisks([]);
+        setPendingDeviceAdds({});
+        setDeviceRemovals(new Set());
       },
     });
   }
@@ -647,7 +728,6 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
     if (machine !== str(original["machine"] ?? "pc")) return true;
     if (scsihw !== str(original["scsihw"] ?? "virtio-scsi-pci")) return true;
     if (buildAgent({ enabled: agentEnabled, fstrimClonedDisks: agentFstrim }) !== buildAgent(parseAgent(str(original["agent"] ?? "")))) return true;
-    if (hasTpm !== (original["tpmstate0"] != null && str(original["tpmstate0"]) !== "")) return true;
     if (kvmEnabled !== (original["kvm"] != null ? bool01(original["kvm"]) : true)) return true;
     if (acpi !== (original["acpi"] != null ? bool01(original["acpi"]) : true)) return true;
     if (onboot !== bool01(original["onboot"])) return true;
@@ -660,13 +740,19 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
     if (bootOrder.trim() !== origBootDevices.join(";")) return true;
     const origStartup = parseStartup(str(original["startup"] ?? ""));
     if (buildStartup({ order: startupOrder, up: startupUp, down: startupDown }) !== buildStartup(origStartup)) return true;
-    if (buildCurrentNet0() !== str(original["net0"] ?? "")) return true;
+    // Multi-NIC changes
+    for (const [nicKey, nic] of Object.entries(nicEdits)) {
+      if (buildNicString(nic) !== str(original[nicKey] ?? "")) return true;
+    }
+    // Generic device changes
+    if (Object.keys(pendingDeviceAdds).length > 0) return true;
+    if (deviceRemovals.size > 0) return true;
     if (buildVGA({ type: vgaType, memory: vgaMemory }) !== str(original["vga"] ?? "")) return true;
     if (buildAudio({ device: audioDevice, driver: "spice" }) !== str(original["audio0"] ?? "")) return true;
     // CD/DVD
-    const origIde2 = str(original["ide2"] ?? "");
-    const origCdromVal = origIde2 && origIde2 !== "none,media=cdrom"
-      ? (origIde2.split(",")[0] ?? "none")
+    const origCdromRaw = str(original[cdromKey] ?? "");
+    const origCdromVal = origCdromRaw && origCdromRaw !== "none,media=cdrom"
+      ? (origCdromRaw.split(",")[0] ?? "none")
       : "none";
     if (cdromValue !== origCdromVal) return true;
     if (description !== str(original["description"] ?? "")) return true;
@@ -680,7 +766,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
     if (pendingNewDisks.length > 0) return true;
     return false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [original, cores, sockets, cpuType, numa, cpulimit, cpuunits, affinity, memory, balloon, shares, bios, machine, scsihw, agentEnabled, agentFstrim, hasTpm, kvmEnabled, acpi, onboot, tablet, hotplug, ostype, protection, localtime, bootOrder, startupOrder, startupUp, startupDown, netModel, netMac, netBridge, netFirewall, netVlan, netRate, netMtu, netLinkDown, vgaType, vgaMemory, audioDevice, cdromValue, description, tags, diskEdits, disksToRemove, pendingNewDisks]);
+  }, [original, cores, sockets, cpuType, numa, cpulimit, cpuunits, affinity, memory, balloon, shares, bios, machine, scsihw, agentEnabled, agentFstrim, kvmEnabled, acpi, onboot, tablet, hotplug, ostype, protection, localtime, bootOrder, startupOrder, startupUp, startupDown, nicEdits, vgaType, vgaMemory, audioDevice, cdromValue, cdromKey, description, tags, diskEdits, disksToRemove, pendingNewDisks, pendingDeviceAdds, deviceRemovals]);
 
   if (isLoading) {
     return (
@@ -710,6 +796,17 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
           <span>Running VM — hardware changes will be pending until restart.</span>
         </div>
       )}
+
+      {/* Add Device button — always visible at top */}
+      <AddDeviceMenu
+        config={config}
+        diskStorages={diskStorages.map((s) => ({ storage: s.storage, type: s.type, id: s.id }))}
+        usbDevices={usbDevices}
+        pciDevices={pciDevices}
+        bridges={bridgeNames}
+        onAddDevice={handleAddDevice}
+        onAddDisk={() => { setShowAddDisk(true); }}
+      />
 
       {/* 2-column grid for compact cards */}
       <div className="grid gap-3 lg:grid-cols-2">
@@ -804,10 +901,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
                 <Label htmlFor="hw-agent-fstrim" className="cursor-pointer text-xs">FSTRIM</Label>
               </div>
             )}
-            <div className="flex items-center gap-1.5">
-              <Checkbox id="hw-tpm" checked={hasTpm} onCheckedChange={(v) => { setHasTpm(v === true); }} />
-              <Label htmlFor="hw-tpm" className="cursor-pointer text-xs">TPM</Label>
-            </div>
+            {config["tpmstate0"] != null && (
+              <span className="text-[10px] text-muted-foreground">TPM: {str(config["tpmstate0"]).includes("v2.0") ? "v2.0" : "v1.2"}</span>
+            )}
             <div className="flex items-center gap-1.5">
               <Checkbox id="hw-kvm" checked={kvmEnabled} onCheckedChange={(v) => { setKvmEnabled(v === true); }} />
               <Label htmlFor="hw-kvm" className="cursor-pointer text-xs">KVM</Label>
@@ -891,60 +987,92 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
           </div>
         </Section>
 
-        {/* Network */}
-        <Section title="Network (net0)">
-          {config["net0"] != null ? (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Model</Label>
-                  <select className={compactSelect} value={netModel} onChange={(e) => { setNetModel(e.target.value); }}>
-                    {netModels.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Bridge</Label>
-                  <Input value={netBridge} onChange={(e) => { setNetBridge(e.target.value); }} placeholder="vmbr0" className="h-8 text-xs" />
-                </div>
-                <div className="col-span-2 space-y-1">
-                  <Label className="text-xs">MAC Address</Label>
-                  <Input value={netMac} onChange={(e) => { setNetMac(e.target.value); }} placeholder="Auto-generated" className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">VLAN</Label>
-                  <Input type="number" min={1} max={4094} value={netVlan} onChange={(e) => { setNetVlan(e.target.value); }} placeholder="None" className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Rate (MB/s)</Label>
-                  <Input type="number" min={0} value={netRate} onChange={(e) => { setNetRate(e.target.value); }} placeholder="Unlimited" className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">MTU</Label>
-                  <Input type="number" min={0} value={netMtu} onChange={(e) => { setNetMtu(e.target.value); }} placeholder="Default" className="h-8 text-xs" />
-                </div>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <Checkbox id="hw-net-firewall" checked={netFirewall} onCheckedChange={(v) => { setNetFirewall(v === true); }} />
-                  <Label htmlFor="hw-net-firewall" className="cursor-pointer text-xs">Firewall</Label>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Checkbox id="hw-net-linkdown" checked={netLinkDown} onCheckedChange={(v) => { setNetLinkDown(v === true); }} />
-                  <Label htmlFor="hw-net-linkdown" className="cursor-pointer text-xs">Disconnect</Label>
-                </div>
-              </div>
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground">No net0 configured.</p>
-          )}
-          {extraNics.length > 0 && (
-            <div className="mt-2">
-              <p className="mb-0.5 text-[10px] font-medium text-muted-foreground">Additional NICs</p>
-              {extraNics.map(({ key, raw }) => (
-                <p key={key} className="truncate font-mono text-[10px]">{key}: {raw}</p>
-              ))}
+        {/* Network (multi-NIC) */}
+        <Section title={`Network (${String(nicKeys.length)} NIC${nicKeys.length !== 1 ? "s" : ""})`}>
+          {nicKeys.length > 0 ? (
+            <div className="space-y-3">
+              {nicKeys.map((nicKey) => {
+                const nic = nicEdits[nicKey];
+                if (!nic) return null;
+                const isRemoved = deviceRemovals.has(nicKey);
+                if (isRemoved) {
+                  return (
+                    <div key={nicKey} className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950">
+                      <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">{nicKey}</span>
+                      <span className="text-[10px] text-red-600 dark:text-red-400">marked for removal</span>
+                      <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-[10px]" onClick={() => { handleUndoRemoveDevice(nicKey); }}>Undo</Button>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={nicKey} className="rounded border p-2">
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <span className="font-mono text-xs font-medium">{nicKey}</span>
+                      {nic.mac && <span className="text-[10px] text-muted-foreground">{nic.mac}</span>}
+                      <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDevice(nicKey); }}>
+                        <Trash2 className="h-3 w-3" /> Remove
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Model</Label>
+                        <select className={compactSelect} value={nic.model} onChange={(e) => { updateNicEdit(nicKey, { model: e.target.value }); }}>
+                          {netModels.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Bridge</Label>
+                        {bridgeNames.length > 0 ? (
+                          <select className={compactSelect} value={nic.bridge} onChange={(e) => { updateNicEdit(nicKey, { bridge: e.target.value }); }}>
+                            {!bridgeNames.includes(nic.bridge) && nic.bridge && (
+                              <option value={nic.bridge}>{nic.bridge}</option>
+                            )}
+                            {bridgeNames.map((b) => (<option key={b} value={b}>{b}</option>))}
+                          </select>
+                        ) : (
+                          <Input value={nic.bridge} onChange={(e) => { updateNicEdit(nicKey, { bridge: e.target.value }); }} placeholder="vmbr0" className="h-8 text-xs" />
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">VLAN</Label>
+                        <Input type="number" min={1} max={4094} value={nic.vlanTag} onChange={(e) => { updateNicEdit(nicKey, { vlanTag: e.target.value }); }} placeholder="None" className="h-8 text-xs" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Rate (MB/s)</Label>
+                        <Input type="number" min={0} value={nic.rateLimit} onChange={(e) => { updateNicEdit(nicKey, { rateLimit: e.target.value }); }} placeholder="Unlimited" className="h-8 text-xs" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">MTU</Label>
+                        <Input type="number" min={0} value={nic.mtu} onChange={(e) => { updateNicEdit(nicKey, { mtu: e.target.value }); }} placeholder="Default" className="h-8 text-xs" />
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <Checkbox id={`hw-${nicKey}-fw`} checked={nic.firewall} onCheckedChange={(v) => { updateNicEdit(nicKey, { firewall: v === true }); }} />
+                        <Label htmlFor={`hw-${nicKey}-fw`} className="cursor-pointer text-xs">Firewall</Label>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Checkbox id={`hw-${nicKey}-linkdown`} checked={nic.linkDown} onCheckedChange={(v) => { updateNicEdit(nicKey, { linkDown: v === true }); }} />
+                        <Label htmlFor={`hw-${nicKey}-linkdown`} className="cursor-pointer text-xs">Disconnect</Label>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No network devices configured.</p>
           )}
+          {/* Pending NIC adds */}
+          {Object.entries(pendingDeviceAdds).filter(([k]) => /^net\d+$/.test(k)).map(([key, val]) => (
+            <div key={key} className="mt-1 flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
+              <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
+              <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+              <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
+                <Trash2 className="h-3 w-3" /> Cancel
+              </Button>
+            </div>
+          ))}
         </Section>
 
         {/* Display / Audio */}
@@ -980,8 +1108,8 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
           </div>
         </Section>
 
-        {/* CD/DVD Drive (ide2) */}
-        <Section title="CD/DVD Drive">
+        {/* CD/DVD Drive */}
+        <Section title={`CD/DVD Drive (${cdromKey})`}>
           <div className="space-y-2">
             <div className="space-y-1">
               <Label className="text-xs">ISO Image</Label>
@@ -991,6 +1119,10 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
                 onChange={(e) => { setCdromValue(e.target.value); }}
               >
                 <option value="none">No media (empty drive)</option>
+                {/* Always show the currently mounted ISO even if not in the storage listing */}
+                {cdromValue !== "none" && !isoFiles.some((iso) => iso.volid === cdromValue) && (
+                  <option value={cdromValue}>{cdromValue} (current)</option>
+                )}
                 {isoFiles.map((iso) => (
                   <option key={iso.volid} value={iso.volid}>
                     {iso.volid}
@@ -1049,12 +1181,29 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
           <div className="space-y-2">
             {diskEntries.map(({ key, parsed }) => {
               const isRemoved = disksToRemove.has(key);
-              if (key.startsWith("efidisk") || key.startsWith("tpmstate")) {
+              if (key.startsWith("efidisk")) {
+                const efi = parseEFIDisk(str(config[key]));
                 return (
-                  <div key={key} className="flex items-center gap-2 rounded border px-2 py-1 text-xs text-muted-foreground">
+                  <div key={key} className="flex items-center gap-2 rounded border px-2 py-1 text-xs">
                     <span className="font-mono font-medium">{key}</span>
-                    <span>{parsed.storage}:{parsed.volume.split(":")[1] ?? ""}</span>
-                    <span className="text-[10px]">({key.startsWith("efidisk") ? "EFI" : "TPM"})</span>
+                    <Badge variant="secondary" className="text-[10px]">EFI</Badge>
+                    <span className="text-[10px] text-muted-foreground">{efi.storage} | {efi.efitype}{efi.preEnrolledKeys ? " | Secure Boot keys" : ""}</span>
+                    <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDevice(key); }}>
+                      <Trash2 className="h-3 w-3" /> Remove
+                    </Button>
+                  </div>
+                );
+              }
+              if (key.startsWith("tpmstate")) {
+                const tpm = parseTPMState(str(config[key]));
+                return (
+                  <div key={key} className="flex items-center gap-2 rounded border px-2 py-1 text-xs">
+                    <span className="font-mono font-medium">{key}</span>
+                    <Badge variant="secondary" className="text-[10px]">TPM</Badge>
+                    <span className="text-[10px] text-muted-foreground">{tpm.storage} | {tpm.version}</span>
+                    <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDevice(key); }}>
+                      <Trash2 className="h-3 w-3" /> Remove
+                    </Button>
                   </div>
                 );
               }
@@ -1233,6 +1382,224 @@ export function HardwarePanel({ clusterId, vmId, vmStatus }: HardwarePanelProps)
           <p className="mt-1 text-xs text-green-600 dark:text-green-500">Disk resized successfully.</p>
         )}
       </Section>
+
+      {/* USB Devices */}
+      {(usbKeys.length > 0 || Object.keys(pendingDeviceAdds).some((k) => /^usb\d+$/.test(k))) && (
+        <Section title={`USB Devices (${String(usbKeys.length)})`} defaultOpen={false}>
+          <div className="space-y-1.5">
+            {usbKeys.map((key) => {
+              const parsed = parseUSB(str(config[key]));
+              const isRemoved = deviceRemovals.has(key);
+              if (isRemoved) {
+                return (
+                  <div key={key} className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950">
+                    <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">{key}</span>
+                    <span className="text-[10px] text-red-600 dark:text-red-400">marked for removal</span>
+                    <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-[10px]" onClick={() => { handleUndoRemoveDevice(key); }}>Undo</Button>
+                  </div>
+                );
+              }
+              return (
+                <div key={key} className="flex items-center gap-2 rounded border px-2 py-1">
+                  <span className="font-mono text-xs font-medium">{key}</span>
+                  {parsed.spice ? (
+                    <Badge variant="secondary" className="text-[10px]">SPICE</Badge>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground">{parsed.host}</span>
+                  )}
+                  {parsed.usb3 && <Badge variant="outline" className="text-[10px]">USB3</Badge>}
+                  <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDevice(key); }}>
+                    <Trash2 className="h-3 w-3" /> Remove
+                  </Button>
+                </div>
+              );
+            })}
+            {Object.entries(pendingDeviceAdds).filter(([k]) => /^usb\d+$/.test(k)).map(([key, val]) => (
+              <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
+                <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
+                <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+                <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
+                  <Trash2 className="h-3 w-3" /> Cancel
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* PCI Devices */}
+      {(pciKeys.length > 0 || Object.keys(pendingDeviceAdds).some((k) => /^hostpci\d+$/.test(k))) && (
+        <Section title={`PCI Devices (${String(pciKeys.length)})`} defaultOpen={false}>
+          <div className="space-y-1.5">
+            {pciKeys.map((key) => {
+              const parsed = parsePCI(str(config[key]));
+              const isRemoved = deviceRemovals.has(key);
+              if (isRemoved) {
+                return (
+                  <div key={key} className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950">
+                    <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">{key}</span>
+                    <span className="text-[10px] text-red-600 dark:text-red-400">marked for removal</span>
+                    <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-[10px]" onClick={() => { handleUndoRemoveDevice(key); }}>Undo</Button>
+                  </div>
+                );
+              }
+              return (
+                <div key={key} className="flex items-center gap-2 rounded border px-2 py-1">
+                  <span className="font-mono text-xs font-medium">{key}</span>
+                  <span className="text-[10px] text-muted-foreground">{parsed.host}</span>
+                  {parsed.pcie && <Badge variant="outline" className="text-[10px]">PCIe</Badge>}
+                  {parsed.xvga && <Badge variant="outline" className="text-[10px]">x-vga</Badge>}
+                  <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDevice(key); }}>
+                    <Trash2 className="h-3 w-3" /> Remove
+                  </Button>
+                </div>
+              );
+            })}
+            {Object.entries(pendingDeviceAdds).filter(([k]) => /^hostpci\d+$/.test(k)).map(([key, val]) => (
+              <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
+                <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
+                <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+                <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
+                  <Trash2 className="h-3 w-3" /> Cancel
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Serial Ports */}
+      {(serialKeys.length > 0 || Object.keys(pendingDeviceAdds).some((k) => /^serial\d+$/.test(k))) && (
+        <Section title={`Serial Ports (${String(serialKeys.length)})`} defaultOpen={false}>
+          <div className="space-y-1.5">
+            {serialKeys.map((key) => {
+              const val = str(config[key]);
+              const isRemoved = deviceRemovals.has(key);
+              if (isRemoved) {
+                return (
+                  <div key={key} className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950">
+                    <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">{key}</span>
+                    <span className="text-[10px] text-red-600 dark:text-red-400">marked for removal</span>
+                    <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-[10px]" onClick={() => { handleUndoRemoveDevice(key); }}>Undo</Button>
+                  </div>
+                );
+              }
+              return (
+                <div key={key} className="flex items-center gap-2 rounded border px-2 py-1">
+                  <span className="font-mono text-xs font-medium">{key}</span>
+                  <span className="text-[10px] text-muted-foreground">{val}</span>
+                  <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDevice(key); }}>
+                    <Trash2 className="h-3 w-3" /> Remove
+                  </Button>
+                </div>
+              );
+            })}
+            {Object.entries(pendingDeviceAdds).filter(([k]) => /^serial\d+$/.test(k)).map(([key, val]) => (
+              <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
+                <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
+                <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+                <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
+                  <Trash2 className="h-3 w-3" /> Cancel
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* VirtIO RNG */}
+      {(config["rng0"] != null || pendingDeviceAdds["rng0"] != null) && (
+        <Section title="VirtIO RNG" defaultOpen={false}>
+          {config["rng0"] != null && !deviceRemovals.has("rng0") ? (() => {
+            const rng = parseRNG(str(config["rng0"]));
+            return (
+              <div className="flex items-center gap-2 rounded border px-2 py-1">
+                <span className="font-mono text-xs font-medium">rng0</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {rng.source}{rng.maxBytes ? ` | max: ${rng.maxBytes}` : ""}{rng.period ? ` | period: ${rng.period}ms` : ""}
+                </span>
+                <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDevice("rng0"); }}>
+                  <Trash2 className="h-3 w-3" /> Remove
+                </Button>
+              </div>
+            );
+          })() : deviceRemovals.has("rng0") ? (
+            <div className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950">
+              <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">rng0</span>
+              <span className="text-[10px] text-red-600 dark:text-red-400">marked for removal</span>
+              <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-[10px]" onClick={() => { handleUndoRemoveDevice("rng0"); }}>Undo</Button>
+            </div>
+          ) : pendingDeviceAdds["rng0"] ? (
+            <div className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
+              <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">rng0</span>
+              <span className="truncate text-[10px] text-green-600 dark:text-green-400">{pendingDeviceAdds["rng0"]}</span>
+              <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice("rng0"); }}>
+                <Trash2 className="h-3 w-3" /> Cancel
+              </Button>
+            </div>
+          ) : null}
+        </Section>
+      )}
+
+      {/* VirtioFS Shares */}
+      {(virtiofsKeys.length > 0 || Object.keys(pendingDeviceAdds).some((k) => /^virtiofs\d+$/.test(k))) && (
+        <Section title={`VirtioFS Shares (${String(virtiofsKeys.length)})`} defaultOpen={false}>
+          <div className="space-y-1.5">
+            {virtiofsKeys.map((key) => {
+              const parsed = parseVirtioFS(str(config[key]));
+              const isRemoved = deviceRemovals.has(key);
+              if (isRemoved) {
+                return (
+                  <div key={key} className="flex items-center gap-2 rounded border border-red-300 bg-red-50 px-2 py-1 dark:border-red-800 dark:bg-red-950">
+                    <span className="font-mono text-xs font-medium text-red-700 line-through dark:text-red-400">{key}</span>
+                    <span className="text-[10px] text-red-600 dark:text-red-400">marked for removal</span>
+                    <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-[10px]" onClick={() => { handleUndoRemoveDevice(key); }}>Undo</Button>
+                  </div>
+                );
+              }
+              return (
+                <div key={key} className="flex items-center gap-2 rounded border px-2 py-1">
+                  <span className="font-mono text-xs font-medium">{key}</span>
+                  <span className="text-[10px] text-muted-foreground">{parsed.dirid} | cache: {parsed.cache}{parsed.directIo ? " | direct-io" : ""}</span>
+                  <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDevice(key); }}>
+                    <Trash2 className="h-3 w-3" /> Remove
+                  </Button>
+                </div>
+              );
+            })}
+            {Object.entries(pendingDeviceAdds).filter(([k]) => /^virtiofs\d+$/.test(k)).map(([key, val]) => (
+              <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
+                <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
+                <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+                <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
+                  <Trash2 className="h-3 w-3" /> Cancel
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Pending device adds that aren't shown in other sections */}
+      {Object.entries(pendingDeviceAdds)
+        .filter(([k]) => !(/^(net|usb|hostpci|serial|virtiofs)\d+$/.test(k)) && k !== "rng0")
+        .length > 0 && (
+        <Section title="Pending Devices" defaultOpen>
+          <div className="space-y-1.5">
+            {Object.entries(pendingDeviceAdds)
+              .filter(([k]) => !(/^(net|usb|hostpci|serial|virtiofs)\d+$/.test(k)) && k !== "rng0")
+              .map(([key, val]) => (
+                <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
+                  <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
+                  <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+                  <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
+                    <Trash2 className="h-3 w-3" /> Cancel
+                  </Button>
+                </div>
+              ))}
+          </div>
+        </Section>
+      )}
 
       {/* Feedback + Save */}
       {setConfigMutation.isError && (

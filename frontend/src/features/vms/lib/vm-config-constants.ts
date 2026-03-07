@@ -239,3 +239,43 @@ export const RESTART_REQUIRED_FIELDS = new Set([
   "kvm",
   "acpi",
 ]);
+
+export const rngSources = [
+  { value: "/dev/urandom", label: "/dev/urandom (recommended)" },
+  { value: "/dev/random", label: "/dev/random" },
+  { value: "/dev/hwrng", label: "/dev/hwrng (hardware)" },
+] as const;
+
+export const serialOptions = [
+  { value: "socket", label: "Socket (qm terminal)" },
+  { value: "/dev/ttyS0", label: "/dev/ttyS0" },
+  { value: "/dev/ttyS1", label: "/dev/ttyS1" },
+  { value: "/dev/ttyS2", label: "/dev/ttyS2" },
+  { value: "/dev/ttyS3", label: "/dev/ttyS3" },
+] as const;
+
+export const virtiofsCacheModes = [
+  { value: "auto", label: "Auto" },
+  { value: "always", label: "Always" },
+  { value: "never", label: "Never" },
+] as const;
+
+export const efiTypes = [
+  { value: "4m", label: "4M (Secure Boot capable)" },
+  { value: "2m", label: "2M (legacy)" },
+] as const;
+
+export const tpmVersions = [
+  { value: "v2.0", label: "TPM 2.0" },
+  { value: "v1.2", label: "TPM 1.2" },
+] as const;
+
+/** Pattern-based check for config keys that require a VM restart. */
+export function isRestartRequired(key: string): boolean {
+  if (RESTART_REQUIRED_FIELDS.has(key)) return true;
+  if (/^net\d+$/.test(key)) return true;
+  if (/^usb\d+$/.test(key)) return true;
+  if (/^hostpci\d+$/.test(key)) return true;
+  if (/^serial\d+$/.test(key)) return true;
+  return false;
+}

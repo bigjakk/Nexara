@@ -346,3 +346,244 @@ export function parseDisk(raw: string): ParsedDisk {
   }
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// USB passthrough
+// ---------------------------------------------------------------------------
+
+export interface ParsedUSB {
+  host: string;
+  usb3: boolean;
+  spice: boolean;
+}
+
+export function parseUSB(raw: string): ParsedUSB {
+  if (!raw) return { host: "", usb3: false, spice: false };
+  if (raw === "spice") return { host: "", usb3: false, spice: true };
+  const kv = parseKVString(raw);
+  return {
+    host: kv.get("host") ?? "",
+    usb3: kv.get("usb3") === "1",
+    spice: false,
+  };
+}
+
+export function buildUSB(parsed: ParsedUSB): string {
+  if (parsed.spice) return "spice";
+  const parts: string[] = [];
+  if (parsed.host) parts.push(`host=${parsed.host}`);
+  if (parsed.usb3) parts.push("usb3=1");
+  return parts.join(",");
+}
+
+// ---------------------------------------------------------------------------
+// PCI passthrough
+// ---------------------------------------------------------------------------
+
+export interface ParsedPCI {
+  host: string;
+  pcie: boolean;
+  rombar: boolean;
+  xvga: boolean;
+  mdev: string;
+}
+
+export function parsePCI(raw: string): ParsedPCI {
+  if (!raw) return { host: "", pcie: false, rombar: true, xvga: false, mdev: "" };
+  const segments = raw.split(",");
+  const result: ParsedPCI = { host: "", pcie: false, rombar: true, xvga: false, mdev: "" };
+  for (const seg of segments) {
+    const eqIdx = seg.indexOf("=");
+    if (eqIdx === -1) {
+      // bare PCI address like "02:00"
+      result.host = seg.trim();
+      continue;
+    }
+    const key = seg.slice(0, eqIdx).trim();
+    const val = seg.slice(eqIdx + 1).trim();
+    switch (key) {
+      case "host": result.host = val; break;
+      case "pcie": result.pcie = val === "1"; break;
+      case "rombar": result.rombar = val !== "0"; break;
+      case "x-vga": result.xvga = val === "1"; break;
+      case "mdev": result.mdev = val; break;
+    }
+  }
+  return result;
+}
+
+export function buildPCI(parsed: ParsedPCI): string {
+  const parts: string[] = [];
+  if (parsed.host) parts.push(parsed.host);
+  if (parsed.pcie) parts.push("pcie=1");
+  if (!parsed.rombar) parts.push("rombar=0");
+  if (parsed.xvga) parts.push("x-vga=1");
+  if (parsed.mdev) parts.push(`mdev=${parsed.mdev}`);
+  return parts.join(",");
+}
+
+// ---------------------------------------------------------------------------
+// Serial port
+// ---------------------------------------------------------------------------
+
+export function parseSerial(raw: string): string {
+  return raw?.trim() ?? "socket";
+}
+
+export function buildSerial(value: string): string {
+  return value.trim() || "socket";
+}
+
+// ---------------------------------------------------------------------------
+// VirtIO RNG
+// ---------------------------------------------------------------------------
+
+export interface ParsedRNG {
+  source: string;
+  maxBytes: string;
+  period: string;
+}
+
+export function parseRNG(raw: string): ParsedRNG {
+  if (!raw) return { source: "/dev/urandom", maxBytes: "", period: "" };
+  const kv = parseKVString(raw);
+  return {
+    source: kv.get("source") ?? "/dev/urandom",
+    maxBytes: kv.get("max_bytes") ?? "",
+    period: kv.get("period") ?? "",
+  };
+}
+
+export function buildRNG(parsed: ParsedRNG): string {
+  const parts: string[] = [];
+  parts.push(`source=${parsed.source || "/dev/urandom"}`);
+  if (parsed.maxBytes) parts.push(`max_bytes=${parsed.maxBytes}`);
+  if (parsed.period) parts.push(`period=${parsed.period}`);
+  return parts.join(",");
+}
+
+// ---------------------------------------------------------------------------
+// VirtioFS share
+// ---------------------------------------------------------------------------
+
+export interface ParsedVirtioFS {
+  dirid: string;
+  cache: string;
+  directIo: boolean;
+}
+
+export function parseVirtioFS(raw: string): ParsedVirtioFS {
+  if (!raw) return { dirid: "", cache: "auto", directIo: false };
+  const kv = parseKVString(raw);
+  return {
+    dirid: kv.get("dirid") ?? "",
+    cache: kv.get("cache") ?? "auto",
+    directIo: kv.get("direct-io") === "1",
+  };
+}
+
+export function buildVirtioFS(parsed: ParsedVirtioFS): string {
+  const parts: string[] = [];
+  if (parsed.dirid) parts.push(`dirid=${parsed.dirid}`);
+  if (parsed.cache) parts.push(`cache=${parsed.cache}`);
+  if (parsed.directIo) parts.push("direct-io=1");
+  return parts.join(",");
+}
+
+// ---------------------------------------------------------------------------
+// EFI disk
+// ---------------------------------------------------------------------------
+
+export interface ParsedEFIDisk {
+  volume: string;
+  storage: string;
+  efitype: string;
+  preEnrolledKeys: boolean;
+}
+
+export function parseEFIDisk(raw: string): ParsedEFIDisk {
+  if (!raw) return { volume: "", storage: "", efitype: "4m", preEnrolledKeys: false };
+  const segments = raw.split(",");
+  const first = segments[0] ?? "";
+  const colonIdx = first.indexOf(":");
+  const result: ParsedEFIDisk = {
+    volume: first,
+    storage: colonIdx !== -1 ? first.slice(0, colonIdx) : "",
+    efitype: "4m",
+    preEnrolledKeys: false,
+  };
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i] ?? "";
+    const eqIdx = seg.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = seg.slice(0, eqIdx).trim();
+    const val = seg.slice(eqIdx + 1).trim();
+    switch (key) {
+      case "efitype": result.efitype = val; break;
+      case "pre-enrolled-keys": result.preEnrolledKeys = val === "1"; break;
+    }
+  }
+  return result;
+}
+
+export function buildEFIDisk(parsed: ParsedEFIDisk): string {
+  const parts: string[] = [parsed.volume || parsed.storage + ":1"];
+  if (parsed.efitype) parts.push(`efitype=${parsed.efitype}`);
+  if (parsed.preEnrolledKeys) parts.push("pre-enrolled-keys=1");
+  return parts.join(",");
+}
+
+// ---------------------------------------------------------------------------
+// TPM state
+// ---------------------------------------------------------------------------
+
+export interface ParsedTPMState {
+  volume: string;
+  storage: string;
+  version: string;
+}
+
+export function parseTPMState(raw: string): ParsedTPMState {
+  if (!raw) return { volume: "", storage: "", version: "v2.0" };
+  const segments = raw.split(",");
+  const first = segments[0] ?? "";
+  const colonIdx = first.indexOf(":");
+  const result: ParsedTPMState = {
+    volume: first,
+    storage: colonIdx !== -1 ? first.slice(0, colonIdx) : "",
+    version: "v2.0",
+  };
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i] ?? "";
+    const eqIdx = seg.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = seg.slice(0, eqIdx).trim();
+    const val = seg.slice(eqIdx + 1).trim();
+    if (key === "version") result.version = val;
+  }
+  return result;
+}
+
+export function buildTPMState(parsed: ParsedTPMState): string {
+  const parts: string[] = [parsed.volume || parsed.storage + ":1"];
+  if (parsed.version) parts.push(`version=${parsed.version}`);
+  return parts.join(",");
+}
+
+// ---------------------------------------------------------------------------
+// net0 → generic parseNet / buildNet (used for multi-NIC)
+// ---------------------------------------------------------------------------
+
+export function parseNet(raw: string): ParsedNet & { linkDown: boolean } {
+  const result = parseNet0(raw);
+  return {
+    ...result,
+    linkDown: raw.includes("link_down=1"),
+  };
+}
+
+export function buildNet(parsed: ParsedNet & { linkDown: boolean }): string {
+  let s = buildNet0(parsed);
+  if (parsed.linkDown) s += ",link_down=1";
+  return s;
+}

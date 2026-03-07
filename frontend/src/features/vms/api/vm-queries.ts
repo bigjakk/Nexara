@@ -847,3 +847,55 @@ export function useTaskLog(
     staleTime: 60_000,
   });
 }
+
+// --- Node Hardware Devices ---
+
+export interface NodeUSBDevice {
+  busnum: number;
+  devnum: number;
+  port: string;
+  prodid: string;
+  vendid: string;
+  product: string;
+  manufacturer: string;
+  speed: string;
+  class: number;
+  usbpath: string;
+  level: number;
+}
+
+export interface NodePCIDevice {
+  id: string;
+  class: string;
+  device_name: string;
+  vendor_name: string;
+  device: string;
+  vendor: string;
+  iommugroup: number;
+  subsystem_device?: string;
+  subsystem_vendor?: string;
+}
+
+export function useNodeUSBDevices(clusterId: string, nodeName: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeName, "hardware", "usb"],
+    queryFn: () =>
+      apiClient.get<NodeUSBDevice[]>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/hardware/usb`,
+      ),
+    enabled: clusterId.length > 0 && nodeName.length > 0,
+    staleTime: 30_000,
+  });
+}
+
+export function useNodePCIDevices(clusterId: string, nodeName: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeName, "hardware", "pci"],
+    queryFn: () =>
+      apiClient.get<NodePCIDevice[]>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/hardware/pci`,
+      ),
+    enabled: clusterId.length > 0 && nodeName.length > 0,
+    staleTime: 30_000,
+  });
+}

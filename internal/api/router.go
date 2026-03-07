@@ -75,6 +75,8 @@ func (s *Server) setupRoutes() {
 			clusters.Post("/:cluster_id/vms/:vm_id/disks/attach", s.vmHandler.AttachDisk)
 			clusters.Post("/:cluster_id/vms/:vm_id/disks/detach", s.vmHandler.DetachDisk)
 			clusters.Get("/:cluster_id/nodes/:node_name/bridges", s.vmHandler.ListBridges)
+			clusters.Get("/:cluster_id/nodes/:node_name/hardware/usb", s.vmHandler.ListNodeUSBDevices)
+			clusters.Get("/:cluster_id/nodes/:node_name/hardware/pci", s.vmHandler.ListNodePCIDevices)
 			clusters.Get("/:cluster_id/nodes/:node_name/machine-types", s.vmHandler.ListMachineTypes)
 			clusters.Get("/:cluster_id/nodes/:node_name/isos", s.vmHandler.ListNodeISOs)
 			clusters.Post("/:cluster_id/vms/:vm_id/media", s.vmHandler.ChangeMedia)
@@ -273,8 +275,39 @@ func (s *Server) setupRoutes() {
 		tasks.Delete("/", s.taskHandler.ClearCompleted)
 	}
 
-	// Future route groups:
-	// v1.Group("/nodes")
-	// v1.Group("/vms")
-	// v1.Group("/users")
+	// RBAC routes.
+	if s.rbacHandler != nil {
+		rbac := v1.Group("/rbac", s.authRequired())
+		rbac.Get("/roles", s.rbacHandler.ListRoles)
+		rbac.Post("/roles", s.rbacHandler.CreateRole)
+		rbac.Get("/roles/:id", s.rbacHandler.GetRole)
+		rbac.Put("/roles/:id", s.rbacHandler.UpdateRole)
+		rbac.Delete("/roles/:id", s.rbacHandler.DeleteRole)
+		rbac.Get("/permissions", s.rbacHandler.ListPermissions)
+		rbac.Get("/users/:user_id/roles", s.rbacHandler.ListUserRoles)
+		rbac.Post("/users/:user_id/roles", s.rbacHandler.AssignUserRole)
+		rbac.Delete("/users/:user_id/roles/:id", s.rbacHandler.RevokeUserRole)
+		rbac.Get("/me/permissions", s.rbacHandler.MyPermissions)
+	}
+
+	// LDAP config routes.
+	if s.ldapHandler != nil {
+		ldap := v1.Group("/ldap", s.authRequired())
+		ldap.Get("/configs", s.ldapHandler.List)
+		ldap.Post("/configs", s.ldapHandler.Create)
+		ldap.Get("/configs/:id", s.ldapHandler.Get)
+		ldap.Put("/configs/:id", s.ldapHandler.Update)
+		ldap.Delete("/configs/:id", s.ldapHandler.Delete)
+		ldap.Post("/configs/:id/test", s.ldapHandler.TestConnection)
+		ldap.Post("/configs/:id/sync", s.ldapHandler.Sync)
+	}
+
+	// User management routes.
+	if s.userHandler != nil {
+		users := v1.Group("/users", s.authRequired())
+		users.Get("/", s.userHandler.List)
+		users.Get("/:id", s.userHandler.Get)
+		users.Put("/:id", s.userHandler.Update)
+		users.Delete("/:id", s.userHandler.Delete)
+	}
 }

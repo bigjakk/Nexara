@@ -116,7 +116,7 @@ type taskStatusResponse struct {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/vms.
 func (h *VMHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "vm"); err != nil {
 		return err
 	}
 
@@ -140,7 +140,7 @@ func (h *VMHandler) ListByCluster(c *fiber.Ctx) error {
 
 // GetVM handles GET /api/v1/clusters/:cluster_id/vms/:vm_id.
 func (h *VMHandler) GetVM(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "vm"); err != nil {
 		return err
 	}
 
@@ -162,7 +162,7 @@ func (h *VMHandler) GetVM(c *fiber.Ctx) error {
 
 // PerformAction handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/status.
 func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "vm"); err != nil {
 		return err
 	}
 
@@ -227,7 +227,7 @@ func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
 
 // CloneVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone.
 func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "vm"); err != nil {
 		return err
 	}
 
@@ -278,7 +278,7 @@ func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
 
 // DestroyVM handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id.
 func (h *VMHandler) DestroyVM(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "vm"); err != nil {
 		return err
 	}
 
@@ -314,7 +314,7 @@ func (h *VMHandler) DestroyVM(c *fiber.Ctx) error {
 
 // GetTaskStatus handles GET /api/v1/clusters/:cluster_id/tasks/:upid.
 func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "task"); err != nil {
 		return err
 	}
 
@@ -393,7 +393,7 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 
 // GetTaskLog returns the log lines for a Proxmox task.
 func (h *VMHandler) GetTaskLog(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "task"); err != nil {
 		return err
 	}
 
@@ -451,7 +451,7 @@ type diskMoveRequest struct {
 
 // ResizeDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize.
 func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "vm"); err != nil {
 		return err
 	}
 
@@ -497,7 +497,7 @@ func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
 
 // MoveDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/move.
 func (h *VMHandler) MoveDisk(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "vm"); err != nil {
 		return err
 	}
 
@@ -560,7 +560,7 @@ type diskDetachRequest struct {
 
 // AttachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach.
 func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "vm"); err != nil {
 		return err
 	}
 
@@ -614,7 +614,7 @@ func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
 
 // DetachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/detach.
 func (h *VMHandler) DetachDisk(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "vm"); err != nil {
 		return err
 	}
 
@@ -760,7 +760,7 @@ type snapshotResponse struct {
 
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
 func (h *VMHandler) ListSnapshots(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "vm"); err != nil {
 		return err
 	}
 
@@ -803,7 +803,7 @@ func (h *VMHandler) ListSnapshots(c *fiber.Ctx) error {
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
 func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "vm"); err != nil {
 		return err
 	}
 
@@ -851,7 +851,7 @@ func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
 
 // DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name.
 func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "vm"); err != nil {
 		return err
 	}
 
@@ -892,7 +892,7 @@ func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
 
 // RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback.
 func (h *VMHandler) RollbackSnapshot(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "vm"); err != nil {
 		return err
 	}
 
@@ -990,7 +990,7 @@ type createVMRequest struct {
 
 // CreateVM handles POST /api/v1/clusters/:cluster_id/vms.
 func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "vm"); err != nil {
 		return err
 	}
 
@@ -1079,7 +1079,7 @@ func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
 
 // GetVMConfig handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/config.
 func (h *VMHandler) GetVMConfig(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "vm"); err != nil {
 		return err
 	}
 
@@ -1112,7 +1112,7 @@ type setVMConfigRequest struct {
 
 // SetVMConfig handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/config.
 func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "vm"); err != nil {
 		return err
 	}
 
@@ -1159,7 +1159,7 @@ type machineTypeResponse struct {
 
 // ListMachineTypes handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/machine-types.
 func (h *VMHandler) ListMachineTypes(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "node"); err != nil {
 		return err
 	}
 
@@ -1203,7 +1203,7 @@ type resourcePoolResponse struct {
 
 // ListResourcePools handles GET /api/v1/clusters/:cluster_id/pools.
 func (h *VMHandler) ListResourcePools(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "cluster"); err != nil {
 		return err
 	}
 
@@ -1244,7 +1244,7 @@ type networkBridgeResponse struct {
 
 // ListBridges handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/bridges.
 func (h *VMHandler) ListBridges(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "node"); err != nil {
 		return err
 	}
 
@@ -1293,7 +1293,7 @@ type guestAgentResponse struct {
 
 // GetGuestAgentInfo handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/agent.
 func (h *VMHandler) GetGuestAgentInfo(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "vm"); err != nil {
 		return err
 	}
 
@@ -1363,7 +1363,7 @@ type isoResponse struct {
 
 // ListNodeISOs aggregates ISO images from all ISO-capable storage pools on a node.
 func (h *VMHandler) ListNodeISOs(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "node"); err != nil {
 		return err
 	}
 
@@ -1430,7 +1430,7 @@ type changeMediaRequest struct {
 // It detects the existing CD-ROM device from the VM config and uses POST for
 // immediate hotplug (no reboot required).
 func (h *VMHandler) ChangeMedia(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "vm"); err != nil {
 		return err
 	}
 
@@ -1521,7 +1521,7 @@ type vmMigrateRequest struct {
 
 // MigrateVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/migrate.
 func (h *VMHandler) MigrateVM(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "vm"); err != nil {
 		return err
 	}
 
@@ -1578,4 +1578,62 @@ func (h *VMHandler) MigrateVM(c *fiber.Ctx) error {
 		UPID:   upid,
 		Status: "dispatched",
 	})
+}
+
+// ListNodeUSBDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/usb.
+func (h *VMHandler) ListNodeUSBDevices(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "node"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	nodeName := c.Params("node_name")
+	if nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	devices, err := pxClient.ListNodeUSBDevices(c.Context(), nodeName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	return c.JSON(devices)
+}
+
+// ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/pci.
+func (h *VMHandler) ListNodePCIDevices(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "node"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	nodeName := c.Params("node_name")
+	if nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	devices, err := pxClient.ListNodePCIDevices(c.Context(), nodeName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	return c.JSON(devices)
 }
