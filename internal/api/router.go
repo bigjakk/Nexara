@@ -75,6 +75,8 @@ func (s *Server) setupRoutes() {
 			clusters.Post("/:cluster_id/vms/:vm_id/disks/detach", s.vmHandler.DetachDisk)
 			clusters.Get("/:cluster_id/nodes/:node_name/bridges", s.vmHandler.ListBridges)
 			clusters.Get("/:cluster_id/nodes/:node_name/machine-types", s.vmHandler.ListMachineTypes)
+			clusters.Get("/:cluster_id/nodes/:node_name/isos", s.vmHandler.ListNodeISOs)
+			clusters.Post("/:cluster_id/vms/:vm_id/media", s.vmHandler.ChangeMedia)
 			clusters.Get("/:cluster_id/pools", s.vmHandler.ListResourcePools)
 		}
 		if s.storageHandler != nil {

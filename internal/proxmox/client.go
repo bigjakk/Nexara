@@ -1994,6 +1994,26 @@ func (c *Client) SetVMConfig(ctx context.Context, node string, vmid int, fields 
 	return nil
 }
 
+// UpdateVMConfigSync applies configuration changes immediately via POST (hotplug).
+// Unlike SetVMConfig (PUT), changes take effect without a reboot where supported.
+func (c *Client) UpdateVMConfigSync(ctx context.Context, node string, vmid int, fields map[string]string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	form := url.Values{}
+	for k, v := range fields {
+		form.Set(k, v)
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/config"
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update VM %d config on %s: %w", vmid, node, err)
+	}
+	return nil
+}
+
 // SetContainerConfig updates configuration fields on an LXC container.
 func (c *Client) SetContainerConfig(ctx context.Context, node string, vmid int, fields map[string]string) error {
 	if err := validateNodeName(node); err != nil {

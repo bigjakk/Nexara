@@ -1388,3 +1388,175 @@ func mapProxmoxError(err error) error {
 	}
 	return fiber.NewError(fiber.StatusInternalServerError, "Proxmox operation failed: "+err.Error())
 }
+
+// --- ISO Listing ---
+
+type isoResponse struct {
+	Volid   string `json:"volid"`
+	Storage string `json:"storage"`
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	CTime   int64  `json:"ctime"`
+}
+
+// ListNodeISOs aggregates ISO images from all ISO-capable storage pools on a node.
+func (h *VMHandler) ListNodeISOs(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	nodeName := c.Params("node_name")
+	if nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	pools, err := pxClient.GetStoragePools(c.Context(), nodeName)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	var isos []isoResponse
+	for _, pool := range pools {
+		if !strings.Contains(pool.Content, "iso") {
+			continue
+		}
+		items, err := pxClient.GetStorageContent(c.Context(), nodeName, pool.Storage)
+		if err != nil {
+			// Skip pools that error (e.g. offline storage)
+			continue
+		}
+		for _, item := range items {
+			if item.Content != "iso" {
+				continue
+			}
+			name := item.Volid
+			if idx := strings.LastIndex(item.Volid, "/"); idx >= 0 {
+				name = item.Volid[idx+1:]
+			}
+			isos = append(isos, isoResponse{
+				Volid:   item.Volid,
+				Storage: pool.Storage,
+				Name:    name,
+				Size:    item.Size,
+				CTime:   item.CTime,
+			})
+		}
+	}
+
+	if isos == nil {
+		isos = []isoResponse{}
+	}
+
+	return c.JSON(isos)
+}
+
+type changeMediaRequest struct {
+	Volid string `json:"volid"` // "local:iso/file.iso" or "none" to eject
+}
+
+// ChangeMedia mounts or ejects a CD-ROM ISO on a VM.
+// It detects the existing CD-ROM device from the VM config and uses POST for
+// immediate hotplug (no reboot required).
+func (h *VMHandler) ChangeMedia(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var req changeMediaRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Volid == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "volid is required")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	// Read current config to find existing CD-ROM device key.
+	config, err := pxClient.GetVMConfig(c.Context(), node.Name, int(vm.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	cdromKey := ""
+	for key, val := range config {
+		valStr, ok := val.(string)
+		if !ok {
+			continue
+		}
+		if strings.Contains(valStr, "media=cdrom") {
+			cdromKey = key
+			break
+		}
+	}
+
+	// If no existing CD-ROM device and ejecting, nothing to do.
+	if cdromKey == "" && req.Volid == "none" {
+		return c.JSON(fiber.Map{"status": "ok"})
+	}
+
+	// Default to ide2 if no CD-ROM device exists yet.
+	if cdromKey == "" {
+		cdromKey = "ide2"
+	}
+
+	var value string
+	if req.Volid == "none" {
+		value = "none,media=cdrom"
+	} else {
+		value = req.Volid + ",media=cdrom"
+	}
+
+	// Use POST (UpdateVMConfigSync) for immediate hotplug — no reboot needed.
+	if err := pxClient.UpdateVMConfigSync(c.Context(), node.Name, int(vm.Vmid), map[string]string{
+		cdromKey: value,
+	}); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	// Audit log.
+	action := "media_mount"
+	if req.Volid == "none" {
+		action = "media_eject"
+	}
+	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
+		details, _ := json.Marshal(map[string]interface{}{
+			"device": cdromKey,
+			"volid":  req.Volid,
+		})
+		_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+			ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
+			UserID:       uid,
+			ResourceType: "vm",
+			ResourceID:   vm.ID.String(),
+			Action:       action,
+			Details:      details,
+		})
+	}
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), action)
+
+	return c.JSON(fiber.Map{"status": "ok", "device": cdromKey})
+}
