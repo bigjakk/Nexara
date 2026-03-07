@@ -100,7 +100,7 @@ export function usePBSTasks(pbsId: string) {
         `/api/v1/pbs-servers/${pbsId}/tasks?limit=50`,
       ),
     enabled: pbsId.length > 0,
-    refetchInterval: 10000,
+    refetchInterval: 30_000, // WS events not yet wired for PBS; reduced from 10s
   });
 }
 

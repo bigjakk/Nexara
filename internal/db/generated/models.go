@@ -186,6 +186,8 @@ type MigrationJob struct {
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
+	MigrationMode   string             `json:"migration_mode"`
+	TargetStorage   string             `json:"target_storage"`
 }
 
 type Node struct {

@@ -143,12 +143,14 @@ export function MigrateWizard() {
       vmid: parseInt(vmid, 10),
       vm_type: vmType,
       migration_type: migrationType,
+      migration_mode: "live",
       storage_map: migrationType === "cross-cluster" ? storageMap : {},
       network_map: migrationType === "cross-cluster" ? networkMap : {},
       online,
       bwlimit_kib: bwlimit[0] ?? 0,
       delete_source: deleteSource,
       target_vmid: targetVmid ? parseInt(targetVmid, 10) : 0,
+      target_storage: "",
     };
 
     void createMutation.mutateAsync(req).then((created) => {

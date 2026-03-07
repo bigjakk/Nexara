@@ -13,6 +13,7 @@ import (
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -20,11 +21,12 @@ import (
 type ContainerHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewContainerHandler creates a new container handler.
-func NewContainerHandler(queries *db.Queries, encryptionKey string) *ContainerHandler {
-	return &ContainerHandler{queries: queries, encryptionKey: encryptionKey}
+func NewContainerHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *ContainerHandler {
+	return &ContainerHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
 // validCTActions is the set of allowed container status actions.
@@ -156,6 +158,7 @@ func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "container", ct.ID.String(), req.Action)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), req.Action)
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -205,6 +208,7 @@ func (h *ContainerHandler) CloneContainer(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "clone")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "container", ct.ID.String(), "clone")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -251,6 +255,7 @@ func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "migrate")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindMigrationUpdate, "container", ct.ID.String(), "migrate")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -285,6 +290,7 @@ func (h *ContainerHandler) DestroyContainer(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "destroy")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "container", ct.ID.String(), "destroy")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -425,6 +431,7 @@ func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "snapshot_create")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "snapshot_create")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -464,6 +471,7 @@ func (h *ContainerHandler) DeleteSnapshot(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "snapshot_delete")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "snapshot_delete")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -503,6 +511,7 @@ func (h *ContainerHandler) RollbackSnapshot(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "snapshot_rollback")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "snapshot_rollback")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -592,6 +601,7 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, clusterID, "container", strconv.Itoa(req.VMID), "create")
+	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "container", strconv.Itoa(req.VMID), "create")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -641,6 +651,7 @@ func (h *ContainerHandler) MoveVolume(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "volume_move")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "volume_move")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -697,6 +708,7 @@ func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
 			Details:      details,
 		})
 	}
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "config_update")
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

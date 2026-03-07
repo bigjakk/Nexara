@@ -13,6 +13,7 @@ import (
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/drs"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -23,16 +24,18 @@ type Scheduler struct {
 	logger        *slog.Logger
 	drsEngine     *drs.Engine
 	drsExecutor   *drs.Executor
+	eventPub      *events.Publisher
 }
 
 // New creates a new Scheduler.
-func New(queries *db.Queries, encryptionKey string, logger *slog.Logger) *Scheduler {
+func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
 	return &Scheduler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		logger:        logger,
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
-		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor")),
+		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor"), eventPub),
+		eventPub:      eventPub,
 	}
 }
 

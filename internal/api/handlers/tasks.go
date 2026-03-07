@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 )
 
 // auditLog writes an audit log entry for task operations.
@@ -33,12 +34,13 @@ func (h *TaskHandler) auditLog(c *fiber.Ctx, clusterID pgtype.UUID, resourceType
 
 // TaskHandler handles task history CRUD operations.
 type TaskHandler struct {
-	queries *db.Queries
+	queries  *db.Queries
+	eventPub *events.Publisher
 }
 
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(queries *db.Queries) *TaskHandler {
-	return &TaskHandler{queries: queries}
+func NewTaskHandler(queries *db.Queries, eventPub *events.Publisher) *TaskHandler {
+	return &TaskHandler{queries: queries, eventPub: eventPub}
 }
 
 type createTaskRequest struct {
@@ -154,8 +156,7 @@ func (h *TaskHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create task record")
 	}
 
-	details, _ := json.Marshal(map[string]string{"upid": req.UPID, "task_type": req.TaskType, "description": req.Description})
-	h.auditLog(c, pgtype.UUID{Bytes: clusterID, Valid: true}, "task", task.ID.String(), "create", details)
+	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindTaskCreated, "task", task.ID.String(), "create")
 
 	return c.Status(fiber.StatusCreated).JSON(mapTaskHistory(task))
 }
@@ -204,6 +205,7 @@ func (h *TaskHandler) Update(c *fiber.Ctx) error {
 	if err := h.queries.UpdateTaskHistory(c.Context(), params); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update task")
 	}
+	h.eventPub.SystemEvent(c.Context(), events.KindTaskUpdate, req.Status)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -219,6 +221,7 @@ func (h *TaskHandler) ClearCompleted(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, pgtype.UUID{}, "task", "all", "clear_completed", nil)
+	h.eventPub.SystemEvent(c.Context(), events.KindTaskUpdate, "clear_completed")
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

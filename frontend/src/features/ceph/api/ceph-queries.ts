@@ -23,7 +23,7 @@ export function useCephStatus(clusterId: string) {
         `/api/v1/clusters/${clusterId}/ceph/status`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval: 30000,
+    refetchInterval: 60_000,
   });
 }
 
@@ -35,7 +35,7 @@ export function useCephOSDs(clusterId: string) {
         `/api/v1/clusters/${clusterId}/ceph/osds`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval: 30000,
+    refetchInterval: 60_000,
   });
 }
 
@@ -47,7 +47,7 @@ export function useCephPools(clusterId: string) {
         `/api/v1/clusters/${clusterId}/ceph/pools`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval: 30000,
+    refetchInterval: 60_000,
   });
 }
 
@@ -94,7 +94,7 @@ export function useCephMetrics(clusterId: string, timeframe: string) {
         `/api/v1/clusters/${clusterId}/ceph/metrics?timeframe=${timeframe}`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval: 30000,
+    refetchInterval: 60_000,
   });
 }
 

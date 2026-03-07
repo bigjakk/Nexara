@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -21,15 +22,17 @@ var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // Executor handles DRS migration execution and history recording.
 type Executor struct {
-	queries *db.Queries
-	logger  *slog.Logger
+	queries  *db.Queries
+	logger   *slog.Logger
+	eventPub *events.Publisher
 }
 
 // NewExecutor creates a new DRS executor.
-func NewExecutor(queries *db.Queries, logger *slog.Logger) *Executor {
+func NewExecutor(queries *db.Queries, logger *slog.Logger, eventPub *events.Publisher) *Executor {
 	return &Executor{
-		queries: queries,
-		logger:  logger,
+		queries:  queries,
+		logger:   logger,
+		eventPub: eventPub,
 	}
 }
 
@@ -68,6 +71,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 				ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			})
 			e.auditLog(ctx, clusterID, vmDBID, "drs_advisory", rec)
+			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "advisory")
 			continue
 		}
 
@@ -102,6 +106,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 				ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 			})
 			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate_failed", rec)
+			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "migrate_failed")
 			continue
 		}
 
@@ -121,6 +126,8 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			e.logger.Warn("failed to insert task history for DRS migration",
 				"upid", upid, "error", taskErr)
 		}
+		e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindTaskCreated, "task", upid, "drs_migrate")
+		e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "migrate_started")
 
 		// Poll task status until completion.
 		status, exitStatus := e.waitForTask(ctx, client, rec.SourceNode, upid)
@@ -141,9 +148,13 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 		// Audit log the result.
 		if status == "completed" {
 			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate", rec)
+			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "migrate_completed")
+			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindInventoryChange, "vm", vmDBID, "drs_migrated")
 		} else {
 			e.auditLog(ctx, clusterID, vmDBID, "drs_migrate_failed", rec)
+			e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "migrate_failed")
 		}
+		e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindTaskUpdate, "task", upid, status)
 
 		e.logger.Info("DRS migration completed",
 			"vmid", rec.VMID, "status", status, "upid", upid)

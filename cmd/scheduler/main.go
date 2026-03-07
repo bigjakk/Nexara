@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/proxdash/proxdash/internal/config"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/scheduler"
 )
 
@@ -42,7 +44,25 @@ func main() {
 	}
 
 	queries := db.New(pool)
-	sched := scheduler.New(queries, cfg.EncryptionKey, logger)
+
+	// Connect to Redis for event publishing.
+	var eventPub *events.Publisher
+	if cfg.RedisURL != "" {
+		opts, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			logger.Error("failed to parse Redis URL", "error", err)
+			os.Exit(1)
+		}
+		rdb := redis.NewClient(opts)
+		if err := rdb.Ping(ctx).Err(); err != nil {
+			logger.Warn("Redis unavailable, events disabled", "error", err)
+		} else {
+			eventPub = events.NewPublisher(rdb, logger.With("component", "events"))
+			defer rdb.Close()
+		}
+	}
+
+	sched := scheduler.New(queries, cfg.EncryptionKey, logger, eventPub)
 
 	logger.Info("ProxDash scheduler started", "task_interval", "60s", "drs_interval", "60s")
 

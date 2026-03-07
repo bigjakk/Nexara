@@ -22,6 +22,13 @@ const (
 	VMTypeLXC  = "lxc"
 )
 
+// Migration mode constants (for intra-cluster migrations).
+const (
+	ModeLive    = "live"    // Memory/live migration to a different node.
+	ModeStorage = "storage" // Move all disks to a different storage (same node).
+	ModeBoth    = "both"    // Live migration + storage migration.
+)
+
 // CheckSeverity represents the severity of a pre-flight check result.
 type CheckSeverity string
 

@@ -17,7 +17,7 @@ export function useClusterStorage(clusterId: string) {
       ),
     enabled: clusterId.length > 0,
     staleTime: 30_000,
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   });
 }
 

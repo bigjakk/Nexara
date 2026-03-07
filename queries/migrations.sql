@@ -4,8 +4,8 @@ INSERT INTO migration_jobs (
     vmid, vm_type, migration_type,
     storage_map, network_map,
     online, bwlimit_kib, delete_source, target_vmid,
-    created_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    created_by, migration_mode, target_storage
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 RETURNING *;
 
 -- name: GetMigrationJob :one

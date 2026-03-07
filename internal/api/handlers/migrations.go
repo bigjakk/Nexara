@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/migration"
 )
 
@@ -17,13 +18,15 @@ import (
 type MigrationHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewMigrationHandler creates a new MigrationHandler.
-func NewMigrationHandler(queries *db.Queries, encryptionKey string) *MigrationHandler {
+func NewMigrationHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *MigrationHandler {
 	return &MigrationHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
+		eventPub:      eventPub,
 	}
 }
 
@@ -37,12 +40,14 @@ type createMigrationRequest struct {
 	VMID            int32           `json:"vmid"`
 	VMType          string          `json:"vm_type"`
 	MigrationType   string          `json:"migration_type"`
+	MigrationMode   string          `json:"migration_mode"`
 	StorageMap      json.RawMessage `json:"storage_map"`
 	NetworkMap      json.RawMessage `json:"network_map"`
 	Online          bool            `json:"online"`
 	BWLimitKiB      int32           `json:"bwlimit_kib"`
 	DeleteSource    bool            `json:"delete_source"`
 	TargetVMID      int32           `json:"target_vmid"`
+	TargetStorage   string          `json:"target_storage"`
 }
 
 type migrationJobResponse struct {
@@ -54,12 +59,14 @@ type migrationJobResponse struct {
 	VMID            int32           `json:"vmid"`
 	VMType          string          `json:"vm_type"`
 	MigrationType   string          `json:"migration_type"`
+	MigrationMode   string          `json:"migration_mode"`
 	StorageMap      json.RawMessage `json:"storage_map"`
 	NetworkMap      json.RawMessage `json:"network_map"`
 	Online          bool            `json:"online"`
 	BWLimitKiB      int32           `json:"bwlimit_kib"`
 	DeleteSource    bool            `json:"delete_source"`
 	TargetVMID      int32           `json:"target_vmid"`
+	TargetStorage   string          `json:"target_storage"`
 	Status          string          `json:"status"`
 	UPID            string          `json:"upid"`
 	Progress        float64         `json:"progress"`
@@ -81,12 +88,14 @@ func toMigrationJobResponse(j db.MigrationJob) migrationJobResponse {
 		VMID:            j.Vmid,
 		VMType:          j.VmType,
 		MigrationType:   j.MigrationType,
+		MigrationMode:   j.MigrationMode,
 		StorageMap:      j.StorageMap,
 		NetworkMap:      j.NetworkMap,
 		Online:          j.Online,
 		BWLimitKiB:      j.BwlimitKib,
 		DeleteSource:    j.DeleteSource,
 		TargetVMID:      j.TargetVmid,
+		TargetStorage:   j.TargetStorage,
 		Status:          j.Status,
 		UPID:            j.Upid,
 		Progress:        j.Progress,
@@ -136,6 +145,12 @@ var validVMTypes = map[string]bool{
 	migration.VMTypeLXC:  true,
 }
 
+var validMigrationModes = map[string]bool{
+	migration.ModeLive:    true,
+	migration.ModeStorage: true,
+	migration.ModeBoth:    true,
+}
+
 // Create handles POST /api/v1/migrations.
 func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 	if err := requireAdmin(c); err != nil {
@@ -160,6 +175,24 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "migration_type must be 'intra-cluster' or 'cross-cluster'")
 	}
 
+	// Default migration mode to "live" if not specified.
+	if req.MigrationMode == "" {
+		req.MigrationMode = migration.ModeLive
+	}
+	if !validMigrationModes[req.MigrationMode] {
+		return fiber.NewError(fiber.StatusBadRequest, "migration_mode must be 'live', 'storage', or 'both'")
+	}
+
+	// Migration mode only applies to intra-cluster.
+	if req.MigrationType == migration.TypeCrossCluster && req.MigrationMode != migration.ModeLive {
+		return fiber.NewError(fiber.StatusBadRequest, "migration_mode 'storage' and 'both' are only supported for intra-cluster migrations")
+	}
+
+	// Storage and both modes require target_storage.
+	if (req.MigrationMode == migration.ModeStorage || req.MigrationMode == migration.ModeBoth) && req.TargetStorage == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "target_storage is required for storage and both migration modes")
+	}
+
 	srcClusterID, err := uuid.Parse(req.SourceClusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid source_cluster_id")
@@ -175,8 +208,13 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 		if srcClusterID != tgtClusterID {
 			return fiber.NewError(fiber.StatusBadRequest, "For intra-cluster migration, source and target cluster must be the same")
 		}
-		if req.TargetNode == "" {
-			return fiber.NewError(fiber.StatusBadRequest, "target_node is required for intra-cluster migration")
+		// Storage mode doesn't need a target node (stays on same node).
+		if req.MigrationMode == migration.ModeStorage {
+			if req.TargetNode == "" {
+				req.TargetNode = req.SourceNode
+			}
+		} else if req.TargetNode == "" {
+			return fiber.NewError(fiber.StatusBadRequest, "target_node is required for intra-cluster live migration")
 		}
 	}
 
@@ -208,6 +246,8 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 		DeleteSource:    req.DeleteSource,
 		TargetVmid:      req.TargetVMID,
 		CreatedBy:       createdBy,
+		MigrationMode:   req.MigrationMode,
+		TargetStorage:   req.TargetStorage,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create migration job")
@@ -297,7 +337,7 @@ func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
 	}
 
-	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil)
+	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
 	report, err := orch.RunPreFlight(c.Context(), jobID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
@@ -337,10 +377,12 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 		userID = uid
 	}
 
-	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil)
+	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
 
 	// Launch execution in background goroutine.
 	go orch.Execute(context.Background(), jobID, userID)
+
+	h.eventPub.ClusterEvent(c.Context(), job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "started")
 
 	// Audit log with the VM's DB ID.
 	resourceID := jobID.String()
@@ -375,7 +417,7 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
 	}
 
-	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil)
+	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
 	if err := orch.Cancel(c.Context(), jobID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to cancel migration job")
 	}

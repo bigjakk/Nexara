@@ -17,6 +17,7 @@ import (
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/drs"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -24,13 +25,15 @@ import (
 type DRSHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewDRSHandler creates a new DRS handler.
-func NewDRSHandler(queries *db.Queries, encryptionKey string) *DRSHandler {
+func NewDRSHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *DRSHandler {
 	return &DRSHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
+		eventPub:      eventPub,
 	}
 }
 
@@ -396,6 +399,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 
 	details, _ := json.Marshal(map[string]interface{}{"recommendation_count": len(resp)})
 	h.auditLog(c, clusterID, "drs", clusterID.String(), "evaluate_triggered", details)
+	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindDRSAction, "drs", clusterID.String(), "evaluate_triggered")
 
 	return c.JSON(fiber.Map{
 		"recommendations": resp,

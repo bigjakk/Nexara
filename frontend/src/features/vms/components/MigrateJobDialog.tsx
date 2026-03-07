@@ -39,6 +39,7 @@ import type { TaskLogLine } from "../api/vm-queries";
 import type {
   CreateMigrationRequest,
   MigrationType,
+  MigrationMode,
   VMType,
   CheckSeverity,
 } from "@/features/migrations/types/migration";
@@ -97,8 +98,10 @@ export function MigrateJobDialog({
   // Form state
   const [migrationType, setMigrationType] =
     useState<MigrationType>("intra-cluster");
+  const [migrationMode, setMigrationMode] = useState<MigrationMode>("live");
   const [targetClusterId, setTargetClusterId] = useState("");
   const [targetNode, setTargetNode] = useState("");
+  const [targetStorage, setTargetStorage] = useState("");
   const [online, setOnline] = useState(isRunning);
   const [bwlimit, setBwlimit] = useState([0]);
   const [deleteSource, setDeleteSource] = useState(false);
@@ -112,8 +115,16 @@ export function MigrateJobDialog({
     migrationType === "cross-cluster" ? targetClusterId : clusterId;
   const { data: targetNodes } = useClusterNodes(effectiveTargetClusterId);
   const { data: sourceStorage } = useClusterStorage(clusterId);
-  const { data: targetStorage } = useClusterStorage(
-    migrationType === "cross-cluster" ? targetClusterId : "",
+  const needsStorageList =
+    migrationType === "cross-cluster" ||
+    (migrationType === "intra-cluster" &&
+      (migrationMode === "storage" || migrationMode === "both"));
+  const { data: targetStorageList } = useClusterStorage(
+    migrationType === "cross-cluster"
+      ? targetClusterId
+      : needsStorageList
+        ? clusterId
+        : "",
   );
   const { data: sourceBridges } = useNodeBridges(
     migrationType === "cross-cluster" ? clusterId : "",
@@ -154,8 +165,10 @@ export function MigrateJobDialog({
     setStep("config");
     setJobId("");
     setMigrationType("intra-cluster");
+    setMigrationMode("live");
     setTargetClusterId("");
     setTargetNode("");
+    setTargetStorage("");
     setOnline(isRunning);
     setBwlimit([0]);
     setDeleteSource(false);
@@ -182,21 +195,29 @@ export function MigrateJobDialog({
   }
 
   function handleCreate() {
+    const effectiveMode =
+      migrationType === "intra-cluster" ? migrationMode : "live";
     const req: CreateMigrationRequest = {
       source_cluster_id: clusterId,
       target_cluster_id:
         migrationType === "intra-cluster" ? clusterId : targetClusterId,
       source_node: currentNode,
-      target_node: targetNode,
+      target_node:
+        effectiveMode === "storage" ? currentNode : targetNode,
       vmid,
       vm_type: vmType,
       migration_type: migrationType,
+      migration_mode: effectiveMode,
       storage_map: migrationType === "cross-cluster" ? storageMap : {},
       network_map: migrationType === "cross-cluster" ? networkMap : {},
       online,
       bwlimit_kib: bwlimit[0] ?? 0,
       delete_source: deleteSource,
       target_vmid: targetVmid ? parseInt(targetVmid, 10) : 0,
+      target_storage:
+        effectiveMode === "storage" || effectiveMode === "both"
+          ? targetStorage
+          : "",
     };
 
     void createMutation.mutateAsync(req).then((created) => {
@@ -291,15 +312,26 @@ export function MigrateJobDialog({
         new Map(sourceStorage.map((s) => [s.storage, s])).values(),
       )
     : [];
-  const uniqueTargetStorage = targetStorage
+  const uniqueTargetStorage = targetStorageList
     ? Array.from(
-        new Map(targetStorage.map((s) => [s.storage, s])).values(),
+        new Map(targetStorageList.map((s) => [s.storage, s])).values(),
       )
     : [];
 
-  const isFormValid =
-    targetNode.length > 0 &&
-    (migrationType === "intra-cluster" || targetClusterId.length > 0);
+  const isFormValid = (() => {
+    if (migrationType === "cross-cluster") {
+      return targetNode.length > 0 && targetClusterId.length > 0;
+    }
+    // Intra-cluster
+    if (migrationMode === "storage") {
+      return targetStorage.length > 0;
+    }
+    if (migrationMode === "both") {
+      return targetNode.length > 0 && targetStorage.length > 0;
+    }
+    // Live mode
+    return targetNode.length > 0;
+  })();
 
   const bwlimitValue = bwlimit[0] ?? 0;
 
@@ -348,6 +380,46 @@ export function MigrateJobDialog({
               </Select>
             </div>
 
+            {/* Migration Mode (intra-cluster only) */}
+            {migrationType === "intra-cluster" && (
+              <div className="space-y-2">
+                <Label>Migration Mode</Label>
+                <Select
+                  value={migrationMode}
+                  onValueChange={(v) => {
+                    setMigrationMode(v as MigrationMode);
+                    setTargetStorage("");
+                    if (v === "storage") {
+                      setTargetNode("");
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="live">
+                      Live (move VM to another node)
+                    </SelectItem>
+                    <SelectItem value="storage">
+                      Storage (move disks to another storage)
+                    </SelectItem>
+                    <SelectItem value="both">
+                      Both (move VM + move disks)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  {migrationMode === "live" &&
+                    "Moves the VM to a different node (memory migration)"}
+                  {migrationMode === "storage" &&
+                    "Moves all VM disks to a different storage on the same node"}
+                  {migrationMode === "both" &&
+                    "Moves VM to another node and all disks to a different storage"}
+                </p>
+              </div>
+            )}
+
             {/* Target Cluster (cross-cluster only) */}
             {migrationType === "cross-cluster" && (
               <div className="space-y-2">
@@ -377,7 +449,8 @@ export function MigrateJobDialog({
               </div>
             )}
 
-            {/* Target Node */}
+            {/* Target Node (hidden for storage-only mode) */}
+            {!(migrationType === "intra-cluster" && migrationMode === "storage") && (
             <div className="space-y-2">
               <Label>Target Node</Label>
               <Select value={targetNode} onValueChange={setTargetNode}>
@@ -411,6 +484,36 @@ export function MigrateJobDialog({
                 Auto-selects the least loaded node
               </p>
             </div>
+            )}
+
+            {/* Target Storage (storage/both mode for intra-cluster) */}
+            {migrationType === "intra-cluster" &&
+              (migrationMode === "storage" || migrationMode === "both") && (
+                <div className="space-y-2">
+                  <Label>Target Storage</Label>
+                  <Select value={targetStorage} onValueChange={setTargetStorage}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select target storage" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uniqueTargetStorage
+                        .filter((s) => {
+                          if (!s.active || !s.enabled) return false;
+                          const contentType = vmType === "lxc" ? "rootdir" : "images";
+                          return s.content.includes(contentType);
+                        })
+                        .map((s) => (
+                          <SelectItem key={s.storage} value={s.storage}>
+                            {s.storage} ({s.type})
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    All VM disks will be moved to this storage
+                  </p>
+                </div>
+              )}
 
             {/* Storage Mapping (cross-cluster only) */}
             {migrationType === "cross-cluster" &&
@@ -506,10 +609,12 @@ export function MigrateJobDialog({
 
             {/* Options */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>Live Migration</Label>
-                <Switch checked={online} onCheckedChange={setOnline} />
-              </div>
+              {!(migrationType === "intra-cluster" && migrationMode === "storage") && (
+                <div className="flex items-center justify-between">
+                  <Label>Live Migration</Label>
+                  <Switch checked={online} onCheckedChange={setOnline} />
+                </div>
+              )}
               {migrationType === "cross-cluster" && (
                 <div className="flex items-center justify-between">
                   <Label>Delete Source After Migration</Label>
@@ -628,7 +733,7 @@ function MigrationProgress({
   clusterId,
   onClose,
 }: {
-  job: { status: string; progress: number; upid: string; error_message: string };
+  job: { status: string; progress: number; upid: string; error_message: string; migration_mode: string; target_storage: string };
   clusterId: string;
   onClose: () => void;
 }) {
@@ -653,6 +758,22 @@ function MigrationProgress({
     ? speedLines[speedLines.length - 1]
     : undefined;
 
+  const isStorageMode = job.migration_mode === "storage" || job.migration_mode === "both";
+
+  function progressLabel(): string {
+    if (job.status === "pending") return "Starting migration...";
+    if (job.migration_mode === "storage") {
+      return `Moving disks to ${job.target_storage}... (${String(Math.round(job.progress * 100))}%)`;
+    }
+    if (job.migration_mode === "both") {
+      if (job.progress < 0.5) {
+        return "Phase 1: Live migration in progress...";
+      }
+      return `Phase 2: Moving disks to ${job.target_storage}... (${String(Math.round(job.progress * 100))}%)`;
+    }
+    return "Migration in progress...";
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -676,9 +797,7 @@ function MigrationProgress({
             />
           </div>
           <p className="text-center text-xs text-muted-foreground">
-            {job.status === "pending"
-              ? "Starting migration..."
-              : "Migration in progress..."}
+            {progressLabel()}
           </p>
           {speedLine && (
             <p className="text-center text-xs font-medium text-blue-600 dark:text-blue-400 break-all">
@@ -690,7 +809,9 @@ function MigrationProgress({
 
       {job.status === "completed" && (
         <p className="text-sm text-green-600">
-          Migration completed successfully.
+          {isStorageMode
+            ? "Storage migration completed successfully."
+            : "Migration completed successfully."}
         </p>
       )}
       {job.status === "failed" && (
@@ -699,7 +820,7 @@ function MigrationProgress({
         </p>
       )}
 
-      {/* Task Log */}
+      {/* Task Log (only for real Proxmox UPIDs) */}
       {logLines && logLines.length > 0 && (
         <div className="space-y-1">
           <span className="text-xs font-medium text-muted-foreground">Task Log</span>

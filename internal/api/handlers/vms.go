@@ -15,6 +15,7 @@ import (
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -22,11 +23,12 @@ import (
 type VMHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewVMHandler creates a new VM handler.
-func NewVMHandler(queries *db.Queries, encryptionKey string) *VMHandler {
-	return &VMHandler{queries: queries, encryptionKey: encryptionKey}
+func NewVMHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *VMHandler {
+	return &VMHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
 type vmResponse struct {
@@ -211,6 +213,7 @@ func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), req.Action)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), req.Action)
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -260,6 +263,7 @@ func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "clone")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "clone")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -294,6 +298,7 @@ func (h *VMHandler) DestroyVM(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "destroy")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "destroy")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -476,6 +481,7 @@ func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_resize")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_resize")
 
 	return c.JSON(vmActionResponse{
 		UPID:   "",
@@ -523,6 +529,7 @@ func (h *VMHandler) MoveDisk(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_move")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_move")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -590,6 +597,7 @@ func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_attach")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_attach")
 
 	return c.JSON(vmActionResponse{
 		UPID:   "",
@@ -632,6 +640,7 @@ func (h *VMHandler) DetachDisk(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_detach")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_detach")
 
 	return c.JSON(vmActionResponse{
 		UPID:   "",
@@ -859,6 +868,7 @@ func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_create")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_create")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -898,6 +908,7 @@ func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_delete")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_delete")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -937,6 +948,7 @@ func (h *VMHandler) RollbackSnapshot(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_rollback")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_rollback")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -1079,6 +1091,7 @@ func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, clusterID, "vm", strconv.Itoa(req.VMID), "create")
+	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "vm", strconv.Itoa(req.VMID), "create")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,
@@ -1166,6 +1179,7 @@ func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
 			Details:      details,
 		})
 	}
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "config_update")
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

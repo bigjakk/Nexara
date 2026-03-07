@@ -110,3 +110,24 @@ export interface TopConsumer {
   memUsed: number;
   memTotal: number;
 }
+
+// --- Event-driven invalidation types ---
+
+export type EventKind =
+  | "task_created"
+  | "task_update"
+  | "audit_entry"
+  | "vm_state_change"
+  | "inventory_change"
+  | "migration_update"
+  | "drs_action";
+
+/** Event pushed from the backend through the WS pipeline. */
+export interface ProxDashEvent {
+  kind: EventKind;
+  cluster_id?: string;
+  resource_type?: string;
+  resource_id?: string;
+  action?: string;
+  timestamp: string;
+}

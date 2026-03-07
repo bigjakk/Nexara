@@ -42,6 +42,6 @@ export function useAuditLog({ limit, offset, clusterId, resourceType }: AuditLog
       apiClient.get<AuditLogResponse>(
         `/api/v1/audit-log?${params.toString()}`,
       ),
-    refetchInterval: 10_000,
+    refetchInterval: 120_000, // WS events handle immediate updates
   });
 }

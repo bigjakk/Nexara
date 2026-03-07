@@ -62,7 +62,7 @@ export function useVM(clusterId: string, vmId: string, kind: ResourceKind) {
     queryKey: ["clusters", clusterId, kind === "ct" ? "containers" : "vms", vmId],
     queryFn: () => apiClient.get<VMResponse>(endpoint),
     enabled: clusterId.length > 0 && vmId.length > 0,
-    refetchInterval: 10_000,
+    refetchInterval: 60_000, // WS events handle immediate updates
   });
 }
 
@@ -202,7 +202,7 @@ export function useTaskStatus(clusterId: string, upid: string | null) {
     refetchInterval: (query) => {
       const data = query.state.data;
       if (data && data.status === "stopped") return false;
-      return 2000;
+      return 10_000; // WS events trigger immediate invalidation; polling is fallback
     },
   });
 }
@@ -527,11 +527,7 @@ export function useTaskHistory(): UseQueryResult<TaskHistoryEntry[]> {
     queryKey: ["task-history"],
     queryFn: () =>
       apiClient.get<TaskHistoryEntry[]>("/api/v1/tasks"),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (data && data.some((t) => t.status === "running")) return 3000;
-      return 30000;
-    },
+    refetchInterval: 60_000, // WS events handle immediate updates; polling is a safety fallback
   });
 }
 

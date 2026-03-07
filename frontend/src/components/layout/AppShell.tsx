@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Outlet } from "react-router-dom";
 import { LogOut, LogOutIcon, User } from "lucide-react";
 
@@ -13,7 +13,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
+import { useEventInvalidation } from "@/hooks/useEventInvalidation";
 import { useWebSocketStore } from "@/stores/websocket-store";
+import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { Sidebar } from "./Sidebar";
 import { TaskLogPanel } from "./TaskLogPanel";
 import { TaskProgressDialog } from "./TaskProgressDialog";
@@ -32,11 +34,18 @@ export function AppShell() {
   const { user, logout, logoutAll } = useAuth();
   const wsConnect = useWebSocketStore((s) => s.connect);
   const wsDisconnect = useWebSocketStore((s) => s.disconnect);
+  const { data: clusters } = useClusters();
 
   useEffect(() => {
     wsConnect();
     return () => { wsDisconnect(); };
   }, [wsConnect, wsDisconnect]);
+
+  const clusterIds = useMemo(
+    () => (clusters ?? []).map((c) => c.id),
+    [clusters],
+  );
+  useEventInvalidation(clusterIds);
 
   const handleLogout = () => {
     void logout();

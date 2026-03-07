@@ -8,6 +8,8 @@ export type MigrationStatus =
 
 export type MigrationType = "intra-cluster" | "cross-cluster";
 
+export type MigrationMode = "live" | "storage" | "both";
+
 export type VMType = "qemu" | "lxc";
 
 export type CheckSeverity = "pass" | "warn" | "fail";
@@ -32,12 +34,14 @@ export interface MigrationJob {
   vmid: number;
   vm_type: VMType;
   migration_type: MigrationType;
+  migration_mode: MigrationMode;
   storage_map: Record<string, string>;
   network_map: Record<string, string>;
   online: boolean;
   bwlimit_kib: number;
   delete_source: boolean;
   target_vmid: number;
+  target_storage: string;
   status: MigrationStatus;
   upid: string;
   progress: number;
@@ -57,10 +61,12 @@ export interface CreateMigrationRequest {
   vmid: number;
   vm_type: VMType;
   migration_type: MigrationType;
+  migration_mode: MigrationMode;
   storage_map: Record<string, string>;
   network_map: Record<string, string>;
   online: boolean;
   bwlimit_kib: number;
   delete_source: boolean;
   target_vmid: number;
+  target_storage: string;
 }

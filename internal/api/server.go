@@ -5,10 +5,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"log/slog"
+
 	"github.com/proxdash/proxdash/internal/api/handlers"
 	"github.com/proxdash/proxdash/internal/auth"
 	"github.com/proxdash/proxdash/internal/config"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 )
 
 // Server is the API server that holds all dependencies.
@@ -36,6 +39,7 @@ type Server struct {
 	drsHandler       *handlers.DRSHandler
 	migrationHandler *handlers.MigrationHandler
 	networkHandler   *handlers.NetworkHandler
+	eventPub         *events.Publisher
 }
 
 // New creates a new API server with the given dependencies.
@@ -48,6 +52,10 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if pool != nil {
 		s.queries = db.New(pool)
+	}
+
+	if rdb != nil {
+		s.eventPub = events.NewPublisher(rdb, slog.Default())
 	}
 
 	// Initialize auth services when dependencies are available.
@@ -69,8 +77,8 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
-		s.vmHandler = handlers.NewVMHandler(s.queries, cfg.EncryptionKey)
-		s.containerHandler = handlers.NewContainerHandler(s.queries, cfg.EncryptionKey)
+		s.vmHandler = handlers.NewVMHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.containerHandler = handlers.NewContainerHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}
 
 	if s.queries != nil {
@@ -85,14 +93,14 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	}
 
 	if s.queries != nil {
-		s.taskHandler = handlers.NewTaskHandler(s.queries)
+		s.taskHandler = handlers.NewTaskHandler(s.queries, s.eventPub)
 		s.scheduleHandler = handlers.NewScheduleHandler(s.queries)
 		s.auditHandler = handlers.NewAuditHandler(s.queries)
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
-		s.drsHandler = handlers.NewDRSHandler(s.queries, cfg.EncryptionKey)
-		s.migrationHandler = handlers.NewMigrationHandler(s.queries, cfg.EncryptionKey)
+		s.drsHandler = handlers.NewDRSHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.migrationHandler = handlers.NewMigrationHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.networkHandler = handlers.NewNetworkHandler(s.queries, cfg.EncryptionKey)
 	}
 
