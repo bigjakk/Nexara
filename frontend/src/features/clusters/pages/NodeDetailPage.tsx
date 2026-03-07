@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
 import { useNodeHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
-import { useMetricStore } from "@/stores/metric-store";
+import { useClusterMetrics } from "@/hooks/useMetrics";
 import { useConsoleStore } from "@/stores/console-store";
 import { useClusterNodes } from "../api/cluster-queries";
 import { formatBytes, formatUptime } from "@/lib/format";
@@ -32,8 +32,7 @@ export function NodeDetailPage() {
   const { data: nodes, isLoading } = useClusterNodes(clusterId);
   const node = nodes?.find((n) => n.id === nodeId);
 
-  const metricsMap = useMetricStore((s) => s.metrics);
-  const clusterMetrics = metricsMap.get(clusterId);
+  const clusterMetrics = useClusterMetrics(clusterId);
   const liveMetric = clusterMetrics?.nodeMetrics.get(nodeId);
 
   function openShell() {

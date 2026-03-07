@@ -9,9 +9,9 @@ import { StatusBadge } from "@/features/inventory/components/StatusBadge";
 import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
 import { useVMHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
-import { useMetricStore } from "@/stores/metric-store";
 import { useConsoleStore } from "@/stores/console-store";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
+import { useClusterMetrics } from "@/hooks/useMetrics";
 import { useVM, useSetResourceConfig, useGuestAgentInfo } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
 import { CloneDialog } from "../components/CloneDialog";
@@ -54,8 +54,7 @@ export function VMDetailPage() {
   const kind: ResourceKind = rawKind === "ct" ? "ct" : "vm";
   const { data: vm, isLoading, error } = useVM(clusterId, vmId, kind);
 
-  const metricsMap = useMetricStore((s) => s.metrics);
-  const clusterMetrics = metricsMap.get(clusterId);
+  const clusterMetrics = useClusterMetrics(clusterId);
   const liveMetric = clusterMetrics?.vmMetrics.get(vmId);
 
   const { data: nodes } = useClusterNodes(clusterId);
@@ -215,19 +214,19 @@ export function VMDetailPage() {
 
         <TabsContent value="overview" className="mt-4 space-y-6">
           {/* Summary */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <InfoCard label="Status" value={vm.status} />
-            <InfoCard label="VMID" value={String(vm.vmid)} />
-            <InfoCard label="Node" value={nodeName || "--"} />
-            <InfoCard label="Type" value={vm.type === "lxc" ? "LXC Container" : "QEMU VM"} />
-            <InfoCard label="CPUs" value={String(vm.cpu_count)} />
-            <InfoCard label="Memory" value={formatBytes(vm.mem_total)} />
-            <InfoCard label="Disk" value={formatBytes(vm.disk_total)} />
-            <InfoCard label="Uptime" value={formatUptime(vm.uptime)} />
-            <InfoCard label="Tags" value={vm.tags || "--"} />
-            <InfoCard label="HA State" value={vm.ha_state || "--"} />
-            <InfoCard label="Pool" value={vm.pool || "--"} />
-            <InfoCard label="Template" value={vm.template ? "Yes" : "No"} />
+          <div className="rounded-lg border p-4">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+              <InfoItem label="VMID" value={String(vm.vmid)} />
+              <InfoItem label="Node" value={nodeName || "--"} />
+              <InfoItem label="Type" value={vm.type === "lxc" ? "LXC" : "QEMU"} />
+              <InfoItem label="CPUs" value={String(vm.cpu_count)} />
+              <InfoItem label="Memory" value={formatBytes(vm.mem_total)} />
+              <InfoItem label="Disk" value={formatBytes(vm.disk_total)} />
+              <InfoItem label="Uptime" value={formatUptime(vm.uptime)} />
+              <InfoItem label="HA State" value={vm.ha_state || "--"} />
+              <InfoItem label="Pool" value={vm.pool || "--"} />
+              {vm.tags && <InfoItem label="Tags" value={vm.tags} />}
+            </div>
           </div>
 
           {/* Guest Agent — QEMU VMs only, when running */}
@@ -525,11 +524,11 @@ function VMMetricsPanel({
   );
 }
 
-function InfoCard({ label, value }: { label: string; value: string }) {
+function InfoItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border p-3">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm font-medium">{value}</p>
+    <div className="py-1">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-sm font-medium">{value}</p>
     </div>
   );
 }

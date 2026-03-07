@@ -28,7 +28,7 @@ import {
   useClusterVMs,
   useNodeBridges,
 } from "@/features/clusters/api/cluster-queries";
-import { useMetricStore } from "@/stores/metric-store";
+import { useClusterMetrics } from "@/hooks/useMetrics";
 import {
   useCreateMigration,
   useRunPreFlightCheck,
@@ -251,8 +251,7 @@ export function MigrateJobDialog({
       : targetNodes;
 
   // Auto-select the best node (lowest combined CPU + memory + VM count).
-  const metricsMap = useMetricStore((s) => s.metrics);
-  const clusterMetrics = metricsMap.get(effectiveTargetClusterId);
+  const clusterMetrics = useClusterMetrics(effectiveTargetClusterId);
   const { data: clusterVMs } = useClusterVMs(effectiveTargetClusterId);
 
   // Build a VM count per node_id (DB UUID) for scoring

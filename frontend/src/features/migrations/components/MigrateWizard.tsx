@@ -25,7 +25,7 @@ import {
   useClusterStorage,
   useNodeBridges,
 } from "@/features/clusters/api/cluster-queries";
-import { useMetricStore } from "@/stores/metric-store";
+import { useClusterMetrics } from "@/hooks/useMetrics";
 import {
   useCreateMigration,
   useRunPreFlightCheck,
@@ -176,8 +176,7 @@ export function MigrateWizard() {
   }
 
   // Auto-select best target node (lowest combined CPU + memory usage)
-  const metricsMap = useMetricStore((s) => s.metrics);
-  const targetClusterMetrics = metricsMap.get(targetNodeClusterId);
+  const targetClusterMetrics = useClusterMetrics(targetNodeClusterId);
   const availableTargetNodes = targetNodes?.filter(
     (n) => migrationType === "cross-cluster" || n.name !== sourceNode,
   );
