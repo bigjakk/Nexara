@@ -16,6 +16,7 @@ import {
 
 interface AuthState {
   user: User | null;
+  permissions: string[];
   isAuthenticated: boolean;
   isLoading: boolean;
   isInitialized: boolean;
@@ -32,6 +33,7 @@ interface AuthActions {
 
 export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   user: null,
+  permissions: [],
   isAuthenticated: false,
   isLoading: false,
   isInitialized: false,
@@ -56,6 +58,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       storeTokens(res);
       set({
         user: res.user,
+        permissions: res.permissions,
         isAuthenticated: true,
         isLoading: false,
         isInitialized: true,
@@ -64,6 +67,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       clearTokens();
       set({
         user: null,
+        permissions: [],
         isAuthenticated: false,
         isLoading: false,
         isInitialized: true,
@@ -86,6 +90,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       storeTokens(res);
       set({
         user: res.user,
+        permissions: res.permissions,
         isAuthenticated: true,
         isLoading: false,
       });
@@ -105,6 +110,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       storeTokens(res);
       set({
         user: res.user,
+        permissions: res.permissions,
         isAuthenticated: true,
         isLoading: false,
       });
@@ -127,6 +133,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     clearTokens();
     set({
       user: null,
+      permissions: [],
       isAuthenticated: false,
     });
   },
@@ -140,6 +147,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     clearTokens();
     set({
       user: null,
+      permissions: [],
       isAuthenticated: false,
     });
   },
@@ -148,6 +156,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     clearTokens();
     set({
       user: null,
+      permissions: [],
       isAuthenticated: false,
     });
   },

@@ -89,7 +89,7 @@ type deleteContentResponse struct {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/storage.
 func (h *StorageHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "storage"); err != nil {
 		return err
 	}
 
@@ -113,7 +113,7 @@ func (h *StorageHandler) ListByCluster(c *fiber.Ctx) error {
 
 // GetContent handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/content.
 func (h *StorageHandler) GetContent(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "storage"); err != nil {
 		return err
 	}
 
@@ -149,7 +149,7 @@ func (h *StorageHandler) GetContent(c *fiber.Ctx) error {
 
 // UploadFile handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload.
 func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "storage"); err != nil {
 		return err
 	}
 
@@ -199,7 +199,7 @@ func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 
 // DeleteContent handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/:volume.
 func (h *StorageHandler) DeleteContent(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "storage"); err != nil {
 		return err
 	}
 
@@ -252,7 +252,7 @@ var validStorageTypes = map[string]bool{
 // GetConfig handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/config.
 // Returns the Proxmox-level storage configuration (paths, servers, etc.).
 func (h *StorageHandler) GetConfig(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "storage"); err != nil {
 		return err
 	}
 
@@ -278,7 +278,7 @@ type createStorageRequest struct {
 
 // Create handles POST /api/v1/clusters/:cluster_id/storage.
 func (h *StorageHandler) Create(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "storage"); err != nil {
 		return err
 	}
 
@@ -334,7 +334,7 @@ type updateStorageRequest struct {
 
 // Update handles PUT /api/v1/clusters/:cluster_id/storage/:storage_id.
 func (h *StorageHandler) Update(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "storage"); err != nil {
 		return err
 	}
 
@@ -372,7 +372,7 @@ func (h *StorageHandler) Update(c *fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id.
 func (h *StorageHandler) Delete(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "storage"); err != nil {
 		return err
 	}
 

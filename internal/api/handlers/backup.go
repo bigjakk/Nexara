@@ -78,7 +78,7 @@ func parsePBSID(c *fiber.Ctx) (uuid.UUID, error) {
 
 // ListDatastores handles GET /api/v1/pbs-servers/:pbs_id/datastores
 func (h *BackupHandler) ListDatastores(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -102,7 +102,7 @@ func (h *BackupHandler) ListDatastores(c *fiber.Ctx) error {
 
 // GetDatastoreStatus handles GET /api/v1/pbs-servers/:pbs_id/datastores/status
 func (h *BackupHandler) GetDatastoreStatus(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -127,7 +127,7 @@ func (h *BackupHandler) GetDatastoreStatus(c *fiber.Ctx) error {
 
 // TriggerGC handles POST /api/v1/pbs-servers/:pbs_id/datastores/:store/gc
 func (h *BackupHandler) TriggerGC(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -165,7 +165,7 @@ type deleteSnapshotRequest struct {
 
 // DeleteSnapshot handles DELETE /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots
 func (h *BackupHandler) DeleteSnapshot(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "backup"); err != nil {
 		return err
 	}
 
@@ -217,7 +217,7 @@ type protectSnapshotRequest struct {
 
 // ProtectSnapshot handles PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/protect
 func (h *BackupHandler) ProtectSnapshot(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -275,7 +275,7 @@ type updateSnapshotNotesRequest struct {
 
 // UpdateSnapshotNotes handles PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/notes
 func (h *BackupHandler) UpdateSnapshotNotes(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -313,7 +313,7 @@ func (h *BackupHandler) UpdateSnapshotNotes(c *fiber.Ctx) error {
 
 // GetTaskLog handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid/log
 func (h *BackupHandler) GetTaskLog(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -353,7 +353,7 @@ type pruneDatastoreRequest struct {
 
 // PruneDatastore handles POST /api/v1/pbs-servers/:pbs_id/datastores/:store/prune
 func (h *BackupHandler) PruneDatastore(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -436,7 +436,7 @@ func (h *BackupHandler) GetDatastoreConfig(c *fiber.Ctx) error {
 
 // RunSyncJob handles POST /api/v1/pbs-servers/:pbs_id/sync-jobs/:job_id/run
 func (h *BackupHandler) RunSyncJob(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -468,7 +468,7 @@ func (h *BackupHandler) RunSyncJob(c *fiber.Ctx) error {
 
 // RunVerifyJob handles POST /api/v1/pbs-servers/:pbs_id/verify-jobs/:job_id/run
 func (h *BackupHandler) RunVerifyJob(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -500,7 +500,7 @@ func (h *BackupHandler) RunVerifyJob(c *fiber.Ctx) error {
 
 // ListTasks handles GET /api/v1/pbs-servers/:pbs_id/tasks
 func (h *BackupHandler) ListTasks(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -532,7 +532,7 @@ func (h *BackupHandler) ListTasks(c *fiber.Ctx) error {
 
 // GetTaskStatus handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid
 func (h *BackupHandler) GetTaskStatus(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -563,7 +563,7 @@ func (h *BackupHandler) GetTaskStatus(c *fiber.Ctx) error {
 
 // ListSnapshots handles GET /api/v1/pbs-servers/:pbs_id/snapshots
 func (h *BackupHandler) ListSnapshots(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -594,7 +594,7 @@ func (h *BackupHandler) ListSnapshots(c *fiber.Ctx) error {
 
 // ListSyncJobs handles GET /api/v1/pbs-servers/:pbs_id/sync-jobs
 func (h *BackupHandler) ListSyncJobs(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -613,7 +613,7 @@ func (h *BackupHandler) ListSyncJobs(c *fiber.Ctx) error {
 
 // ListVerifyJobs handles GET /api/v1/pbs-servers/:pbs_id/verify-jobs
 func (h *BackupHandler) ListVerifyJobs(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -632,7 +632,7 @@ func (h *BackupHandler) ListVerifyJobs(c *fiber.Ctx) error {
 
 // GetDatastoreMetrics handles GET /api/v1/pbs-servers/:pbs_id/metrics
 func (h *BackupHandler) GetDatastoreMetrics(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -681,7 +681,7 @@ func (h *BackupHandler) GetDatastoreMetrics(c *fiber.Ctx) error {
 // GetDatastoreRRD handles GET /api/v1/pbs-servers/:pbs_id/datastores/:store/rrd
 // Live proxy to PBS RRD — returns IO performance metrics (transfer rate, IOPS).
 func (h *BackupHandler) GetDatastoreRRD(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -714,7 +714,7 @@ func (h *BackupHandler) GetDatastoreRRD(c *fiber.Ctx) error {
 // ListSnapshotsByBackupID handles GET /api/v1/pbs-snapshots?backup_id=XXX
 // Returns all PBS snapshots across all servers matching a given backup_id (VMID).
 func (h *BackupHandler) ListSnapshotsByBackupID(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -771,7 +771,7 @@ type triggerBackupRequest struct {
 
 // TriggerBackup handles POST /api/v1/clusters/:cluster_id/backup
 func (h *BackupHandler) TriggerBackup(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -834,7 +834,7 @@ func (h *BackupHandler) TriggerBackup(c *fiber.Ctx) error {
 
 // ListBackupJobs handles GET /api/v1/clusters/:cluster_id/backup-jobs
 func (h *BackupHandler) ListBackupJobs(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "backup"); err != nil {
 		return err
 	}
 
@@ -872,7 +872,7 @@ type backupJobRequest struct {
 
 // CreateBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs
 func (h *BackupHandler) CreateBackupJob(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -914,7 +914,7 @@ func (h *BackupHandler) CreateBackupJob(c *fiber.Ctx) error {
 
 // UpdateBackupJob handles PUT /api/v1/clusters/:cluster_id/backup-jobs/:job_id
 func (h *BackupHandler) UpdateBackupJob(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -961,7 +961,7 @@ func (h *BackupHandler) UpdateBackupJob(c *fiber.Ctx) error {
 
 // DeleteBackupJob handles DELETE /api/v1/clusters/:cluster_id/backup-jobs/:job_id
 func (h *BackupHandler) DeleteBackupJob(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "backup"); err != nil {
 		return err
 	}
 
@@ -991,7 +991,7 @@ func (h *BackupHandler) DeleteBackupJob(c *fiber.Ctx) error {
 
 // RunBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs/:job_id/run
 func (h *BackupHandler) RunBackupJob(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 
@@ -1056,7 +1056,7 @@ type restoreBackupRequest struct {
 
 // RestoreBackup handles POST /api/v1/clusters/:cluster_id/restore
 func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "backup"); err != nil {
 		return err
 	}
 

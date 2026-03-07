@@ -53,7 +53,7 @@ func toNodeResponse(n db.Node) nodeResponse {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/nodes.
 func (h *NodeHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "node"); err != nil {
 		return err
 	}
 

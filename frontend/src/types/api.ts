@@ -10,6 +10,111 @@ export interface AuthResponse {
   access_token: string;
   refresh_token: string;
   expires_at: number;
+  permissions: string[];
+}
+
+// RBAC types
+export interface RBACRole {
+  id: string;
+  name: string;
+  description: string;
+  is_builtin: boolean;
+  permissions?: RBACPermission[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RBACPermission {
+  id: string;
+  action: string;
+  resource: string;
+  description: string;
+}
+
+export interface RBACUserRole {
+  id: string;
+  user_id: string;
+  role_id: string;
+  role_name: string;
+  role_description: string;
+  is_builtin: boolean;
+  scope_type: "global" | "cluster";
+  scope_id?: string;
+  created_at: string;
+}
+
+export interface UserListItem {
+  id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  is_active: boolean;
+  auth_source: "local" | "ldap";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LDAPConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  server_url: string;
+  start_tls: boolean;
+  skip_tls_verify: boolean;
+  bind_dn: string;
+  bind_password_set: boolean;
+  search_base_dn: string;
+  user_filter: string;
+  username_attribute: string;
+  email_attribute: string;
+  display_name_attribute: string;
+  group_search_base_dn: string;
+  group_filter: string;
+  group_attribute: string;
+  group_role_mapping: Record<string, string>;
+  default_role_id: string | null;
+  sync_interval_minutes: number;
+  last_sync_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LDAPConfigRequest {
+  name: string;
+  enabled: boolean;
+  server_url: string;
+  start_tls: boolean;
+  skip_tls_verify: boolean;
+  bind_dn: string;
+  bind_password: string;
+  search_base_dn: string;
+  user_filter: string;
+  username_attribute: string;
+  email_attribute: string;
+  display_name_attribute: string;
+  group_search_base_dn: string;
+  group_filter: string;
+  group_attribute: string;
+  group_role_mapping: Record<string, string>;
+  default_role_id: string | null;
+  sync_interval_minutes: number;
+}
+
+export interface LDAPTestResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface LDAPSyncResponse {
+  message: string;
+  users_synced: number;
+  users_disabled: number;
+  users_re_enabled: number;
+}
+
+export interface MyPermissionsResponse {
+  permissions: string[];
+  roles: RBACUserRole[];
 }
 
 export interface LoginRequest {

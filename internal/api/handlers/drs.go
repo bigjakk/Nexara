@@ -161,7 +161,7 @@ var validRuleTypes = map[string]bool{
 
 // GetConfig handles GET /api/v1/clusters/:cluster_id/drs/config.
 func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "drs"); err != nil {
 		return err
 	}
 
@@ -188,7 +188,7 @@ func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
 
 // UpdateConfig handles PUT /api/v1/clusters/:cluster_id/drs/config.
 func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "drs"); err != nil {
 		return err
 	}
 
@@ -238,7 +238,7 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 
 // ListRules handles GET /api/v1/clusters/:cluster_id/drs/rules.
 func (h *DRSHandler) ListRules(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "drs"); err != nil {
 		return err
 	}
 
@@ -262,7 +262,7 @@ func (h *DRSHandler) ListRules(c *fiber.Ctx) error {
 
 // CreateRule handles POST /api/v1/clusters/:cluster_id/drs/rules.
 func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "drs"); err != nil {
 		return err
 	}
 
@@ -306,7 +306,7 @@ func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
 
 // DeleteRule handles DELETE /api/v1/clusters/:cluster_id/drs/rules/:rule_id.
 func (h *DRSHandler) DeleteRule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "drs"); err != nil {
 		return err
 	}
 
@@ -328,7 +328,7 @@ func (h *DRSHandler) DeleteRule(c *fiber.Ctx) error {
 
 // TriggerEvaluate handles POST /api/v1/clusters/:cluster_id/drs/evaluate.
 func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "drs"); err != nil {
 		return err
 	}
 
@@ -392,7 +392,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 
 // ListHistory handles GET /api/v1/clusters/:cluster_id/drs/history.
 func (h *DRSHandler) ListHistory(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "drs"); err != nil {
 		return err
 	}
 
@@ -487,7 +487,7 @@ func haRuleToResponse(clusterID uuid.UUID, entry proxmox.HARuleEntry) drsRuleRes
 
 // ListHARules handles GET /api/v1/clusters/:cluster_id/drs/ha-rules.
 func (h *DRSHandler) ListHARules(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "drs"); err != nil {
 		return err
 	}
 
@@ -516,7 +516,7 @@ func (h *DRSHandler) ListHARules(c *fiber.Ctx) error {
 
 // CreateHARule handles POST /api/v1/clusters/:cluster_id/drs/ha-rules.
 func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "drs"); err != nil {
 		return err
 	}
 
@@ -590,7 +590,7 @@ func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
 
 // DeleteHARule handles DELETE /api/v1/clusters/:cluster_id/drs/ha-rules/:rule_name.
 func (h *DRSHandler) DeleteHARule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "drs"); err != nil {
 		return err
 	}
 

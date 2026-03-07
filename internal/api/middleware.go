@@ -58,6 +58,10 @@ func (s *Server) authRequired() fiber.Handler {
 		c.Locals("email", claims.Email)
 		c.Locals("role", claims.Role)
 
+		if s.rbacEngine != nil {
+			c.Locals("rbac_engine", s.rbacEngine)
+		}
+
 		return c.Next()
 	}
 }

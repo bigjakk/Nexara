@@ -83,7 +83,7 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 
 // List returns task history for all users (includes DRS/system tasks).
 func (h *TaskHandler) List(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "task"); err != nil {
 		return err
 	}
 
@@ -101,7 +101,7 @@ func (h *TaskHandler) List(c *fiber.Ctx) error {
 
 // Create creates a new task history record.
 func (h *TaskHandler) Create(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "task"); err != nil {
 		return err
 	}
 
@@ -149,7 +149,7 @@ func (h *TaskHandler) Create(c *fiber.Ctx) error {
 
 // Update updates a task history record by UPID.
 func (h *TaskHandler) Update(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "task"); err != nil {
 		return err
 	}
 
@@ -198,7 +198,7 @@ func (h *TaskHandler) Update(c *fiber.Ctx) error {
 
 // ClearCompleted deletes all completed/failed tasks.
 func (h *TaskHandler) ClearCompleted(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "task"); err != nil {
 		return err
 	}
 

@@ -26,7 +26,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, totp_secret, role)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source
 `
 
 type CreateUserParams struct {
@@ -58,6 +58,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Role,
+		&i.AuthSource,
 	)
 	return i, err
 }
@@ -72,7 +73,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role FROM users WHERE email = $1
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -88,12 +89,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Role,
+		&i.AuthSource,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role FROM users WHERE id = $1
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -109,12 +111,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Role,
+		&i.AuthSource,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role FROM users ORDER BY created_at DESC
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source FROM users ORDER BY created_at DESC
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -136,6 +139,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Role,
+			&i.AuthSource,
 		); err != nil {
 			return nil, err
 		}
@@ -169,7 +173,7 @@ SET email = $2,
     is_active = $5,
     totp_secret = $6
 WHERE id = $1
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source
 `
 
 type UpdateUserParams struct {
@@ -201,6 +205,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Role,
+		&i.AuthSource,
 	)
 	return i, err
 }

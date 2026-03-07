@@ -13,6 +13,9 @@ import { VMDetailPage } from "@/features/vms/pages/VMDetailPage";
 import { StoragePage } from "@/features/storage/pages/StoragePage";
 import { BackupDashboardPage } from "@/features/backup/pages/BackupDashboardPage";
 import { AuditLogPage } from "@/features/audit/pages/AuditLogPage";
+import { UsersPage } from "@/features/admin/pages/UsersPage";
+import { RolesPage } from "@/features/admin/pages/RolesPage";
+import { LDAPPage } from "@/features/admin/pages/LDAPPage";
 
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
@@ -78,6 +81,18 @@ const router = createBrowserRouter([
                 <ConsolePage />
               </Suspense>
             ),
+          },
+          {
+            path: "admin/users",
+            element: <UsersPage />,
+          },
+          {
+            path: "admin/roles",
+            element: <RolesPage />,
+          },
+          {
+            path: "admin/ldap",
+            element: <LDAPPage />,
           },
         ],
       },

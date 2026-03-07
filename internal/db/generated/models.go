@@ -161,6 +161,31 @@ type FirewallTemplate struct {
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
+type LdapConfig struct {
+	ID                    uuid.UUID          `json:"id"`
+	Name                  string             `json:"name"`
+	Enabled               bool               `json:"enabled"`
+	ServerUrl             string             `json:"server_url"`
+	StartTls              bool               `json:"start_tls"`
+	SkipTlsVerify         bool               `json:"skip_tls_verify"`
+	BindDn                string             `json:"bind_dn"`
+	BindPasswordEncrypted string             `json:"bind_password_encrypted"`
+	SearchBaseDn          string             `json:"search_base_dn"`
+	UserFilter            string             `json:"user_filter"`
+	UsernameAttribute     string             `json:"username_attribute"`
+	EmailAttribute        string             `json:"email_attribute"`
+	DisplayNameAttribute  string             `json:"display_name_attribute"`
+	GroupSearchBaseDn     string             `json:"group_search_base_dn"`
+	GroupFilter           string             `json:"group_filter"`
+	GroupAttribute        string             `json:"group_attribute"`
+	GroupRoleMapping      json.RawMessage    `json:"group_role_mapping"`
+	DefaultRoleID         pgtype.UUID        `json:"default_role_id"`
+	SyncIntervalMinutes   int32              `json:"sync_interval_minutes"`
+	LastSyncAt            pgtype.Timestamptz `json:"last_sync_at"`
+	CreatedAt             time.Time          `json:"created_at"`
+	UpdatedAt             time.Time          `json:"updated_at"`
+}
+
 type MigrationJob struct {
 	ID              uuid.UUID          `json:"id"`
 	SourceClusterID uuid.UUID          `json:"source_cluster_id"`
@@ -322,6 +347,27 @@ type PbsVerifyJob struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type Permission struct {
+	ID          uuid.UUID `json:"id"`
+	Action      string    `json:"action"`
+	Resource    string    `json:"resource"`
+	Description string    `json:"description"`
+}
+
+type Role struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	IsBuiltin   bool      `json:"is_builtin"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type RolePermission struct {
+	RoleID       uuid.UUID `json:"role_id"`
+	PermissionID uuid.UUID `json:"permission_id"`
+}
+
 type ScheduledTask struct {
 	ID           uuid.UUID          `json:"id"`
 	ClusterID    uuid.UUID          `json:"cluster_id"`
@@ -407,6 +453,16 @@ type User struct {
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 	Role         string      `json:"role"`
+	AuthSource   string      `json:"auth_source"`
+}
+
+type UserRole struct {
+	ID        uuid.UUID   `json:"id"`
+	UserID    uuid.UUID   `json:"user_id"`
+	RoleID    uuid.UUID   `json:"role_id"`
+	ScopeType string      `json:"scope_type"`
+	ScopeID   pgtype.UUID `json:"scope_id"`
+	CreatedAt time.Time   `json:"created_at"`
 }
 
 type Vm struct {

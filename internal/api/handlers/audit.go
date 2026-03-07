@@ -63,7 +63,7 @@ type auditListResponse struct {
 
 // List handles GET /api/v1/audit-log.
 func (h *AuditHandler) List(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "audit"); err != nil {
 		return err
 	}
 
@@ -118,7 +118,7 @@ func (h *AuditHandler) List(c *fiber.Ctx) error {
 
 // ListRecent handles GET /api/v1/audit-log/recent — returns the 50 most recent entries.
 func (h *AuditHandler) ListRecent(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "audit"); err != nil {
 		return err
 	}
 
@@ -159,7 +159,7 @@ func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow) auditLogResponse 
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/audit-log.
 func (h *AuditHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "audit"); err != nil {
 		return err
 	}
 

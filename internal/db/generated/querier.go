@@ -12,15 +12,21 @@ import (
 )
 
 type Querier interface {
+	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
+	AssignUserRole(ctx context.Context, arg AssignUserRoleParams) (UserRole, error)
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
+	CheckUserPermission(ctx context.Context, arg CheckUserPermissionParams) (bool, error)
 	CleanupStaleDRSHistory(ctx context.Context) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
 	CreateFirewallTemplate(ctx context.Context, arg CreateFirewallTemplateParams) (FirewallTemplate, error)
+	CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigParams) (LdapConfig, error)
+	CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) (User, error)
 	CreateMigrationJob(ctx context.Context, arg CreateMigrationJobParams) (MigrationJob, error)
 	CreatePBSServer(ctx context.Context, arg CreatePBSServerParams) (PbsServer, error)
+	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
@@ -28,7 +34,9 @@ type Querier interface {
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
+	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
+	DeleteRole(ctx context.Context, id uuid.UUID) error
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
@@ -46,7 +54,9 @@ type Querier interface {
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
 	GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
+	GetEnabledLDAPConfig(ctx context.Context) (LdapConfig, error)
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
+	GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, error)
 	GetLastDRSMigrationForVM(ctx context.Context, arg GetLastDRSMigrationForVMParams) (DrsHistory, error)
 	GetLatestCephClusterMetrics(ctx context.Context, clusterID uuid.UUID) (CephClusterMetric, error)
 	GetLatestCephOSDMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephOsdMetric, error)
@@ -59,12 +69,19 @@ type Querier interface {
 	GetNodeMetrics5m(ctx context.Context, arg GetNodeMetrics5mParams) ([]GetNodeMetrics5mRow, error)
 	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]PbsDatastoreMetric, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
+	GetPermission(ctx context.Context, id uuid.UUID) (Permission, error)
+	GetPermissionByActionResource(ctx context.Context, arg GetPermissionByActionResourceParams) (Permission, error)
+	GetRole(ctx context.Context, id uuid.UUID) (Role, error)
+	GetRoleByName(ctx context.Context, name string) (Role, error)
 	GetScheduledTask(ctx context.Context, id uuid.UUID) (ScheduledTask, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]GetUserPermissionsRow, error)
+	GetUserScopedPermissions(ctx context.Context, userID uuid.UUID) ([]GetUserScopedPermissionsRow, error)
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
@@ -89,6 +106,8 @@ type Querier interface {
 	ListDueTasks(ctx context.Context) ([]ScheduledTask, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
 	ListFirewallTemplates(ctx context.Context) ([]FirewallTemplate, error)
+	ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error)
+	ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
@@ -99,36 +118,52 @@ type Querier interface {
 	ListPBSSnapshotsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSnapshot, error)
 	ListPBSSyncJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSyncJob, error)
 	ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsVerifyJob, error)
+	ListPermissions(ctx context.Context) ([]Permission, error)
 	ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentAuditLogEnrichedRow, error)
+	ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
+	ListRoles(ctx context.Context) ([]Role, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
 	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
 	ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHistoryByClusterParams) ([]TaskHistory, error)
+	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
+	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListUsers(ctx context.Context) ([]User, error)
+	ListUsersWithRoles(ctx context.Context) ([]ListUsersWithRolesRow, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
+	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
+	RevokeAllUserRoles(ctx context.Context, userID uuid.UUID) error
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
+	RevokeUserRole(ctx context.Context, arg RevokeUserRoleParams) error
+	SetLDAPUserActive(ctx context.Context, arg SetLDAPUserActiveParams) error
 	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
+	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
 	UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHistoryStatusParams) error
 	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error
 	UpdateFirewallTemplate(ctx context.Context, arg UpdateFirewallTemplateParams) (FirewallTemplate, error)
+	UpdateLDAPConfig(ctx context.Context, arg UpdateLDAPConfigParams) (LdapConfig, error)
+	UpdateLDAPConfigLastSync(ctx context.Context, id uuid.UUID) error
+	UpdateLDAPUserProfile(ctx context.Context, arg UpdateLDAPUserProfileParams) (User, error)
 	UpdateMigrationJobChecks(ctx context.Context, arg UpdateMigrationJobChecksParams) error
 	UpdateMigrationJobProgress(ctx context.Context, arg UpdateMigrationJobProgressParams) error
 	UpdateMigrationJobStatus(ctx context.Context, arg UpdateMigrationJobStatusParams) error
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
+	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)
 	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) error
 	UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error
 	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) error
 	UpdateTaskLastRun(ctx context.Context, arg UpdateTaskLastRunParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
+	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)

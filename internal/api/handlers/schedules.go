@@ -100,7 +100,7 @@ var validScheduleActions = map[string]bool{
 
 // Create handles POST /api/v1/clusters/:cluster_id/schedules.
 func (h *ScheduleHandler) Create(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "schedule"); err != nil {
 		return err
 	}
 
@@ -162,7 +162,7 @@ func (h *ScheduleHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/clusters/:cluster_id/schedules.
 func (h *ScheduleHandler) List(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "schedule"); err != nil {
 		return err
 	}
 
@@ -186,7 +186,7 @@ func (h *ScheduleHandler) List(c *fiber.Ctx) error {
 
 // Update handles PUT /api/v1/clusters/:cluster_id/schedules/:id.
 func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "schedule"); err != nil {
 		return err
 	}
 
@@ -232,7 +232,7 @@ func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/clusters/:cluster_id/schedules/:id.
 func (h *ScheduleHandler) Delete(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "schedule"); err != nil {
 		return err
 	}
 

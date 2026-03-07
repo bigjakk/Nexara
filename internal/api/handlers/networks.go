@@ -41,7 +41,7 @@ func (h *NetworkHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceTyp
 
 // ListNetworkInterfaces handles GET /clusters/:cluster_id/networks.
 func (h *NetworkHandler) ListNetworkInterfaces(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -82,7 +82,7 @@ func (h *NetworkHandler) ListNetworkInterfaces(c *fiber.Ctx) error {
 
 // ListNodeNetworkInterfaces handles GET /clusters/:cluster_id/networks/:node_name.
 func (h *NetworkHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -111,7 +111,7 @@ func (h *NetworkHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
 
 // CreateNetworkInterface handles POST /clusters/:cluster_id/networks/:node_name.
 func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -151,7 +151,7 @@ func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
 
 // UpdateNetworkInterface handles PUT /clusters/:cluster_id/networks/:node_name/:iface.
 func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -192,7 +192,7 @@ func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
 
 // DeleteNetworkInterface handles DELETE /clusters/:cluster_id/networks/:node_name/:iface.
 func (h *NetworkHandler) DeleteNetworkInterface(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "network"); err != nil {
 		return err
 	}
 
@@ -224,7 +224,7 @@ func (h *NetworkHandler) DeleteNetworkInterface(c *fiber.Ctx) error {
 
 // ApplyNetworkConfig handles POST /clusters/:cluster_id/networks/:node_name/apply.
 func (h *NetworkHandler) ApplyNetworkConfig(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -255,7 +255,7 @@ func (h *NetworkHandler) ApplyNetworkConfig(c *fiber.Ctx) error {
 
 // RevertNetworkConfig handles POST /clusters/:cluster_id/networks/:node_name/revert.
 func (h *NetworkHandler) RevertNetworkConfig(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -288,7 +288,7 @@ func (h *NetworkHandler) RevertNetworkConfig(c *fiber.Ctx) error {
 
 // ListClusterFirewallRules handles GET /clusters/:cluster_id/firewall/rules.
 func (h *NetworkHandler) ListClusterFirewallRules(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -312,7 +312,7 @@ func (h *NetworkHandler) ListClusterFirewallRules(c *fiber.Ctx) error {
 
 // CreateClusterFirewallRule handles POST /clusters/:cluster_id/firewall/rules.
 func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -347,7 +347,7 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
 
 // UpdateClusterFirewallRule handles PUT /clusters/:cluster_id/firewall/rules/:pos.
 func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -383,7 +383,7 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
 
 // DeleteClusterFirewallRule handles DELETE /clusters/:cluster_id/firewall/rules/:pos.
 func (h *NetworkHandler) DeleteClusterFirewallRule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "network"); err != nil {
 		return err
 	}
 
@@ -437,7 +437,7 @@ func (h *NetworkHandler) resolveVMNode(c *fiber.Ctx, clusterID uuid.UUID, vmid i
 
 // ListVMFirewallRules handles GET /clusters/:cluster_id/vms/:vm_id/firewall/rules.
 func (h *NetworkHandler) ListVMFirewallRules(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -471,7 +471,7 @@ func (h *NetworkHandler) ListVMFirewallRules(c *fiber.Ctx) error {
 
 // CreateVMFirewallRule handles POST /clusters/:cluster_id/vms/:vm_id/firewall/rules.
 func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -516,7 +516,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
 
 // UpdateVMFirewallRule handles PUT /clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos.
 func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -562,7 +562,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
 
 // DeleteVMFirewallRule handles DELETE /clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos.
 func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "network"); err != nil {
 		return err
 	}
 
@@ -605,7 +605,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
 
 // GetFirewallOptions handles GET /clusters/:cluster_id/firewall/options.
 func (h *NetworkHandler) GetFirewallOptions(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -629,7 +629,7 @@ func (h *NetworkHandler) GetFirewallOptions(c *fiber.Ctx) error {
 
 // SetFirewallOptions handles PUT /clusters/:cluster_id/firewall/options.
 func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -662,7 +662,7 @@ func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
 
 // ListSDNZones handles GET /clusters/:cluster_id/sdn/zones.
 func (h *NetworkHandler) ListSDNZones(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -686,7 +686,7 @@ func (h *NetworkHandler) ListSDNZones(c *fiber.Ctx) error {
 
 // ListSDNVNets handles GET /clusters/:cluster_id/sdn/vnets.
 func (h *NetworkHandler) ListSDNVNets(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -712,7 +712,7 @@ func (h *NetworkHandler) ListSDNVNets(c *fiber.Ctx) error {
 
 // CreateSDNZone handles POST /clusters/:cluster_id/sdn/zones.
 func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -747,7 +747,7 @@ func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
 
 // UpdateSDNZone handles PUT /clusters/:cluster_id/sdn/zones/:zone.
 func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -783,7 +783,7 @@ func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
 
 // DeleteSDNZone handles DELETE /clusters/:cluster_id/sdn/zones/:zone.
 func (h *NetworkHandler) DeleteSDNZone(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "network"); err != nil {
 		return err
 	}
 
@@ -814,7 +814,7 @@ func (h *NetworkHandler) DeleteSDNZone(c *fiber.Ctx) error {
 
 // CreateSDNVNet handles POST /clusters/:cluster_id/sdn/vnets.
 func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -849,7 +849,7 @@ func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
 
 // UpdateSDNVNet handles PUT /clusters/:cluster_id/sdn/vnets/:vnet.
 func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -885,7 +885,7 @@ func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
 
 // DeleteSDNVNet handles DELETE /clusters/:cluster_id/sdn/vnets/:vnet.
 func (h *NetworkHandler) DeleteSDNVNet(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "network"); err != nil {
 		return err
 	}
 
@@ -916,7 +916,7 @@ func (h *NetworkHandler) DeleteSDNVNet(c *fiber.Ctx) error {
 
 // ListSDNSubnets handles GET /clusters/:cluster_id/sdn/vnets/:vnet/subnets.
 func (h *NetworkHandler) ListSDNSubnets(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -945,7 +945,7 @@ func (h *NetworkHandler) ListSDNSubnets(c *fiber.Ctx) error {
 
 // CreateSDNSubnet handles POST /clusters/:cluster_id/sdn/vnets/:vnet/subnets.
 func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -985,7 +985,7 @@ func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
 
 // UpdateSDNSubnet handles PUT /clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet.
 func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -1022,7 +1022,7 @@ func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
 
 // DeleteSDNSubnet handles DELETE /clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet.
 func (h *NetworkHandler) DeleteSDNSubnet(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "network"); err != nil {
 		return err
 	}
 
@@ -1054,7 +1054,7 @@ func (h *NetworkHandler) DeleteSDNSubnet(c *fiber.Ctx) error {
 
 // ApplySDN handles PUT /clusters/:cluster_id/sdn/apply.
 func (h *NetworkHandler) ApplySDN(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -1107,7 +1107,7 @@ type createTemplateRequest struct {
 
 // ListTemplates handles GET /api/v1/firewall-templates.
 func (h *NetworkHandler) ListTemplates(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -1126,7 +1126,7 @@ func (h *NetworkHandler) ListTemplates(c *fiber.Ctx) error {
 
 // GetTemplate handles GET /api/v1/firewall-templates/:id.
 func (h *NetworkHandler) GetTemplate(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 
@@ -1148,7 +1148,7 @@ func (h *NetworkHandler) GetTemplate(c *fiber.Ctx) error {
 
 // CreateTemplate handles POST /api/v1/firewall-templates.
 func (h *NetworkHandler) CreateTemplate(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -1182,7 +1182,7 @@ func (h *NetworkHandler) CreateTemplate(c *fiber.Ctx) error {
 
 // UpdateTemplate handles PUT /api/v1/firewall-templates/:id.
 func (h *NetworkHandler) UpdateTemplate(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
@@ -1225,7 +1225,7 @@ func (h *NetworkHandler) UpdateTemplate(c *fiber.Ctx) error {
 
 // DeleteTemplate handles DELETE /api/v1/firewall-templates/:id.
 func (h *NetworkHandler) DeleteTemplate(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "network"); err != nil {
 		return err
 	}
 
@@ -1246,7 +1246,7 @@ func (h *NetworkHandler) DeleteTemplate(c *fiber.Ctx) error {
 
 // ApplyTemplate handles POST /clusters/:cluster_id/firewall-templates/:id/apply.
 func (h *NetworkHandler) ApplyTemplate(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 

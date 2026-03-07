@@ -85,7 +85,7 @@ func (h *PBSHandler) auditLog(c *fiber.Ctx, resourceType, resourceID, action str
 
 // Create handles POST /api/v1/pbs-servers.
 func (h *PBSHandler) Create(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "pbs"); err != nil {
 		return err
 	}
 
@@ -140,7 +140,7 @@ func (h *PBSHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/pbs-servers.
 func (h *PBSHandler) List(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "pbs"); err != nil {
 		return err
 	}
 
@@ -159,7 +159,7 @@ func (h *PBSHandler) List(c *fiber.Ctx) error {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/pbs-servers.
 func (h *PBSHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "pbs"); err != nil {
 		return err
 	}
 
@@ -183,7 +183,7 @@ func (h *PBSHandler) ListByCluster(c *fiber.Ctx) error {
 
 // Get handles GET /api/v1/pbs-servers/:id.
 func (h *PBSHandler) Get(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "pbs"); err != nil {
 		return err
 	}
 
@@ -205,7 +205,7 @@ func (h *PBSHandler) Get(c *fiber.Ctx) error {
 
 // Update handles PUT /api/v1/pbs-servers/:id.
 func (h *PBSHandler) Update(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "pbs"); err != nil {
 		return err
 	}
 
@@ -283,7 +283,7 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/pbs-servers/:id.
 func (h *PBSHandler) Delete(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "pbs"); err != nil {
 		return err
 	}
 

@@ -39,6 +39,10 @@ type Server struct {
 	drsHandler       *handlers.DRSHandler
 	migrationHandler *handlers.MigrationHandler
 	networkHandler   *handlers.NetworkHandler
+	rbacHandler      *handlers.RBACHandler
+	userHandler      *handlers.UserHandler
+	ldapHandler      *handlers.LDAPHandler
+	rbacEngine       *auth.RBACEngine
 	eventPub         *events.Publisher
 }
 
@@ -67,8 +71,12 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.sessionManager = auth.NewSessionManager(s.queries, rdb)
 	}
 
+	if s.queries != nil && rdb != nil {
+		s.rbacEngine = auth.NewRBACEngine(s.queries, rdb)
+	}
+
 	if s.queries != nil && s.jwtService != nil && s.sessionManager != nil {
-		s.authHandler = handlers.NewAuthHandler(s.queries, s.jwtService, s.sessionManager)
+		s.authHandler = handlers.NewAuthHandler(s.queries, s.jwtService, s.sessionManager, s.rbacEngine)
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
@@ -102,6 +110,20 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.drsHandler = handlers.NewDRSHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.migrationHandler = handlers.NewMigrationHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.networkHandler = handlers.NewNetworkHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+	}
+
+	if s.queries != nil && s.rbacEngine != nil {
+		s.rbacHandler = handlers.NewRBACHandler(s.queries, s.rbacEngine, s.eventPub)
+		s.userHandler = handlers.NewUserHandler(s.queries, s.rbacEngine, s.eventPub)
+	}
+
+	if s.queries != nil && cfg.EncryptionKey != "" && s.rbacEngine != nil {
+		s.ldapHandler = handlers.NewLDAPHandler(s.queries, cfg.EncryptionKey, s.rbacEngine, s.eventPub)
+	}
+
+	// Wire LDAP handler into auth handler for LDAP-aware login
+	if s.authHandler != nil && s.ldapHandler != nil {
+		s.authHandler.SetLDAPHandler(s.ldapHandler)
 	}
 
 	s.app = fiber.New(fiber.Config{

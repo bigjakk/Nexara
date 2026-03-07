@@ -1,4 +1,5 @@
 import { useAuthStore } from "@/stores/auth-store";
+import { usePermissions } from "@/hooks/usePermissions";
 
 export function useAuth() {
   const user = useAuthStore((s) => s.user);
@@ -9,14 +10,21 @@ export function useAuth() {
   const register = useAuthStore((s) => s.register);
   const logout = useAuthStore((s) => s.logout);
   const logoutAll = useAuthStore((s) => s.logoutAll);
+  const { isAdmin, hasPermission, canView, canManage, canExecute, canDelete } =
+    usePermissions();
 
   return {
     user,
     isAuthenticated,
     isLoading,
     isInitialized,
-    // UX hint only — all admin actions enforced server-side via requireAdmin() middleware
-    isAdmin: user?.role === "admin",
+    // RBAC-aware admin check — UX hint, server enforces all permissions
+    isAdmin,
+    hasPermission,
+    canView,
+    canManage,
+    canExecute,
+    canDelete,
     login,
     register,
     logout,

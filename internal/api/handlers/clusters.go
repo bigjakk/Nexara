@@ -106,7 +106,7 @@ func toClusterResponse(c db.Cluster) clusterResponse {
 
 // Create handles POST /api/v1/clusters.
 func (h *ClusterHandler) Create(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "cluster"); err != nil {
 		return err
 	}
 
@@ -166,7 +166,7 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/clusters.
 func (h *ClusterHandler) List(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "cluster"); err != nil {
 		return err
 	}
 
@@ -185,7 +185,7 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 
 // Get handles GET /api/v1/clusters/:id.
 func (h *ClusterHandler) Get(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "cluster"); err != nil {
 		return err
 	}
 
@@ -207,7 +207,7 @@ func (h *ClusterHandler) Get(c *fiber.Ctx) error {
 
 // Update handles PUT /api/v1/clusters/:id.
 func (h *ClusterHandler) Update(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "cluster"); err != nil {
 		return err
 	}
 
@@ -302,7 +302,7 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/clusters/:id.
 func (h *ClusterHandler) Delete(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "cluster"); err != nil {
 		return err
 	}
 
@@ -379,7 +379,7 @@ type fetchFingerprintResponse struct {
 // FetchFingerprint handles POST /api/v1/clusters/fetch-fingerprint.
 // It connects to the Proxmox host, retrieves the TLS certificate, and returns the SHA-256 fingerprint.
 func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "cluster"); err != nil {
 		return err
 	}
 

@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   Server,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,7 +29,7 @@ interface NavItem {
   label: string;
   to: string;
   icon: React.ComponentType<{ className?: string }>;
-  adminOnly?: boolean;
+  requiredPermission?: string;
 }
 
 const navItems: NavItem[] = [
@@ -37,7 +38,8 @@ const navItems: NavItem[] = [
   { label: "Console", to: "/console", icon: TerminalSquare },
   { label: "Storage", to: "/storage", icon: HardDrive },
   { label: "Backup", to: "/backup", icon: Shield },
-  { label: "Audit Log", to: "/audit-log", icon: ScrollText, adminOnly: true },
+  { label: "Audit Log", to: "/audit-log", icon: ScrollText, requiredPermission: "view:audit" },
+  { label: "Admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
 ];
 
 function isInventoryRoute(pathname: string): boolean {
@@ -45,7 +47,7 @@ function isInventoryRoute(pathname: string): boolean {
 }
 
 export function Sidebar() {
-  const { isAdmin } = useAuth();
+  const { hasPermission } = useAuth();
   const { collapsed, toggleCollapsed, treeVisible, setTreeVisible } = useSidebarStore();
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
@@ -59,9 +61,11 @@ export function Sidebar() {
     }
   }, [location.pathname, setTreeVisible]);
 
-  const visibleItems = navItems.filter(
-    (item) => !item.adminOnly || isAdmin,
-  );
+  const visibleItems = navItems.filter((item) => {
+    if (!item.requiredPermission) return true;
+    const parts = item.requiredPermission.split(":");
+    return hasPermission(parts[0] ?? "", parts[1] ?? "");
+  });
 
   const showTree = !collapsed && treeVisible;
 

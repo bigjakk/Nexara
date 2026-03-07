@@ -139,7 +139,7 @@ var validMigrationModes = map[string]bool{
 
 // Create handles POST /api/v1/migrations.
 func (h *MigrationHandler) Create(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "migration"); err != nil {
 		return err
 	}
 
@@ -267,7 +267,7 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/migrations.
 func (h *MigrationHandler) List(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "migration"); err != nil {
 		return err
 	}
 
@@ -295,7 +295,7 @@ func (h *MigrationHandler) List(c *fiber.Ctx) error {
 
 // Get handles GET /api/v1/migrations/:id.
 func (h *MigrationHandler) Get(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "migration"); err != nil {
 		return err
 	}
 
@@ -314,7 +314,7 @@ func (h *MigrationHandler) Get(c *fiber.Ctx) error {
 
 // RunCheck handles POST /api/v1/migrations/:id/check.
 func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "migration"); err != nil {
 		return err
 	}
 
@@ -334,7 +334,7 @@ func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
 
 // Execute handles POST /api/v1/migrations/:id/execute.
 func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "migration"); err != nil {
 		return err
 	}
 
@@ -384,7 +384,7 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 
 // Cancel handles POST /api/v1/migrations/:id/cancel.
 func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "migration"); err != nil {
 		return err
 	}
 
@@ -417,7 +417,7 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/migrations.
 func (h *MigrationHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "migration"); err != nil {
 		return err
 	}
 

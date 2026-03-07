@@ -20,15 +20,23 @@ type AuthHandler struct {
 	queries        *db.Queries
 	jwtService     *auth.JWTService
 	sessionManager *auth.SessionManager
+	rbac           *auth.RBACEngine
+	ldapHandler    *LDAPHandler
 }
 
 // NewAuthHandler creates a new auth handler.
-func NewAuthHandler(queries *db.Queries, jwtSvc *auth.JWTService, sessMgr *auth.SessionManager) *AuthHandler {
+func NewAuthHandler(queries *db.Queries, jwtSvc *auth.JWTService, sessMgr *auth.SessionManager, rbac *auth.RBACEngine) *AuthHandler {
 	return &AuthHandler{
 		queries:        queries,
 		jwtService:     jwtSvc,
 		sessionManager: sessMgr,
+		rbac:           rbac,
 	}
+}
+
+// SetLDAPHandler sets the LDAP handler reference for LDAP-aware login.
+func (h *AuthHandler) SetLDAPHandler(lh *LDAPHandler) {
+	h.ldapHandler = lh
 }
 
 type registerRequest struct {
@@ -51,13 +59,14 @@ type logoutRequest struct {
 }
 
 type authResponse struct {
-	User         userResponse `json:"user"`
-	AccessToken  string       `json:"access_token"`
-	RefreshToken string       `json:"refresh_token"`
-	ExpiresAt    int64        `json:"expires_at"`
+	User         authUserResponse `json:"user"`
+	AccessToken  string           `json:"access_token"`
+	RefreshToken string           `json:"refresh_token"`
+	ExpiresAt    int64            `json:"expires_at"`
+	Permissions  []string         `json:"permissions"`
 }
 
-type userResponse struct {
+type authUserResponse struct {
 	ID          uuid.UUID `json:"id"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
@@ -140,6 +149,19 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create user")
 	}
 
+	// Assign RBAC role: admin -> Admin, user -> Viewer
+	rbacRoleID := "a0000000-0000-0000-0000-000000000003" // Viewer
+	if role == "admin" {
+		rbacRoleID = "a0000000-0000-0000-0000-000000000001" // Admin
+	}
+	if roleUUID, parseErr := uuid.Parse(rbacRoleID); parseErr == nil {
+		_, _ = h.queries.AssignUserRole(c.Context(), db.AssignUserRoleParams{
+			UserID:    user.ID,
+			RoleID:    roleUUID,
+			ScopeType: "global",
+		})
+	}
+
 	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
@@ -162,8 +184,10 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	details, _ := json.Marshal(map[string]string{"email": user.Email, "role": user.Role})
 	h.authAuditLog(c, user.ID, "register", details)
 
+	perms := h.loadPerms(c, user.ID)
+
 	return c.Status(fiber.StatusCreated).JSON(authResponse{
-		User: userResponse{
+		User: authUserResponse{
 			ID:          user.ID,
 			Email:       user.Email,
 			DisplayName: user.DisplayName,
@@ -172,10 +196,12 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresAt:    expiresAt.Unix(),
+		Permissions:  perms,
 	})
 }
 
 // Login handles user authentication.
+// If LDAP is enabled, tries LDAP authentication first, then falls back to local auth.
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -188,12 +214,23 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 
 	invalidCredentials := fiber.NewError(fiber.StatusUnauthorized, "Invalid email or password")
 
+	// Try LDAP authentication first if enabled
+	if user, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
+		return h.issueTokens(c, user, "ldap_login")
+	}
+
+	// Fall back to local authentication
 	user, err := h.queries.GetUserByEmail(c.Context(), req.Email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return invalidCredentials
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up user")
+	}
+
+	// LDAP-sourced users cannot log in with local passwords
+	if user.AuthSource == "ldap" {
+		return invalidCredentials
 	}
 
 	if !user.IsActive {
@@ -204,6 +241,98 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		return invalidCredentials
 	}
 
+	return h.issueTokens(c, user, "login")
+}
+
+// tryLDAPLogin attempts LDAP authentication. Returns the DB user and true on success.
+func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.User, bool) {
+	if h.ldapHandler == nil {
+		return db.User{}, false
+	}
+
+	ldapCfg, err := h.queries.GetEnabledLDAPConfig(c.Context())
+	if err != nil {
+		return db.User{}, false
+	}
+
+	authCfg, err := h.ldapHandler.BuildLDAPConfigFromDB(ldapCfg)
+	if err != nil {
+		return db.User{}, false
+	}
+
+	client := auth.NewLDAPClient(authCfg)
+	ldapUser, err := client.Authenticate(email, password)
+	if err != nil {
+		return db.User{}, false
+	}
+
+	// Determine the email to use
+	userEmail := ldapUser.Email
+	if userEmail == "" {
+		userEmail = email
+	}
+
+	// Look up or JIT-create the user
+	user, err := h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
+		Email:      userEmail,
+		AuthSource: "ldap",
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return db.User{}, false
+		}
+
+		// JIT provision
+		displayName := ldapUser.DisplayName
+		if displayName == "" {
+			displayName = userEmail
+		}
+		user, err = h.queries.CreateLDAPUser(c.Context(), db.CreateLDAPUserParams{
+			Email:       userEmail,
+			DisplayName: displayName,
+		})
+		if err != nil {
+			// Handle race condition: another concurrent request may have created this user
+			if isDuplicateKeyError(err) {
+				user, err = h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
+					Email:      userEmail,
+					AuthSource: "ldap",
+				})
+				if err != nil {
+					return db.User{}, false
+				}
+			} else {
+				return db.User{}, false
+			}
+		}
+	} else {
+		// Update display name if changed
+		if ldapUser.DisplayName != "" && ldapUser.DisplayName != user.DisplayName {
+			if updated, err := h.queries.UpdateLDAPUserProfile(c.Context(), db.UpdateLDAPUserProfileParams{
+				ID:          user.ID,
+				DisplayName: ldapUser.DisplayName,
+			}); err == nil {
+				user = updated
+			}
+		}
+	}
+
+	if !user.IsActive {
+		return db.User{}, false
+	}
+
+	// Sync RBAC roles from LDAP group mapping
+	mapping := make(map[string]string)
+	if len(ldapCfg.GroupRoleMapping) > 0 {
+		_ = json.Unmarshal(ldapCfg.GroupRoleMapping, &mapping)
+	}
+	h.ldapHandler.SyncUserRoles(c, user.ID, ldapUser.Groups, mapping, ldapCfg.DefaultRoleID)
+
+	return user, true
+}
+
+// issueTokens creates JWT + session for the given user and returns the auth response.
+func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string) error {
 	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
@@ -224,10 +353,12 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"email": user.Email, "ip": c.IP()})
-	h.authAuditLog(c, user.ID, "login", details)
+	h.authAuditLog(c, user.ID, auditAction, details)
+
+	perms := h.loadPerms(c, user.ID)
 
 	return c.JSON(authResponse{
-		User: userResponse{
+		User: authUserResponse{
 			ID:          user.ID,
 			Email:       user.Email,
 			DisplayName: user.DisplayName,
@@ -236,6 +367,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresAt:    expiresAt.Unix(),
+		Permissions:  perms,
 	})
 }
 
@@ -279,8 +411,10 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to rotate refresh token")
 	}
 
+	perms := h.loadPerms(c, user.ID)
+
 	return c.JSON(authResponse{
-		User: userResponse{
+		User: authUserResponse{
 			ID:          user.ID,
 			Email:       user.Email,
 			DisplayName: user.DisplayName,
@@ -289,6 +423,7 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshToken,
 		ExpiresAt:    expiresAt.Unix(),
+		Permissions:  perms,
 	})
 }
 
@@ -349,6 +484,18 @@ func (h *AuthHandler) SetupStatus(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"needs_setup": count == 0,
 	})
+}
+
+// loadPerms loads the flat permissions list for the given user via RBAC engine.
+func (h *AuthHandler) loadPerms(c *fiber.Ctx, userID uuid.UUID) []string {
+	if h.rbac == nil {
+		return []string{}
+	}
+	perms, err := h.rbac.GetFlatPermissions(c.Context(), userID)
+	if err != nil || perms == nil {
+		return []string{}
+	}
+	return perms
 }
 
 // isDuplicateKeyError checks if a pgx error is a unique constraint violation.

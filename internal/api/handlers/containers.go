@@ -63,7 +63,7 @@ type ctVolumeMoveRequest struct {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/containers.
 func (h *ContainerHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "container"); err != nil {
 		return err
 	}
 
@@ -87,7 +87,7 @@ func (h *ContainerHandler) ListByCluster(c *fiber.Ctx) error {
 
 // GetContainer handles GET /api/v1/clusters/:cluster_id/containers/:ct_id.
 func (h *ContainerHandler) GetContainer(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "container"); err != nil {
 		return err
 	}
 
@@ -109,7 +109,7 @@ func (h *ContainerHandler) GetContainer(c *fiber.Ctx) error {
 
 // PerformAction handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/status.
 func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "container"); err != nil {
 		return err
 	}
 
@@ -170,7 +170,7 @@ func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
 
 // CloneContainer handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone.
 func (h *ContainerHandler) CloneContainer(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "container"); err != nil {
 		return err
 	}
 
@@ -221,7 +221,7 @@ func (h *ContainerHandler) CloneContainer(c *fiber.Ctx) error {
 
 // MigrateContainer handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/migrate.
 func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "container"); err != nil {
 		return err
 	}
 
@@ -269,7 +269,7 @@ func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
 
 // DestroyContainer handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id.
 func (h *ContainerHandler) DestroyContainer(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "delete", "container"); err != nil {
 		return err
 	}
 
@@ -357,7 +357,7 @@ func (h *ContainerHandler) resolveCT(c *fiber.Ctx, clusterID, ctID uuid.UUID) (d
 
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
 func (h *ContainerHandler) ListSnapshots(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "view", "container"); err != nil {
 		return err
 	}
 
@@ -400,7 +400,7 @@ func (h *ContainerHandler) ListSnapshots(c *fiber.Ctx) error {
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
 func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "container"); err != nil {
 		return err
 	}
 
@@ -447,7 +447,7 @@ func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
 
 // DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name.
 func (h *ContainerHandler) DeleteSnapshot(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "container"); err != nil {
 		return err
 	}
 
@@ -488,7 +488,7 @@ func (h *ContainerHandler) DeleteSnapshot(c *fiber.Ctx) error {
 
 // RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback.
 func (h *ContainerHandler) RollbackSnapshot(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "container"); err != nil {
 		return err
 	}
 
@@ -554,7 +554,7 @@ type createCTRequest struct {
 
 // CreateContainer handles POST /api/v1/clusters/:cluster_id/containers.
 func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "container"); err != nil {
 		return err
 	}
 
@@ -622,7 +622,7 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 
 // MoveVolume handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/volumes/move.
 func (h *ContainerHandler) MoveVolume(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "execute", "container"); err != nil {
 		return err
 	}
 
@@ -675,7 +675,7 @@ type setCTConfigRequest struct {
 
 // SetContainerConfig handles PUT /api/v1/clusters/:cluster_id/containers/:ct_id/config.
 func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := requirePerm(c, "manage", "container"); err != nil {
 		return err
 	}
 
