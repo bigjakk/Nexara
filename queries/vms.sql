@@ -35,5 +35,11 @@ SELECT * FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid;
 -- name: GetContainer :one
 SELECT * FROM vms WHERE id = $1 AND type = 'lxc';
 
+-- name: UpdateVMStatus :exec
+UPDATE vms SET status = $2, updated_at = now() WHERE id = $1;
+
+-- name: ListVMStatusesByCluster :many
+SELECT id, vmid, status FROM vms WHERE cluster_id = $1;
+
 -- name: DeleteStaleVMs :exec
 DELETE FROM vms WHERE cluster_id = $1 AND last_seen_at < $2;

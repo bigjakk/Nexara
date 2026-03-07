@@ -122,8 +122,6 @@ export function CloneDialog({
             <TaskProgressBanner
               clusterId={clusterId}
               upid={upid}
-              kind={kind}
-              resourceId={resourceId}
               onComplete={() => { handleClose(); }}
               description={`Clone ${sourceName}`}
             />

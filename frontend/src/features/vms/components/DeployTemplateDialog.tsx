@@ -135,8 +135,6 @@ export function DeployTemplateDialog({
           <TaskProgressBanner
             clusterId={clusterId}
             upid={upid}
-            kind={kind}
-            resourceId={vmId}
             onComplete={() => {
               setUpid(null);
               onOpenChange(false);

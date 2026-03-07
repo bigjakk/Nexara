@@ -164,6 +164,36 @@ func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UU
 	return items, nil
 }
 
+const listVMStatusesByCluster = `-- name: ListVMStatusesByCluster :many
+SELECT id, vmid, status FROM vms WHERE cluster_id = $1
+`
+
+type ListVMStatusesByClusterRow struct {
+	ID     uuid.UUID `json:"id"`
+	Vmid   int32     `json:"vmid"`
+	Status string    `json:"status"`
+}
+
+func (q *Queries) ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error) {
+	rows, err := q.db.Query(ctx, listVMStatusesByCluster, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVMStatusesByClusterRow{}
+	for rows.Next() {
+		var i ListVMStatusesByClusterRow
+		if err := rows.Scan(&i.ID, &i.Vmid, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVMsByCluster = `-- name: ListVMsByCluster :many
 SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE cluster_id = $1 ORDER BY vmid
 `
@@ -248,6 +278,20 @@ func (q *Queries) ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, er
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateVMStatus = `-- name: UpdateVMStatus :exec
+UPDATE vms SET status = $2, updated_at = now() WHERE id = $1
+`
+
+type UpdateVMStatusParams struct {
+	ID     uuid.UUID `json:"id"`
+	Status string    `json:"status"`
+}
+
+func (q *Queries) UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error {
+	_, err := q.db.Exec(ctx, updateVMStatus, arg.ID, arg.Status)
+	return err
 }
 
 const upsertVM = `-- name: UpsertVM :one

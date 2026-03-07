@@ -162,8 +162,6 @@ export function UploadDialog({
             <TaskProgressBanner
               clusterId={clusterId}
               upid={taskUpid}
-              kind="vm"
-              resourceId={storageId}
               description={`Upload: ${selectedFile?.name ?? "file"}`}
               onComplete={handleTaskComplete}
             />

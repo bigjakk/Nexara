@@ -135,8 +135,6 @@ export function SnapshotPanel({
         <TaskProgressBanner
           clusterId={clusterId}
           upid={upid}
-          kind={kind}
-          resourceId={resourceId}
           onComplete={handleTaskComplete}
           description="Snapshot operation"
         />

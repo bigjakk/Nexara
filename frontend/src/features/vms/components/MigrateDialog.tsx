@@ -74,8 +74,6 @@ export function MigrateDialog({
           <TaskProgressBanner
             clusterId={clusterId}
             upid={upid}
-            kind="ct"
-            resourceId={containerId}
             onComplete={() => { handleClose(); }}
             description={`Migrate ${containerName}`}
           />

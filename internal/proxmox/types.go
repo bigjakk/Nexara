@@ -78,6 +78,8 @@ type VirtualMachine struct {
 	VMID      int     `json:"vmid"`
 	Name      string  `json:"name"`
 	Status    string  `json:"status"`
+	QMPStatus string  `json:"qmpstatus"`
+	Lock      string  `json:"lock"`
 	Node      string  `json:"node"`
 	CPU       float64 `json:"cpu"`
 	CPUs      int     `json:"cpus"`
@@ -93,6 +95,15 @@ type VirtualMachine struct {
 	PID       int     `json:"pid"`
 	Template  int     `json:"template"`
 	Tags      string  `json:"tags"`
+}
+
+// EffectiveStatus returns the real VM status by checking qmpstatus.
+// Proxmox reports status="running" + qmpstatus="paused" for suspended VMs.
+func (vm VirtualMachine) EffectiveStatus() string {
+	if vm.Status == "running" && vm.QMPStatus == "paused" {
+		return "suspended"
+	}
+	return vm.Status
 }
 
 // Container represents an LXC container from GET /nodes/{node}/lxc.

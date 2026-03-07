@@ -11,6 +11,7 @@ import (
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -22,6 +23,7 @@ type SyncQueries interface {
 	UpsertVM(ctx context.Context, arg db.UpsertVMParams) (db.Vm, error)
 	UpsertStoragePool(ctx context.Context, arg db.UpsertStoragePoolParams) (db.StoragePool, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
+	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
 	DeleteStaleVMs(ctx context.Context, arg db.DeleteStaleVMsParams) error
 	// PBS queries
 	ListActivePBSServers(ctx context.Context) ([]db.PbsServer, error)
@@ -90,6 +92,7 @@ type Syncer struct {
 	clientFactory    ClientFactory
 	pbsClientFactory PBSClientFactory
 	healthMonitor    *HealthMonitor
+	eventPub         *events.Publisher
 	logger           *slog.Logger
 }
 
@@ -102,6 +105,11 @@ func NewSyncer(queries SyncQueries, encryptionKey string, logger *slog.Logger) *
 		pbsClientFactory: DefaultPBSClientFactory,
 		logger:           logger,
 	}
+}
+
+// SetEventPublisher attaches an event publisher for status change notifications.
+func (s *Syncer) SetEventPublisher(pub *events.Publisher) {
+	s.eventPub = pub
 }
 
 // SetHealthMonitor attaches a health monitor to the syncer.
@@ -125,6 +133,17 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 	nodes, err := client.GetNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("sync cluster %s: get nodes: %w", cluster.ID, err)
+	}
+
+	// Snapshot current VM statuses so we can detect changes after sync.
+	var oldStatuses map[int32]string
+	if s.eventPub != nil {
+		if rows, err := s.queries.ListVMStatusesByCluster(ctx, cluster.ID); err == nil {
+			oldStatuses = make(map[int32]string, len(rows))
+			for _, r := range rows {
+				oldStatuses[r.Vmid] = r.Status
+			}
+		}
 	}
 
 	now := time.Now()
@@ -168,6 +187,24 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 			result.CephCluster = cephResult.CephCluster
 			result.CephOSDs = cephResult.CephOSDs
 			result.CephPools = cephResult.CephPools
+		}
+	}
+
+	// Check for VM status changes and notify the frontend.
+	if s.eventPub != nil && oldStatuses != nil {
+		if newRows, err := s.queries.ListVMStatusesByCluster(ctx, cluster.ID); err == nil {
+			for _, r := range newRows {
+				if old, ok := oldStatuses[r.Vmid]; ok && old != r.Status {
+					s.logger.Info("VM status changed during sync",
+						"vmid", r.Vmid,
+						"old_status", old,
+						"new_status", r.Status,
+						"cluster_id", cluster.ID,
+					)
+					s.eventPub.ClusterEvent(ctx, cluster.ID.String(),
+						events.KindVMStateChange, "vm", r.ID.String(), "status_sync")
+				}
+			}
 		}
 	}
 
@@ -299,7 +336,7 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 			Vmid:      int32(vm.VMID),
 			Name:      vm.Name,
 			Type:      "qemu",
-			Status:    vm.Status,
+			Status:    vm.EffectiveStatus(),
 			CpuCount:  int32(vm.CPUs),
 			MemTotal:  vm.MaxMem,
 			DiskTotal: vm.MaxDisk,

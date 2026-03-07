@@ -3,13 +3,10 @@ import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useTaskStatus } from "../api/vm-queries";
-import type { ResourceKind } from "../types/vm";
 
 interface TaskProgressBannerProps {
   clusterId: string;
   upid: string | null;
-  kind: ResourceKind;
-  resourceId: string;
   onComplete?: () => void;
   description?: string;
 }
@@ -17,8 +14,6 @@ interface TaskProgressBannerProps {
 export function TaskProgressBanner({
   clusterId,
   upid,
-  kind: _kind,
-  resourceId: _resourceId,
   onComplete,
   description,
 }: TaskProgressBannerProps) {
@@ -42,10 +37,10 @@ export function TaskProgressBanner({
 
   const invalidateAll = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["task-history"] });
-    // Refresh cluster VMs/containers so the inventory tree updates immediately.
-    void queryClient.invalidateQueries({ queryKey: ["clusters", clusterId, "vms"] });
-    void queryClient.invalidateQueries({ queryKey: ["clusters", clusterId, "containers"] });
-  }, [queryClient, clusterId]);
+    // VM/container status invalidation is handled by the backend's
+    // vm_state_change events via useEventInvalidation — no need to
+    // invalidate here (doing so causes stale status refetches).
+  }, [queryClient]);
 
   // Persist task to DB when UPID becomes available.
   useEffect(() => {

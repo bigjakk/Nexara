@@ -13,6 +13,7 @@ import (
 	"github.com/proxdash/proxdash/internal/collector"
 	"github.com/proxdash/proxdash/internal/config"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 )
 
 func main() {
@@ -56,6 +57,10 @@ func main() {
 
 	queries := db.New(pool)
 	syncer := collector.NewSyncer(queries, cfg.EncryptionKey, logger)
+
+	// Set up event publisher for VM status change notifications.
+	eventPub := events.NewPublisher(redisClient, logger)
+	syncer.SetEventPublisher(eventPub)
 
 	publisher := collector.NewPublisher(redisClient, logger)
 	health := collector.NewHealthMonitor(queries, publisher, logger)

@@ -158,7 +158,9 @@ func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "container", ct.ID.String(), req.Action)
-	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), req.Action)
+
+	// Watch the task in the background and update the DB when it completes.
+	watchTaskAndUpdateStatus(h.queries, h.eventPub, pxClient, node.Name, upid, ct.ID, cluster.ID, req.Action, "container")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,

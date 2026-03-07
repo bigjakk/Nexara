@@ -682,8 +682,6 @@ export function CreateVMDialog({
           <TaskProgressBanner
             clusterId={clusterId}
             upid={upid}
-            kind="vm"
-            resourceId=""
             onComplete={() => {
               // After task completes, poll for the new VM record and navigate to it
               const createdVmid = Number(vmid);

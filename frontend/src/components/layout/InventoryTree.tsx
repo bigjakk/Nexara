@@ -34,7 +34,9 @@ function StatusDot({ status }: { status: string }) {
       ? "bg-green-500"
       : status === "stopped" || status === "offline"
         ? "bg-red-500"
-        : "bg-gray-400";
+        : status === "suspended" || status === "paused"
+          ? "bg-yellow-500"
+          : "bg-gray-400";
   return <span className={cn("inline-block h-2 w-2 shrink-0 rounded-full", color)} />;
 }
 

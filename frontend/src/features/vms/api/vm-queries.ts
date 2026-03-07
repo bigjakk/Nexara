@@ -76,8 +76,6 @@ interface ActionParams {
 }
 
 export function useVMAction() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: ({ clusterId, resourceId, kind, action }: ActionParams) => {
       const base =
@@ -86,14 +84,9 @@ export function useVMAction() {
           : `/api/v1/clusters/${clusterId}/vms/${resourceId}/status`;
       return apiClient.post<VMActionResponse>(base, { action });
     },
-    onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "containers"],
-      });
-    },
+    // No onSuccess invalidation here — the backend publishes a vm_state_change
+    // event when the Proxmox task completes and the DB is updated, which
+    // triggers invalidation via useEventInvalidation with the correct status.
   });
 }
 

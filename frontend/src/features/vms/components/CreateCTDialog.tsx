@@ -400,8 +400,6 @@ export function CreateCTDialog({
           <TaskProgressBanner
             clusterId={clusterId}
             upid={upid}
-            kind="ct"
-            resourceId=""
             onComplete={() => {
               handleClose();
             }}

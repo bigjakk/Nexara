@@ -213,7 +213,11 @@ func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
 	}
 
 	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), req.Action)
-	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), req.Action)
+
+	// Watch the task in the background and update the DB when it completes.
+	// The watcher publishes a vm_state_change event only after the DB is updated
+	// with the real status, avoiding premature refetches of stale data.
+	watchTaskAndUpdateStatus(h.queries, h.eventPub, pxClient, node.Name, upid, vm.ID, cluster.ID, req.Action, "vm")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,

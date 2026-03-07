@@ -167,8 +167,6 @@ export function VMActions({
       <TaskProgressBanner
         clusterId={clusterId}
         upid={activeUpid}
-        kind={kind}
-        resourceId={resourceId}
         onComplete={handleTaskComplete}
         description={`${lastAction ?? "action"} ${name}`}
       />

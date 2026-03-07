@@ -76,8 +76,6 @@ export function DestroyDialog({
           <TaskProgressBanner
             clusterId={clusterId}
             upid={upid}
-            kind={kind}
-            resourceId={resourceId}
             onComplete={() => {
               handleClose();
               void navigate("/inventory");
