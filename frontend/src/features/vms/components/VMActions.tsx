@@ -1,16 +1,5 @@
 import { useState } from "react";
-import {
-  Play,
-  Square,
-  Power,
-  RotateCcw,
-  Zap,
-  Pause,
-  PlayCircle,
-  Copy,
-  ArrowRightLeft,
-  Trash2,
-} from "lucide-react";
+import { Copy, ArrowRightLeft, Trash2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { useVMAction } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
+import { lifecycleActions, type ActionConfig } from "../lib/vm-action-defs";
 import type { VMAction, ResourceKind } from "../types/vm";
 
 /** Map a completed lifecycle action to the expected VM status. */
@@ -53,73 +43,6 @@ interface VMActionsProps {
   onDestroy: () => void;
 }
 
-interface ActionConfig {
-  action: VMAction;
-  label: string;
-  icon: React.ReactNode;
-  variant: "outline" | "destructive";
-  needsConfirm: boolean;
-  showWhen: (status: string, kind: ResourceKind) => boolean;
-}
-
-const actions: ActionConfig[] = [
-  {
-    action: "start",
-    label: "Start",
-    icon: <Play className="h-4 w-4" />,
-    variant: "outline",
-    needsConfirm: false,
-    showWhen: (s) => s === "stopped" || s === "suspended",
-  },
-  {
-    action: "shutdown",
-    label: "Shutdown",
-    icon: <Power className="h-4 w-4" />,
-    variant: "outline",
-    needsConfirm: false,
-    showWhen: (s) => s === "running",
-  },
-  {
-    action: "reboot",
-    label: "Reboot",
-    icon: <RotateCcw className="h-4 w-4" />,
-    variant: "outline",
-    needsConfirm: false,
-    showWhen: (s) => s === "running",
-  },
-  {
-    action: "stop",
-    label: "Stop",
-    icon: <Square className="h-4 w-4" />,
-    variant: "outline",
-    needsConfirm: true,
-    showWhen: (s) => s === "running",
-  },
-  {
-    action: "reset",
-    label: "Reset",
-    icon: <Zap className="h-4 w-4" />,
-    variant: "outline",
-    needsConfirm: true,
-    showWhen: (s, k) => s === "running" && k === "vm",
-  },
-  {
-    action: "suspend",
-    label: "Suspend",
-    icon: <Pause className="h-4 w-4" />,
-    variant: "outline",
-    needsConfirm: false,
-    showWhen: (s) => s === "running",
-  },
-  {
-    action: "resume",
-    label: "Resume",
-    icon: <PlayCircle className="h-4 w-4" />,
-    variant: "outline",
-    needsConfirm: false,
-    showWhen: (s) => s === "suspended",
-  },
-];
 
 export function VMActions({
   clusterId,
@@ -184,7 +107,7 @@ export function VMActions({
     }
   }
 
-  const visibleActions = actions.filter((a) =>
+  const visibleActions = lifecycleActions.filter((a) =>
     a.showWhen(normalizedStatus, kind),
   );
 

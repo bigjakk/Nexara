@@ -17,6 +17,8 @@ import { useSidebarStore } from "@/stores/sidebar-store";
 import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { EditClusterDialog } from "@/features/clusters/components/EditClusterDialog";
 import { DeleteClusterDialog } from "@/features/clusters/components/DeleteClusterDialog";
+import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
+import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -105,20 +107,32 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
               const vmPath = `/inventory/${kind}/${clusterId}/${vm.id}`;
               const vmActive = location.pathname === vmPath;
               return (
-                <button
+                <VMContextMenu
                   key={vm.id}
-                  onClick={() => { navigate(vmPath); }}
-                  className={cn(
-                    "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-                    vmActive && "bg-accent text-accent-foreground",
-                  )}
+                  target={{
+                    clusterId,
+                    resourceId: vm.id,
+                    vmid: vm.vmid,
+                    name: vm.name,
+                    kind: vm.type === "lxc" ? "ct" : "vm",
+                    status: vm.status,
+                    currentNode: node.name,
+                  }}
                 >
-                  <VMIcon type={vm.type} />
-                  <StatusDot status={vm.status} />
-                  <span className="truncate">
-                    {vm.vmid} {vm.name}
-                  </span>
-                </button>
+                  <button
+                    onClick={() => { navigate(vmPath); }}
+                    className={cn(
+                      "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
+                      vmActive && "bg-accent text-accent-foreground",
+                    )}
+                  >
+                    <VMIcon type={vm.type} />
+                    <StatusDot status={vm.status} />
+                    <span className="truncate">
+                      {vm.vmid} {vm.name}
+                    </span>
+                  </button>
+                </VMContextMenu>
               );
             })}
         </div>
@@ -275,6 +289,8 @@ export function InventoryTree() {
       {clusters?.map((cluster) => (
         <ClusterBranch key={cluster.id} cluster={cluster} />
       ))}
+
+      <VMContextDialogs />
     </div>
   );
 }
