@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { Loader2, Save, AlertTriangle, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { Loader2, Save, AlertTriangle, ChevronDown, ChevronRight, Plus, Trash2, ArrowUp, ArrowDown, HardDrive, Network, Disc } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -116,6 +116,26 @@ function Section({ title, children, defaultOpen = true }: SectionProps) {
   );
 }
 
+/** Returns a human-readable label for a bootable device key. */
+function bootDeviceLabel(key: string, config: VMConfig): { label: string; type: "disk" | "cdrom" | "net" | "other" } {
+  if (/^net\d+$/.test(key)) {
+    const raw = str(config[key]);
+    const bridge = raw.match(/bridge=([^,]+)/)?.[1] ?? "";
+    return { label: `Network (${key})${bridge ? ` — ${bridge}` : ""}`, type: "net" };
+  }
+  const val = str(config[key]);
+  if (val.includes("media=cdrom")) {
+    const iso = val.split(",")[0];
+    return { label: `CD/DVD (${key})${iso && iso !== "none" ? ` — ${iso}` : " — empty"}`, type: "cdrom" };
+  }
+  if (DISK_KEY_RE.test(key)) {
+    const storage = val.split(":")[0] ?? "";
+    const size = val.match(/size=([^,]+)/)?.[1] ?? "";
+    return { label: `Disk (${key})${storage ? ` — ${storage}` : ""}${size ? `, ${size}` : ""}`, type: "disk" };
+  }
+  return { label: key, type: "other" };
+}
+
 /** Per-disk editable options tracked in local state. */
 interface DiskEdit {
   cache: string;
@@ -173,7 +193,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
   const [onboot, setOnboot] = useState(false);
   const [tablet, setTablet] = useState(true);
   const [hotplug, setHotplug] = useState("");
-  const [bootOrder, setBootOrder] = useState("");
+  const [bootOrder, setBootOrder] = useState<Array<{ device: string; enabled: boolean }>>([]);
   const [ostype, setOstype] = useState("l26");
   const [protection, setProtection] = useState(false);
   const [localtime, setLocaltime] = useState(false);
@@ -188,9 +208,8 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
   const [vgaMemory, setVgaMemory] = useState("");
   const [audioDevice, setAudioDevice] = useState("");
 
-  // --- CD/DVD (any bus with media=cdrom) ---
-  const [cdromValue, setCdromValue] = useState("none");
-  const [cdromKey, setCdromKey] = useState("ide2"); // device key (ide2, sata0, etc.)
+  // --- CD/DVD (all devices with media=cdrom) ---
+  const [cdromEdits, setCdromEdits] = useState<Record<string, string>>({});
   const [cdromStorageId, setCdromStorageId] = useState("");
 
   // --- Meta ---
@@ -256,13 +275,14 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
     return isoContent.filter((item) => item.content === "iso");
   }, [isoContent]);
 
-  // Auto-select ISO storage: prefer the one matching the mounted ISO, else first available
+  // Auto-select ISO storage: prefer the one matching a mounted ISO, else first available
   useEffect(() => {
     if (isoStorages.length === 0) return;
     if (cdromStorageId) return;
     // If an ISO is mounted (e.g. "local:iso/ubuntu.iso"), match by storage name prefix
-    if (cdromValue !== "none" && cdromValue.includes(":")) {
-      const storageName = cdromValue.split(":")[0];
+    const mountedIso = Object.values(cdromEdits).find((v) => v !== "none" && v.includes(":"));
+    if (mountedIso) {
+      const storageName = mountedIso.split(":")[0];
       const match = isoStorages.find((s) => s.storage === storageName);
       if (match) {
         setCdromStorageId(match.id);
@@ -270,7 +290,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
       }
     }
     setCdromStorageId(isoStorages[0]?.id ?? "");
-  }, [isoStorages, cdromStorageId, cdromValue]);
+  }, [isoStorages, cdromStorageId, cdromEdits]);
 
   function updateDiskEdit(key: string, partial: Partial<DiskEdit>) {
     setDiskEdits((prev) => ({
@@ -399,7 +419,26 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
     setProtection(bool01(config["protection"]));
     setLocaltime(bool01(config["localtime"]));
     const bootDevices = parseBootOrder(str(config["boot"] ?? ""));
-    setBootOrder(bootDevices.join(";"));
+    // Build full boot order: enabled devices first (in order), then all other bootable devices (disabled)
+    const enabledSet = new Set(bootDevices);
+    const allBootable: string[] = [];
+    for (const key of Object.keys(config)) {
+      if (DISK_KEY_RE.test(key) && !key.startsWith("unused")) allBootable.push(key);
+      else if (/^net\d+$/.test(key)) allBootable.push(key);
+    }
+    allBootable.sort((a, b) => a.localeCompare(b));
+    const ordered: Array<{ device: string; enabled: boolean }> = [];
+    // First: enabled devices in their configured order
+    for (const d of bootDevices) {
+      ordered.push({ device: d, enabled: true });
+    }
+    // Then: remaining bootable devices not in boot order (disabled)
+    for (const d of allBootable) {
+      if (!enabledSet.has(d)) {
+        ordered.push({ device: d, enabled: false });
+      }
+    }
+    setBootOrder(ordered);
     const startup = parseStartup(str(config["startup"] ?? ""));
     setStartupOrder(startup.order);
     setStartupUp(startup.up);
@@ -433,22 +472,19 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
     setAudioDevice(audio.device);
 
     // CD/DVD — scan all config keys for media=cdrom (ide*, sata*, etc.)
-    let foundCdromKey = "";
-    let foundCdromVal = "none";
+    const newCdromEdits: Record<string, string> = {};
     for (const [cfgKey, cfgVal] of Object.entries(config)) {
       if (!DISK_KEY_RE.test(cfgKey)) continue;
       const v = str(cfgVal);
       if (v.includes("media=cdrom")) {
-        foundCdromKey = cfgKey;
-        if (v !== "none,media=cdrom") {
-          const parts = v.split(",");
-          foundCdromVal = parts[0] ?? "none";
+        if (v === "none,media=cdrom") {
+          newCdromEdits[cfgKey] = "none";
+        } else {
+          newCdromEdits[cfgKey] = v.split(",")[0] ?? "none";
         }
-        break;
       }
     }
-    setCdromKey(foundCdromKey || "ide2");
-    setCdromValue(foundCdromVal);
+    setCdromEdits(newCdromEdits);
 
     // Meta
     setDescription(str(config["description"] ?? ""));
@@ -499,6 +535,23 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
 
   function handleAddDevice(key: string, value: string) {
     setPendingDeviceAdds((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleAddCDROM(key: string, isoVolid: string) {
+    setCdromEdits((prev) => ({ ...prev, [key]: isoVolid }));
+  }
+
+  function handleRemoveCDROM(key: string) {
+    setCdromEdits((prev) => {
+      const next = { ...prev };
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete next[key];
+      return next;
+    });
+    // If it existed in original config, mark for deletion
+    if (original && original[key] != null) {
+      setDeviceRemovals((prev) => new Set(prev).add(key));
+    }
   }
 
   function handleRemoveDevice(key: string) {
@@ -608,10 +661,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
     if (localtime !== origLocaltime) fields["localtime"] = localtime ? "1" : "0";
     // Boot order
     const origBootDevices = parseBootOrder(str(original["boot"] ?? ""));
-    const newBootStr = bootOrder.trim();
-    if (newBootStr !== origBootDevices.join(";")) {
-      const devices = newBootStr.split(";").filter(Boolean);
-      fields["boot"] = buildBootOrder(devices);
+    const enabledDevices = bootOrder.filter((b) => b.enabled).map((b) => b.device);
+    if (enabledDevices.join(";") !== origBootDevices.join(";")) {
+      fields["boot"] = buildBootOrder(enabledDevices);
     }
     // Startup order
     const origStartup = parseStartup(str(original["startup"] ?? ""));
@@ -652,16 +704,17 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
       if (newAudio) { fields["audio0"] = newAudio; } else { deleteFields.push("audio0"); }
     }
 
-    // CD/DVD (dynamic key — ide2, sata0, etc.)
-    const origCdromRaw = str(original[cdromKey] ?? "");
-    const origCdrom = origCdromRaw && origCdromRaw !== "none,media=cdrom"
-      ? (origCdromRaw.split(",")[0] ?? "none")
-      : "none";
-    if (cdromValue !== origCdrom) {
-      if (cdromValue === "none") {
-        fields[cdromKey] = "none,media=cdrom";
+    // CD/DVD drives (all media=cdrom devices)
+    for (const [key, isoVal] of Object.entries(cdromEdits)) {
+      const origRaw = str(original[key] ?? "");
+      if (!origRaw) {
+        // New cdrom device
+        fields[key] = isoVal === "none" ? "none,media=cdrom" : `${isoVal},media=cdrom`;
       } else {
-        fields[cdromKey] = `${cdromValue},media=cdrom`;
+        const origVal = origRaw !== "none,media=cdrom" ? (origRaw.split(",")[0] ?? "none") : "none";
+        if (isoVal !== origVal) {
+          fields[key] = isoVal === "none" ? "none,media=cdrom" : `${isoVal},media=cdrom`;
+        }
       }
     }
 
@@ -737,7 +790,8 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
     if (protection !== bool01(original["protection"])) return true;
     if (localtime !== bool01(original["localtime"])) return true;
     const origBootDevices = parseBootOrder(str(original["boot"] ?? ""));
-    if (bootOrder.trim() !== origBootDevices.join(";")) return true;
+    const currentEnabled = bootOrder.filter((b) => b.enabled).map((b) => b.device);
+    if (currentEnabled.join(";") !== origBootDevices.join(";")) return true;
     const origStartup = parseStartup(str(original["startup"] ?? ""));
     if (buildStartup({ order: startupOrder, up: startupUp, down: startupDown }) !== buildStartup(origStartup)) return true;
     // Multi-NIC changes
@@ -749,12 +803,13 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
     if (deviceRemovals.size > 0) return true;
     if (buildVGA({ type: vgaType, memory: vgaMemory }) !== str(original["vga"] ?? "")) return true;
     if (buildAudio({ device: audioDevice, driver: "spice" }) !== str(original["audio0"] ?? "")) return true;
-    // CD/DVD
-    const origCdromRaw = str(original[cdromKey] ?? "");
-    const origCdromVal = origCdromRaw && origCdromRaw !== "none,media=cdrom"
-      ? (origCdromRaw.split(",")[0] ?? "none")
-      : "none";
-    if (cdromValue !== origCdromVal) return true;
+    // CD/DVD drives
+    for (const [key, isoVal] of Object.entries(cdromEdits)) {
+      const origRaw = str(original[key] ?? "");
+      if (!origRaw) return true; // new cdrom
+      const origVal = origRaw !== "none,media=cdrom" ? (origRaw.split(",")[0] ?? "none") : "none";
+      if (isoVal !== origVal) return true;
+    }
     if (description !== str(original["description"] ?? "")) return true;
     if (tags !== str(original["tags"] ?? "")) return true;
     for (const [key, edit] of Object.entries(diskEdits)) {
@@ -766,7 +821,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
     if (pendingNewDisks.length > 0) return true;
     return false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [original, cores, sockets, cpuType, numa, cpulimit, cpuunits, affinity, memory, balloon, shares, bios, machine, scsihw, agentEnabled, agentFstrim, kvmEnabled, acpi, onboot, tablet, hotplug, ostype, protection, localtime, bootOrder, startupOrder, startupUp, startupDown, nicEdits, vgaType, vgaMemory, audioDevice, cdromValue, cdromKey, description, tags, diskEdits, disksToRemove, pendingNewDisks, pendingDeviceAdds, deviceRemovals]);
+  }, [original, cores, sockets, cpuType, numa, cpulimit, cpuunits, affinity, memory, balloon, shares, bios, machine, scsihw, agentEnabled, agentFstrim, kvmEnabled, acpi, onboot, tablet, hotplug, ostype, protection, localtime, bootOrder, startupOrder, startupUp, startupDown, nicEdits, vgaType, vgaMemory, audioDevice, cdromEdits, description, tags, diskEdits, disksToRemove, pendingNewDisks, pendingDeviceAdds, deviceRemovals]);
 
   if (isLoading) {
     return (
@@ -804,7 +859,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
         usbDevices={usbDevices}
         pciDevices={pciDevices}
         bridges={bridgeNames}
+        isoFiles={isoFiles}
         onAddDevice={handleAddDevice}
+        onAddCDROM={handleAddCDROM}
         onAddDisk={() => { setShowAddDisk(true); }}
       />
 
@@ -950,7 +1007,66 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
             </div>
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">Boot Order</Label>
-              <Input value={bootOrder} onChange={(e) => { setBootOrder(e.target.value); }} placeholder="scsi0;ide2;net0" className="h-8 text-xs" />
+              <div className="space-y-1 rounded-md border p-1.5">
+                {bootOrder.length === 0 && (
+                  <p className="px-1 text-[10px] text-muted-foreground">No bootable devices</p>
+                )}
+                {bootOrder.map((entry, idx) => {
+                  const info = config ? bootDeviceLabel(entry.device, config) : { label: entry.device, type: "other" as const };
+                  const DeviceIcon = info.type === "net" ? Network : info.type === "cdrom" ? Disc : HardDrive;
+                  return (
+                    <div
+                      key={entry.device}
+                      className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-xs ${entry.enabled ? "bg-muted/50" : "opacity-50"}`}
+                    >
+                      <Checkbox
+                        id={`boot-${entry.device}`}
+                        checked={entry.enabled}
+                        onCheckedChange={(v) => {
+                          setBootOrder((prev) => prev.map((b, i) => i === idx ? { ...b, enabled: v === true } : b));
+                        }}
+                      />
+                      <DeviceIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate">{info.label}</span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">#{String(idx + 1)}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 w-5 p-0"
+                        disabled={idx === 0}
+                        onClick={() => {
+                          setBootOrder((prev) => {
+                            const next = [...prev];
+                            const temp = next[idx];
+                            next[idx] = next[idx - 1]!;
+                            next[idx - 1] = temp!;
+                            return next;
+                          });
+                        }}
+                      >
+                        <ArrowUp className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 w-5 p-0"
+                        disabled={idx === bootOrder.length - 1}
+                        onClick={() => {
+                          setBootOrder((prev) => {
+                            const next = [...prev];
+                            const temp = next[idx];
+                            next[idx] = next[idx + 1]!;
+                            next[idx + 1] = temp!;
+                            return next;
+                          });
+                        }}
+                      >
+                        <ArrowDown className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
@@ -1108,29 +1224,44 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
           </div>
         </Section>
 
-        {/* CD/DVD Drive */}
-        <Section title={`CD/DVD Drive (${cdromKey})`}>
-          <div className="space-y-2">
-            <div className="space-y-1">
-              <Label className="text-xs">ISO Image</Label>
-              <select
-                className={compactSelect}
-                value={cdromValue}
-                onChange={(e) => { setCdromValue(e.target.value); }}
-              >
-                <option value="none">No media (empty drive)</option>
-                {/* Always show the currently mounted ISO even if not in the storage listing */}
-                {cdromValue !== "none" && !isoFiles.some((iso) => iso.volid === cdromValue) && (
-                  <option value={cdromValue}>{cdromValue} (current)</option>
-                )}
-                {isoFiles.map((iso) => (
-                  <option key={iso.volid} value={iso.volid}>
-                    {iso.volid}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {isoStorages.length > 1 && (
+        {/* CD/DVD Drives */}
+        <Section title={`CD/DVD Drives (${String(Object.keys(cdromEdits).length)})`}>
+          <div className="space-y-3">
+            {Object.entries(cdromEdits)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([key, isoVal]) => (
+              <div key={key} className="space-y-1.5 rounded border p-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-medium">{key}</span>
+                  <Badge variant="secondary" className="text-[10px]">CD/DVD</Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
+                    onClick={() => { handleRemoveCDROM(key); }}
+                  >
+                    <Trash2 className="h-3 w-3" /> Remove
+                  </Button>
+                </div>
+                <select
+                  className={compactSelect}
+                  value={isoVal}
+                  onChange={(e) => { setCdromEdits((prev) => ({ ...prev, [key]: e.target.value })); }}
+                >
+                  <option value="none">No media (empty drive)</option>
+                  {isoVal !== "none" && !isoFiles.some((iso) => iso.volid === isoVal) && (
+                    <option value={isoVal}>{isoVal} (current)</option>
+                  )}
+                  {isoFiles.map((iso) => (
+                    <option key={iso.volid} value={iso.volid}>{iso.volid}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+            {Object.keys(cdromEdits).length === 0 && (
+              <p className="text-xs text-muted-foreground">No CD/DVD drives configured. Use &quot;Add Device&quot; to add one.</p>
+            )}
+            {isoStorages.length > 1 && Object.keys(cdromEdits).length > 0 && (
               <div className="space-y-1">
                 <Label className="text-xs">Browse storage</Label>
                 <select
@@ -1139,17 +1270,10 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
                   onChange={(e) => { setCdromStorageId(e.target.value); }}
                 >
                   {isoStorages.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.storage}
-                    </option>
+                    <option key={s.id} value={s.id}>{s.storage}</option>
                   ))}
                 </select>
               </div>
-            )}
-            {cdromValue !== "none" && (
-              <p className="text-[10px] text-muted-foreground">
-                Current: {cdromValue}
-              </p>
             )}
           </div>
         </Section>

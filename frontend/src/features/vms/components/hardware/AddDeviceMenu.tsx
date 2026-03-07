@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Network, Usb, Cpu, Monitor, HardDrive, Key, Shield, Dice1, FolderOpen, Terminal } from "lucide-react";
+import { Plus, Network, Usb, Cpu, Monitor, HardDrive, Key, Shield, Dice1, FolderOpen, Terminal, Disc } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,13 +42,20 @@ import type { VMConfig } from "../../types/vm";
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
+interface ISOFile {
+  volid: string;
+  content: string;
+}
+
 interface AddDeviceMenuProps {
   config: VMConfig;
   diskStorages: Array<{ storage: string; type: string; id: string }>;
   usbDevices: NodeUSBDevice[] | undefined;
   pciDevices: NodePCIDevice[] | undefined;
   bridges: string[];
+  isoFiles: ISOFile[];
   onAddDevice: (key: string, value: string) => void;
+  onAddCDROM: (key: string, isoVolid: string) => void;
   onAddDisk: () => void;
 }
 
@@ -62,6 +69,7 @@ type DeviceDialog =
   | "efi"
   | "tpm"
   | "cloudinit"
+  | "cdrom"
   | null;
 
 function findNextIndex(config: VMConfig, prefix: string, max: number): number {
@@ -77,7 +85,9 @@ export function AddDeviceMenu({
   usbDevices,
   pciDevices,
   bridges,
+  isoFiles,
   onAddDevice,
+  onAddCDROM,
   onAddDisk,
 }: AddDeviceMenuProps) {
   const [dialog, setDialog] = useState<DeviceDialog>(null);
@@ -97,6 +107,9 @@ export function AddDeviceMenu({
         <DropdownMenuContent align="start" className="w-48">
           <DropdownMenuItem onClick={onAddDisk}>
             <HardDrive className="mr-2 h-4 w-4" /> Hard Disk
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => { setDialog("cdrom"); }}>
+            <Disc className="mr-2 h-4 w-4" /> CD/DVD Drive
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => { setDialog("nic"); }}>
             <Network className="mr-2 h-4 w-4" /> Network Device
@@ -194,6 +207,14 @@ export function AddDeviceMenu({
           config={config}
           diskStorages={diskStorages}
           onAdd={onAddDevice}
+          onClose={() => { setDialog(null); }}
+        />
+      )}
+      {dialog === "cdrom" && (
+        <AddCDROMDialog
+          config={config}
+          isoFiles={isoFiles}
+          onAdd={onAddCDROM}
           onClose={() => { setDialog(null); }}
         />
       )}
@@ -825,6 +846,82 @@ function AddCloudInitDialog({
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button onClick={handleAdd} disabled={!storage}>Add</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CD/DVD Drive Dialog
+// ---------------------------------------------------------------------------
+
+const cdromBusSlots = [
+  { value: "ide0", label: "IDE 0" },
+  { value: "ide1", label: "IDE 1" },
+  { value: "ide2", label: "IDE 2" },
+  { value: "ide3", label: "IDE 3" },
+  { value: "sata0", label: "SATA 0" },
+  { value: "sata1", label: "SATA 1" },
+  { value: "sata2", label: "SATA 2" },
+  { value: "sata3", label: "SATA 3" },
+  { value: "sata4", label: "SATA 4" },
+  { value: "sata5", label: "SATA 5" },
+];
+
+function AddCDROMDialog({
+  config,
+  isoFiles,
+  onAdd,
+  onClose,
+}: {
+  config: VMConfig;
+  isoFiles: ISOFile[];
+  onAdd: (key: string, isoVolid: string) => void;
+  onClose: () => void;
+}) {
+  const availableSlot = cdromBusSlots.find((b) => config[b.value] == null)?.value ?? "ide2";
+  const [slot, setSlot] = useState(availableSlot);
+  const [iso, setIso] = useState("none");
+
+  const slotFree = config[slot] == null;
+
+  function handleAdd() {
+    if (!slotFree) return;
+    onAdd(slot, iso);
+    onClose();
+  }
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add CD/DVD Drive</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Bus/Slot</Label>
+            <select className={selectClass} value={slot} onChange={(e) => { setSlot(e.target.value); }}>
+              {cdromBusSlots.map((b) => (
+                <option key={b.value} value={b.value} disabled={config[b.value] != null}>
+                  {b.label}{config[b.value] != null ? " (in use)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">ISO Image</Label>
+            <select className={selectClass} value={iso} onChange={(e) => { setIso(e.target.value); }}>
+              <option value="none">No media (empty drive)</option>
+              {isoFiles.map((f) => (
+                <option key={f.volid} value={f.volid}>{f.volid}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleAdd} disabled={!slotFree}>Add</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

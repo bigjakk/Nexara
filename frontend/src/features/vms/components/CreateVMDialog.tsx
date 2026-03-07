@@ -561,6 +561,7 @@ export function CreateVMDialog({
     }
     // Boot / Options
     if (onboot) body.onboot = true;
+    body.hotplug = "network,disk,usb";
     // Cloud-Init
     if (ciuser) body.ciuser = ciuser;
     if (cipassword) body.cipassword = cipassword;
