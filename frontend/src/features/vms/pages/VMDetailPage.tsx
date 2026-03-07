@@ -21,7 +21,6 @@ import { SnapshotPanel } from "../components/SnapshotPanel";
 import { CloudInitPanel } from "../components/CloudInitPanel";
 import { HardwarePanel } from "../components/HardwarePanel";
 import { SchedulePanel } from "../components/SchedulePanel";
-import { InlineVNCViewer } from "../components/InlineVNCViewer";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
@@ -188,7 +187,32 @@ export function VMDetailPage() {
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Console + Actions */}
+      <div className="flex items-center gap-2">
+        {kind === "vm" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => { openConsole("vnc"); }}
+            disabled={normalizedStatus !== "running"}
+          >
+            <Monitor className="h-4 w-4" />
+            VNC Console
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => { openConsole("terminal"); }}
+          disabled={normalizedStatus !== "running"}
+        >
+          <Terminal className="h-4 w-4" />
+          {kind === "ct" ? "Attach" : "Serial"}
+        </Button>
+      </div>
+
       <VMActions
         clusterId={clusterId}
         resourceId={vmId}
@@ -212,7 +236,6 @@ export function VMDetailPage() {
             <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
           )}
           <TabsTrigger value="schedules">Schedules</TabsTrigger>
-          <TabsTrigger value="console">Console</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 space-y-6">
@@ -274,43 +297,6 @@ export function VMDetailPage() {
           />
         </TabsContent>
 
-        <TabsContent value="console" className="mt-4 space-y-4">
-          <div className="flex gap-3">
-            {kind === "vm" && (
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => { openConsole("vnc"); }}
-                disabled={normalizedStatus !== "running"}
-              >
-                <Monitor className="h-4 w-4" />
-                <span className="hidden sm:inline">Open in</span> Dedicated Console
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              className="gap-2"
-              onClick={() => { openConsole("terminal"); }}
-              disabled={normalizedStatus !== "running"}
-            >
-              <Terminal className="h-4 w-4" />
-              Open {kind === "ct" ? "Attach" : "Serial"} Console
-            </Button>
-            {normalizedStatus !== "running" && (
-              <p className="self-center text-sm text-muted-foreground">
-                Resource must be running to open a console.
-              </p>
-            )}
-          </div>
-          {normalizedStatus === "running" && (
-            <InlineVNCViewer
-              clusterId={clusterId}
-              node={nodeName}
-              vmid={vm.vmid}
-              guestType={kind === "ct" ? "lxc" : "qemu"}
-            />
-          )}
-        </TabsContent>
       </Tabs>
 
       {/* Dialogs */}
