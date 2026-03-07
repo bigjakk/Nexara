@@ -121,6 +121,76 @@ func (q *Queries) GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterA
 	return i, err
 }
 
+const listAllVMs = `-- name: ListAllVMs :many
+SELECT v.id, v.cluster_id, v.node_id, v.vmid, v.name, v.type, v.status, v.cpu_count, v.mem_total, v.disk_total, v.uptime, v.template, v.tags, v.ha_state, v.pool, v.last_seen_at, v.created_at, v.updated_at, c.name AS cluster_name
+FROM vms v
+JOIN clusters c ON c.id = v.cluster_id
+WHERE v.template = false
+ORDER BY v.name
+`
+
+type ListAllVMsRow struct {
+	ID          uuid.UUID `json:"id"`
+	ClusterID   uuid.UUID `json:"cluster_id"`
+	NodeID      uuid.UUID `json:"node_id"`
+	Vmid        int32     `json:"vmid"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Status      string    `json:"status"`
+	CpuCount    int32     `json:"cpu_count"`
+	MemTotal    int64     `json:"mem_total"`
+	DiskTotal   int64     `json:"disk_total"`
+	Uptime      int64     `json:"uptime"`
+	Template    bool      `json:"template"`
+	Tags        string    `json:"tags"`
+	HaState     string    `json:"ha_state"`
+	Pool        string    `json:"pool"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	ClusterName string    `json:"cluster_name"`
+}
+
+func (q *Queries) ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error) {
+	rows, err := q.db.Query(ctx, listAllVMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllVMsRow{}
+	for rows.Next() {
+		var i ListAllVMsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.NodeID,
+			&i.Vmid,
+			&i.Name,
+			&i.Type,
+			&i.Status,
+			&i.CpuCount,
+			&i.MemTotal,
+			&i.DiskTotal,
+			&i.Uptime,
+			&i.Template,
+			&i.Tags,
+			&i.HaState,
+			&i.Pool,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ClusterName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listContainersByCluster = `-- name: ListContainersByCluster :many
 SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid
 `

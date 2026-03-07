@@ -42,6 +42,7 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/vms/:vm_id", s.vmHandler.GetVM)
 			clusters.Post("/:cluster_id/vms/:vm_id/status", s.vmHandler.PerformAction)
 			clusters.Post("/:cluster_id/vms/:vm_id/clone", s.vmHandler.CloneVM)
+			clusters.Post("/:cluster_id/vms/:vm_id/migrate", s.vmHandler.MigrateVM)
 			clusters.Delete("/:cluster_id/vms/:vm_id", s.vmHandler.DestroyVM)
 			clusters.Get("/:cluster_id/vms/:vm_id/snapshots", s.vmHandler.ListSnapshots)
 			clusters.Post("/:cluster_id/vms/:vm_id/snapshots", s.vmHandler.CreateSnapshot)
@@ -201,6 +202,11 @@ func (s *Server) setupRoutes() {
 			pbs.Get("/:pbs_id/datastores/status", s.backupHandler.GetDatastoreStatus)
 			pbs.Post("/:pbs_id/datastores/:store/gc", s.backupHandler.TriggerGC)
 			pbs.Delete("/:pbs_id/datastores/:store/snapshots", s.backupHandler.DeleteSnapshot)
+			pbs.Put("/:pbs_id/datastores/:store/snapshots/protect", s.backupHandler.ProtectSnapshot)
+			pbs.Put("/:pbs_id/datastores/:store/snapshots/notes", s.backupHandler.UpdateSnapshotNotes)
+			pbs.Post("/:pbs_id/datastores/:store/prune", s.backupHandler.PruneDatastore)
+			pbs.Get("/:pbs_id/datastores/:store/rrd", s.backupHandler.GetDatastoreRRD)
+			pbs.Get("/:pbs_id/datastores/:store/config", s.backupHandler.GetDatastoreConfig)
 			pbs.Get("/:pbs_id/snapshots", s.backupHandler.ListSnapshots)
 			pbs.Get("/:pbs_id/sync-jobs", s.backupHandler.ListSyncJobs)
 			pbs.Post("/:pbs_id/sync-jobs/:job_id/run", s.backupHandler.RunSyncJob)
@@ -208,6 +214,7 @@ func (s *Server) setupRoutes() {
 			pbs.Post("/:pbs_id/verify-jobs/:job_id/run", s.backupHandler.RunVerifyJob)
 			pbs.Get("/:pbs_id/tasks", s.backupHandler.ListTasks)
 			pbs.Get("/:pbs_id/tasks/:upid", s.backupHandler.GetTaskStatus)
+			pbs.Get("/:pbs_id/tasks/:upid/log", s.backupHandler.GetTaskLog)
 			pbs.Get("/:pbs_id/metrics", s.backupHandler.GetDatastoreMetrics)
 		}
 	}
@@ -218,10 +225,22 @@ func (s *Server) setupRoutes() {
 		migClusters.Get("/:cluster_id/migrations", s.migrationHandler.ListByCluster)
 	}
 
-	// Restore route under clusters.
+	// PBS snapshot lookup (cross-server, by backup_id / VMID).
+	if s.backupHandler != nil {
+		v1.Get("/pbs-snapshots", s.authRequired(), s.backupHandler.ListSnapshotsByBackupID)
+		v1.Get("/backup-coverage", s.authRequired(), s.backupHandler.GetBackupCoverage)
+	}
+
+	// Restore and backup job routes under clusters.
 	if s.backupHandler != nil && s.clusterHandler != nil {
 		clusters := v1.Group("/clusters", s.authRequired())
 		clusters.Post("/:cluster_id/restore", s.backupHandler.RestoreBackup)
+		clusters.Post("/:cluster_id/backup", s.backupHandler.TriggerBackup)
+		clusters.Get("/:cluster_id/backup-jobs", s.backupHandler.ListBackupJobs)
+		clusters.Post("/:cluster_id/backup-jobs", s.backupHandler.CreateBackupJob)
+		clusters.Put("/:cluster_id/backup-jobs/:job_id", s.backupHandler.UpdateBackupJob)
+		clusters.Delete("/:cluster_id/backup-jobs/:job_id", s.backupHandler.DeleteBackupJob)
+		clusters.Post("/:cluster_id/backup-jobs/:job_id/run", s.backupHandler.RunBackupJob)
 	}
 
 	// Schedule routes (under clusters).

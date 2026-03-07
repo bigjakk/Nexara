@@ -116,37 +116,6 @@ describe("metric-store", () => {
     expect(metrics.history).toHaveLength(MAX_HISTORY_POINTS);
   });
 
-  it("computes health score in valid range", () => {
-    const payload = createPayload();
-    useMetricStore.getState().processMetricMessage("test-cluster", payload);
-
-    const metrics = getMetrics("test-cluster");
-    expect(metrics.healthScore).toBeGreaterThanOrEqual(0);
-    expect(metrics.healthScore).toBeLessThanOrEqual(100);
-  });
-
-  it("produces high health score for low utilization", () => {
-    const payload = createPayload({
-      nodes: [
-        {
-          node_id: "node-1",
-          cpu_usage: 0.1,
-          mem_used: 1_000_000_000,
-          mem_total: 16_000_000_000,
-          disk_read: 0,
-          disk_write: 0,
-          net_in: 0,
-          net_out: 0,
-        },
-      ],
-    });
-    useMetricStore.getState().processMetricMessage("test-cluster", payload);
-
-    const metrics = getMetrics("test-cluster");
-    // Low CPU (10%) and low memory (~6%) should yield high score
-    expect(metrics.healthScore).toBeGreaterThanOrEqual(80);
-  });
-
   it("sorts top consumers by CPU descending", () => {
     const payload = createPayload();
     useMetricStore.getState().processMetricMessage("test-cluster", payload);

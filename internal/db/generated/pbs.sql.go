@@ -132,6 +132,47 @@ func (q *Queries) GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSD
 	return items, nil
 }
 
+const listPBSSnapshotsByBackupID = `-- name: ListPBSSnapshotsByBackupID :many
+SELECT id, pbs_server_id, datastore, backup_type, backup_id, backup_time, size, verified, protected, comment, owner, last_seen_at, created_at, updated_at FROM pbs_snapshots
+WHERE backup_id = $1
+ORDER BY backup_time DESC
+`
+
+func (q *Queries) ListPBSSnapshotsByBackupID(ctx context.Context, backupID string) ([]PbsSnapshot, error) {
+	rows, err := q.db.Query(ctx, listPBSSnapshotsByBackupID, backupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PbsSnapshot{}
+	for rows.Next() {
+		var i PbsSnapshot
+		if err := rows.Scan(
+			&i.ID,
+			&i.PbsServerID,
+			&i.Datastore,
+			&i.BackupType,
+			&i.BackupID,
+			&i.BackupTime,
+			&i.Size,
+			&i.Verified,
+			&i.Protected,
+			&i.Comment,
+			&i.Owner,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPBSSnapshotsByDatastore = `-- name: ListPBSSnapshotsByDatastore :many
 SELECT id, pbs_server_id, datastore, backup_type, backup_id, backup_time, size, verified, protected, comment, owner, last_seen_at, created_at, updated_at FROM pbs_snapshots
 WHERE pbs_server_id = $1 AND datastore = $2

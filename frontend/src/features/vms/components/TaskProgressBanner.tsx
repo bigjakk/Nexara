@@ -6,7 +6,7 @@ import { useTaskStatus } from "../api/vm-queries";
 interface TaskProgressBannerProps {
   clusterId: string;
   upid: string | null;
-  onComplete?: () => void;
+  onComplete?: (success: boolean) => void;
   description?: string;
 }
 
@@ -35,9 +35,9 @@ export function TaskProgressBanner({
       void queryClient.invalidateQueries({
         queryKey: ["recent-activity"],
       });
-      onComplete?.();
+      onComplete?.(isOk);
     }
-  }, [isStopped, upid, onComplete, queryClient]);
+  }, [isStopped, isOk, upid, onComplete, queryClient]);
 
   if (!upid) return null;
 

@@ -3,7 +3,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDashboardData } from "../api/dashboard-queries";
 import type { ClusterSummary } from "../api/dashboard-queries";
-import { useHistoricalMetrics } from "../api/historical-queries";
+import { useHistoricalMetrics, useSeedMetrics } from "../api/historical-queries";
 import { useDashboardMetrics } from "@/hooks/useMetrics";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { StatsOverview } from "../components/StatsOverview";
@@ -14,7 +14,6 @@ import { TimeRangeSelector } from "../components/TimeRangeSelector";
 import { RefreshRateSelector } from "../components/RefreshRateSelector";
 import { LiveMetricCards } from "../components/LiveMetricCards";
 import { MetricChart } from "../components/MetricChart";
-import { HealthScore } from "../components/HealthScore";
 import { TopConsumers } from "../components/TopConsumers";
 import { CreateVMDialog } from "@/features/vms/components/CreateVMDialog";
 import { CreateCTDialog } from "@/features/vms/components/CreateCTDialog";
@@ -46,9 +45,13 @@ function ClusterMetricsSection({
   vmNameMap,
 }: ClusterMetricsSectionProps) {
   const historicalQuery = useHistoricalMetrics(summary.cluster.id, timeRange);
+  const seedData = useSeedMetrics(summary.cluster.id);
   const isLive = timeRange === "live";
+
+  // For live mode, use live history but fall back to seed data (recent 1h) until live data accumulates
+  const liveHistory = liveMetrics?.history ?? [];
   const chartData = isLive
-    ? (liveMetrics?.history ?? [])
+    ? (liveHistory.length > 0 ? liveHistory : (seedData ?? []))
     : (historicalQuery.data ?? []);
 
   const heading = isLive
@@ -59,14 +62,7 @@ function ClusterMetricsSection({
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">{heading}</h2>
 
-      {isLive && (
-        <div className="grid gap-4 lg:grid-cols-[100px_1fr]">
-          <div className="flex items-start justify-center pt-2">
-            <HealthScore score={liveMetrics?.healthScore ?? 0} />
-          </div>
-          <LiveMetricCards metrics={liveMetrics} />
-        </div>
-      )}
+      {isLive && <LiveMetricCards metrics={liveMetrics} />}
 
       {!isLive && historicalQuery.isLoading && (
         <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">

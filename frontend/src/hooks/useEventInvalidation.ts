@@ -91,6 +91,15 @@ export function useEventInvalidation(clusterIds: string[]): void {
             scheduleInvalidation(["clusters", cid, "vms"]);
           }
           break;
+
+        case "pbs_change":
+          scheduleInvalidation(
+            ["pbs-servers"],
+            ["backup-coverage"],
+            ["audit-log"],
+            ["recent-activity"],
+          );
+          break;
       }
     },
     [scheduleInvalidation],

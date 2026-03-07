@@ -97,6 +97,18 @@ export interface PBSDatastoreMetric {
   avail: number;
 }
 
+export interface PBSDatastoreRRDEntry {
+  time: number;
+  total?: number | null;
+  used?: number | null;
+  available?: number | null;
+  read_bytes?: number | null;
+  write_bytes?: number | null;
+  read_ios?: number | null;
+  write_ios?: number | null;
+  io_ticks?: number | null;
+}
+
 export interface RestoreRequest {
   pbs_server_id: string;
   backup_type: string;
@@ -106,10 +118,118 @@ export interface RestoreRequest {
   target_node: string;
   vmid: number;
   storage?: string;
+  force?: boolean;
+  unique?: boolean;
+  start_after_restore?: boolean;
 }
 
 export interface DeleteSnapshotRequest {
   backup_type: string;
   backup_id: string;
   backup_time: number;
+}
+
+export interface ProtectSnapshotRequest {
+  backup_type: string;
+  backup_id: string;
+  backup_time: number;
+  protected: boolean;
+}
+
+export interface UpdateSnapshotNotesRequest {
+  backup_type: string;
+  backup_id: string;
+  backup_time: number;
+  comment: string;
+}
+
+export interface PBSTaskLogEntry {
+  n: number;
+  t: string;
+}
+
+export interface PBSPruneRequest {
+  backup_type?: string;
+  backup_id?: string;
+  dry_run: boolean;
+  keep_last: number;
+  keep_daily: number;
+  keep_weekly: number;
+  keep_monthly: number;
+  keep_yearly: number;
+}
+
+export interface PBSPruneResult {
+  "backup-type": string;
+  "backup-id": string;
+  "backup-time": number;
+  keep: boolean;
+  protected?: boolean;
+}
+
+export interface BackupJob {
+  id: string;
+  enabled?: number;
+  type: string;
+  schedule?: string;
+  storage?: string;
+  node?: string;
+  vmid?: string;
+  mode?: string;
+  compress?: string;
+  mailnotification?: string;
+  mailto?: string;
+  "next-run"?: number;
+  comment?: string;
+}
+
+export interface TriggerBackupRequest {
+  vmid: string;
+  storage?: string;
+  mode?: string;
+  compress?: string;
+  node: string;
+}
+
+export interface PBSDatastoreConfig {
+  name: string;
+  path?: string;
+  comment?: string;
+  "gc-schedule"?: string;
+  "prune-schedule"?: string;
+  "keep-last"?: number;
+  "keep-daily"?: number;
+  "keep-weekly"?: number;
+  "keep-monthly"?: number;
+  "keep-yearly"?: number;
+  "notify-user"?: string;
+  notify?: string;
+  "verify-new"?: boolean;
+  "maintenance-mode"?: string;
+}
+
+export interface BackupCoverageEntry {
+  vmid: number;
+  name: string;
+  type: string;
+  status: string;
+  cluster_id: string;
+  cluster_name: string;
+  latest_backup: number | null;
+  backup_count: number;
+  coverage_status: "recent" | "stale" | "none";
+}
+
+export interface BackupJobParams {
+  enabled?: number;
+  type?: string;
+  schedule?: string;
+  storage?: string;
+  node?: string;
+  vmid?: string;
+  mode?: string;
+  compress?: string;
+  mailnotification?: string;
+  mailto?: string;
+  comment?: string;
 }

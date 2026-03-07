@@ -586,6 +586,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMe
 	if err != nil {
 		s.logger.Warn("failed to get PBS datastore status", "pbs_id", server.ID, "error", err)
 	} else {
+		s.logger.Debug("PBS datastore status", "pbs_id", server.ID, "count", len(dsStatus))
 		for _, ds := range dsStatus {
 			result.DatastoreMetrics = append(result.DatastoreMetrics, pbsDatastoreMetricSnapshot{
 				PBSServerID: server.ID,
@@ -602,6 +603,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMe
 	if err != nil {
 		s.logger.Warn("failed to get PBS datastores", "pbs_id", server.ID, "error", err)
 	} else {
+		s.logger.Debug("PBS datastores", "pbs_id", server.ID, "count", len(datastores))
 		for _, ds := range datastores {
 			snaps, err := client.GetSnapshots(ctx, ds.Name)
 			if err != nil {
@@ -612,6 +614,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMe
 				)
 				continue
 			}
+			s.logger.Debug("PBS snapshots", "pbs_id", server.ID, "datastore", ds.Name, "count", len(snaps))
 			for _, snap := range snaps {
 				verified := false
 				if snap.Verification != nil && snap.Verification.State == "ok" {
@@ -644,6 +647,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMe
 	if err != nil {
 		s.logger.Warn("failed to get PBS sync jobs", "pbs_id", server.ID, "error", err)
 	} else {
+		s.logger.Debug("PBS sync jobs", "pbs_id", server.ID, "count", len(syncJobs))
 		for _, job := range syncJobs {
 			_, uErr := s.queries.UpsertPBSSyncJob(ctx, db.UpsertPBSSyncJobParams{
 				PbsServerID:  server.ID,
@@ -667,6 +671,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMe
 	if err != nil {
 		s.logger.Warn("failed to get PBS verify jobs", "pbs_id", server.ID, "error", err)
 	} else {
+		s.logger.Debug("PBS verify jobs", "pbs_id", server.ID, "count", len(verifyJobs))
 		for _, job := range verifyJobs {
 			_, uErr := s.queries.UpsertPBSVerifyJob(ctx, db.UpsertPBSVerifyJobParams{
 				PbsServerID:  server.ID,
@@ -700,6 +705,11 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMe
 		LastSeenAt:  now,
 	}); err != nil {
 		s.logger.Warn("failed to prune stale PBS verify jobs", "pbs_id", server.ID, "error", err)
+	}
+
+	// Emit pbs_change event so frontend caches auto-refresh.
+	if s.eventPub != nil {
+		s.eventPub.SystemEvent(ctx, events.KindPBSChange, "pbs_sync_complete")
 	}
 
 	return result, nil

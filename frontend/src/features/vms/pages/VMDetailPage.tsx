@@ -21,6 +21,7 @@ import { SnapshotPanel } from "../components/SnapshotPanel";
 import { CloudInitPanel } from "../components/CloudInitPanel";
 import { HardwarePanel } from "../components/HardwarePanel";
 import { SchedulePanel } from "../components/SchedulePanel";
+import { BackupPanel } from "../components/BackupPanel";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
@@ -235,6 +236,7 @@ export function VMDetailPage() {
           {kind === "vm" && (
             <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
           )}
+          <TabsTrigger value="backups">Backups</TabsTrigger>
           <TabsTrigger value="schedules">Schedules</TabsTrigger>
         </TabsList>
 
@@ -287,6 +289,15 @@ export function VMDetailPage() {
             <CloudInitPanel clusterId={clusterId} vmId={vmId} />
           </TabsContent>
         )}
+
+        <TabsContent value="backups" className="mt-4">
+          <BackupPanel
+            vmid={vm.vmid}
+            clusterId={clusterId}
+            nodeName={nodeName}
+            kind={kind}
+          />
+        </TabsContent>
 
         <TabsContent value="schedules" className="mt-4">
           <SchedulePanel

@@ -70,6 +70,11 @@ WHERE pbs_server_id = $1 AND last_seen_at < $2;
 DELETE FROM pbs_verify_jobs
 WHERE pbs_server_id = $1 AND last_seen_at < $2;
 
+-- name: ListPBSSnapshotsByBackupID :many
+SELECT * FROM pbs_snapshots
+WHERE backup_id = $1
+ORDER BY backup_time DESC;
+
 -- name: GetLatestPBSDatastoreMetrics :many
 SELECT DISTINCT ON (datastore)
     time, pbs_server_id, datastore, total, used, avail

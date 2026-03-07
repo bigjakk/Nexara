@@ -138,6 +138,129 @@ func (c *PBSClient) RunVerifyJob(ctx context.Context, jobID string) (string, err
 	return upid, nil
 }
 
+// ProtectSnapshot sets or clears the protected flag on a snapshot.
+func (c *PBSClient) ProtectSnapshot(ctx context.Context, store, backupType, backupID string, backupTime int64, protect bool) error {
+	if store == "" {
+		return fmt.Errorf("store name is required")
+	}
+	qp := url.Values{}
+	qp.Set("backup-type", backupType)
+	qp.Set("backup-id", backupID)
+	qp.Set("backup-time", strconv.FormatInt(backupTime, 10))
+	if protect {
+		qp.Set("protected", "true")
+	} else {
+		qp.Set("protected", "false")
+	}
+	path := "/admin/datastore/" + url.PathEscape(store) + "/protected?" + qp.Encode()
+	if err := c.doPut(ctx, path, nil, nil); err != nil {
+		return fmt.Errorf("protect snapshot on %s: %w", store, err)
+	}
+	return nil
+}
+
+// UpdateSnapshotNotes updates the comment/notes on a snapshot.
+func (c *PBSClient) UpdateSnapshotNotes(ctx context.Context, store, backupType, backupID string, backupTime int64, comment string) error {
+	if store == "" {
+		return fmt.Errorf("store name is required")
+	}
+	qp := url.Values{}
+	qp.Set("backup-type", backupType)
+	qp.Set("backup-id", backupID)
+	qp.Set("backup-time", strconv.FormatInt(backupTime, 10))
+	qp.Set("notes", comment)
+	path := "/admin/datastore/" + url.PathEscape(store) + "/notes?" + qp.Encode()
+	if err := c.doPut(ctx, path, nil, nil); err != nil {
+		return fmt.Errorf("update snapshot notes on %s: %w", store, err)
+	}
+	return nil
+}
+
+// GetTaskLog returns log lines for a PBS task.
+func (c *PBSClient) GetTaskLog(ctx context.Context, upid string) ([]PBSTaskLogEntry, error) {
+	if upid == "" {
+		return nil, fmt.Errorf("UPID cannot be empty")
+	}
+	path := "/nodes/localhost/tasks/" + url.PathEscape(upid) + "/log?start=0&limit=5000"
+	var entries []PBSTaskLogEntry
+	if err := c.do(ctx, path, &entries); err != nil {
+		return nil, fmt.Errorf("get PBS task log: %w", err)
+	}
+	return entries, nil
+}
+
+// PruneDatastore runs or dry-runs a prune operation on a datastore.
+func (c *PBSClient) PruneDatastore(ctx context.Context, store string, params PBSPruneParams) ([]PBSPruneResult, error) {
+	if store == "" {
+		return nil, fmt.Errorf("store name is required")
+	}
+	form := url.Values{}
+	if params.BackupType != "" {
+		form.Set("backup-type", params.BackupType)
+	}
+	if params.BackupID != "" {
+		form.Set("backup-id", params.BackupID)
+	}
+	if params.DryRun {
+		form.Set("dry-run", "true")
+	}
+	if params.KeepLast > 0 {
+		form.Set("keep-last", strconv.Itoa(params.KeepLast))
+	}
+	if params.KeepDaily > 0 {
+		form.Set("keep-daily", strconv.Itoa(params.KeepDaily))
+	}
+	if params.KeepWeekly > 0 {
+		form.Set("keep-weekly", strconv.Itoa(params.KeepWeekly))
+	}
+	if params.KeepMonthly > 0 {
+		form.Set("keep-monthly", strconv.Itoa(params.KeepMonthly))
+	}
+	if params.KeepYearly > 0 {
+		form.Set("keep-yearly", strconv.Itoa(params.KeepYearly))
+	}
+	path := "/admin/datastore/" + url.PathEscape(store) + "/prune"
+	var results []PBSPruneResult
+	if err := c.doPost(ctx, path, form, &results); err != nil {
+		return nil, fmt.Errorf("prune datastore %s: %w", store, err)
+	}
+	return results, nil
+}
+
+// GetDatastoreConfig returns the full configuration of a PBS datastore.
+func (c *PBSClient) GetDatastoreConfig(ctx context.Context, store string) (*PBSDatastoreConfig, error) {
+	if store == "" {
+		return nil, fmt.Errorf("store name is required")
+	}
+	path := "/admin/datastore/" + url.PathEscape(store)
+	var config PBSDatastoreConfig
+	if err := c.do(ctx, path, &config); err != nil {
+		return nil, fmt.Errorf("get datastore config for %s: %w", store, err)
+	}
+	return &config, nil
+}
+
+// GetDatastoreRRD returns RRD performance data for a datastore.
+// timeframe: "hour", "day", "week", "month"
+// cf: "AVERAGE" or "MAX"
+func (c *PBSClient) GetDatastoreRRD(ctx context.Context, store, timeframe, cf string) ([]PBSDatastoreRRDEntry, error) {
+	if store == "" {
+		return nil, fmt.Errorf("store name is required")
+	}
+	if timeframe == "" {
+		timeframe = "hour"
+	}
+	if cf == "" {
+		cf = "AVERAGE"
+	}
+	path := "/admin/datastore/" + url.PathEscape(store) + "/rrd?timeframe=" + url.QueryEscape(timeframe) + "&cf=" + url.QueryEscape(cf)
+	var entries []PBSDatastoreRRDEntry
+	if err := c.do(ctx, path, &entries); err != nil {
+		return nil, fmt.Errorf("get datastore RRD for %s: %w", store, err)
+	}
+	return entries, nil
+}
+
 // GetTasks returns recent tasks from the PBS node.
 func (c *PBSClient) GetTasks(ctx context.Context, limit int) ([]PBSTask, error) {
 	path := "/nodes/localhost/tasks"

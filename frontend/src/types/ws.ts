@@ -93,7 +93,6 @@ export interface AggregatedMetrics {
   netOutBps: number;
   nodeCount: number;
   vmCount: number;
-  healthScore: number;
   history: MetricDataPoint[];
   topConsumers: TopConsumer[];
   /** Live metrics for ALL VMs in the cluster, keyed by VM UUID. */
@@ -120,7 +119,8 @@ export type EventKind =
   | "vm_state_change"
   | "inventory_change"
   | "migration_update"
-  | "drs_action";
+  | "drs_action"
+  | "pbs_change";
 
 /** Event pushed from the backend through the WS pipeline. */
 export interface ProxDashEvent {

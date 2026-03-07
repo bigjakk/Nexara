@@ -13,7 +13,6 @@ import { VMDetailPage } from "@/features/vms/pages/VMDetailPage";
 import { StoragePage } from "@/features/storage/pages/StoragePage";
 import { BackupDashboardPage } from "@/features/backup/pages/BackupDashboardPage";
 import { AuditLogPage } from "@/features/audit/pages/AuditLogPage";
-import { MigrationsPage } from "@/features/migrations/pages/MigrationsPage";
 
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
@@ -67,10 +66,6 @@ const router = createBrowserRouter([
           {
             path: "backup",
             element: <BackupDashboardPage />,
-          },
-          {
-            path: "migrations",
-            element: <MigrationsPage />,
           },
           {
             path: "audit-log",

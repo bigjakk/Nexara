@@ -121,7 +121,7 @@ export function useCloneVM() {
   });
 }
 
-// --- Migrate (CT only) ---
+// --- Migrate ---
 
 interface MigrateParams {
   clusterId: string;
@@ -144,6 +144,29 @@ export function useMigrateContainer() {
       });
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "containers"],
+      });
+    },
+  });
+}
+
+interface MigrateVMParams {
+  clusterId: string;
+  vmId: string;
+  body: MigrateRequest;
+}
+
+export function useMigrateVM() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, vmId, body }: MigrateVMParams) =>
+      apiClient.post<VMActionResponse>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/migrate`,
+        body,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vms"],
       });
     },
   });

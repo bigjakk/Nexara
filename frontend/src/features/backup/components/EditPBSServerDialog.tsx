@@ -153,7 +153,10 @@ export function EditPBSServerDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-pbs-cluster">
-              Associated Cluster (optional)
+              Associated Cluster
+              <span className="ml-1 text-xs font-normal text-muted-foreground">
+                (used to scope backup coverage by cluster)
+              </span>
             </Label>
             <select
               id="edit-pbs-cluster"

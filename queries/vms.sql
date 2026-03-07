@@ -41,5 +41,12 @@ UPDATE vms SET status = $2, updated_at = now() WHERE id = $1;
 -- name: ListVMStatusesByCluster :many
 SELECT id, vmid, status FROM vms WHERE cluster_id = $1;
 
+-- name: ListAllVMs :many
+SELECT v.*, c.name AS cluster_name
+FROM vms v
+JOIN clusters c ON c.id = v.cluster_id
+WHERE v.template = false
+ORDER BY v.name;
+
 -- name: DeleteStaleVMs :exec
 DELETE FROM vms WHERE cluster_id = $1 AND last_seen_at < $2;

@@ -51,6 +51,7 @@ vi.mock("../api/historical-queries", () => ({
     isLoading: false,
     error: null,
   }),
+  useSeedMetrics: () => undefined,
 }));
 
 beforeEach(() => {

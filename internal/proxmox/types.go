@@ -922,3 +922,43 @@ type UpdateNetworkInterfaceParams struct {
 	Method      string `json:"method,omitempty"`
 	Method6     string `json:"method6,omitempty"`
 }
+
+// BackupParams holds parameters for triggering a vzdump backup.
+type BackupParams struct {
+	VMID     string `json:"vmid"`
+	Storage  string `json:"storage,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+	Compress string `json:"compress,omitempty"`
+}
+
+// BackupJob represents a cluster-level vzdump backup job schedule.
+type BackupJob struct {
+	ID               string `json:"id"`
+	Enabled          int    `json:"enabled,omitempty"`
+	Type             string `json:"type,omitempty"`
+	Schedule         string `json:"schedule,omitempty"`
+	Storage          string `json:"storage,omitempty"`
+	Node             string `json:"node,omitempty"`
+	VMID             string `json:"vmid,omitempty"`
+	Mode             string `json:"mode,omitempty"`
+	Compress         string `json:"compress,omitempty"`
+	MailNotification string `json:"mailnotification,omitempty"`
+	MailTo           string `json:"mailto,omitempty"`
+	NextRun          int64  `json:"next-run,omitempty"`
+	Comment          string `json:"comment,omitempty"`
+}
+
+// BackupJobParams holds parameters for creating or updating a backup job.
+type BackupJobParams struct {
+	Enabled          *int   `json:"enabled,omitempty"`
+	Type             string `json:"type,omitempty"`
+	Schedule         string `json:"schedule,omitempty"`
+	Storage          string `json:"storage,omitempty"`
+	Node             string `json:"node,omitempty"`
+	VMID             string `json:"vmid,omitempty"`
+	Mode             string `json:"mode,omitempty"`
+	Compress         string `json:"compress,omitempty"`
+	MailNotification string `json:"mailnotification,omitempty"`
+	MailTo           string `json:"mailto,omitempty"`
+	Comment          string `json:"comment,omitempty"`
+}

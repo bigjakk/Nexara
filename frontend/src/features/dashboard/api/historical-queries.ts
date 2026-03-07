@@ -31,6 +31,25 @@ export function useHistoricalMetrics(clusterId: string, range: TimeRange) {
   });
 }
 
+/**
+ * Fetch recent 1h historical data to seed live charts so they aren't empty on load.
+ * This runs once and caches — live WS data takes over once it starts arriving.
+ */
+export function useSeedMetrics(clusterId: string) {
+  const query = useQuery({
+    queryKey: ["clusters", clusterId, "metrics", "seed"],
+    queryFn: async () => {
+      const data = await apiClient.get<HistoricalMetricPoint[]>(
+        `/api/v1/clusters/${clusterId}/metrics?range=1h`,
+      );
+      return toMetricDataPoints(data);
+    },
+    enabled: clusterId.length > 0,
+    staleTime: 5 * 60_000,
+  });
+  return query.data;
+}
+
 export function useNodeHistoricalMetrics(clusterId: string, nodeId: string, range: TimeRange) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeId, "metrics", range],

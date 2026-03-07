@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -19,12 +20,16 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i] ?? ""}`;
 }
 
+const TIMEFRAMES = ["1h", "6h", "24h", "7d"] as const;
+type Timeframe = (typeof TIMEFRAMES)[number];
+
 interface DatastoreChartProps {
   pbsId: string;
 }
 
 export function DatastoreChart({ pbsId }: DatastoreChartProps) {
-  const { data: metrics, isLoading } = usePBSDatastoreMetrics(pbsId, "24h");
+  const [timeframe, setTimeframe] = useState<Timeframe>("24h");
+  const { data: metrics, isLoading } = usePBSDatastoreMetrics(pbsId, timeframe);
 
   if (isLoading) {
     return null;
@@ -48,10 +53,27 @@ export function DatastoreChart({ pbsId }: DatastoreChartProps) {
 
   return (
     <Card>
-      <CardHeader className="pb-2">
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm font-medium">
-          Datastore Usage (24h)
+          Datastore Usage
         </CardTitle>
+        <div className="flex gap-1">
+          {TIMEFRAMES.map((tf) => (
+            <button
+              key={tf}
+              onClick={() => {
+                setTimeframe(tf);
+              }}
+              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                timeframe === tf
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
       </CardHeader>
       <CardContent>
         <div className="h-64">

@@ -8,7 +8,6 @@ import type {
 } from "@/types/ws";
 
 const MAX_HISTORY_POINTS = 60;
-const GBPS_BYTES = 125_000_000; // 1 Gbps in bytes/sec
 const DEFAULT_REFRESH_INTERVAL = 10_000;
 const REFRESH_INTERVAL_KEY = "proxdash:refreshInterval";
 
@@ -46,28 +45,6 @@ interface MetricActions {
   setRefreshInterval: (ms: number) => void;
   clearCluster: (clusterId: string) => void;
   clearAll: () => void;
-}
-
-function computeHealthScore(
-  cpuPercent: number,
-  memPercent: number,
-  netInBps: number,
-  netOutBps: number,
-  nodeCount: number,
-): number {
-  const cpuScore = (1 - cpuPercent / 100) * 100;
-  const memScore = (1 - memPercent / 100) * 100;
-  const storageScore = 100; // Live stream lacks capacity data
-
-  // Network heuristic: compare throughput vs 1 Gbps per node
-  const maxBandwidth = nodeCount * GBPS_BYTES;
-  const totalNet = netInBps + netOutBps;
-  const netUtilization = maxBandwidth > 0 ? totalNet / maxBandwidth : 0;
-  const netScore = (1 - Math.min(netUtilization, 1)) * 100;
-
-  const score =
-    cpuScore * 0.3 + memScore * 0.3 + storageScore * 0.2 + netScore * 0.2;
-  return Math.round(Math.max(0, Math.min(100, score)));
 }
 
 function extractTopConsumers(payload: ClusterMetricSummary): TopConsumer[] {
@@ -170,14 +147,6 @@ export const useMetricStore = create<MetricState & MetricActions>()(
         }
       }
 
-      const healthScore = computeHealthScore(
-        avgCpu,
-        memPercent,
-        netInBps,
-        netOutBps,
-        nodeCount,
-      );
-
       const dataPoint: MetricDataPoint = {
         timestamp: now,
         cpuPercent: avgCpu,
@@ -226,7 +195,6 @@ export const useMetricStore = create<MetricState & MetricActions>()(
         netOutBps,
         nodeCount,
         vmCount: payload.vm_count,
-        healthScore,
         history: trimmedHistory,
         topConsumers,
         vmMetrics,
@@ -268,4 +236,4 @@ export const useMetricStore = create<MetricState & MetricActions>()(
 );
 
 // Export for testing
-export { computeHealthScore, extractTopConsumers, MAX_HISTORY_POINTS, DEFAULT_REFRESH_INTERVAL };
+export { extractTopConsumers, MAX_HISTORY_POINTS, DEFAULT_REFRESH_INTERVAL };

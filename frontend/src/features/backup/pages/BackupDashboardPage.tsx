@@ -11,17 +11,26 @@ import {
   usePBSSyncJobs,
   usePBSVerifyJobs,
   usePBSTasks,
+  useBackupJobs,
 } from "../api/backup-queries";
+import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { DatastoreCards } from "../components/DatastoreCards";
 import { SnapshotTable } from "../components/SnapshotTable";
 import { SyncJobTable } from "../components/SyncJobTable";
 import { VerifyJobTable } from "../components/VerifyJobTable";
 import { PBSTaskTable } from "../components/PBSTaskTable";
 import { GCDialog } from "../components/GCDialog";
+import { PruneDialog } from "../components/PruneDialog";
 import { DatastoreChart } from "../components/DatastoreChart";
 import { AddPBSServerDialog } from "../components/AddPBSServerDialog";
 import { EditPBSServerDialog } from "../components/EditPBSServerDialog";
 import { DeletePBSServerDialog } from "../components/DeletePBSServerDialog";
+import { BackupJobTable } from "../components/BackupJobTable";
+import { BackupJobDialog } from "../components/BackupJobDialog";
+import { DatastoreIOChart } from "../components/DatastoreIOChart";
+import { DatastoreConfigCard } from "../components/DatastoreConfigCard";
+import { CapacityForecastChart } from "../components/CapacityForecastChart";
+import { BackupCoverageReport } from "../components/BackupCoverageReport";
 
 export function BackupDashboardPage() {
   const serversQuery = usePBSServers();
@@ -39,14 +48,22 @@ export function BackupDashboardPage() {
   const snapshotsQuery = usePBSSnapshots(activeServerId);
   const syncJobsQuery = usePBSSyncJobs(activeServerId);
   const verifyJobsQuery = usePBSVerifyJobs(activeServerId);
-
   const tasksQuery = usePBSTasks(activeServerId);
+
+  // Cluster data for backup jobs
+  const clustersQuery = useClusters();
+  const clusters = clustersQuery.data ?? [];
+  const [selectedClusterId, setSelectedClusterId] = useState<string>("");
+  const activeClusterId =
+    selectedClusterId || (clusters.length > 0 ? clusters[0]?.id ?? "" : "");
+  const backupJobsQuery = useBackupJobs(activeClusterId);
 
   const datastores = dsStatusQuery.data ?? [];
   const snapshots = snapshotsQuery.data ?? [];
   const syncJobs = syncJobsQuery.data ?? [];
   const verifyJobs = verifyJobsQuery.data ?? [];
   const tasks = tasksQuery.data ?? [];
+  const backupJobs = backupJobsQuery.data ?? [];
 
   const isNotFound =
     dsStatusQuery.isError &&
@@ -180,6 +197,9 @@ export function BackupDashboardPage() {
               <TabsTrigger value="snapshots">
                 Snapshots ({snapshots.length})
               </TabsTrigger>
+              <TabsTrigger value="schedules">
+                Schedules ({backupJobs.length})
+              </TabsTrigger>
               <TabsTrigger value="replication">
                 Replication ({syncJobs.length})
               </TabsTrigger>
@@ -189,18 +209,45 @@ export function BackupDashboardPage() {
               <TabsTrigger value="tasks">
                 Tasks ({tasks.length})
               </TabsTrigger>
+              <TabsTrigger value="coverage">Coverage</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6">
               <DatastoreChart pbsId={activeServerId} />
+              {datastores.map((ds) => (
+                <DatastoreIOChart
+                  key={ds.store}
+                  pbsId={activeServerId}
+                  store={ds.store}
+                />
+              ))}
+              {datastores.map((ds) => (
+                <CapacityForecastChart
+                  key={`forecast-${ds.store}`}
+                  pbsId={activeServerId}
+                  store={ds.store}
+                />
+              ))}
+              {datastores.map((ds) => (
+                <DatastoreConfigCard
+                  key={`config-${ds.store}`}
+                  pbsId={activeServerId}
+                  store={ds.store}
+                />
+              ))}
               {datastores.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {datastores.map((ds) => (
-                    <GCDialog
-                      key={ds.store}
-                      pbsId={activeServerId}
-                      store={ds.store}
-                    />
+                    <div key={ds.store} className="flex gap-1">
+                      <GCDialog
+                        pbsId={activeServerId}
+                        store={ds.store}
+                      />
+                      <PruneDialog
+                        pbsId={activeServerId}
+                        store={ds.store}
+                      />
+                    </div>
                   ))}
                 </div>
               )}
@@ -208,6 +255,32 @@ export function BackupDashboardPage() {
 
             <TabsContent value="snapshots" className="space-y-4">
               <SnapshotTable snapshots={snapshots} pbsId={activeServerId} />
+            </TabsContent>
+
+            <TabsContent value="schedules" className="space-y-4">
+              {clusters.length > 1 && (
+                <div className="flex gap-2">
+                  {clusters.map((cluster) => (
+                    <button
+                      key={cluster.id}
+                      onClick={() => {
+                        setSelectedClusterId(cluster.id);
+                      }}
+                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        activeClusterId === cluster.id
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground hover:bg-accent"
+                      }`}
+                    >
+                      {cluster.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex justify-end">
+                <BackupJobDialog clusterId={activeClusterId} />
+              </div>
+              <BackupJobTable jobs={backupJobs} clusterId={activeClusterId} />
             </TabsContent>
 
             <TabsContent value="replication" className="space-y-4">
@@ -219,7 +292,11 @@ export function BackupDashboardPage() {
             </TabsContent>
 
             <TabsContent value="tasks" className="space-y-4">
-              <PBSTaskTable tasks={tasks} />
+              <PBSTaskTable tasks={tasks} pbsId={activeServerId} />
+            </TabsContent>
+
+            <TabsContent value="coverage" className="space-y-4">
+              <BackupCoverageReport />
             </TabsContent>
           </Tabs>
         </>

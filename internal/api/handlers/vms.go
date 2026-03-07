@@ -1513,3 +1513,69 @@ func (h *VMHandler) ChangeMedia(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"status": "ok", "device": cdromKey})
 }
+
+type vmMigrateRequest struct {
+	Target string `json:"target"`
+	Online bool   `json:"online"`
+}
+
+// MigrateVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/migrate.
+func (h *VMHandler) MigrateVM(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var req vmMigrateRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Target == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "target node is required")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	upid, err := pxClient.MigrateVM(c.Context(), node.Name, int(vm.Vmid), proxmox.MigrateParams{
+		Target: req.Target,
+		Online: req.Online,
+	})
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid, "target": req.Target})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "migrate", detailsJSON)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindMigrationUpdate, "vm", vm.ID.String(), "migrate")
+
+	// Track in activity panel.
+	description := "Migrate VM " + strconv.Itoa(int(vm.Vmid)) + " → " + req.Target
+	uid, _ := c.Locals("user_id").(uuid.UUID)
+	_, _ = h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
+		ClusterID:   cluster.ID,
+		UserID:      uid,
+		Upid:        upid,
+		Description: description,
+		Status:      "running",
+		Node:        node.Name,
+		TaskType:    "qmigrate",
+	})
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindTaskCreated, "task", upid, "qmigrate")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}

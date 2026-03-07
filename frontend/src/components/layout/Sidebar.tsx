@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -6,9 +7,10 @@ import {
   HardDrive,
   TerminalSquare,
   ScrollText,
-  ArrowLeftRight,
   PanelLeftClose,
   PanelLeftOpen,
+  ChevronDown,
+  ChevronRight,
   Server,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -35,7 +37,6 @@ const navItems: NavItem[] = [
   { label: "Console", to: "/console", icon: TerminalSquare },
   { label: "Storage", to: "/storage", icon: HardDrive },
   { label: "Backup", to: "/backup", icon: Shield },
-  { label: "Migrations", to: "/migrations", icon: ArrowLeftRight, adminOnly: true },
   { label: "Audit Log", to: "/audit-log", icon: ScrollText, adminOnly: true },
 ];
 
@@ -45,14 +46,24 @@ function isInventoryRoute(pathname: string): boolean {
 
 export function Sidebar() {
   const { isAdmin } = useAuth();
-  const { collapsed, toggleCollapsed } = useSidebarStore();
+  const { collapsed, toggleCollapsed, treeVisible, setTreeVisible } = useSidebarStore();
   const location = useLocation();
+  const prevPathRef = useRef(location.pathname);
+
+  // Auto-expand tree when navigating to inventory/clusters routes
+  useEffect(() => {
+    const prev = prevPathRef.current;
+    prevPathRef.current = location.pathname;
+    if (isInventoryRoute(location.pathname) && !isInventoryRoute(prev)) {
+      setTreeVisible(true);
+    }
+  }, [location.pathname, setTreeVisible]);
 
   const visibleItems = navItems.filter(
     (item) => !item.adminOnly || isAdmin,
   );
 
-  const showTree = !collapsed && isInventoryRoute(location.pathname);
+  const showTree = !collapsed && treeVisible;
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -120,23 +131,37 @@ export function Sidebar() {
 
             return (
               <div key={item.to}>
-                <NavLink
-                  to={item.to}
-                  end={item.to === "/" || isInventoryItem}
-                  className={({ isActive }) =>
-                    cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                      isActive || inventoryActive
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-                    )
-                  }
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </NavLink>
+                <div className="flex items-center">
+                  <NavLink
+                    to={item.to}
+                    end={item.to === "/" || isInventoryItem}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex flex-1 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        isActive || inventoryActive
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
+                      )
+                    }
+                  >
+                    <item.icon className="h-4 w-4" />
+                    {item.label}
+                  </NavLink>
+                  {isInventoryItem && (
+                    <button
+                      onClick={() => { setTreeVisible(!treeVisible); }}
+                      className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                    >
+                      {showTree ? (
+                        <ChevronDown className="h-3 w-3" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3" />
+                      )}
+                    </button>
+                  )}
+                </div>
 
-                {/* Render tree inline below Inventory when active */}
+                {/* Render tree inline below Inventory — persists across routes */}
                 {isInventoryItem && showTree && (
                   <div className="mt-1 max-h-[calc(100vh-20rem)] overflow-y-auto">
                     <InventoryTree />

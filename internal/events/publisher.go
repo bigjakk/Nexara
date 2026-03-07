@@ -19,6 +19,7 @@ const (
 	KindInventoryChange  = "inventory_change"
 	KindMigrationUpdate  = "migration_update"
 	KindDRSAction        = "drs_action"
+	KindPBSChange        = "pbs_change"
 )
 
 // Event is a lightweight notification pushed through Redis pub/sub.
