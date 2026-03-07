@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type RFB from "@novnc/novnc/lib/rfb";
 import type { ConsoleTab } from "../types/console";
-import { useVM, useVMAction, useVMConfig, useAddTaskHistory } from "@/features/vms/api/vm-queries";
+import { useVM, useVMAction, useVMConfig } from "@/features/vms/api/vm-queries";
 import { lifecycleActions } from "@/features/vms/lib/vm-action-defs";
 import type { VMAction } from "@/features/vms/types/vm";
 import { useTaskLogStore } from "@/stores/task-log-store";
@@ -96,7 +96,6 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
   const mountISO = useMountISO();
 
   const actionMutation = useVMAction();
-  const addTask = useAddTaskHistory();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
@@ -117,13 +116,6 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
       },
       {
         onSuccess: (data) => {
-          addTask.mutate({
-            clusterId: tab.clusterID,
-            upid: data.upid,
-            description,
-            node: tab.node,
-            taskType: action,
-          });
           setFocusedTask({
             clusterId: tab.clusterID,
             upid: data.upid,

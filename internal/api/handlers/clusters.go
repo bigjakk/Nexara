@@ -17,10 +17,10 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -28,32 +28,20 @@ import (
 type ClusterHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewClusterHandler creates a new cluster handler.
-func NewClusterHandler(queries *db.Queries, encryptionKey string) *ClusterHandler {
+func NewClusterHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *ClusterHandler {
 	return &ClusterHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
+		eventPub:      eventPub,
 	}
 }
 
 func (h *ClusterHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	if details == nil {
-		details = json.RawMessage(`{}`)
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      details,
-	})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }
 
 type createClusterRequest struct {

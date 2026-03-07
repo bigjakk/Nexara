@@ -9,17 +9,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/scheduler"
 )
 
 // ScheduleHandler handles scheduled task CRUD endpoints.
 type ScheduleHandler struct {
-	queries *db.Queries
+	queries  *db.Queries
+	eventPub *events.Publisher
 }
 
 // NewScheduleHandler creates a new schedule handler.
-func NewScheduleHandler(queries *db.Queries) *ScheduleHandler {
-	return &ScheduleHandler{queries: queries}
+func NewScheduleHandler(queries *db.Queries, eventPub *events.Publisher) *ScheduleHandler {
+	return &ScheduleHandler{queries: queries, eventPub: eventPub}
 }
 
 type createScheduleRequest struct {
@@ -88,21 +90,7 @@ func toScheduleResponse(t db.ScheduledTask) scheduleResponse {
 }
 
 func (h *ScheduleHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	if details == nil {
-		details = json.RawMessage(`{}`)
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      details,
-	})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }
 
 var validScheduleActions = map[string]bool{

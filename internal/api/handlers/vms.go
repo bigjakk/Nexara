@@ -10,7 +10,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/proxdash/proxdash/internal/crypto"
@@ -212,7 +211,8 @@ func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), req.Action)
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), req.Action, detailsJSON)
 
 	// Watch the task in the background and update the DB when it completes.
 	// The watcher publishes a vm_state_change event only after the DB is updated
@@ -266,7 +266,8 @@ func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "clone")
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "clone", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "clone")
 
 	return c.JSON(vmActionResponse{
@@ -301,7 +302,8 @@ func (h *VMHandler) DestroyVM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "destroy")
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "destroy", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "destroy")
 
 	return c.JSON(vmActionResponse{
@@ -484,7 +486,7 @@ func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_resize")
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_resize", nil)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_resize")
 
 	return c.JSON(vmActionResponse{
@@ -532,7 +534,8 @@ func (h *VMHandler) MoveDisk(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_move")
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_move", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_move")
 
 	return c.JSON(vmActionResponse{
@@ -600,7 +603,7 @@ func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_attach")
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_attach", nil)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_attach")
 
 	return c.JSON(vmActionResponse{
@@ -643,7 +646,7 @@ func (h *VMHandler) DetachDisk(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_detach")
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "disk_detach", nil)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_detach")
 
 	return c.JSON(vmActionResponse{
@@ -704,31 +707,7 @@ func (h *VMHandler) resolveVM(c *fiber.Ctx, clusterID, vmID uuid.UUID) (db.Vm, d
 
 // createProxmoxClient creates a Proxmox client for the given cluster.
 func (h *VMHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "Cluster not found")
-		}
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Second,
-	})
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
-	}
-
-	return pxClient, nil
+	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // extractNodeFromUPID extracts the node name from a Proxmox UPID string.
@@ -758,20 +737,9 @@ func splitUPID(upid string) []string {
 	return parts
 }
 
-// auditLog writes an audit log entry. Failures are logged but don't fail the request.
-func (h *VMHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      json.RawMessage(`{}`),
-	})
+// auditLog writes an audit log entry and publishes an audit_entry event.
+func (h *VMHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }
 
 // --- Snapshot handlers ---
@@ -871,7 +839,8 @@ func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_create")
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_create", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_create")
 
 	return c.JSON(vmActionResponse{
@@ -911,7 +880,8 @@ func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_delete")
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_delete", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_delete")
 
 	return c.JSON(vmActionResponse{
@@ -951,7 +921,8 @@ func (h *VMHandler) RollbackSnapshot(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_rollback")
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "snapshot_rollback", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_rollback")
 
 	return c.JSON(vmActionResponse{
@@ -1094,7 +1065,8 @@ func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, clusterID, "vm", strconv.Itoa(req.VMID), "create")
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": req.Node, "vmid": req.VMID})
+	h.auditLog(c, clusterID, "vm", strconv.Itoa(req.VMID), "create", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "vm", strconv.Itoa(req.VMID), "create")
 
 	return c.JSON(vmActionResponse{
@@ -1171,18 +1143,8 @@ func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	// Audit log with field details.
-	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
-		details, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
-		_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-			ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
-			UserID:       uid,
-			ResourceType: "vm",
-			ResourceID:   vm.ID.String(),
-			Action:       "config_update",
-			Details:      details,
-		})
-	}
+	configDetails, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), "config_update", configDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "config_update")
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -1324,8 +1286,8 @@ func (h *VMHandler) ListBridges(c *fiber.Ctx) error {
 // --- Guest Agent ---
 
 type guestAgentResponse struct {
-	Running           bool                           `json:"running"`
-	OSInfo            *proxmox.GuestOSInfo           `json:"os_info,omitempty"`
+	Running           bool                            `json:"running"`
+	OSInfo            *proxmox.GuestOSInfo            `json:"os_info,omitempty"`
 	NetworkInterfaces []proxmox.GuestNetworkInterface `json:"network_interfaces,omitempty"`
 }
 
@@ -1542,20 +1504,11 @@ func (h *VMHandler) ChangeMedia(c *fiber.Ctx) error {
 	if req.Volid == "none" {
 		action = "media_eject"
 	}
-	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
-		details, _ := json.Marshal(map[string]interface{}{
-			"device": cdromKey,
-			"volid":  req.Volid,
-		})
-		_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-			ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
-			UserID:       uid,
-			ResourceType: "vm",
-			ResourceID:   vm.ID.String(),
-			Action:       action,
-			Details:      details,
-		})
-	}
+	mediaDetails, _ := json.Marshal(map[string]interface{}{
+		"device": cdromKey,
+		"volid":  req.Volid,
+	})
+	h.auditLog(c, cluster.ID, "vm", vm.ID.String(), action, mediaDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), action)
 
 	return c.JSON(fiber.Map{"status": "ok", "device": cdromKey})

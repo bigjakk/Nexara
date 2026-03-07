@@ -34,6 +34,8 @@ type Querier interface {
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
 	DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) error
+	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
+	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	GetCephClusterMetrics1h(ctx context.Context, arg GetCephClusterMetrics1hParams) ([]CephClusterMetrics1h, error)
 	GetCephClusterMetrics5m(ctx context.Context, arg GetCephClusterMetrics5mParams) ([]CephClusterMetrics5m, error)
@@ -95,6 +97,7 @@ type Querier interface {
 	ListPBSSnapshotsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSnapshot, error)
 	ListPBSSyncJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSyncJob, error)
 	ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsVerifyJob, error)
+	ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentAuditLogEnrichedRow, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)

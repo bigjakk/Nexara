@@ -4,6 +4,9 @@ import type { StorageResponse } from "@/types/api";
 import type {
   StorageContentItem,
   StorageActionResponse,
+  StorageConfigResponse,
+  CreateStorageRequest,
+  UpdateStorageRequest,
 } from "../types/storage";
 
 // --- Storage pools for a cluster ---
@@ -136,6 +139,91 @@ export function useDeleteContent() {
           variables.storageId,
           "content",
         ],
+      });
+    },
+  });
+}
+
+// --- Storage config (for editing) ---
+
+export function useStorageConfig(clusterId: string, storageId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "storage", storageId, "config"],
+    queryFn: () =>
+      apiClient.get<StorageConfigResponse>(
+        `/api/v1/clusters/${clusterId}/storage/${storageId}/config`,
+      ),
+    enabled: clusterId.length > 0 && storageId.length > 0,
+  });
+}
+
+// --- Create storage ---
+
+interface CreateStorageParams {
+  clusterId: string;
+  data: CreateStorageRequest;
+}
+
+export function useCreateStorage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, data }: CreateStorageParams) =>
+      apiClient.post<{ status: string; storage: string }>(
+        `/api/v1/clusters/${clusterId}/storage`,
+        data,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "storage"],
+      });
+    },
+  });
+}
+
+// --- Update storage ---
+
+interface UpdateStorageParams {
+  clusterId: string;
+  storageId: string;
+  data: UpdateStorageRequest;
+}
+
+export function useUpdateStorage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, storageId, data }: UpdateStorageParams) =>
+      apiClient.put<{ status: string; storage: string }>(
+        `/api/v1/clusters/${clusterId}/storage/${storageId}`,
+        data,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "storage"],
+      });
+    },
+  });
+}
+
+// --- Delete storage ---
+
+interface DeleteStorageParams {
+  clusterId: string;
+  storageId: string;
+}
+
+export function useDeleteStorage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, storageId }: DeleteStorageParams) =>
+      apiClient.delete<{ status: string; storage: string }>(
+        `/api/v1/clusters/${clusterId}/storage/${storageId}`,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "storage"],
       });
     },
   });

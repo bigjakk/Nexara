@@ -81,6 +81,10 @@ func (s *Server) setupRoutes() {
 		}
 		if s.storageHandler != nil {
 			clusters.Get("/:cluster_id/storage", s.storageHandler.ListByCluster)
+			clusters.Post("/:cluster_id/storage", s.storageHandler.Create)
+			clusters.Get("/:cluster_id/storage/:storage_id/config", s.storageHandler.GetConfig)
+			clusters.Put("/:cluster_id/storage/:storage_id", s.storageHandler.Update)
+			clusters.Delete("/:cluster_id/storage/:storage_id", s.storageHandler.Delete)
 			clusters.Get("/:cluster_id/storage/:storage_id/content", s.storageHandler.GetContent)
 			clusters.Post("/:cluster_id/storage/:storage_id/upload", s.storageHandler.UploadFile)
 			clusters.Delete("/:cluster_id/storage/:storage_id/content/*", s.storageHandler.DeleteContent)
@@ -232,6 +236,7 @@ func (s *Server) setupRoutes() {
 	// Audit log routes.
 	if s.auditHandler != nil {
 		audit := v1.Group("/audit-log", s.authRequired())
+		audit.Get("/recent", s.auditHandler.ListRecent)
 		audit.Get("/", s.auditHandler.List)
 
 		if s.clusterHandler != nil {

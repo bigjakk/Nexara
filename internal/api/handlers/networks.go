@@ -5,15 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -21,59 +19,22 @@ import (
 type NetworkHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewNetworkHandler creates a new NetworkHandler.
-func NewNetworkHandler(queries *db.Queries, encryptionKey string) *NetworkHandler {
-	return &NetworkHandler{queries: queries, encryptionKey: encryptionKey}
+func NewNetworkHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *NetworkHandler {
+	return &NetworkHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster ID.
 func (h *NetworkHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "Cluster not found")
-		}
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Second,
-	})
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
-	}
-
-	return pxClient, nil
+	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // auditLog records an audit log entry for a mutating network/firewall/SDN operation.
 func (h *NetworkHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	if details == nil {
-		details = json.RawMessage(`{}`)
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      details,
-	})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }
 
 // --- Network Interface Endpoints ---
@@ -100,7 +61,7 @@ func (h *NetworkHandler) ListNetworkInterfaces(c *fiber.Ctx) error {
 	}
 
 	type nodeIfaces struct {
-		Node       string                    `json:"node"`
+		Node       string                     `json:"node"`
 		Interfaces []proxmox.NetworkInterface `json:"interfaces"`
 	}
 

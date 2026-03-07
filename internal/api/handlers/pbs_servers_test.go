@@ -15,7 +15,7 @@ import (
 func newPBSTestApp(t *testing.T) *fiber.App {
 	t.Helper()
 
-	handler := NewPBSHandler(nil, testEncryptionKey)
+	handler := NewPBSHandler(nil, testEncryptionKey, nil)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: testErrorHandler,

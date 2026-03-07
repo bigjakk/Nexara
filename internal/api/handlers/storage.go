@@ -10,11 +10,10 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -22,11 +21,12 @@ import (
 type StorageHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewStorageHandler creates a new storage handler.
-func NewStorageHandler(queries *db.Queries, encryptionKey string) *StorageHandler {
-	return &StorageHandler{queries: queries, encryptionKey: encryptionKey}
+func NewStorageHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *StorageHandler {
+	return &StorageHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
 type storageResponse struct {
@@ -237,6 +237,169 @@ func (h *StorageHandler) DeleteContent(c *fiber.Ctx) error {
 	})
 }
 
+// storageConfigResponse wraps the Proxmox storage config for frontend consumption.
+type storageConfigResponse struct {
+	proxmox.StorageConfig
+}
+
+// validStorageTypes defines all Proxmox-supported storage plugin types.
+var validStorageTypes = map[string]bool{
+	"dir": true, "nfs": true, "cifs": true, "lvm": true, "lvmthin": true,
+	"zfspool": true, "iscsi": true, "iscsidirect": true,
+	"rbd": true, "cephfs": true, "glusterfs": true, "btrfs": true, "pbs": true,
+}
+
+// GetConfig handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/config.
+// Returns the Proxmox-level storage configuration (paths, servers, etc.).
+func (h *StorageHandler) GetConfig(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	pool, pxClient, err := h.resolveStorage(c)
+	if err != nil {
+		return err
+	}
+
+	cfg, err := pxClient.GetStorageConfig(c.Context(), pool.Storage)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	return c.JSON(storageConfigResponse{*cfg})
+}
+
+// createStorageRequest is the JSON body for creating a new storage pool.
+type createStorageRequest struct {
+	Storage string            `json:"storage"`
+	Type    string            `json:"type"`
+	Params  map[string]string `json:"params"`
+}
+
+// Create handles POST /api/v1/clusters/:cluster_id/storage.
+func (h *StorageHandler) Create(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	var req createStorageRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Storage == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "storage name is required")
+	}
+	if !validStorageTypes[req.Type] {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid storage type: "+req.Type)
+	}
+
+	form := url.Values{}
+	form.Set("storage", req.Storage)
+	form.Set("type", req.Type)
+	for k, v := range req.Params {
+		if k != "storage" && k != "type" && v != "" {
+			form.Set(k, v)
+		}
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.CreateStorage(c.Context(), form); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	details, _ := json.Marshal(map[string]string{"storage": req.Storage, "type": req.Type})
+	h.auditLogDetails(c, clusterID, "storage", req.Storage, "create", details)
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"status":  "created",
+		"storage": req.Storage,
+	})
+}
+
+// updateStorageRequest is the JSON body for updating a storage pool.
+type updateStorageRequest struct {
+	Params map[string]string `json:"params"`
+	Delete string            `json:"delete,omitempty"` // comma-separated params to remove
+}
+
+// Update handles PUT /api/v1/clusters/:cluster_id/storage/:storage_id.
+func (h *StorageHandler) Update(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	pool, pxClient, err := h.resolveStorage(c)
+	if err != nil {
+		return err
+	}
+
+	var req updateStorageRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	form := url.Values{}
+	for k, v := range req.Params {
+		if k != "storage" && k != "type" && v != "" {
+			form.Set(k, v)
+		}
+	}
+	if req.Delete != "" {
+		form.Set("delete", req.Delete)
+	}
+
+	if err := pxClient.UpdateStorage(c.Context(), pool.Storage, form); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, pool.ClusterID, "storage", pool.ID.String(), "update")
+
+	return c.JSON(fiber.Map{
+		"status":  "updated",
+		"storage": pool.Storage,
+	})
+}
+
+// Delete handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id.
+func (h *StorageHandler) Delete(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	pool, pxClient, err := h.resolveStorage(c)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.DeleteStorage(c.Context(), pool.Storage); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	// Remove from local DB immediately so it doesn't appear stale.
+	// Storage is cluster-level, so delete all rows for this name across nodes.
+	_ = h.queries.DeleteStoragePoolsByName(c.Context(), db.DeleteStoragePoolsByNameParams{
+		ClusterID: pool.ClusterID,
+		Storage:   pool.Storage,
+	})
+
+	h.auditLog(c, pool.ClusterID, "storage", pool.ID.String(), "delete")
+
+	return c.JSON(fiber.Map{
+		"status":  "deleted",
+		"storage": pool.Storage,
+	})
+}
+
 // resolveStorage loads the storage pool from the DB and creates a Proxmox client.
 func (h *StorageHandler) resolveStorage(c *fiber.Ctx) (db.StoragePool, *proxmox.Client, error) {
 	var zero db.StoragePool
@@ -272,46 +435,17 @@ func (h *StorageHandler) resolveStorage(c *fiber.Ctx) (db.StoragePool, *proxmox.
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster.
+// Uses 30-minute timeout for large ISO uploads.
 func (h *StorageHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "Cluster not found")
-		}
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Minute, // large timeout for ISO uploads
-	})
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
-	}
-
-	return pxClient, nil
+	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 30*time.Minute)
 }
 
 // auditLog writes an audit log entry. Failures are logged but don't fail the request.
 func (h *StorageHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      json.RawMessage(`{}`),
-	})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, nil)
+}
+
+// auditLogDetails writes an audit log entry with details.
+func (h *StorageHandler) auditLogDetails(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }

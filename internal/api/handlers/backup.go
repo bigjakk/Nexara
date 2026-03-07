@@ -9,11 +9,12 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -21,30 +22,18 @@ import (
 type BackupHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewBackupHandler creates a new backup handler.
-func NewBackupHandler(queries *db.Queries, encryptionKey string) *BackupHandler {
-	return &BackupHandler{queries: queries, encryptionKey: encryptionKey}
+func NewBackupHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *BackupHandler {
+	return &BackupHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
 // auditLog records an audit log entry for backup-related actions.
+// Backup actions don't have a cluster context.
 func (h *BackupHandler) auditLog(c *fiber.Ctx, resourceType, resourceID, action string, details json.RawMessage) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	if details == nil {
-		details = json.RawMessage(`{}`)
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{},
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      details,
-	})
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, resourceType, resourceID, action, details)
 }
 
 // createPBSClient creates a PBS client for the given server ID.

@@ -66,7 +66,7 @@ export function TaskProgressDialog() {
       prevStatus.current !== task.status &&
       task.status === "stopped"
     ) {
-      void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+      void queryClient.invalidateQueries({ queryKey: ["recent-activity"] });
       void queryClient.invalidateQueries({
         queryKey: ["clusters", clusterId],
       });

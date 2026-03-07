@@ -12,19 +12,22 @@ import (
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 )
 
 // PBSHandler handles PBS server CRUD endpoints.
 type PBSHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewPBSHandler creates a new PBS server handler.
-func NewPBSHandler(queries *db.Queries, encryptionKey string) *PBSHandler {
+func NewPBSHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *PBSHandler {
 	return &PBSHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
+		eventPub:      eventPub,
 	}
 }
 
@@ -77,21 +80,7 @@ func toPBSResponse(p db.PbsServer) pbsResponse {
 
 // auditLog writes an audit log entry. Failures are logged but don't fail the request.
 func (h *PBSHandler) auditLog(c *fiber.Ctx, resourceType, resourceID, action string, details json.RawMessage, clusterID pgtype.UUID) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	if details == nil {
-		details = json.RawMessage(`{}`)
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    clusterID,
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      details,
-	})
+	AuditLog(c, h.queries, h.eventPub, clusterID, resourceType, resourceID, action, details)
 }
 
 // Create handles POST /api/v1/pbs-servers.

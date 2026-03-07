@@ -14,6 +14,9 @@ import { StorageCapacityBar } from "../components/StorageCapacityBar";
 import { StorageContentTable } from "../components/StorageContentTable";
 import { UploadDialog } from "../components/UploadDialog";
 import { BulkMoveDialog } from "../components/BulkMoveDialog";
+import { AddStorageDialog } from "../components/AddStorageDialog";
+import { EditStorageDialog } from "../components/EditStorageDialog";
+import { DeleteStorageDialog } from "../components/DeleteStorageDialog";
 import type { StorageResponse, NodeResponse } from "@/types/api";
 import type { StorageContentItem } from "../types/storage";
 
@@ -108,6 +111,9 @@ export function StoragePage() {
           <HardDrive className="h-6 w-6 text-primary" />
           <h1 className="text-2xl font-semibold">Storage</h1>
         </div>
+        {activeClusterId && (
+          <AddStorageDialog clusterId={activeClusterId} />
+        )}
       </div>
 
       {clusters.length > 1 && (
@@ -306,6 +312,18 @@ function StoragePoolDetail({
             clusterId={clusterId}
             storageId={pool.id}
             supportedContent={pool.content}
+          />
+          <EditStorageDialog
+            clusterId={clusterId}
+            storageId={pool.id}
+            storageName={pool.storage}
+            storageType={pool.type}
+          />
+          <DeleteStorageDialog
+            clusterId={clusterId}
+            storageId={pool.id}
+            storageName={pool.storage}
+            onDeleted={onBack}
           />
         </div>
       </div>

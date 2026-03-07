@@ -15,21 +15,7 @@ import (
 
 // auditLog writes an audit log entry for task operations.
 func (h *TaskHandler) auditLog(c *fiber.Ctx, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	if details == nil {
-		details = json.RawMessage(`{}`)
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    clusterID,
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      details,
-	})
+	AuditLog(c, h.queries, h.eventPub, clusterID, resourceType, resourceID, action, details)
 }
 
 // TaskHandler handles task history CRUD operations.
@@ -44,12 +30,12 @@ func NewTaskHandler(queries *db.Queries, eventPub *events.Publisher) *TaskHandle
 }
 
 type createTaskRequest struct {
-	ClusterID   string  `json:"cluster_id"`
-	UPID        string  `json:"upid"`
-	Description string  `json:"description"`
-	Status      string  `json:"status"`
-	Node        string  `json:"node"`
-	TaskType    string  `json:"task_type"`
+	ClusterID   string `json:"cluster_id"`
+	UPID        string `json:"upid"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	Node        string `json:"node"`
+	TaskType    string `json:"task_type"`
 }
 
 type updateTaskRequest struct {

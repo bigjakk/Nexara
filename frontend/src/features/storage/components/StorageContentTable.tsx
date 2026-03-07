@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { apiClient } from "@/lib/api-client";
 import { useQueryClient } from "@tanstack/react-query";
 import type { StorageContentItem } from "../types/storage";
 import { useDeleteContent } from "../api/storage-queries";
@@ -67,21 +66,7 @@ export function StorageContentTable({
       {
         onSuccess: (data) => {
           if (data.upid) {
-            void apiClient
-              .post("/api/v1/tasks", {
-                cluster_id: clusterId,
-                upid: data.upid,
-                description: `Delete: ${volid}`,
-                status: "running",
-                node: "",
-                task_type: "delete",
-              })
-              .then(() => {
-                void queryClient.invalidateQueries({ queryKey: ["task-history"] });
-              })
-              .catch(() => {
-                // ignore — task may already exist
-              });
+            void queryClient.invalidateQueries({ queryKey: ["recent-activity"] });
           }
         },
         onSettled: () => { setDeletingVolid(null); },

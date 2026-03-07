@@ -21,3 +21,9 @@ SELECT * FROM storage_pools WHERE node_id = $1 ORDER BY storage;
 
 -- name: ListStoragePoolsByCluster :many
 SELECT * FROM storage_pools WHERE cluster_id = $1 ORDER BY storage;
+
+-- name: DeleteStoragePool :exec
+DELETE FROM storage_pools WHERE id = $1;
+
+-- name: DeleteStoragePoolsByName :exec
+DELETE FROM storage_pools WHERE cluster_id = $1 AND storage = $2;

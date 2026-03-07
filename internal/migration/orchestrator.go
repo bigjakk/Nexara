@@ -229,6 +229,15 @@ func (o *Orchestrator) startAndPollMigration(ctx context.Context, client *proxmo
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "migrating")
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskCreated, "task", upid, "migrate")
 
+	// Audit log with UPID so the activity panel can track and double-click to reopen.
+	typeLabel := "VM"
+	if job.VmType == VMTypeLXC {
+		typeLabel = "CT"
+	}
+	o.auditLog(ctx, mc, "migrate_running",
+		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"source_node":%q,"target_node":%q,"migration_type":%q}`,
+			upid, job.Vmid, typeLabel, job.SourceNode, job.SourceNode, job.TargetNode, job.MigrationType))
+
 	// Insert task history so the task shows in the Tasks panel.
 	description := fmt.Sprintf("Migrate %s: %s → %s", mc.vmLabel, job.SourceNode, job.TargetNode)
 	_, taskErr := o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
@@ -321,22 +330,7 @@ func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *prox
 			firstUpid = upid
 		}
 
-		// Insert a task_history entry with the real Proxmox UPID so the task
-		// panel shows progress and logs exactly like a hardware tab disk move.
-		description := fmt.Sprintf("Move disk %s → %s (%s, %d/%d)", disk, targetStorage, mc.vmLabel, i+1, len(disks))
-		_, taskErr := o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
-			ClusterID:   job.SourceClusterID,
-			UserID:      userID,
-			Upid:        upid,
-			Description: description,
-			Status:      "running",
-			Node:        job.SourceNode,
-			TaskType:    "move_disk",
-		})
-		if taskErr != nil {
-			o.logger.Warn("failed to insert task history", "job_id", jobID, "disk", disk, "error", taskErr)
-		}
-		o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskCreated, "task", upid, "move_disk")
+		o.recordDiskMove(ctx, mc, job.SourceNode, disk, targetStorage, upid, i+1, len(disks))
 
 		// Update migration job progress and current UPID.
 		progress := float64(i) / float64(len(disks))
@@ -374,9 +368,6 @@ func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *prox
 		CompletedAt: now,
 	})
 	o.logger.Info("storage migration completed", "job_id", jobID, "disks_moved", len(disks))
-	o.auditLog(ctx, mc, "storage_migrate",
-		fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"node":%q,"target_storage":%q,"disks_moved":%d,"status":"completed"}`,
-			job.Vmid, job.VmType, job.SourceNode, targetStorage, len(disks)))
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "completed")
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskUpdate, "task", firstUpid, "completed")
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindVMStateChange, "vm", mc.vmDBID, "storage_migrated")
@@ -401,6 +392,15 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 	}
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "migrating")
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskCreated, "task", upid, "migrate")
+
+	// Audit log with UPID so the activity panel can track the live phase.
+	typeLabel := "VM"
+	if job.VmType == VMTypeLXC {
+		typeLabel = "CT"
+	}
+	o.auditLog(ctx, mc, "migrate_running",
+		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"source_node":%q,"target_node":%q,"migration_type":"both"}`,
+			upid, job.Vmid, typeLabel, job.SourceNode, job.SourceNode, job.TargetNode))
 
 	description := fmt.Sprintf("Migrate %s: %s → %s (phase 1: live)", mc.vmLabel, job.SourceNode, job.TargetNode)
 	_, _ = o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
@@ -459,9 +459,6 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 			Status:      StatusCompleted,
 			CompletedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		})
-		o.auditLog(ctx, mc, "migrate_both",
-			fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"target_storage":%q,"status":"completed","note":"no movable disks"}`,
-				job.Vmid, job.VmType, job.SourceNode, job.TargetNode, job.TargetStorage))
 		o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "completed")
 		o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindInventoryChange, "vm", mc.vmDBID, "migrated")
 		return
@@ -493,18 +490,7 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 
 		lastDiskUpid = diskUpid
 
-		// Insert task_history with real Proxmox UPID for each disk move.
-		diskDesc := fmt.Sprintf("Move disk %s → %s (%s, %d/%d)", disk, targetStorage, mc.vmLabel, i+1, len(disks))
-		_, _ = o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
-			ClusterID:   job.SourceClusterID,
-			UserID:      userID,
-			Upid:        diskUpid,
-			Description: diskDesc,
-			Status:      "running",
-			Node:        job.TargetNode,
-			TaskType:    "move_disk",
-		})
-		o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskCreated, "task", diskUpid, "move_disk")
+		o.recordDiskMove(ctx, mc, job.TargetNode, disk, targetStorage, diskUpid, i+1, len(disks))
 
 		progress := 0.5 + (float64(i)/float64(len(disks)))*0.5
 		_ = o.queries.UpdateMigrationJobProgress(ctx, db.UpdateMigrationJobProgressParams{
@@ -526,9 +512,6 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 		CompletedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	})
 	o.logger.Info("both migration completed", "job_id", jobID)
-	o.auditLog(ctx, mc, "migrate_both",
-		fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"target_storage":%q,"disks_moved":%d,"status":"completed"}`,
-			job.Vmid, job.VmType, job.SourceNode, job.TargetNode, job.TargetStorage, len(disks)))
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "completed")
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskUpdate, "task", lastDiskUpid, "completed")
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindInventoryChange, "vm", mc.vmDBID, "migrated")
@@ -765,15 +748,6 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 			})
 
 			job := mc.job
-			typeLabel := "VM"
-			if job.VmType == VMTypeLXC {
-				typeLabel = "CT"
-			}
-
-			actionPrefix := "migrate"
-			if job.MigrationType == TypeCrossCluster {
-				actionPrefix = "cross_cluster_migrate"
-			}
 
 			if migrationSucceeded(status.ExitStatus) {
 				_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
@@ -782,9 +756,6 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 					CompletedAt: now,
 				})
 				o.logger.Info("migration completed", "job_id", jobID)
-				o.auditLog(ctx, mc, actionPrefix,
-					fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"migration_type":%q,"status":"completed"}`,
-						job.Vmid, typeLabel, job.SourceNode, job.TargetNode, job.MigrationType))
 				o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "completed")
 				o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskUpdate, "task", upid, "completed")
 				o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindInventoryChange, "vm", mc.vmDBID, "migrated")
@@ -797,9 +768,6 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 					ErrorMessage: errMsg,
 				})
 				o.logger.Error("migration failed", "job_id", jobID, "exit_status", status.ExitStatus)
-				o.auditLog(ctx, mc, actionPrefix+"_failed",
-					fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"migration_type":%q,"error":%q}`,
-						job.Vmid, typeLabel, job.SourceNode, job.TargetNode, job.MigrationType, status.ExitStatus))
 				o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "failed")
 				o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindTaskUpdate, "task", upid, "failed")
 			}
@@ -856,6 +824,35 @@ func (o *Orchestrator) auditLog(ctx context.Context, mc *migrationContext, actio
 		Action:       action,
 		Details:      json.RawMessage(detailsJSON),
 	})
+	o.eventPub.ClusterEvent(ctx, mc.job.SourceClusterID.String(), events.KindAuditEntry, resourceType, resourceID, action)
+}
+
+// recordDiskMove is the single place that records a disk move for tracking.
+// It creates an audit log entry with the UPID (so the activity panel can
+// track it and double-click to reopen), inserts a task_history row, and
+// publishes events. Both executeStorageMigration and executeBothMigration
+// call this instead of duplicating the logic.
+func (o *Orchestrator) recordDiskMove(ctx context.Context, mc *migrationContext, node, disk, targetStorage, upid string, index, total int) {
+	typeLabel := "VM"
+	if mc.job.VmType == VMTypeLXC {
+		typeLabel = "CT"
+	}
+
+	o.auditLog(ctx, mc, "disk_move_running",
+		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"disk":%q,"target_storage":%q,"disk_index":%d,"disk_total":%d}`,
+			upid, mc.job.Vmid, typeLabel, node, disk, targetStorage, index, total))
+
+	description := fmt.Sprintf("Move disk %s → %s (%s, %d/%d)", disk, targetStorage, mc.vmLabel, index, total)
+	_, _ = o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
+		ClusterID:   mc.job.SourceClusterID,
+		UserID:      mc.userID,
+		Upid:        upid,
+		Description: description,
+		Status:      "running",
+		Node:        node,
+		TaskType:    "move_disk",
+	})
+	o.eventPub.ClusterEvent(ctx, mc.job.SourceClusterID.String(), events.KindTaskCreated, "task", upid, "move_disk")
 }
 
 // Cancel cancels a pending or checking job.

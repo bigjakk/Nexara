@@ -6,106 +6,133 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
-  Trash2,
+  Activity,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import {
-  useTaskHistory,
-  useClearTaskHistory,
-  useTaskLog,
+  useRecentActivity,
+  type AuditLogEntry,
+} from "@/features/audit/api/audit-queries";
+import {
   useTaskStatus,
-  type TaskHistoryEntry,
+  useTaskLog,
 } from "@/features/vms/api/vm-queries";
 
-function isTaskOk(exitStatus: string): boolean {
-  return exitStatus === "" || exitStatus === "OK" || exitStatus.startsWith("WARNINGS");
-}
-
-function formatElapsed(startedAt: string, finishedAt: string | null): string {
-  const start = new Date(startedAt).getTime();
-  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
-  const seconds = Math.floor((end - start) / 1000);
-
-  if (!finishedAt) {
-    if (seconds < 60) return `${seconds}s`;
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}m ${s}s`;
-  }
-
-  const ago = Math.floor((Date.now() - end) / 1000);
-  if (ago < 60) return `${ago}s ago`;
-  if (ago < 3600) return `${Math.floor(ago / 60)}m ago`;
-  if (ago < 86400) return `${Math.floor(ago / 3600)}h ago`;
-  return `${Math.floor(ago / 86400)}d ago`;
+function formatRelativeTime(iso: string): string {
+  const ago = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (ago < 60) return `${String(ago)}s ago`;
+  if (ago < 3600) return `${String(Math.floor(ago / 60))}m ago`;
+  if (ago < 86400) return `${String(Math.floor(ago / 3600))}h ago`;
+  return `${String(Math.floor(ago / 86400))}d ago`;
 }
 
 function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-function formatDuration(startedAt: string, finishedAt: string | null): string {
-  const start = new Date(startedAt).getTime();
-  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
-  const seconds = Math.floor((end - start) / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}m ${s}s`;
+function formatAction(action: string): string {
+  return action
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+interface ParsedDetails {
+  upid?: string;
+  node?: string;
+  vmid?: number;
+  [key: string]: unknown;
+}
+
+function parseDetails(detailsStr: string): ParsedDetails {
+  try {
+    const parsed: unknown = JSON.parse(detailsStr);
+    if (parsed && typeof parsed === "object") {
+      return parsed as ParsedDetails;
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function getClusterIdFromEntry(entry: AuditLogEntry): string {
+  return entry.cluster_id ?? "";
+}
+
+function isRecentEntry(entry: AuditLogEntry): boolean {
+  const tenMinAgo = Date.now() - 10 * 60 * 1000;
+  return new Date(entry.created_at).getTime() > tenMinAgo;
 }
 
 /**
- * Invisible component that polls Proxmox for a running task's status
- * and updates the task history DB when it completes.
+ * Polls Proxmox for a UPID's live status (running/stopped).
+ * Only active for recent entries with UPIDs.
  */
-function RunningTaskUpdater({ task }: { task: TaskHistoryEntry }) {
-  const { data: proxmoxTask } = useTaskStatus(task.cluster_id, task.upid);
-  const queryClient = useQueryClient();
-  const updatedRef = useRef<string | null>(null);
+function ActiveTaskPoller({
+  entry,
+  onStatus,
+}: {
+  entry: AuditLogEntry;
+  onStatus: (upid: string, status: string, exitStatus: string) => void;
+}) {
+  const details = parseDetails(entry.details);
+  const clusterId = getClusterIdFromEntry(entry);
+  const upid = details.upid ?? null;
 
+  const { data: task } = useTaskStatus(
+    clusterId,
+    upid && isRecentEntry(entry) ? upid : null,
+  );
+
+  const prevRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!proxmoxTask) return;
-    const key = `${task.upid}:${proxmoxTask.status}:${proxmoxTask.exit_status ?? ""}:${String(proxmoxTask.progress)}`;
-    if (updatedRef.current === key) return;
-    updatedRef.current = key;
-
-    void apiClient
-      .put(`/api/v1/tasks/${encodeURIComponent(task.upid)}`, {
-        status: proxmoxTask.status,
-        exit_status: proxmoxTask.exit_status ?? "",
-        progress: proxmoxTask.progress ?? null,
-        finished_at: proxmoxTask.status === "stopped" ? new Date().toISOString() : null,
-      })
-      .then(() => {
-        void queryClient.invalidateQueries({ queryKey: ["task-history"] });
-      })
-      .catch(() => {
-        // ignore update failures
-      });
-  }, [proxmoxTask, task.upid, queryClient]);
+    if (task && upid) {
+      const key = `${task.status}:${task.exit_status ?? ""}`;
+      if (prevRef.current !== key) {
+        prevRef.current = key;
+        onStatus(upid, task.status, task.exit_status ?? "");
+      }
+    }
+  }, [task, upid, onStatus]);
 
   return null;
 }
 
-function TaskRow({ task, expanded, onToggle, onFocus }: {
-  task: TaskHistoryEntry;
+function ActivityRow({
+  entry,
+  expanded,
+  onToggle,
+  onFocus,
+  taskStatus,
+}: {
+  entry: AuditLogEntry;
   expanded: boolean;
   onToggle: () => void;
   onFocus: () => void;
+  taskStatus: { status: string; exitStatus: string } | undefined;
 }) {
-  const isRunning = task.status === "running";
-  const isOk = task.status === "stopped" && isTaskOk(task.exit_status);
-  const hasWarnings = isOk && task.exit_status.startsWith("WARNINGS");
-  const isFailed = task.status === "stopped" && !isOk;
+  const details = parseDetails(entry.details);
+  const hasUpid = !!details.upid;
+  const clusterId = getClusterIdFromEntry(entry);
+
+  const isRunning = hasUpid && taskStatus?.status === "running";
+  const isStopped = hasUpid && taskStatus?.status === "stopped";
+  const isOk =
+    isStopped &&
+    (taskStatus.exitStatus === "" ||
+      taskStatus.exitStatus === "OK" ||
+      taskStatus.exitStatus.startsWith("WARNINGS"));
+  const isFailed = isStopped && !isOk;
+
+  const resourceLabel =
+    entry.resource_name && entry.resource_vmid
+      ? `${entry.resource_name} (${String(entry.resource_vmid)})`
+      : entry.resource_name || entry.resource_id;
 
   const { data: logLines, isLoading: logLoading } = useTaskLog(
-    task.cluster_id,
-    task.upid,
-    expanded,
+    clusterId,
+    details.upid ?? null,
+    expanded && hasUpid,
   );
 
   return (
@@ -113,7 +140,10 @@ function TaskRow({ task, expanded, onToggle, onFocus }: {
       <tr
         className="cursor-pointer border-b hover:bg-muted/20"
         onClick={onToggle}
-        onDoubleClick={(e) => { e.stopPropagation(); onFocus(); }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onFocus();
+        }}
       >
         <td className="px-2 py-1">
           <div className="flex items-center gap-1">
@@ -123,120 +153,120 @@ function TaskRow({ task, expanded, onToggle, onFocus }: {
             {isRunning && (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
             )}
-            {isOk && !hasWarnings && (
+            {isOk && (
               <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-            )}
-            {hasWarnings && (
-              <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
             )}
             {isFailed && (
               <XCircle className="h-3.5 w-3.5 text-red-500" />
+            )}
+            {!hasUpid && (
+              <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+            {hasUpid && !taskStatus && (
+              <Activity className="h-3.5 w-3.5 text-muted-foreground" />
             )}
           </div>
         </td>
         <td className="px-2 py-1">
           <div className="flex items-center gap-2">
-            <span>
-              {task.description || task.task_type || "Task"}
-            </span>
-            {isRunning && task.progress != null && (
-              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-blue-500 transition-all duration-300"
-                  style={{
-                    width: `${Math.round(task.progress * 100)}%`,
-                  }}
-                />
-              </div>
+            <span>{formatAction(entry.action)}</span>
+            {resourceLabel && (
+              <span className="text-muted-foreground">
+                — {resourceLabel}
+              </span>
+            )}
+            {isRunning && (
+              <span className="text-xs text-blue-500">running</span>
             )}
           </div>
         </td>
-        <td className="px-2 py-1">
-          {isFailed && (
-            <span className="text-red-500">
-              {task.exit_status}
-            </span>
-          )}
-          {isOk && !hasWarnings && (
-            <span className="text-green-600 dark:text-green-400">
-              OK
-            </span>
-          )}
-          {hasWarnings && (
-            <span className="text-yellow-600 dark:text-yellow-400">
-              {task.exit_status}
-            </span>
-          )}
-          {isRunning && (
-            <span className="text-blue-500">Running</span>
-          )}
+        <td className="px-2 py-1 text-muted-foreground">
+          {entry.cluster_name || "—"}
         </td>
         <td className="px-2 py-1 text-right text-muted-foreground">
-          {formatElapsed(task.started_at, task.finished_at)}
+          {formatRelativeTime(entry.created_at)}
         </td>
       </tr>
       {expanded && (
         <tr className="border-b bg-muted/10">
           <td colSpan={4} className="px-4 py-2">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-              {task.exit_status !== "" && (
+              <span className="text-muted-foreground">Action</span>
+              <span>{entry.action}</span>
+              <span className="text-muted-foreground">Resource</span>
+              <span>
+                {entry.resource_type} / {entry.resource_id}
+              </span>
+              <span className="text-muted-foreground">User</span>
+              <span>
+                {entry.user_display_name || entry.user_email}
+              </span>
+              <span className="text-muted-foreground">Time</span>
+              <span>{formatTimestamp(entry.created_at)}</span>
+              {isFailed && (
                 <>
                   <span className="text-muted-foreground">Exit Status</span>
-                  <span className={
-                    isFailed
-                      ? "text-red-500"
-                      : hasWarnings
-                        ? "text-yellow-600 dark:text-yellow-400"
-                        : ""
-                  }>
-                    {task.exit_status}
+                  <span className="text-red-500">
+                    {taskStatus.exitStatus}
                   </span>
                 </>
               )}
-              <span className="text-muted-foreground">UPID</span>
-              <span className="break-all font-mono text-[10px]">{task.upid}</span>
-              {task.node !== "" && (
+              {details.upid && (
+                <>
+                  <span className="text-muted-foreground">UPID</span>
+                  <span className="break-all font-mono text-[10px]">
+                    {details.upid}
+                  </span>
+                </>
+              )}
+              {details.node && (
                 <>
                   <span className="text-muted-foreground">Node</span>
-                  <span>{task.node}</span>
+                  <span>{details.node as string}</span>
                 </>
               )}
-              {task.task_type !== "" && (
+              {Object.keys(details).filter(
+                (k) => !["upid", "node", "vmid"].includes(k),
+              ).length > 0 && (
                 <>
-                  <span className="text-muted-foreground">Type</span>
-                  <span>{task.task_type}</span>
+                  <span className="text-muted-foreground">Details</span>
+                  <span className="break-all font-mono text-[10px]">
+                    {JSON.stringify(
+                      Object.fromEntries(
+                        Object.entries(details).filter(
+                          ([k]) => !["upid", "node", "vmid"].includes(k),
+                        ),
+                      ),
+                    )}
+                  </span>
                 </>
               )}
-              <span className="text-muted-foreground">Started</span>
-              <span>{formatTimestamp(task.started_at)}</span>
-              {task.finished_at && (
-                <>
-                  <span className="text-muted-foreground">Finished</span>
-                  <span>{formatTimestamp(task.finished_at)}</span>
-                </>
-              )}
-              <span className="text-muted-foreground">Duration</span>
-              <span>{formatDuration(task.started_at, task.finished_at)}</span>
             </div>
 
-            {/* Task Log Output */}
-            <div className="mt-2 border-t pt-2">
-              <span className="text-xs font-medium text-muted-foreground">Log</span>
-              {logLoading && (
-                <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Loading log…
-                </div>
-              )}
-              {logLines && logLines.length > 0 && (
-                <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-                  {logLines.map((line) => line.t).join("\n")}
-                </pre>
-              )}
-              {logLines && logLines.length === 0 && (
-                <div className="mt-1 text-xs text-muted-foreground">No log output</div>
-              )}
-            </div>
+            {/* Task Log Output (for UPID-bearing entries) */}
+            {hasUpid && (
+              <div className="mt-2 border-t pt-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Log
+                </span>
+                {logLoading && (
+                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading log…
+                  </div>
+                )}
+                {logLines && logLines.length > 0 && (
+                  <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
+                    {logLines.map((line) => line.t).join("\n")}
+                  </pre>
+                )}
+                {logLines && logLines.length === 0 && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    No log output
+                  </div>
+                )}
+              </div>
+            )}
           </td>
         </tr>
       )}
@@ -251,18 +281,53 @@ export function TaskLogPanel() {
   const setPanelHeight = useTaskLogStore((s) => s.setPanelHeight);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
-  const { data: tasks } = useTaskHistory();
-  const clearMutation = useClearTaskHistory();
+  const { data: entries } = useRecentActivity();
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const runningCount = tasks?.filter((t) => t.status === "running").length ?? 0;
-  const failedCount =
-    tasks?.filter(
-      (t) => t.status === "stopped" && !isTaskOk(t.exit_status),
-    ).length ?? 0;
+  // Track live task statuses from pollers
+  const [taskStatuses, setTaskStatuses] = useState<
+    Record<string, { status: string; exitStatus: string }>
+  >({});
 
-  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const handleTaskStatus = useCallback(
+    (upid: string, status: string, exitStatus: string) => {
+      setTaskStatuses((prev) => {
+        const existing = prev[upid];
+        if (
+          existing?.status === status &&
+          existing.exitStatus === exitStatus
+        ) {
+          return prev;
+        }
+        return { ...prev, [upid]: { status, exitStatus } };
+      });
+    },
+    [],
+  );
+
+  // Count running/failed from polled statuses
+  const runningCount = Object.values(taskStatuses).filter(
+    (s) => s.status === "running",
+  ).length;
+  const failedCount = Object.values(taskStatuses).filter(
+    (s) =>
+      s.status === "stopped" &&
+      s.exitStatus !== "" &&
+      s.exitStatus !== "OK" &&
+      !s.exitStatus.startsWith("WARNINGS"),
+  ).length;
+
+  // Recent entries that have UPIDs and are within last 10 minutes
+  const recentWithUpids =
+    entries?.filter((e) => {
+      const d = parseDetails(e.details);
+      return d.upid && isRecentEntry(e);
+    }) ?? [];
+
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(
+    null,
+  );
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -287,14 +352,15 @@ export function TaskLogPanel() {
     dragRef.current = null;
   }, []);
 
-  // Poll Proxmox for all running tasks to keep their status up to date.
-  const runningTasks = tasks?.filter((t) => t.status === "running") ?? [];
-
   return (
     <div className="flex flex-col border-t bg-background">
-      {/* Invisible pollers for running tasks */}
-      {runningTasks.map((t) => (
-        <RunningTaskUpdater key={t.upid} task={t} />
+      {/* Invisible pollers for recent UPID-bearing entries */}
+      {recentWithUpids.map((e) => (
+        <ActiveTaskPoller
+          key={e.id}
+          entry={e}
+          onStatus={handleTaskStatus}
+        />
       ))}
 
       {/* Resize handle — only visible when panel is open */}
@@ -310,9 +376,11 @@ export function TaskLogPanel() {
       {/* Header bar */}
       <div
         className="flex h-7 cursor-pointer items-center gap-2 border-b px-3 text-xs select-none"
-        onClick={() => { setPanelOpen(!panelOpen); }}
+        onClick={() => {
+          setPanelOpen(!panelOpen);
+        }}
       >
-        <span className="font-medium">Tasks</span>
+        <span className="font-medium">Activity</span>
         {runningCount > 0 && (
           <span className="rounded-full bg-blue-500/20 px-1.5 py-0.5 text-blue-600 dark:text-blue-400">
             {runningCount} running
@@ -324,20 +392,6 @@ export function TaskLogPanel() {
           </span>
         )}
         <div className="flex-1" />
-        {panelOpen && tasks && tasks.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 px-1.5 text-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              clearMutation.mutate();
-            }}
-          >
-            <Trash2 className="mr-1 h-3 w-3" />
-            Clear
-          </Button>
-        )}
         {panelOpen ? (
           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
         ) : (
@@ -345,45 +399,55 @@ export function TaskLogPanel() {
         )}
       </div>
 
-      {/* Task list */}
+      {/* Activity list */}
       {panelOpen && (
-        <div
-          className="overflow-auto"
-          style={{ height: panelHeight }}
-        >
-          {(!tasks || tasks.length === 0) && (
+        <div className="overflow-auto" style={{ height: panelHeight }}>
+          {(!entries || entries.length === 0) && (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-              No tasks
+              No activity
             </div>
           )}
-          {tasks && tasks.length > 0 && (
+          {entries && entries.length > 0 && (
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b bg-muted/30 text-left">
                   <th className="w-12 px-2 py-1" />
-                  <th className="px-2 py-1 font-medium">Description</th>
-                  <th className="px-2 py-1 font-medium">Status</th>
-                  <th className="w-24 px-2 py-1 text-right font-medium">Time</th>
+                  <th className="px-2 py-1 font-medium">Action</th>
+                  <th className="px-2 py-1 font-medium">Cluster</th>
+                  <th className="w-24 px-2 py-1 text-right font-medium">
+                    Time
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {tasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    expanded={expandedId === task.id}
-                    onToggle={() => {
-                      setExpandedId(expandedId === task.id ? null : task.id);
-                    }}
-                    onFocus={() => {
-                      setFocusedTask({
-                        clusterId: task.cluster_id,
-                        upid: task.upid,
-                        description: task.description || task.task_type || "Task",
-                      });
-                    }}
-                  />
-                ))}
+                {entries.map((entry) => {
+                  const details = parseDetails(entry.details);
+                  const upid = details.upid;
+                  return (
+                    <ActivityRow
+                      key={entry.id}
+                      entry={entry}
+                      expanded={expandedId === entry.id}
+                      onToggle={() => {
+                        setExpandedId(
+                          expandedId === entry.id ? null : entry.id,
+                        );
+                      }}
+                      onFocus={() => {
+                        if (upid && entry.cluster_id) {
+                          setFocusedTask({
+                            clusterId: entry.cluster_id,
+                            upid,
+                            description: `${formatAction(entry.action)} — ${entry.resource_name || entry.resource_id}`,
+                          });
+                        }
+                      }}
+                      taskStatus={
+                        upid ? taskStatuses[upid] : undefined
+                      }
+                    />
+                  );
+                })}
               </tbody>
             </table>
           )}

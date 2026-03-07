@@ -269,3 +269,76 @@ func (q *Queries) ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilt
 	}
 	return items, nil
 }
+
+const listRecentAuditLogEnriched = `-- name: ListRecentAuditLogEnriched :many
+SELECT
+  a.id,
+  a.cluster_id,
+  a.user_id,
+  a.resource_type,
+  a.resource_id,
+  a.action,
+  a.details,
+  a.created_at,
+  u.email AS user_email,
+  u.display_name AS user_display_name,
+  COALESCE(c.name, '') AS cluster_name,
+  COALESCE(v.vmid, 0) AS resource_vmid,
+  COALESCE(v.name, '') AS resource_name
+FROM audit_log a
+JOIN users u ON u.id = a.user_id
+LEFT JOIN clusters c ON c.id = a.cluster_id
+LEFT JOIN vms v ON v.id::text = a.resource_id
+ORDER BY a.created_at DESC
+LIMIT 50
+`
+
+type ListRecentAuditLogEnrichedRow struct {
+	ID              uuid.UUID       `json:"id"`
+	ClusterID       pgtype.UUID     `json:"cluster_id"`
+	UserID          uuid.UUID       `json:"user_id"`
+	ResourceType    string          `json:"resource_type"`
+	ResourceID      string          `json:"resource_id"`
+	Action          string          `json:"action"`
+	Details         json.RawMessage `json:"details"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UserEmail       string          `json:"user_email"`
+	UserDisplayName string          `json:"user_display_name"`
+	ClusterName     string          `json:"cluster_name"`
+	ResourceVmid    int32           `json:"resource_vmid"`
+	ResourceName    string          `json:"resource_name"`
+}
+
+func (q *Queries) ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentAuditLogEnrichedRow, error) {
+	rows, err := q.db.Query(ctx, listRecentAuditLogEnriched)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentAuditLogEnrichedRow{}
+	for rows.Next() {
+		var i ListRecentAuditLogEnrichedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+			&i.UserEmail,
+			&i.UserDisplayName,
+			&i.ClusterName,
+			&i.ResourceVmid,
+			&i.ResourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

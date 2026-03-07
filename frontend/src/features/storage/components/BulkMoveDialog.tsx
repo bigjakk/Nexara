@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { useStorageContent } from "../api/storage-queries";
-import { useAddTaskHistory } from "@/features/vms/api/vm-queries";
 import type { StorageContentItem } from "../types/storage";
 import type { VMActionResponse } from "@/features/vms/types/vm";
 
@@ -77,7 +76,6 @@ export function BulkMoveDialog({
   const [buildingJobs, setBuildingJobs] = useState(false);
 
   const contentQuery = useStorageContent(clusterId, storageId);
-  const addTask = useAddTaskHistory();
 
   const imageItems = (contentQuery.data ?? []).filter(
     (item: StorageContentItem) => item.content === "images" && item.vmid != null,
@@ -156,14 +154,6 @@ export function BulkMoveDialog({
         newJobs[i] = { ...job, status: "completed", upid: resp.upid };
         setJobs([...newJobs]);
 
-        if (resp.upid) {
-          addTask.mutate({
-            clusterId,
-            upid: resp.upid,
-            description: `Evacuate: move ${job.diskKey} (VM ${String(job.vmid)}) → ${targetStorage}`,
-            taskType: "move_disk",
-          });
-        }
       } catch (err) {
         newJobs[i] = {
           ...job,
@@ -175,7 +165,7 @@ export function BulkMoveDialog({
     }
 
     setRunning(false);
-  }, [targetStorage, imageItems, clusterId, deleteOriginal, addTask]);
+  }, [targetStorage, imageItems, clusterId, deleteOriginal]);
 
   const completedCount = jobs.filter((j) => j.status === "completed").length;
   const failedCount = jobs.filter((j) => j.status === "failed").length;

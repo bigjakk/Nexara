@@ -72,8 +72,8 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
-		s.clusterHandler = handlers.NewClusterHandler(s.queries, cfg.EncryptionKey)
-		s.pbsHandler = handlers.NewPBSHandler(s.queries, cfg.EncryptionKey)
+		s.clusterHandler = handlers.NewClusterHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.pbsHandler = handlers.NewPBSHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
@@ -87,21 +87,21 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
-		s.storageHandler = handlers.NewStorageHandler(s.queries, cfg.EncryptionKey)
-		s.cephHandler = handlers.NewCephHandler(s.queries, cfg.EncryptionKey)
-		s.backupHandler = handlers.NewBackupHandler(s.queries, cfg.EncryptionKey)
+		s.storageHandler = handlers.NewStorageHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.cephHandler = handlers.NewCephHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.backupHandler = handlers.NewBackupHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}
 
 	if s.queries != nil {
 		s.taskHandler = handlers.NewTaskHandler(s.queries, s.eventPub)
-		s.scheduleHandler = handlers.NewScheduleHandler(s.queries)
+		s.scheduleHandler = handlers.NewScheduleHandler(s.queries, s.eventPub)
 		s.auditHandler = handlers.NewAuditHandler(s.queries)
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
 		s.drsHandler = handlers.NewDRSHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.migrationHandler = handlers.NewMigrationHandler(s.queries, cfg.EncryptionKey, s.eventPub)
-		s.networkHandler = handlers.NewNetworkHandler(s.queries, cfg.EncryptionKey)
+		s.networkHandler = handlers.NewNetworkHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}
 
 	s.app = fiber.New(fiber.Config{

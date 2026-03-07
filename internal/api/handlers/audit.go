@@ -116,6 +116,47 @@ func (h *AuditHandler) List(c *fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
+// ListRecent handles GET /api/v1/audit-log/recent — returns the 50 most recent entries.
+func (h *AuditHandler) ListRecent(c *fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
+
+	items, err := h.queries.ListRecentAuditLogEnriched(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list recent activity")
+	}
+
+	resp := make([]auditLogResponse, len(items))
+	for i, a := range items {
+		resp[i] = toRecentAuditResponse(a)
+	}
+
+	return c.JSON(resp)
+}
+
+func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow) auditLogResponse {
+	resp := auditLogResponse{
+		ID:              a.ID,
+		UserID:          a.UserID,
+		ResourceType:    a.ResourceType,
+		ResourceID:      a.ResourceID,
+		Action:          a.Action,
+		Details:         string(a.Details),
+		CreatedAt:       a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UserEmail:       a.UserEmail,
+		UserDisplayName: a.UserDisplayName,
+		ClusterName:     a.ClusterName,
+		ResourceVMID:    a.ResourceVmid,
+		ResourceName:    a.ResourceName,
+	}
+	if a.ClusterID.Valid {
+		s := uuid.UUID(a.ClusterID.Bytes).String()
+		resp.ClusterID = &s
+	}
+	return resp
+}
+
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/audit-log.
 func (h *AuditHandler) ListByCluster(c *fiber.Ctx) error {
 	if err := requireAdmin(c); err != nil {

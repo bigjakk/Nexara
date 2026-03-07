@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { useResizeDisk, useMoveDisk, useAddTaskHistory } from "@/features/vms/api/vm-queries";
+import { useResizeDisk, useMoveDisk } from "@/features/vms/api/vm-queries";
 import { useTaskLogStore } from "@/stores/task-log-store";
 
 // --- Resize Disk Dialog ---
@@ -104,7 +104,6 @@ export function MoveDiskDialog({
   const [targetStorage, setTargetStorage] = useState("");
   const [deleteOriginal, setDeleteOriginal] = useState(true);
   const moveMutation = useMoveDisk();
-  const addTask = useAddTaskHistory();
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
   // Filter out current storage from options
@@ -124,19 +123,11 @@ export function MoveDiskDialog({
       },
       {
         onSuccess: (data) => {
-          const desc = `Move disk ${diskName} → ${targetStorage}`;
           if (data.upid) {
-            addTask.mutate({
-              clusterId,
-              upid: data.upid,
-              description: desc,
-              taskType: "move_disk",
-            });
-            // Open the progress dialog
             setFocusedTask({
               clusterId,
               upid: data.upid,
-              description: desc,
+              description: `Move disk ${diskName} → ${targetStorage}`,
             });
           }
           setOpen(false);

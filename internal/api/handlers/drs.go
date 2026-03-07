@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -11,10 +10,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/drs"
 	"github.com/proxdash/proxdash/internal/events"
@@ -39,21 +36,7 @@ func NewDRSHandler(queries *db.Queries, encryptionKey string, eventPub *events.P
 
 // auditLog writes an audit log entry. Failures are logged but don't fail the request.
 func (h *DRSHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	if details == nil {
-		details = json.RawMessage(`{}`)
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      details,
-	})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }
 
 // --- Request / Response types ---
@@ -377,11 +360,11 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 	}
 
 	type evalResponse struct {
-		VMID       int     `json:"vmid"`
-		VMType     string  `json:"vm_type"`
-		From       string  `json:"from"`
-		To         string  `json:"to"`
-		Reason     string  `json:"reason"`
+		VMID        int     `json:"vmid"`
+		VMType      string  `json:"vm_type"`
+		From        string  `json:"from"`
+		To          string  `json:"to"`
+		Reason      string  `json:"reason"`
 		Improvement float64 `json:"improvement"`
 	}
 
@@ -441,31 +424,7 @@ func (h *DRSHandler) ListHistory(c *fiber.Ctx) error {
 
 // createProxmoxClient creates a Proxmox client for the given cluster ID.
 func (h *DRSHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "Cluster not found")
-		}
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Second,
-	})
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
-	}
-
-	return pxClient, nil
+	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // haRuleToResponse converts a Proxmox HA rule entry to a DRS rule response.

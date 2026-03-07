@@ -549,6 +549,66 @@ func (c *Client) DeleteStorageContent(ctx context.Context, node, storage, volume
 	return upid, nil
 }
 
+// --- Cluster-Level Storage Management ---
+
+// GetStorageConfig returns the configuration of a storage pool from GET /storage/{storage}.
+func (c *Client) GetStorageConfig(ctx context.Context, storage string) (*StorageConfig, error) {
+	if storage == "" {
+		return nil, fmt.Errorf("storage name is required")
+	}
+	var cfg StorageConfig
+	if err := c.do(ctx, "/storage/"+url.PathEscape(storage), &cfg); err != nil {
+		return nil, fmt.Errorf("get storage config %s: %w", storage, err)
+	}
+	return &cfg, nil
+}
+
+// ListStorageConfigs returns all storage definitions from GET /storage.
+func (c *Client) ListStorageConfigs(ctx context.Context) ([]StorageConfig, error) {
+	var cfgs []StorageConfig
+	if err := c.do(ctx, "/storage", &cfgs); err != nil {
+		return nil, fmt.Errorf("list storage configs: %w", err)
+	}
+	return cfgs, nil
+}
+
+// CreateStorage creates a new storage pool via POST /storage.
+// The params map contains all type-specific and common parameters.
+func (c *Client) CreateStorage(ctx context.Context, params url.Values) error {
+	if params.Get("storage") == "" {
+		return fmt.Errorf("storage name is required")
+	}
+	if params.Get("type") == "" {
+		return fmt.Errorf("storage type is required")
+	}
+	if err := c.doPost(ctx, "/storage", params, nil); err != nil {
+		return fmt.Errorf("create storage %s: %w", params.Get("storage"), err)
+	}
+	return nil
+}
+
+// UpdateStorage updates a storage pool via PUT /storage/{storage}.
+func (c *Client) UpdateStorage(ctx context.Context, storage string, params url.Values) error {
+	if storage == "" {
+		return fmt.Errorf("storage name is required")
+	}
+	if err := c.doPut(ctx, "/storage/"+url.PathEscape(storage), params, nil); err != nil {
+		return fmt.Errorf("update storage %s: %w", storage, err)
+	}
+	return nil
+}
+
+// DeleteStorage deletes a storage pool via DELETE /storage/{storage}.
+func (c *Client) DeleteStorage(ctx context.Context, storage string) error {
+	if storage == "" {
+		return fmt.Errorf("storage name is required")
+	}
+	if err := c.doDelete(ctx, "/storage/"+url.PathEscape(storage), nil); err != nil {
+		return fmt.Errorf("delete storage %s: %w", storage, err)
+	}
+	return nil
+}
+
 // --- Ceph API Methods ---
 
 // GetCephStatus returns the cluster-wide Ceph status from any node.

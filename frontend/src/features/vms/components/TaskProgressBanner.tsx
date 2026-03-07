@@ -1,7 +1,6 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
 import { useTaskStatus } from "../api/vm-queries";
 
 interface TaskProgressBannerProps {
@@ -15,7 +14,6 @@ export function TaskProgressBanner({
   clusterId,
   upid,
   onComplete,
-  description,
 }: TaskProgressBannerProps) {
   const { data: task } = useTaskStatus(clusterId, upid);
   const queryClient = useQueryClient();
@@ -30,79 +28,16 @@ export function TaskProgressBanner({
 
   // Track whether we've already fired onComplete for this UPID.
   const firedRef = useRef<string | null>(null);
-  // Track whether we've already persisted this UPID to the task history.
-  const persistedRef = useRef<string | null>(null);
-  // Track the last update key to avoid duplicate updates.
-  const lastUpdateRef = useRef<string | null>(null);
-
-  const invalidateAll = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["task-history"] });
-    // VM/container status invalidation is handled by the backend's
-    // vm_state_change events via useEventInvalidation — no need to
-    // invalidate here (doing so causes stale status refetches).
-  }, [queryClient]);
-
-  // Persist task to DB when UPID becomes available.
-  useEffect(() => {
-    if (upid && persistedRef.current !== upid) {
-      persistedRef.current = upid;
-      void apiClient
-        .post("/api/v1/tasks", {
-          cluster_id: clusterId,
-          upid,
-          description: description ?? "Task",
-          status: "running",
-          node: "",
-          task_type: "",
-        })
-        .then(invalidateAll)
-        .catch(() => {
-          // ignore — task may already exist (ON CONFLICT)
-        });
-    }
-  }, [upid, clusterId, description, invalidateAll]);
-
-  // Update task status on each poll result.
-  useEffect(() => {
-    if (!upid || !task) return;
-    const key = `${upid}:${task.status}:${task.exit_status ?? ""}:${String(task.progress)}`;
-    if (lastUpdateRef.current === key) return;
-    lastUpdateRef.current = key;
-
-    void apiClient
-      .put(`/api/v1/tasks/${encodeURIComponent(upid)}`, {
-        status: task.status,
-        exit_status: task.exit_status ?? "",
-        progress: task.progress ?? null,
-        finished_at: task.status === "stopped" ? new Date().toISOString() : null,
-      })
-      .then(invalidateAll)
-      .catch(() => {
-        // ignore update failures
-      });
-  }, [upid, task, invalidateAll]);
 
   useEffect(() => {
-    if (isStopped && upid && task && firedRef.current !== upid) {
+    if (isStopped && upid && firedRef.current !== upid) {
       firedRef.current = upid;
-      // Ensure the final status is persisted to DB before firing onComplete,
-      // which may unmount this component.
-      void apiClient
-        .put(`/api/v1/tasks/${encodeURIComponent(upid)}`, {
-          status: task.status,
-          exit_status: task.exit_status ?? "",
-          progress: task.progress ?? null,
-          finished_at: new Date().toISOString(),
-        })
-        .then(invalidateAll)
-        .catch(() => {
-          // ignore
-        })
-        .finally(() => {
-          onComplete?.();
-        });
+      void queryClient.invalidateQueries({
+        queryKey: ["recent-activity"],
+      });
+      onComplete?.();
     }
-  }, [isStopped, upid, task, onComplete, invalidateAll]);
+  }, [isStopped, upid, onComplete, queryClient]);
 
   if (!upid) return null;
 
@@ -115,7 +50,7 @@ export function TaskProgressBanner({
             <span>
               Task running
               {task?.progress != null
-                ? `… ${Math.round(task.progress * 100)}%`
+                ? `… ${String(Math.round(task.progress * 100))}%`
                 : "…"}
             </span>
             <span className="text-xs text-muted-foreground">{task?.type}</span>
@@ -123,7 +58,9 @@ export function TaskProgressBanner({
               <div className="ml-auto h-2 w-32 overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full rounded-full bg-blue-500 transition-all duration-300"
-                  style={{ width: `${Math.round(task.progress * 100)}%` }}
+                  style={{
+                    width: `${String(Math.round(task.progress * 100))}%`,
+                  }}
                 />
               </div>
             )}

@@ -197,14 +197,13 @@ describe("VMDetailPage", () => {
     renderPage();
     expect(screen.getByText("100")).toBeInTheDocument(); // VMID
     expect(screen.getByText("4")).toBeInTheDocument(); // CPUs
-    expect(screen.getByText("QEMU VM")).toBeInTheDocument();
+    expect(screen.getByText("QEMU")).toBeInTheDocument();
   });
 
-  it("renders tabs for Overview, Snapshots, Console", () => {
+  it("renders tabs for Overview and Snapshots", () => {
     renderPage();
     expect(screen.getByRole("tab", { name: /overview/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /snapshots/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /console/i })).toBeInTheDocument();
   });
 
   it("shows action buttons for running VM", () => {

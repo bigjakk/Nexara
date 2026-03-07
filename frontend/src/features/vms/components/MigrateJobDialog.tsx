@@ -156,7 +156,7 @@ export function MigrateJobDialog({
       (status === "completed" || status === "failed")
     ) {
       void queryClient.invalidateQueries({ queryKey: ["clusters", clusterId] });
-      void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+      void queryClient.invalidateQueries({ queryKey: ["recent-activity"] });
     }
     prevJobStatus.current = status;
   }, [job?.status, clusterId, queryClient]);
@@ -232,7 +232,7 @@ export function MigrateJobDialog({
     void executeMutation.mutateAsync(jobId).then(() => {
       setStep("progress");
       // Trigger task panel to pick up the new task_history entry from the backend.
-      void queryClient.invalidateQueries({ queryKey: ["task-history"] });
+      void queryClient.invalidateQueries({ queryKey: ["recent-activity"] });
     });
   }
 

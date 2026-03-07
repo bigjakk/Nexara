@@ -11,6 +11,29 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteStoragePool = `-- name: DeleteStoragePool :exec
+DELETE FROM storage_pools WHERE id = $1
+`
+
+func (q *Queries) DeleteStoragePool(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteStoragePool, id)
+	return err
+}
+
+const deleteStoragePoolsByName = `-- name: DeleteStoragePoolsByName :exec
+DELETE FROM storage_pools WHERE cluster_id = $1 AND storage = $2
+`
+
+type DeleteStoragePoolsByNameParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Storage   string    `json:"storage"`
+}
+
+func (q *Queries) DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error {
+	_, err := q.db.Exec(ctx, deleteStoragePoolsByName, arg.ClusterID, arg.Storage)
+	return err
+}
+
 const getStoragePool = `-- name: GetStoragePool :one
 SELECT id, cluster_id, node_id, storage, type, content, active, enabled, shared, total, used, avail, last_seen_at, created_at, updated_at FROM storage_pools WHERE id = $1
 `

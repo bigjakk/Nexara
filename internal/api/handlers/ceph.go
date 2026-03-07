@@ -1,17 +1,13 @@
 package handlers
 
 import (
-	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5"
 
-	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
 )
 
@@ -19,20 +15,21 @@ import (
 type CephHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewCephHandler creates a new Ceph handler.
-func NewCephHandler(queries *db.Queries, encryptionKey string) *CephHandler {
-	return &CephHandler{queries: queries, encryptionKey: encryptionKey}
+func NewCephHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *CephHandler {
+	return &CephHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
 // --- Response types ---
 
 type cephStatusResponse struct {
-	Health  cephHealthResponse  `json:"health"`
-	PGMap   cephPGMapResponse   `json:"pgmap"`
-	OSDMap  cephOSDMapResponse  `json:"osdmap"`
-	MonMap  cephMonMapResponse  `json:"monmap"`
+	Health cephHealthResponse `json:"health"`
+	PGMap  cephPGMapResponse  `json:"pgmap"`
+	OSDMap cephOSDMapResponse `json:"osdmap"`
+	MonMap cephMonMapResponse `json:"monmap"`
 }
 
 type cephHealthResponse struct {
@@ -89,10 +86,10 @@ type cephPoolResponse struct {
 }
 
 type cephMonResponse struct {
-	Name   string `json:"name"`
-	Addr   string `json:"addr"`
-	Host   string `json:"host"`
-	Rank   int    `json:"rank"`
+	Name string `json:"name"`
+	Addr string `json:"addr"`
+	Host string `json:"host"`
+	Rank int    `json:"rank"`
 }
 
 type cephFSResponse struct {
@@ -523,45 +520,10 @@ func (h *CephHandler) resolveClusterNode(c *fiber.Ctx) (*proxmox.Client, string,
 
 // createProxmoxClient creates a Proxmox client for the given cluster.
 func (h *CephHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "Cluster not found")
-		}
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Second,
-	})
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
-	}
-
-	return pxClient, nil
+	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // auditLog writes an audit log entry.
 func (h *CephHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	uid, ok := c.Locals("user_id").(uuid.UUID)
-	if !ok {
-		return
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       uid,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Action:       action,
-		Details:      json.RawMessage(`{}`),
-	})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, nil)
 }

@@ -234,6 +234,77 @@ type TaskLogEntry struct {
 	T string `json:"t"`
 }
 
+// StorageConfig represents the full configuration of a storage pool from GET /storage/{storage}.
+// Fields are optional because they vary by storage type.
+// Some fields are shared across types (e.g. "pool" is used by both zfspool and rbd).
+type StorageConfig struct {
+	Storage string `json:"storage"`
+	Type    string `json:"type"`
+	Content string `json:"content,omitempty"`
+	Nodes   string `json:"nodes,omitempty"`
+	Disable int    `json:"disable,omitempty"`
+	Shared  int    `json:"shared,omitempty"`
+	Digest  string `json:"digest,omitempty"`
+
+	// dir / btrfs
+	Path         string `json:"path,omitempty"`
+	Mkdir        int    `json:"mkdir,omitempty"`
+	IsMountpoint string `json:"is_mountpoint,omitempty"`
+
+	// nfs / cifs / glusterfs / pbs
+	Server  string `json:"server,omitempty"`
+	Export  string `json:"export,omitempty"`
+	Options string `json:"options,omitempty"`
+
+	// cifs/smb
+	Share      string `json:"share,omitempty"`
+	Username   string `json:"username,omitempty"` // also used by rbd/cephfs/pbs
+	Domain     string `json:"domain,omitempty"`
+	SMBVersion string `json:"smbversion,omitempty"`
+	Password   string `json:"password,omitempty"` // cifs / pbs
+
+	// lvm / lvmthin
+	VGName     string `json:"vgname,omitempty"`
+	BaseVolume string `json:"base,omitempty"`
+	SafeRemove int    `json:"saferemove,omitempty"`
+	ThinPool   string `json:"thinpool,omitempty"`
+
+	// zfspool / rbd / cephfs
+	Pool      string `json:"pool,omitempty"`
+	BlockSize string `json:"blocksize,omitempty"`
+	Sparse    int    `json:"sparse,omitempty"`
+
+	// iscsi
+	Portal string `json:"portal,omitempty"`
+	Target string `json:"target,omitempty"`
+
+	// cephfs / rbd
+	MonHost   string `json:"monhost,omitempty"`
+	KRBD      int    `json:"krbd,omitempty"`
+	Fuse      int    `json:"fuse,omitempty"`
+	Subdir    string `json:"subdir,omitempty"`
+	FSName    string `json:"fs-name,omitempty"`
+	Keyring   string `json:"keyring,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+
+	// glusterfs
+	Server2   string `json:"server2,omitempty"`
+	Volume    string `json:"volume,omitempty"`
+	Transport string `json:"transport,omitempty"`
+
+	// pbs
+	Datastore       string `json:"datastore,omitempty"`
+	FingerprintPBS  string `json:"fingerprint,omitempty"`
+	EncryptionKey   string `json:"encryption-key,omitempty"`
+	MasterPubkey    string `json:"master-pubkey,omitempty"`
+
+	// common optional
+	Preallocation string `json:"preallocation,omitempty"`
+	Format        string `json:"format,omitempty"`
+	MaxFiles      int    `json:"maxfiles,omitempty"`
+	PruneBackups  string `json:"prune-backups,omitempty"`
+}
+
 // StorageContent represents an item from GET /nodes/{node}/storage/{storage}/content.
 type StorageContent struct {
 	Volid   string `json:"volid"`

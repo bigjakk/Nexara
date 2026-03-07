@@ -45,3 +45,12 @@ export function useAuditLog({ limit, offset, clusterId, resourceType }: AuditLog
     refetchInterval: 120_000, // WS events handle immediate updates
   });
 }
+
+export function useRecentActivity() {
+  return useQuery({
+    queryKey: ["recent-activity"],
+    queryFn: () =>
+      apiClient.get<AuditLogEntry[]>("/api/v1/audit-log/recent"),
+    refetchInterval: 120_000,
+  });
+}

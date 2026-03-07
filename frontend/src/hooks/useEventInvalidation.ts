@@ -52,11 +52,11 @@ export function useEventInvalidation(clusterIds: string[]): void {
       switch (event.kind) {
         case "task_created":
         case "task_update":
-          scheduleInvalidation(["task-history"]);
+          scheduleInvalidation(["recent-activity"]);
           break;
 
         case "audit_entry":
-          scheduleInvalidation(["audit-log"]);
+          scheduleInvalidation(["audit-log"], ["recent-activity"]);
           break;
 
         case "vm_state_change":
@@ -79,14 +79,14 @@ export function useEventInvalidation(clusterIds: string[]): void {
           break;
 
         case "migration_update":
-          scheduleInvalidation(["migrations"], ["task-history"]);
+          scheduleInvalidation(["migrations"], ["recent-activity"]);
           if (cid) {
             scheduleInvalidation(["clusters", cid, "vms"]);
           }
           break;
 
         case "drs_action":
-          scheduleInvalidation(["drs"], ["task-history"]);
+          scheduleInvalidation(["drs"], ["recent-activity"]);
           if (cid) {
             scheduleInvalidation(["clusters", cid, "vms"]);
           }
