@@ -20,7 +20,4 @@ COPY --from=builder /build/proxdash-scheduler /proxdash-scheduler
 
 USER nonroot:nonroot
 
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/proxdash-scheduler", "healthcheck"]
-
 ENTRYPOINT ["/proxdash-scheduler"]

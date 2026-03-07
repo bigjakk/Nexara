@@ -9,8 +9,8 @@ import (
 func setRequiredEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/testdb")
-	t.Setenv("JWT_SECRET", "test-jwt-secret")
-	t.Setenv("ENCRYPTION_KEY", "test-encryption-key")
+	t.Setenv("JWT_SECRET", "test-jwt-secret-at-least-16-chars")
+	t.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 }
 
 func TestLoad_Defaults(t *testing.T) {

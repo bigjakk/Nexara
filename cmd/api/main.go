@@ -15,6 +15,7 @@ import (
 
 	"github.com/proxdash/proxdash/internal/api"
 	"github.com/proxdash/proxdash/internal/config"
+	"github.com/proxdash/proxdash/internal/db"
 )
 
 func main() {
@@ -43,6 +44,11 @@ func main() {
 		log.Fatalf("failed to ping database: %v", err)
 	}
 	log.Println("connected to database")
+
+	// Create schema on fresh database.
+	if err := db.EnsureSchema(ctx, pool); err != nil {
+		log.Fatalf("failed to ensure database schema: %v", err)
+	}
 
 	// Connect to Redis (optional).
 	var rdb *redis.Client

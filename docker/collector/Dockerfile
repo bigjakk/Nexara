@@ -20,7 +20,4 @@ COPY --from=builder /build/proxdash-collector /proxdash-collector
 
 USER nonroot:nonroot
 
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/proxdash-collector", "healthcheck"]
-
 ENTRYPOINT ["/proxdash-collector"]

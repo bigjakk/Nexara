@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
@@ -36,5 +38,24 @@ func Load() (*Config, error) {
 	if err := envconfig.Process("", &cfg); err != nil {
 		return nil, err
 	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+func (c *Config) validate() error {
+	if c.JWTSecret == "" || c.JWTSecret == "change-this-to-a-secure-random-string" {
+		return fmt.Errorf("JWT_SECRET must be set to a secure random value (see .env.example)")
+	}
+	if len(c.JWTSecret) < 16 {
+		return fmt.Errorf("JWT_SECRET must be at least 16 characters")
+	}
+	if c.EncryptionKey == "" || c.EncryptionKey == "change-this-to-a-32-byte-hex-key" {
+		return fmt.Errorf("ENCRYPTION_KEY must be set to a 64-character hex string (32 bytes). Generate with: openssl rand -hex 32")
+	}
+	if _, err := hex.DecodeString(c.EncryptionKey); err != nil || len(c.EncryptionKey) != 64 {
+		return fmt.Errorf("ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32")
+	}
+	return nil
 }
