@@ -7,6 +7,7 @@ import {
   ContextMenuLabel,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Monitor } from "lucide-react";
 import { useVMAction } from "../api/vm-queries";
 import { lifecycleActions, managementActions } from "../lib/vm-action-defs";
 import {
@@ -14,6 +15,7 @@ import {
   type VMContextTarget,
 } from "@/stores/vm-context-menu-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
+import { useConsoleStore } from "@/stores/console-store";
 import type { VMAction } from "../types/vm";
 
 interface VMContextMenuProps {
@@ -27,6 +29,8 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const actionMutation = useVMAction();
+  const addTab = useConsoleStore((s) => s.addTab);
+  const showConsole = useConsoleStore((s) => s.showConsole);
 
   const normalizedStatus = target.status.toLowerCase();
 
@@ -69,6 +73,19 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
     if (action === "destroy") openDestroy(target);
   }
 
+  function handleOpenConsole() {
+    const type = target.kind === "ct" ? "ct_vnc" as const : "vm_vnc" as const;
+    const labelPrefix = target.kind === "ct" ? "CT" : "VNC";
+    addTab({
+      clusterID: target.clusterId,
+      node: target.currentNode,
+      vmid: target.vmid,
+      type,
+      label: `${labelPrefix}: ${target.name}`,
+    });
+    showConsole();
+  }
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -88,6 +105,16 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
             {config.label}
           </ContextMenuItem>
         ))}
+
+        {normalizedStatus === "running" && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={handleOpenConsole}>
+              <span className="mr-2"><Monitor className="h-4 w-4" /></span>
+              Console
+            </ContextMenuItem>
+          </>
+        )}
 
         {visibleManagement.length > 0 && <ContextMenuSeparator />}
 

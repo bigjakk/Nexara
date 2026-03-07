@@ -9,6 +9,33 @@ interface VNCViewerProps {
   visible: boolean;
 }
 
+/**
+ * Type out text as individual key events into a VNC session.
+ * Converts each character to an X11 keysym and sends press/release.
+ */
+export function typeTextIntoVnc(rfb: RFB, text: string) {
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    if (code === undefined) continue;
+
+    let keysym: number;
+    if (ch === "\n" || ch === "\r") {
+      keysym = 0xff0d; // XK_Return
+    } else if (ch === "\t") {
+      keysym = 0xff09; // XK_Tab
+    } else if (code <= 0x00ff) {
+      // Latin-1: keysym === unicode code point
+      keysym = code;
+    } else {
+      // Unicode above Latin-1: keysym = 0x01000000 + code point
+      keysym = 0x01000000 + code;
+    }
+
+    rfb.sendKey(keysym, null, true);  // key down
+    rfb.sendKey(keysym, null, false); // key up
+  }
+}
+
 function buildVncWsUrl(
   clusterID: string,
   node: string,
@@ -127,6 +154,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     // Only re-run when the actual connection parameters change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, clusterID, node, vmid, guestType, reconnectKey]);
+
 
   return (
     <div

@@ -19,6 +19,7 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { Sidebar } from "./Sidebar";
 import { TaskLogPanel } from "./TaskLogPanel";
 import { TaskProgressDialog } from "./TaskProgressDialog";
+import { FloatingConsole } from "@/features/console/components/FloatingConsole";
 
 function getInitials(name: string): string {
   return name
@@ -102,6 +103,7 @@ export function AppShell() {
         <TaskLogPanel />
         <TaskProgressDialog />
       </div>
+      <FloatingConsole />
     </div>
   );
 }

@@ -6,9 +6,14 @@ import type {
   ConsoleType,
 } from "@/features/console/types/console";
 
+export type WindowMode = "hidden" | "minimized" | "floating" | "maximized";
+
 interface ConsoleState {
   tabs: ConsoleTab[];
   activeTabId: string | null;
+  windowMode: WindowMode;
+  windowPosition: { x: number; y: number };
+  windowSize: { width: number; height: number };
 }
 
 interface ConsoleActions {
@@ -19,6 +24,11 @@ interface ConsoleActions {
   reconnectTab: (id: string) => void;
   /** Update node for all tabs matching a VM and trigger reconnect. */
   updateTabNode: (clusterID: string, vmid: number, newNode: string) => void;
+  setWindowMode: (mode: WindowMode) => void;
+  setWindowPosition: (pos: { x: number; y: number }) => void;
+  setWindowSize: (size: { width: number; height: number }) => void;
+  /** Show the floating console — if hidden opens as floating, if minimized restores. */
+  showConsole: () => void;
 }
 
 let nextId = Date.now();
@@ -29,19 +39,30 @@ function generateTabId(type: ConsoleType, node: string, vmid?: number): string {
   return `${type}-${node}${suffix}-${String(nextId)}`;
 }
 
+function defaultPosition(): { x: number; y: number } {
+  if (typeof window === "undefined") return { x: 100, y: 100 };
+  return { x: Math.max(0, window.innerWidth - 820), y: Math.max(0, window.innerHeight - 520) };
+}
+
 export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       tabs: [],
       activeTabId: null,
+      windowMode: "hidden" as WindowMode,
+      windowPosition: defaultPosition(),
+      windowSize: { width: 800, height: 500 },
 
       addTab: (tab) => {
         const id = generateTabId(tab.type, tab.node, tab.vmid);
         const newTab: ConsoleTab = { ...tab, id, status: "connecting", reconnectKey: 0 };
-        set((state) => ({
+        const state = get();
+        const newWindowMode = state.windowMode === "hidden" ? "floating" as WindowMode : state.windowMode;
+        set({
           tabs: [...state.tabs, newTab],
           activeTabId: id,
-        }));
+          windowMode: newWindowMode,
+        });
         return id;
       },
 
@@ -53,7 +74,8 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
             const lastTab = filtered[filtered.length - 1];
             newActiveId = lastTab !== undefined ? lastTab.id : null;
           }
-          return { tabs: filtered, activeTabId: newActiveId };
+          const newWindowMode = filtered.length === 0 ? "hidden" as WindowMode : state.windowMode;
+          return { tabs: filtered, activeTabId: newActiveId, windowMode: newWindowMode };
         });
       },
 
@@ -86,10 +108,28 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
           ),
         }));
       },
+
+      setWindowMode: (mode) => {
+        set({ windowMode: mode });
+      },
+
+      setWindowPosition: (pos) => {
+        set({ windowPosition: pos });
+      },
+
+      setWindowSize: (size) => {
+        set({ windowSize: { width: Math.max(400, size.width), height: Math.max(300, size.height) } });
+      },
+
+      showConsole: () => {
+        const state = get();
+        if (state.windowMode === "hidden" || state.windowMode === "minimized") {
+          set({ windowMode: "floating" });
+        }
+      },
     }),
     {
       name: "proxdash-console-tabs",
-      // Only persist tab definitions and active tab, not transient connection status.
       partialize: (state) => ({
         tabs: state.tabs.map((t) => ({
           ...t,
@@ -97,6 +137,9 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
           reconnectKey: 0,
         })),
         activeTabId: state.activeTabId,
+        windowMode: state.tabs.length > 0 ? state.windowMode : "hidden" as WindowMode,
+        windowPosition: state.windowPosition,
+        windowSize: state.windowSize,
       }),
     },
   ),

@@ -27,6 +27,7 @@ interface VMEntry {
 export function QuickConnect() {
   const [open, setOpen] = useState(false);
   const addTab = useConsoleStore((s) => s.addTab);
+  const showConsole = useConsoleStore((s) => s.showConsole);
 
   const { data: clusters } = useClusters();
   const clusterIds = clusters?.map((c) => c.id) ?? [];
@@ -105,6 +106,7 @@ export function QuickConnect() {
       type,
       label: `${labelPrefix}: ${vm.name}`,
     });
+    showConsole();
     setOpen(false);
   }
 

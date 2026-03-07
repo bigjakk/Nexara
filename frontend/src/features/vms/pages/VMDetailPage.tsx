@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Monitor, Terminal, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,8 +49,6 @@ export function VMDetailPage() {
     vmId: string;
     kind: string;
   }>();
-  const navigate = useNavigate();
-
   const kind: ResourceKind = rawKind === "ct" ? "ct" : "vm";
   const { data: vm, isLoading, error } = useVM(clusterId, vmId, kind);
 
@@ -59,6 +57,7 @@ export function VMDetailPage() {
 
   const { data: nodes } = useClusterNodes(clusterId);
   const addTab = useConsoleStore((s) => s.addTab);
+  const showConsole = useConsoleStore((s) => s.showConsole);
   const updateTabNode = useConsoleStore((s) => s.updateTabNode);
 
   // Resolve node name from node_id
@@ -125,7 +124,7 @@ export function VMDetailPage() {
         label: `${kind === "ct" ? "CT" : "Serial"}: ${vm.name}`,
       });
     }
-    void navigate("/console");
+    showConsole();
   }
 
   return (
