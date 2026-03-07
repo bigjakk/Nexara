@@ -26,7 +26,7 @@ RETURNING *;
 UPDATE users SET password_hash = $2 WHERE id = $1;
 
 -- name: CountUsers :one
-SELECT count(*) FROM users;
+SELECT count(*) FROM users WHERE is_active = true;
 
 -- name: DeleteUser :exec
 DELETE FROM users WHERE id = $1;

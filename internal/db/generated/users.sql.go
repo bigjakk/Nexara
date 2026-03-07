@@ -13,7 +13,7 @@ import (
 )
 
 const countUsers = `-- name: CountUsers :one
-SELECT count(*) FROM users
+SELECT count(*) FROM users WHERE is_active = true
 `
 
 func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
