@@ -10,8 +10,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Trash2, ShieldCheck, UserPlus } from "lucide-react";
+import { Trash2, ShieldCheck, ShieldOff, UserPlus } from "lucide-react";
 import { useUsers, useUpdateUser, useDeleteUser } from "../api/rbac-queries";
+import { useAdminResetTOTP } from "@/features/settings/api/totp-queries";
 import { RoleAssignDialog } from "../components/RoleAssignDialog";
 import { CreateUserDialog } from "../components/CreateUserDialog";
 import { AdminNav } from "../components/AdminNav";
@@ -20,6 +21,7 @@ export function UsersPage() {
   const { data: users, isLoading } = useUsers();
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
+  const resetTotp = useAdminResetTOTP();
   const [roleDialogUserId, setRoleDialogUserId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
@@ -57,6 +59,7 @@ export function UsersPage() {
             <TableHead>Email</TableHead>
             <TableHead>Display Name</TableHead>
             <TableHead>Source</TableHead>
+            <TableHead>2FA</TableHead>
             <TableHead>Legacy Role</TableHead>
             <TableHead>Active</TableHead>
             <TableHead>Created</TableHead>
@@ -69,9 +72,19 @@ export function UsersPage() {
               <TableCell className="font-medium">{user.email}</TableCell>
               <TableCell>{user.display_name}</TableCell>
               <TableCell>
-                <Badge variant={user.auth_source === "ldap" ? "outline" : "secondary"}>
-                  {user.auth_source === "ldap" ? "LDAP" : "Local"}
+                <Badge variant={user.auth_source === "local" ? "secondary" : "outline"}>
+                  {user.auth_source === "ldap" ? "LDAP" : user.auth_source === "oidc" ? "OIDC" : "Local"}
                 </Badge>
+              </TableCell>
+              <TableCell>
+                {user.totp_enabled ? (
+                  <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+                    <ShieldCheck className="mr-1 h-3 w-3" />
+                    Enabled
+                  </Badge>
+                ) : (
+                  <span className="text-sm text-muted-foreground">Off</span>
+                )}
               </TableCell>
               <TableCell>
                 <Badge variant={user.role === "admin" ? "default" : "secondary"}>
@@ -99,6 +112,25 @@ export function UsersPage() {
                   >
                     <ShieldCheck className="h-4 w-4" />
                   </Button>
+                  {user.totp_enabled && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        if (
+                          confirm(
+                            `Reset 2FA for ${user.email}? They will need to set up 2FA again.`,
+                          )
+                        ) {
+                          resetTotp.mutate(user.id);
+                        }
+                      }}
+                      title="Reset 2FA"
+                      className="text-amber-600 hover:text-amber-700"
+                    >
+                      <ShieldOff className="h-4 w-4" />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"

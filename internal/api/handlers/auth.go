@@ -23,6 +23,12 @@ type AuthHandler struct {
 	rbac           *auth.RBACEngine
 	ldapHandler    *LDAPHandler
 	oidcHandler    *OIDCHandler
+	totpHandler    *TOTPHandler
+}
+
+type totpRequiredResponse struct {
+	TOTPRequired     bool   `json:"totp_required"`
+	TOTPPendingToken string `json:"totp_pending_token"`
 }
 
 // NewAuthHandler creates a new auth handler.
@@ -43,6 +49,11 @@ func (h *AuthHandler) SetLDAPHandler(lh *LDAPHandler) {
 // SetOIDCHandler sets the OIDC handler reference for SSO-aware login and token exchange.
 func (h *AuthHandler) SetOIDCHandler(oh *OIDCHandler) {
 	h.oidcHandler = oh
+}
+
+// SetTOTPHandler sets the TOTP handler reference for TOTP-aware login.
+func (h *AuthHandler) SetTOTPHandler(th *TOTPHandler) {
+	h.totpHandler = th
 }
 
 type registerRequest struct {
@@ -222,7 +233,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 
 	// Try LDAP authentication first if enabled
 	if user, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
-		return h.issueTokens(c, user, "ldap_login")
+		return h.issueOrTOTP(c, user, "ldap_login")
 	}
 
 	// Fall back to local authentication
@@ -247,7 +258,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		return invalidCredentials
 	}
 
-	return h.issueTokens(c, user, "login")
+	return h.issueOrTOTP(c, user, "login")
 }
 
 // tryLDAPLogin attempts LDAP authentication. Returns the DB user and true on success.
@@ -375,6 +386,11 @@ func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
+}
+
+// IssueTokens is the exported version of issueTokens for cross-handler use.
+func (h *AuthHandler) IssueTokens(c *fiber.Ctx, user db.User, auditAction string) error {
+	return h.issueTokens(c, user, auditAction)
 }
 
 // Refresh exchanges a valid refresh token for a new token pair.
@@ -564,7 +580,23 @@ func (h *AuthHandler) OIDCTokenExchange(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Account is disabled")
 	}
 
-	return h.issueTokens(c, user, "oidc_login")
+	return h.issueOrTOTP(c, user, "oidc_login")
+}
+
+// issueOrTOTP checks if the user has TOTP enabled. If so, returns a pending token
+// instead of issuing JWT tokens directly. Otherwise, issues tokens normally.
+func (h *AuthHandler) issueOrTOTP(c *fiber.Ctx, user db.User, auditAction string) error {
+	if user.TotpSecret.Valid && h.totpHandler != nil {
+		token, err := h.totpHandler.CreateTOTPPendingToken(c.Context(), user.ID, auditAction)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to create TOTP challenge")
+		}
+		return c.JSON(totpRequiredResponse{
+			TOTPRequired:     true,
+			TOTPPendingToken: token,
+		})
+	}
+	return h.issueTokens(c, user, auditAction)
 }
 
 // isDuplicateKeyError checks if a pgx error is a unique constraint violation.

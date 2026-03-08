@@ -101,7 +101,8 @@ SELECT EXISTS(
 SELECT DISTINCT user_id FROM user_roles WHERE role_id = $1;
 
 -- name: ListUsersWithRoles :many
-SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source
+SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source,
+       (u.totp_secret IS NOT NULL)::bool AS totp_enabled
 FROM users u
 WHERE u.id != '00000000-0000-0000-0000-000000000000'
 ORDER BY u.created_at DESC;

@@ -50,6 +50,7 @@ export interface UserListItem {
   role: string;
   is_active: boolean;
   auth_source: "local" | "ldap" | "oidc";
+  totp_enabled: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -189,6 +190,32 @@ export interface LogoutRequest {
 
 export interface SetupStatus {
   needs_setup: boolean;
+}
+
+export interface TOTPSetupResponse {
+  secret: string;
+  otpauth_url: string;
+}
+
+export interface TOTPConfirmResponse {
+  enabled: boolean;
+  recovery_codes: string[];
+}
+
+export interface TOTPStatusResponse {
+  enabled: boolean;
+  recovery_codes_remaining: number;
+}
+
+export interface TOTPRequiredResponse {
+  totp_required: boolean;
+  totp_pending_token: string;
+}
+
+export interface TOTPVerifyLoginRequest {
+  totp_pending_token: string;
+  code?: string;
+  recovery_code?: string;
 }
 
 export interface ApiError {

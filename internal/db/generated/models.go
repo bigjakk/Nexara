@@ -463,6 +463,13 @@ type TaskHistory struct {
 	UpdatedAt   time.Time          `json:"updated_at"`
 }
 
+type TotpRecoveryCode struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	CodeHash  string    `json:"code_hash"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type User struct {
 	ID           uuid.UUID   `json:"id"`
 	Email        string      `json:"email"`

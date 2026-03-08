@@ -43,6 +43,7 @@ type Server struct {
 	userHandler      *handlers.UserHandler
 	ldapHandler      *handlers.LDAPHandler
 	oidcHandler      *handlers.OIDCHandler
+	totpHandler      *handlers.TOTPHandler
 	rbacEngine       *auth.RBACEngine
 	eventPub         *events.Publisher
 }
@@ -126,6 +127,10 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.oidcHandler = handlers.NewOIDCHandler(s.queries, cfg.EncryptionKey, s.rbacEngine, s.eventPub, rdb)
 	}
 
+	if s.queries != nil && cfg.EncryptionKey != "" && rdb != nil {
+		s.totpHandler = handlers.NewTOTPHandler(s.queries, cfg.EncryptionKey, rdb, s.eventPub)
+	}
+
 	// Wire LDAP handler into auth handler for LDAP-aware login
 	if s.authHandler != nil && s.ldapHandler != nil {
 		s.authHandler.SetLDAPHandler(s.ldapHandler)
@@ -134,6 +139,12 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	// Wire OIDC handler into auth handler for SSO-aware login
 	if s.authHandler != nil && s.oidcHandler != nil {
 		s.authHandler.SetOIDCHandler(s.oidcHandler)
+	}
+
+	// Wire TOTP handler into auth handler for TOTP-aware login
+	if s.authHandler != nil && s.totpHandler != nil {
+		s.authHandler.SetTOTPHandler(s.totpHandler)
+		s.totpHandler.SetIssueTokensFn(s.authHandler.IssueTokens)
 	}
 
 	s.app = fiber.New(fiber.Config{

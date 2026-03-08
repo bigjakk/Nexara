@@ -25,6 +25,20 @@ func (s *Server) setupRoutes() {
 			authGroup.Get("/oidc/callback", s.oidcHandler.Callback)
 			authGroup.Post("/oidc/token-exchange", s.authHandler.OIDCTokenExchange)
 		}
+
+		// TOTP 2FA routes
+		if s.totpHandler != nil {
+			// Public — completes two-step login
+			authGroup.Post("/totp/verify-login", s.totpHandler.VerifyLogin)
+
+			// Authenticated — self-service TOTP management
+			totpGroup := authGroup.Group("/totp", s.authRequired())
+			totpGroup.Post("/setup", s.totpHandler.BeginSetup)
+			totpGroup.Post("/setup/verify", s.totpHandler.ConfirmSetup)
+			totpGroup.Delete("/", s.totpHandler.Disable)
+			totpGroup.Get("/status", s.totpHandler.Status)
+			totpGroup.Post("/recovery-codes/regenerate", s.totpHandler.RegenerateRecoveryCodes)
+		}
 	}
 
 	// Cluster routes.
@@ -328,5 +342,8 @@ func (s *Server) setupRoutes() {
 		users.Get("/:id", s.userHandler.Get)
 		users.Put("/:id", s.userHandler.Update)
 		users.Delete("/:id", s.userHandler.Delete)
+		if s.totpHandler != nil {
+			users.Delete("/:id/totp", s.totpHandler.AdminReset)
+		}
 	}
 }

@@ -37,6 +37,7 @@ type userListResponse struct {
 	Role        string    `json:"role"`
 	IsActive    bool      `json:"is_active"`
 	AuthSource  string    `json:"auth_source"`
+	TotpEnabled bool      `json:"totp_enabled"`
 	CreatedAt   string    `json:"created_at"`
 	UpdatedAt   string    `json:"updated_at"`
 }
@@ -67,6 +68,7 @@ func (h *UserHandler) List(c *fiber.Ctx) error {
 			Role:        u.Role,
 			IsActive:    u.IsActive,
 			AuthSource:  u.AuthSource,
+			TotpEnabled: u.TotpEnabled,
 			CreatedAt:   u.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt:   u.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		}
@@ -101,6 +103,7 @@ func (h *UserHandler) Get(c *fiber.Ctx) error {
 		Role:        user.Role,
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
+		TotpEnabled: user.TotpSecret.Valid,
 		CreatedAt:   user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:   user.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
@@ -180,6 +183,7 @@ func (h *UserHandler) Update(c *fiber.Ctx) error {
 		Role:        user.Role,
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
+		TotpEnabled: user.TotpSecret.Valid,
 		CreatedAt:   user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:   user.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})

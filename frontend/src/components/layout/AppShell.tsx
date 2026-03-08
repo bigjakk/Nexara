@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
-import { Outlet } from "react-router-dom";
-import { LogOut, LogOutIcon, User } from "lucide-react";
+import { Outlet, useNavigate } from "react-router-dom";
+import { LogOut, LogOutIcon, ShieldCheck, User } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,7 @@ function getInitials(name: string): string {
 }
 
 export function AppShell() {
+  const navigate = useNavigate();
   const { user, logout, logoutAll } = useAuth();
   const wsConnect = useWebSocketStore((s) => s.connect);
   const wsDisconnect = useWebSocketStore((s) => s.disconnect);
@@ -85,6 +86,10 @@ export function AppShell() {
               <DropdownMenuItem>
                 <User className="mr-2 h-4 w-4" />
                 Profile
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { void navigate("/settings/security"); }}>
+                <ShieldCheck className="mr-2 h-4 w-4" />
+                Security
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout}>

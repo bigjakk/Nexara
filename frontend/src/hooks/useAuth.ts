@@ -10,6 +10,10 @@ export function useAuth() {
   const register = useAuthStore((s) => s.register);
   const logout = useAuthStore((s) => s.logout);
   const logoutAll = useAuthStore((s) => s.logoutAll);
+  const totpPending = useAuthStore((s) => s.totpPending);
+  const verifyTotp = useAuthStore((s) => s.verifyTotp);
+  const verifyTotpRecovery = useAuthStore((s) => s.verifyTotpRecovery);
+  const clearTotpPending = useAuthStore((s) => s.clearTotpPending);
   const { isAdmin, hasPermission, canView, canManage, canExecute, canDelete } =
     usePermissions();
 
@@ -29,5 +33,9 @@ export function useAuth() {
     register,
     logout,
     logoutAll,
+    totpPending,
+    verifyTotp,
+    verifyTotpRecovery,
+    clearTotpPending,
   };
 }

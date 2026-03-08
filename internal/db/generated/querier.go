@@ -17,8 +17,10 @@ type Querier interface {
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
 	CheckUserPermission(ctx context.Context, arg CheckUserPermissionParams) (bool, error)
 	CleanupStaleDRSHistory(ctx context.Context) error
+	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
+	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
 	CreateFirewallTemplate(ctx context.Context, arg CreateFirewallTemplateParams) (FirewallTemplate, error)
@@ -31,6 +33,7 @@ type Querier interface {
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) error
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
 	DeleteCompletedTasks(ctx context.Context) error
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
@@ -39,6 +42,7 @@ type Querier interface {
 	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
 	DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
+	DeleteRecoveryCode(ctx context.Context, id uuid.UUID) error
 	DeleteRole(ctx context.Context, id uuid.UUID) error
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
@@ -87,6 +91,7 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]GetUserPermissionsRow, error)
 	GetUserScopedPermissions(ctx context.Context, userID uuid.UUID) ([]GetUserScopedPermissionsRow, error)
+	GetUserTOTPSecret(ctx context.Context, id uuid.UUID) (GetUserTOTPSecretRow, error)
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
@@ -94,6 +99,7 @@ type Querier interface {
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertDRSHistory(ctx context.Context, arg InsertDRSHistoryParams) (DrsHistory, error)
 	InsertDRSRule(ctx context.Context, arg InsertDRSRuleParams) (DrsRule, error)
+	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
@@ -127,6 +133,7 @@ type Querier interface {
 	ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsVerifyJob, error)
 	ListPermissions(ctx context.Context) ([]Permission, error)
 	ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentAuditLogEnrichedRow, error)
+	ListRecoveryCodes(ctx context.Context, userID uuid.UUID) ([]ListRecoveryCodesRow, error)
 	ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
@@ -152,6 +159,7 @@ type Querier interface {
 	SetLDAPUserActive(ctx context.Context, arg SetLDAPUserActiveParams) error
 	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
+	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
 	UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHistoryStatusParams) error
 	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error

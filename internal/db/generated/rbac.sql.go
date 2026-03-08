@@ -448,7 +448,8 @@ func (q *Queries) ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUs
 }
 
 const listUsersWithRoles = `-- name: ListUsersWithRoles :many
-SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source
+SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source,
+       (u.totp_secret IS NOT NULL)::bool AS totp_enabled
 FROM users u
 WHERE u.id != '00000000-0000-0000-0000-000000000000'
 ORDER BY u.created_at DESC
@@ -463,6 +464,7 @@ type ListUsersWithRolesRow struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	AuthSource  string    `json:"auth_source"`
+	TotpEnabled bool      `json:"totp_enabled"`
 }
 
 func (q *Queries) ListUsersWithRoles(ctx context.Context) ([]ListUsersWithRolesRow, error) {
@@ -483,6 +485,7 @@ func (q *Queries) ListUsersWithRoles(ctx context.Context) ([]ListUsersWithRolesR
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AuthSource,
+			&i.TotpEnabled,
 		); err != nil {
 			return nil, err
 		}
