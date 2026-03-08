@@ -162,17 +162,9 @@ export function DashboardPage() {
     setEditMode(!editMode);
   }, [editMode, saveLayout]);
 
-  // Get first cluster data for widget rendering
-  const firstCluster = data?.clusters[0];
-
   const renderWidget = useCallback(
     (widgetId: string) => {
       if (!data) return null;
-
-      const firstSummary = firstCluster;
-      const firstLiveMetrics = firstCluster
-        ? liveMetrics.get(firstCluster.cluster.id)
-        : undefined;
 
       switch (widgetId) {
         case "stats-overview":
@@ -196,59 +188,99 @@ export function DashboardPage() {
           );
 
         case "cpu-chart":
-          return firstSummary ? (
-            <ClusterChart
-              summary={firstSummary}
-              timeRange={timeRange}
-              liveMetrics={firstLiveMetrics}
-              vmNameMap={data.vmNameMap}
-              chartType="cpu"
-            />
-          ) : null;
+          return (
+            <div className="space-y-4">
+              {data.clusters.map((summary) => (
+                <ClusterChart
+                  key={summary.cluster.id}
+                  summary={summary}
+                  timeRange={timeRange}
+                  liveMetrics={liveMetrics.get(summary.cluster.id)}
+                  vmNameMap={data.vmNameMap}
+                  chartType="cpu"
+                />
+              ))}
+            </div>
+          );
 
         case "memory-chart":
-          return firstSummary ? (
-            <ClusterChart
-              summary={firstSummary}
-              timeRange={timeRange}
-              liveMetrics={firstLiveMetrics}
-              vmNameMap={data.vmNameMap}
-              chartType="memory"
-            />
-          ) : null;
+          return (
+            <div className="space-y-4">
+              {data.clusters.map((summary) => (
+                <ClusterChart
+                  key={summary.cluster.id}
+                  summary={summary}
+                  timeRange={timeRange}
+                  liveMetrics={liveMetrics.get(summary.cluster.id)}
+                  vmNameMap={data.vmNameMap}
+                  chartType="memory"
+                />
+              ))}
+            </div>
+          );
 
         case "disk-chart":
-          return firstSummary ? (
-            <ClusterChart
-              summary={firstSummary}
-              timeRange={timeRange}
-              liveMetrics={firstLiveMetrics}
-              vmNameMap={data.vmNameMap}
-              chartType="disk"
-            />
-          ) : null;
+          return (
+            <div className="space-y-4">
+              {data.clusters.map((summary) => (
+                <ClusterChart
+                  key={summary.cluster.id}
+                  summary={summary}
+                  timeRange={timeRange}
+                  liveMetrics={liveMetrics.get(summary.cluster.id)}
+                  vmNameMap={data.vmNameMap}
+                  chartType="disk"
+                />
+              ))}
+            </div>
+          );
 
         case "network-chart":
-          return firstSummary ? (
-            <ClusterChart
-              summary={firstSummary}
-              timeRange={timeRange}
-              liveMetrics={firstLiveMetrics}
-              vmNameMap={data.vmNameMap}
-              chartType="network"
-            />
-          ) : null;
+          return (
+            <div className="space-y-4">
+              {data.clusters.map((summary) => (
+                <ClusterChart
+                  key={summary.cluster.id}
+                  summary={summary}
+                  timeRange={timeRange}
+                  liveMetrics={liveMetrics.get(summary.cluster.id)}
+                  vmNameMap={data.vmNameMap}
+                  chartType="network"
+                />
+              ))}
+            </div>
+          );
 
-        case "live-metrics":
-          return <LiveMetricCards metrics={firstLiveMetrics} />;
+        case "live-metrics": {
+          return (
+            <div className="space-y-4">
+              {data.clusters.map((summary) => {
+                const m = liveMetrics.get(summary.cluster.id);
+                return (
+                  <div key={summary.cluster.id}>
+                    {data.clusters.length > 1 && (
+                      <h3 className="mb-2 text-sm font-medium text-muted-foreground">{summary.cluster.name}</h3>
+                    )}
+                    <LiveMetricCards metrics={m} />
+                  </div>
+                );
+              })}
+            </div>
+          );
+        }
 
-        case "top-consumers":
+        case "top-consumers": {
+          const combinedConsumers = data.clusters.flatMap((s) => {
+            const m = liveMetrics.get(s.cluster.id);
+            return m?.topConsumers ?? [];
+          });
           return (
             <TopConsumers
-              consumers={firstLiveMetrics?.topConsumers ?? []}
+              consumers={combinedConsumers}
               vmNames={data.vmNameMap}
             />
           );
+        }
 
         default:
           return (
@@ -258,7 +290,7 @@ export function DashboardPage() {
           );
       }
     },
-    [data, firstCluster, isLoading, liveMetrics, timeRange],
+    [data, isLoading, liveMetrics, timeRange],
   );
 
   return (
