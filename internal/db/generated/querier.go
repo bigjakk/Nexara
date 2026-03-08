@@ -61,6 +61,8 @@ type Querier interface {
 	DeleteReportSchedule(ctx context.Context, id uuid.UUID) error
 	DeleteRole(ctx context.Context, id uuid.UUID) error
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
+	DeleteSetting(ctx context.Context, arg DeleteSettingParams) error
+	DeleteSettingByID(ctx context.Context, id uuid.UUID) error
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
@@ -130,6 +132,7 @@ type Querier interface {
 	GetScheduledTask(ctx context.Context, id uuid.UUID) (ScheduledTask, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
+	GetSetting(ctx context.Context, arg GetSettingParams) (Setting, error)
 	GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error)
@@ -201,6 +204,7 @@ type Querier interface {
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
 	ListFirewallTemplates(ctx context.Context) ([]FirewallTemplate, error)
 	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
+	ListGlobalSettings(ctx context.Context) ([]Setting, error)
 	ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error)
 	ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
 	ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error)
@@ -232,6 +236,7 @@ type Querier interface {
 	ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) ([]RollingUpdateNode, error)
 	ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUpdateJob, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
+	ListSettingsByScope(ctx context.Context, arg ListSettingsByScopeParams) ([]Setting, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
 	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
@@ -326,6 +331,7 @@ type Querier interface {
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)
 	UpsertPBSSyncJob(ctx context.Context, arg UpsertPBSSyncJobParams) (PbsSyncJob, error)
 	UpsertPBSVerifyJob(ctx context.Context, arg UpsertPBSVerifyJobParams) (PbsVerifyJob, error)
+	UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error)
 	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (StoragePool, error)
 	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
 }

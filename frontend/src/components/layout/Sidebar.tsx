@@ -16,11 +16,13 @@ import {
   ChevronDown,
   ChevronRight,
   Server,
+  Settings,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useSidebarStore } from "@/stores/sidebar-store";
+import { useBrandingStore } from "@/stores/branding-store";
 import { InventoryTree } from "./InventoryTree";
 import {
   Tooltip,
@@ -47,6 +49,7 @@ const navItems: NavItem[] = [
   { label: "Reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
   { label: "Security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },
   { label: "Audit Log", to: "/audit-log", icon: ScrollText, requiredPermission: "view:audit" },
+  { label: "Settings", to: "/settings/appearance", icon: Settings },
   { label: "Admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
 ];
 
@@ -57,6 +60,7 @@ function isInventoryRoute(pathname: string): boolean {
 export function Sidebar() {
   const { hasPermission } = useAuth();
   const { collapsed, toggleCollapsed, treeVisible, setTreeVisible } = useSidebarStore();
+  const { appTitle, logoUrl } = useBrandingStore();
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
 
@@ -89,8 +93,12 @@ export function Sidebar() {
         <div className="flex h-14 shrink-0 items-center border-b px-2">
           {!collapsed && (
             <>
-              <Server className="ml-2 h-6 w-6 shrink-0 text-primary" />
-              <span className="ml-2 text-lg font-semibold">ProxDash</span>
+              {logoUrl ? (
+                <img src={logoUrl} alt={appTitle} className="ml-2 h-6 w-6 shrink-0 object-contain" />
+              ) : (
+                <Server className="ml-2 h-6 w-6 shrink-0 text-primary" />
+              )}
+              <span className="ml-2 text-lg font-semibold">{appTitle}</span>
             </>
           )}
           <button

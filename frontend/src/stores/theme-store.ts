@@ -25,6 +25,9 @@ function applyTheme(mode: ThemeMode) {
     (mode === "system" &&
       window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.classList.toggle("dark", isDark);
+
+  // Re-apply accent color when theme changes (light/dark have different accent values)
+  reapplyAccentColor();
 }
 
 export const useThemeStore = create<ThemeState>()((set) => ({
@@ -45,3 +48,43 @@ mq.addEventListener("change", () => {
     applyTheme("system");
   }
 });
+
+// Accent color definitions (shared with AppearancePage)
+const accentColorMap: Record<string, { hsl: string; darkHsl: string }> = {
+  blue: { hsl: "221 83% 53%", darkHsl: "217 91% 60%" },
+  green: { hsl: "142 71% 45%", darkHsl: "142 71% 45%" },
+  purple: { hsl: "262 83% 58%", darkHsl: "262 83% 58%" },
+  orange: { hsl: "25 95% 53%", darkHsl: "25 95% 53%" },
+  red: { hsl: "0 72% 51%", darkHsl: "0 72% 51%" },
+  pink: { hsl: "330 81% 60%", darkHsl: "330 81% 60%" },
+  teal: { hsl: "173 80% 40%", darkHsl: "173 80% 40%" },
+  cyan: { hsl: "189 94% 43%", darkHsl: "189 94% 43%" },
+  amber: { hsl: "38 92% 50%", darkHsl: "38 92% 50%" },
+};
+
+function reapplyAccentColor() {
+  try {
+    const raw = localStorage.getItem("proxdash-preferences");
+    if (!raw) return;
+    const prefs = JSON.parse(raw) as { accentColor?: string };
+    if (!prefs.accentColor || prefs.accentColor === "default") {
+      document.documentElement.style.removeProperty("--primary");
+      document.documentElement.style.removeProperty("--ring");
+      return;
+    }
+    const color = accentColorMap[prefs.accentColor];
+    if (color) {
+      const isDark = document.documentElement.classList.contains("dark");
+      const hsl = isDark ? color.darkHsl : color.hsl;
+      document.documentElement.style.setProperty("--primary", hsl);
+      document.documentElement.style.setProperty("--ring", hsl);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// Apply stored accent color on initial load
+reapplyAccentColor();
+
+export { reapplyAccentColor };

@@ -16,6 +16,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useEventInvalidation } from "@/hooks/useEventInvalidation";
 import { useWebSocketStore } from "@/stores/websocket-store";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { useBranding } from "@/features/settings/api/settings-queries";
+import { useBrandingStore } from "@/stores/branding-store";
 import { Sidebar } from "./Sidebar";
 import { TaskLogPanel } from "./TaskLogPanel";
 import { TaskProgressDialog } from "./TaskProgressDialog";
@@ -38,11 +40,20 @@ export function AppShell() {
   const wsConnect = useWebSocketStore((s) => s.connect);
   const wsDisconnect = useWebSocketStore((s) => s.disconnect);
   const { data: clusters } = useClusters();
+  const brandingQuery = useBranding();
+  const loadBranding = useBrandingStore((s) => s.loadFromBranding);
 
   useEffect(() => {
     wsConnect();
     return () => { wsDisconnect(); };
   }, [wsConnect, wsDisconnect]);
+
+  // Load branding settings on mount
+  useEffect(() => {
+    if (brandingQuery.data) {
+      loadBranding(brandingQuery.data);
+    }
+  }, [brandingQuery.data, loadBranding]);
 
   const clusterIds = useMemo(
     () => (clusters ?? []).map((c) => c.id),

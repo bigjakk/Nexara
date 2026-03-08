@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { Plus } from "lucide-react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { Plus, LayoutGrid, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDashboardData } from "../api/dashboard-queries";
 import type { ClusterSummary } from "../api/dashboard-queries";
@@ -15,8 +15,19 @@ import { RefreshRateSelector } from "../components/RefreshRateSelector";
 import { LiveMetricCards } from "../components/LiveMetricCards";
 import { MetricChart } from "../components/MetricChart";
 import { TopConsumers } from "../components/TopConsumers";
+import { DashboardGrid } from "../components/DashboardGrid";
+import type { LayoutItem } from "react-grid-layout";
 import { CreateVMDialog } from "@/features/vms/components/CreateVMDialog";
 import { CreateCTDialog } from "@/features/vms/components/CreateCTDialog";
+import { DashboardPresetSelector } from "../components/DashboardPresetSelector";
+import {
+  defaultPreset,
+  type DashboardPreset,
+} from "../lib/widget-registry";
+import {
+  useSetting,
+  useUpsertSetting,
+} from "@/features/settings/api/settings-queries";
 import type { TimeRange } from "@/types/api";
 import type { AggregatedMetrics } from "@/types/ws";
 
@@ -31,102 +42,224 @@ function ConnectionDot({ status }: { status: string }) {
   );
 }
 
-interface ClusterMetricsSectionProps {
-  summary: ClusterSummary;
-  timeRange: TimeRange;
-  liveMetrics: AggregatedMetrics | undefined;
-  vmNameMap: Map<string, string>;
-}
-
-function ClusterMetricsSection({
-  summary,
-  timeRange,
-  liveMetrics,
-  vmNameMap,
-}: ClusterMetricsSectionProps) {
-  const historicalQuery = useHistoricalMetrics(summary.cluster.id, timeRange);
-  const seedData = useSeedMetrics(summary.cluster.id);
-  const isLive = timeRange === "live";
-
-  // For live mode, use live history but fall back to seed data (recent 1h) until live data accumulates
-  const liveHistory = liveMetrics?.history ?? [];
-  const chartData = isLive
-    ? (liveHistory.length > 0 ? liveHistory : (seedData ?? []))
-    : (historicalQuery.data ?? []);
-
-  const heading = isLive
-    ? `${summary.cluster.name} — Live Metrics`
-    : `${summary.cluster.name} — ${timeRange} Historical`;
-
-  return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-semibold">{heading}</h2>
-
-      {isLive && <LiveMetricCards metrics={liveMetrics} />}
-
-      {!isLive && historicalQuery.isLoading && (
-        <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-          Loading historical data...
-        </div>
-      )}
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <MetricChart
-          title="CPU Usage"
-          data={chartData}
-          dataKey="cpuPercent"
-          color="#3b82f6"
-          timeRange={timeRange}
-        />
-        <MetricChart
-          title="Memory Usage"
-          data={chartData}
-          dataKey="memPercent"
-          color="#8b5cf6"
-          timeRange={timeRange}
-        />
-        <MetricChart
-          title="Disk I/O (Read)"
-          data={chartData}
-          dataKey="diskReadBps"
-          color="#f59e0b"
-          timeRange={timeRange}
-        />
-        <MetricChart
-          title="Network In"
-          data={chartData}
-          dataKey="netInBps"
-          color="#10b981"
-          timeRange={timeRange}
-        />
-      </div>
-
-      {isLive && (
-        <TopConsumers
-          consumers={liveMetrics?.topConsumers ?? []}
-          vmNames={vmNameMap}
-        />
-      )}
-    </div>
-  );
-}
-
 export function DashboardPage() {
   const [timeRange, setTimeRange] = useState<TimeRange>("live");
   const [createVMOpen, setCreateVMOpen] = useState(false);
   const [createCTOpen, setCreateCTOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const { data, isLoading, error } = useDashboardData();
   const { status } = useWebSocket();
+  const upsertSetting = useUpsertSetting();
 
   const clusterIds = useMemo(
     () => data?.clusters.map((s) => s.cluster.id) ?? [],
     [data?.clusters],
   );
 
-  // Auto-select first cluster for create dialogs
   const firstClusterId = data?.clusters[0]?.cluster.id ?? "";
-
   const liveMetrics = useDashboardMetrics(clusterIds);
+
+  // Load saved dashboard layout from backend
+  const layoutQuery = useSetting("dashboard.layout", "user");
+  const presetsQuery = useSetting("dashboard.presets", "user");
+
+  const [activePreset, setActivePreset] = useState<DashboardPreset>(defaultPreset);
+
+  // Load layout from backend when available
+  useEffect(() => {
+    if (layoutQuery.data?.value && typeof layoutQuery.data.value === "object") {
+      const saved = layoutQuery.data.value as {
+        widgetIds?: string[];
+        layouts?: LayoutItem[];
+        name?: string;
+      };
+      if (saved.widgetIds && saved.layouts) {
+        setActivePreset({
+          name: saved.name ?? "Custom",
+          widgetIds: saved.widgetIds,
+          layouts: saved.layouts,
+        });
+      }
+    }
+  }, [layoutQuery.data?.value]);
+
+  const savedPresets = useMemo<DashboardPreset[]>(() => {
+    if (presetsQuery.data?.value && Array.isArray(presetsQuery.data.value)) {
+      return presetsQuery.data.value as DashboardPreset[];
+    }
+    return [];
+  }, [presetsQuery.data?.value]);
+
+  const handleLayoutChange = useCallback(
+    (layouts: LayoutItem[], widgetIds: string[]) => {
+      const updated: DashboardPreset = {
+        ...activePreset,
+        layouts,
+        widgetIds,
+      };
+      setActivePreset(updated);
+      // Debounce save — only save when edit mode changes
+    },
+    [activePreset],
+  );
+
+  const saveLayout = useCallback(() => {
+    upsertSetting.mutate({
+      key: "dashboard.layout",
+      value: activePreset,
+      scope: "user",
+    });
+  }, [activePreset, upsertSetting]);
+
+  const handlePresetSelect = useCallback(
+    (preset: DashboardPreset) => {
+      setActivePreset(preset);
+      upsertSetting.mutate({
+        key: "dashboard.layout",
+        value: preset,
+        scope: "user",
+      });
+    },
+    [upsertSetting],
+  );
+
+  const handlePresetSave = useCallback(
+    (name: string) => {
+      const newPreset: DashboardPreset = { ...activePreset, name };
+      const updated = [
+        ...savedPresets.filter((p) => p.name !== name),
+        newPreset,
+      ];
+      upsertSetting.mutate({
+        key: "dashboard.presets",
+        value: updated,
+        scope: "user",
+      });
+      setActivePreset(newPreset);
+    },
+    [activePreset, savedPresets, upsertSetting],
+  );
+
+  const handlePresetDelete = useCallback(
+    (name: string) => {
+      const updated = savedPresets.filter((p) => p.name !== name);
+      upsertSetting.mutate({
+        key: "dashboard.presets",
+        value: updated,
+        scope: "user",
+      });
+      if (activePreset.name === name) {
+        setActivePreset(defaultPreset);
+      }
+    },
+    [activePreset.name, savedPresets, upsertSetting],
+  );
+
+  const toggleEditMode = useCallback(() => {
+    if (editMode) {
+      saveLayout();
+    }
+    setEditMode(!editMode);
+  }, [editMode, saveLayout]);
+
+  // Get first cluster data for widget rendering
+  const firstCluster = data?.clusters[0];
+
+  const renderWidget = useCallback(
+    (widgetId: string) => {
+      if (!data) return null;
+
+      const firstSummary = firstCluster;
+      const firstLiveMetrics = firstCluster
+        ? liveMetrics.get(firstCluster.cluster.id)
+        : undefined;
+
+      switch (widgetId) {
+        case "stats-overview":
+          return (
+            <StatsOverview
+              totalNodes={data.totalNodes}
+              totalVMs={data.totalVMs}
+              totalContainers={data.totalContainers}
+              totalStorageBytes={data.totalStorageBytes}
+              isLoading={isLoading}
+            />
+          );
+
+        case "cluster-cards":
+          return (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {data.clusters.map((summary) => (
+                <ClusterCard key={summary.cluster.id} summary={summary} />
+              ))}
+            </div>
+          );
+
+        case "cpu-chart":
+          return firstSummary ? (
+            <ClusterChart
+              summary={firstSummary}
+              timeRange={timeRange}
+              liveMetrics={firstLiveMetrics}
+              vmNameMap={data.vmNameMap}
+              chartType="cpu"
+            />
+          ) : null;
+
+        case "memory-chart":
+          return firstSummary ? (
+            <ClusterChart
+              summary={firstSummary}
+              timeRange={timeRange}
+              liveMetrics={firstLiveMetrics}
+              vmNameMap={data.vmNameMap}
+              chartType="memory"
+            />
+          ) : null;
+
+        case "disk-chart":
+          return firstSummary ? (
+            <ClusterChart
+              summary={firstSummary}
+              timeRange={timeRange}
+              liveMetrics={firstLiveMetrics}
+              vmNameMap={data.vmNameMap}
+              chartType="disk"
+            />
+          ) : null;
+
+        case "network-chart":
+          return firstSummary ? (
+            <ClusterChart
+              summary={firstSummary}
+              timeRange={timeRange}
+              liveMetrics={firstLiveMetrics}
+              vmNameMap={data.vmNameMap}
+              chartType="network"
+            />
+          ) : null;
+
+        case "live-metrics":
+          return <LiveMetricCards metrics={firstLiveMetrics} />;
+
+        case "top-consumers":
+          return (
+            <TopConsumers
+              consumers={firstLiveMetrics?.topConsumers ?? []}
+              vmNames={data.vmNameMap}
+            />
+          );
+
+        default:
+          return (
+            <div className="flex h-full items-center justify-center text-muted-foreground">
+              Unknown widget: {widgetId}
+            </div>
+          );
+      }
+    },
+    [data, firstCluster, isLoading, liveMetrics, timeRange],
+  );
 
   return (
     <div className="space-y-6">
@@ -136,6 +269,31 @@ export function DashboardPage() {
           <ConnectionDot status={status} />
         </div>
         <div className="flex items-center gap-3">
+          <DashboardPresetSelector
+            activePreset={activePreset}
+            savedPresets={savedPresets}
+            onSelect={handlePresetSelect}
+            onSave={handlePresetSave}
+            onDelete={handlePresetDelete}
+          />
+          <Button
+            size="sm"
+            variant={editMode ? "default" : "outline"}
+            className="gap-1"
+            onClick={toggleEditMode}
+          >
+            {editMode ? (
+              <>
+                <Lock className="h-4 w-4" />
+                Lock
+              </>
+            ) : (
+              <>
+                <LayoutGrid className="h-4 w-4" />
+                Customize
+              </>
+            )}
+          </Button>
           {firstClusterId && (
             <>
               <Button
@@ -169,36 +327,26 @@ export function DashboardPage() {
         </div>
       ) : (
         <>
-          <StatsOverview
-            totalNodes={data?.totalNodes ?? 0}
-            totalVMs={data?.totalVMs ?? 0}
-            totalContainers={data?.totalContainers ?? 0}
-            totalStorageBytes={data?.totalStorageBytes ?? 0}
-            isLoading={isLoading}
-          />
-
           {!isLoading && data?.clusters.length === 0 && <EmptyState />}
 
           {data != null && data.clusters.length > 0 && (
-            <div className="space-y-8">
-              {/* Cluster cards grid */}
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {data.clusters.map((summary) => (
-                  <ClusterCard key={summary.cluster.id} summary={summary} />
-                ))}
-              </div>
+            <DashboardGrid
+              preset={activePreset}
+              onLayoutChange={handleLayoutChange}
+              editMode={editMode}
+            >
+              {renderWidget}
+            </DashboardGrid>
+          )}
 
-              {/* Per-cluster metrics */}
-              {data.clusters.map((summary) => (
-                <ClusterMetricsSection
-                  key={`metrics-${summary.cluster.id}`}
-                  summary={summary}
-                  timeRange={timeRange}
-                  liveMetrics={liveMetrics.get(summary.cluster.id)}
-                  vmNameMap={data.vmNameMap}
-                />
-              ))}
-            </div>
+          {isLoading && !data && (
+            <StatsOverview
+              totalNodes={0}
+              totalVMs={0}
+              totalContainers={0}
+              totalStorageBytes={0}
+              isLoading={true}
+            />
           )}
         </>
       )}
@@ -214,5 +362,57 @@ export function DashboardPage() {
         clusterId={firstClusterId}
       />
     </div>
+  );
+}
+
+// Individual chart widget that handles its own data fetching
+interface ClusterChartProps {
+  summary: ClusterSummary;
+  timeRange: TimeRange;
+  liveMetrics: AggregatedMetrics | undefined;
+  vmNameMap: Map<string, string>;
+  chartType: "cpu" | "memory" | "disk" | "network";
+}
+
+function ClusterChart({
+  summary,
+  timeRange,
+  liveMetrics,
+  chartType,
+}: ClusterChartProps) {
+  const historicalQuery = useHistoricalMetrics(summary.cluster.id, timeRange);
+  const seedData = useSeedMetrics(summary.cluster.id);
+  const isLive = timeRange === "live";
+
+  const liveHistory = liveMetrics?.history ?? [];
+  const chartData = isLive
+    ? (liveHistory.length > 0 ? liveHistory : (seedData ?? []))
+    : (historicalQuery.data ?? []);
+
+  const chartConfigs = {
+    cpu: { title: "CPU Usage", dataKey: "cpuPercent" as const, color: "#3b82f6" },
+    memory: { title: "Memory Usage", dataKey: "memPercent" as const, color: "#8b5cf6" },
+    disk: { title: "Disk I/O (Read)", dataKey: "diskReadBps" as const, color: "#f59e0b" },
+    network: { title: "Network In", dataKey: "netInBps" as const, color: "#10b981" },
+  };
+
+  const config = chartConfigs[chartType];
+
+  if (!isLive && historicalQuery.isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Loading...
+      </div>
+    );
+  }
+
+  return (
+    <MetricChart
+      title={`${summary.cluster.name} — ${config.title}`}
+      data={chartData}
+      dataKey={config.dataKey}
+      color={config.color}
+      timeRange={timeRange}
+    />
   );
 }

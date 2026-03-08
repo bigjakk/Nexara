@@ -54,6 +54,18 @@ vi.mock("../api/historical-queries", () => ({
   useSeedMetrics: () => undefined,
 }));
 
+vi.mock("@/features/settings/api/settings-queries", () => ({
+  useSetting: () => ({
+    data: undefined,
+    isLoading: false,
+    error: null,
+  }),
+  useUpsertSetting: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -112,7 +124,7 @@ describe("DashboardPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows Live Metrics heading by default", () => {
+  it("shows CPU Usage chart title for first cluster", () => {
     mockUseDashboardData.mockReturnValue({
       data: mockDashboardData,
       isLoading: false,
@@ -121,7 +133,7 @@ describe("DashboardPage", () => {
 
     renderWithProviders(<DashboardPage />);
     expect(
-      screen.getByText("Prod Cluster — Live Metrics"),
+      screen.getByText("Prod Cluster — CPU Usage"),
     ).toBeInTheDocument();
   });
 

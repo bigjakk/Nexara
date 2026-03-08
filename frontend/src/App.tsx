@@ -17,8 +17,10 @@ import { UsersPage } from "@/features/admin/pages/UsersPage";
 import { RolesPage } from "@/features/admin/pages/RolesPage";
 import { LDAPPage } from "@/features/admin/pages/LDAPPage";
 import { OIDCPage } from "@/features/admin/pages/OIDCPage";
+import { BrandingPage } from "@/features/admin/pages/BrandingPage";
 import { OIDCCallbackPage } from "@/features/auth/pages/OIDCCallbackPage";
 import { SecurityPage } from "@/features/settings/pages/SecurityPage";
+import { AppearancePage } from "@/features/settings/pages/AppearancePage";
 import { SecurityDashboardPage } from "@/features/security/pages/SecurityDashboardPage";
 import { AlertsPage } from "@/features/alerts/pages/AlertsPage";
 import { ReportsPage } from "@/features/reports/pages/ReportsPage";
@@ -110,6 +112,10 @@ const router = createBrowserRouter([
             element: <OIDCPage />,
           },
           {
+            path: "admin/branding",
+            element: <BrandingPage />,
+          },
+          {
             path: "alerts",
             element: <AlertsPage />,
           },
@@ -128,6 +134,10 @@ const router = createBrowserRouter([
 {
             path: "settings/security",
             element: <SecurityPage />,
+          },
+          {
+            path: "settings/appearance",
+            element: <AppearancePage />,
           },
         ],
       },

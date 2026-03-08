@@ -50,6 +50,7 @@ type Server struct {
 	alertHandler        *handlers.AlertHandler
 	reportHandler       *handlers.ReportHandler
 	rollingUpdateHandler *handlers.RollingUpdateHandler
+	settingsHandler      *handlers.SettingsHandler
 	rbacEngine          *auth.RBACEngine
 	eventPub            *events.Publisher
 }
@@ -135,6 +136,10 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil && cfg.EncryptionKey != "" && rdb != nil {
 		s.totpHandler = handlers.NewTOTPHandler(s.queries, cfg.EncryptionKey, rdb, s.eventPub)
+	}
+
+	if s.queries != nil {
+		s.settingsHandler = handlers.NewSettingsHandler(s.queries, cfg.DataDir)
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {

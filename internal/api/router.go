@@ -422,6 +422,20 @@ func (s *Server) setupRoutes() {
 		ruClusters.Post("/:cluster_id/ssh-credentials/test", s.rollingUpdateHandler.TestSSHConnection)
 	}
 
+	// Settings routes.
+	if s.settingsHandler != nil {
+		settings := v1.Group("/settings", s.authRequired())
+		settings.Get("/", s.settingsHandler.ListSettings)
+		settings.Get("/branding", s.settingsHandler.GetBranding)
+		settings.Get("/branding/logo-file", s.settingsHandler.ServeLogo)
+		settings.Get("/branding/favicon-file", s.settingsHandler.ServeFavicon)
+		settings.Post("/branding/logo", s.settingsHandler.UploadLogo)
+		settings.Post("/branding/favicon", s.settingsHandler.UploadFavicon)
+		settings.Get("/:key", s.settingsHandler.GetSetting)
+		settings.Put("/:key", s.settingsHandler.UpsertSetting)
+		settings.Delete("/:key", s.settingsHandler.DeleteSetting)
+	}
+
 	// User management routes.
 	if s.userHandler != nil {
 		users := v1.Group("/users", s.authRequired())
