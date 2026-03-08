@@ -156,7 +156,7 @@ export function TaskProgressDialog() {
           )}
           {isFailed && (
             <p className="text-sm text-red-500">
-              Task failed{task?.exit_status ? `: ${task.exit_status}` : ""}
+              Task failed{task.exit_status ? `: ${task.exit_status}` : ""}
             </p>
           )}
 

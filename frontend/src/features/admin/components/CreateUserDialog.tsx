@@ -23,7 +23,7 @@ export function CreateUserDialog({ open, onOpenChange }: CreateUserDialogProps) 
   const [error, setError] = useState("");
   const createUser = useCreateUser();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError("");
 

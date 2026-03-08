@@ -177,7 +177,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                             <span className="text-muted-foreground">
                               Type:
                             </span>{" "}
-                            {job.type ?? "-"}
+                            {job.type}
                           </div>
                           <div>
                             <span className="text-muted-foreground">

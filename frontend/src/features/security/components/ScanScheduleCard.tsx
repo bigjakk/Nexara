@@ -46,13 +46,13 @@ export function ScanScheduleCard({ clusterId }: { clusterId: string }) {
             type="button"
             role="switch"
             aria-checked={enabled}
-            onClick={() =>
+            onClick={() => {
               updateSchedule.mutate({
                 clusterId,
                 enabled: !enabled,
                 intervalHours,
-              })
-            }
+              });
+            }}
             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
               enabled ? "bg-primary" : "bg-muted"
             }`}
@@ -74,13 +74,13 @@ export function ScanScheduleCard({ clusterId }: { clusterId: string }) {
             <span className="text-sm text-muted-foreground">Interval:</span>
             <select
               value={intervalHours}
-              onChange={(e) =>
+              onChange={(e) => {
                 updateSchedule.mutate({
                   clusterId,
                   enabled,
                   intervalHours: Number(e.target.value),
-                })
-              }
+                });
+              }}
               className="rounded-md border bg-background px-2 py-1 text-sm"
             >
               {INTERVAL_OPTIONS.map((opt) => (

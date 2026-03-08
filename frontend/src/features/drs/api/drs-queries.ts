@@ -135,7 +135,7 @@ export function useDRSHistory(clusterId: string, limit: number = 25) {
     queryKey: ["drs", "history", clusterId, limit],
     queryFn: () =>
       apiClient.get<DRSHistoryEntry[]>(
-        `/api/v1/clusters/${clusterId}/drs/history?limit=${limit}`,
+        `/api/v1/clusters/${clusterId}/drs/history?limit=${String(limit)}`,
       ),
     enabled: clusterId.length > 0,
   });

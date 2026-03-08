@@ -19,7 +19,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   const handleEvaluate = () => {
     evaluation.mutate(undefined, {
       onSuccess: (data) => {
-        setResults(data.recommendations ?? []);
+        setResults(data.recommendations);
         setEvaluated(true);
       },
       onError: () => {

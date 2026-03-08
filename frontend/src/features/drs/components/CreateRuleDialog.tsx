@@ -145,7 +145,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
             <Label>Target</Label>
             <Select
               value={target}
-              onValueChange={(v) => setTarget(v as RuleTarget)}
+              onValueChange={(v) => { setTarget(v as RuleTarget); }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -164,7 +164,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
                 id="rule-name"
                 placeholder="my-ha-rule"
                 value={ruleName}
-                onChange={(e) => setRuleName(e.target.value)}
+                onChange={(e) => { setRuleName(e.target.value); }}
               />
             </div>
           )}
@@ -173,7 +173,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
             <Label>Rule Type</Label>
             <Select
               value={ruleType}
-              onValueChange={(v) => setRuleType(v as RuleType)}
+              onValueChange={(v) => { setRuleType(v as RuleType); }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -202,7 +202,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
                 placeholder="Search VMs..."
                 className="pl-7"
                 value={vmSearch}
-                onChange={(e) => setVmSearch(e.target.value)}
+                onChange={(e) => { setVmSearch(e.target.value); }}
               />
             </div>
             <div className="max-h-40 overflow-y-auto rounded-md border p-1">
@@ -218,7 +218,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
                   >
                     <Checkbox
                       checked={selectedVmIds.includes(vm.vmid)}
-                      onCheckedChange={() => toggleVM(vm.vmid)}
+                      onCheckedChange={() => { toggleVM(vm.vmid); }}
                     />
                     <span className="font-mono text-xs text-muted-foreground">
                       {vm.vmid}
@@ -250,7 +250,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
                   placeholder="Search nodes..."
                   className="pl-7"
                   value={nodeSearch}
-                  onChange={(e) => setNodeSearch(e.target.value)}
+                  onChange={(e) => { setNodeSearch(e.target.value); }}
                 />
               </div>
               <div className="max-h-32 overflow-y-auto rounded-md border p-1">
@@ -266,7 +266,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
                     >
                       <Checkbox
                         checked={selectedNodes.includes(node.name)}
-                        onCheckedChange={() => toggleNode(node.name)}
+                        onCheckedChange={() => { toggleNode(node.name); }}
                       />
                       <span>{node.name}</span>
                       <span className="ml-auto text-xs text-muted-foreground">
@@ -283,7 +283,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
             <Checkbox
               id="rule-enabled"
               checked={enabled}
-              onCheckedChange={(checked) => setEnabled(checked === true)}
+              onCheckedChange={(checked) => { setEnabled(checked === true); }}
             />
             <Label htmlFor="rule-enabled">Enabled</Label>
           </div>
@@ -298,7 +298,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
+          <Button variant="outline" onClick={() => { setOpen(false); }}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={isPending || !isValid}>

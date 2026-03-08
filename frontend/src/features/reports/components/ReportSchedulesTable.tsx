@@ -87,7 +87,7 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleToggle(s)}
+                    onClick={() => { handleToggle(s); }}
                     title={s.enabled ? "Disable" : "Enable"}
                   >
                     {s.enabled ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
@@ -103,7 +103,7 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleDelete(s)}
+                    onClick={() => { handleDelete(s); }}
                     title="Delete"
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />

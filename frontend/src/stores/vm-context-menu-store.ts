@@ -35,11 +35,12 @@ export const useVMContextMenuStore = create<VMContextMenuState & VMContextMenuAc
     confirmAction: null,
     confirmActionLabel: null,
 
-    openClone: (target) => set({ target, openDialog: "clone" }),
-    openMigrate: (target) => set({ target, openDialog: "migrate" }),
-    openDestroy: (target) => set({ target, openDialog: "destroy" }),
-    openConfirmAction: (target, action, label) =>
-      set({ target, openDialog: "confirm-action", confirmAction: action, confirmActionLabel: label }),
-    closeDialog: () => set({ openDialog: null, confirmAction: null, confirmActionLabel: null }),
+    openClone: (target) => { set({ target, openDialog: "clone" }); },
+    openMigrate: (target) => { set({ target, openDialog: "migrate" }); },
+    openDestroy: (target) => { set({ target, openDialog: "destroy" }); },
+    openConfirmAction: (target, action, label) => {
+      set({ target, openDialog: "confirm-action", confirmAction: action, confirmActionLabel: label });
+    },
+    closeDialog: () => { set({ openDialog: null, confirmAction: null, confirmActionLabel: null }); },
   }),
 );

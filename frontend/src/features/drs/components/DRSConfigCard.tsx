@@ -101,7 +101,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
 
         <div className="space-y-2">
           <Label>Mode</Label>
-          <Select value={mode} onValueChange={(v) => setMode(v as DRSMode)}>
+          <Select value={mode} onValueChange={(v) => { setMode(v as DRSMode); }}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -183,7 +183,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             type="number"
             min={60}
             value={evalInterval}
-            onChange={(e) => setEvalInterval(Number(e.target.value))}
+            onChange={(e) => { setEvalInterval(Number(e.target.value)); }}
           />
         </div>
 

@@ -142,7 +142,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
         </DialogHeader>
 
         {!showFingerprint ? (
-          <form onSubmit={handleFetchFingerprint} className="space-y-4">
+          <form onSubmit={(e) => { void handleFetchFingerprint(e); }} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="pbs-name">Server Name</Label>
               <Input

@@ -219,7 +219,7 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => setIsoPickerOpen(true)}>
+              <DropdownMenuItem onClick={() => { setIsoPickerOpen(true); }}>
                 Mount ISO...
               </DropdownMenuItem>
               {hasISO && (

@@ -67,7 +67,9 @@ interface HardwarePanelProps {
 
 function str(val: unknown): string {
   if (val == null) return "";
-  return String(val);
+  if (typeof val === "string") return val;
+  if (typeof val === "number" || typeof val === "boolean") return String(val);
+  return JSON.stringify(val);
 }
 
 function num(val: unknown): number {
@@ -568,9 +570,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
 
   function handleCancelPendingDevice(key: string) {
     setPendingDeviceAdds((prev) => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
+      return Object.fromEntries(
+        Object.entries(prev).filter(([k]) => k !== key),
+      );
     });
   }
 
@@ -1012,7 +1014,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
                   <p className="px-1 text-[10px] text-muted-foreground">No bootable devices</p>
                 )}
                 {bootOrder.map((entry, idx) => {
-                  const info = config ? bootDeviceLabel(entry.device, config) : { label: entry.device, type: "other" as const };
+                  const info = bootDeviceLabel(entry.device, config);
                   const DeviceIcon = info.type === "net" ? Network : info.type === "cdrom" ? Disc : HardDrive;
                   return (
                     <div
@@ -1037,9 +1039,12 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
                         onClick={() => {
                           setBootOrder((prev) => {
                             const next = [...prev];
-                            const temp = next[idx];
-                            next[idx] = next[idx - 1]!;
-                            next[idx - 1] = temp!;
+                            const a = next[idx];
+                            const b = next[idx - 1];
+                            if (a && b) {
+                              next[idx] = b;
+                              next[idx - 1] = a;
+                            }
                             return next;
                           });
                         }}
@@ -1054,9 +1059,12 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
                         onClick={() => {
                           setBootOrder((prev) => {
                             const next = [...prev];
-                            const temp = next[idx];
-                            next[idx] = next[idx + 1]!;
-                            next[idx + 1] = temp!;
+                            const a = next[idx];
+                            const b = next[idx + 1];
+                            if (a && b) {
+                              next[idx] = b;
+                              next[idx + 1] = a;
+                            }
                             return next;
                           });
                         }}
@@ -1344,7 +1352,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
                 return (
                   <div key={key} className="flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 dark:border-amber-800 dark:bg-amber-950">
                     <span className="font-mono text-xs font-medium text-amber-700 dark:text-amber-400">{key}</span>
-                    <span className="truncate text-[10px] text-amber-600 dark:text-amber-400">{parsed.volume || str(config?.[key] ?? "")}</span>
+                    <span className="truncate text-[10px] text-amber-600 dark:text-amber-400">{parsed.volume || str(config[key] ?? "")}</span>
                     <span className="rounded bg-amber-200 px-1 py-0.5 text-[9px] font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-300">Unused</span>
                     <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDisk(key); }}>
                       <Trash2 className="h-3 w-3" /> Remove

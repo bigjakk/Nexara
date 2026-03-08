@@ -125,7 +125,7 @@ function MiniChart({
               }}
               formatter={(value: unknown, name: unknown) => [
                 value != null ? formatter(Number(value)) : "0",
-                String(name ?? ""),
+                typeof name === "string" ? name : "",
               ]}
               contentStyle={{
                 backgroundColor: "hsl(var(--popover))",

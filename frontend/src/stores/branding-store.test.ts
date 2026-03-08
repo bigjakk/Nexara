@@ -130,7 +130,7 @@ describe("branding-store — setFaviconUrl", () => {
     useBrandingStore.getState().setFaviconUrl("https://example.com/fav.ico");
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     expect(link).not.toBeNull();
-    expect(link!.href).toContain("fav.ico");
+    expect(link?.href).toContain("fav.ico");
   });
 
   it("updates existing <link rel='icon'> href when element already present", () => {
@@ -142,7 +142,7 @@ describe("branding-store — setFaviconUrl", () => {
 
     useBrandingStore.getState().setFaviconUrl("https://example.com/new.ico");
     const found = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    expect(found!.href).toContain("new.ico");
+    expect(found?.href).toContain("new.ico");
   });
 
   it("does not inject a DOM element when url is null", () => {
@@ -221,7 +221,7 @@ describe("branding-store — loadFromBranding", () => {
     });
     const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     expect(link).not.toBeNull();
-    expect(link!.href).toContain("favicon.ico");
+    expect(link?.href).toContain("favicon.ico");
   });
 
   it("loads all three branding fields together", () => {

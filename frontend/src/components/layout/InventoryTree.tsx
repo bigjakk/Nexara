@@ -81,7 +81,7 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
       <button
         onClick={() => {
           if (nodeVMs.length > 0) toggleNode(nodeKey);
-          navigate(`/clusters/${clusterId}/nodes/${node.id}`);
+          void navigate(`/clusters/${clusterId}/nodes/${node.id}`);
         }}
         className={cn(
           "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
@@ -122,7 +122,7 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
                   }}
                 >
                   <button
-                    onClick={() => { navigate(vmPath); }}
+                    onClick={() => { void navigate(vmPath); }}
                     className={cn(
                       "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
                       vmActive && "bg-accent text-accent-foreground",
@@ -193,7 +193,7 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
             />
           </button>
           <button
-            onClick={() => { navigate(`/clusters/${cluster.id}`); }}
+            onClick={() => { void navigate(`/clusters/${cluster.id}`); }}
             className="flex min-w-0 flex-1 items-center gap-1.5"
           >
             <Server className="h-3.5 w-3.5 shrink-0 text-primary" />

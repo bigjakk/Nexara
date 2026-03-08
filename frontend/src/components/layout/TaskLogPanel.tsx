@@ -87,10 +87,10 @@ function ActiveTaskPoller({
   const prevRef = useRef<string | null>(null);
   useEffect(() => {
     if (task && upid) {
-      const key = `${task.status}:${task.exit_status ?? ""}`;
+      const key = `${task.status}:${task.exit_status}`;
       if (prevRef.current !== key) {
         prevRef.current = key;
-        onStatus(upid, task.status, task.exit_status ?? "");
+        onStatus(upid, task.status, task.exit_status);
       }
     }
   }, [task, upid, onStatus]);
@@ -222,7 +222,7 @@ function ActivityRow({
               {details.node && (
                 <>
                   <span className="text-muted-foreground">Node</span>
-                  <span>{details.node as string}</span>
+                  <span>{details.node}</span>
                 </>
               )}
               {Object.keys(details).filter(

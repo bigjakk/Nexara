@@ -44,9 +44,9 @@ function formatUnixTime(ts: number): string {
 
 function timeAgo(ts: number): string {
   const diff = Math.floor(Date.now() / 1000 - ts);
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 3600) return `${String(Math.floor(diff / 60))}m ago`;
+  if (diff < 86400) return `${String(Math.floor(diff / 3600))}h ago`;
+  return `${String(Math.floor(diff / 86400))}d ago`;
 }
 
 interface BackupPanelProps {
@@ -110,7 +110,7 @@ export function BackupPanel({ vmid, clusterId, nodeName, kind }: BackupPanelProp
   const sorted = hasSnapshots
     ? [...snapshots].sort((a, b) => b.backup_time - a.backup_time)
     : [];
-  const latest = sorted[0] as PBSSnapshot | undefined;
+  const latest: PBSSnapshot | undefined = sorted[0];
 
   return (
     <div className="space-y-4">

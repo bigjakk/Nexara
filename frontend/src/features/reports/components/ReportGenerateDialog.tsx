@@ -126,7 +126,7 @@ export function ReportGenerateDialog() {
               min={1}
               max={8760}
               value={timeRangeHours}
-              onChange={(e) => setTimeRangeHours(Number(e.target.value))}
+              onChange={(e) => { setTimeRangeHours(Number(e.target.value)); }}
             />
           </div>
 

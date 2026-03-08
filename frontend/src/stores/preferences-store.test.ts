@@ -91,7 +91,7 @@ describe("preferences-store — setPreferences", () => {
     usePreferencesStore.getState().setPreferences({ accentColor: "blue" });
     const stored = localStorage.getItem(STORAGE_KEY);
     expect(stored).not.toBeNull();
-    const parsed = JSON.parse(stored!) as Partial<UserPreferences>;
+    const parsed = JSON.parse(stored ?? "{}") as Partial<UserPreferences>;
     expect(parsed.accentColor).toBe("blue");
   });
 
@@ -104,7 +104,7 @@ describe("preferences-store — setPreferences", () => {
     });
     const stored = localStorage.getItem(STORAGE_KEY);
     expect(stored).not.toBeNull();
-    const parsed = JSON.parse(stored!) as UserPreferences;
+    const parsed = JSON.parse(stored ?? "{}") as UserPreferences;
     expect(parsed.byteUnit).toBe("decimal");
     expect(parsed.dateFormat).toBe("locale");
     expect(parsed.refreshInterval).toBe(0);
@@ -155,7 +155,7 @@ describe("preferences-store — loadFromJSON", () => {
       .loadFromJSON({ accentColor: "green", refreshInterval: 120 });
     const stored = localStorage.getItem(STORAGE_KEY);
     expect(stored).not.toBeNull();
-    const parsed = JSON.parse(stored!) as UserPreferences;
+    const parsed = JSON.parse(stored ?? "{}") as UserPreferences;
     expect(parsed.accentColor).toBe("green");
     expect(parsed.refreshInterval).toBe(120);
   });

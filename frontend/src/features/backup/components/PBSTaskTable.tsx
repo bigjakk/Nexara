@@ -29,10 +29,10 @@ function formatTime(unix: number): string {
 function formatDuration(start: number, end?: number): string {
   if (!end) return "running";
   const secs = end - start;
-  if (secs < 60) return `${secs}s`;
+  if (secs < 60) return `${String(secs)}s`;
   const m = Math.floor(secs / 60);
   const s = secs % 60;
-  return `${m}m ${s}s`;
+  return `${String(m)}m ${String(s)}s`;
 }
 
 function TaskLogPanel({ pbsId, upid }: { pbsId: string; upid: string }) {

@@ -106,7 +106,7 @@ export function ReportRunsTable({ onPreview }: ReportRunsTableProps) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleDownloadCSV(run)}
+                    onClick={() => { handleDownloadCSV(run); }}
                     title="Download CSV"
                   >
                     <Download className="h-4 w-4" />

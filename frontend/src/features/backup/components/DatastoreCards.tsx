@@ -48,7 +48,7 @@ export function DatastoreCards({ datastores }: DatastoreCardsProps) {
               <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className={`h-full rounded-full transition-all ${barColor}`}
-                  style={{ width: `${Math.min(usedPct, 100)}%` }}
+                  style={{ width: `${String(Math.min(usedPct, 100))}%` }}
                 />
               </div>
               <div className="flex justify-between text-xs text-muted-foreground">

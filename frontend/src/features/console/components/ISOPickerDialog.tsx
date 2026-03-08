@@ -48,14 +48,14 @@ export function ISOPickerDialog({
   function handleMount(volid: string) {
     mountISO.mutate(
       { clusterId, vmId: vmResourceId, volid },
-      { onSuccess: () => onOpenChange(false) },
+      { onSuccess: () => { onOpenChange(false); } },
     );
   }
 
   function handleEject() {
     mountISO.mutate(
       { clusterId, vmId: vmResourceId, volid: "none" },
-      { onSuccess: () => onOpenChange(false) },
+      { onSuccess: () => { onOpenChange(false); } },
     );
   }
 
@@ -90,7 +90,7 @@ export function ISOPickerDialog({
           <Input
             placeholder="Search ISOs..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); }}
             className="pl-9"
           />
         </div>
@@ -110,7 +110,7 @@ export function ISOPickerDialog({
                 key={iso.volid}
                 type="button"
                 className="flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left text-sm last:border-0 hover:bg-accent"
-                onClick={() => handleMount(iso.volid)}
+                onClick={() => { handleMount(iso.volid); }}
                 disabled={mountISO.isPending}
               >
                 <Disc className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -128,7 +128,7 @@ export function ISOPickerDialog({
         {mountISO.isPending && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            {mountISO.variables?.volid === "none"
+            {mountISO.variables.volid === "none"
               ? "Ejecting..."
               : "Mounting..."}
           </div>

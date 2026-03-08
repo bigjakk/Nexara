@@ -88,7 +88,7 @@ export function VMContextDialogs() {
                         setFocusedTask({
                           clusterId: target.clusterId,
                           upid: data.upid,
-                          description: `${confirmActionLabel} ${target.name}`,
+                          description: `${confirmActionLabel ?? ""} ${target.name}`,
                         });
                         setPanelOpen(true);
                         closeDialog();

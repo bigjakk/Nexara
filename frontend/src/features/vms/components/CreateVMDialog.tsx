@@ -451,7 +451,7 @@ export function CreateVMDialog({
           idx++;
         }
       }
-      result.push({ name: `${disk.bus}${idx}`, disk });
+      result.push({ name: `${disk.bus}${String(idx)}`, disk });
       counters[disk.bus] = idx + 1;
     }
     return result;
@@ -702,7 +702,7 @@ export function CreateVMDialog({
                       // Reset dialog state without closing
                       createMutation.reset();
                       onOpenChange(false);
-                      navigate(`/inventory/vm/${clusterId}/${found.id}`);
+                      void navigate(`/inventory/vm/${clusterId}/${found.id}`);
                     }
                   })
                   .catch(() => {
@@ -1194,27 +1194,27 @@ export function CreateVMDialog({
                       <div className="flex flex-wrap gap-x-4 gap-y-1 items-center pt-4">
                         <div className="flex items-center gap-1.5">
                           <Checkbox
-                            id={`discard-${disk.id}`}
+                            id={`discard-${String(disk.id)}`}
                             checked={disk.discard}
                             onCheckedChange={(c) => { updateDisk(disk.id, { discard: Boolean(c) }); }}
                           />
-                          <Label htmlFor={`discard-${disk.id}`} className="text-xs font-normal">TRIM</Label>
+                          <Label htmlFor={`discard-${String(disk.id)}`} className="text-xs font-normal">TRIM</Label>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <Checkbox
-                            id={`ssd-${disk.id}`}
+                            id={`ssd-${String(disk.id)}`}
                             checked={disk.ssd}
                             onCheckedChange={(c) => { updateDisk(disk.id, { ssd: Boolean(c) }); }}
                           />
-                          <Label htmlFor={`ssd-${disk.id}`} className="text-xs font-normal">SSD</Label>
+                          <Label htmlFor={`ssd-${String(disk.id)}`} className="text-xs font-normal">SSD</Label>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <Checkbox
-                            id={`io-${disk.id}`}
+                            id={`io-${String(disk.id)}`}
                             checked={disk.iothread}
                             onCheckedChange={(c) => { updateDisk(disk.id, { iothread: Boolean(c) }); }}
                           />
-                          <Label htmlFor={`io-${disk.id}`} className="text-xs font-normal">IO Thread</Label>
+                          <Label htmlFor={`io-${String(disk.id)}`} className="text-xs font-normal">IO Thread</Label>
                         </div>
                       </div>
                     </div>
@@ -1583,7 +1583,7 @@ export function CreateVMDialog({
                   </span>
                   {disks.map((disk, idx) => {
                     const devNames = assignDiskDeviceNames();
-                    const devName = devNames[idx]?.name ?? `disk${idx}`;
+                    const devName = devNames[idx]?.name ?? `disk${String(idx)}`;
                     return (
                       <React.Fragment key={disk.id}>
                         <span className="text-muted-foreground">

@@ -133,7 +133,7 @@ export function ScanHistoryTable({
               <tbody key={scan.id}>
                 <tr
                   className="cursor-pointer border-b transition-colors hover:bg-muted/50"
-                  onClick={() => setExpandedId(isExpanded ? null : scan.id)}
+                  onClick={() => { setExpandedId(isExpanded ? null : scan.id); }}
                 >
                   <td className="px-4 py-3">
                     {isExpanded ? (

@@ -329,10 +329,10 @@ function BulkMigrateDialog({
           done++;
           setProgress({ done, total, errors: [...errors] });
         })
-        .catch((err: Error) => {
+        .catch((err: unknown) => {
           done++;
           errors.push(
-            `${row.original.name} (${String(row.original.vmid)}): ${err.message}`,
+            `${row.original.name} (${String(row.original.vmid)}): ${err instanceof Error ? err.message : String(err)}`,
           );
           setProgress({ done, total, errors: [...errors] });
         });
@@ -456,7 +456,7 @@ function BulkMigrateDialog({
         )}
 
         <DialogFooter>
-          {isDone && progress && progress.errors.length > 0 ? (
+          {isDone && progress.errors.length > 0 ? (
             <Button
               variant="outline"
               onClick={() => {

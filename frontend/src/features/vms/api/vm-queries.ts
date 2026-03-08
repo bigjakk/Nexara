@@ -841,7 +841,7 @@ export function useTaskLog(
     queryKey: ["task-log", clusterId, upid],
     queryFn: () =>
       apiClient.get<TaskLogLine[]>(
-        `/api/v1/clusters/${clusterId}/tasks/${encodeURIComponent(upid!)}/log`,
+        `/api/v1/clusters/${clusterId ?? ""}/tasks/${encodeURIComponent(upid ?? "")}/log`,
       ),
     enabled: enabled && !!clusterId && !!upid,
     staleTime: 60_000,

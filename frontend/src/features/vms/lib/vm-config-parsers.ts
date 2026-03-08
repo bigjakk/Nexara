@@ -427,7 +427,7 @@ export function buildPCI(parsed: ParsedPCI): string {
 // ---------------------------------------------------------------------------
 
 export function parseSerial(raw: string): string {
-  return raw?.trim() ?? "socket";
+  return raw.trim() || "socket";
 }
 
 export function buildSerial(value: string): string {

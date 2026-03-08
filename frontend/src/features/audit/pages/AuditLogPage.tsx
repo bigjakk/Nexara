@@ -71,22 +71,22 @@ function formatDetailsSummary(entry: AuditLogEntry): string | null {
     const parts: string[] = [];
 
     if (typeof d["vm_type"] === "string") {
-      parts.push(d["vm_type"] as string);
+      parts.push(d["vm_type"]);
     }
     if (typeof d["source_node"] === "string" && typeof d["target_node"] === "string") {
-      parts.push(`${d["source_node"] as string} → ${d["target_node"] as string}`);
+      parts.push(`${d["source_node"]} → ${d["target_node"]}`);
     }
     if (typeof d["migration_type"] === "string") {
-      parts.push(d["migration_type"] as string);
+      parts.push(d["migration_type"]);
     }
     if (d["online"] === true) {
       parts.push("live");
     }
     if (typeof d["error"] === "string") {
-      parts.push(`Error: ${d["error"] as string}`);
+      parts.push(`Error: ${d["error"]}`);
     }
     if (typeof d["status"] === "string" && d["status"] !== "completed") {
-      parts.push(d["status"] as string);
+      parts.push(d["status"]);
     }
 
     return parts.length > 0 ? parts.join(" · ") : null;
@@ -149,7 +149,7 @@ function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
   try {
     const d = JSON.parse(entry.details) as Record<string, unknown>;
     const vmid = typeof d["vmid"] === "number" ? d["vmid"] : null;
-    const vmType = typeof d["vm_type"] === "string" ? (d["vm_type"] as string) : null;
+    const vmType = typeof d["vm_type"] === "string" ? d["vm_type"] : null;
     if (vmid != null) {
       return (
         <span className="ml-2 text-xs">

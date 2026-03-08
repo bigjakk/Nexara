@@ -17,9 +17,9 @@ describe("console-store", () => {
 
     const state = useConsoleStore.getState();
     expect(state.tabs).toHaveLength(1);
-    expect(state.tabs[0]!.id).toBe(id);
-    expect(state.tabs[0]!.status).toBe("connecting");
-    expect(state.tabs[0]!.label).toBe("node1 shell");
+    expect(state.tabs[0]?.id).toBe(id);
+    expect(state.tabs[0]?.status).toBe("connecting");
+    expect(state.tabs[0]?.label).toBe("node1 shell");
     expect(state.activeTabId).toBe(id);
   });
 
@@ -109,10 +109,10 @@ describe("console-store", () => {
     });
 
     useConsoleStore.getState().updateTabStatus(id, "connected");
-    expect(useConsoleStore.getState().tabs[0]!.status).toBe("connected");
+    expect(useConsoleStore.getState().tabs[0]?.status).toBe("connected");
 
     useConsoleStore.getState().updateTabStatus(id, "error");
-    expect(useConsoleStore.getState().tabs[0]!.status).toBe("error");
+    expect(useConsoleStore.getState().tabs[0]?.status).toBe("error");
   });
 
   it("handles VM tab with vmid", () => {
@@ -124,9 +124,9 @@ describe("console-store", () => {
       label: "VM 100",
     });
 
-    const tab = useConsoleStore.getState().tabs[0]!;
-    expect(tab.vmid).toBe(100);
-    expect(tab.type).toBe("vm_serial");
-    expect(tab.id).toBe(id);
+    const tab = useConsoleStore.getState().tabs[0];
+    expect(tab?.vmid).toBe(100);
+    expect(tab?.type).toBe("vm_serial");
+    expect(tab?.id).toBe(id);
   });
 });

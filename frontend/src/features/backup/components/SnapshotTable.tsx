@@ -113,11 +113,11 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
         },
         onError: () => {
           // Revert optimistic update
-          setProtectOverrides((prev) => {
-            const next = { ...prev };
-            delete next[key];
-            return next;
-          });
+          setProtectOverrides((prev) =>
+            Object.fromEntries(
+              Object.entries(prev).filter(([k]) => k !== key),
+            ),
+          );
           setProtectingKey(null);
           setProtectError(key);
           setTimeout(() => { setProtectError(null); }, 3000);

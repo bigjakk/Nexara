@@ -229,7 +229,7 @@ export function CreateCTDialog({
   function extractFilename(volid: string): string {
     // volid like "local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
     const parts = volid.split("/");
-    return parts.length > 1 ? parts[parts.length - 1]! : volid;
+    return parts.length > 1 ? (parts[parts.length - 1] ?? volid) : volid;
   }
 
   function buildNet0(): string {
@@ -383,7 +383,7 @@ export function CreateCTDialog({
   function formatSize(bytes: number): string {
     if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
     if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
-    return `${bytes} B`;
+    return `${String(bytes)} B`;
   }
 
   return (
@@ -1210,7 +1210,8 @@ export function CreateCTDialog({
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    setStep(steps[stepIdx - 1]!);
+                    const prev = steps[stepIdx - 1];
+                    if (prev) setStep(prev);
                   }}
                 >
                   Back
@@ -1221,7 +1222,8 @@ export function CreateCTDialog({
                   type="button"
                   disabled={!canProceed}
                   onClick={() => {
-                    setStep(steps[stepIdx + 1]!);
+                    const next = steps[stepIdx + 1];
+                    if (next) setStep(next);
                   }}
                 >
                   Next

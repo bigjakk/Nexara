@@ -74,7 +74,9 @@ export function CreateSDNVNetDialog({
     if (vlanaware) params.vlanaware = 1;
 
     if (isEdit) {
-      const { vnet: _v, ...updateParams } = params;
+      const updateParams: Omit<CreateSDNVNetRequest, "vnet"> = Object.fromEntries(
+        Object.entries(params).filter(([k]) => k !== "vnet"),
+      ) as Omit<CreateSDNVNetRequest, "vnet">;
       update.mutate(
         { vnet: initialData.vnet, params: updateParams },
         { onSuccess: () => { setOpen(false); } },

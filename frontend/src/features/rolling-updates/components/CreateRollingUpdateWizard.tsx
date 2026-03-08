@@ -356,7 +356,7 @@ export function CreateRollingUpdateWizard({
                 </p>
                 <div className="max-h-64 space-y-2 overflow-auto">
                   {preflightReport.conflicts.map((c, i) => (
-                    <ConflictCard key={`${c.vmid}-${c.node}-${String(i)}`} conflict={c} />
+                    <ConflictCard key={`${String(c.vmid)}-${c.node}-${String(i)}`} conflict={c} />
                   ))}
                 </div>
               </div>

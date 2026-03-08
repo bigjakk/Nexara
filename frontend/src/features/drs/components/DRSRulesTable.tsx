@@ -42,9 +42,9 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
   const allRules = useMemo(() => {
     const normalize = (r: DRSRule): DRSRule => ({
       ...r,
-      vm_ids: r.vm_ids ?? [],
-      node_names: r.node_names ?? [],
-      source: r.source ?? "manual",
+      vm_ids: r.vm_ids,
+      node_names: r.node_names,
+      source: r.source,
     });
     const manual = (manualRules ?? []).map(normalize);
     const ha = (haRules ?? []).map(normalize);
@@ -62,11 +62,11 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
 
     if (deleteTarget.source === "ha" && deleteTarget.ha_rule_name) {
       deleteHARule.mutate(deleteTarget.ha_rule_name, {
-        onSuccess: () => setDeleteTarget(null),
+        onSuccess: () => { setDeleteTarget(null); },
       });
     } else {
       deleteManualRule.mutate(deleteTarget.id, {
-        onSuccess: () => setDeleteTarget(null),
+        onSuccess: () => { setDeleteTarget(null); },
       });
     }
   };
@@ -99,7 +99,7 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
               </TableRow>
             ) : (
               allRules.map((rule, idx) => (
-                <TableRow key={rule.id || `ha-${rule.ha_rule_name ?? idx}`}>
+                <TableRow key={rule.id || `ha-${rule.ha_rule_name ?? String(idx)}`}>
                   <TableCell>
                     <Badge
                       variant={
@@ -139,7 +139,7 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => setDeleteTarget(rule)}
+                      onClick={() => { setDeleteTarget(rule); }}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -153,7 +153,7 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
 
       <Dialog
         open={deleteTarget !== null}
-        onOpenChange={() => setDeleteTarget(null)}
+        onOpenChange={() => { setDeleteTarget(null); }}
       >
         <DialogContent>
           <DialogHeader>
@@ -165,7 +165,7 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+            <Button variant="outline" onClick={() => { setDeleteTarget(null); }}>
               Cancel
             </Button>
             <Button

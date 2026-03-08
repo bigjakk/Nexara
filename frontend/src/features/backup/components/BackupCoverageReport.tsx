@@ -18,9 +18,9 @@ import type { BackupCoverageEntry } from "../types/backup";
 function formatBackupAge(unixTs: number | null): string {
   if (unixTs == null) return "Never";
   const ageSec = Math.floor(Date.now() / 1000) - unixTs;
-  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m ago`;
-  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}h ago`;
-  return `${Math.floor(ageSec / 86400)}d ago`;
+  if (ageSec < 3600) return `${String(Math.floor(ageSec / 60))}m ago`;
+  if (ageSec < 86400) return `${String(Math.floor(ageSec / 3600))}h ago`;
+  return `${String(Math.floor(ageSec / 86400))}d ago`;
 }
 
 function CoverageBadge({ status }: { status: BackupCoverageEntry["coverage_status"] }) {

@@ -117,8 +117,7 @@ export function MigrateJobDialog({
   const { data: sourceStorage } = useClusterStorage(clusterId);
   const needsStorageList =
     migrationType === "cross-cluster" ||
-    (migrationType === "intra-cluster" &&
-      (migrationMode === "storage" || migrationMode === "both"));
+    (migrationMode === "storage" || migrationMode === "both");
   const { data: targetStorageList } = useClusterStorage(
     migrationType === "cross-cluster"
       ? targetClusterId
@@ -458,9 +457,9 @@ export function MigrateJobDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {availableTargetNodes?.map((n) => {
-                    const live = clusterMetrics?.nodeMetrics?.get(n.id);
-                    const cpuLabel = live ? `${Math.round(live.cpuPercent)}%` : null;
-                    const memLabel = live ? `${Math.round(live.memPercent)}%` : null;
+                    const live = clusterMetrics?.nodeMetrics.get(n.id);
+                    const cpuLabel = live ? `${String(Math.round(live.cpuPercent))}%` : null;
+                    const memLabel = live ? `${String(Math.round(live.memPercent))}%` : null;
                     return (
                       <SelectItem key={n.id} value={n.name}>
                         <span className="flex items-center gap-2">

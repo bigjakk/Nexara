@@ -222,7 +222,7 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
             >
               {pruneMutation.isPending
                 ? "Pruning..."
-                : `Remove ${toRemove.length} Snapshots`}
+                : `Remove ${String(toRemove.length)} Snapshots`}
             </Button>
           )}
         </DialogFooter>

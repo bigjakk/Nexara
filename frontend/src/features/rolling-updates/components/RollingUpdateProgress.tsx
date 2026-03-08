@@ -456,7 +456,7 @@ export function RollingUpdateProgress({
         </Card>
       )}
 
-      {job.ha_warnings && job.ha_warnings.length > 0 && (
+      {job.ha_warnings.length > 0 && (
         <HAWarningsCard warnings={job.ha_warnings} policy={job.ha_policy} />
       )}
 

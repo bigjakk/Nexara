@@ -60,7 +60,7 @@ export function DRSHistoryTable({ clusterId }: DRSHistoryTableProps) {
         <span className="text-sm text-muted-foreground">Show</span>
         <Select
           value={String(limit)}
-          onValueChange={(v) => setLimit(Number(v))}
+          onValueChange={(v) => { setLimit(Number(v)); }}
         >
           <SelectTrigger className="w-20">
             <SelectValue />

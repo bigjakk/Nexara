@@ -399,9 +399,9 @@ export function MigrateWizard() {
                   </SelectTrigger>
                   <SelectContent>
                     {availableTargetNodes?.map((n) => {
-                      const live = targetClusterMetrics?.nodeMetrics?.get(n.id);
-                      const cpuLabel = live ? `${Math.round(live.cpuPercent)}%` : null;
-                      const memLabel = live ? `${Math.round(live.memPercent)}%` : null;
+                      const live = targetClusterMetrics?.nodeMetrics.get(n.id);
+                      const cpuLabel = live ? `${String(Math.round(live.cpuPercent))}%` : null;
+                      const memLabel = live ? `${String(Math.round(live.memPercent))}%` : null;
                       return (
                         <SelectItem key={n.id} value={n.name}>
                           <span className="flex items-center gap-2">

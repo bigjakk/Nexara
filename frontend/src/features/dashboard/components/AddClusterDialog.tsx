@@ -133,7 +133,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
         </DialogHeader>
 
         {!showFingerprint ? (
-          <form onSubmit={handleFetchFingerprint} className="space-y-4">
+          <form onSubmit={(e) => { void handleFetchFingerprint(e); }} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="cluster-name">Cluster Name</Label>
               <Input

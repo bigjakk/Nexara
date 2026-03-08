@@ -457,8 +457,12 @@ function AddPCIDialog({
   if (devices) {
     for (const d of devices) {
       const group = d.iommugroup;
-      if (!grouped.has(group)) grouped.set(group, []);
-      grouped.get(group)!.push(d);
+      let list = grouped.get(group);
+      if (!list) {
+        list = [];
+        grouped.set(group, list);
+      }
+      list.push(d);
     }
   }
 

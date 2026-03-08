@@ -73,7 +73,7 @@ export function BackupJobDialog({
       comment,
     };
 
-    if (isEdit && job) {
+    if (job) {
       updateMutation.mutate(
         { clusterId, jobId: job.id, body },
         {

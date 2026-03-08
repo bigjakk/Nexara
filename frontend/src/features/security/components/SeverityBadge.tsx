@@ -15,7 +15,7 @@ interface SeverityBadgeProps {
 }
 
 export function SeverityBadge({ severity, count, className }: SeverityBadgeProps) {
-  const config = severityConfig[severity as keyof typeof severityConfig] ?? severityConfig.unknown;
+  const config = (severity in severityConfig ? severityConfig[severity as keyof typeof severityConfig] : severityConfig.unknown);
 
   return (
     <span

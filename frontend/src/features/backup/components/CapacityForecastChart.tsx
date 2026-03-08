@@ -98,10 +98,13 @@ export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartPro
 
       // Add the transition point (last actual value is also first forecast)
       const lastUsed = reg.slope * lastTs + reg.intercept;
-      data[data.length - 1] = {
-        ...data[data.length - 1]!,
-        forecast: lastUsed,
-      };
+      const lastEntry = data[data.length - 1];
+      if (lastEntry) {
+        data[data.length - 1] = {
+          ...lastEntry,
+          forecast: lastUsed,
+        };
+      }
 
       for (let t = lastTs + stepMs; t <= lastTs + maxForecastMs; t += stepMs) {
         const projected = reg.slope * t + reg.intercept;
