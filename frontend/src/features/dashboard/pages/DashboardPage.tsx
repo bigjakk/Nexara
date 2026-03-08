@@ -23,6 +23,7 @@ import { DashboardPresetSelector } from "../components/DashboardPresetSelector";
 import {
   buildDefaultPreset,
   parseWidgetId,
+  getTemplate,
   type ClusterInfo,
   type DashboardPreset,
 } from "../lib/widget-registry";
@@ -104,16 +105,24 @@ export function DashboardPage() {
         name?: string;
       };
       if (saved.widgetIds && saved.layouts) {
-        setActivePreset({
-          name: saved.name ?? "Custom",
-          widgetIds: saved.widgetIds,
-          layouts: saved.layouts,
+        // Detect stale layouts from before per-cluster widget IDs were introduced:
+        // if any per-cluster widget type appears without a ":clusterId" suffix, discard
+        const isStale = saved.widgetIds.some((id) => {
+          const tmpl = getTemplate(id);
+          return tmpl?.perCluster === true && !id.includes(":");
         });
-        setInitializedFromBackend(true);
-        return;
+        if (!isStale) {
+          setActivePreset({
+            name: saved.name ?? "Custom",
+            widgetIds: saved.widgetIds,
+            layouts: saved.layouts,
+          });
+          setInitializedFromBackend(true);
+          return;
+        }
       }
     }
-    // If no saved layout and we haven't initialized yet, use default when clusters are ready
+    // If no saved layout (or stale) and we haven't initialized yet, use default when clusters are ready
     if (!initializedFromBackend && clusters.length > 0) {
       setActivePreset(computedDefaultPreset);
       setInitializedFromBackend(true);
