@@ -47,6 +47,7 @@ type Server struct {
 	totpHandler      *handlers.TOTPHandler
 	cveHandler       *handlers.CVEHandler
 	alertHandler     *handlers.AlertHandler
+	reportHandler    *handlers.ReportHandler
 	rbacEngine       *auth.RBACEngine
 	eventPub         *events.Publisher
 }
@@ -137,6 +138,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	if s.queries != nil && cfg.EncryptionKey != "" {
 		s.cveHandler = handlers.NewCVEHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub, newDispatcherRegistry())
+		s.reportHandler = handlers.NewReportHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}
 
 	// Wire LDAP handler into auth handler for LDAP-aware login

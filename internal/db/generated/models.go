@@ -506,6 +506,43 @@ type Permission struct {
 	Description string    `json:"description"`
 }
 
+type ReportRun struct {
+	ID             uuid.UUID          `json:"id"`
+	ScheduleID     pgtype.UUID        `json:"schedule_id"`
+	ReportType     string             `json:"report_type"`
+	ClusterID      uuid.UUID          `json:"cluster_id"`
+	Status         string             `json:"status"`
+	TimeRangeHours int32              `json:"time_range_hours"`
+	ReportData     []byte             `json:"report_data"`
+	ReportHtml     pgtype.Text        `json:"report_html"`
+	ReportCsv      pgtype.Text        `json:"report_csv"`
+	ErrorMessage   string             `json:"error_message"`
+	CreatedBy      uuid.UUID          `json:"created_by"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt      time.Time          `json:"created_at"`
+}
+
+type ReportSchedule struct {
+	ID              uuid.UUID          `json:"id"`
+	Name            string             `json:"name"`
+	ReportType      string             `json:"report_type"`
+	ClusterID       uuid.UUID          `json:"cluster_id"`
+	TimeRangeHours  int32              `json:"time_range_hours"`
+	Schedule        string             `json:"schedule"`
+	Format          string             `json:"format"`
+	EmailEnabled    bool               `json:"email_enabled"`
+	EmailChannelID  pgtype.UUID        `json:"email_channel_id"`
+	EmailRecipients []string           `json:"email_recipients"`
+	Parameters      json.RawMessage    `json:"parameters"`
+	Enabled         bool               `json:"enabled"`
+	LastRunAt       pgtype.Timestamptz `json:"last_run_at"`
+	NextRunAt       pgtype.Timestamptz `json:"next_run_at"`
+	CreatedBy       uuid.UUID          `json:"created_by"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
 type Role struct {
 	ID          uuid.UUID `json:"id"`
 	Name        string    `json:"name"`

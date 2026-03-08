@@ -136,6 +136,137 @@ func (q *Queries) GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics
 	return items, nil
 }
 
+const getClusterMetricsDailyAvg = `-- name: GetClusterMetricsDailyAvg :many
+SELECT
+  date_trunc('day', m.bucket)::timestamptz AS day,
+  avg(m.avg_cpu_usage)::double precision   AS cpu,
+  max(m.max_cpu_usage)::double precision   AS cpu_max,
+  avg(m.avg_mem_used)::double precision    AS mem_used,
+  max(m.max_mem_used)::double precision    AS mem_used_max,
+  avg(m.avg_mem_total)::double precision   AS mem_total,
+  avg(m.avg_disk_read)::double precision   AS disk_read,
+  avg(m.avg_disk_write)::double precision  AS disk_write,
+  avg(m.avg_net_in)::double precision      AS net_in,
+  avg(m.avg_net_out)::double precision     AS net_out
+FROM node_metrics_1h m
+JOIN nodes n ON n.id = m.node_id
+WHERE n.cluster_id = $1 AND m.bucket >= $2
+GROUP BY date_trunc('day', m.bucket)
+ORDER BY day
+`
+
+type GetClusterMetricsDailyAvgParams struct {
+	ClusterID uuid.UUID   `json:"cluster_id"`
+	Bucket    interface{} `json:"bucket"`
+}
+
+type GetClusterMetricsDailyAvgRow struct {
+	Day        time.Time `json:"day"`
+	Cpu        float64   `json:"cpu"`
+	CpuMax     float64   `json:"cpu_max"`
+	MemUsed    float64   `json:"mem_used"`
+	MemUsedMax float64   `json:"mem_used_max"`
+	MemTotal   float64   `json:"mem_total"`
+	DiskRead   float64   `json:"disk_read"`
+	DiskWrite  float64   `json:"disk_write"`
+	NetIn      float64   `json:"net_in"`
+	NetOut     float64   `json:"net_out"`
+}
+
+func (q *Queries) GetClusterMetricsDailyAvg(ctx context.Context, arg GetClusterMetricsDailyAvgParams) ([]GetClusterMetricsDailyAvgRow, error) {
+	rows, err := q.db.Query(ctx, getClusterMetricsDailyAvg, arg.ClusterID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetClusterMetricsDailyAvgRow{}
+	for rows.Next() {
+		var i GetClusterMetricsDailyAvgRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.Cpu,
+			&i.CpuMax,
+			&i.MemUsed,
+			&i.MemUsedMax,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getNodeIODailyRate = `-- name: GetNodeIODailyRate :many
+SELECT
+  date_trunc('day', time)::timestamptz AS day,
+  node_id,
+  (CASE WHEN EXTRACT(EPOCH FROM max(time) - min(time)) > 0
+    THEN GREATEST(max(disk_read) - min(disk_read), 0)::double precision / EXTRACT(EPOCH FROM max(time) - min(time))
+    ELSE 0 END)::double precision AS disk_read_rate,
+  (CASE WHEN EXTRACT(EPOCH FROM max(time) - min(time)) > 0
+    THEN GREATEST(max(disk_write) - min(disk_write), 0)::double precision / EXTRACT(EPOCH FROM max(time) - min(time))
+    ELSE 0 END)::double precision AS disk_write_rate,
+  (CASE WHEN EXTRACT(EPOCH FROM max(time) - min(time)) > 0
+    THEN GREATEST(max(net_in) - min(net_in), 0)::double precision / EXTRACT(EPOCH FROM max(time) - min(time))
+    ELSE 0 END)::double precision AS net_in_rate,
+  (CASE WHEN EXTRACT(EPOCH FROM max(time) - min(time)) > 0
+    THEN GREATEST(max(net_out) - min(net_out), 0)::double precision / EXTRACT(EPOCH FROM max(time) - min(time))
+    ELSE 0 END)::double precision AS net_out_rate
+FROM node_metrics
+WHERE node_id = $1 AND time >= $2
+GROUP BY date_trunc('day', time), node_id
+ORDER BY day
+`
+
+type GetNodeIODailyRateParams struct {
+	NodeID uuid.UUID `json:"node_id"`
+	Time   time.Time `json:"time"`
+}
+
+type GetNodeIODailyRateRow struct {
+	Day           time.Time `json:"day"`
+	NodeID        uuid.UUID `json:"node_id"`
+	DiskReadRate  float64   `json:"disk_read_rate"`
+	DiskWriteRate float64   `json:"disk_write_rate"`
+	NetInRate     float64   `json:"net_in_rate"`
+	NetOutRate    float64   `json:"net_out_rate"`
+}
+
+func (q *Queries) GetNodeIODailyRate(ctx context.Context, arg GetNodeIODailyRateParams) ([]GetNodeIODailyRateRow, error) {
+	rows, err := q.db.Query(ctx, getNodeIODailyRate, arg.NodeID, arg.Time)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodeIODailyRateRow{}
+	for rows.Next() {
+		var i GetNodeIODailyRateRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.NodeID,
+			&i.DiskReadRate,
+			&i.DiskWriteRate,
+			&i.NetInRate,
+			&i.NetOutRate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getNodeMetrics1h = `-- name: GetNodeMetrics1h :many
 SELECT
   m.bucket::timestamptz                   AS bucket,
@@ -256,6 +387,139 @@ func (q *Queries) GetNodeMetrics5m(ctx context.Context, arg GetNodeMetrics5mPara
 	return items, nil
 }
 
+const getNodeMetricsDailyAvg = `-- name: GetNodeMetricsDailyAvg :many
+SELECT
+  date_trunc('day', m.bucket)::timestamptz AS day,
+  m.node_id,
+  avg(m.avg_cpu_usage)::double precision   AS cpu,
+  max(m.max_cpu_usage)::double precision   AS cpu_max,
+  avg(m.avg_mem_used)::double precision    AS mem_used,
+  max(m.max_mem_used)::double precision    AS mem_used_max,
+  avg(m.avg_mem_total)::double precision   AS mem_total,
+  avg(m.avg_disk_read)::double precision   AS disk_read,
+  avg(m.avg_disk_write)::double precision  AS disk_write,
+  avg(m.avg_net_in)::double precision      AS net_in,
+  avg(m.avg_net_out)::double precision     AS net_out
+FROM node_metrics_1h m
+WHERE m.node_id = $1 AND m.bucket >= $2
+GROUP BY date_trunc('day', m.bucket), m.node_id
+ORDER BY day
+`
+
+type GetNodeMetricsDailyAvgParams struct {
+	NodeID uuid.UUID   `json:"node_id"`
+	Bucket interface{} `json:"bucket"`
+}
+
+type GetNodeMetricsDailyAvgRow struct {
+	Day        time.Time `json:"day"`
+	NodeID     uuid.UUID `json:"node_id"`
+	Cpu        float64   `json:"cpu"`
+	CpuMax     float64   `json:"cpu_max"`
+	MemUsed    float64   `json:"mem_used"`
+	MemUsedMax float64   `json:"mem_used_max"`
+	MemTotal   float64   `json:"mem_total"`
+	DiskRead   float64   `json:"disk_read"`
+	DiskWrite  float64   `json:"disk_write"`
+	NetIn      float64   `json:"net_in"`
+	NetOut     float64   `json:"net_out"`
+}
+
+func (q *Queries) GetNodeMetricsDailyAvg(ctx context.Context, arg GetNodeMetricsDailyAvgParams) ([]GetNodeMetricsDailyAvgRow, error) {
+	rows, err := q.db.Query(ctx, getNodeMetricsDailyAvg, arg.NodeID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetNodeMetricsDailyAvgRow{}
+	for rows.Next() {
+		var i GetNodeMetricsDailyAvgRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.NodeID,
+			&i.Cpu,
+			&i.CpuMax,
+			&i.MemUsed,
+			&i.MemUsedMax,
+			&i.MemTotal,
+			&i.DiskRead,
+			&i.DiskWrite,
+			&i.NetIn,
+			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getVMIODailyRate = `-- name: GetVMIODailyRate :many
+SELECT
+  date_trunc('day', time)::timestamptz AS day,
+  vm_id,
+  (CASE WHEN EXTRACT(EPOCH FROM max(time) - min(time)) > 0
+    THEN GREATEST(max(disk_read) - min(disk_read), 0)::double precision / EXTRACT(EPOCH FROM max(time) - min(time))
+    ELSE 0 END)::double precision AS disk_read_rate,
+  (CASE WHEN EXTRACT(EPOCH FROM max(time) - min(time)) > 0
+    THEN GREATEST(max(disk_write) - min(disk_write), 0)::double precision / EXTRACT(EPOCH FROM max(time) - min(time))
+    ELSE 0 END)::double precision AS disk_write_rate,
+  (CASE WHEN EXTRACT(EPOCH FROM max(time) - min(time)) > 0
+    THEN GREATEST(max(net_in) - min(net_in), 0)::double precision / EXTRACT(EPOCH FROM max(time) - min(time))
+    ELSE 0 END)::double precision AS net_in_rate,
+  (CASE WHEN EXTRACT(EPOCH FROM max(time) - min(time)) > 0
+    THEN GREATEST(max(net_out) - min(net_out), 0)::double precision / EXTRACT(EPOCH FROM max(time) - min(time))
+    ELSE 0 END)::double precision AS net_out_rate
+FROM vm_metrics
+WHERE vm_id = $1 AND time >= $2
+GROUP BY date_trunc('day', time), vm_id
+ORDER BY day
+`
+
+type GetVMIODailyRateParams struct {
+	VmID uuid.UUID `json:"vm_id"`
+	Time time.Time `json:"time"`
+}
+
+type GetVMIODailyRateRow struct {
+	Day           time.Time `json:"day"`
+	VmID          uuid.UUID `json:"vm_id"`
+	DiskReadRate  float64   `json:"disk_read_rate"`
+	DiskWriteRate float64   `json:"disk_write_rate"`
+	NetInRate     float64   `json:"net_in_rate"`
+	NetOutRate    float64   `json:"net_out_rate"`
+}
+
+func (q *Queries) GetVMIODailyRate(ctx context.Context, arg GetVMIODailyRateParams) ([]GetVMIODailyRateRow, error) {
+	rows, err := q.db.Query(ctx, getVMIODailyRate, arg.VmID, arg.Time)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetVMIODailyRateRow{}
+	for rows.Next() {
+		var i GetVMIODailyRateRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.VmID,
+			&i.DiskReadRate,
+			&i.DiskWriteRate,
+			&i.NetInRate,
+			&i.NetOutRate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getVMMetrics1h = `-- name: GetVMMetrics1h :many
 SELECT
   m.bucket::timestamptz                   AS bucket,
@@ -365,6 +629,64 @@ func (q *Queries) GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) 
 			&i.DiskWrite,
 			&i.NetIn,
 			&i.NetOut,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getVMMetricsDailyAvg = `-- name: GetVMMetricsDailyAvg :many
+SELECT
+  date_trunc('day', m.bucket)::timestamptz AS day,
+  m.vm_id,
+  avg(m.avg_cpu_usage)::double precision   AS cpu,
+  max(m.max_cpu_usage)::double precision   AS cpu_max,
+  avg(m.avg_mem_used)::double precision    AS mem_used,
+  max(m.max_mem_used)::double precision    AS mem_used_max,
+  avg(m.avg_mem_total)::double precision   AS mem_total
+FROM vm_metrics_1h m
+WHERE m.vm_id = $1 AND m.bucket >= $2
+GROUP BY date_trunc('day', m.bucket), m.vm_id
+ORDER BY day
+`
+
+type GetVMMetricsDailyAvgParams struct {
+	VmID   uuid.UUID   `json:"vm_id"`
+	Bucket interface{} `json:"bucket"`
+}
+
+type GetVMMetricsDailyAvgRow struct {
+	Day        time.Time `json:"day"`
+	VmID       uuid.UUID `json:"vm_id"`
+	Cpu        float64   `json:"cpu"`
+	CpuMax     float64   `json:"cpu_max"`
+	MemUsed    float64   `json:"mem_used"`
+	MemUsedMax float64   `json:"mem_used_max"`
+	MemTotal   float64   `json:"mem_total"`
+}
+
+func (q *Queries) GetVMMetricsDailyAvg(ctx context.Context, arg GetVMMetricsDailyAvgParams) ([]GetVMMetricsDailyAvgRow, error) {
+	rows, err := q.db.Query(ctx, getVMMetricsDailyAvg, arg.VmID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetVMMetricsDailyAvgRow{}
+	for rows.Next() {
+		var i GetVMMetricsDailyAvgRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.VmID,
+			&i.Cpu,
+			&i.CpuMax,
+			&i.MemUsed,
+			&i.MemUsedMax,
+			&i.MemTotal,
 		); err != nil {
 			return nil, err
 		}

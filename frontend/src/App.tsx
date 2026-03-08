@@ -21,6 +21,7 @@ import { OIDCCallbackPage } from "@/features/auth/pages/OIDCCallbackPage";
 import { SecurityPage } from "@/features/settings/pages/SecurityPage";
 import { SecurityDashboardPage } from "@/features/security/pages/SecurityDashboardPage";
 import { AlertsPage } from "@/features/alerts/pages/AlertsPage";
+import { ReportsPage } from "@/features/reports/pages/ReportsPage";
 
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
@@ -110,6 +111,10 @@ const router = createBrowserRouter([
           {
             path: "alerts",
             element: <AlertsPage />,
+          },
+          {
+            path: "reports",
+            element: <ReportsPage />,
           },
           {
             path: "security",

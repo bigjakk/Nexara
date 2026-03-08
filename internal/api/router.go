@@ -245,6 +245,21 @@ func (s *Server) setupRoutes() {
 		}
 	}
 
+	// Report routes.
+	if s.reportHandler != nil {
+		rpts := v1.Group("/reports", s.authRequired())
+		rpts.Get("/schedules", s.reportHandler.ListSchedules)
+		rpts.Post("/schedules", s.reportHandler.CreateSchedule)
+		rpts.Get("/schedules/:id", s.reportHandler.GetSchedule)
+		rpts.Put("/schedules/:id", s.reportHandler.UpdateSchedule)
+		rpts.Delete("/schedules/:id", s.reportHandler.DeleteSchedule)
+		rpts.Post("/generate", s.reportHandler.GenerateReport)
+		rpts.Get("/runs", s.reportHandler.ListRuns)
+		rpts.Get("/runs/:id", s.reportHandler.GetRun)
+		rpts.Get("/runs/:id/html", s.reportHandler.GetRunHTML)
+		rpts.Get("/runs/:id/csv", s.reportHandler.GetRunCSV)
+	}
+
 	// DRS routes.
 	if s.drsHandler != nil && s.clusterHandler != nil {
 		drsClusters := v1.Group("/clusters", s.authRequired())

@@ -404,6 +404,48 @@ export interface AlertRuleRequest {
   message_template?: string | undefined;
 }
 
+// Report types
+export type ReportType =
+  | "resource_utilization"
+  | "capacity_forecast"
+  | "backup_compliance"
+  | "patch_status"
+  | "uptime_summary";
+
+export interface ReportSchedule {
+  id: string;
+  name: string;
+  report_type: ReportType;
+  cluster_id: string;
+  time_range_hours: number;
+  schedule: string;
+  format: "html" | "csv";
+  email_enabled: boolean;
+  email_channel_id?: string;
+  email_recipients: string[];
+  parameters: Record<string, unknown>;
+  enabled: boolean;
+  last_run_at?: string;
+  next_run_at?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReportRun {
+  id: string;
+  schedule_id?: string;
+  report_type: ReportType;
+  cluster_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  time_range_hours: number;
+  error_message?: string;
+  created_by: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+}
+
 export interface ApiError {
   error: string;
   message: string;

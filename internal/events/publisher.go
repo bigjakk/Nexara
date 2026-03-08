@@ -23,6 +23,7 @@ const (
 	KindCVEScan          = "cve_scan"
 	KindAlertFired       = "alert_fired"
 	KindAlertStateChange = "alert_state_change"
+	KindReportGenerated  = "report_generated"
 )
 
 // Event is a lightweight notification pushed through Redis pub/sub.

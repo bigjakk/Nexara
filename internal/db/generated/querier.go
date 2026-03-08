@@ -18,6 +18,7 @@ type Querier interface {
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
 	CheckUserPermission(ctx context.Context, arg CheckUserPermissionParams) (bool, error)
+	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
 	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
@@ -50,6 +51,8 @@ type Querier interface {
 	DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
 	DeleteRecoveryCode(ctx context.Context, id uuid.UUID) error
+	DeleteReportRun(ctx context.Context, id uuid.UUID) error
+	DeleteReportSchedule(ctx context.Context, id uuid.UUID) error
 	DeleteRole(ctx context.Context, id uuid.UUID) error
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
@@ -72,6 +75,7 @@ type Querier interface {
 	GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 	GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error)
 	GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error)
+	GetClusterMetricsDailyAvg(ctx context.Context, arg GetClusterMetricsDailyAvgParams) ([]GetClusterMetricsDailyAvgRow, error)
 	GetClusterSecuritySummary(ctx context.Context, clusterID uuid.UUID) (GetClusterSecuritySummaryRow, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
@@ -91,8 +95,10 @@ type Querier interface {
 	GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJob, error)
 	GetNode(ctx context.Context, id uuid.UUID) (Node, error)
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
+	GetNodeIODailyRate(ctx context.Context, arg GetNodeIODailyRateParams) ([]GetNodeIODailyRateRow, error)
 	GetNodeMetrics1h(ctx context.Context, arg GetNodeMetrics1hParams) ([]GetNodeMetrics1hRow, error)
 	GetNodeMetrics5m(ctx context.Context, arg GetNodeMetrics5mParams) ([]GetNodeMetrics5mRow, error)
+	GetNodeMetricsDailyAvg(ctx context.Context, arg GetNodeMetricsDailyAvgParams) ([]GetNodeMetricsDailyAvgRow, error)
 	// Metric queries for alert evaluation
 	GetNodeRecentMetrics(ctx context.Context, arg GetNodeRecentMetricsParams) ([]GetNodeRecentMetricsRow, error)
 	GetNotificationChannel(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
@@ -102,6 +108,10 @@ type Querier interface {
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
 	GetPermission(ctx context.Context, id uuid.UUID) (Permission, error)
 	GetPermissionByActionResource(ctx context.Context, arg GetPermissionByActionResourceParams) (Permission, error)
+	GetReportRun(ctx context.Context, id uuid.UUID) (ReportRun, error)
+	GetReportRunCSV(ctx context.Context, id uuid.UUID) (GetReportRunCSVRow, error)
+	GetReportRunHTML(ctx context.Context, id uuid.UUID) (GetReportRunHTMLRow, error)
+	GetReportSchedule(ctx context.Context, id uuid.UUID) (ReportSchedule, error)
 	GetRole(ctx context.Context, id uuid.UUID) (Role, error)
 	GetRoleByName(ctx context.Context, name string) (Role, error)
 	GetScheduledTask(ctx context.Context, id uuid.UUID) (ScheduledTask, error)
@@ -116,8 +126,10 @@ type Querier interface {
 	GetUserTOTPSecret(ctx context.Context, id uuid.UUID) (GetUserTOTPSecretRow, error)
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
+	GetVMIODailyRate(ctx context.Context, arg GetVMIODailyRateParams) ([]GetVMIODailyRateRow, error)
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
+	GetVMMetricsDailyAvg(ctx context.Context, arg GetVMMetricsDailyAvgParams) ([]GetVMMetricsDailyAvgRow, error)
 	GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetricsParams) ([]GetVMRecentMetricsRow, error)
 	// Alert History
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
@@ -134,6 +146,10 @@ type Querier interface {
 	// Notification Channels
 	InsertNotificationChannel(ctx context.Context, arg InsertNotificationChannelParams) (NotificationChannel, error)
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
+	// Report Runs
+	InsertReportRun(ctx context.Context, arg InsertReportRunParams) (ReportRun, error)
+	// Report Schedules
+	InsertReportSchedule(ctx context.Context, arg InsertReportScheduleParams) (ReportSchedule, error)
 	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
@@ -161,6 +177,7 @@ type Querier interface {
 	ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListDRSHistory(ctx context.Context, arg ListDRSHistoryParams) ([]DrsHistory, error)
 	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsRule, error)
+	ListDueReportSchedules(ctx context.Context) ([]ReportSchedule, error)
 	ListDueTasks(ctx context.Context) ([]ScheduledTask, error)
 	ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error)
 	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
@@ -186,6 +203,11 @@ type Querier interface {
 	ListPermissions(ctx context.Context) ([]Permission, error)
 	ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentAuditLogEnrichedRow, error)
 	ListRecoveryCodes(ctx context.Context, userID uuid.UUID) ([]ListRecoveryCodesRow, error)
+	ListReportRuns(ctx context.Context, arg ListReportRunsParams) ([]ReportRun, error)
+	ListReportRunsByCluster(ctx context.Context, arg ListReportRunsByClusterParams) ([]ReportRun, error)
+	ListReportRunsBySchedule(ctx context.Context, arg ListReportRunsByScheduleParams) ([]ReportRun, error)
+	ListReportSchedules(ctx context.Context, arg ListReportSchedulesParams) ([]ReportSchedule, error)
+	ListReportSchedulesByCluster(ctx context.Context, arg ListReportSchedulesByClusterParams) ([]ReportSchedule, error)
 	ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
@@ -237,6 +259,11 @@ type Querier interface {
 	UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserProfileParams) (User, error)
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
+	UpdateReportRunCompleted(ctx context.Context, arg UpdateReportRunCompletedParams) error
+	UpdateReportRunFailed(ctx context.Context, arg UpdateReportRunFailedParams) error
+	UpdateReportRunStarted(ctx context.Context, id uuid.UUID) error
+	UpdateReportSchedule(ctx context.Context, arg UpdateReportScheduleParams) (ReportSchedule, error)
+	UpdateReportScheduleLastRun(ctx context.Context, arg UpdateReportScheduleLastRunParams) error
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)
 	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) error
 	UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error

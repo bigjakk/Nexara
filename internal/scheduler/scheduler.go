@@ -16,6 +16,7 @@ import (
 	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/notifications"
 	"github.com/proxdash/proxdash/internal/proxmox"
+	"github.com/proxdash/proxdash/internal/reports"
 	"github.com/proxdash/proxdash/internal/scanner"
 )
 
@@ -28,6 +29,7 @@ type Scheduler struct {
 	drsExecutor   *drs.Executor
 	cveScanner    *scanner.Engine
 	alertEngine   *notifications.Engine
+	reportGen     *reports.Generator
 	eventPub      *events.Publisher
 }
 
@@ -41,6 +43,7 @@ func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPu
 		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor"), eventPub),
 		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner")),
 		alertEngine:   notifications.NewEngine(queries, logger.With("component", "alert-engine"), eventPub, newDispatcherRegistry(), encryptionKey),
+		reportGen:     reports.NewGenerator(queries, logger.With("component", "report-gen")),
 		eventPub:      eventPub,
 	}
 }
@@ -330,6 +333,122 @@ func (s *Scheduler) RunAlertEvaluation(ctx context.Context) {
 		}
 	}()
 	s.alertEngine.Evaluate(ctx)
+}
+
+// RunReportGeneration checks for due report schedules and generates reports.
+func (s *Scheduler) RunReportGeneration(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("report generation panicked", "panic", r)
+		}
+	}()
+
+	schedules, err := s.queries.ListDueReportSchedules(ctx)
+	if err != nil {
+		s.logger.Error("failed to list due report schedules", "error", err)
+		return
+	}
+
+	if len(schedules) == 0 {
+		return
+	}
+
+	s.logger.Info("processing due report schedules", "count", len(schedules))
+
+	for _, sched := range schedules {
+		s.generateScheduledReport(ctx, sched)
+	}
+}
+
+func (s *Scheduler) generateScheduledReport(ctx context.Context, sched db.ReportSchedule) {
+	run, err := s.queries.InsertReportRun(ctx, db.InsertReportRunParams{
+		ScheduleID:     pgtype.UUID{Bytes: sched.ID, Valid: true},
+		ReportType:     sched.ReportType,
+		ClusterID:      sched.ClusterID,
+		Status:         "running",
+		TimeRangeHours: sched.TimeRangeHours,
+		CreatedBy:      sched.CreatedBy,
+	})
+	if err != nil {
+		s.logger.Error("failed to create report run", "schedule_id", sched.ID, "error", err)
+		return
+	}
+
+	_ = s.queries.UpdateReportRunStarted(ctx, run.ID)
+
+	data, err := s.reportGen.Generate(ctx, sched.ReportType, sched.ClusterID, int(sched.TimeRangeHours))
+	if err != nil {
+		_ = s.queries.UpdateReportRunFailed(ctx, db.UpdateReportRunFailedParams{
+			ID:           run.ID,
+			ErrorMessage: err.Error(),
+		})
+		s.logger.Error("report generation failed", "schedule_id", sched.ID, "error", err)
+		s.updateScheduleNextRun(ctx, sched)
+		return
+	}
+
+	htmlOutput, err := reports.RenderHTML(data)
+	if err != nil {
+		_ = s.queries.UpdateReportRunFailed(ctx, db.UpdateReportRunFailedParams{
+			ID:           run.ID,
+			ErrorMessage: fmt.Sprintf("render HTML: %v", err),
+		})
+		s.updateScheduleNextRun(ctx, sched)
+		return
+	}
+
+	csvOutput, err := reports.RenderCSV(data)
+	if err != nil {
+		_ = s.queries.UpdateReportRunFailed(ctx, db.UpdateReportRunFailedParams{
+			ID:           run.ID,
+			ErrorMessage: fmt.Sprintf("render CSV: %v", err),
+		})
+		s.updateScheduleNextRun(ctx, sched)
+		return
+	}
+
+	dataJSON, _ := json.Marshal(data)
+
+	if err := s.queries.UpdateReportRunCompleted(ctx, db.UpdateReportRunCompletedParams{
+		ID:         run.ID,
+		ReportData: dataJSON,
+		ReportHtml: pgtype.Text{String: htmlOutput, Valid: true},
+		ReportCsv:  pgtype.Text{String: csvOutput, Valid: true},
+	}); err != nil {
+		s.logger.Error("failed to save report", "run_id", run.ID, "error", err)
+	}
+
+	s.logger.Info("scheduled report generated",
+		"schedule_id", sched.ID, "run_id", run.ID, "type", sched.ReportType)
+
+	// Send email if configured.
+	if sched.EmailEnabled && sched.EmailChannelID.Valid {
+		channelID, _ := uuid.FromBytes(sched.EmailChannelID.Bytes[:])
+		subject := fmt.Sprintf("ProxDash Report: %s", data.Title)
+		if err := reports.SendReportEmail(ctx, s.queries, s.encryptionKey, channelID, sched.EmailRecipients, subject, htmlOutput, s.logger); err != nil {
+			s.logger.Error("failed to send report email", "schedule_id", sched.ID, "error", err)
+		}
+	}
+
+	if s.eventPub != nil {
+		s.eventPub.SystemEvent(ctx, events.KindReportGenerated, "completed")
+	}
+
+	s.updateScheduleNextRun(ctx, sched)
+}
+
+func (s *Scheduler) updateScheduleNextRun(ctx context.Context, sched db.ReportSchedule) {
+	now := time.Now()
+	nextRun, err := NextRunTime(sched.Schedule, now)
+	next := pgtype.Timestamptz{Time: nextRun, Valid: err == nil}
+
+	if uErr := s.queries.UpdateReportScheduleLastRun(ctx, db.UpdateReportScheduleLastRunParams{
+		ID:        sched.ID,
+		LastRunAt: pgtype.Timestamptz{Time: now, Valid: true},
+		NextRunAt: next,
+	}); uErr != nil {
+		s.logger.Error("failed to update schedule last run", "schedule_id", sched.ID, "error", uErr)
+	}
 }
 
 // newDispatcherRegistry creates a registry with all notification dispatchers.
