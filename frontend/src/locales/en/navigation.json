@@ -9,6 +9,7 @@
   "reports": "Reports",
   "security": "Security",
   "auditLog": "Audit Log",
+  "events": "Events",
   "settings": "Settings",
   "admin": "Admin"
 }

@@ -12,7 +12,7 @@ import { InventoryPage } from "@/features/inventory/pages/InventoryPage";
 import { VMDetailPage } from "@/features/vms/pages/VMDetailPage";
 import { StoragePage } from "@/features/storage/pages/StoragePage";
 import { BackupDashboardPage } from "@/features/backup/pages/BackupDashboardPage";
-import { AuditLogPage } from "@/features/audit/pages/AuditLogPage";
+import { EventsPage } from "@/features/events/pages/EventsPage";
 import { UsersPage } from "@/features/admin/pages/UsersPage";
 import { RolesPage } from "@/features/admin/pages/RolesPage";
 import { LDAPPage } from "@/features/admin/pages/LDAPPage";
@@ -84,8 +84,8 @@ const router = createBrowserRouter([
             element: <BackupDashboardPage />,
           },
           {
-            path: "audit-log",
-            element: <AuditLogPage />,
+            path: "events",
+            element: <EventsPage />,
           },
           {
             path: "console",

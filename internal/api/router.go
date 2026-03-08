@@ -344,6 +344,9 @@ func (s *Server) setupRoutes() {
 	if s.auditHandler != nil {
 		audit := v1.Group("/audit-log", s.authRequired())
 		audit.Get("/recent", s.auditHandler.ListRecent)
+		audit.Get("/actions", s.auditHandler.ListActions)
+		audit.Get("/users", s.auditHandler.ListUsers)
+		audit.Get("/export", s.auditHandler.Export)
 		audit.Get("/", s.auditHandler.List)
 
 		if s.clusterHandler != nil {

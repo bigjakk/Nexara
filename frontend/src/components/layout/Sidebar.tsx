@@ -49,7 +49,7 @@ const navItems: NavItem[] = [
   { labelKey: "alerts", to: "/alerts", icon: Bell, requiredPermission: "view:alert" },
   { labelKey: "reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
   { labelKey: "security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },
-  { labelKey: "auditLog", to: "/audit-log", icon: ScrollText, requiredPermission: "view:audit" },
+  { labelKey: "events", to: "/events", icon: ScrollText, requiredPermission: "view:audit" },
   { labelKey: "settings", to: "/settings/appearance", icon: Settings },
   { labelKey: "admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
 ];

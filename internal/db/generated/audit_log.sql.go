@@ -32,6 +32,39 @@ func (q *Queries) CountAuditLog(ctx context.Context, arg CountAuditLogParams) (i
 	return count, err
 }
 
+const countAuditLogAdvanced = `-- name: CountAuditLogAdvanced :one
+SELECT count(*) FROM audit_log
+WHERE ($1::uuid IS NULL OR cluster_id = $1)
+  AND ($2::text IS NULL OR resource_type = $2)
+  AND ($3::uuid IS NULL OR user_id = $3)
+  AND ($4::text IS NULL OR action = $4)
+  AND ($5::timestamptz IS NULL OR created_at >= $5)
+  AND ($6::timestamptz IS NULL OR created_at <= $6)
+`
+
+type CountAuditLogAdvancedParams struct {
+	ClusterID    pgtype.UUID        `json:"cluster_id"`
+	ResourceType pgtype.Text        `json:"resource_type"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	Action       pgtype.Text        `json:"action"`
+	StartTime    pgtype.Timestamptz `json:"start_time"`
+	EndTime      pgtype.Timestamptz `json:"end_time"`
+}
+
+func (q *Queries) CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAdvancedParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAuditLogAdvanced,
+		arg.ClusterID,
+		arg.ResourceType,
+		arg.UserID,
+		arg.Action,
+		arg.StartTime,
+		arg.EndTime,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const insertAuditLog = `-- name: InsertAuditLog :exec
 INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -85,6 +118,105 @@ func (q *Queries) ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]A
 			&i.Action,
 			&i.Details,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditLogAdvanced = `-- name: ListAuditLogAdvanced :many
+SELECT
+  a.id,
+  a.cluster_id,
+  a.user_id,
+  a.resource_type,
+  a.resource_id,
+  a.action,
+  a.details,
+  a.created_at,
+  u.email AS user_email,
+  u.display_name AS user_display_name,
+  COALESCE(c.name, '') AS cluster_name,
+  COALESCE(v.vmid, 0) AS resource_vmid,
+  COALESCE(v.name, '') AS resource_name
+FROM audit_log a
+JOIN users u ON u.id = a.user_id
+LEFT JOIN clusters c ON c.id = a.cluster_id
+LEFT JOIN vms v ON v.id::text = a.resource_id
+WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
+  AND ($4::text IS NULL OR a.resource_type = $4)
+  AND ($5::uuid IS NULL OR a.user_id = $5)
+  AND ($6::text IS NULL OR a.action = $6)
+  AND ($7::timestamptz IS NULL OR a.created_at >= $7)
+  AND ($8::timestamptz IS NULL OR a.created_at <= $8)
+ORDER BY a.created_at DESC
+LIMIT $1 OFFSET $2
+`
+
+type ListAuditLogAdvancedParams struct {
+	Limit        int32              `json:"limit"`
+	Offset       int32              `json:"offset"`
+	ClusterID    pgtype.UUID        `json:"cluster_id"`
+	ResourceType pgtype.Text        `json:"resource_type"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	Action       pgtype.Text        `json:"action"`
+	StartTime    pgtype.Timestamptz `json:"start_time"`
+	EndTime      pgtype.Timestamptz `json:"end_time"`
+}
+
+type ListAuditLogAdvancedRow struct {
+	ID              uuid.UUID       `json:"id"`
+	ClusterID       pgtype.UUID     `json:"cluster_id"`
+	UserID          uuid.UUID       `json:"user_id"`
+	ResourceType    string          `json:"resource_type"`
+	ResourceID      string          `json:"resource_id"`
+	Action          string          `json:"action"`
+	Details         json.RawMessage `json:"details"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UserEmail       string          `json:"user_email"`
+	UserDisplayName string          `json:"user_display_name"`
+	ClusterName     string          `json:"cluster_name"`
+	ResourceVmid    int32           `json:"resource_vmid"`
+	ResourceName    string          `json:"resource_name"`
+}
+
+func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error) {
+	rows, err := q.db.Query(ctx, listAuditLogAdvanced,
+		arg.Limit,
+		arg.Offset,
+		arg.ClusterID,
+		arg.ResourceType,
+		arg.UserID,
+		arg.Action,
+		arg.StartTime,
+		arg.EndTime,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuditLogAdvancedRow{}
+	for rows.Next() {
+		var i ListAuditLogAdvancedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+			&i.UserEmail,
+			&i.UserDisplayName,
+			&i.ClusterName,
+			&i.ResourceVmid,
+			&i.ResourceName,
 		); err != nil {
 			return nil, err
 		}
@@ -260,6 +392,63 @@ func (q *Queries) ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilt
 			&i.Details,
 			&i.CreatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDistinctAuditActions = `-- name: ListDistinctAuditActions :many
+SELECT DISTINCT action FROM audit_log ORDER BY action
+`
+
+func (q *Queries) ListDistinctAuditActions(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listDistinctAuditActions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var action string
+		if err := rows.Scan(&action); err != nil {
+			return nil, err
+		}
+		items = append(items, action)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDistinctAuditUsers = `-- name: ListDistinctAuditUsers :many
+SELECT DISTINCT u.id, u.email, u.display_name
+FROM audit_log a
+JOIN users u ON u.id = a.user_id
+ORDER BY u.display_name
+`
+
+type ListDistinctAuditUsersRow struct {
+	ID          uuid.UUID `json:"id"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"display_name"`
+}
+
+func (q *Queries) ListDistinctAuditUsers(ctx context.Context) ([]ListDistinctAuditUsersRow, error) {
+	rows, err := q.db.Query(ctx, listDistinctAuditUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDistinctAuditUsersRow{}
+	for rows.Next() {
+		var i ListDistinctAuditUsersRow
+		if err := rows.Scan(&i.ID, &i.Email, &i.DisplayName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
