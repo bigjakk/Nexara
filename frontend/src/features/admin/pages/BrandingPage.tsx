@@ -18,6 +18,7 @@ import {
   useUploadFavicon,
 } from "@/features/settings/api/settings-queries";
 import { useBrandingStore } from "@/stores/branding-store";
+import { AdminNav } from "../components/AdminNav";
 
 export function BrandingPage() {
   const brandingQuery = useBranding();
@@ -95,7 +96,9 @@ export function BrandingPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div>
+      <AdminNav />
+      <div className="space-y-6 p-6">
       <div>
         <h1 className="text-2xl font-bold">Branding</h1>
         <p className="text-muted-foreground">
@@ -240,6 +243,7 @@ export function BrandingPage() {
           </Label>
         </CardContent>
       </Card>
+    </div>
     </div>
   );
 }

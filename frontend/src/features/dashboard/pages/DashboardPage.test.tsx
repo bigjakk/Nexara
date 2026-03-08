@@ -54,6 +54,20 @@ vi.mock("../api/historical-queries", () => ({
   useSeedMetrics: () => undefined,
 }));
 
+vi.mock("react-grid-layout", async () => {
+  const React = await import("react");
+  return {
+    ResponsiveGridLayout: ({ children }: { children: React.ReactNode }) =>
+      React.createElement("div", { "data-testid": "grid-layout" }, children),
+    useContainerWidth: () => ({
+      width: 1200,
+      mounted: true,
+      containerRef: { current: null },
+      measureWidth: () => undefined,
+    }),
+  };
+});
+
 vi.mock("@/features/settings/api/settings-queries", () => ({
   useSetting: () => ({
     data: undefined,

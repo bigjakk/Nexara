@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ResponsiveGridLayout,
   useContainerWidth,
@@ -41,15 +41,19 @@ export function DashboardGrid({
   children,
 }: DashboardGridProps) {
   const [currentLayouts, setCurrentLayouts] = useState<LayoutItem[]>(
-    [...preset.layouts],
+    () => preset.layouts.map((l) => ({ ...l })),
   );
-  const activeWidgetIds = useMemo(
-    () => preset.widgetIds,
-    [preset.widgetIds],
+  const [activeWidgetIds, setActiveWidgetIds] = useState<string[]>(
+    () => [...preset.widgetIds],
   );
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const { width } = useContainerWidth({ measureBeforeMount: true });
+  // Sync internal state when preset changes from parent (e.g. reset, preset switch)
+  useEffect(() => {
+    setCurrentLayouts(preset.layouts.map((l) => ({ ...l })));
+    setActiveWidgetIds([...preset.widgetIds]);
+  }, [preset]);
+
+  const { width, containerRef } = useContainerWidth({ measureBeforeMount: true });
 
   const handleLayoutChange = useCallback(
     (layout: Layout) => {
@@ -60,6 +64,13 @@ export function DashboardGrid({
       }
     },
     [editMode, onLayoutChange, activeWidgetIds],
+  );
+
+  const handleResponsiveLayoutChange = useCallback(
+    (...args: [Layout, Partial<Record<string, Layout>>]) => {
+      handleLayoutChange(args[0]);
+    },
+    [handleLayoutChange],
   );
 
   const addWidget = useCallback(
@@ -86,6 +97,7 @@ export function DashboardGrid({
       const updatedLayouts = [...currentLayouts, newLayout];
       const updatedIds = [...activeWidgetIds, widgetId];
       setCurrentLayouts(updatedLayouts);
+      setActiveWidgetIds(updatedIds);
       onLayoutChange(updatedLayouts, updatedIds);
     },
     [activeWidgetIds, currentLayouts, onLayoutChange],
@@ -96,6 +108,7 @@ export function DashboardGrid({
       const updatedLayouts = currentLayouts.filter((l) => l.i !== widgetId);
       const updatedIds = activeWidgetIds.filter((id) => id !== widgetId);
       setCurrentLayouts(updatedLayouts);
+      setActiveWidgetIds(updatedIds);
       onLayoutChange(updatedLayouts, updatedIds);
     },
     [activeWidgetIds, currentLayouts, onLayoutChange],
@@ -103,12 +116,15 @@ export function DashboardGrid({
 
   const resetLayout = useCallback(() => {
     const layouts = defaultPreset.layouts.map((l) => ({ ...l }));
+    const ids = [...defaultPreset.widgetIds];
     setCurrentLayouts(layouts);
-    onLayoutChange(layouts, defaultPreset.widgetIds);
+    setActiveWidgetIds(ids);
+    onLayoutChange(layouts, ids);
   }, [onLayoutChange]);
 
-  const availableWidgets = widgetRegistry.filter(
-    (w) => !activeWidgetIds.includes(w.id),
+  const availableWidgets = useMemo(
+    () => widgetRegistry.filter((w) => !activeWidgetIds.includes(w.id)),
+    [activeWidgetIds],
   );
 
   return (
@@ -155,46 +171,48 @@ export function DashboardGrid({
             onClick={resetLayout}
           >
             <RotateCcw className="h-4 w-4" />
-            Reset
+            Reset to Default
           </Button>
         </div>
       )}
 
-      <ResponsiveGridLayout
-        className="layout"
-        layouts={{ lg: currentLayouts }}
-        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-        cols={{ lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 }}
-        rowHeight={30}
-        width={width}
-        dragConfig={{
-          enabled: editMode,
-          handle: ".widget-drag-handle",
-        }}
-        resizeConfig={{ enabled: editMode }}
-        margin={[16, 16]}
-        containerPadding={[0, 0]}
-        onLayoutChange={handleLayoutChange}
-      >
-        {activeWidgetIds.map((widgetId) => (
-          <div
-            key={widgetId}
-            className={cn(editMode && "rounded-lg ring-1 ring-border")}
-          >
-            {editMode && (
-              <WidgetOverlay
-                widgetId={widgetId}
-                onRemove={() => {
-                  removeWidget(widgetId);
-                }}
-              />
-            )}
-            <div className="h-full w-full overflow-auto">
-              {children(widgetId)}
+      {width > 0 && (
+        <ResponsiveGridLayout
+          className="layout"
+          width={width}
+          layouts={{ lg: currentLayouts }}
+          breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+          cols={{ lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 }}
+          rowHeight={30}
+          dragConfig={{
+            enabled: editMode,
+            handle: ".widget-drag-handle",
+          }}
+          resizeConfig={{ enabled: editMode }}
+          margin={[16, 16]}
+          containerPadding={[0, 0]}
+          onLayoutChange={handleResponsiveLayoutChange}
+        >
+          {activeWidgetIds.map((widgetId) => (
+            <div
+              key={widgetId}
+              className={cn(editMode && "rounded-lg ring-1 ring-border")}
+            >
+              {editMode && (
+                <WidgetOverlay
+                  widgetId={widgetId}
+                  onRemove={() => {
+                    removeWidget(widgetId);
+                  }}
+                />
+              )}
+              <div className="h-full w-full overflow-auto">
+                {children(widgetId)}
+              </div>
             </div>
-          </div>
-        ))}
-      </ResponsiveGridLayout>
+          ))}
+        </ResponsiveGridLayout>
+      )}
     </div>
   );
 }
