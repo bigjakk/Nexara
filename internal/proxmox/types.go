@@ -951,6 +951,19 @@ type UpdateNetworkInterfaceParams struct {
 	Method6     string `json:"method6,omitempty"`
 }
 
+// AptUpdate represents a pending package update from GET /nodes/{node}/apt/update.
+type AptUpdate struct {
+	Package      string `json:"Package"`
+	Title        string `json:"Title"`
+	Description  string `json:"Description"`
+	Origin       string `json:"Origin"`
+	Priority     string `json:"Priority"`
+	OldVersion   string `json:"OldVersion"`
+	NewVersion   string `json:"Version"`
+	Section      string `json:"Section"`
+	ChangeLogURL string `json:"ChangeLogUrl"`
+}
+
 // BackupParams holds parameters for triggering a vzdump backup.
 type BackupParams struct {
 	VMID     string `json:"vmid"`

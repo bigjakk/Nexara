@@ -196,6 +196,19 @@ func (s *Server) setupRoutes() {
 		migrations.Post("/:id/cancel", s.migrationHandler.Cancel)
 	}
 
+	// CVE scanning routes.
+	if s.cveHandler != nil && s.clusterHandler != nil {
+		cveClusters := v1.Group("/clusters", s.authRequired())
+		cveClusters.Get("/:cluster_id/cve-scans", s.cveHandler.ListScans)
+		cveClusters.Post("/:cluster_id/cve-scans", s.cveHandler.TriggerScan)
+		cveClusters.Get("/:cluster_id/cve-scans/:scan_id", s.cveHandler.GetScan)
+		cveClusters.Get("/:cluster_id/cve-scans/:scan_id/vulnerabilities", s.cveHandler.ListVulnerabilities)
+		cveClusters.Delete("/:cluster_id/cve-scans/:scan_id", s.cveHandler.DeleteScan)
+		cveClusters.Get("/:cluster_id/security-posture", s.cveHandler.GetSecurityPosture)
+		cveClusters.Get("/:cluster_id/cve-scan-schedule", s.cveHandler.GetSchedule)
+		cveClusters.Put("/:cluster_id/cve-scan-schedule", s.cveHandler.UpdateSchedule)
+	}
+
 	// DRS routes.
 	if s.drsHandler != nil && s.clusterHandler != nil {
 		drsClusters := v1.Group("/clusters", s.authRequired())

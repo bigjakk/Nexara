@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Package,
   Shield,
+  ShieldAlert,
   HardDrive,
   TerminalSquare,
   ScrollText,
@@ -38,6 +39,7 @@ const navItems: NavItem[] = [
   { label: "Console", to: "/console", icon: TerminalSquare },
   { label: "Storage", to: "/storage", icon: HardDrive },
   { label: "Backup", to: "/backup", icon: Shield },
+  { label: "Security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },
   { label: "Audit Log", to: "/audit-log", icon: ScrollText, requiredPermission: "view:audit" },
   { label: "Admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
 ];

@@ -114,6 +114,68 @@ type Cluster struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
+type CveCache struct {
+	ID          uuid.UUID          `json:"id"`
+	CveID       string             `json:"cve_id"`
+	Severity    string             `json:"severity"`
+	CvssScore   pgtype.Float4      `json:"cvss_score"`
+	Description string             `json:"description"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	FetchedAt   time.Time          `json:"fetched_at"`
+}
+
+type CveScan struct {
+	ID            uuid.UUID          `json:"id"`
+	ClusterID     uuid.UUID          `json:"cluster_id"`
+	Status        string             `json:"status"`
+	TotalNodes    int32              `json:"total_nodes"`
+	ScannedNodes  int32              `json:"scanned_nodes"`
+	TotalVulns    int32              `json:"total_vulns"`
+	CriticalCount int32              `json:"critical_count"`
+	HighCount     int32              `json:"high_count"`
+	MediumCount   int32              `json:"medium_count"`
+	LowCount      int32              `json:"low_count"`
+	ErrorMessage  pgtype.Text        `json:"error_message"`
+	StartedAt     time.Time          `json:"started_at"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt     time.Time          `json:"created_at"`
+}
+
+type CveScanNode struct {
+	ID            uuid.UUID          `json:"id"`
+	ScanID        uuid.UUID          `json:"scan_id"`
+	NodeID        uuid.UUID          `json:"node_id"`
+	NodeName      string             `json:"node_name"`
+	Status        string             `json:"status"`
+	PackagesTotal int32              `json:"packages_total"`
+	VulnsFound    int32              `json:"vulns_found"`
+	PostureScore  pgtype.Float4      `json:"posture_score"`
+	ErrorMessage  pgtype.Text        `json:"error_message"`
+	ScannedAt     pgtype.Timestamptz `json:"scanned_at"`
+}
+
+type CveScanSchedule struct {
+	ID            uuid.UUID `json:"id"`
+	ClusterID     uuid.UUID `json:"cluster_id"`
+	Enabled       bool      `json:"enabled"`
+	IntervalHours int32     `json:"interval_hours"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type CveScanVuln struct {
+	ID             uuid.UUID     `json:"id"`
+	ScanID         uuid.UUID     `json:"scan_id"`
+	ScanNodeID     uuid.UUID     `json:"scan_node_id"`
+	CveID          string        `json:"cve_id"`
+	PackageName    string        `json:"package_name"`
+	CurrentVersion string        `json:"current_version"`
+	FixedVersion   pgtype.Text   `json:"fixed_version"`
+	Severity       string        `json:"severity"`
+	CvssScore      pgtype.Float4 `json:"cvss_score"`
+	Description    string        `json:"description"`
+}
+
 type DrsConfig struct {
 	ID                  uuid.UUID       `json:"id"`
 	ClusterID           uuid.UUID       `json:"cluster_id"`

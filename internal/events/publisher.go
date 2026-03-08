@@ -20,6 +20,7 @@ const (
 	KindMigrationUpdate  = "migration_update"
 	KindDRSAction        = "drs_action"
 	KindPBSChange        = "pbs_change"
+	KindCVEScan          = "cve_scan"
 )
 
 // Event is a lightweight notification pushed through Redis pub/sub.

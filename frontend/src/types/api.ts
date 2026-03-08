@@ -218,6 +218,77 @@ export interface TOTPVerifyLoginRequest {
   recovery_code?: string;
 }
 
+// CVE Scanning types
+export interface CVEScan {
+  id: string;
+  cluster_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  total_nodes: number;
+  scanned_nodes: number;
+  total_vulns: number;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  error_message?: string;
+  started_at: string;
+  completed_at?: string;
+  created_at: string;
+}
+
+export interface CVEScanNode {
+  id: string;
+  scan_id: string;
+  node_id: string;
+  node_name: string;
+  status: string;
+  packages_total: number;
+  vulns_found: number;
+  posture_score: number;
+  error_message?: string;
+  scanned_at?: string;
+}
+
+export interface CVEScanVuln {
+  id: string;
+  scan_id: string;
+  scan_node_id: string;
+  cve_id: string;
+  package_name: string;
+  current_version: string;
+  fixed_version?: string;
+  severity: "critical" | "high" | "medium" | "low" | "unknown";
+  cvss_score: number;
+  description: string;
+}
+
+export interface CVEScanDetail {
+  scan: CVEScan;
+  nodes: CVEScanNode[];
+}
+
+export interface SecurityPosture {
+  scan_id: string;
+  status: string;
+  total_vulns: number;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  total_nodes: number;
+  scanned_nodes: number;
+  posture_score: number;
+  started_at: string;
+  completed_at?: string;
+}
+
+export interface CVEScanSchedule {
+  cluster_id: string;
+  enabled: boolean;
+  interval_hours: number;
+  updated_at?: string;
+}
+
 export interface ApiError {
   error: string;
   message: string;

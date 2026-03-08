@@ -34,6 +34,7 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) error
+	DeleteCVEScan(ctx context.Context, id uuid.UUID) error
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
 	DeleteCompletedTasks(ctx context.Context) error
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
@@ -52,12 +53,17 @@ type Querier interface {
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	GetCVECacheAge(ctx context.Context) (interface{}, error)
+	GetCVECacheByID(ctx context.Context, cveID string) (CveCache, error)
+	GetCVEScan(ctx context.Context, id uuid.UUID) (CveScan, error)
+	GetCVEScanSchedule(ctx context.Context, clusterID uuid.UUID) (CveScanSchedule, error)
 	GetCephClusterMetrics1h(ctx context.Context, arg GetCephClusterMetrics1hParams) ([]CephClusterMetrics1h, error)
 	GetCephClusterMetrics5m(ctx context.Context, arg GetCephClusterMetrics5mParams) ([]CephClusterMetrics5m, error)
 	GetCephClusterMetricsHistory(ctx context.Context, arg GetCephClusterMetricsHistoryParams) ([]CephClusterMetric, error)
 	GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 	GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error)
 	GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error)
+	GetClusterSecuritySummary(ctx context.Context, clusterID uuid.UUID) (GetClusterSecuritySummaryRow, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
 	GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
@@ -66,6 +72,7 @@ type Querier interface {
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
 	GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, error)
 	GetLastDRSMigrationForVM(ctx context.Context, arg GetLastDRSMigrationForVMParams) (DrsHistory, error)
+	GetLatestCVEScan(ctx context.Context, clusterID uuid.UUID) (CveScan, error)
 	GetLatestCephClusterMetrics(ctx context.Context, clusterID uuid.UUID) (CephClusterMetric, error)
 	GetLatestCephOSDMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephOsdMetric, error)
 	GetLatestCephPoolMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephPoolMetric, error)
@@ -97,6 +104,9 @@ type Querier interface {
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertCVEScan(ctx context.Context, arg InsertCVEScanParams) (CveScan, error)
+	InsertCVEScanNode(ctx context.Context, arg InsertCVEScanNodeParams) (CveScanNode, error)
+	InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnParams) (CveScanVuln, error)
 	InsertDRSHistory(ctx context.Context, arg InsertDRSHistoryParams) (DrsHistory, error)
 	InsertDRSRule(ctx context.Context, arg InsertDRSRuleParams) (DrsRule, error)
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
@@ -110,11 +120,17 @@ type Querier interface {
 	ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error)
 	ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnrichedParams) ([]ListAuditLogEnrichedRow, error)
 	ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilteredParams) ([]AuditLog, error)
+	ListCVEScanNodes(ctx context.Context, scanID uuid.UUID) ([]CveScanNode, error)
+	ListCVEScanVulns(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
+	ListCVEScanVulnsByNode(ctx context.Context, scanNodeID uuid.UUID) ([]CveScanVuln, error)
+	ListCVEScanVulnsBySeverity(ctx context.Context, arg ListCVEScanVulnsBySeverityParams) ([]CveScanVuln, error)
+	ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]CveScan, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListDRSHistory(ctx context.Context, arg ListDRSHistoryParams) ([]DrsHistory, error)
 	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsRule, error)
 	ListDueTasks(ctx context.Context) ([]ScheduledTask, error)
+	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
 	ListFirewallTemplates(ctx context.Context) ([]FirewallTemplate, error)
 	ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error)
@@ -160,6 +176,9 @@ type Querier interface {
 	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error
+	UpdateCVEScanCounts(ctx context.Context, arg UpdateCVEScanCountsParams) error
+	UpdateCVEScanNode(ctx context.Context, arg UpdateCVEScanNodeParams) error
+	UpdateCVEScanStatus(ctx context.Context, arg UpdateCVEScanStatusParams) error
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
 	UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHistoryStatusParams) error
 	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error
@@ -182,6 +201,8 @@ type Querier interface {
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error
+	UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) error
+	UpsertCVEScanSchedule(ctx context.Context, arg UpsertCVEScanScheduleParams) (CveScanSchedule, error)
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)

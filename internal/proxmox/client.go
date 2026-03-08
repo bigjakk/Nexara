@@ -2272,6 +2272,18 @@ func (c *Client) RunBackupJob(ctx context.Context, id string) (string, error) {
 	return upid, nil
 }
 
+// GetNodeAptUpdates returns pending package updates for a node from GET /nodes/{node}/apt/update.
+func (c *Client) GetNodeAptUpdates(ctx context.Context, node string) ([]AptUpdate, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var updates []AptUpdate
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/apt/update", &updates); err != nil {
+		return nil, fmt.Errorf("get apt updates on %s: %w", node, err)
+	}
+	return updates, nil
+}
+
 // DeleteBackupJob deletes a vzdump backup job schedule.
 func (c *Client) DeleteBackupJob(ctx context.Context, id string) error {
 	if id == "" {

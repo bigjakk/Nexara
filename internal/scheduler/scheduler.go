@@ -15,6 +15,7 @@ import (
 	"github.com/proxdash/proxdash/internal/drs"
 	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
+	"github.com/proxdash/proxdash/internal/scanner"
 )
 
 // Scheduler runs due scheduled tasks.
@@ -24,6 +25,7 @@ type Scheduler struct {
 	logger        *slog.Logger
 	drsEngine     *drs.Engine
 	drsExecutor   *drs.Executor
+	cveScanner    *scanner.Engine
 	eventPub      *events.Publisher
 }
 
@@ -35,6 +37,7 @@ func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPu
 		logger:        logger,
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
 		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor"), eventPub),
+		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner")),
 		eventPub:      eventPub,
 	}
 }
@@ -113,6 +116,75 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 		if err := s.drsExecutor.Execute(ctx, client, cfg.ClusterID, cfg.Mode, recommendations); err != nil {
 			s.logger.Error("DRS execution failed",
 				"cluster_id", cfg.ClusterID, "error", err)
+		}
+	}
+}
+
+// RunCVEScanning runs CVE scans for clusters based on their schedule configuration.
+// Clusters with no schedule config default to enabled with a 24-hour interval.
+func (s *Scheduler) RunCVEScanning(ctx context.Context) {
+	clusters, err := s.queries.ListClusters(ctx)
+	if err != nil {
+		s.logger.Error("failed to list clusters for CVE scanning", "error", err)
+		return
+	}
+
+	// Build a map of schedule configs for quick lookup
+	schedules := make(map[uuid.UUID]struct {
+		enabled  bool
+		interval time.Duration
+	})
+	scheds, err := s.queries.ListEnabledCVEScanSchedules(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list CVE scan schedules, using defaults", "error", err)
+	}
+	for _, sc := range scheds {
+		schedules[sc.ClusterID] = struct {
+			enabled  bool
+			interval time.Duration
+		}{enabled: sc.Enabled, interval: time.Duration(sc.IntervalHours) * time.Hour}
+	}
+
+	for _, cluster := range clusters {
+		if !cluster.IsActive {
+			continue
+		}
+
+		// Look up schedule config; default to enabled / 24h
+		sched, hasConfig := schedules[cluster.ID]
+		if hasConfig {
+			if !sched.enabled {
+				continue
+			}
+		} else {
+			// Check if there's a disabled schedule (not in the "enabled" list)
+			cfg, cfgErr := s.queries.GetCVEScanSchedule(ctx, cluster.ID)
+			if cfgErr == nil && !cfg.Enabled {
+				continue
+			}
+			sched.interval = 24 * time.Hour
+		}
+
+		// Check if last scan was within the configured interval
+		lastScan, err := s.queries.GetLatestCVEScan(ctx, cluster.ID)
+		if err == nil && time.Since(lastScan.CreatedAt) < sched.interval {
+			continue
+		}
+
+		s.logger.Info("starting CVE scan", "cluster_id", cluster.ID, "cluster_name", cluster.Name)
+
+		scanID, err := s.cveScanner.ScanCluster(ctx, cluster.ID)
+		if err != nil {
+			s.logger.Error("CVE scan failed",
+				"cluster_id", cluster.ID, "error", err)
+			continue
+		}
+
+		s.logger.Info("CVE scan completed",
+			"cluster_id", cluster.ID, "scan_id", scanID)
+
+		if s.eventPub != nil {
+			s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindCVEScan, "cve_scan", scanID.String(), "completed")
 		}
 	}
 }
