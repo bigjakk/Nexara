@@ -96,8 +96,11 @@ export function DashboardPage() {
   const [activePreset, setActivePreset] = useState<DashboardPreset | null>(null);
   const [initializedFromBackend, setInitializedFromBackend] = useState(false);
 
-  // Load layout from backend when available
+  // Load layout from backend on first load only — not on subsequent query refreshes
+  // to avoid infinite update loops when saveLayout triggers query invalidation.
   useEffect(() => {
+    if (initializedFromBackend) return;
+
     if (layoutQuery.data?.value && typeof layoutQuery.data.value === "object") {
       const saved = layoutQuery.data.value as {
         widgetIds?: string[];
@@ -122,8 +125,8 @@ export function DashboardPage() {
         }
       }
     }
-    // If no saved layout (or stale) and we haven't initialized yet, use default when clusters are ready
-    if (!initializedFromBackend && clusters.length > 0) {
+    // If no saved layout (or stale), use default when clusters are ready
+    if (clusters.length > 0) {
       setActivePreset(computedDefaultPreset);
       setInitializedFromBackend(true);
     }
