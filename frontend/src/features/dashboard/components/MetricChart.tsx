@@ -58,12 +58,12 @@ export function MetricChart({
 
   if (data.length === 0) {
     return (
-      <Card>
+      <Card className="flex h-full flex-col">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium">{title}</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+        <CardContent className="flex flex-1 items-center justify-center">
+          <div className="text-sm text-muted-foreground">
             Waiting for data...
           </div>
         </CardContent>
@@ -72,12 +72,12 @@ export function MetricChart({
   }
 
   return (
-    <Card>
+    <Card className="flex h-full flex-col">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium">{title}</CardTitle>
       </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={200}>
+      <CardContent className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data}>
             <defs>
               <linearGradient id={`gradient-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
