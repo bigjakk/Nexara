@@ -347,6 +347,9 @@ func (s *Server) setupRoutes() {
 		audit.Get("/actions", s.auditHandler.ListActions)
 		audit.Get("/users", s.auditHandler.ListUsers)
 		audit.Get("/export", s.auditHandler.Export)
+		audit.Get("/syslog-config", s.auditHandler.GetSyslogConfig)
+		audit.Put("/syslog-config", s.auditHandler.UpdateSyslogConfig)
+		audit.Post("/syslog-test", s.auditHandler.TestSyslog)
 		audit.Get("/", s.auditHandler.List)
 
 		if s.clusterHandler != nil {

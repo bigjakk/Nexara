@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -11,16 +12,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/proxdash/proxdash/internal/db/generated"
+	"github.com/proxdash/proxdash/internal/events"
+	proxsyslog "github.com/proxdash/proxdash/internal/syslog"
 )
 
 // AuditHandler handles audit log endpoints.
 type AuditHandler struct {
-	queries *db.Queries
+	queries  *db.Queries
+	eventPub *events.Publisher
 }
 
 // NewAuditHandler creates a new audit handler.
-func NewAuditHandler(queries *db.Queries) *AuditHandler {
-	return &AuditHandler{queries: queries}
+func NewAuditHandler(queries *db.Queries, eventPub *events.Publisher) *AuditHandler {
+	return &AuditHandler{queries: queries, eventPub: eventPub}
 }
 
 type auditLogResponse struct {
@@ -426,4 +430,138 @@ func syslogSeverity(action string) int {
 	default:
 		return 6 // informational
 	}
+}
+
+// --- Syslog forwarding config ---
+
+const syslogSettingKey = "syslog_forwarding"
+
+// GetSyslogConfig handles GET /api/v1/audit-log/syslog-config.
+func (h *AuditHandler) GetSyslogConfig(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "audit"); err != nil {
+		return err
+	}
+
+	setting, err := h.queries.GetSetting(c.Context(), db.GetSettingParams{
+		Key:   syslogSettingKey,
+		Scope: "global",
+	})
+	if err != nil {
+		// No config yet — return defaults.
+		return c.JSON(proxsyslog.Config{
+			Port:     514,
+			Protocol: "udp",
+			Facility: 16,
+		})
+	}
+
+	var cfg proxsyslog.Config
+	if err := json.Unmarshal(setting.Value, &cfg); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Invalid syslog config in database")
+	}
+
+	return c.JSON(cfg)
+}
+
+// UpdateSyslogConfig handles PUT /api/v1/audit-log/syslog-config.
+func (h *AuditHandler) UpdateSyslogConfig(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "audit"); err != nil {
+		return err
+	}
+
+	var cfg proxsyslog.Config
+	if err := c.BodyParser(&cfg); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	// Validate.
+	if cfg.Enabled {
+		if cfg.Host == "" {
+			return fiber.NewError(fiber.StatusBadRequest, "Host is required when enabled")
+		}
+		if cfg.Port < 1 || cfg.Port > 65535 {
+			return fiber.NewError(fiber.StatusBadRequest, "Port must be between 1 and 65535")
+		}
+		proto := strings.ToLower(cfg.Protocol)
+		if proto != "udp" && proto != "tcp" && proto != "tls" {
+			return fiber.NewError(fiber.StatusBadRequest, "Protocol must be 'udp', 'tcp', or 'tls'")
+		}
+		cfg.Protocol = proto
+	}
+	if cfg.Facility < 0 || cfg.Facility > 23 {
+		return fiber.NewError(fiber.StatusBadRequest, "Facility must be between 0 and 23")
+	}
+	if cfg.Facility == 0 {
+		cfg.Facility = 16 // default local0
+	}
+	if cfg.Port == 0 {
+		cfg.Port = 514
+	}
+	if cfg.Protocol == "" {
+		cfg.Protocol = "udp"
+	}
+
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to marshal config")
+	}
+
+	_, err = h.queries.UpsertSetting(c.Context(), db.UpsertSettingParams{
+		Key:   syslogSettingKey,
+		Value: data,
+		Scope: "global",
+	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to save syslog config")
+	}
+
+	// Reconfigure the live forwarder.
+	if fwd := h.eventPub.SyslogForwarder(); fwd != nil {
+		if err := fwd.Configure(cfg); err != nil {
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"saved":   true,
+				"warning": fmt.Sprintf("Config saved but forwarder failed to connect: %v", err),
+			})
+		}
+	}
+
+	return c.JSON(cfg)
+}
+
+// TestSyslog handles POST /api/v1/audit-log/syslog-test.
+func (h *AuditHandler) TestSyslog(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "audit"); err != nil {
+		return err
+	}
+
+	var cfg proxsyslog.Config
+	if err := c.BodyParser(&cfg); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if cfg.Host == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Host is required")
+	}
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return fiber.NewError(fiber.StatusBadRequest, "Port must be between 1 and 65535")
+	}
+	if cfg.Port == 0 {
+		cfg.Port = 514
+	}
+	if cfg.Protocol == "" {
+		cfg.Protocol = "udp"
+	}
+	if cfg.Facility == 0 {
+		cfg.Facility = 16
+	}
+
+	fwd := proxsyslog.NewForwarder(nil)
+	if err := fwd.Test(cfg); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	return c.JSON(fiber.Map{"success": true})
 }

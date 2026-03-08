@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	proxsyslog "github.com/proxdash/proxdash/internal/syslog"
 )
 
 // Event kinds published through the WebSocket pipeline.
@@ -39,8 +41,9 @@ type Event struct {
 
 // Publisher publishes events to Redis for fan-out via the WS pipeline.
 type Publisher struct {
-	client *redis.Client
-	logger *slog.Logger
+	client    *redis.Client
+	logger    *slog.Logger
+	syslogFwd *proxsyslog.Forwarder
 }
 
 // NewPublisher creates a new event publisher.
@@ -49,6 +52,23 @@ func NewPublisher(client *redis.Client, logger *slog.Logger) *Publisher {
 		client: client,
 		logger: logger,
 	}
+}
+
+// SetSyslogForwarder attaches a syslog forwarder to the publisher.
+// When set, audit events will also be forwarded to the configured syslog server.
+func (p *Publisher) SetSyslogForwarder(fwd *proxsyslog.Forwarder) {
+	if p == nil {
+		return
+	}
+	p.syslogFwd = fwd
+}
+
+// SyslogForwarder returns the attached syslog forwarder (may be nil).
+func (p *Publisher) SyslogForwarder() *proxsyslog.Forwarder {
+	if p == nil {
+		return nil
+	}
+	return p.syslogFwd
 }
 
 // Publish sends an event to Redis. It is nil-safe and fire-and-forget.

@@ -15,6 +15,7 @@ import (
 	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/proxmox"
+	proxsyslog "github.com/proxdash/proxdash/internal/syslog"
 )
 
 // AuditLog writes an audit log entry and publishes an audit_entry WS event.
@@ -36,11 +37,26 @@ func AuditLog(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clu
 		Action:       action,
 		Details:      details,
 	})
+
+	var cidStr string
 	if clusterID.Valid {
 		cid, _ := uuid.FromBytes(clusterID.Bytes[:])
-		eventPub.ClusterEvent(c.Context(), cid.String(), events.KindAuditEntry, resourceType, resourceID, action)
-	} else {
-		eventPub.ClusterEvent(c.Context(), "", events.KindAuditEntry, resourceType, resourceID, action)
+		cidStr = cid.String()
+	}
+
+	eventPub.ClusterEvent(c.Context(), cidStr, events.KindAuditEntry, resourceType, resourceID, action)
+
+	// Forward to syslog if configured.
+	if fwd := eventPub.SyslogForwarder(); fwd != nil {
+		fwd.Forward(proxsyslog.Message{
+			Timestamp:    time.Now().UTC(),
+			UserID:       uid.String(),
+			ClusterID:    cidStr,
+			ResourceType: resourceType,
+			ResourceID:   resourceID,
+			Action:       action,
+			Details:      string(details),
+		})
 	}
 }
 

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"log/slog"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-
-	"log/slog"
 
 	"github.com/proxdash/proxdash/internal/api/handlers"
 	"github.com/proxdash/proxdash/internal/auth"
@@ -14,6 +16,7 @@ import (
 	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/notifications"
 	"github.com/proxdash/proxdash/internal/rolling"
+	proxsyslog "github.com/proxdash/proxdash/internal/syslog"
 )
 
 // Server is the API server that holds all dependencies.
@@ -112,7 +115,18 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	if s.queries != nil {
 		s.taskHandler = handlers.NewTaskHandler(s.queries, s.eventPub)
 		s.scheduleHandler = handlers.NewScheduleHandler(s.queries, s.eventPub)
-		s.auditHandler = handlers.NewAuditHandler(s.queries)
+		s.auditHandler = handlers.NewAuditHandler(s.queries, s.eventPub)
+	}
+
+	// Initialize syslog forwarder and attach to event publisher.
+	if s.eventPub != nil {
+		syslogFwd := proxsyslog.NewForwarder(slog.Default().With("component", "syslog"))
+		s.eventPub.SetSyslogForwarder(syslogFwd)
+
+		// Load syslog config from settings if available.
+		if s.queries != nil {
+			s.loadSyslogConfig(syslogFwd)
+		}
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
@@ -188,6 +202,27 @@ func newDispatcherRegistry() *notifications.Registry {
 	r.Register(&notifications.WebhookDispatcher{})
 	r.Register(&notifications.PagerDutyDispatcher{})
 	return r
+}
+
+// loadSyslogConfig reads syslog forwarding config from settings and configures the forwarder.
+func (s *Server) loadSyslogConfig(fwd *proxsyslog.Forwarder) {
+	setting, err := s.queries.GetSetting(context.Background(), db.GetSettingParams{
+		Key:   "syslog_forwarding",
+		Scope: "global",
+	})
+	if err != nil {
+		return // no config saved yet — forwarder stays disabled
+	}
+
+	var cfg proxsyslog.Config
+	if err := json.Unmarshal(setting.Value, &cfg); err != nil {
+		slog.Warn("syslog: invalid config in settings", "error", err)
+		return
+	}
+
+	if err := fwd.Configure(cfg); err != nil {
+		slog.Warn("syslog: failed to configure forwarder on startup", "error", err)
+	}
 }
 
 // Listen starts the HTTP server on the given address.

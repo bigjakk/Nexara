@@ -16,6 +16,7 @@ import {
   buildExportUrl,
   type AuditLogEntry,
 } from "../api/events-queries";
+import { SyslogConfigCard } from "../components/SyslogConfigCard";
 
 const PAGE_SIZE = 25;
 
@@ -578,6 +579,9 @@ export function EventsPage() {
           </Button>
         )}
       </div>
+
+      {/* Syslog forwarding config */}
+      <SyslogConfigCard />
 
       {/* Table */}
       {isLoading ? (

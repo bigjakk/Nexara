@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 
 export interface AuditLogEntry {
@@ -93,6 +93,47 @@ export function useAuditUsers() {
     queryFn: () =>
       apiClient.get<AuditUserRef[]>("/api/v1/audit-log/users"),
     staleTime: 300_000,
+  });
+}
+
+// --- Syslog forwarding config ---
+
+export interface SyslogConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  protocol: string;
+  facility: number;
+  tls_skip_verify: boolean;
+}
+
+export function useSyslogConfig() {
+  return useQuery({
+    queryKey: ["syslog-config"],
+    queryFn: () =>
+      apiClient.get<SyslogConfig>("/api/v1/audit-log/syslog-config"),
+    staleTime: 60_000,
+  });
+}
+
+export function useSaveSyslogConfig() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (cfg: SyslogConfig) =>
+      apiClient.put<SyslogConfig>("/api/v1/audit-log/syslog-config", cfg),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["syslog-config"] });
+    },
+  });
+}
+
+export function useTestSyslog() {
+  return useMutation({
+    mutationFn: (cfg: SyslogConfig) =>
+      apiClient.post<{ success: boolean; error?: string }>(
+        "/api/v1/audit-log/syslog-test",
+        cfg,
+      ),
   });
 }
 
