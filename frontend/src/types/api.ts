@@ -49,7 +49,7 @@ export interface UserListItem {
   display_name: string;
   role: string;
   is_active: boolean;
-  auth_source: "local" | "ldap";
+  auth_source: "local" | "ldap" | "oidc";
   created_at: string;
   updated_at: string;
 }
@@ -110,6 +110,57 @@ export interface LDAPSyncResponse {
   users_synced: number;
   users_disabled: number;
   users_re_enabled: number;
+}
+
+export interface OIDCConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  issuer_url: string;
+  client_id: string;
+  client_secret_set: boolean;
+  redirect_uri: string;
+  scopes: string[];
+  email_claim: string;
+  display_name_claim: string;
+  groups_claim: string;
+  group_role_mapping: Record<string, string>;
+  default_role_id: string | null;
+  auto_provision: boolean;
+  allowed_domains: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OIDCConfigRequest {
+  name: string;
+  enabled: boolean;
+  issuer_url: string;
+  client_id: string;
+  client_secret: string;
+  redirect_uri: string;
+  scopes: string[];
+  email_claim: string;
+  display_name_claim: string;
+  groups_claim: string;
+  group_role_mapping: Record<string, string>;
+  default_role_id: string | null;
+  auto_provision: boolean;
+  allowed_domains: string[];
+}
+
+export interface OIDCTestResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface OIDCAuthorizeResponse {
+  redirect_url: string;
+}
+
+export interface SSOStatus {
+  oidc_enabled: boolean;
+  oidc_provider_name: string;
 }
 
 export interface MyPermissionsResponse {

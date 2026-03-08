@@ -42,6 +42,7 @@ type Server struct {
 	rbacHandler      *handlers.RBACHandler
 	userHandler      *handlers.UserHandler
 	ldapHandler      *handlers.LDAPHandler
+	oidcHandler      *handlers.OIDCHandler
 	rbacEngine       *auth.RBACEngine
 	eventPub         *events.Publisher
 }
@@ -121,9 +122,18 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.ldapHandler = handlers.NewLDAPHandler(s.queries, cfg.EncryptionKey, s.rbacEngine, s.eventPub)
 	}
 
+	if s.queries != nil && cfg.EncryptionKey != "" && s.rbacEngine != nil && rdb != nil {
+		s.oidcHandler = handlers.NewOIDCHandler(s.queries, cfg.EncryptionKey, s.rbacEngine, s.eventPub, rdb)
+	}
+
 	// Wire LDAP handler into auth handler for LDAP-aware login
 	if s.authHandler != nil && s.ldapHandler != nil {
 		s.authHandler.SetLDAPHandler(s.ldapHandler)
+	}
+
+	// Wire OIDC handler into auth handler for SSO-aware login
+	if s.authHandler != nil && s.oidcHandler != nil {
+		s.authHandler.SetOIDCHandler(s.oidcHandler)
 	}
 
 	s.app = fiber.New(fiber.Config{

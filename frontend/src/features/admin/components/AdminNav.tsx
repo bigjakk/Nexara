@@ -5,6 +5,7 @@ const tabs = [
   { label: "Users", to: "/admin/users" },
   { label: "Roles", to: "/admin/roles" },
   { label: "LDAP", to: "/admin/ldap" },
+  { label: "OIDC / SSO", to: "/admin/oidc" },
 ];
 
 export function AdminNav() {

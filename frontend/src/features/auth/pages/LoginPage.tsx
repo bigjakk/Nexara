@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
-import type { SetupStatus } from "@/types/api";
+import type { SetupStatus, SSOStatus, OIDCAuthorizeResponse } from "@/types/api";
 
 function sanitizeReturnTo(value: string | null): string {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
@@ -38,6 +38,8 @@ export function LoginPage() {
   const { login, isLoading, isAuthenticated } = useAuth();
   const [error, setError] = useState("");
   const [checkingSetup, setCheckingSetup] = useState(true);
+  const [ssoStatus, setSSOStatus] = useState<SSOStatus | null>(null);
+  const [ssoLoading, setSSOLoading] = useState(false);
 
   const returnTo = sanitizeReturnTo(searchParams.get("returnTo"));
 
@@ -74,6 +76,43 @@ export function LoginPage() {
       cancelled = true;
     };
   }, [navigate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getPublic<SSOStatus>("/api/v1/auth/sso-status")
+      .then((status) => {
+        if (!cancelled) setSSOStatus(status);
+      })
+      .catch(() => {
+        // SSO check failed — no SSO button shown
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Check for SSO error in URL params
+  useEffect(() => {
+    const errorParam = searchParams.get("error");
+    if (errorParam) {
+      setError(errorParam);
+    }
+  }, [searchParams]);
+
+  const handleSSOLogin = async () => {
+    setSSOLoading(true);
+    setError("");
+    try {
+      const res = await apiClient.getPublic<OIDCAuthorizeResponse>(
+        "/api/v1/auth/oidc/authorize",
+      );
+      window.location.href = res.redirect_url;
+    } catch {
+      setError("Failed to initiate SSO login");
+      setSSOLoading(false);
+    }
+  };
 
   const onSubmit = async (data: LoginFormValues) => {
     setError("");
@@ -150,6 +189,25 @@ export function LoginPage() {
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Sign In
             </Button>
+            {ssoStatus?.oidc_enabled && (
+              <>
+                <div className="flex w-full items-center gap-3">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs text-muted-foreground">or</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={ssoLoading}
+                  onClick={() => void handleSSOLogin()}
+                >
+                  {ssoLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Sign in with {ssoStatus.oidc_provider_name || "SSO"}
+                </Button>
+              </>
+            )}
             <p className="text-center text-sm text-muted-foreground">
               First time?{" "}
               <Link

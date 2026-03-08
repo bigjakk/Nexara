@@ -16,6 +16,8 @@ import { AuditLogPage } from "@/features/audit/pages/AuditLogPage";
 import { UsersPage } from "@/features/admin/pages/UsersPage";
 import { RolesPage } from "@/features/admin/pages/RolesPage";
 import { LDAPPage } from "@/features/admin/pages/LDAPPage";
+import { OIDCPage } from "@/features/admin/pages/OIDCPage";
+import { OIDCCallbackPage } from "@/features/auth/pages/OIDCCallbackPage";
 
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
@@ -31,6 +33,10 @@ const router = createBrowserRouter([
   {
     path: "/register",
     element: <RegisterPage />,
+  },
+  {
+    path: "/oidc-callback",
+    element: <OIDCCallbackPage />,
   },
   {
     element: <ProtectedRoute />,
@@ -93,6 +99,10 @@ const router = createBrowserRouter([
           {
             path: "admin/ldap",
             element: <LDAPPage />,
+          },
+          {
+            path: "admin/oidc",
+            element: <OIDCPage />,
           },
         ],
       },

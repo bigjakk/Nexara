@@ -25,6 +25,8 @@ type Querier interface {
 	CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigParams) (LdapConfig, error)
 	CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) (User, error)
 	CreateMigrationJob(ctx context.Context, arg CreateMigrationJobParams) (MigrationJob, error)
+	CreateOIDCConfig(ctx context.Context, arg CreateOIDCConfigParams) (OidcConfig, error)
+	CreateOIDCUser(ctx context.Context, arg CreateOIDCUserParams) (User, error)
 	CreatePBSServer(ctx context.Context, arg CreatePBSServerParams) (PbsServer, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
@@ -35,6 +37,7 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
 	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
+	DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
 	DeleteRole(ctx context.Context, id uuid.UUID) error
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
@@ -55,6 +58,7 @@ type Querier interface {
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
 	GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
 	GetEnabledLDAPConfig(ctx context.Context) (LdapConfig, error)
+	GetEnabledOIDCConfig(ctx context.Context) (OidcConfig, error)
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
 	GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, error)
 	GetLastDRSMigrationForVM(ctx context.Context, arg GetLastDRSMigrationForVMParams) (DrsHistory, error)
@@ -67,6 +71,7 @@ type Querier interface {
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
 	GetNodeMetrics1h(ctx context.Context, arg GetNodeMetrics1hParams) ([]GetNodeMetrics1hRow, error)
 	GetNodeMetrics5m(ctx context.Context, arg GetNodeMetrics5mParams) ([]GetNodeMetrics5mRow, error)
+	GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, error)
 	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]PbsDatastoreMetric, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
 	GetPermission(ctx context.Context, id uuid.UUID) (Permission, error)
@@ -111,6 +116,8 @@ type Querier interface {
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
+	ListOIDCConfigs(ctx context.Context) ([]OidcConfig, error)
+	ListOIDCUsers(ctx context.Context) ([]ListOIDCUsersRow, error)
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
 	ListPBSServersByCluster(ctx context.Context, clusterID pgtype.UUID) ([]PbsServer, error)
 	ListPBSSnapshotsByBackupID(ctx context.Context, backupID string) ([]PbsSnapshot, error)
@@ -155,6 +162,8 @@ type Querier interface {
 	UpdateMigrationJobChecks(ctx context.Context, arg UpdateMigrationJobChecksParams) error
 	UpdateMigrationJobProgress(ctx context.Context, arg UpdateMigrationJobProgressParams) error
 	UpdateMigrationJobStatus(ctx context.Context, arg UpdateMigrationJobStatusParams) error
+	UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error)
+	UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserProfileParams) (User, error)
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)

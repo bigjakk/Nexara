@@ -271,6 +271,26 @@ type NodeMetrics5m struct {
 	AvgNetOut    float64     `json:"avg_net_out"`
 }
 
+type OidcConfig struct {
+	ID                    uuid.UUID       `json:"id"`
+	Name                  string          `json:"name"`
+	Enabled               bool            `json:"enabled"`
+	IssuerUrl             string          `json:"issuer_url"`
+	ClientID              string          `json:"client_id"`
+	ClientSecretEncrypted string          `json:"client_secret_encrypted"`
+	RedirectUri           string          `json:"redirect_uri"`
+	Scopes                []string        `json:"scopes"`
+	EmailClaim            string          `json:"email_claim"`
+	DisplayNameClaim      string          `json:"display_name_claim"`
+	GroupsClaim           string          `json:"groups_claim"`
+	GroupRoleMapping      json.RawMessage `json:"group_role_mapping"`
+	DefaultRoleID         pgtype.UUID     `json:"default_role_id"`
+	AutoProvision         bool            `json:"auto_provision"`
+	AllowedDomains        []string        `json:"allowed_domains"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
+}
+
 type PbsDatastoreMetric struct {
 	Time        time.Time `json:"time"`
 	PbsServerID uuid.UUID `json:"pbs_server_id"`

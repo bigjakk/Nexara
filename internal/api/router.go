@@ -17,6 +17,14 @@ func (s *Server) setupRoutes() {
 		authGroup.Post("/logout", s.authRequired(), s.authHandler.Logout)
 		authGroup.Post("/logout-all", s.authRequired(), s.authHandler.LogoutAll)
 		authGroup.Get("/setup-status", s.authHandler.SetupStatus)
+		authGroup.Get("/sso-status", s.authHandler.SSOStatus)
+
+		// OIDC auth flow (public, no auth required)
+		if s.oidcHandler != nil {
+			authGroup.Get("/oidc/authorize", s.oidcHandler.Authorize)
+			authGroup.Get("/oidc/callback", s.oidcHandler.Callback)
+			authGroup.Post("/oidc/token-exchange", s.authHandler.OIDCTokenExchange)
+		}
 	}
 
 	// Cluster routes.
@@ -300,6 +308,17 @@ func (s *Server) setupRoutes() {
 		ldap.Delete("/configs/:id", s.ldapHandler.Delete)
 		ldap.Post("/configs/:id/test", s.ldapHandler.TestConnection)
 		ldap.Post("/configs/:id/sync", s.ldapHandler.Sync)
+	}
+
+	// OIDC config routes (admin).
+	if s.oidcHandler != nil {
+		oidc := v1.Group("/oidc", s.authRequired())
+		oidc.Get("/configs", s.oidcHandler.List)
+		oidc.Post("/configs", s.oidcHandler.Create)
+		oidc.Get("/configs/:id", s.oidcHandler.Get)
+		oidc.Put("/configs/:id", s.oidcHandler.Update)
+		oidc.Delete("/configs/:id", s.oidcHandler.Delete)
+		oidc.Post("/configs/:id/test", s.oidcHandler.TestConnection)
 	}
 
 	// User management routes.

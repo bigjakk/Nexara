@@ -22,6 +22,7 @@ type AuthHandler struct {
 	sessionManager *auth.SessionManager
 	rbac           *auth.RBACEngine
 	ldapHandler    *LDAPHandler
+	oidcHandler    *OIDCHandler
 }
 
 // NewAuthHandler creates a new auth handler.
@@ -37,6 +38,11 @@ func NewAuthHandler(queries *db.Queries, jwtSvc *auth.JWTService, sessMgr *auth.
 // SetLDAPHandler sets the LDAP handler reference for LDAP-aware login.
 func (h *AuthHandler) SetLDAPHandler(lh *LDAPHandler) {
 	h.ldapHandler = lh
+}
+
+// SetOIDCHandler sets the OIDC handler reference for SSO-aware login and token exchange.
+func (h *AuthHandler) SetOIDCHandler(oh *OIDCHandler) {
+	h.oidcHandler = oh
 }
 
 type registerRequest struct {
@@ -228,8 +234,8 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up user")
 	}
 
-	// LDAP-sourced users cannot log in with local passwords
-	if user.AuthSource == "ldap" {
+	// LDAP/OIDC-sourced users cannot log in with local passwords
+	if user.AuthSource == "ldap" || user.AuthSource == "oidc" {
 		return invalidCredentials
 	}
 
@@ -496,6 +502,69 @@ func (h *AuthHandler) loadPerms(c *fiber.Ctx, userID uuid.UUID) []string {
 		return []string{}
 	}
 	return perms
+}
+
+// SSOStatus returns whether OIDC/SSO is enabled and the provider name.
+func (h *AuthHandler) SSOStatus(c *fiber.Ctx) error {
+	resp := fiber.Map{
+		"oidc_enabled":       false,
+		"oidc_provider_name": "",
+	}
+
+	if h.oidcHandler != nil {
+		cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
+		if err == nil {
+			resp["oidc_enabled"] = true
+			resp["oidc_provider_name"] = cfg.Name
+		}
+	}
+
+	return c.JSON(resp)
+}
+
+// OIDCTokenExchange consumes the short-lived exchange code and issues standard JWT tokens.
+func (h *AuthHandler) OIDCTokenExchange(c *fiber.Ctx) error {
+	if h.oidcHandler == nil {
+		return fiber.NewError(fiber.StatusNotFound, "OIDC not configured")
+	}
+
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Code == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Code is required")
+	}
+
+	// Atomic GetDel — single-use exchange code
+	data, err := h.oidcHandler.rdb.GetDel(c.Context(), "oidc:exchange:"+req.Code).Result()
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired exchange code")
+	}
+
+	var exchangeData map[string]string
+	if err := json.Unmarshal([]byte(data), &exchangeData); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Invalid exchange data")
+	}
+
+	userID, err := uuid.Parse(exchangeData["user_id"])
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Invalid user in exchange data")
+	}
+
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "User not found")
+	}
+
+	if !user.IsActive {
+		return fiber.NewError(fiber.StatusForbidden, "Account is disabled")
+	}
+
+	return h.issueTokens(c, user, "oidc_login")
 }
 
 // isDuplicateKeyError checks if a pgx error is a unique constraint violation.

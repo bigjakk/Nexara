@@ -29,6 +29,7 @@ interface AuthActions {
   logoutAll: () => Promise<void>;
   initialize: () => Promise<void>;
   clearAuth: () => void;
+  setAuthFromResponse: (res: AuthResponse) => void;
 }
 
 export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
@@ -158,6 +159,15 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       user: null,
       permissions: [],
       isAuthenticated: false,
+    });
+  },
+
+  setAuthFromResponse: (res: AuthResponse) => {
+    set({
+      user: res.user,
+      permissions: res.permissions,
+      isAuthenticated: true,
+      isLoading: false,
     });
   },
 }));
