@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   useReactTable,
   getCoreRowModel,
@@ -13,7 +14,7 @@ import {
   type RowSelectionState,
 } from "@tanstack/react-table";
 import { Link } from "react-router-dom";
-import { ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowUpDown, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -30,6 +31,16 @@ import { MetricMiniBar } from "./MetricMiniBar";
 import { SearchBar } from "./SearchBar";
 import { ColumnToggle } from "./ColumnToggle";
 import { BulkActionToolbar } from "./BulkActionToolbar";
+import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
+import { lifecycleActions, managementActions } from "@/features/vms/lib/vm-action-defs";
+import { useVMAction } from "@/features/vms/api/vm-queries";
+import {
+  useVMContextMenuStore,
+  type VMContextTarget,
+} from "@/stores/vm-context-menu-store";
+import { useTaskLogStore } from "@/stores/task-log-store";
+import { useConsoleStore } from "@/stores/console-store";
+import type { VMAction } from "@/features/vms/types/vm";
 import { applyFilter } from "../lib/search-parser";
 import {
   loadColumnVisibility,
@@ -53,6 +64,170 @@ function formatBytes(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   const val = bytes / Math.pow(1024, i);
   return `${val.toFixed(val >= 100 ? 0 : 1)} ${units[i] ?? ""}`;
+}
+
+function toContextTarget(row: InventoryRow): VMContextTarget | null {
+  if (row.type === "node" || row.vmid === null) return null;
+  return {
+    clusterId: row.clusterId,
+    resourceId: row.id,
+    vmid: row.vmid,
+    name: row.name,
+    kind: row.type === "ct" ? "ct" : "vm",
+    status: row.status,
+    currentNode: row.nodeName,
+  };
+}
+
+interface MenuState {
+  target: VMContextTarget;
+  x: number;
+  y: number;
+}
+
+function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { openClone, openMigrate, openDestroy, openConfirmAction } =
+    useVMContextMenuStore();
+  const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
+  const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
+  const actionMutation = useVMAction();
+  const addTab = useConsoleStore((s) => s.addTab);
+  const showConsole = useConsoleStore((s) => s.showConsole);
+
+  const { target } = menu;
+  const normalizedStatus = target.status.toLowerCase();
+
+  const visibleLifecycle = lifecycleActions.filter((a) =>
+    a.showWhen(normalizedStatus, target.kind),
+  );
+  const visibleManagement = managementActions.filter((a) =>
+    a.showWhen(normalizedStatus, target.kind),
+  );
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [onClose]);
+
+  // Clamp position so menu doesn't overflow viewport
+  const menuWidth = 176;
+  const menuHeight = (visibleLifecycle.length + visibleManagement.length + 3) * 32;
+  const x = Math.min(menu.x, window.innerWidth - menuWidth - 8);
+  const y = Math.min(menu.y, window.innerHeight - menuHeight - 8);
+
+  function handleLifecycleAction(action: VMAction, needsConfirm: boolean, label: string) {
+    if (needsConfirm) {
+      openConfirmAction(target, action, label);
+    } else {
+      actionMutation.mutate(
+        {
+          clusterId: target.clusterId,
+          resourceId: target.resourceId,
+          kind: target.kind,
+          action,
+        },
+        {
+          onSuccess: (data) => {
+            setFocusedTask({
+              clusterId: target.clusterId,
+              upid: data.upid,
+              description: `${label} ${target.name}`,
+            });
+            setPanelOpen(true);
+          },
+        },
+      );
+    }
+    onClose();
+  }
+
+  function handleManagementAction(action: "clone" | "migrate" | "destroy") {
+    if (action === "clone") openClone(target);
+    if (action === "migrate") openMigrate(target);
+    if (action === "destroy") openDestroy(target);
+    onClose();
+  }
+
+  function handleOpenConsole() {
+    const type = target.kind === "ct" ? ("ct_vnc" as const) : ("vm_vnc" as const);
+    const labelPrefix = target.kind === "ct" ? "CT" : "VNC";
+    addTab({
+      clusterID: target.clusterId,
+      node: target.currentNode,
+      vmid: target.vmid,
+      type,
+      label: `${labelPrefix}: ${target.name}`,
+      resourceId: target.resourceId,
+      kind: target.kind,
+    });
+    showConsole();
+    onClose();
+  }
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="fixed z-50 min-w-[11rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+      style={{ left: x, top: y }}
+    >
+      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+        {String(target.vmid)} {target.name}
+      </div>
+
+      {visibleLifecycle.map((config) => (
+        <button
+          key={config.action}
+          className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+          onClick={() => { handleLifecycleAction(config.action, config.needsConfirm, config.label); }}
+        >
+          <span className="mr-2">{config.icon}</span>
+          {config.label}
+        </button>
+      ))}
+
+      {normalizedStatus === "running" && (
+        <>
+          <div className="-mx-1 my-1 h-px bg-border" />
+          <button
+            className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+            onClick={handleOpenConsole}
+          >
+            <span className="mr-2"><Monitor className="h-4 w-4" /></span>
+            Console
+          </button>
+        </>
+      )}
+
+      {visibleManagement.length > 0 && <div className="-mx-1 my-1 h-px bg-border" />}
+
+      {visibleManagement.map((config) => (
+        <button
+          key={config.action}
+          className={`relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground ${
+            config.variant === "destructive" ? "text-destructive" : ""
+          }`}
+          onClick={() => { handleManagementAction(config.action); }}
+        >
+          <span className="mr-2">{config.icon}</span>
+          {config.label}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
 }
 
 const columnHelper = createColumnHelper<InventoryRow>();
@@ -275,6 +450,7 @@ export function ResourceTable({ data }: ResourceTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [query, setQuery] = useState<ParsedQuery>({ filters: [], freeText: "" });
+  const [contextMenu, setContextMenu] = useState<MenuState | null>(null);
 
   const savedVisibility = useMemo(() => {
     const saved = loadColumnVisibility();
@@ -296,6 +472,10 @@ export function ResourceTable({ data }: ResourceTableProps) {
 
   const handleQueryChange = useCallback((parsed: ParsedQuery) => {
     setQuery(parsed);
+  }, []);
+
+  const handleCloseMenu = useCallback(() => {
+    setContextMenu(null);
   }, []);
 
   const table = useReactTable({
@@ -350,21 +530,28 @@ export function ResourceTable({ data }: ResourceTableProps) {
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows.length > 0 ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() ? "selected" : undefined}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
+              table.getRowModel().rows.map((row) => {
+                const target = toContextTarget(row.original);
+                return (
+                  <TableRow
+                    key={row.id}
+                    data-state={row.getIsSelected() ? "selected" : undefined}
+                    onContextMenu={target ? (e) => {
+                      e.preventDefault();
+                      setContextMenu({ target, x: e.clientX, y: e.clientY });
+                    } : undefined}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })
             ) : (
               <TableRow>
                 <TableCell
@@ -408,6 +595,12 @@ export function ResourceTable({ data }: ResourceTableProps) {
           </Button>
         </div>
       </div>
+
+      {contextMenu && (
+        <RowContextMenu menu={contextMenu} onClose={handleCloseMenu} />
+      )}
+
+      <VMContextDialogs />
     </div>
   );
 }
