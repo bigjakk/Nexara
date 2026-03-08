@@ -64,7 +64,7 @@ func main() {
 
 	sched := scheduler.New(queries, cfg.EncryptionKey, logger, eventPub)
 
-	logger.Info("ProxDash scheduler started", "task_interval", "60s", "drs_interval", "60s", "cve_interval", "6h")
+	logger.Info("ProxDash scheduler started", "task_interval", "60s", "drs_interval", "60s", "cve_interval", "6h", "alert_interval", "60s")
 
 	// Clean up stale DRS history entries from previous interrupted runs.
 	if err := queries.CleanupStaleDRSHistory(ctx); err != nil {
@@ -75,6 +75,7 @@ func main() {
 	sched.Run(ctx)
 	sched.RunDRS(ctx)
 	sched.RunCVEScanning(ctx)
+	sched.RunAlertEvaluation(ctx)
 
 	taskTicker := time.NewTicker(60 * time.Second)
 	defer taskTicker.Stop()
@@ -84,6 +85,9 @@ func main() {
 
 	cveTicker := time.NewTicker(6 * time.Hour)
 	defer cveTicker.Stop()
+
+	alertTicker := time.NewTicker(60 * time.Second)
+	defer alertTicker.Stop()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -96,6 +100,8 @@ func main() {
 			sched.RunDRS(ctx)
 		case <-cveTicker.C:
 			sched.RunCVEScanning(ctx)
+		case <-alertTicker.C:
+			sched.RunAlertEvaluation(ctx)
 		case sig := <-sigCh:
 			logger.Info("received signal, shutting down", "signal", sig)
 			cancel()

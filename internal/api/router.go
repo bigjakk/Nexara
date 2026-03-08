@@ -209,6 +209,41 @@ func (s *Server) setupRoutes() {
 		cveClusters.Put("/:cluster_id/cve-scan-schedule", s.cveHandler.UpdateSchedule)
 	}
 
+	// Alert routes.
+	if s.alertHandler != nil {
+		alerts := v1.Group("/alerts", s.authRequired())
+		alerts.Get("/", s.alertHandler.ListAlerts)
+		alerts.Get("/summary", s.alertHandler.GetAlertSummary)
+		alerts.Get("/:id", s.alertHandler.GetAlert)
+		alerts.Post("/:id/acknowledge", s.alertHandler.AcknowledgeAlert)
+		alerts.Post("/:id/resolve", s.alertHandler.ResolveAlert)
+
+		alertRules := v1.Group("/alert-rules", s.authRequired())
+		alertRules.Get("/", s.alertHandler.ListRules)
+		alertRules.Post("/", s.alertHandler.CreateRule)
+		alertRules.Get("/:id", s.alertHandler.GetRule)
+		alertRules.Put("/:id", s.alertHandler.UpdateRule)
+		alertRules.Delete("/:id", s.alertHandler.DeleteRule)
+
+		notifChannels := v1.Group("/notification-channels", s.authRequired())
+		notifChannels.Get("/", s.alertHandler.ListChannels)
+		notifChannels.Post("/", s.alertHandler.CreateChannel)
+		notifChannels.Get("/:id", s.alertHandler.GetChannel)
+		notifChannels.Put("/:id", s.alertHandler.UpdateChannel)
+		notifChannels.Delete("/:id", s.alertHandler.DeleteChannel)
+
+		// Cluster-scoped alert routes
+		if s.clusterHandler != nil {
+			alertClusters := v1.Group("/clusters", s.authRequired())
+			alertClusters.Get("/:cluster_id/alerts", s.alertHandler.ListAlertsByCluster)
+			alertClusters.Get("/:cluster_id/alerts/count", s.alertHandler.CountActiveAlertsByCluster)
+			alertClusters.Get("/:cluster_id/maintenance-windows", s.alertHandler.ListMaintenanceWindows)
+			alertClusters.Post("/:cluster_id/maintenance-windows", s.alertHandler.CreateMaintenanceWindow)
+			alertClusters.Put("/:cluster_id/maintenance-windows/:id", s.alertHandler.UpdateMaintenanceWindow)
+			alertClusters.Delete("/:cluster_id/maintenance-windows/:id", s.alertHandler.DeleteMaintenanceWindow)
+		}
+	}
+
 	// DRS routes.
 	if s.drsHandler != nil && s.clusterHandler != nil {
 		drsClusters := v1.Group("/clusters", s.authRequired())

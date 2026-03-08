@@ -21,6 +21,8 @@ const (
 	KindDRSAction        = "drs_action"
 	KindPBSChange        = "pbs_change"
 	KindCVEScan          = "cve_scan"
+	KindAlertFired       = "alert_fired"
+	KindAlertStateChange = "alert_state_change"
 )
 
 // Event is a lightweight notification pushed through Redis pub/sub.

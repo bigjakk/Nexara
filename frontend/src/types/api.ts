@@ -289,6 +289,105 @@ export interface CVEScanSchedule {
   updated_at?: string;
 }
 
+// Alert types
+export interface AlertRule {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  severity: "critical" | "warning" | "info";
+  metric: string;
+  operator: string;
+  threshold: number;
+  duration_seconds: number;
+  scope_type: "cluster" | "node" | "vm";
+  cluster_id?: string;
+  node_id?: string;
+  vm_id?: string;
+  cooldown_seconds: number;
+  escalation_chain: EscalationStep[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EscalationStep {
+  channel_id: string;
+  delay_minutes: number;
+}
+
+export interface AlertInstance {
+  id: string;
+  rule_id: string;
+  state: "pending" | "firing" | "acknowledged" | "resolved";
+  severity: "critical" | "warning" | "info";
+  cluster_id?: string;
+  node_id?: string;
+  vm_id?: string;
+  resource_name: string;
+  metric: string;
+  current_value: number;
+  threshold: number;
+  message: string;
+  escalation_level: number;
+  channel_id?: string;
+  pending_at: string;
+  fired_at?: string;
+  acknowledged_at?: string;
+  acknowledged_by?: string;
+  resolved_at?: string;
+  resolved_by?: string;
+  created_at: string;
+}
+
+export interface AlertSummary {
+  firing_count: number;
+  pending_count: number;
+  acknowledged_count: number;
+  critical_firing: number;
+  warning_firing: number;
+  info_firing: number;
+}
+
+export interface NotificationChannel {
+  id: string;
+  name: string;
+  channel_type: "email" | "webhook" | "slack" | "discord" | "pagerduty";
+  enabled: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaintenanceWindow {
+  id: string;
+  cluster_id: string;
+  node_id?: string;
+  description: string;
+  starts_at: string;
+  ends_at: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlertRuleRequest {
+  name: string;
+  description?: string | undefined;
+  enabled?: boolean | undefined;
+  severity?: "critical" | "warning" | "info" | undefined;
+  metric: string;
+  operator: string;
+  threshold: number;
+  duration_seconds?: number | undefined;
+  scope_type?: "cluster" | "node" | "vm" | undefined;
+  cluster_id?: string | undefined;
+  node_id?: string | undefined;
+  vm_id?: string | undefined;
+  cooldown_seconds?: number | undefined;
+  escalation_chain?: EscalationStep[] | undefined;
+}
+
 export interface ApiError {
   error: string;
   message: string;

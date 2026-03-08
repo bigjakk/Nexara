@@ -100,6 +100,30 @@ export function useEventInvalidation(clusterIds: string[]): void {
             ["recent-activity"],
           );
           break;
+
+        case "cve_scan":
+          if (cid) {
+            scheduleInvalidation(
+              ["cve-scans", cid],
+              ["security-posture", cid],
+            );
+          }
+          break;
+
+        case "alert_fired":
+        case "alert_state_change":
+          scheduleInvalidation(
+            ["alerts"],
+            ["alert-rules"],
+            ["alert-summary"],
+          );
+          if (cid) {
+            scheduleInvalidation(
+              ["cluster-alerts", cid],
+              ["cluster-alert-count", cid],
+            );
+          }
+          break;
       }
     },
     [scheduleInvalidation],

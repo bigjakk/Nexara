@@ -14,6 +14,7 @@ import (
 	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/drs"
 	"github.com/proxdash/proxdash/internal/events"
+	"github.com/proxdash/proxdash/internal/notifications"
 	"github.com/proxdash/proxdash/internal/proxmox"
 	"github.com/proxdash/proxdash/internal/scanner"
 )
@@ -26,6 +27,7 @@ type Scheduler struct {
 	drsEngine     *drs.Engine
 	drsExecutor   *drs.Executor
 	cveScanner    *scanner.Engine
+	alertEngine   *notifications.Engine
 	eventPub      *events.Publisher
 }
 
@@ -38,6 +40,7 @@ func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPu
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
 		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor"), eventPub),
 		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner")),
+		alertEngine:   notifications.NewEngine(queries, logger.With("component", "alert-engine"), eventPub),
 		eventPub:      eventPub,
 	}
 }
@@ -317,6 +320,16 @@ func (s *Scheduler) markFailed(ctx context.Context, task db.ScheduledTask, errMs
 		LastStatus: pgtype.Text{String: "failed", Valid: true},
 		LastError:  pgtype.Text{String: errMsg, Valid: true},
 	})
+}
+
+// RunAlertEvaluation evaluates all enabled alert rules against current metrics.
+func (s *Scheduler) RunAlertEvaluation(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("alert evaluation panicked", "panic", r)
+		}
+	}()
+	s.alertEngine.Evaluate(ctx)
 }
 
 // mustAtoi converts a string to int, returning 0 on failure.

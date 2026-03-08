@@ -12,6 +12,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AlertHistory struct {
+	ID              uuid.UUID          `json:"id"`
+	RuleID          uuid.UUID          `json:"rule_id"`
+	State           string             `json:"state"`
+	Severity        string             `json:"severity"`
+	ClusterID       pgtype.UUID        `json:"cluster_id"`
+	NodeID          pgtype.UUID        `json:"node_id"`
+	VmID            pgtype.UUID        `json:"vm_id"`
+	ResourceName    string             `json:"resource_name"`
+	Metric          string             `json:"metric"`
+	CurrentValue    float64            `json:"current_value"`
+	Threshold       float64            `json:"threshold"`
+	Message         string             `json:"message"`
+	EscalationLevel int32              `json:"escalation_level"`
+	ChannelID       pgtype.UUID        `json:"channel_id"`
+	PendingAt       time.Time          `json:"pending_at"`
+	FiredAt         pgtype.Timestamptz `json:"fired_at"`
+	AcknowledgedAt  pgtype.Timestamptz `json:"acknowledged_at"`
+	AcknowledgedBy  pgtype.UUID        `json:"acknowledged_by"`
+	ResolvedAt      pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedBy      pgtype.UUID        `json:"resolved_by"`
+	CreatedAt       time.Time          `json:"created_at"`
+}
+
+type AlertRule struct {
+	ID              uuid.UUID       `json:"id"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	Enabled         bool            `json:"enabled"`
+	Severity        string          `json:"severity"`
+	Metric          string          `json:"metric"`
+	Operator        string          `json:"operator"`
+	Threshold       float64         `json:"threshold"`
+	DurationSeconds int32           `json:"duration_seconds"`
+	ScopeType       string          `json:"scope_type"`
+	ClusterID       pgtype.UUID     `json:"cluster_id"`
+	NodeID          pgtype.UUID     `json:"node_id"`
+	VmID            pgtype.UUID     `json:"vm_id"`
+	CooldownSeconds int32           `json:"cooldown_seconds"`
+	EscalationChain json.RawMessage `json:"escalation_chain"`
+	CreatedBy       uuid.UUID       `json:"created_by"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
 type AuditLog struct {
 	ID           uuid.UUID       `json:"id"`
 	ClusterID    pgtype.UUID     `json:"cluster_id"`
@@ -248,6 +293,18 @@ type LdapConfig struct {
 	UpdatedAt             time.Time          `json:"updated_at"`
 }
 
+type MaintenanceWindow struct {
+	ID          uuid.UUID   `json:"id"`
+	ClusterID   uuid.UUID   `json:"cluster_id"`
+	NodeID      pgtype.UUID `json:"node_id"`
+	Description string      `json:"description"`
+	StartsAt    time.Time   `json:"starts_at"`
+	EndsAt      time.Time   `json:"ends_at"`
+	CreatedBy   uuid.UUID   `json:"created_by"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+}
+
 type MigrationJob struct {
 	ID              uuid.UUID          `json:"id"`
 	SourceClusterID uuid.UUID          `json:"source_cluster_id"`
@@ -331,6 +388,17 @@ type NodeMetrics5m struct {
 	AvgDiskWrite float64     `json:"avg_disk_write"`
 	AvgNetIn     float64     `json:"avg_net_in"`
 	AvgNetOut    float64     `json:"avg_net_out"`
+}
+
+type NotificationChannel struct {
+	ID              uuid.UUID `json:"id"`
+	Name            string    `json:"name"`
+	ChannelType     string    `json:"channel_type"`
+	ConfigEncrypted string    `json:"config_encrypted"`
+	Enabled         bool      `json:"enabled"`
+	CreatedBy       uuid.UUID `json:"created_by"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type OidcConfig struct {

@@ -12,13 +12,16 @@ import (
 )
 
 type Querier interface {
+	AcknowledgeAlert(ctx context.Context, arg AcknowledgeAlertParams) error
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
 	AssignUserRole(ctx context.Context, arg AssignUserRoleParams) (UserRole, error)
+	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
 	CheckUserPermission(ctx context.Context, arg CheckUserPermissionParams) (bool, error)
 	CleanupStaleDRSHistory(ctx context.Context) error
 	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
+	CountActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) (CountActiveAlertsByClusterRow, error)
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -33,6 +36,7 @@ type Querier interface {
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteAlertRule(ctx context.Context, id uuid.UUID) error
 	DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) error
 	DeleteCVEScan(ctx context.Context, id uuid.UUID) error
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
@@ -41,6 +45,8 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
 	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
+	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
+	DeleteNotificationChannel(ctx context.Context, id uuid.UUID) error
 	DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
 	DeleteRecoveryCode(ctx context.Context, id uuid.UUID) error
@@ -53,6 +59,9 @@ type Querier interface {
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error)
+	GetAlertRule(ctx context.Context, id uuid.UUID) (AlertRule, error)
+	GetAlertSummary(ctx context.Context) (GetAlertSummaryRow, error)
 	GetCVECacheAge(ctx context.Context) (interface{}, error)
 	GetCVECacheByID(ctx context.Context, cveID string) (CveCache, error)
 	GetCVEScan(ctx context.Context, id uuid.UUID) (CveScan, error)
@@ -72,16 +81,21 @@ type Querier interface {
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
 	GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, error)
 	GetLastDRSMigrationForVM(ctx context.Context, arg GetLastDRSMigrationForVMParams) (DrsHistory, error)
+	GetLatestAlertForRule(ctx context.Context, arg GetLatestAlertForRuleParams) (AlertHistory, error)
 	GetLatestCVEScan(ctx context.Context, clusterID uuid.UUID) (CveScan, error)
 	GetLatestCephClusterMetrics(ctx context.Context, clusterID uuid.UUID) (CephClusterMetric, error)
 	GetLatestCephOSDMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephOsdMetric, error)
 	GetLatestCephPoolMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephPoolMetric, error)
 	GetLatestPBSDatastoreMetrics(ctx context.Context, pbsServerID uuid.UUID) ([]PbsDatastoreMetric, error)
+	GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (MaintenanceWindow, error)
 	GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJob, error)
 	GetNode(ctx context.Context, id uuid.UUID) (Node, error)
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
 	GetNodeMetrics1h(ctx context.Context, arg GetNodeMetrics1hParams) ([]GetNodeMetrics1hRow, error)
 	GetNodeMetrics5m(ctx context.Context, arg GetNodeMetrics5mParams) ([]GetNodeMetrics5mRow, error)
+	// Metric queries for alert evaluation
+	GetNodeRecentMetrics(ctx context.Context, arg GetNodeRecentMetricsParams) ([]GetNodeRecentMetricsRow, error)
+	GetNotificationChannel(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
 	GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, error)
 	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]PbsDatastoreMetric, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
@@ -103,17 +117,34 @@ type Querier interface {
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
+	GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetricsParams) ([]GetVMRecentMetricsRow, error)
+	// Alert History
+	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
+	// Alert Rules
+	InsertAlertRule(ctx context.Context, arg InsertAlertRuleParams) (AlertRule, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertCVEScan(ctx context.Context, arg InsertCVEScanParams) (CveScan, error)
 	InsertCVEScanNode(ctx context.Context, arg InsertCVEScanNodeParams) (CveScanNode, error)
 	InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnParams) (CveScanVuln, error)
 	InsertDRSHistory(ctx context.Context, arg InsertDRSHistoryParams) (DrsHistory, error)
 	InsertDRSRule(ctx context.Context, arg InsertDRSRuleParams) (DrsRule, error)
+	// Maintenance Windows
+	InsertMaintenanceWindow(ctx context.Context, arg InsertMaintenanceWindowParams) (MaintenanceWindow, error)
+	// Notification Channels
+	InsertNotificationChannel(ctx context.Context, arg InsertNotificationChannelParams) (NotificationChannel, error)
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
+	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
+	ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
+	ListActiveMaintenanceWindows(ctx context.Context) ([]MaintenanceWindow, error)
 	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
+	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
+	ListAlertHistoryByCluster(ctx context.Context, arg ListAlertHistoryByClusterParams) ([]AlertHistory, error)
+	ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHistoryFilteredParams) ([]AlertHistory, error)
+	ListAlertRules(ctx context.Context, arg ListAlertRulesParams) ([]AlertRule, error)
+	ListAlertRulesByCluster(ctx context.Context, arg ListAlertRulesByClusterParams) ([]AlertRule, error)
 	ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error)
 	ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error)
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
@@ -130,14 +161,18 @@ type Querier interface {
 	ListDRSHistory(ctx context.Context, arg ListDRSHistoryParams) ([]DrsHistory, error)
 	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsRule, error)
 	ListDueTasks(ctx context.Context) ([]ScheduledTask, error)
+	ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error)
 	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
 	ListFirewallTemplates(ctx context.Context) ([]FirewallTemplate, error)
+	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
 	ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error)
 	ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
+	ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error)
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
+	ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error)
 	ListOIDCConfigs(ctx context.Context) ([]OidcConfig, error)
 	ListOIDCUsers(ctx context.Context) ([]ListOIDCUsersRow, error)
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
@@ -168,6 +203,7 @@ type Querier interface {
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
+	ResolveAlert(ctx context.Context, arg ResolveAlertParams) error
 	RevokeAllUserRoles(ctx context.Context, userID uuid.UUID) error
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
@@ -176,6 +212,10 @@ type Querier interface {
 	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error
+	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error
+	UpdateAlertEscalation(ctx context.Context, arg UpdateAlertEscalationParams) error
+	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)
+	UpdateAlertState(ctx context.Context, arg UpdateAlertStateParams) error
 	UpdateCVEScanCounts(ctx context.Context, arg UpdateCVEScanCountsParams) error
 	UpdateCVEScanNode(ctx context.Context, arg UpdateCVEScanNodeParams) error
 	UpdateCVEScanStatus(ctx context.Context, arg UpdateCVEScanStatusParams) error
@@ -186,9 +226,11 @@ type Querier interface {
 	UpdateLDAPConfig(ctx context.Context, arg UpdateLDAPConfigParams) (LdapConfig, error)
 	UpdateLDAPConfigLastSync(ctx context.Context, id uuid.UUID) error
 	UpdateLDAPUserProfile(ctx context.Context, arg UpdateLDAPUserProfileParams) (User, error)
+	UpdateMaintenanceWindow(ctx context.Context, arg UpdateMaintenanceWindowParams) (MaintenanceWindow, error)
 	UpdateMigrationJobChecks(ctx context.Context, arg UpdateMigrationJobChecksParams) error
 	UpdateMigrationJobProgress(ctx context.Context, arg UpdateMigrationJobProgressParams) error
 	UpdateMigrationJobStatus(ctx context.Context, arg UpdateMigrationJobStatusParams) error
+	UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (NotificationChannel, error)
 	UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error)
 	UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserProfileParams) (User, error)
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)

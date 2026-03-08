@@ -120,7 +120,10 @@ export type EventKind =
   | "inventory_change"
   | "migration_update"
   | "drs_action"
-  | "pbs_change";
+  | "pbs_change"
+  | "cve_scan"
+  | "alert_fired"
+  | "alert_state_change";
 
 /** Event pushed from the backend through the WS pipeline. */
 export interface ProxDashEvent {
