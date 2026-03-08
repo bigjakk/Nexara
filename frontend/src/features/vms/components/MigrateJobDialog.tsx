@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import {
@@ -254,14 +254,17 @@ export function MigrateJobDialog({
   const { data: clusterVMs } = useClusterVMs(effectiveTargetClusterId);
 
   // Build a VM count per node_id (DB UUID) for scoring
-  const vmCountByNodeId = new Map<string, number>();
-  if (clusterVMs) {
-    for (const vm of clusterVMs) {
-      if (vm.status === "running") {
-        vmCountByNodeId.set(vm.node_id, (vmCountByNodeId.get(vm.node_id) ?? 0) + 1);
+  const vmCountByNodeId = useMemo(() => {
+    const map = new Map<string, number>();
+    if (clusterVMs) {
+      for (const vm of clusterVMs) {
+        if (vm.status === "running") {
+          map.set(vm.node_id, (map.get(vm.node_id) ?? 0) + 1);
+        }
       }
     }
-  }
+    return map;
+  }, [clusterVMs]);
 
   useEffect(() => {
     if (!availableTargetNodes || availableTargetNodes.length === 0) return;

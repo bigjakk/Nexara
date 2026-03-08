@@ -13,6 +13,7 @@ interface VNCViewerProps {
  * Type out text as individual key events into a VNC session.
  * Converts each character to an X11 keysym and sends press/release.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function typeTextIntoVnc(rfb: RFB, text: string) {
   for (const ch of text) {
     const code = ch.codePointAt(0);
@@ -152,9 +153,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       wsRef.current = null;
     };
     // Only re-run when the actual connection parameters change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId, clusterID, node, vmid, guestType, reconnectKey]);
-
 
   return (
     <div

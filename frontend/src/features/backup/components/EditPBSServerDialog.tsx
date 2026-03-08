@@ -48,6 +48,7 @@ export function EditPBSServerDialog({
       setClusterId(server.cluster_id ?? "");
       updatePBS.reset();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, server]);
 
   function handleSubmit(e: React.SyntheticEvent) {

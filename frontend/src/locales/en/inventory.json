@@ -1,0 +1,15 @@
+{
+  "inventory": "Inventory",
+  "browseAllResources": "Browse all VMs, containers, and nodes across your clusters.",
+  "newVM": "New VM",
+  "newCT": "New CT",
+  "resources": "Resources",
+  "resourcesCount": "Resources ({{count}})",
+  "templatesCount": "Templates ({{count}})",
+  "failedLoadInventory": "Failed to load inventory data. Please try again.",
+  "noResources": "No resources found. Add a cluster to get started.",
+  "noTemplates": "No templates found. Convert a VM or container to a template in Proxmox.",
+  "searchPlaceholder": "Search VMs, containers, nodes...",
+  "columnToggle": "Columns",
+  "node": "Node"
+}

@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ShieldAlert, Loader2, RefreshCw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
@@ -26,6 +27,7 @@ import { SSHCredentialsForm } from "@/features/rolling-updates/components/SSHCre
 import type { RollingUpdateJob } from "@/types/api";
 
 export function SecurityDashboardPage() {
+  const { t } = useTranslation("security");
   const { hasPermission } = useAuth();
   const canManageRolling = hasPermission("manage", "rolling_update");
   const canManageSSH = hasPermission("manage", "ssh_credentials");
@@ -97,7 +99,7 @@ export function SecurityDashboardPage() {
       <div className="flex h-full items-center justify-center">
         <div className="text-center text-muted-foreground">
           <ShieldAlert className="mx-auto mb-2 h-12 w-12" />
-          <p>No clusters configured. Add a cluster first.</p>
+          <p>{t("noClustersConfigured")}</p>
         </div>
       </div>
     );
@@ -109,7 +111,7 @@ export function SecurityDashboardPage() {
       <div className="space-y-6 p-6">
         <div className="flex items-center gap-3">
           <ShieldAlert className="h-6 w-6" />
-          <h1 className="text-2xl font-bold">Security</h1>
+          <h1 className="text-2xl font-bold">{t("security")}</h1>
         </div>
         <RollingUpdateProgress
           clusterId={activeClusterId}
@@ -132,7 +134,7 @@ export function SecurityDashboardPage() {
       {/* Header */}
       <div className="flex items-center gap-3">
         <ShieldAlert className="h-6 w-6" />
-        <h1 className="text-2xl font-bold">Security</h1>
+        <h1 className="text-2xl font-bold">{t("security")}</h1>
       </div>
 
       {/* Cluster selector */}
@@ -160,8 +162,8 @@ export function SecurityDashboardPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="vulnerabilities">Vulnerability Scanning</TabsTrigger>
-          <TabsTrigger value="rolling-updates">Rolling Updates</TabsTrigger>
+          <TabsTrigger value="vulnerabilities">{t("vulnerabilityScanning")}</TabsTrigger>
+          <TabsTrigger value="rolling-updates">{t("rollingUpdates")}</TabsTrigger>
         </TabsList>
 
         {/* Vulnerability Scanning Tab */}
@@ -179,7 +181,7 @@ export function SecurityDashboardPage() {
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              Scan Now
+              {t("scanNow")}
             </button>
           </div>
 

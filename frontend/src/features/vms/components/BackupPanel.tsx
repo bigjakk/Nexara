@@ -338,7 +338,7 @@ function BackupNowDialog({
   const [backupUpid, setBackupUpid] = useState<string | null>(null);
 
   const storageQuery = useClusterStorage(clusterId);
-  const allStorage = storageQuery.data ?? [];
+  const allStorage = useMemo(() => storageQuery.data ?? [], [storageQuery.data]);
 
   // Deduplicate shared storage, only show backup-capable storage
   // Sort: PBS first (recommended), then others

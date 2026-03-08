@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertSummaryCard } from "../components/AlertSummaryCard";
 import { AlertsTable } from "../components/AlertsTable";
@@ -8,6 +9,7 @@ import { ChannelForm } from "../components/ChannelForm";
 import { useAuth } from "@/hooks/useAuth";
 
 export function AlertsPage() {
+  const { t } = useTranslation("alerts");
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "alert");
   const canManageChannels = hasPermission("manage", "notification_channel");
@@ -15,7 +17,7 @@ export function AlertsPage() {
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Alerts</h1>
+        <h1 className="text-2xl font-bold">{t("alerts")}</h1>
         <div className="flex gap-2">
           {canManageChannels && <ChannelForm />}
           {canManage && <AlertRuleForm />}
@@ -26,9 +28,9 @@ export function AlertsPage() {
 
       <Tabs defaultValue="alerts">
         <TabsList>
-          <TabsTrigger value="alerts">Alert History</TabsTrigger>
-          <TabsTrigger value="rules">Alert Rules</TabsTrigger>
-          <TabsTrigger value="channels">Channels</TabsTrigger>
+          <TabsTrigger value="alerts">{t("alertHistory")}</TabsTrigger>
+          <TabsTrigger value="rules">{t("alertRules")}</TabsTrigger>
+          <TabsTrigger value="channels">{t("channels")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="alerts" className="mt-4">

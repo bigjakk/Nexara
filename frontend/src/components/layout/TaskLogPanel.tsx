@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ChevronUp,
   ChevronDown,
@@ -111,6 +112,7 @@ function ActivityRow({
   onFocus: () => void;
   taskStatus: { status: string; exitStatus: string } | undefined;
 }) {
+  const { t } = useTranslation("common");
   const details = parseDetails(entry.details);
   const hasUpid = !!details.upid;
   const clusterId = getClusterIdFromEntry(entry);
@@ -176,7 +178,7 @@ function ActivityRow({
               </span>
             )}
             {isRunning && (
-              <span className="text-xs text-blue-500">running</span>
+              <span className="text-xs text-blue-500">{t("running").toLowerCase()}</span>
             )}
           </div>
         </td>
@@ -229,7 +231,7 @@ function ActivityRow({
                 (k) => !["upid", "node", "vmid"].includes(k),
               ).length > 0 && (
                 <>
-                  <span className="text-muted-foreground">Details</span>
+                  <span className="text-muted-foreground">{t("details")}</span>
                   <span className="break-all font-mono text-[10px]">
                     {JSON.stringify(
                       Object.fromEntries(
@@ -247,12 +249,12 @@ function ActivityRow({
             {hasUpid && (
               <div className="mt-2 border-t pt-2">
                 <span className="text-xs font-medium text-muted-foreground">
-                  Log
+                  {t("log")}
                 </span>
                 {logLoading && (
                   <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                     <Loader2 className="h-3 w-3 animate-spin" />
-                    Loading log…
+                    {t("loadingLog")}
                   </div>
                 )}
                 {logLines && logLines.length > 0 && (
@@ -262,7 +264,7 @@ function ActivityRow({
                 )}
                 {logLines && logLines.length === 0 && (
                   <div className="mt-1 text-xs text-muted-foreground">
-                    No log output
+                    {t("noLogOutput")}
                   </div>
                 )}
               </div>
@@ -275,6 +277,7 @@ function ActivityRow({
 }
 
 export function TaskLogPanel() {
+  const { t } = useTranslation("common");
   const panelOpen = useTaskLogStore((s) => s.panelOpen);
   const panelHeight = useTaskLogStore((s) => s.panelHeight);
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
@@ -380,15 +383,15 @@ export function TaskLogPanel() {
           setPanelOpen(!panelOpen);
         }}
       >
-        <span className="font-medium">Activity</span>
+        <span className="font-medium">{t("activity")}</span>
         {runningCount > 0 && (
           <span className="rounded-full bg-blue-500/20 px-1.5 py-0.5 text-blue-600 dark:text-blue-400">
-            {runningCount} running
+            {runningCount} {t("running").toLowerCase()}
           </span>
         )}
         {failedCount > 0 && (
           <span className="rounded-full bg-red-500/20 px-1.5 py-0.5 text-red-600 dark:text-red-400">
-            {failedCount} failed
+            {failedCount} {t("failed").toLowerCase()}
           </span>
         )}
         <div className="flex-1" />
@@ -404,7 +407,7 @@ export function TaskLogPanel() {
         <div className="overflow-auto" style={{ height: panelHeight }}>
           {(!entries || entries.length === 0) && (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-              No activity
+              {t("noActivity")}
             </div>
           )}
           {entries && entries.length > 0 && (

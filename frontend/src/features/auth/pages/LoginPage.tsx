@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft, Loader2, Server, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,14 +26,19 @@ function sanitizeReturnTo(value: string | null): string {
   return value;
 }
 
-const loginSchema = z.object({
-  email: z.email({ message: "Invalid email address" }),
-  password: z.string().min(1, "Password is required"),
-});
+function useLoginSchema() {
+  const { t } = useTranslation("auth");
+  return z.object({
+    email: z.email({ message: t("invalidEmailAddress") }),
+    password: z.string().min(1, t("passwordRequired")),
+  });
+}
 
-type LoginFormValues = z.infer<typeof loginSchema>;
+type LoginFormValues = z.infer<ReturnType<typeof useLoginSchema>>;
 
 export function LoginPage() {
+  const { t } = useTranslation("auth");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const {
@@ -52,6 +58,7 @@ export function LoginPage() {
   const [useRecoveryCode, setUseRecoveryCode] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState("");
 
+  const loginSchema = useLoginSchema();
   const returnTo = sanitizeReturnTo(searchParams.get("returnTo"));
 
   const {
@@ -120,7 +127,7 @@ export function LoginPage() {
       );
       window.location.href = res.redirect_url;
     } catch {
-      setError("Failed to initiate SSO login");
+      setError(t("failedToInitiateSSOLogin"));
       setSSOLoading(false);
     }
   };
@@ -133,7 +140,7 @@ export function LoginPage() {
       if (err instanceof ApiClientError) {
         setError(err.body.message);
       } else {
-        setError("An unexpected error occurred");
+        setError(tc("unexpectedError"));
       }
     }
   };
@@ -151,7 +158,7 @@ export function LoginPage() {
       if (err instanceof ApiClientError) {
         setError(err.body.message);
       } else {
-        setError("An unexpected error occurred");
+        setError(tc("unexpectedError"));
       }
     }
   };
@@ -181,11 +188,11 @@ export function LoginPage() {
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary">
               <ShieldCheck className="h-6 w-6 text-primary-foreground" />
             </div>
-            <CardTitle className="text-2xl">Two-Factor Authentication</CardTitle>
+            <CardTitle className="text-2xl">{t("twoFactorAuthentication")}</CardTitle>
             <CardDescription>
               {useRecoveryCode
-                ? "Enter one of your recovery codes"
-                : "Enter the 6-digit code from your authenticator app"}
+                ? t("enterRecoveryCodes")
+                : t("enterSixDigitCode")}
             </CardDescription>
           </CardHeader>
           <form onSubmit={(e) => void handleTotpSubmit(e)}>
@@ -197,7 +204,7 @@ export function LoginPage() {
               )}
               {useRecoveryCode ? (
                 <div className="space-y-2">
-                  <Label htmlFor="recovery-code">Recovery Code</Label>
+                  <Label htmlFor="recovery-code">{t("recoveryCode")}</Label>
                   <Input
                     id="recovery-code"
                     type="text"
@@ -210,7 +217,7 @@ export function LoginPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <Label htmlFor="totp-code">Authentication Code</Label>
+                  <Label htmlFor="totp-code">{t("authenticationCode")}</Label>
                   <Input
                     id="totp-code"
                     type="text"
@@ -233,7 +240,7 @@ export function LoginPage() {
                 disabled={isLoading || (useRecoveryCode ? !recoveryCode : totpCode.length !== 6)}
               >
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Verify
+                {t("verify")}
               </Button>
               <Button
                 type="button"
@@ -245,8 +252,8 @@ export function LoginPage() {
                 }}
               >
                 {useRecoveryCode
-                  ? "Use authenticator app instead"
-                  : "Use a recovery code"}
+                  ? t("useAuthenticatorApp")
+                  : t("useRecoveryCode")}
               </Button>
               <Button
                 type="button"
@@ -256,7 +263,7 @@ export function LoginPage() {
                 onClick={handleBackToLogin}
               >
                 <ArrowLeft className="mr-1 h-3 w-3" />
-                Back to login
+                {t("backToLogin")}
               </Button>
             </CardFooter>
           </form>
@@ -272,9 +279,9 @@ export function LoginPage() {
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary">
             <Server className="h-6 w-6 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl">Welcome to ProxDash</CardTitle>
+          <CardTitle className="text-2xl">{t("welcomeToProxDash")}</CardTitle>
           <CardDescription>
-            Sign in to manage your Proxmox infrastructure
+            {t("signInToManage")}
           </CardDescription>
         </CardHeader>
         <form onSubmit={(e) => void handleSubmit(onSubmit)(e)}>
@@ -285,7 +292,7 @@ export function LoginPage() {
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("email")}</Label>
               <Input
                 id="email"
                 type="email"
@@ -300,7 +307,7 @@ export function LoginPage() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("password")}</Label>
               <Input
                 id="password"
                 type="password"
@@ -317,13 +324,13 @@ export function LoginPage() {
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Sign In
+              {t("signIn")}
             </Button>
             {ssoStatus?.oidc_enabled && (
               <>
                 <div className="flex w-full items-center gap-3">
                   <div className="h-px flex-1 bg-border" />
-                  <span className="text-xs text-muted-foreground">or</span>
+                  <span className="text-xs text-muted-foreground">{t("or")}</span>
                   <div className="h-px flex-1 bg-border" />
                 </div>
                 <Button
@@ -334,17 +341,17 @@ export function LoginPage() {
                   onClick={() => void handleSSOLogin()}
                 >
                   {ssoLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Sign in with {ssoStatus.oidc_provider_name || "SSO"}
+                  {t("signInWith", { provider: ssoStatus.oidc_provider_name || "SSO" })}
                 </Button>
               </>
             )}
             <p className="text-center text-sm text-muted-foreground">
-              First time?{" "}
+              {t("firstTime")}{" "}
               <Link
                 to="/register"
                 className="font-medium text-primary underline-offset-4 hover:underline"
               >
-                Create admin account
+                {t("createAdminAccount")}
               </Link>
             </p>
           </CardFooter>

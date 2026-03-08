@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   ChevronRight,
@@ -259,13 +260,14 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
 }
 
 export function InventoryTree() {
+  const { t } = useTranslation("common");
   const { data: clusters, isLoading } = useClusters();
 
   return (
     <div className="space-y-1 py-1">
       <div className="flex items-center justify-between px-2 pb-1">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Datacenter
+          {t("datacenter")}
         </span>
         <AddClusterDialog
           trigger={
@@ -285,7 +287,7 @@ export function InventoryTree() {
       )}
 
       {clusters?.length === 0 && (
-        <p className="px-2 text-xs text-muted-foreground">No clusters added.</p>
+        <p className="px-2 text-xs text-muted-foreground">{t("noClustersAdded")}</p>
       )}
 
       {clusters?.map((cluster) => (

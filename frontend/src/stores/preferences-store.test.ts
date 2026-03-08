@@ -9,6 +9,7 @@ const defaultPreferences: UserPreferences = {
   dateFormat: "relative",
   refreshInterval: 30,
   accentColor: "default",
+  language: "en",
 };
 
 describe("preferences-store — defaults", () => {
@@ -181,12 +182,13 @@ describe("preferences-store — loadFromJSON", () => {
     expect(usePreferencesStore.getState().preferences).toEqual(before);
   });
 
-  it("can load all four preference fields at once", () => {
+  it("can load all preference fields at once", () => {
     const full: UserPreferences = {
       byteUnit: "decimal",
       dateFormat: "locale",
       refreshInterval: 5,
       accentColor: "red",
+      language: "en",
     };
     usePreferencesStore.getState().loadFromJSON(full);
     expect(usePreferencesStore.getState().preferences).toEqual(full);

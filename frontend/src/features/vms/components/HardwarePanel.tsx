@@ -822,7 +822,6 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
     if (disksToRemove.size > 0) return true;
     if (pendingNewDisks.length > 0) return true;
     return false;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [original, cores, sockets, cpuType, numa, cpulimit, cpuunits, affinity, memory, balloon, shares, bios, machine, scsihw, agentEnabled, agentFstrim, kvmEnabled, acpi, onboot, tablet, hotplug, ostype, protection, localtime, bootOrder, startupOrder, startupUp, startupDown, nicEdits, vgaType, vgaMemory, audioDevice, cdromEdits, description, tags, diskEdits, disksToRemove, pendingNewDisks, pendingDeviceAdds, deviceRemovals]);
 
   if (isLoading) {

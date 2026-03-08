@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { LogOut, LogOutIcon, ShieldCheck, User } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -35,6 +36,7 @@ function getInitials(name: string): string {
 }
 
 export function AppShell() {
+  const { t } = useTranslation("navigation");
   const navigate = useNavigate();
   const { user, logout, logoutAll } = useAuth();
   const wsConnect = useWebSocketStore((s) => s.connect);
@@ -96,20 +98,20 @@ export function AppShell() {
               <DropdownMenuSeparator />
               <DropdownMenuItem>
                 <User className="mr-2 h-4 w-4" />
-                Profile
+                {t("profile", { ns: "common" })}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => { void navigate("/settings/security"); }}>
                 <ShieldCheck className="mr-2 h-4 w-4" />
-                Security
+                {t("security")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout}>
                 <LogOut className="mr-2 h-4 w-4" />
-                Sign Out
+                {t("signOut", { ns: "common" })}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleLogoutAll}>
                 <LogOutIcon className="mr-2 h-4 w-4" />
-                Sign Out All Devices
+                {t("signOutAllDevices", { ns: "common" })}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -1,0 +1,17 @@
+{
+  "topology": "Topology",
+  "loadingTopology": "Loading topology...",
+  "failedLoadTopology": "Failed to load topology: {{error}}",
+  "noClustersTopology": "No clusters configured. Add a cluster to see the topology.",
+  "showVMs": "Show VMs",
+  "showContainers": "Show Containers",
+  "showStorage": "Show Storage",
+  "layoutDirection": "Layout Direction",
+  "topToBottom": "Top to Bottom",
+  "leftToRight": "Left to Right",
+  "allClusters": "All Clusters",
+  "legend": "Legend",
+  "healthy": "Healthy",
+  "degraded": "Degraded",
+  "offline": "Offline"
+}

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Server, Monitor, Box, HardDrive } from "lucide-react";
@@ -12,10 +13,10 @@ interface StatsOverviewProps {
 }
 
 const stats = [
-  { key: "nodes", label: "Nodes", icon: Server },
-  { key: "vms", label: "Virtual Machines", icon: Monitor },
-  { key: "containers", label: "Containers", icon: Box },
-  { key: "storage", label: "Total Storage", icon: HardDrive },
+  { key: "nodes", labelKey: "nodes", icon: Server },
+  { key: "vms", labelKey: "virtualMachines", icon: Monitor },
+  { key: "containers", labelKey: "containers", icon: Box },
+  { key: "storage", labelKey: "totalStorage", icon: HardDrive },
 ] as const;
 
 export function StatsOverview({
@@ -25,6 +26,7 @@ export function StatsOverview({
   totalStorageBytes,
   isLoading,
 }: StatsOverviewProps) {
+  const { t } = useTranslation("dashboard");
   const values: Record<string, string> = {
     nodes: String(totalNodes),
     vms: String(totalVMs),
@@ -40,7 +42,7 @@ export function StatsOverview({
           <Card key={stat.key}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
-                {stat.label}
+                {t(stat.labelKey)}
               </CardTitle>
               <Icon className="h-4 w-4 text-muted-foreground" />
             </CardHeader>

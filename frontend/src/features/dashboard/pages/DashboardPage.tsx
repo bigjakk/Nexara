@@ -1,4 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 import { Plus, LayoutGrid, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDashboardData } from "../api/dashboard-queries";
@@ -34,18 +36,19 @@ import {
 import type { TimeRange } from "@/types/api";
 import type { AggregatedMetrics } from "@/types/ws";
 
-function ConnectionDot({ status }: { status: string }) {
+function ConnectionDot({ status, t }: { status: string; t: (key: string) => string }) {
   const isConnected = status === "connected";
   return (
     <span
       className={`inline-block h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
-      title={isConnected ? "Live connected" : "Disconnected"}
+      title={isConnected ? t("liveConnected") : t("disconnected")}
       data-testid="connection-dot"
     />
   );
 }
 
 export function DashboardPage() {
+  const { t } = useTranslation("dashboard");
   const [timeRange, setTimeRange] = useState<TimeRange>("live");
   const [createVMOpen, setCreateVMOpen] = useState(false);
   const [createCTOpen, setCreateCTOpen] = useState(false);
@@ -316,20 +319,20 @@ export function DashboardPage() {
         default:
           return (
             <div className="flex h-full items-center justify-center text-muted-foreground">
-              Unknown widget: {widgetId}
+              {t("unknownWidget", { widgetId })}
             </div>
           );
       }
     },
-    [data, clusterMap, isLoading, liveMetrics, timeRange],
+    [data, clusterMap, isLoading, liveMetrics, timeRange, t],
   );
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <ConnectionDot status={status} />
+          <h1 className="text-2xl font-bold">{t("dashboard")}</h1>
+          <ConnectionDot status={status} t={t} />
         </div>
         <div className="flex items-center gap-3">
           <DashboardPresetSelector
@@ -349,12 +352,12 @@ export function DashboardPage() {
             {editMode ? (
               <>
                 <Lock className="h-4 w-4" />
-                Lock
+                {t("lock")}
               </>
             ) : (
               <>
                 <LayoutGrid className="h-4 w-4" />
-                Customize
+                {t("customize")}
               </>
             )}
           </Button>
@@ -366,7 +369,7 @@ export function DashboardPage() {
                 onClick={() => { setCreateVMOpen(true); }}
               >
                 <Plus className="h-4 w-4" />
-                New VM
+                {t("newVM")}
               </Button>
               <Button
                 size="sm"
@@ -375,7 +378,7 @@ export function DashboardPage() {
                 onClick={() => { setCreateCTOpen(true); }}
               >
                 <Plus className="h-4 w-4" />
-                New CT
+                {t("newCT")}
               </Button>
             </>
           )}
@@ -387,7 +390,7 @@ export function DashboardPage() {
 
       {error != null ? (
         <div className="rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
-          Failed to load dashboard data. Please try again.
+          {t("failedLoadDashboard")}
         </div>
       ) : (
         <>
@@ -458,10 +461,10 @@ function ClusterChart({
     : (historicalQuery.data ?? []);
 
   const chartConfigs = {
-    cpu: { title: "CPU Usage", dataKey: "cpuPercent" as const, color: "#3b82f6" },
-    memory: { title: "Memory Usage", dataKey: "memPercent" as const, color: "#8b5cf6" },
-    disk: { title: "Disk I/O (Read)", dataKey: "diskReadBps" as const, color: "#f59e0b" },
-    network: { title: "Network In", dataKey: "netInBps" as const, color: "#10b981" },
+    cpu: { titleKey: "cpuUsage", dataKey: "cpuPercent" as const, color: "#3b82f6" },
+    memory: { titleKey: "memoryUsage", dataKey: "memPercent" as const, color: "#8b5cf6" },
+    disk: { titleKey: "diskIoRead", dataKey: "diskReadBps" as const, color: "#f59e0b" },
+    network: { titleKey: "networkIn", dataKey: "netInBps" as const, color: "#10b981" },
   };
 
   const config = chartConfigs[chartType];
@@ -469,14 +472,14 @@ function ClusterChart({
   if (!isLive && historicalQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading...
+        {i18n.t("common:loading")}
       </div>
     );
   }
 
   return (
     <MetricChart
-      title={`${summary.cluster.name} — ${config.title}`}
+      title={`${summary.cluster.name} — ${i18n.t(`dashboard:${config.titleKey}`)}`}
       data={chartData}
       dataKey={config.dataKey}
       color={config.color}

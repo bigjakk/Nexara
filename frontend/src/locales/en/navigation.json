@@ -1,0 +1,14 @@
+{
+  "dashboard": "Dashboard",
+  "inventory": "Inventory",
+  "topology": "Topology",
+  "console": "Console",
+  "storage": "Storage",
+  "backup": "Backup",
+  "alerts": "Alerts",
+  "reports": "Reports",
+  "security": "Security",
+  "auditLog": "Audit Log",
+  "settings": "Settings",
+  "admin": "Admin"
+}

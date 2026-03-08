@@ -108,6 +108,7 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
   const paged = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
   // Reset page when filters change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useMemo(() => { setPage(0); }, [typeFilter, statusFilter, search]);
 
   if (tasks.length === 0) {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { apiClient, ApiClientError, storeTokens } from "@/lib/api-client";
@@ -27,6 +28,7 @@ function isTotpRequired(
 }
 
 export function OIDCCallbackPage() {
+  const { t } = useTranslation("auth");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +50,7 @@ export function OIDCCallbackPage() {
     }
 
     if (!oidcToken) {
-      setError("Missing authentication token");
+      setError(t("missingAuthToken"));
       return;
     }
 
@@ -72,15 +74,13 @@ export function OIDCCallbackPage() {
       })
       .catch(() => {
         if (cancelled) return;
-        setError(
-          "Authentication failed. The SSO token may have expired. Please try again.",
-        );
+        setError(t("ssoTokenExpired"));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [searchParams, navigate, setAuth]);
+  }, [searchParams, navigate, setAuth, t]);
 
   const handleTotpSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -104,7 +104,7 @@ export function OIDCCallbackPage() {
       if (err instanceof ApiClientError) {
         setError(err.body.message);
       } else {
-        setError("Verification failed");
+        setError(t("verificationFailed"));
       }
     } finally {
       setVerifying(false);
@@ -116,13 +116,13 @@ export function OIDCCallbackPage() {
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="w-full max-w-md space-y-4 text-center">
           <XCircle className="mx-auto h-12 w-12 text-destructive" />
-          <h1 className="text-xl font-semibold">SSO Authentication Failed</h1>
+          <h1 className="text-xl font-semibold">{t("ssoAuthenticationFailed")}</h1>
           <p className="text-muted-foreground">{error}</p>
           <a
             href="/login"
             className="inline-block text-primary underline-offset-4 hover:underline"
           >
-            Back to login
+            {t("backToLogin")}
           </a>
         </div>
       </div>
@@ -138,12 +138,12 @@ export function OIDCCallbackPage() {
               <ShieldCheck className="h-6 w-6 text-primary-foreground" />
             </div>
             <CardTitle className="text-2xl">
-              Two-Factor Authentication
+              {t("twoFactorAuthentication")}
             </CardTitle>
             <CardDescription>
               {useRecoveryCode
-                ? "Enter one of your recovery codes"
-                : "Enter the 6-digit code from your authenticator app"}
+                ? t("enterRecoveryCodes")
+                : t("enterSixDigitCode")}
             </CardDescription>
           </CardHeader>
           <form onSubmit={(e) => void handleTotpSubmit(e)}>
@@ -155,7 +155,7 @@ export function OIDCCallbackPage() {
               )}
               {useRecoveryCode ? (
                 <div className="space-y-2">
-                  <Label htmlFor="recovery-code">Recovery Code</Label>
+                  <Label htmlFor="recovery-code">{t("recoveryCode")}</Label>
                   <Input
                     id="recovery-code"
                     type="text"
@@ -170,7 +170,7 @@ export function OIDCCallbackPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <Label htmlFor="totp-code">Authentication Code</Label>
+                  <Label htmlFor="totp-code">{t("authenticationCode")}</Label>
                   <Input
                     id="totp-code"
                     type="text"
@@ -200,7 +200,7 @@ export function OIDCCallbackPage() {
                 {verifying && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
-                Verify
+                {t("verify")}
               </Button>
               <Button
                 type="button"
@@ -212,8 +212,8 @@ export function OIDCCallbackPage() {
                 }}
               >
                 {useRecoveryCode
-                  ? "Use authenticator app instead"
-                  : "Use a recovery code"}
+                  ? t("useAuthenticatorApp")
+                  : t("useRecoveryCode")}
               </Button>
             </CardFooter>
           </form>
@@ -226,7 +226,7 @@ export function OIDCCallbackPage() {
     <div className="flex min-h-screen items-center justify-center">
       <div className="space-y-4 text-center">
         <Loader2 className="mx-auto h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="text-muted-foreground">Completing SSO sign-in...</p>
+        <p className="text-muted-foreground">{t("completingSSOSignIn")}</p>
       </div>
     </div>
   );

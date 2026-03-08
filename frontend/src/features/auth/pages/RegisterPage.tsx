@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useTranslation } from "react-i18next";
 import { Loader2, Server } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -20,32 +21,39 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import type { SetupStatus } from "@/types/api";
 
-const registerSchema = z
-  .object({
-    email: z.email({ message: "Invalid email address" }),
-    display_name: z.string().min(1, "Display name is required"),
-    password: z
-      .string()
-      .min(8, "Password must be at least 8 characters")
-      .max(72, "Password must be at most 72 characters")
-      .regex(/[A-Z]/, "Must contain an uppercase letter")
-      .regex(/[a-z]/, "Must contain a lowercase letter")
-      .regex(/[0-9]/, "Must contain a digit")
-      .regex(/[^A-Za-z0-9]/, "Must contain a special character"),
-    confirm_password: z.string(),
-  })
-  .refine((data) => data.password === data.confirm_password, {
-    message: "Passwords do not match",
-    path: ["confirm_password"],
-  });
+function useRegisterSchema() {
+  const { t } = useTranslation("auth");
+  return z
+    .object({
+      email: z.email({ message: t("invalidEmailAddress") }),
+      display_name: z.string().min(1, t("displayNameRequired")),
+      password: z
+        .string()
+        .min(8, t("passwordAtLeast8Chars"))
+        .max(72, t("passwordAtMost72Chars"))
+        .regex(/[A-Z]/, t("mustContainUppercase"))
+        .regex(/[a-z]/, t("mustContainLowercase"))
+        .regex(/[0-9]/, t("mustContainDigit"))
+        .regex(/[^A-Za-z0-9]/, t("mustContainSpecialChar")),
+      confirm_password: z.string(),
+    })
+    .refine((data) => data.password === data.confirm_password, {
+      message: t("passwordsDoNotMatch"),
+      path: ["confirm_password"],
+    });
+}
 
-type RegisterFormValues = z.infer<typeof registerSchema>;
+type RegisterFormValues = z.infer<ReturnType<typeof useRegisterSchema>>;
 
 export function RegisterPage() {
+  const { t } = useTranslation("auth");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { register: registerUser, isLoading, isAuthenticated } = useAuth();
   const [error, setError] = useState("");
   const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null);
+
+  const registerSchema = useRegisterSchema();
 
   const {
     register,
@@ -88,7 +96,7 @@ export function RegisterPage() {
       if (err instanceof ApiClientError) {
         setError(err.body.message);
       } else {
-        setError("An unexpected error occurred");
+        setError(tc("unexpectedError"));
       }
     }
   };
@@ -101,12 +109,12 @@ export function RegisterPage() {
             <Server className="h-6 w-6 text-primary-foreground" />
           </div>
           <CardTitle className="text-2xl">
-            {isFirstRun ? "Set Up ProxDash" : "Create Account"}
+            {isFirstRun ? t("setupProxDash") : t("createAccount")}
           </CardTitle>
           <CardDescription>
             {isFirstRun
-              ? "Create the first admin account to get started"
-              : "Register a new account"}
+              ? t("createFirstAdminAccount")
+              : t("registerNewAccount")}
           </CardDescription>
         </CardHeader>
         <form onSubmit={(e) => void handleSubmit(onSubmit)(e)}>
@@ -117,7 +125,7 @@ export function RegisterPage() {
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="display_name">Display Name</Label>
+              <Label htmlFor="display_name">{t("displayName")}</Label>
               <Input
                 id="display_name"
                 placeholder="Admin"
@@ -131,7 +139,7 @@ export function RegisterPage() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("email")}</Label>
               <Input
                 id="email"
                 type="email"
@@ -146,7 +154,7 @@ export function RegisterPage() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("password")}</Label>
               <Input
                 id="password"
                 type="password"
@@ -159,12 +167,11 @@ export function RegisterPage() {
                 </p>
               )}
               <p className="text-xs text-muted-foreground">
-                8+ characters with uppercase, lowercase, digit, and special
-                character
+                {t("passwordRequirements")}
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="confirm_password">Confirm Password</Label>
+              <Label htmlFor="confirm_password">{t("confirmPassword")}</Label>
               <Input
                 id="confirm_password"
                 type="password"
@@ -181,16 +188,16 @@ export function RegisterPage() {
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isFirstRun ? "Create Admin Account" : "Create Account"}
+              {isFirstRun ? t("createAdminAccount") : t("createAccount")}
             </Button>
             {!isFirstRun && (
               <p className="text-center text-sm text-muted-foreground">
-                Already have an account?{" "}
+                {t("alreadyHaveAccount")}{" "}
                 <Link
                   to="/login"
                   className="font-medium text-primary underline-offset-4 hover:underline"
                 >
-                  Sign in
+                  {t("signInLink")}
                 </Link>
               </p>
             )}

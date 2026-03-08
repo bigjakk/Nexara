@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AlertCircle, Loader2, Package, Plus, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,6 +15,8 @@ const selectClass =
   "flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 export function InventoryPage() {
+  const { t } = useTranslation("inventory");
+  const { t: tc } = useTranslation("common");
   const { rows, isLoading, error } = useInventoryData();
   const { data: clusters } = useClusters();
 
@@ -38,9 +41,9 @@ export function InventoryPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Inventory</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t("inventory")}</h1>
           <p className="text-sm text-muted-foreground">
-            Browse all VMs, containers, and nodes across your clusters.
+            {t("browseAllResources")}
           </p>
         </div>
         {clusters && clusters.length > 0 && (
@@ -64,7 +67,7 @@ export function InventoryPage() {
               onClick={() => { setCreateVMOpen(true); }}
             >
               <Plus className="h-4 w-4" />
-              New VM
+              {t("newVM")}
             </Button>
             <Button
               size="sm"
@@ -73,7 +76,7 @@ export function InventoryPage() {
               onClick={() => { setCreateCTOpen(true); }}
             >
               <Plus className="h-4 w-4" />
-              New CT
+              {t("newCT")}
             </Button>
           </div>
         )}
@@ -88,14 +91,14 @@ export function InventoryPage() {
       {error && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <AlertCircle className="h-4 w-4 shrink-0" />
-          Failed to load inventory data. Please try again.
+          {t("failedLoadInventory")}
         </div>
       )}
 
       {!isLoading && !error && rows.length === 0 && (
         <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
           <Package className="mb-2 h-10 w-10" />
-          <p className="text-sm">No resources found. Add a cluster to get started.</p>
+          <p className="text-sm">{t("noResources")}</p>
         </div>
       )}
 
@@ -103,10 +106,10 @@ export function InventoryPage() {
         <Tabs defaultValue="resources">
           <TabsList>
             <TabsTrigger value="resources">
-              Resources ({String(resourceRows.length)})
+              {t("resourcesCount", { count: resourceRows.length })}
             </TabsTrigger>
             <TabsTrigger value="templates">
-              Templates ({String(templateRows.length)})
+              {t("templatesCount", { count: templateRows.length })}
             </TabsTrigger>
           </TabsList>
 
@@ -117,19 +120,19 @@ export function InventoryPage() {
           <TabsContent value="templates" className="mt-4">
             {templateRows.length === 0 ? (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                No templates found. Convert a VM or container to a template in Proxmox.
+                {t("noTemplates")}
               </p>
             ) : (
               <div className="overflow-hidden rounded-lg border">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/50">
-                      <th className="px-4 py-2 text-left font-medium">Type</th>
-                      <th className="px-4 py-2 text-left font-medium">Name</th>
+                      <th className="px-4 py-2 text-left font-medium">{tc("type")}</th>
+                      <th className="px-4 py-2 text-left font-medium">{tc("name")}</th>
                       <th className="px-4 py-2 text-left font-medium">VMID</th>
-                      <th className="px-4 py-2 text-left font-medium">Cluster</th>
-                      <th className="px-4 py-2 text-left font-medium">Node</th>
-                      <th className="px-4 py-2 text-right font-medium">Actions</th>
+                      <th className="px-4 py-2 text-left font-medium">{t("cluster", { ns: "audit" })}</th>
+                      <th className="px-4 py-2 text-left font-medium">{t("node")}</th>
+                      <th className="px-4 py-2 text-right font-medium">{tc("actions")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -157,7 +160,7 @@ export function InventoryPage() {
                             }}
                           >
                             <Rocket className="h-3.5 w-3.5" />
-                            Deploy
+                            {t("deploy", { ns: "vms" })}
                           </Button>
                         </td>
                       </tr>

@@ -1,0 +1,16 @@
+{
+  "consoleInFloatingWindow": "Console sessions run in the floating window.",
+  "minimize": "Minimize",
+  "maximize": "Maximize",
+  "restoreWindow": "Restore",
+  "clickToRestore": "Click to restore console",
+  "noConsoleSessions": "No console sessions",
+  "clickNewConsole": "Click \"New Console\" to connect to a VM or container, or open one from the Inventory page.",
+  "newConsole": "New Console",
+  "openConsole": "Open Console",
+  "selectVMOrContainer": "Select a VM or Container",
+  "noVMsOrContainersFound": "No VMs or containers found",
+  "vncConsole": "VNC Console",
+  "serialConsole": "Serial Console",
+  "containerAttach": "Container Attach"
+}

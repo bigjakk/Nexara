@@ -99,8 +99,8 @@ export function StoragePage() {
 
   const storageQuery = useClusterStorage(activeClusterId);
   const nodesQuery = useClusterNodes(activeClusterId);
-  const pools = storageQuery.data ?? [];
-  const nodes = nodesQuery.data ?? [];
+  const pools = useMemo(() => storageQuery.data ?? [], [storageQuery.data]);
+  const nodes = useMemo(() => nodesQuery.data ?? [], [nodesQuery.data]);
 
   const groups = useMemo(() => groupStorage(pools, nodes), [pools, nodes]);
 

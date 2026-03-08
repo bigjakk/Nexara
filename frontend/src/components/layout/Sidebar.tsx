@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
   Network,
@@ -32,25 +33,25 @@ import {
 } from "@/components/ui/tooltip";
 
 interface NavItem {
-  label: string;
+  labelKey: string;
   to: string;
   icon: React.ComponentType<{ className?: string }>;
   requiredPermission?: string;
 }
 
 const navItems: NavItem[] = [
-  { label: "Dashboard", to: "/", icon: LayoutDashboard },
-  { label: "Inventory", to: "/inventory", icon: Package },
-  { label: "Topology", to: "/topology", icon: Network },
-  { label: "Console", to: "/console", icon: TerminalSquare },
-  { label: "Storage", to: "/storage", icon: HardDrive },
-  { label: "Backup", to: "/backup", icon: Shield },
-  { label: "Alerts", to: "/alerts", icon: Bell, requiredPermission: "view:alert" },
-  { label: "Reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
-  { label: "Security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },
-  { label: "Audit Log", to: "/audit-log", icon: ScrollText, requiredPermission: "view:audit" },
-  { label: "Settings", to: "/settings/appearance", icon: Settings },
-  { label: "Admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
+  { labelKey: "dashboard", to: "/", icon: LayoutDashboard },
+  { labelKey: "inventory", to: "/inventory", icon: Package },
+  { labelKey: "topology", to: "/topology", icon: Network },
+  { labelKey: "console", to: "/console", icon: TerminalSquare },
+  { labelKey: "storage", to: "/storage", icon: HardDrive },
+  { labelKey: "backup", to: "/backup", icon: Shield },
+  { labelKey: "alerts", to: "/alerts", icon: Bell, requiredPermission: "view:alert" },
+  { labelKey: "reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
+  { labelKey: "security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },
+  { labelKey: "auditLog", to: "/audit-log", icon: ScrollText, requiredPermission: "view:audit" },
+  { labelKey: "settings", to: "/settings/appearance", icon: Settings },
+  { labelKey: "admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
 ];
 
 function isInventoryRoute(pathname: string): boolean {
@@ -58,6 +59,7 @@ function isInventoryRoute(pathname: string): boolean {
 }
 
 export function Sidebar() {
+  const { t } = useTranslation("navigation");
   const { hasPermission } = useAuth();
   const { collapsed, toggleCollapsed, treeVisible, setTreeVisible } = useSidebarStore();
   const { appTitle, logoUrl } = useBrandingStore();
@@ -119,6 +121,7 @@ export function Sidebar() {
         {/* Nav items */}
         <nav className="flex-1 space-y-1 overflow-y-auto p-2">
           {visibleItems.map((item) => {
+            const label = t(item.labelKey);
             // "Inventory" should be active for both /inventory/* and /clusters/*
             const isInventoryItem = item.to === "/inventory";
             const inventoryActive = isInventoryItem && isInventoryRoute(location.pathname);
@@ -143,7 +146,7 @@ export function Sidebar() {
                     </NavLink>
                   </TooltipTrigger>
                   <TooltipContent side="right">
-                    {item.label}
+                    {label}
                   </TooltipContent>
                 </Tooltip>
               );
@@ -165,7 +168,7 @@ export function Sidebar() {
                     }
                   >
                     <item.icon className="h-4 w-4" />
-                    {item.label}
+                    {label}
                   </NavLink>
                   {isInventoryItem && (
                     <button

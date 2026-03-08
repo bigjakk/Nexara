@@ -41,13 +41,13 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
   const [restoreUpid, setRestoreUpid] = useState<string | null>(null);
 
   const clustersQuery = useClusters();
-  const clusters = clustersQuery.data ?? [];
+  const clusters = useMemo(() => clustersQuery.data ?? [], [clustersQuery.data]);
   const nodesQuery = useClusterNodes(targetClusterId);
-  const nodes = nodesQuery.data ?? [];
+  const nodes = useMemo(() => nodesQuery.data ?? [], [nodesQuery.data]);
   const storageQuery = useClusterStorage(targetClusterId);
-  const allStorage = storageQuery.data ?? [];
+  const allStorage = useMemo(() => storageQuery.data ?? [], [storageQuery.data]);
   const vmsQuery = useClusterVMs(targetClusterId);
-  const clusterVMs = vmsQuery.data ?? [];
+  const clusterVMs = useMemo(() => vmsQuery.data ?? [], [vmsQuery.data]);
 
   // Filter to storage that accepts disk images, deduplicate shared storage
   const targetStorage = useMemo(() => {

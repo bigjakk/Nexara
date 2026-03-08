@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,6 +20,7 @@ import { useTaskLogStore } from "@/stores/task-log-store";
  * Shows live progress bar, status, speed extraction, and streaming task log.
  */
 export function TaskProgressDialog() {
+  const { t } = useTranslation("common");
   const focusedTask = useTaskLogStore((s) => s.focusedTask);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
@@ -109,7 +111,7 @@ export function TaskProgressDialog() {
         <div className="space-y-4">
           {/* Status */}
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Status</span>
+            <span className="text-sm font-medium">{t("status")}</span>
             <Badge
               variant="outline"
               className={
@@ -120,7 +122,7 @@ export function TaskProgressDialog() {
                     : "bg-red-100 text-red-700"
               }
             >
-              {isActive ? "Running" : isOk ? "Completed" : "Failed"}
+              {isActive ? t("running") : isOk ? t("completed") : t("failed")}
             </Badge>
           </div>
 
@@ -137,7 +139,7 @@ export function TaskProgressDialog() {
                 <p className="text-xs text-muted-foreground">
                   {progressPct != null
                     ? `${String(progressPct)}%`
-                    : "In progress..."}
+                    : t("inProgress")}
                 </p>
                 {speedLine && (
                   <p className="break-all text-xs font-medium text-blue-600 dark:text-blue-400">
@@ -151,12 +153,12 @@ export function TaskProgressDialog() {
           {/* Completion messages */}
           {isOk && (
             <p className="text-sm text-green-600">
-              Task completed successfully.
+              {t("taskCompletedSuccessfully")}
             </p>
           )}
           {isFailed && (
             <p className="text-sm text-red-500">
-              Task failed{task.exit_status ? `: ${task.exit_status}` : ""}
+              {t("taskFailed")}{task.exit_status ? `: ${task.exit_status}` : ""}
             </p>
           )}
 
@@ -164,7 +166,7 @@ export function TaskProgressDialog() {
           {allLogText.length > 0 && (
             <div className="space-y-1">
               <span className="text-xs font-medium text-muted-foreground">
-                Task Log
+                {t("taskLog")}
               </span>
               <pre
                 ref={logRef}
@@ -178,7 +180,7 @@ export function TaskProgressDialog() {
           {allLogText.length === 0 && isActive && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
-              Waiting for task log...
+              {t("waitingForTaskLog")}
             </div>
           )}
 
@@ -190,7 +192,7 @@ export function TaskProgressDialog() {
             }}
             className="w-full"
           >
-            {isActive ? "Close (task continues in background)" : "Close"}
+            {isActive ? t("closeTaskBackground") : t("close")}
           </Button>
         </div>
       </DialogContent>
