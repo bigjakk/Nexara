@@ -21,7 +21,9 @@ import { CreateVMDialog } from "@/features/vms/components/CreateVMDialog";
 import { CreateCTDialog } from "@/features/vms/components/CreateCTDialog";
 import { DashboardPresetSelector } from "../components/DashboardPresetSelector";
 import {
-  defaultPreset,
+  buildDefaultPreset,
+  parseWidgetId,
+  type ClusterInfo,
   type DashboardPreset,
 } from "../lib/widget-registry";
 import {
@@ -56,14 +58,42 @@ export function DashboardPage() {
     [data?.clusters],
   );
 
+  const clusters = useMemo<ClusterInfo[]>(
+    () => data?.clusters.map((s) => ({ id: s.cluster.id, name: s.cluster.name })) ?? [],
+    [data?.clusters],
+  );
+
+  const clusterNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of clusters) {
+      map.set(c.id, c.name);
+    }
+    return map;
+  }, [clusters]);
+
+  const clusterMap = useMemo(() => {
+    const map = new Map<string, ClusterSummary>();
+    for (const s of data?.clusters ?? []) {
+      map.set(s.cluster.id, s);
+    }
+    return map;
+  }, [data?.clusters]);
+
   const firstClusterId = data?.clusters[0]?.cluster.id ?? "";
   const liveMetrics = useDashboardMetrics(clusterIds);
+
+  // Build default preset based on actual clusters
+  const computedDefaultPreset = useMemo(
+    () => buildDefaultPreset(clusters),
+    [clusters],
+  );
 
   // Load saved dashboard layout from backend
   const layoutQuery = useSetting("dashboard.layout", "user");
   const presetsQuery = useSetting("dashboard.presets", "user");
 
-  const [activePreset, setActivePreset] = useState<DashboardPreset>(defaultPreset);
+  const [activePreset, setActivePreset] = useState<DashboardPreset | null>(null);
+  const [initializedFromBackend, setInitializedFromBackend] = useState(false);
 
   // Load layout from backend when available
   useEffect(() => {
@@ -79,9 +109,19 @@ export function DashboardPage() {
           widgetIds: saved.widgetIds,
           layouts: saved.layouts,
         });
+        setInitializedFromBackend(true);
+        return;
       }
     }
-  }, [layoutQuery.data?.value]);
+    // If no saved layout and we haven't initialized yet, use default when clusters are ready
+    if (!initializedFromBackend && clusters.length > 0) {
+      setActivePreset(computedDefaultPreset);
+      setInitializedFromBackend(true);
+    }
+  }, [layoutQuery.data?.value, clusters, computedDefaultPreset, initializedFromBackend]);
+
+  // Effective preset — fallback to computed default
+  const effectivePreset = activePreset ?? computedDefaultPreset;
 
   const savedPresets = useMemo<DashboardPreset[]>(() => {
     if (presetsQuery.data?.value && Array.isArray(presetsQuery.data.value)) {
@@ -93,23 +133,31 @@ export function DashboardPage() {
   const handleLayoutChange = useCallback(
     (layouts: LayoutItem[], widgetIds: string[]) => {
       const updated: DashboardPreset = {
-        ...activePreset,
+        ...effectivePreset,
         layouts,
         widgetIds,
       };
       setActivePreset(updated);
-      // Debounce save — only save when edit mode changes
     },
-    [activePreset],
+    [effectivePreset],
   );
 
   const saveLayout = useCallback(() => {
     upsertSetting.mutate({
       key: "dashboard.layout",
-      value: activePreset,
+      value: effectivePreset,
       scope: "user",
     });
-  }, [activePreset, upsertSetting]);
+  }, [effectivePreset, upsertSetting]);
+
+  const handleReset = useCallback(() => {
+    setActivePreset(computedDefaultPreset);
+    upsertSetting.mutate({
+      key: "dashboard.layout",
+      value: computedDefaultPreset,
+      scope: "user",
+    });
+  }, [computedDefaultPreset, upsertSetting]);
 
   const handlePresetSelect = useCallback(
     (preset: DashboardPreset) => {
@@ -125,7 +173,7 @@ export function DashboardPage() {
 
   const handlePresetSave = useCallback(
     (name: string) => {
-      const newPreset: DashboardPreset = { ...activePreset, name };
+      const newPreset: DashboardPreset = { ...effectivePreset, name };
       const updated = [
         ...savedPresets.filter((p) => p.name !== name),
         newPreset,
@@ -137,7 +185,7 @@ export function DashboardPage() {
       });
       setActivePreset(newPreset);
     },
-    [activePreset, savedPresets, upsertSetting],
+    [effectivePreset, savedPresets, upsertSetting],
   );
 
   const handlePresetDelete = useCallback(
@@ -148,11 +196,11 @@ export function DashboardPage() {
         value: updated,
         scope: "user",
       });
-      if (activePreset.name === name) {
-        setActivePreset(defaultPreset);
+      if (effectivePreset.name === name) {
+        setActivePreset(computedDefaultPreset);
       }
     },
-    [activePreset.name, savedPresets, upsertSetting],
+    [effectivePreset.name, savedPresets, upsertSetting, computedDefaultPreset],
   );
 
   const toggleEditMode = useCallback(() => {
@@ -166,7 +214,13 @@ export function DashboardPage() {
     (widgetId: string) => {
       if (!data) return null;
 
-      switch (widgetId) {
+      const { type, clusterId } = parseWidgetId(widgetId);
+
+      // For per-cluster widgets, look up the cluster
+      const summary = clusterId ? clusterMap.get(clusterId) : undefined;
+      const clusterLiveMetrics = clusterId ? liveMetrics.get(clusterId) : undefined;
+
+      switch (type) {
         case "stats-overview":
           return (
             <StatsOverview
@@ -181,93 +235,58 @@ export function DashboardPage() {
         case "cluster-cards":
           return (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {data.clusters.map((summary) => (
-                <ClusterCard key={summary.cluster.id} summary={summary} />
+              {data.clusters.map((s) => (
+                <ClusterCard key={s.cluster.id} summary={s} />
               ))}
             </div>
           );
 
         case "cpu-chart":
-          return (
-            <div className="space-y-4">
-              {data.clusters.map((summary) => (
-                <ClusterChart
-                  key={summary.cluster.id}
-                  summary={summary}
-                  timeRange={timeRange}
-                  liveMetrics={liveMetrics.get(summary.cluster.id)}
-                  vmNameMap={data.vmNameMap}
-                  chartType="cpu"
-                />
-              ))}
-            </div>
-          );
+          return summary ? (
+            <ClusterChart
+              summary={summary}
+              timeRange={timeRange}
+              liveMetrics={clusterLiveMetrics}
+              vmNameMap={data.vmNameMap}
+              chartType="cpu"
+            />
+          ) : null;
 
         case "memory-chart":
-          return (
-            <div className="space-y-4">
-              {data.clusters.map((summary) => (
-                <ClusterChart
-                  key={summary.cluster.id}
-                  summary={summary}
-                  timeRange={timeRange}
-                  liveMetrics={liveMetrics.get(summary.cluster.id)}
-                  vmNameMap={data.vmNameMap}
-                  chartType="memory"
-                />
-              ))}
-            </div>
-          );
+          return summary ? (
+            <ClusterChart
+              summary={summary}
+              timeRange={timeRange}
+              liveMetrics={clusterLiveMetrics}
+              vmNameMap={data.vmNameMap}
+              chartType="memory"
+            />
+          ) : null;
 
         case "disk-chart":
-          return (
-            <div className="space-y-4">
-              {data.clusters.map((summary) => (
-                <ClusterChart
-                  key={summary.cluster.id}
-                  summary={summary}
-                  timeRange={timeRange}
-                  liveMetrics={liveMetrics.get(summary.cluster.id)}
-                  vmNameMap={data.vmNameMap}
-                  chartType="disk"
-                />
-              ))}
-            </div>
-          );
+          return summary ? (
+            <ClusterChart
+              summary={summary}
+              timeRange={timeRange}
+              liveMetrics={clusterLiveMetrics}
+              vmNameMap={data.vmNameMap}
+              chartType="disk"
+            />
+          ) : null;
 
         case "network-chart":
-          return (
-            <div className="space-y-4">
-              {data.clusters.map((summary) => (
-                <ClusterChart
-                  key={summary.cluster.id}
-                  summary={summary}
-                  timeRange={timeRange}
-                  liveMetrics={liveMetrics.get(summary.cluster.id)}
-                  vmNameMap={data.vmNameMap}
-                  chartType="network"
-                />
-              ))}
-            </div>
-          );
+          return summary ? (
+            <ClusterChart
+              summary={summary}
+              timeRange={timeRange}
+              liveMetrics={clusterLiveMetrics}
+              vmNameMap={data.vmNameMap}
+              chartType="network"
+            />
+          ) : null;
 
-        case "live-metrics": {
-          return (
-            <div className="space-y-4">
-              {data.clusters.map((summary) => {
-                const m = liveMetrics.get(summary.cluster.id);
-                return (
-                  <div key={summary.cluster.id}>
-                    {data.clusters.length > 1 && (
-                      <h3 className="mb-2 text-sm font-medium text-muted-foreground">{summary.cluster.name}</h3>
-                    )}
-                    <LiveMetricCards metrics={m} />
-                  </div>
-                );
-              })}
-            </div>
-          );
-        }
+        case "live-metrics":
+          return <LiveMetricCards metrics={clusterLiveMetrics} />;
 
         case "top-consumers": {
           const combinedConsumers = data.clusters.flatMap((s) => {
@@ -290,7 +309,7 @@ export function DashboardPage() {
           );
       }
     },
-    [data, isLoading, liveMetrics, timeRange],
+    [data, clusterMap, isLoading, liveMetrics, timeRange],
   );
 
   return (
@@ -302,11 +321,12 @@ export function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <DashboardPresetSelector
-            activePreset={activePreset}
+            activePreset={effectivePreset}
             savedPresets={savedPresets}
             onSelect={handlePresetSelect}
             onSave={handlePresetSave}
             onDelete={handlePresetDelete}
+            onReset={handleReset}
           />
           <Button
             size="sm"
@@ -363,8 +383,12 @@ export function DashboardPage() {
 
           {data != null && data.clusters.length > 0 && (
             <DashboardGrid
-              preset={activePreset}
+              preset={effectivePreset}
+              defaultPreset={computedDefaultPreset}
+              clusters={clusters}
+              clusterNames={clusterNames}
               onLayoutChange={handleLayoutChange}
+              onReset={handleReset}
               editMode={editMode}
             >
               {renderWidget}

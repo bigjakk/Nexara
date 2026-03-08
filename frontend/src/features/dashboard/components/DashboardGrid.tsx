@@ -19,8 +19,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  widgetRegistry,
-  defaultPreset,
+  getAllAvailableWidgets,
+  getTemplate,
+  getWidgetLabel,
+  type ClusterInfo,
   type DashboardPreset,
 } from "../lib/widget-registry";
 import { cn } from "@/lib/utils";
@@ -29,14 +31,22 @@ export type { LayoutItem };
 
 interface DashboardGridProps {
   preset: DashboardPreset;
+  defaultPreset: DashboardPreset;
+  clusters: ClusterInfo[];
+  clusterNames: Map<string, string>;
   onLayoutChange: (layouts: LayoutItem[], widgetIds: string[]) => void;
+  onReset: () => void;
   editMode: boolean;
   children: (widgetId: string) => React.ReactNode;
 }
 
 export function DashboardGrid({
   preset,
+  defaultPreset,
+  clusters,
+  clusterNames,
   onLayoutChange,
+  onReset,
   editMode,
   children,
 }: DashboardGridProps) {
@@ -76,22 +86,23 @@ export function DashboardGrid({
   const addWidget = useCallback(
     (widgetId: string) => {
       if (activeWidgetIds.includes(widgetId)) return;
-      const def = widgetRegistry.find((w) => w.id === widgetId);
-      if (!def) return;
+      const template = getTemplate(widgetId);
+      if (!template) return;
 
       const maxY = currentLayouts.reduce(
         (max, l) => Math.max(max, l.y + l.h),
         0,
       );
 
+      const dl = template.defaultLayout;
       const newLayout: LayoutItem = {
         i: widgetId,
         x: 0,
         y: maxY,
-        w: def.defaultLayout.w,
-        h: def.defaultLayout.h,
-        ...(def.defaultLayout.minW != null ? { minW: def.defaultLayout.minW } : {}),
-        ...(def.defaultLayout.minH != null ? { minH: def.defaultLayout.minH } : {}),
+        w: dl.w,
+        h: dl.h,
+        ...(dl.minW != null ? { minW: dl.minW } : {}),
+        ...(dl.minH != null ? { minH: dl.minH } : {}),
       };
 
       const updatedLayouts = [...currentLayouts, newLayout];
@@ -114,17 +125,17 @@ export function DashboardGrid({
     [activeWidgetIds, currentLayouts, onLayoutChange],
   );
 
-  const resetLayout = useCallback(() => {
+  const handleReset = useCallback(() => {
     const layouts = defaultPreset.layouts.map((l) => ({ ...l }));
     const ids = [...defaultPreset.widgetIds];
     setCurrentLayouts(layouts);
     setActiveWidgetIds(ids);
-    onLayoutChange(layouts, ids);
-  }, [onLayoutChange]);
+    onReset();
+  }, [defaultPreset, onReset]);
 
   const availableWidgets = useMemo(
-    () => widgetRegistry.filter((w) => !activeWidgetIds.includes(w.id)),
-    [activeWidgetIds],
+    () => getAllAvailableWidgets(clusters).filter((w) => !activeWidgetIds.includes(w.id)),
+    [activeWidgetIds, clusters],
   );
 
   return (
@@ -143,7 +154,7 @@ export function DashboardGrid({
                 Add Widget
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuContent align="start" className="w-64 max-h-80 overflow-y-auto">
               <DropdownMenuLabel>Available Widgets</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {availableWidgets.map((w) => (
@@ -168,7 +179,7 @@ export function DashboardGrid({
             size="sm"
             variant="outline"
             className="gap-1"
-            onClick={resetLayout}
+            onClick={handleReset}
           >
             <RotateCcw className="h-4 w-4" />
             Reset to Default
@@ -201,6 +212,7 @@ export function DashboardGrid({
               {editMode && (
                 <WidgetOverlay
                   widgetId={widgetId}
+                  clusterNames={clusterNames}
                   onRemove={() => {
                     removeWidget(widgetId);
                   }}
@@ -219,18 +231,20 @@ export function DashboardGrid({
 
 function WidgetOverlay({
   widgetId,
+  clusterNames,
   onRemove,
 }: {
   widgetId: string;
+  clusterNames: Map<string, string>;
   onRemove: () => void;
 }) {
-  const def = widgetRegistry.find((w) => w.id === widgetId);
+  const label = getWidgetLabel(widgetId, clusterNames);
   return (
     <Card className="absolute inset-x-0 top-0 z-10 flex h-8 items-center justify-between rounded-b-none border-b bg-muted/80 px-2 backdrop-blur-sm">
       <CardHeader className="flex flex-row items-center gap-1 p-0">
         <GripVertical className="widget-drag-handle h-4 w-4 cursor-grab text-muted-foreground" />
         <CardTitle className="text-xs font-medium">
-          {def?.label ?? widgetId}
+          {label}
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">

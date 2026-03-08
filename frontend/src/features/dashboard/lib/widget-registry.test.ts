@@ -1,183 +1,200 @@
 import { describe, it, expect } from "vitest";
 import {
-  widgetRegistry,
-  defaultWidgetIds,
+  widgetTemplates,
+  parseWidgetId,
+  buildWidgetId,
+  getTemplate,
+  getWidgetLabel,
+  getDefaultWidgetIds,
   getDefaultLayout,
+  getAllAvailableWidgets,
+  buildDefaultPreset,
   defaultPreset,
+  type ClusterInfo,
 } from "./widget-registry";
-import type { WidgetDefinition } from "./widget-registry";
 
-describe("widgetRegistry", () => {
-  it("contains at least one widget", () => {
-    expect(widgetRegistry.length).toBeGreaterThan(0);
+const testClusters: ClusterInfo[] = [
+  { id: "c1", name: "Prod Cluster" },
+  { id: "c2", name: "Dev Cluster" },
+];
+
+describe("widgetTemplates", () => {
+  it("contains at least one template", () => {
+    expect(widgetTemplates.length).toBeGreaterThan(0);
   });
 
-  it("contains the expected 8 widgets", () => {
-    const ids = widgetRegistry.map((w) => w.id);
-    expect(ids).toContain("stats-overview");
-    expect(ids).toContain("cluster-cards");
-    expect(ids).toContain("cpu-chart");
-    expect(ids).toContain("memory-chart");
-    expect(ids).toContain("disk-chart");
-    expect(ids).toContain("network-chart");
-    expect(ids).toContain("live-metrics");
-    expect(ids).toContain("top-consumers");
-    expect(widgetRegistry).toHaveLength(8);
+  it("contains expected template types", () => {
+    const types = widgetTemplates.map((t) => t.type);
+    expect(types).toContain("stats-overview");
+    expect(types).toContain("cluster-cards");
+    expect(types).toContain("cpu-chart");
+    expect(types).toContain("memory-chart");
+    expect(types).toContain("disk-chart");
+    expect(types).toContain("network-chart");
+    expect(types).toContain("live-metrics");
+    expect(types).toContain("top-consumers");
   });
 
-  it("each widget has all required fields", () => {
-    for (const widget of widgetRegistry) {
-      expect(typeof widget.id).toBe("string");
-      expect(widget.id.length).toBeGreaterThan(0);
-
-      expect(typeof widget.label).toBe("string");
-      expect(widget.label.length).toBeGreaterThan(0);
-
-      expect(typeof widget.description).toBe("string");
-      expect(widget.description.length).toBeGreaterThan(0);
-
-      expect(widget.defaultLayout).toBeDefined();
-      expect(typeof widget.defaultLayout.w).toBe("number");
-      expect(typeof widget.defaultLayout.h).toBe("number");
-
-      expect(["overview", "metrics", "cluster"]).toContain(widget.category);
+  it("each template has required fields", () => {
+    for (const t of widgetTemplates) {
+      expect(typeof t.type).toBe("string");
+      expect(t.type.length).toBeGreaterThan(0);
+      expect(typeof t.label).toBe("string");
+      expect(typeof t.description).toBe("string");
+      expect(t.defaultLayout.w).toBeGreaterThan(0);
+      expect(t.defaultLayout.h).toBeGreaterThan(0);
+      expect(["overview", "metrics", "cluster"]).toContain(t.category);
+      expect(typeof t.perCluster).toBe("boolean");
     }
   });
 
-  it("each widget has positive layout dimensions", () => {
-    for (const widget of widgetRegistry) {
-      expect(widget.defaultLayout.w).toBeGreaterThan(0);
-      expect(widget.defaultLayout.h).toBeGreaterThan(0);
-    }
+  it("all template types are unique", () => {
+    const types = widgetTemplates.map((t) => t.type);
+    expect(new Set(types).size).toBe(types.length);
   });
 
-  it("minW and minH, when present, are less than or equal to w and h", () => {
-    for (const widget of widgetRegistry) {
-      if (widget.defaultLayout.minW != null) {
-        expect(widget.defaultLayout.minW).toBeLessThanOrEqual(
-          widget.defaultLayout.w,
-        );
-      }
-      if (widget.defaultLayout.minH != null) {
-        expect(widget.defaultLayout.minH).toBeLessThanOrEqual(
-          widget.defaultLayout.h,
-        );
-      }
-    }
+  it("per-cluster templates include chart types and live-metrics", () => {
+    const perCluster = widgetTemplates.filter((t) => t.perCluster);
+    const types = perCluster.map((t) => t.type);
+    expect(types).toContain("cpu-chart");
+    expect(types).toContain("memory-chart");
+    expect(types).toContain("live-metrics");
   });
 
-  it("all widget ids are unique", () => {
-    const ids = widgetRegistry.map((w) => w.id);
-    const uniqueIds = new Set(ids);
-    expect(uniqueIds.size).toBe(ids.length);
-  });
-
-  it("widget categories are valid enum values", () => {
-    const validCategories: WidgetDefinition["category"][] = [
-      "overview",
-      "metrics",
-      "cluster",
-    ];
-    for (const widget of widgetRegistry) {
-      expect(validCategories).toContain(widget.category);
-    }
+  it("global templates include stats-overview and cluster-cards", () => {
+    const global = widgetTemplates.filter((t) => !t.perCluster);
+    const types = global.map((t) => t.type);
+    expect(types).toContain("stats-overview");
+    expect(types).toContain("cluster-cards");
   });
 });
 
-describe("defaultWidgetIds", () => {
-  it("matches the number of widgets in the registry", () => {
-    expect(defaultWidgetIds).toHaveLength(widgetRegistry.length);
+describe("parseWidgetId", () => {
+  it("parses global widget ID", () => {
+    expect(parseWidgetId("stats-overview")).toEqual({ type: "stats-overview", clusterId: null });
   });
 
-  it("every id in defaultWidgetIds maps to a widget in the registry", () => {
-    const registryIds = new Set(widgetRegistry.map((w) => w.id));
-    for (const id of defaultWidgetIds) {
-      expect(registryIds.has(id)).toBe(true);
-    }
+  it("parses per-cluster widget ID", () => {
+    expect(parseWidgetId("cpu-chart:abc123")).toEqual({ type: "cpu-chart", clusterId: "abc123" });
   });
 
-  it("all defaultWidgetIds are unique", () => {
-    const unique = new Set(defaultWidgetIds);
-    expect(unique.size).toBe(defaultWidgetIds.length);
+  it("handles widget ID with UUID cluster ID", () => {
+    const id = "memory-chart:550e8400-e29b-41d4-a716-446655440000";
+    const result = parseWidgetId(id);
+    expect(result.type).toBe("memory-chart");
+    expect(result.clusterId).toBe("550e8400-e29b-41d4-a716-446655440000");
+  });
+});
+
+describe("buildWidgetId", () => {
+  it("builds global widget ID", () => {
+    expect(buildWidgetId("stats-overview", null)).toBe("stats-overview");
+  });
+
+  it("builds per-cluster widget ID", () => {
+    expect(buildWidgetId("cpu-chart", "abc")).toBe("cpu-chart:abc");
+  });
+});
+
+describe("getTemplate", () => {
+  it("returns template for global widget ID", () => {
+    const t = getTemplate("stats-overview");
+    expect(t).toBeDefined();
+    expect(t?.type).toBe("stats-overview");
+  });
+
+  it("returns template for per-cluster widget ID", () => {
+    const t = getTemplate("cpu-chart:abc");
+    expect(t).toBeDefined();
+    expect(t?.type).toBe("cpu-chart");
+  });
+
+  it("returns undefined for unknown type", () => {
+    expect(getTemplate("unknown-widget")).toBeUndefined();
+  });
+});
+
+describe("getWidgetLabel", () => {
+  const names = new Map([["c1", "Prod"], ["c2", "Dev"]]);
+
+  it("returns template label for global widget", () => {
+    expect(getWidgetLabel("stats-overview", names)).toBe("Stats Overview");
+  });
+
+  it("returns cluster-prefixed label for per-cluster widget", () => {
+    expect(getWidgetLabel("cpu-chart:c1", names)).toBe("Prod — CPU Usage Chart");
+  });
+
+  it("falls back to 'Cluster' if cluster name not found", () => {
+    expect(getWidgetLabel("cpu-chart:unknown", names)).toBe("Cluster — CPU Usage Chart");
+  });
+});
+
+describe("getDefaultWidgetIds", () => {
+  it("includes global widgets", () => {
+    const ids = getDefaultWidgetIds(testClusters);
+    expect(ids).toContain("stats-overview");
+    expect(ids).toContain("cluster-cards");
+    expect(ids).toContain("top-consumers");
+  });
+
+  it("includes per-cluster widgets for each cluster", () => {
+    const ids = getDefaultWidgetIds(testClusters);
+    expect(ids).toContain("cpu-chart:c1");
+    expect(ids).toContain("cpu-chart:c2");
+    expect(ids).toContain("memory-chart:c1");
+    expect(ids).toContain("memory-chart:c2");
+    expect(ids).toContain("live-metrics:c1");
+    expect(ids).toContain("live-metrics:c2");
+  });
+
+  it("returns only global widgets when no clusters", () => {
+    const ids = getDefaultWidgetIds([]);
+    expect(ids).toContain("stats-overview");
+    expect(ids).toContain("cluster-cards");
+    expect(ids).toContain("top-consumers");
+    expect(ids.some((id) => id.includes(":"))).toBe(false);
+  });
+
+  it("all IDs are unique", () => {
+    const ids = getDefaultWidgetIds(testClusters);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 
 describe("getDefaultLayout", () => {
-  it("returns a layout item for every defaultWidgetId", () => {
-    const layouts = getDefaultLayout();
-    expect(layouts).toHaveLength(defaultWidgetIds.length);
+  it("returns a layout item for every widget ID", () => {
+    const ids = getDefaultWidgetIds(testClusters);
+    const layouts = getDefaultLayout(ids);
+    expect(layouts).toHaveLength(ids.length);
   });
 
-  it("each layout item has the expected LayoutItem fields", () => {
-    const layouts = getDefaultLayout();
+  it("each layout item has valid fields", () => {
+    const ids = getDefaultWidgetIds(testClusters);
+    const layouts = getDefaultLayout(ids);
     for (const item of layouts) {
       expect(typeof item.i).toBe("string");
       expect(typeof item.x).toBe("number");
       expect(typeof item.y).toBe("number");
-      expect(typeof item.w).toBe("number");
-      expect(typeof item.h).toBe("number");
+      expect(item.w).toBeGreaterThan(0);
+      expect(item.h).toBeGreaterThan(0);
     }
-  });
-
-  it("each layout item id corresponds to a known widget", () => {
-    const layouts = getDefaultLayout();
-    const registryIds = new Set(widgetRegistry.map((w) => w.id));
-    for (const item of layouts) {
-      expect(registryIds.has(item.i)).toBe(true);
-    }
-  });
-
-  it("no two layout items share the same widget id", () => {
-    const layouts = getDefaultLayout();
-    const ids = layouts.map((l) => l.i);
-    const unique = new Set(ids);
-    expect(unique.size).toBe(ids.length);
   });
 
   it("layout positions are non-negative", () => {
-    const layouts = getDefaultLayout();
+    const ids = getDefaultWidgetIds(testClusters);
+    const layouts = getDefaultLayout(ids);
     for (const item of layouts) {
       expect(item.x).toBeGreaterThanOrEqual(0);
       expect(item.y).toBeGreaterThanOrEqual(0);
     }
   });
 
-  it("layout dimensions match the widget defaultLayout w and h", () => {
-    const layouts = getDefaultLayout();
-    for (const item of layouts) {
-      const def = widgetRegistry.find((w) => w.id === item.i);
-      expect(def).toBeDefined();
-      if (!def) continue;
-      expect(item.w).toBe(def.defaultLayout.w);
-      expect(item.h).toBe(def.defaultLayout.h);
-    }
-  });
-
-  it("minW and minH are propagated from widget definition when present", () => {
-    const layouts = getDefaultLayout();
-    for (const item of layouts) {
-      const def = widgetRegistry.find((w) => w.id === item.i);
-      expect(def).toBeDefined();
-      if (!def) continue;
-      if (def.defaultLayout.minW != null) {
-        expect(item.minW).toBe(def.defaultLayout.minW);
-      } else {
-        expect(item.minW).toBeUndefined();
-      }
-      if (def.defaultLayout.minH != null) {
-        expect(item.minH).toBe(def.defaultLayout.minH);
-      } else {
-        expect(item.minH).toBeUndefined();
-      }
-    }
-  });
-
-  it("half-width widgets (w<=6) are placed side-by-side on the same row", () => {
-    const layouts = getDefaultLayout();
-    const halfWidthLayouts = layouts.filter((l) => l.w <= 6);
-
-    // There should be at least one pair of widgets on the same y row
-    const yValues = halfWidthLayouts.map((l) => l.y);
+  it("half-width widgets are placed side-by-side", () => {
+    const ids = getDefaultWidgetIds(testClusters);
+    const layouts = getDefaultLayout(ids);
+    const halfWidth = layouts.filter((l) => l.w <= 6);
+    const yValues = halfWidth.map((l) => l.y);
     const rowCounts = new Map<number, number>();
     for (const y of yValues) {
       rowCounts.set(y, (rowCounts.get(y) ?? 0) + 1);
@@ -185,56 +202,63 @@ describe("getDefaultLayout", () => {
     const hasPairedRow = [...rowCounts.values()].some((count) => count >= 2);
     expect(hasPairedRow).toBe(true);
   });
+});
 
-  it("full-width widgets (w>6) start at x=0", () => {
-    const layouts = getDefaultLayout();
-    const fullWidthLayouts = layouts.filter((l) => l.w > 6);
-    for (const item of fullWidthLayouts) {
-      expect(item.x).toBe(0);
-    }
+describe("getAllAvailableWidgets", () => {
+  it("returns global widgets", () => {
+    const available = getAllAvailableWidgets(testClusters);
+    const ids = available.map((w) => w.id);
+    expect(ids).toContain("stats-overview");
+    expect(ids).toContain("cluster-cards");
   });
 
-  it("returns a new array on each call (referential independence)", () => {
-    const first = getDefaultLayout();
-    const second = getDefaultLayout();
-    expect(first).not.toBe(second);
-    expect(first).toEqual(second);
+  it("returns per-cluster widgets for each cluster", () => {
+    const available = getAllAvailableWidgets(testClusters);
+    const ids = available.map((w) => w.id);
+    expect(ids).toContain("cpu-chart:c1");
+    expect(ids).toContain("cpu-chart:c2");
+  });
+
+  it("labels include cluster name for per-cluster widgets", () => {
+    const available = getAllAvailableWidgets(testClusters);
+    const cpuC1 = available.find((w) => w.id === "cpu-chart:c1");
+    expect(cpuC1?.label).toContain("Prod Cluster");
+  });
+
+  it("returns more widgets with more clusters", () => {
+    const first = testClusters[0];
+    if (!first) throw new Error("test setup error");
+    const one = getAllAvailableWidgets([first]);
+    const two = getAllAvailableWidgets(testClusters);
+    expect(two.length).toBeGreaterThan(one.length);
   });
 });
 
-describe("defaultPreset", () => {
-  it("has a non-empty name", () => {
-    expect(typeof defaultPreset.name).toBe("string");
-    expect(defaultPreset.name.length).toBeGreaterThan(0);
+describe("buildDefaultPreset", () => {
+  it("has name 'Default'", () => {
+    const preset = buildDefaultPreset(testClusters);
+    expect(preset.name).toBe("Default");
   });
 
-  it("name is 'Default'", () => {
+  it("layouts match widgetIds count", () => {
+    const preset = buildDefaultPreset(testClusters);
+    expect(preset.layouts).toHaveLength(preset.widgetIds.length);
+  });
+
+  it("includes per-cluster widgets", () => {
+    const preset = buildDefaultPreset(testClusters);
+    expect(preset.widgetIds.some((id) => id.includes("c1"))).toBe(true);
+    expect(preset.widgetIds.some((id) => id.includes("c2"))).toBe(true);
+  });
+});
+
+describe("defaultPreset (static fallback)", () => {
+  it("has name 'Default'", () => {
     expect(defaultPreset.name).toBe("Default");
   });
 
-  it("widgetIds matches defaultWidgetIds", () => {
-    expect(defaultPreset.widgetIds).toEqual(defaultWidgetIds);
-  });
-
-  it("layouts array has the same length as widgetIds", () => {
-    expect(defaultPreset.layouts).toHaveLength(defaultPreset.widgetIds.length);
-  });
-
-  it("layouts match the result of getDefaultLayout()", () => {
-    expect(defaultPreset.layouts).toEqual(getDefaultLayout());
-  });
-
-  it("has widgetIds, layouts, and name properties", () => {
-    expect(defaultPreset).toHaveProperty("name");
-    expect(defaultPreset).toHaveProperty("widgetIds");
-    expect(defaultPreset).toHaveProperty("layouts");
-  });
-
-  it("widgetIds is a non-empty array of strings", () => {
-    expect(Array.isArray(defaultPreset.widgetIds)).toBe(true);
-    expect(defaultPreset.widgetIds.length).toBeGreaterThan(0);
-    for (const id of defaultPreset.widgetIds) {
-      expect(typeof id).toBe("string");
-    }
+  it("has global widgets only (no clusters)", () => {
+    expect(defaultPreset.widgetIds).toContain("stats-overview");
+    expect(defaultPreset.widgetIds.every((id) => !id.includes(":"))).toBe(true);
   });
 });

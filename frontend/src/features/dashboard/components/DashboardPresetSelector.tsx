@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { defaultPreset, type DashboardPreset } from "../lib/widget-registry";
+import type { DashboardPreset } from "../lib/widget-registry";
 
 interface DashboardPresetSelectorProps {
   activePreset: DashboardPreset;
@@ -26,6 +26,7 @@ interface DashboardPresetSelectorProps {
   onSelect: (preset: DashboardPreset) => void;
   onSave: (name: string) => void;
   onDelete: (name: string) => void;
+  onReset: () => void;
 }
 
 export function DashboardPresetSelector({
@@ -34,6 +35,7 @@ export function DashboardPresetSelector({
   onSelect,
   onSave,
   onDelete,
+  onReset,
 }: DashboardPresetSelectorProps) {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [presetName, setPresetName] = useState("");
@@ -60,7 +62,7 @@ export function DashboardPresetSelector({
           <DropdownMenuLabel>Dashboard Presets</DropdownMenuLabel>
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem onClick={() => { onSelect(defaultPreset); }}>
+          <DropdownMenuItem onClick={onReset}>
             Default
           </DropdownMenuItem>
 
