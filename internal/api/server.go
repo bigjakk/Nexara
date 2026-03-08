@@ -12,6 +12,7 @@ import (
 	"github.com/proxdash/proxdash/internal/config"
 	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/events"
+	"github.com/proxdash/proxdash/internal/notifications"
 )
 
 // Server is the API server that holds all dependencies.
@@ -135,7 +136,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
 		s.cveHandler = handlers.NewCVEHandler(s.queries, cfg.EncryptionKey, s.eventPub)
-		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub, newDispatcherRegistry())
 	}
 
 	// Wire LDAP handler into auth handler for LDAP-aware login
@@ -164,6 +165,18 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	s.setupRoutes()
 
 	return s
+}
+
+func newDispatcherRegistry() *notifications.Registry {
+	r := notifications.NewRegistry()
+	r.Register(&notifications.SMTPDispatcher{})
+	r.Register(&notifications.SlackDispatcher{})
+	r.Register(&notifications.DiscordDispatcher{})
+	r.Register(&notifications.TeamsDispatcher{})
+	r.Register(&notifications.TelegramDispatcher{})
+	r.Register(&notifications.WebhookDispatcher{})
+	r.Register(&notifications.PagerDutyDispatcher{})
+	return r
 }
 
 // Listen starts the HTTP server on the given address.

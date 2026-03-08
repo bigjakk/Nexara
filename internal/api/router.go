@@ -231,6 +231,7 @@ func (s *Server) setupRoutes() {
 		notifChannels.Get("/:id", s.alertHandler.GetChannel)
 		notifChannels.Put("/:id", s.alertHandler.UpdateChannel)
 		notifChannels.Delete("/:id", s.alertHandler.DeleteChannel)
+		notifChannels.Post("/:id/test", s.alertHandler.TestChannel)
 
 		// Cluster-scoped alert routes
 		if s.clusterHandler != nil {

@@ -20,7 +20,9 @@ import {
 import { Plus } from "lucide-react";
 import { useCreateAlertRule } from "../api/alert-queries";
 import { apiClient } from "@/lib/api-client";
-import type { ClusterResponse } from "@/types/api";
+import type { ClusterResponse, EscalationStep } from "@/types/api";
+import { EscalationChainEditor } from "./EscalationChainEditor";
+import { TemplateEditor } from "./TemplateEditor";
 
 const METRICS = [
   { value: "cpu_usage", label: "CPU Usage (%)" },
@@ -52,6 +54,8 @@ export function AlertRuleForm() {
   const [scopeType, setScopeType] = useState("cluster");
   const [clusterId, setClusterId] = useState("");
   const [cooldownSeconds, setCooldownSeconds] = useState("3600");
+  const [escalationChain, setEscalationChain] = useState<EscalationStep[]>([]);
+  const [messageTemplate, setMessageTemplate] = useState("");
 
   const createMutation = useCreateAlertRule();
 
@@ -71,6 +75,8 @@ export function AlertRuleForm() {
     setScopeType("cluster");
     setClusterId("");
     setCooldownSeconds("3600");
+    setEscalationChain([]);
+    setMessageTemplate("");
   };
 
   const handleSubmit = (e: React.SyntheticEvent) => {
@@ -87,6 +93,9 @@ export function AlertRuleForm() {
         scope_type: scopeType as "cluster" | "node" | "vm",
         cluster_id: clusterId || undefined,
         cooldown_seconds: Number(cooldownSeconds),
+        escalation_chain:
+          escalationChain.length > 0 ? escalationChain : undefined,
+        message_template: messageTemplate || undefined,
       },
       {
         onSuccess: () => {
@@ -250,6 +259,13 @@ export function AlertRuleForm() {
               </p>
             </div>
           </div>
+
+          <EscalationChainEditor
+            steps={escalationChain}
+            onChange={setEscalationChain}
+          />
+
+          <TemplateEditor value={messageTemplate} onChange={setMessageTemplate} />
 
           <div className="flex justify-end gap-2 pt-2">
             <Button

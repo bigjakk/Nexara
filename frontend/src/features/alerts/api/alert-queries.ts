@@ -7,6 +7,7 @@ import type {
   AlertRuleRequest,
   NotificationChannel,
   MaintenanceWindow,
+  TestChannelResponse,
 } from "@/types/api";
 
 // --- Alert Rules ---
@@ -139,6 +140,29 @@ export function useCreateNotificationChannel() {
   });
 }
 
+export function useUpdateNotificationChannel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...data
+    }: {
+      id: string;
+      name?: string;
+      channel_type?: string;
+      config?: Record<string, unknown>;
+      enabled?: boolean;
+    }) =>
+      apiClient.put<NotificationChannel>(
+        `/api/v1/notification-channels/${id}`,
+        data,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["notification-channels"] });
+    },
+  });
+}
+
 export function useDeleteNotificationChannel() {
   const qc = useQueryClient();
   return useMutation({
@@ -147,6 +171,15 @@ export function useDeleteNotificationChannel() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["notification-channels"] });
     },
+  });
+}
+
+export function useTestNotificationChannel() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient.post<TestChannelResponse>(
+        `/api/v1/notification-channels/${id}/test`,
+      ),
   });
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/events"
 )
@@ -31,17 +32,21 @@ func ValidMetric(m string) bool {
 
 // Engine evaluates alert rules against incoming metrics.
 type Engine struct {
-	queries  *db.Queries
-	logger   *slog.Logger
-	eventPub *events.Publisher
+	queries       *db.Queries
+	logger        *slog.Logger
+	eventPub      *events.Publisher
+	registry      *Registry
+	encryptionKey string
 }
 
 // NewEngine creates a new alert engine.
-func NewEngine(queries *db.Queries, logger *slog.Logger, eventPub *events.Publisher) *Engine {
+func NewEngine(queries *db.Queries, logger *slog.Logger, eventPub *events.Publisher, registry *Registry, encryptionKey string) *Engine {
 	return &Engine{
-		queries:  queries,
-		logger:   logger,
-		eventPub: eventPub,
+		queries:       queries,
+		logger:        logger,
+		eventPub:      eventPub,
+		registry:      registry,
+		encryptionKey: encryptionKey,
 	}
 }
 
@@ -224,6 +229,7 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 					e.logger.Info("alert fired",
 						"rule", rule.Name, "resource", resourceName, "value", value)
 					e.publishAlertEvent(ctx, rule, existing.ID, "fired")
+					e.dispatchForRule(ctx, rule, existing.ID, value, resourceName, "firing", 0)
 				}
 			}
 			// Already firing — nothing to do (deduplication).
@@ -276,6 +282,7 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 				return fmt.Errorf("immediate fire: %w", err)
 			}
 			e.publishAlertEvent(ctx, rule, alert.ID, "fired")
+			e.dispatchForRule(ctx, rule, alert.ID, value, resourceName, "firing", 0)
 		}
 
 		return nil
@@ -289,6 +296,7 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 		e.logger.Info("alert auto-resolved",
 			"rule", rule.Name, "resource", resourceName, "alert_id", existing.ID)
 		e.publishAlertEvent(ctx, rule, existing.ID, "resolved")
+		e.dispatchForRule(ctx, rule, existing.ID, value, resourceName, "resolved", int(existing.EscalationLevel))
 	}
 
 	return nil
@@ -341,6 +349,7 @@ func (e *Engine) checkEscalations(ctx context.Context) {
 		e.logger.Info("alert escalated",
 			"alert_id", alert.ID, "level", nextLevel, "channel_id", step.ChannelID)
 		e.publishAlertEvent(ctx, rule, alert.ID, "escalated")
+		e.dispatchToChannel(ctx, rule, alert.ID, step.ChannelID, alert.CurrentValue, alert.ResourceName, "escalated", nextLevel)
 	}
 }
 
@@ -372,6 +381,86 @@ func (e *Engine) publishAlertEvent(ctx context.Context, rule db.AlertRule, alert
 		clusterID = uuidFromPgtype(rule.ClusterID).String()
 	}
 	e.eventPub.ClusterEvent(ctx, clusterID, events.KindAlertFired, "alert", alertID.String(), action)
+}
+
+// --- Notification Dispatch ---
+
+// dispatchForRule dispatches a notification using the rule's escalation chain at the given level.
+func (e *Engine) dispatchForRule(ctx context.Context, rule db.AlertRule, alertID uuid.UUID, value float64, resourceName, state string, escalationLevel int) {
+	chain := parseEscalationChain(rule.EscalationChain)
+	if len(chain) == 0 {
+		return
+	}
+	idx := escalationLevel
+	if idx >= len(chain) {
+		idx = len(chain) - 1
+	}
+	e.dispatchToChannel(ctx, rule, alertID, chain[idx].ChannelID, value, resourceName, state, escalationLevel)
+}
+
+// dispatchToChannel dispatches a notification to a specific channel.
+func (e *Engine) dispatchToChannel(ctx context.Context, rule db.AlertRule, alertID uuid.UUID, channelID uuid.UUID, value float64, resourceName, state string, escalationLevel int) {
+	if e.registry == nil || channelID == uuid.Nil {
+		return
+	}
+
+	channel, err := e.queries.GetNotificationChannelEnabled(ctx, channelID)
+	if err != nil {
+		e.logger.Warn("channel not found or disabled for dispatch", "channel_id", channelID, "error", err)
+		return
+	}
+
+	configJSON, err := crypto.Decrypt(channel.ConfigEncrypted, e.encryptionKey)
+	if err != nil {
+		e.logger.Error("failed to decrypt channel config", "channel_id", channelID, "error", err)
+		return
+	}
+
+	dispatcher, ok := e.registry.Get(channel.ChannelType)
+	if !ok {
+		e.logger.Warn("no dispatcher for channel type", "type", channel.ChannelType)
+		return
+	}
+
+	payload := AlertPayload{
+		RuleName:        rule.Name,
+		RuleID:          rule.ID.String(),
+		Severity:        rule.Severity,
+		State:           state,
+		Metric:          rule.Metric,
+		Operator:        rule.Operator,
+		Threshold:       rule.Threshold,
+		CurrentValue:    value,
+		ResourceName:    resourceName,
+		NodeName:        resourceName,
+		FiredAt:         time.Now().UTC().Format(time.RFC3339),
+		EscalationLevel: escalationLevel,
+	}
+	if rule.ClusterID.Valid {
+		payload.ClusterID = uuidFromPgtype(rule.ClusterID).String()
+	}
+
+	// Render custom template if set on rule.
+	if rule.MessageTemplate != "" {
+		if rendered, err := renderTemplate(rule.MessageTemplate, payload); err == nil {
+			payload.Message = rendered
+		}
+	}
+
+	// Dispatch in a goroutine to avoid blocking the evaluation loop.
+	go func() {
+		sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := dispatcher.Send(sendCtx, json.RawMessage(configJSON), payload); err != nil {
+			e.logger.Error("notification dispatch failed",
+				"channel_id", channelID, "channel_type", channel.ChannelType, "error", err)
+		} else {
+			e.logger.Info("notification dispatched",
+				"channel_id", channelID, "channel_type", channel.ChannelType, "state", state)
+			_ = e.queries.MarkAlertNotificationSent(sendCtx, alertID)
+		}
+	}()
 }
 
 // --- Helpers ---

@@ -21,14 +21,16 @@ type AlertHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	registry      *notifications.Registry
 }
 
 // NewAlertHandler creates a new AlertHandler.
-func NewAlertHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *AlertHandler {
+func NewAlertHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher, registry *notifications.Registry) *AlertHandler {
 	return &AlertHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
+		registry:      registry,
 	}
 }
 
@@ -58,6 +60,7 @@ type alertRuleResponse struct {
 	VmID            string          `json:"vm_id,omitempty"`
 	CooldownSeconds int32           `json:"cooldown_seconds"`
 	EscalationChain json.RawMessage `json:"escalation_chain"`
+	MessageTemplate string          `json:"message_template"`
 	CreatedBy       uuid.UUID       `json:"created_by"`
 	CreatedAt       string          `json:"created_at"`
 	UpdatedAt       string          `json:"updated_at"`
@@ -77,6 +80,7 @@ func toAlertRuleResponse(r db.AlertRule) alertRuleResponse {
 		ScopeType:       r.ScopeType,
 		CooldownSeconds: r.CooldownSeconds,
 		EscalationChain: r.EscalationChain,
+		MessageTemplate: r.MessageTemplate,
 		CreatedBy:       r.CreatedBy,
 		CreatedAt:       r.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:       r.UpdatedAt.Format(time.RFC3339),
@@ -247,7 +251,8 @@ var validScopeTypes = map[string]bool{
 }
 
 var validChannelTypes = map[string]bool{
-	"email": true, "webhook": true, "slack": true, "discord": true, "pagerduty": true,
+	"email": true, "webhook": true, "slack": true, "discord": true,
+	"pagerduty": true, "teams": true, "telegram": true,
 }
 
 type createAlertRuleRequest struct {
@@ -265,7 +270,10 @@ type createAlertRuleRequest struct {
 	VmID            string          `json:"vm_id"`
 	CooldownSeconds *int32          `json:"cooldown_seconds"`
 	EscalationChain json.RawMessage `json:"escalation_chain"`
+	MessageTemplate string          `json:"message_template"`
 }
+
+const maxTemplateLen = 4096
 
 const (
 	maxNameLen        = 255
@@ -428,6 +436,9 @@ func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
 		}
 		escalationChain = req.EscalationChain
 	}
+	if len(req.MessageTemplate) > maxTemplateLen {
+		return fiber.NewError(fiber.StatusBadRequest, "message_template must be <= 4096 characters")
+	}
 
 	var clusterID, nodeID, vmID pgtype.UUID
 	if req.ClusterID != "" {
@@ -470,6 +481,7 @@ func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
 		CooldownSeconds: cooldownSeconds,
 		EscalationChain: escalationChain,
 		CreatedBy:       userID,
+		MessageTemplate: req.MessageTemplate,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create alert rule")
@@ -597,6 +609,13 @@ func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
 		}
 		escalationChain = req.EscalationChain
 	}
+	messageTemplate := existing.MessageTemplate
+	if req.MessageTemplate != "" {
+		if len(req.MessageTemplate) > maxTemplateLen {
+			return fiber.NewError(fiber.StatusBadRequest, "message_template must be <= 4096 characters")
+		}
+		messageTemplate = req.MessageTemplate
+	}
 
 	clusterID := existing.ClusterID
 	if req.ClusterID != "" {
@@ -639,6 +658,7 @@ func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
 		VmID:            vmID,
 		CooldownSeconds: cooldownSeconds,
 		EscalationChain: escalationChain,
+		MessageTemplate: messageTemplate,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update alert rule")
@@ -1085,6 +1105,70 @@ func (h *AlertHandler) DeleteChannel(c *fiber.Ctx) error {
 	h.auditLogGlobal(c, "notification_channel", id.String(), "channel_deleted", nil)
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// TestChannel sends a test notification through a channel.
+func (h *AlertHandler) TestChannel(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
+		return err
+	}
+
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid channel ID")
+	}
+
+	ch, err := h.queries.GetNotificationChannel(c.Context(), id)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "Channel not found")
+	}
+
+	if h.registry == nil {
+		return fiber.NewError(fiber.StatusServiceUnavailable, "Notification dispatchers not available")
+	}
+
+	dispatcher, ok := h.registry.Get(ch.ChannelType)
+	if !ok {
+		return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("No dispatcher for channel type: %s", ch.ChannelType))
+	}
+
+	configJSON, err := crypto.Decrypt(ch.ConfigEncrypted, h.encryptionKey)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt channel config")
+	}
+
+	payload := notifications.AlertPayload{
+		RuleName:        "Test Alert Rule",
+		RuleID:          "00000000-0000-0000-0000-000000000000",
+		Severity:        "warning",
+		State:           "firing",
+		Metric:          "cpu_usage",
+		Operator:        ">",
+		Threshold:       90.0,
+		CurrentValue:    95.5,
+		ResourceName:    "test-node-01",
+		NodeName:        "test-node-01",
+		ClusterID:       "test-cluster",
+		Message:         "This is a test notification from ProxDash.",
+		FiredAt:         time.Now().UTC().Format(time.RFC3339),
+		EscalationLevel: 0,
+	}
+
+	if err := dispatcher.Send(c.Context(), json.RawMessage(configJSON), payload); err != nil {
+		// Log the full error for debugging; return generic message to client.
+		h.eventPub.ClusterEvent(c.Context(), "", events.KindAlertFired, "notification_channel", id.String(), "test_failed")
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"success": false,
+			"message": "Test notification failed. Check server logs for details.",
+		})
+	}
+
+	h.auditLogGlobal(c, "notification_channel", id.String(), "channel_tested", nil)
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Test notification sent successfully",
+	})
 }
 
 // ====== Maintenance Windows ======

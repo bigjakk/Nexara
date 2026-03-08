@@ -306,6 +306,7 @@ export interface AlertRule {
   vm_id?: string;
   cooldown_seconds: number;
   escalation_chain: EscalationStep[];
+  message_template: string;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -349,14 +350,28 @@ export interface AlertSummary {
   info_firing: number;
 }
 
+export type ChannelType =
+  | "email"
+  | "webhook"
+  | "slack"
+  | "discord"
+  | "pagerduty"
+  | "teams"
+  | "telegram";
+
 export interface NotificationChannel {
   id: string;
   name: string;
-  channel_type: "email" | "webhook" | "slack" | "discord" | "pagerduty";
+  channel_type: ChannelType;
   enabled: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface TestChannelResponse {
+  success: boolean;
+  message: string;
 }
 
 export interface MaintenanceWindow {
@@ -386,6 +401,7 @@ export interface AlertRuleRequest {
   vm_id?: string | undefined;
   cooldown_seconds?: number | undefined;
   escalation_chain?: EscalationStep[] | undefined;
+  message_template?: string | undefined;
 }
 
 export interface ApiError {

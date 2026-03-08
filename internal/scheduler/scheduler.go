@@ -40,7 +40,7 @@ func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPu
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
 		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor"), eventPub),
 		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner")),
-		alertEngine:   notifications.NewEngine(queries, logger.With("component", "alert-engine"), eventPub),
+		alertEngine:   notifications.NewEngine(queries, logger.With("component", "alert-engine"), eventPub, newDispatcherRegistry(), encryptionKey),
 		eventPub:      eventPub,
 	}
 }
@@ -330,6 +330,19 @@ func (s *Scheduler) RunAlertEvaluation(ctx context.Context) {
 		}
 	}()
 	s.alertEngine.Evaluate(ctx)
+}
+
+// newDispatcherRegistry creates a registry with all notification dispatchers.
+func newDispatcherRegistry() *notifications.Registry {
+	r := notifications.NewRegistry()
+	r.Register(&notifications.SMTPDispatcher{})
+	r.Register(&notifications.SlackDispatcher{})
+	r.Register(&notifications.DiscordDispatcher{})
+	r.Register(&notifications.TeamsDispatcher{})
+	r.Register(&notifications.TelegramDispatcher{})
+	r.Register(&notifications.WebhookDispatcher{})
+	r.Register(&notifications.PagerDutyDispatcher{})
+	return r
 }
 
 // mustAtoi converts a string to int, returning 0 on failure.

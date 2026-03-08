@@ -2,8 +2,8 @@
 
 -- name: InsertAlertRule :one
 INSERT INTO alert_rules (name, description, enabled, severity, metric, operator, threshold,
-    duration_seconds, scope_type, cluster_id, node_id, vm_id, cooldown_seconds, escalation_chain, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    duration_seconds, scope_type, cluster_id, node_id, vm_id, cooldown_seconds, escalation_chain, created_by, message_template)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 RETURNING *;
 
 -- name: GetAlertRule :one
@@ -28,7 +28,7 @@ UPDATE alert_rules
 SET name = $2, description = $3, enabled = $4, severity = $5, metric = $6,
     operator = $7, threshold = $8, duration_seconds = $9, scope_type = $10,
     cluster_id = $11, node_id = $12, vm_id = $13, cooldown_seconds = $14,
-    escalation_chain = $15, updated_at = now()
+    escalation_chain = $15, message_template = $16, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -186,6 +186,12 @@ RETURNING *;
 
 -- name: DeleteMaintenanceWindow :exec
 DELETE FROM maintenance_windows WHERE id = $1;
+
+-- name: GetNotificationChannelEnabled :one
+SELECT * FROM notification_channels WHERE id = $1 AND enabled = true;
+
+-- name: MarkAlertNotificationSent :exec
+UPDATE alert_history SET notification_sent_at = now() WHERE id = $1;
 
 -- Metric queries for alert evaluation
 

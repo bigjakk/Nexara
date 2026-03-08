@@ -13,27 +13,28 @@ import (
 )
 
 type AlertHistory struct {
-	ID              uuid.UUID          `json:"id"`
-	RuleID          uuid.UUID          `json:"rule_id"`
-	State           string             `json:"state"`
-	Severity        string             `json:"severity"`
-	ClusterID       pgtype.UUID        `json:"cluster_id"`
-	NodeID          pgtype.UUID        `json:"node_id"`
-	VmID            pgtype.UUID        `json:"vm_id"`
-	ResourceName    string             `json:"resource_name"`
-	Metric          string             `json:"metric"`
-	CurrentValue    float64            `json:"current_value"`
-	Threshold       float64            `json:"threshold"`
-	Message         string             `json:"message"`
-	EscalationLevel int32              `json:"escalation_level"`
-	ChannelID       pgtype.UUID        `json:"channel_id"`
-	PendingAt       time.Time          `json:"pending_at"`
-	FiredAt         pgtype.Timestamptz `json:"fired_at"`
-	AcknowledgedAt  pgtype.Timestamptz `json:"acknowledged_at"`
-	AcknowledgedBy  pgtype.UUID        `json:"acknowledged_by"`
-	ResolvedAt      pgtype.Timestamptz `json:"resolved_at"`
-	ResolvedBy      pgtype.UUID        `json:"resolved_by"`
-	CreatedAt       time.Time          `json:"created_at"`
+	ID                 uuid.UUID          `json:"id"`
+	RuleID             uuid.UUID          `json:"rule_id"`
+	State              string             `json:"state"`
+	Severity           string             `json:"severity"`
+	ClusterID          pgtype.UUID        `json:"cluster_id"`
+	NodeID             pgtype.UUID        `json:"node_id"`
+	VmID               pgtype.UUID        `json:"vm_id"`
+	ResourceName       string             `json:"resource_name"`
+	Metric             string             `json:"metric"`
+	CurrentValue       float64            `json:"current_value"`
+	Threshold          float64            `json:"threshold"`
+	Message            string             `json:"message"`
+	EscalationLevel    int32              `json:"escalation_level"`
+	ChannelID          pgtype.UUID        `json:"channel_id"`
+	PendingAt          time.Time          `json:"pending_at"`
+	FiredAt            pgtype.Timestamptz `json:"fired_at"`
+	AcknowledgedAt     pgtype.Timestamptz `json:"acknowledged_at"`
+	AcknowledgedBy     pgtype.UUID        `json:"acknowledged_by"`
+	ResolvedAt         pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedBy         pgtype.UUID        `json:"resolved_by"`
+	CreatedAt          time.Time          `json:"created_at"`
+	NotificationSentAt pgtype.Timestamptz `json:"notification_sent_at"`
 }
 
 type AlertRule struct {
@@ -55,6 +56,7 @@ type AlertRule struct {
 	CreatedBy       uuid.UUID       `json:"created_by"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
+	MessageTemplate string          `json:"message_template"`
 }
 
 type AuditLog struct {

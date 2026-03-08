@@ -96,6 +96,7 @@ type Querier interface {
 	// Metric queries for alert evaluation
 	GetNodeRecentMetrics(ctx context.Context, arg GetNodeRecentMetricsParams) ([]GetNodeRecentMetricsRow, error)
 	GetNotificationChannel(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
+	GetNotificationChannelEnabled(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
 	GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, error)
 	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]PbsDatastoreMetric, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
@@ -200,6 +201,7 @@ type Querier interface {
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
+	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
