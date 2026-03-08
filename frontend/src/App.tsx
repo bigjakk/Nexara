@@ -22,6 +22,7 @@ import { SecurityPage } from "@/features/settings/pages/SecurityPage";
 import { SecurityDashboardPage } from "@/features/security/pages/SecurityDashboardPage";
 import { AlertsPage } from "@/features/alerts/pages/AlertsPage";
 import { ReportsPage } from "@/features/reports/pages/ReportsPage";
+import { TopologyPage } from "@/features/topology/pages/TopologyPage";
 
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
@@ -115,6 +116,10 @@ const router = createBrowserRouter([
           {
             path: "reports",
             element: <ReportsPage />,
+          },
+          {
+            path: "topology",
+            element: <TopologyPage />,
           },
           {
             path: "security",

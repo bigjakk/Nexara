@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
+  Network,
   Package,
   Shield,
   ShieldAlert,
@@ -38,6 +39,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "Dashboard", to: "/", icon: LayoutDashboard },
   { label: "Inventory", to: "/inventory", icon: Package },
+  { label: "Topology", to: "/topology", icon: Network },
   { label: "Console", to: "/console", icon: TerminalSquare },
   { label: "Storage", to: "/storage", icon: HardDrive },
   { label: "Backup", to: "/backup", icon: Shield },
