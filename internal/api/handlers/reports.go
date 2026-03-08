@@ -43,8 +43,8 @@ func NewReportHandler(queries *db.Queries, encryptionKey string, eventPub *event
 	}
 }
 
-func (h *ReportHandler) auditLogGlobal(c *fiber.Ctx, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, resourceType, resourceID, action, details)
+func (h *ReportHandler) auditLogGlobal(c *fiber.Ctx, resourceType, resourceID, action string) {
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, resourceType, resourceID, action, nil)
 }
 
 // --- Response types ---
@@ -235,7 +235,7 @@ func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
 		Name:            req.Name,
 		ReportType:      req.ReportType,
 		ClusterID:       clusterID,
-		TimeRangeHours:  int32(req.TimeRangeHours),
+		TimeRangeHours:  safeInt32(req.TimeRangeHours),
 		Schedule:        req.Schedule,
 		Format:          req.Format,
 		EmailEnabled:    req.EmailEnabled,
@@ -250,7 +250,7 @@ func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create schedule")
 	}
 
-	h.auditLogGlobal(c, "report_schedule", schedule.ID.String(), "created", nil)
+	h.auditLogGlobal(c, "report_schedule", schedule.ID.String(), "created")
 	return c.Status(fiber.StatusCreated).JSON(toReportScheduleResponse(schedule))
 }
 
@@ -364,7 +364,7 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 		Name:            name,
 		ReportType:      reportType,
 		ClusterID:       clusterID,
-		TimeRangeHours:  int32(timeRangeHours),
+		TimeRangeHours:  safeInt32(timeRangeHours),
 		Schedule:        scheduleStr,
 		Format:          format,
 		EmailEnabled:    emailEnabled,
@@ -378,7 +378,7 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update schedule")
 	}
 
-	h.auditLogGlobal(c, "report_schedule", id.String(), "updated", nil)
+	h.auditLogGlobal(c, "report_schedule", id.String(), "updated")
 	return c.JSON(toReportScheduleResponse(updated))
 }
 
@@ -401,7 +401,7 @@ func (h *ReportHandler) DeleteSchedule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete schedule")
 	}
 
-	h.auditLogGlobal(c, "report_schedule", id.String(), "deleted", nil)
+	h.auditLogGlobal(c, "report_schedule", id.String(), "deleted")
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
@@ -457,7 +457,7 @@ func (h *ReportHandler) GenerateReport(c *fiber.Ctx) error {
 		ReportType:     req.ReportType,
 		ClusterID:      clusterID,
 		Status:         "running",
-		TimeRangeHours: int32(req.TimeRangeHours),
+		TimeRangeHours: safeInt32(req.TimeRangeHours),
 		CreatedBy:      userID,
 	})
 	if err != nil {
@@ -515,7 +515,7 @@ func (h *ReportHandler) GenerateReport(c *fiber.Ctx) error {
 		h.eventPub.SystemEvent(c.Context(), events.KindReportGenerated, "completed")
 	}
 
-	h.auditLogGlobal(c, "report", run.ID.String(), "generated", nil)
+	h.auditLogGlobal(c, "report", run.ID.String(), "generated")
 	return c.Status(fiber.StatusCreated).JSON(toRunResponse(completed))
 }
 

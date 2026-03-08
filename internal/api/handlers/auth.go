@@ -322,15 +322,13 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 				return db.User{}, false
 			}
 		}
-	} else {
+	} else if ldapUser.DisplayName != "" && ldapUser.DisplayName != user.DisplayName {
 		// Update display name if changed
-		if ldapUser.DisplayName != "" && ldapUser.DisplayName != user.DisplayName {
-			if updated, err := h.queries.UpdateLDAPUserProfile(c.Context(), db.UpdateLDAPUserProfileParams{
-				ID:          user.ID,
-				DisplayName: ldapUser.DisplayName,
-			}); err == nil {
-				user = updated
-			}
+		if updated, err := h.queries.UpdateLDAPUserProfile(c.Context(), db.UpdateLDAPUserProfileParams{
+			ID:          user.ID,
+			DisplayName: ldapUser.DisplayName,
+		}); err == nil {
+			user = updated
 		}
 	}
 

@@ -182,14 +182,14 @@ func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to open uploaded file")
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	upid, err := pxClient.UploadToStorage(c.Context(), node.Name, pool.Storage, contentType, filename, file, fileHeader.Size)
 	if err != nil {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, pool.ClusterID, "storage", pool.ID.String(), "upload")
+	h.auditLog(c, pool.ClusterID, pool.ID.String(), "upload")
 
 	return c.JSON(uploadResponse{
 		UPID:   upid,
@@ -229,7 +229,7 @@ func (h *StorageHandler) DeleteContent(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, pool.ClusterID, "storage", pool.ID.String(), "delete_content")
+	h.auditLog(c, pool.ClusterID, pool.ID.String(), "delete_content")
 
 	return c.JSON(deleteContentResponse{
 		UPID:   upid,
@@ -362,7 +362,7 @@ func (h *StorageHandler) Update(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, pool.ClusterID, "storage", pool.ID.String(), "update")
+	h.auditLog(c, pool.ClusterID, pool.ID.String(), "update")
 
 	return c.JSON(fiber.Map{
 		"status":  "updated",
@@ -392,7 +392,7 @@ func (h *StorageHandler) Delete(c *fiber.Ctx) error {
 		Storage:   pool.Storage,
 	})
 
-	h.auditLog(c, pool.ClusterID, "storage", pool.ID.String(), "delete")
+	h.auditLog(c, pool.ClusterID, pool.ID.String(), "delete")
 
 	return c.JSON(fiber.Map{
 		"status":  "deleted",
@@ -441,8 +441,8 @@ func (h *StorageHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) 
 }
 
 // auditLog writes an audit log entry. Failures are logged but don't fail the request.
-func (h *StorageHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, nil)
+func (h *StorageHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string) {
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", resourceID, action, nil)
 }
 
 // auditLogDetails writes an audit log entry with details.

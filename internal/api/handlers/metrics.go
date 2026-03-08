@@ -21,7 +21,7 @@ func NewMetricsHandler(queries *db.Queries) *MetricsHandler {
 
 type metricPoint struct {
 	Timestamp    int64   `json:"timestamp"`
-	CpuPercent   float64 `json:"cpuPercent"`
+	CPUPercent   float64 `json:"cpuPercent"`
 	MemPercent   float64 `json:"memPercent"`
 	DiskReadBps  float64 `json:"diskReadBps"`
 	DiskWriteBps float64 `json:"diskWriteBps"`
@@ -184,7 +184,7 @@ func toMetricPoint(bucket time.Time, cpu, memUsed, memTotal, diskRead, diskWrite
 	}
 	return metricPoint{
 		Timestamp:    bucket.UnixMilli(),
-		CpuPercent:   cpu * 100,
+		CPUPercent:   cpu * 100,
 		MemPercent:   memPercent,
 		DiskReadBps:  diskRead,
 		DiskWriteBps: diskWrite,

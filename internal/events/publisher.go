@@ -24,6 +24,7 @@ const (
 	KindAlertFired       = "alert_fired"
 	KindAlertStateChange = "alert_state_change"
 	KindReportGenerated  = "report_generated"
+	KindRollingUpdate    = "rolling_update"
 )
 
 // Event is a lightweight notification pushed through Redis pub/sub.

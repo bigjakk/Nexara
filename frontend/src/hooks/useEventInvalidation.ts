@@ -44,7 +44,7 @@ export function useEventInvalidation(clusterIds: string[]): void {
 
   const handleEvent = useCallback(
     (payload: unknown) => {
-      const event = payload as ProxDashEvent;
+      const event = payload as Partial<ProxDashEvent>;
       if (!event.kind) return;
 
       const cid = event.cluster_id;
@@ -121,6 +121,16 @@ export function useEventInvalidation(clusterIds: string[]): void {
             scheduleInvalidation(
               ["cluster-alerts", cid],
               ["cluster-alert-count", cid],
+            );
+          }
+          break;
+
+        case "rolling_update":
+          if (cid) {
+            scheduleInvalidation(
+              ["rolling-update-jobs", cid],
+              ["rolling-update-job"],
+              ["rolling-update-nodes"],
             );
           }
           break;

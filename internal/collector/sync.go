@@ -25,6 +25,7 @@ type SyncQueries interface {
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
 	DeleteStaleVMs(ctx context.Context, arg db.DeleteStaleVMsParams) error
+	UpdateNodeAddress(ctx context.Context, arg db.UpdateNodeAddressParams) error
 	// PBS queries
 	ListActivePBSServers(ctx context.Context) ([]db.PbsServer, error)
 	UpsertPBSSnapshot(ctx context.Context, arg db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error)
@@ -45,6 +46,7 @@ type ProxmoxClient interface {
 	GetCephStatus(ctx context.Context, node string) (*proxmox.CephStatus, error)
 	GetCephOSDs(ctx context.Context, node string) (*proxmox.CephOSDResponse, error)
 	GetCephPools(ctx context.Context, node string) ([]proxmox.CephPool, error)
+	GetClusterStatus(ctx context.Context) ([]proxmox.ClusterStatusEntry, error)
 }
 
 // ClientFactory creates a ProxmoxClient from cluster credentials.
@@ -179,6 +181,9 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 		result.NodeMetrics = append(result.NodeMetrics, nr.NodeMetric)
 		result.VMMetrics = append(result.VMMetrics, nr.VMMetrics...)
 	}
+
+	// Update node addresses from corosync cluster status.
+	s.syncNodeAddresses(ctx, client, cluster.ID)
 
 	// Sync Ceph data once per cluster using the first online node.
 	if len(nodes) > 0 {
@@ -713,6 +718,26 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMe
 	}
 
 	return result, nil
+}
+
+// syncNodeAddresses fetches corosync cluster status and updates node IP addresses.
+func (s *Syncer) syncNodeAddresses(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID) {
+	entries, err := client.GetClusterStatus(ctx)
+	if err != nil {
+		s.logger.Debug("failed to get cluster status for node addresses", "cluster_id", clusterID, "error", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.Type != "node" || entry.IP == "" {
+			continue
+		}
+		_ = s.queries.UpdateNodeAddress(ctx, db.UpdateNodeAddressParams{
+			ClusterID: clusterID,
+			Name:      entry.Name,
+			Address:   entry.IP,
+		})
+	}
 }
 
 // SyncAll syncs all active clusters and returns collected metric results.

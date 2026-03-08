@@ -157,7 +157,7 @@ func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": ct.Vmid})
-	h.auditLog(c, cluster.ID, "container", ct.ID.String(), req.Action, detailsJSON)
+	h.auditLog(c, cluster.ID, ct.ID.String(), req.Action, detailsJSON)
 
 	// Watch the task in the background and update the DB when it completes.
 	watchTaskAndUpdateStatus(h.queries, h.eventPub, pxClient, node.Name, upid, ct.ID, cluster.ID, req.Action, "container")
@@ -210,7 +210,7 @@ func (h *ContainerHandler) CloneContainer(c *fiber.Ctx) error {
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": ct.Vmid})
-	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "clone", detailsJSON)
+	h.auditLog(c, cluster.ID, ct.ID.String(), "clone", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "container", ct.ID.String(), "clone")
 
 	return c.JSON(vmActionResponse{
@@ -258,7 +258,7 @@ func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": ct.Vmid})
-	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "migrate", detailsJSON)
+	h.auditLog(c, cluster.ID, ct.ID.String(), "migrate", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindMigrationUpdate, "container", ct.ID.String(), "migrate")
 
 	return c.JSON(vmActionResponse{
@@ -294,7 +294,7 @@ func (h *ContainerHandler) DestroyContainer(c *fiber.Ctx) error {
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": ct.Vmid})
-	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "destroy", detailsJSON)
+	h.auditLog(c, cluster.ID, ct.ID.String(), "destroy", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "container", ct.ID.String(), "destroy")
 
 	return c.JSON(vmActionResponse{
@@ -436,7 +436,7 @@ func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": ct.Vmid})
-	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "snapshot_create", detailsJSON)
+	h.auditLog(c, cluster.ID, ct.ID.String(), "snapshot_create", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "snapshot_create")
 
 	return c.JSON(vmActionResponse{
@@ -477,7 +477,7 @@ func (h *ContainerHandler) DeleteSnapshot(c *fiber.Ctx) error {
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": ct.Vmid})
-	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "snapshot_delete", detailsJSON)
+	h.auditLog(c, cluster.ID, ct.ID.String(), "snapshot_delete", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "snapshot_delete")
 
 	return c.JSON(vmActionResponse{
@@ -518,7 +518,7 @@ func (h *ContainerHandler) RollbackSnapshot(c *fiber.Ctx) error {
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": ct.Vmid})
-	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "snapshot_rollback", detailsJSON)
+	h.auditLog(c, cluster.ID, ct.ID.String(), "snapshot_rollback", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "snapshot_rollback")
 
 	return c.JSON(vmActionResponse{
@@ -609,7 +609,7 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": req.Node, "vmid": req.VMID})
-	h.auditLog(c, clusterID, "container", strconv.Itoa(req.VMID), "create", detailsJSON)
+	h.auditLog(c, clusterID, strconv.Itoa(req.VMID), "create", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "container", strconv.Itoa(req.VMID), "create")
 
 	return c.JSON(vmActionResponse{
@@ -660,7 +660,7 @@ func (h *ContainerHandler) MoveVolume(c *fiber.Ctx) error {
 	}
 
 	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": ct.Vmid})
-	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "volume_move", detailsJSON)
+	h.auditLog(c, cluster.ID, ct.ID.String(), "volume_move", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "volume_move")
 
 	return c.JSON(vmActionResponse{
@@ -707,7 +707,7 @@ func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
 	}
 
 	configDetails, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
-	h.auditLog(c, cluster.ID, "container", ct.ID.String(), "config_update", configDetails)
+	h.auditLog(c, cluster.ID, ct.ID.String(), "config_update", configDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "config_update")
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -719,6 +719,6 @@ func (h *ContainerHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID
 }
 
 // auditLog writes an audit log entry and publishes an audit_entry event.
-func (h *ContainerHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
+func (h *ContainerHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string, details json.RawMessage) {
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "container", resourceID, action, details)
 }

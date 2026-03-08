@@ -304,6 +304,20 @@ func (q *Queries) ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error
 	return items, nil
 }
 
+const setDRSEnabled = `-- name: SetDRSEnabled :exec
+UPDATE drs_configs SET enabled = $2, updated_at = now() WHERE cluster_id = $1
+`
+
+type SetDRSEnabledParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Enabled   bool      `json:"enabled"`
+}
+
+func (q *Queries) SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error {
+	_, err := q.db.Exec(ctx, setDRSEnabled, arg.ClusterID, arg.Enabled)
+	return err
+}
+
 const updateDRSHistoryStatus = `-- name: UpdateDRSHistoryStatus :exec
 UPDATE drs_history SET status = $2, executed_at = $3 WHERE id = $1
 `

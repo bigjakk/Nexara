@@ -24,7 +24,7 @@ type nodeResponse struct {
 	ClusterID  uuid.UUID `json:"cluster_id"`
 	Name       string    `json:"name"`
 	Status     string    `json:"status"`
-	CpuCount   int32     `json:"cpu_count"`
+	CPUCount   int32     `json:"cpu_count"`
 	MemTotal   int64     `json:"mem_total"`
 	DiskTotal  int64     `json:"disk_total"`
 	PveVersion string    `json:"pve_version"`
@@ -40,7 +40,7 @@ func toNodeResponse(n db.Node) nodeResponse {
 		ClusterID:  n.ClusterID,
 		Name:       n.Name,
 		Status:     n.Status,
-		CpuCount:   n.CpuCount,
+		CPUCount:   n.CpuCount,
 		MemTotal:   n.MemTotal,
 		DiskTotal:  n.DiskTotal,
 		PveVersion: n.PveVersion,

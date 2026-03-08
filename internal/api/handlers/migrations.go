@@ -271,11 +271,11 @@ func (h *MigrationHandler) List(c *fiber.Ctx) error {
 		return err
 	}
 
-	limit := int32(50)
+	limit := safeInt32(50)
 	if l := c.QueryInt("limit", 50); l > 0 && l <= 500 {
-		limit = int32(l)
+		limit = safeInt32(l)
 	}
-	offset := int32(c.QueryInt("offset", 0))
+	offset := safeInt32(c.QueryInt("offset", 0))
 
 	jobs, err := h.queries.ListMigrationJobs(c.Context(), db.ListMigrationJobsParams{
 		Limit:  limit,
@@ -426,11 +426,11 @@ func (h *MigrationHandler) ListByCluster(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
 	}
 
-	limit := int32(50)
+	limit := safeInt32(50)
 	if l := c.QueryInt("limit", 50); l > 0 && l <= 500 {
-		limit = int32(l)
+		limit = safeInt32(l)
 	}
-	offset := int32(c.QueryInt("offset", 0))
+	offset := safeInt32(c.QueryInt("offset", 0))
 
 	jobs, err := h.queries.ListMigrationJobsByCluster(c.Context(), db.ListMigrationJobsByClusterParams{
 		SourceClusterID: clusterID,

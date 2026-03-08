@@ -20,3 +20,13 @@ SELECT * FROM nodes WHERE cluster_id = $1 AND name = $2;
 
 -- name: ListNodesByCluster :many
 SELECT * FROM nodes WHERE cluster_id = $1 ORDER BY name;
+
+-- name: UpdateNodeAddress :exec
+UPDATE nodes SET address = $3, updated_at = now()
+WHERE cluster_id = $1 AND name = $2 AND address != $3;
+
+-- name: GetNodeAddressByName :one
+SELECT address FROM nodes WHERE cluster_id = $1 AND name = $2;
+
+-- name: ListNodeAddresses :many
+SELECT name, address FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name;

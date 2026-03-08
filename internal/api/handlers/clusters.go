@@ -156,11 +156,38 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 	details, _ := json.Marshal(map[string]string{"name": cluster.Name})
 	h.auditLog(c, cluster.ID, "cluster", cluster.ID.String(), "cluster_created", details)
 
-	connectivity := testClusterConnectivity(req.APIURL, req.TokenID, req.TokenSecret, req.TLSFingerprint)
+	testResult := testClusterConnectivity(req.APIURL, req.TokenID, req.TokenSecret, req.TLSFingerprint)
+
+	// Pre-populate node entries with addresses from corosync discovery.
+	if testResult.Result.Reachable {
+		for _, entry := range testResult.Nodes {
+			if entry.Type != "node" || entry.Name == "" {
+				continue
+			}
+			_, nodeErr := h.queries.UpsertNode(c.Context(), db.UpsertNodeParams{
+				ClusterID:      cluster.ID,
+				Name:           entry.Name,
+				Status:         "unknown",
+				CpuCount:       0,
+				MemTotal:        0,
+				DiskTotal:       0,
+				PveVersion:     "",
+				SslFingerprint: "",
+				Uptime:          0,
+			})
+			if nodeErr == nil && entry.IP != "" {
+				_ = h.queries.UpdateNodeAddress(c.Context(), db.UpdateNodeAddressParams{
+					ClusterID: cluster.ID,
+					Name:      entry.Name,
+					Address:   entry.IP,
+				})
+			}
+		}
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(createClusterResponse{
 		Cluster:      toClusterResponse(cluster),
-		Connectivity: connectivity,
+		Connectivity: testResult.Result,
 	})
 }
 
@@ -296,7 +323,7 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 
 	return c.JSON(updateClusterResponse{
 		Cluster:      toClusterResponse(cluster),
-		Connectivity: connectivity,
+		Connectivity: connectivity.Result,
 	})
 }
 
@@ -329,7 +356,12 @@ func (h *ClusterHandler) Delete(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
-func testClusterConnectivity(apiURL, tokenID, tokenSecret, tlsFingerprint string) connectivityResult {
+type connectivityTestResult struct {
+	Result connectivityResult
+	Nodes  []proxmox.ClusterStatusEntry
+}
+
+func testClusterConnectivity(apiURL, tokenID, tokenSecret, tlsFingerprint string) connectivityTestResult {
 	client, err := proxmox.NewClient(proxmox.ClientConfig{
 		BaseURL:        apiURL,
 		TokenID:        tokenID,
@@ -338,13 +370,13 @@ func testClusterConnectivity(apiURL, tokenID, tokenSecret, tlsFingerprint string
 		Timeout:        10 * time.Second,
 	})
 	if err != nil {
-		return connectivityResult{Reachable: false, Message: "Failed to create client"}
+		return connectivityTestResult{Result: connectivityResult{Reachable: false, Message: "Failed to create client"}}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	_, err = client.GetClusterStatus(ctx)
+	entries, err := client.GetClusterStatus(ctx)
 	if err != nil {
 		msg := "Connection failed"
 		if errors.Is(err, proxmox.ErrForbidden) {
@@ -352,10 +384,13 @@ func testClusterConnectivity(apiURL, tokenID, tokenSecret, tlsFingerprint string
 		} else if errors.Is(err, proxmox.ErrConnectionFailed) {
 			msg = "Host unreachable or connection refused"
 		}
-		return connectivityResult{Reachable: false, Message: msg}
+		return connectivityTestResult{Result: connectivityResult{Reachable: false, Message: msg}}
 	}
 
-	return connectivityResult{Reachable: true, Message: "Successfully connected to cluster"}
+	return connectivityTestResult{
+		Result: connectivityResult{Reachable: true, Message: "Successfully connected to cluster"},
+		Nodes:  entries,
+	}
 }
 
 // requireAdmin checks that the request was made by an admin user.
@@ -409,7 +444,7 @@ func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("Failed to connect to %s: %s", u.Host, err.Error()))
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {

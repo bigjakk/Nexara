@@ -13,6 +13,7 @@ import (
 	db "github.com/proxdash/proxdash/internal/db/generated"
 	"github.com/proxdash/proxdash/internal/events"
 	"github.com/proxdash/proxdash/internal/notifications"
+	"github.com/proxdash/proxdash/internal/rolling"
 )
 
 // Server is the API server that holds all dependencies.
@@ -46,10 +47,11 @@ type Server struct {
 	oidcHandler      *handlers.OIDCHandler
 	totpHandler      *handlers.TOTPHandler
 	cveHandler       *handlers.CVEHandler
-	alertHandler     *handlers.AlertHandler
-	reportHandler    *handlers.ReportHandler
-	rbacEngine       *auth.RBACEngine
-	eventPub         *events.Publisher
+	alertHandler        *handlers.AlertHandler
+	reportHandler       *handlers.ReportHandler
+	rollingUpdateHandler *handlers.RollingUpdateHandler
+	rbacEngine          *auth.RBACEngine
+	eventPub            *events.Publisher
 }
 
 // New creates a new API server with the given dependencies.
@@ -139,6 +141,8 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.cveHandler = handlers.NewCVEHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub, newDispatcherRegistry())
 		s.reportHandler = handlers.NewReportHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		rollingOrch := rolling.NewOrchestrator(s.queries, cfg.EncryptionKey, slog.Default().With("component", "rolling-update"), s.eventPub, nil)
+		s.rollingUpdateHandler = handlers.NewRollingUpdateHandler(s.queries, cfg.EncryptionKey, s.eventPub, rollingOrch)
 	}
 
 	// Wire LDAP handler into auth handler for LDAP-aware login

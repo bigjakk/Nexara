@@ -189,7 +189,7 @@ func (h *TOTPHandler) Disable(c *fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid TOTP code")
 		}
 	} else {
-		if _, err := h.consumeRecoveryCode(c.Context(), userID, req.RecoveryCode); err != nil {
+		if err := h.consumeRecoveryCode(c.Context(), userID, req.RecoveryCode); err != nil {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid recovery code")
 		}
 	}
@@ -347,7 +347,7 @@ func (h *TOTPHandler) VerifyLogin(c *fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid TOTP code")
 		}
 	} else {
-		if _, err := h.consumeRecoveryCode(c.Context(), userID, req.RecoveryCode); err != nil {
+		if err := h.consumeRecoveryCode(c.Context(), userID, req.RecoveryCode); err != nil {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid recovery code")
 		}
 	}
@@ -423,20 +423,20 @@ func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UU
 }
 
 // consumeRecoveryCode finds and deletes a matching recovery code.
-func (h *TOTPHandler) consumeRecoveryCode(ctx context.Context, userID uuid.UUID, inputCode string) (bool, error) {
+func (h *TOTPHandler) consumeRecoveryCode(ctx context.Context, userID uuid.UUID, inputCode string) error {
 	codes, err := h.queries.ListRecoveryCodes(ctx, userID)
 	if err != nil {
-		return false, fmt.Errorf("list recovery codes: %w", err)
+		return fmt.Errorf("list recovery codes: %w", err)
 	}
 
 	for _, rc := range codes {
 		if h.totpService.ValidateRecoveryCode(rc.CodeHash, inputCode) {
 			if err := h.queries.DeleteRecoveryCode(ctx, rc.ID); err != nil {
-				return false, fmt.Errorf("delete recovery code: %w", err)
+				return fmt.Errorf("delete recovery code: %w", err)
 			}
-			return true, nil
+			return nil
 		}
 	}
 
-	return false, fmt.Errorf("no matching recovery code")
+	return fmt.Errorf("no matching recovery code")
 }

@@ -33,8 +33,8 @@ func NewBackupHandler(queries *db.Queries, encryptionKey string, eventPub *event
 
 // auditLog records an audit log entry for backup-related actions.
 // Backup actions don't have a cluster context.
-func (h *BackupHandler) auditLog(c *fiber.Ctx, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, resourceType, resourceID, action, details)
+func (h *BackupHandler) auditLog(c *fiber.Ctx, resourceID, action string, details json.RawMessage) {
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", resourceID, action, details)
 }
 
 // createPBSClient creates a PBS client for the given server ID.
@@ -151,7 +151,7 @@ func (h *BackupHandler) TriggerGC(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, "backup", store, "gc_triggered", nil)
+	h.auditLog(c, store, "gc_triggered", nil)
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "gc_triggered")
 
 	return c.JSON(fiber.Map{"upid": upid})
@@ -202,7 +202,7 @@ func (h *BackupHandler) DeleteSnapshot(c *fiber.Ctx) error {
 		"backup_id":   req.BackupID,
 		"backup_time": req.BackupTime,
 	})
-	h.auditLog(c, "backup", store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_deleted", details)
+	h.auditLog(c, store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_deleted", details)
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "snapshot_deleted")
 
 	return c.JSON(fiber.Map{"status": "deleted"})
@@ -259,7 +259,7 @@ func (h *BackupHandler) ProtectSnapshot(c *fiber.Ctx) error {
 		"backup_time": req.BackupTime,
 		"protected":   req.Protected,
 	})
-	h.auditLog(c, "backup", store+"/"+req.BackupType+"/"+req.BackupID, action, details)
+	h.auditLog(c, store+"/"+req.BackupType+"/"+req.BackupID, action, details)
 
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, action)
 
@@ -306,7 +306,7 @@ func (h *BackupHandler) UpdateSnapshotNotes(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, "backup", store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_notes_updated", nil)
+	h.auditLog(c, store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_notes_updated", nil)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -402,7 +402,7 @@ func (h *BackupHandler) PruneDatastore(c *fiber.Ctx) error {
 			"keep_monthly": req.KeepMonthly,
 			"keep_yearly": req.KeepYearly,
 		})
-		h.auditLog(c, "backup", store, "datastore_pruned", details)
+		h.auditLog(c, store, "datastore_pruned", details)
 		h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "datastore_pruned")
 	}
 
@@ -460,7 +460,7 @@ func (h *BackupHandler) RunSyncJob(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, "backup", jobID, "sync_job_triggered", nil)
+	h.auditLog(c, jobID, "sync_job_triggered", nil)
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "sync_job_triggered")
 
 	return c.JSON(fiber.Map{"upid": upid})
@@ -492,7 +492,7 @@ func (h *BackupHandler) RunVerifyJob(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, "backup", jobID, "verify_job_triggered", nil)
+	h.auditLog(c, jobID, "verify_job_triggered", nil)
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "verify_job_triggered")
 
 	return c.JSON(fiber.Map{"upid": upid})
@@ -1137,7 +1137,7 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 	if req.Force {
 		existingVM, vmErr := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
 			ClusterID: clusterID,
-			Vmid:      int32(req.VMID),
+			Vmid:      safeInt32(req.VMID),
 		})
 		if vmErr != nil && !errors.Is(vmErr, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to check existing VM")

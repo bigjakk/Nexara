@@ -432,6 +432,18 @@ func (c *Client) GetHAResources(ctx context.Context) ([]HAResource, error) {
 	return resources, nil
 }
 
+// SetHAResourceState updates an HA resource's state via PUT /cluster/ha/resources/{sid}.
+// Valid states: "started", "stopped", "enabled", "disabled", "ignored".
+func (c *Client) SetHAResourceState(ctx context.Context, sid string, state string) error {
+	path := "/cluster/ha/resources/" + url.PathEscape(sid)
+	form := url.Values{}
+	form.Set("state", state)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("set HA resource %s state to %s: %w", sid, state, err)
+	}
+	return nil
+}
+
 // GetHAGroups returns all HA groups from GET /cluster/ha/groups.
 func (c *Client) GetHAGroups(ctx context.Context) ([]HAGroup, error) {
 	var groups []HAGroup
@@ -471,6 +483,24 @@ func (c *Client) CreateHARule(ctx context.Context, ruleType string, params Creat
 	}
 	if err := c.doPost(ctx, "/cluster/ha/rules", form, nil); err != nil {
 		return fmt.Errorf("create HA rule %q: %w", params.Rule, err)
+	}
+	return nil
+}
+
+// SetHARuleDisabled enables or disables an HA rule via PUT /cluster/ha/rules/{rule}.
+// SetHARuleDisabled enables or disables an HA rule via PUT /cluster/ha/rules/{rule}.
+// The ruleType ("node-affinity" or "resource-affinity") is required by the Proxmox API.
+func (c *Client) SetHARuleDisabled(ctx context.Context, ruleID string, ruleType string, disabled bool) error {
+	path := "/cluster/ha/rules/" + url.PathEscape(ruleID)
+	form := url.Values{}
+	form.Set("type", ruleType)
+	if disabled {
+		form.Set("disable", "1")
+	} else {
+		form.Set("disable", "0")
+	}
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("set HA rule %s disabled=%v: %w", ruleID, disabled, err)
 	}
 	return nil
 }
@@ -2282,6 +2312,32 @@ func (c *Client) GetNodeAptUpdates(ctx context.Context, node string) ([]AptUpdat
 		return nil, fmt.Errorf("get apt updates on %s: %w", node, err)
 	}
 	return updates, nil
+}
+
+// RefreshNodeAptIndex triggers an apt-get update on a node via POST /nodes/{node}/apt/update.
+// Returns the UPID of the background task.
+func (c *Client) RefreshNodeAptIndex(ctx context.Context, node string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	var upid string
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/apt/update", nil, &upid); err != nil {
+		return "", fmt.Errorf("refresh apt index on %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// RebootNode reboots a node via POST /nodes/{node}/status with command=reboot.
+func (c *Client) RebootNode(ctx context.Context, node string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form := url.Values{}
+	form.Set("command", "reboot")
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/status", form, nil); err != nil {
+		return fmt.Errorf("reboot node %s: %w", node, err)
+	}
+	return nil
 }
 
 // DeleteBackupJob deletes a vzdump backup job schedule.

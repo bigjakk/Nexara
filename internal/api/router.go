@@ -399,6 +399,29 @@ func (s *Server) setupRoutes() {
 		oidc.Post("/configs/:id/test", s.oidcHandler.TestConnection)
 	}
 
+	// Rolling update routes.
+	if s.rollingUpdateHandler != nil && s.clusterHandler != nil {
+		ruClusters := v1.Group("/clusters", s.authRequired())
+		ruClusters.Get("/:cluster_id/rolling-updates", s.rollingUpdateHandler.ListJobs)
+		ruClusters.Post("/:cluster_id/rolling-updates", s.rollingUpdateHandler.CreateJob)
+		ruClusters.Get("/:cluster_id/rolling-updates/:id", s.rollingUpdateHandler.GetJob)
+		ruClusters.Post("/:cluster_id/rolling-updates/:id/start", s.rollingUpdateHandler.StartJob)
+		ruClusters.Post("/:cluster_id/rolling-updates/:id/cancel", s.rollingUpdateHandler.CancelJob)
+		ruClusters.Post("/:cluster_id/rolling-updates/:id/pause", s.rollingUpdateHandler.PauseJob)
+		ruClusters.Post("/:cluster_id/rolling-updates/:id/resume", s.rollingUpdateHandler.ResumeJob)
+		ruClusters.Get("/:cluster_id/rolling-updates/:id/nodes", s.rollingUpdateHandler.ListNodes)
+		ruClusters.Post("/:cluster_id/rolling-updates/:id/nodes/:node_id/confirm-upgrade", s.rollingUpdateHandler.ConfirmUpgrade)
+		ruClusters.Post("/:cluster_id/rolling-updates/:id/nodes/:node_id/skip", s.rollingUpdateHandler.SkipNode)
+		ruClusters.Post("/:cluster_id/rolling-updates/preflight-ha", s.rollingUpdateHandler.PreflightHA)
+		ruClusters.Get("/:cluster_id/nodes/:node/packages", s.rollingUpdateHandler.PreviewPackages)
+
+		// SSH credential management.
+		ruClusters.Get("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.GetSSHCredentials)
+		ruClusters.Put("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.UpsertSSHCredentials)
+		ruClusters.Delete("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.DeleteSSHCredentials)
+		ruClusters.Post("/:cluster_id/ssh-credentials/test", s.rollingUpdateHandler.TestSSHConnection)
+	}
+
 	// User management routes.
 	if s.userHandler != nil {
 		users := v1.Group("/users", s.authRequired())

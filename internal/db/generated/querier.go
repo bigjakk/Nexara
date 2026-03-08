@@ -17,13 +17,18 @@ type Querier interface {
 	AssignUserRole(ctx context.Context, arg AssignUserRoleParams) (UserRole, error)
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
+	CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	CheckUserPermission(ctx context.Context, arg CheckUserPermissionParams) (bool, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
 	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
+	CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) error
 	CountActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) (CountActiveAlertsByClusterRow, error)
+	CountActiveNodes(ctx context.Context, jobID uuid.UUID) (int64, error)
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
+	CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (CountCompletedNodesRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
@@ -41,6 +46,7 @@ type Querier interface {
 	DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) error
 	DeleteCVEScan(ctx context.Context, id uuid.UUID) error
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
+	DeleteClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) error
 	DeleteCompletedTasks(ctx context.Context) error
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
@@ -62,6 +68,8 @@ type Querier interface {
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error
+	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) error
 	GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error)
 	GetAlertRule(ctx context.Context, id uuid.UUID) (AlertRule, error)
 	GetAlertSummary(ctx context.Context) (GetAlertSummaryRow, error)
@@ -76,6 +84,7 @@ type Querier interface {
 	GetClusterMetrics1h(ctx context.Context, arg GetClusterMetrics1hParams) ([]GetClusterMetrics1hRow, error)
 	GetClusterMetrics5m(ctx context.Context, arg GetClusterMetrics5mParams) ([]GetClusterMetrics5mRow, error)
 	GetClusterMetricsDailyAvg(ctx context.Context, arg GetClusterMetricsDailyAvgParams) ([]GetClusterMetricsDailyAvgRow, error)
+	GetClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (ClusterSshCredential, error)
 	GetClusterSecuritySummary(ctx context.Context, clusterID uuid.UUID) (GetClusterSecuritySummaryRow, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
@@ -93,7 +102,9 @@ type Querier interface {
 	GetLatestPBSDatastoreMetrics(ctx context.Context, pbsServerID uuid.UUID) ([]PbsDatastoreMetric, error)
 	GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (MaintenanceWindow, error)
 	GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJob, error)
+	GetNextPendingNode(ctx context.Context, jobID uuid.UUID) (RollingUpdateNode, error)
 	GetNode(ctx context.Context, id uuid.UUID) (Node, error)
+	GetNodeAddressByName(ctx context.Context, arg GetNodeAddressByNameParams) (string, error)
 	GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClusterAndNameParams) (Node, error)
 	GetNodeIODailyRate(ctx context.Context, arg GetNodeIODailyRateParams) ([]GetNodeIODailyRateRow, error)
 	GetNodeMetrics1h(ctx context.Context, arg GetNodeMetrics1hParams) ([]GetNodeMetrics1hRow, error)
@@ -114,6 +125,8 @@ type Querier interface {
 	GetReportSchedule(ctx context.Context, id uuid.UUID) (ReportSchedule, error)
 	GetRole(ctx context.Context, id uuid.UUID) (Role, error)
 	GetRoleByName(ctx context.Context, name string) (Role, error)
+	GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (RollingUpdateJob, error)
+	GetRollingUpdateNode(ctx context.Context, id uuid.UUID) (RollingUpdateNode, error)
 	GetScheduledTask(ctx context.Context, id uuid.UUID) (ScheduledTask, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
@@ -131,6 +144,8 @@ type Querier interface {
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
 	GetVMMetricsDailyAvg(ctx context.Context, arg GetVMMetricsDailyAvgParams) ([]GetVMMetricsDailyAvgRow, error)
 	GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetricsParams) ([]GetVMRecentMetricsRow, error)
+	HasClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (bool, error)
+	HasRunningJobForCluster(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	// Alert History
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
 	// Alert Rules
@@ -150,6 +165,8 @@ type Querier interface {
 	InsertReportRun(ctx context.Context, arg InsertReportRunParams) (ReportRun, error)
 	// Report Schedules
 	InsertReportSchedule(ctx context.Context, arg InsertReportScheduleParams) (ReportSchedule, error)
+	InsertRollingUpdateJob(ctx context.Context, arg InsertRollingUpdateJobParams) (RollingUpdateJob, error)
+	InsertRollingUpdateNode(ctx context.Context, arg InsertRollingUpdateNodeParams) (RollingUpdateNode, error)
 	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
@@ -189,6 +206,7 @@ type Querier interface {
 	ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error)
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
+	ListNodeAddresses(ctx context.Context, clusterID uuid.UUID) ([]ListNodeAddressesRow, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
 	ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error)
 	ListOIDCConfigs(ctx context.Context) ([]OidcConfig, error)
@@ -210,6 +228,9 @@ type Querier interface {
 	ListReportSchedulesByCluster(ctx context.Context, arg ListReportSchedulesByClusterParams) ([]ReportSchedule, error)
 	ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 	ListRoles(ctx context.Context) ([]Role, error)
+	ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpdateJobsParams) ([]RollingUpdateJob, error)
+	ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) ([]RollingUpdateNode, error)
+	ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUpdateJob, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
@@ -226,16 +247,38 @@ type Querier interface {
 	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
+	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	ResolveAlert(ctx context.Context, arg ResolveAlertParams) error
+	ResumeRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	RevokeAllUserRoles(ctx context.Context, userID uuid.UUID) error
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
 	RevokeUserRole(ctx context.Context, arg RevokeUserRoleParams) error
+	SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error
+	SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabledParams) error
 	SetLDAPUserActive(ctx context.Context, arg SetLDAPUserActiveParams) error
 	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
+	SetNodeDisabledHARules(ctx context.Context, arg SetNodeDisabledHARulesParams) error
+	SetNodeDrainCompletedAuto(ctx context.Context, id uuid.UUID) error
+	SetNodeDrainCompletedManual(ctx context.Context, id uuid.UUID) error
+	SetNodeDrainStarted(ctx context.Context, id uuid.UUID) error
+	SetNodeGuestsJSON(ctx context.Context, arg SetNodeGuestsJSONParams) error
+	SetNodeHealthCheckPassed(ctx context.Context, id uuid.UUID) error
+	SetNodePackagesJSON(ctx context.Context, arg SetNodePackagesJSONParams) error
+	SetNodeRebootCompleted(ctx context.Context, id uuid.UUID) error
+	SetNodeRebootStarted(ctx context.Context, id uuid.UUID) error
+	SetNodeRestoreCompleted(ctx context.Context, id uuid.UUID) error
+	SetNodeRestoreStarted(ctx context.Context, id uuid.UUID) error
+	SetNodeUpgradeCompleted(ctx context.Context, id uuid.UUID) error
+	SetNodeUpgradeCompletedNoReboot(ctx context.Context, id uuid.UUID) error
+	SetNodeUpgradeOutput(ctx context.Context, arg SetNodeUpgradeOutputParams) error
+	SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error
+	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) error
+	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
+	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error
 	UpdateAlertEscalation(ctx context.Context, arg UpdateAlertEscalationParams) error
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)
@@ -254,6 +297,7 @@ type Querier interface {
 	UpdateMigrationJobChecks(ctx context.Context, arg UpdateMigrationJobChecksParams) error
 	UpdateMigrationJobProgress(ctx context.Context, arg UpdateMigrationJobProgressParams) error
 	UpdateMigrationJobStatus(ctx context.Context, arg UpdateMigrationJobStatusParams) error
+	UpdateNodeAddress(ctx context.Context, arg UpdateNodeAddressParams) error
 	UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (NotificationChannel, error)
 	UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error)
 	UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserProfileParams) (User, error)
@@ -265,6 +309,8 @@ type Querier interface {
 	UpdateReportSchedule(ctx context.Context, arg UpdateReportScheduleParams) (ReportSchedule, error)
 	UpdateReportScheduleLastRun(ctx context.Context, arg UpdateReportScheduleLastRunParams) error
 	UpdateRole(ctx context.Context, arg UpdateRoleParams) (Role, error)
+	UpdateRollingUpdateJobStatus(ctx context.Context, arg UpdateRollingUpdateJobStatusParams) error
+	UpdateRollingUpdateNodeStep(ctx context.Context, arg UpdateRollingUpdateNodeStepParams) error
 	UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) error
 	UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error
 	UpdateTaskHistory(ctx context.Context, arg UpdateTaskHistoryParams) error
@@ -274,6 +320,7 @@ type Querier interface {
 	UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error
 	UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) error
 	UpsertCVEScanSchedule(ctx context.Context, arg UpsertCVEScanScheduleParams) (CveScanSchedule, error)
+	UpsertClusterSSHCredentials(ctx context.Context, arg UpsertClusterSSHCredentialsParams) (ClusterSshCredential, error)
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)

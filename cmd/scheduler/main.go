@@ -64,7 +64,7 @@ func main() {
 
 	sched := scheduler.New(queries, cfg.EncryptionKey, logger, eventPub)
 
-	logger.Info("ProxDash scheduler started", "task_interval", "60s", "drs_interval", "60s", "cve_interval", "6h", "alert_interval", "60s", "report_interval", "60s")
+	logger.Info("ProxDash scheduler started", "task_interval", "60s", "drs_interval", "60s", "cve_interval", "6h", "alert_interval", "60s", "report_interval", "60s", "rolling_update_interval", "15s")
 
 	// Clean up stale DRS history entries from previous interrupted runs.
 	if err := queries.CleanupStaleDRSHistory(ctx); err != nil {
@@ -77,6 +77,7 @@ func main() {
 	sched.RunCVEScanning(ctx)
 	sched.RunAlertEvaluation(ctx)
 	sched.RunReportGeneration(ctx)
+	sched.RunRollingUpdates(ctx)
 
 	taskTicker := time.NewTicker(60 * time.Second)
 	defer taskTicker.Stop()
@@ -93,6 +94,9 @@ func main() {
 	reportTicker := time.NewTicker(60 * time.Second)
 	defer reportTicker.Stop()
 
+	rollingTicker := time.NewTicker(15 * time.Second)
+	defer rollingTicker.Stop()
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -108,6 +112,8 @@ func main() {
 			sched.RunAlertEvaluation(ctx)
 		case <-reportTicker.C:
 			sched.RunReportGeneration(ctx)
+		case <-rollingTicker.C:
+			sched.RunRollingUpdates(ctx)
 		case sig := <-sigCh:
 			logger.Info("received signal, shutting down", "signal", sig)
 			cancel()

@@ -12,7 +12,7 @@ import (
 )
 
 const getNode = `-- name: GetNode :one
-SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at FROM nodes WHERE id = $1
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address FROM nodes WHERE id = $1
 `
 
 func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (Node, error) {
@@ -32,12 +32,29 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (Node, error) {
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Address,
 	)
 	return i, err
 }
 
+const getNodeAddressByName = `-- name: GetNodeAddressByName :one
+SELECT address FROM nodes WHERE cluster_id = $1 AND name = $2
+`
+
+type GetNodeAddressByNameParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Name      string    `json:"name"`
+}
+
+func (q *Queries) GetNodeAddressByName(ctx context.Context, arg GetNodeAddressByNameParams) (string, error) {
+	row := q.db.QueryRow(ctx, getNodeAddressByName, arg.ClusterID, arg.Name)
+	var address string
+	err := row.Scan(&address)
+	return address, err
+}
+
 const getNodeByClusterAndName = `-- name: GetNodeByClusterAndName :one
-SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at FROM nodes WHERE cluster_id = $1 AND name = $2
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address FROM nodes WHERE cluster_id = $1 AND name = $2
 `
 
 type GetNodeByClusterAndNameParams struct {
@@ -62,12 +79,42 @@ func (q *Queries) GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClus
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Address,
 	)
 	return i, err
 }
 
+const listNodeAddresses = `-- name: ListNodeAddresses :many
+SELECT name, address FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name
+`
+
+type ListNodeAddressesRow struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
+func (q *Queries) ListNodeAddresses(ctx context.Context, clusterID uuid.UUID) ([]ListNodeAddressesRow, error) {
+	rows, err := q.db.Query(ctx, listNodeAddresses, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNodeAddressesRow{}
+	for rows.Next() {
+		var i ListNodeAddressesRow
+		if err := rows.Scan(&i.Name, &i.Address); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNodesByCluster = `-- name: ListNodesByCluster :many
-SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at FROM nodes WHERE cluster_id = $1 ORDER BY name
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address FROM nodes WHERE cluster_id = $1 ORDER BY name
 `
 
 func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error) {
@@ -93,6 +140,7 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) (
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Address,
 		); err != nil {
 			return nil, err
 		}
@@ -102,6 +150,22 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) (
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateNodeAddress = `-- name: UpdateNodeAddress :exec
+UPDATE nodes SET address = $3, updated_at = now()
+WHERE cluster_id = $1 AND name = $2 AND address != $3
+`
+
+type UpdateNodeAddressParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Name      string    `json:"name"`
+	Address   string    `json:"address"`
+}
+
+func (q *Queries) UpdateNodeAddress(ctx context.Context, arg UpdateNodeAddressParams) error {
+	_, err := q.db.Exec(ctx, updateNodeAddress, arg.ClusterID, arg.Name, arg.Address)
+	return err
 }
 
 const upsertNode = `-- name: UpsertNode :one
@@ -116,7 +180,7 @@ ON CONFLICT (cluster_id, name) DO UPDATE SET
     ssl_fingerprint = EXCLUDED.ssl_fingerprint,
     uptime = EXCLUDED.uptime,
     last_seen_at = now()
-RETURNING id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at
+RETURNING id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address
 `
 
 type UpsertNodeParams struct {
@@ -158,6 +222,7 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Address,
 	)
 	return i, err
 }

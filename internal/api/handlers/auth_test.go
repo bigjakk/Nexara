@@ -16,7 +16,7 @@ import (
 )
 
 func TestRegister_MissingFields(t *testing.T) {
-	app, _ := newTestApp(t)
+	app := newTestApp(t)
 
 	tests := []struct {
 		name string
@@ -35,7 +35,7 @@ func TestRegister_MissingFields(t *testing.T) {
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -45,7 +45,7 @@ func TestRegister_MissingFields(t *testing.T) {
 }
 
 func TestRegister_InvalidEmail(t *testing.T) {
-	app, _ := newTestApp(t)
+	app := newTestApp(t)
 
 	body := `{"email":"not-an-email","password":"Str0ng!Pass"}`
 	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString(body))
@@ -54,7 +54,7 @@ func TestRegister_InvalidEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -62,7 +62,7 @@ func TestRegister_InvalidEmail(t *testing.T) {
 }
 
 func TestRegister_WeakPassword(t *testing.T) {
-	app, _ := newTestApp(t)
+	app := newTestApp(t)
 
 	tests := []struct {
 		name     string
@@ -83,7 +83,7 @@ func TestRegister_WeakPassword(t *testing.T) {
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusBadRequest {
 				body, _ := io.ReadAll(resp.Body)
@@ -94,7 +94,7 @@ func TestRegister_WeakPassword(t *testing.T) {
 }
 
 func TestLogin_MissingFields(t *testing.T) {
-	app, _ := newTestApp(t)
+	app := newTestApp(t)
 
 	tests := []struct {
 		name string
@@ -113,7 +113,7 @@ func TestLogin_MissingFields(t *testing.T) {
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -123,7 +123,7 @@ func TestLogin_MissingFields(t *testing.T) {
 }
 
 func TestLogin_InvalidJSON(t *testing.T) {
-	app, _ := newTestApp(t)
+	app := newTestApp(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString("not json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -131,7 +131,7 @@ func TestLogin_InvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		body, _ := io.ReadAll(resp.Body)
@@ -146,7 +146,7 @@ func TestLogin_InvalidJSON(t *testing.T) {
 }
 
 func TestRefresh_MissingToken(t *testing.T) {
-	app, _ := newTestApp(t)
+	app := newTestApp(t)
 
 	body := `{}`
 	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", bytes.NewBufferString(body))
@@ -155,7 +155,7 @@ func TestRefresh_MissingToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -227,7 +227,7 @@ func TestExtractBearerToken(t *testing.T) {
 }
 
 // newTestApp creates a Fiber app with auth handler for unit tests (no DB/Redis).
-func newTestApp(t *testing.T) (*fiber.App, *AuthHandler) {
+func newTestApp(t *testing.T) *fiber.App {
 	t.Helper()
 
 	jwtSvc := auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour)
@@ -255,7 +255,7 @@ func newTestApp(t *testing.T) (*fiber.App, *AuthHandler) {
 	app.Post("/auth/login", handler.Login)
 	app.Post("/auth/refresh", handler.Refresh)
 
-	return app, handler
+	return app
 }
 
 // extractBearerTokenFromHeader replicates the bearer token extraction logic for testing.

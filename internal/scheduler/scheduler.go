@@ -17,6 +17,7 @@ import (
 	"github.com/proxdash/proxdash/internal/notifications"
 	"github.com/proxdash/proxdash/internal/proxmox"
 	"github.com/proxdash/proxdash/internal/reports"
+	"github.com/proxdash/proxdash/internal/rolling"
 	"github.com/proxdash/proxdash/internal/scanner"
 )
 
@@ -30,11 +31,13 @@ type Scheduler struct {
 	cveScanner    *scanner.Engine
 	alertEngine   *notifications.Engine
 	reportGen     *reports.Generator
+	rollingOrch   *rolling.Orchestrator
 	eventPub      *events.Publisher
 }
 
 // New creates a new Scheduler.
 func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
+	registry := newDispatcherRegistry()
 	return &Scheduler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
@@ -42,8 +45,9 @@ func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPu
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
 		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor"), eventPub),
 		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner")),
-		alertEngine:   notifications.NewEngine(queries, logger.With("component", "alert-engine"), eventPub, newDispatcherRegistry(), encryptionKey),
+		alertEngine:   notifications.NewEngine(queries, logger.With("component", "alert-engine"), eventPub, registry, encryptionKey),
 		reportGen:     reports.NewGenerator(queries, logger.With("component", "report-gen")),
+		rollingOrch:   rolling.NewOrchestrator(queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry),
 		eventPub:      eventPub,
 	}
 }
@@ -449,6 +453,21 @@ func (s *Scheduler) updateScheduleNextRun(ctx context.Context, sched db.ReportSc
 	}); uErr != nil {
 		s.logger.Error("failed to update schedule last run", "schedule_id", sched.ID, "error", uErr)
 	}
+}
+
+// RunRollingUpdates advances any running rolling update jobs.
+func (s *Scheduler) RunRollingUpdates(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("rolling update orchestrator panicked", "panic", r)
+		}
+	}()
+	s.rollingOrch.Tick(ctx)
+}
+
+// RollingOrchestrator returns the rolling update orchestrator for use by API handlers.
+func (s *Scheduler) RollingOrchestrator() *rolling.Orchestrator {
+	return s.rollingOrch
 }
 
 // newDispatcherRegistry creates a registry with all notification dispatchers.

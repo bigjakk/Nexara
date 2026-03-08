@@ -88,8 +88,8 @@ func (h *AuditHandler) List(c *fiber.Ctx) error {
 	}
 
 	items, err := h.queries.ListAuditLogEnriched(c.Context(), db.ListAuditLogEnrichedParams{
-		Limit:        int32(limit),
-		Offset:       int32(offset),
+		Limit:        safeInt32(limit),
+		Offset:       safeInt32(offset),
 		ClusterID:    clusterFilter,
 		ResourceType: resourceFilter,
 	})

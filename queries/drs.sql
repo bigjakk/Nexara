@@ -54,6 +54,9 @@ UPDATE drs_history
 SET status = 'cancelled', executed_at = now()
 WHERE status = 'pending' AND created_at < now() - interval '60 minutes';
 
+-- name: SetDRSEnabled :exec
+UPDATE drs_configs SET enabled = $2, updated_at = now() WHERE cluster_id = $1;
+
 -- name: GetLastDRSMigrationForVM :one
 SELECT * FROM drs_history
 WHERE cluster_id = $1 AND vm_id = $2 AND status IN ('completed', 'pending')

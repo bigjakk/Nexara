@@ -110,6 +110,10 @@ func (m *mockQueries) DeleteStaleVMs(_ context.Context, _ db.DeleteStaleVMsParam
 	return nil
 }
 
+func (m *mockQueries) UpdateNodeAddress(_ context.Context, _ db.UpdateNodeAddressParams) error {
+	return nil
+}
+
 // PBS mock methods (no-op stubs for interface compliance).
 func (m *mockQueries) ListActivePBSServers(_ context.Context) ([]db.PbsServer, error) {
 	return nil, nil

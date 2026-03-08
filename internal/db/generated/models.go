@@ -161,6 +161,18 @@ type Cluster struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
+type ClusterSshCredential struct {
+	ID                  uuid.UUID `json:"id"`
+	ClusterID           uuid.UUID `json:"cluster_id"`
+	Username            string    `json:"username"`
+	Port                int32     `json:"port"`
+	AuthType            string    `json:"auth_type"`
+	EncryptedPassword   string    `json:"encrypted_password"`
+	EncryptedPrivateKey string    `json:"encrypted_private_key"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
 type CveCache struct {
 	ID          uuid.UUID          `json:"id"`
 	CveID       string             `json:"cve_id"`
@@ -350,6 +362,7 @@ type Node struct {
 	LastSeenAt     time.Time `json:"last_seen_at"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	Address        string    `json:"address"`
 }
 
 type NodeMetric struct {
@@ -555,6 +568,53 @@ type Role struct {
 type RolePermission struct {
 	RoleID       uuid.UUID `json:"role_id"`
 	PermissionID uuid.UUID `json:"permission_id"`
+}
+
+type RollingUpdateJob struct {
+	ID                uuid.UUID          `json:"id"`
+	ClusterID         uuid.UUID          `json:"cluster_id"`
+	Status            string             `json:"status"`
+	Parallelism       int32              `json:"parallelism"`
+	RebootAfterUpdate bool               `json:"reboot_after_update"`
+	AutoRestoreGuests bool               `json:"auto_restore_guests"`
+	PackageExcludes   []string           `json:"package_excludes"`
+	FailureReason     string             `json:"failure_reason"`
+	CreatedBy         uuid.UUID          `json:"created_by"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	HaPolicy          string             `json:"ha_policy"`
+	HaWarnings        json.RawMessage    `json:"ha_warnings"`
+	AutoUpgrade       bool               `json:"auto_upgrade"`
+	DrsWasEnabled     bool               `json:"drs_was_enabled"`
+	NotifyChannelID   pgtype.UUID        `json:"notify_channel_id"`
+}
+
+type RollingUpdateNode struct {
+	ID                 uuid.UUID          `json:"id"`
+	JobID              uuid.UUID          `json:"job_id"`
+	NodeName           string             `json:"node_name"`
+	NodeOrder          int32              `json:"node_order"`
+	Step               string             `json:"step"`
+	FailureReason      string             `json:"failure_reason"`
+	PackagesJson       json.RawMessage    `json:"packages_json"`
+	GuestsJson         json.RawMessage    `json:"guests_json"`
+	DrainStartedAt     pgtype.Timestamptz `json:"drain_started_at"`
+	DrainCompletedAt   pgtype.Timestamptz `json:"drain_completed_at"`
+	UpgradeConfirmedAt pgtype.Timestamptz `json:"upgrade_confirmed_at"`
+	RebootStartedAt    pgtype.Timestamptz `json:"reboot_started_at"`
+	RebootCompletedAt  pgtype.Timestamptz `json:"reboot_completed_at"`
+	HealthCheckAt      pgtype.Timestamptz `json:"health_check_at"`
+	RestoreStartedAt   pgtype.Timestamptz `json:"restore_started_at"`
+	RestoreCompletedAt pgtype.Timestamptz `json:"restore_completed_at"`
+	CreatedAt          time.Time          `json:"created_at"`
+	UpdatedAt          time.Time          `json:"updated_at"`
+	UpgradeStartedAt   pgtype.Timestamptz `json:"upgrade_started_at"`
+	UpgradeCompletedAt pgtype.Timestamptz `json:"upgrade_completed_at"`
+	UpgradeOutput      string             `json:"upgrade_output"`
+	DisabledHaRules    json.RawMessage    `json:"disabled_ha_rules"`
+	SkipReason         string             `json:"skip_reason"`
 }
 
 type ScheduledTask struct {

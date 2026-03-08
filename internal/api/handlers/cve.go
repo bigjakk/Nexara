@@ -188,8 +188,8 @@ func (h *CVEHandler) ListScans(c *fiber.Ctx) error {
 
 	scans, err := h.queries.ListCVEScans(c.Context(), db.ListCVEScansParams{
 		ClusterID: clusterID,
-		Limit:     int32(limit),
-		Offset:    int32(offset),
+		Limit:     safeInt32(limit),
+		Offset:    safeInt32(offset),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list scans")
@@ -334,18 +334,19 @@ func (h *CVEHandler) ListVulnerabilities(c *fiber.Ctx) error {
 
 	var vulns []db.CveScanVuln
 
-	if nodeID != "" {
+	switch {
+	case nodeID != "":
 		nid, parseErr := uuid.Parse(nodeID)
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid node ID")
 		}
 		vulns, err = h.queries.ListCVEScanVulnsByNode(c.Context(), nid)
-	} else if severity != "" {
+	case severity != "":
 		vulns, err = h.queries.ListCVEScanVulnsBySeverity(c.Context(), db.ListCVEScanVulnsBySeverityParams{
 			ScanID:   scanID,
 			Severity: severity,
 		})
-	} else {
+	default:
 		vulns, err = h.queries.ListCVEScanVulns(c.Context(), scanID)
 	}
 

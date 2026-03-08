@@ -349,7 +349,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 			ClusterID:   clusterID,
 			SourceNode:  rec.SourceNode,
 			TargetNode:  rec.TargetNode,
-			VmID:        int32(rec.VMID),
+			VmID:        safeInt32(rec.VMID),
 			VmType:      rec.VMType,
 			Reason:      rec.Reason,
 			ScoreBefore: rec.ScoreBefore,

@@ -120,7 +120,7 @@ const router = createBrowserRouter([
             path: "security",
             element: <SecurityDashboardPage />,
           },
-          {
+{
             path: "settings/security",
             element: <SecurityPage />,
           },

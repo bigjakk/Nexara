@@ -394,7 +394,7 @@ func (h *OIDCHandler) TestConnection(c *fiber.Ctx) error {
 			Message: "Failed to reach OIDC discovery endpoint. Check the issuer URL and network connectivity.",
 		})
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return c.JSON(testConnectionResponse{

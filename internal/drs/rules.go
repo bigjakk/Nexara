@@ -21,8 +21,8 @@ type Rule struct {
 	Enabled   bool
 }
 
-// parseDBRules converts DB rule records to engine Rule structs.
-func parseDBRules(dbRules []db.DrsRule) []Rule {
+// ParseDBRules converts DB rule records to engine Rule structs.
+func ParseDBRules(dbRules []db.DrsRule) []Rule {
 	rules := make([]Rule, 0, len(dbRules))
 	for _, r := range dbRules {
 		if !r.Enabled {
@@ -172,6 +172,11 @@ func CheckViolations(nodeWorkloads map[string][]Workload, rules []Rule) []string
 	}
 
 	return violations
+}
+
+// FindVMNodePublic returns the node a VM is on, given a workload map.
+func FindVMNodePublic(vmid int, nodeWorkloads map[string][]Workload) string {
+	return findVMNode(vmid, nodeWorkloads)
 }
 
 func findVMNode(vmid int, nodeWorkloads map[string][]Workload) string {

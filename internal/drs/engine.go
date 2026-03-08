@@ -190,7 +190,7 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) ([]Recommend
 	if err != nil {
 		return nil, fmt.Errorf("list DRS rules: %w", err)
 	}
-	rules := parseDBRules(dbRules)
+	rules := ParseDBRules(dbRules)
 	rules = append(rules, haRules...)
 
 	// Build filtered workloads for the planner (exclude pinned VMs).

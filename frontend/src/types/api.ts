@@ -548,3 +548,127 @@ export interface StorageResponse {
   created_at: string;
   updated_at: string;
 }
+
+// Rolling Update types
+export interface RollingUpdateJob {
+  id: string;
+  cluster_id: string;
+  status:
+    | "pending"
+    | "running"
+    | "paused"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  parallelism: number;
+  reboot_after_update: boolean;
+  auto_restore_guests: boolean;
+  package_excludes: string[];
+  ha_policy: "strict" | "warn";
+  ha_warnings: HAConflict[];
+  auto_upgrade: boolean;
+  failure_reason: string;
+  notify_channel_id?: string;
+  created_by: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RollingUpdateNode {
+  id: string;
+  job_id: string;
+  node_name: string;
+  node_order: number;
+  step:
+    | "pending"
+    | "draining"
+    | "awaiting_upgrade"
+    | "upgrading"
+    | "rebooting"
+    | "health_check"
+    | "restoring"
+    | "completed"
+    | "failed"
+    | "skipped";
+  failure_reason: string;
+  skip_reason?: string;
+  packages_json: AptPackage[];
+  guests_json: GuestSnapshot[];
+  drain_started_at?: string;
+  drain_completed_at?: string;
+  upgrade_confirmed_at?: string;
+  upgrade_started_at?: string;
+  upgrade_completed_at?: string;
+  upgrade_output?: string;
+  reboot_started_at?: string;
+  reboot_completed_at?: string;
+  health_check_at?: string;
+  restore_started_at?: string;
+  restore_completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AptPackage {
+  Package: string;
+  Title: string;
+  Description: string;
+  OldVersion: string;
+  Version: string;
+  Origin: string;
+  Priority: string;
+  Section: string;
+  ChangeLogUrl: string;
+}
+
+export interface GuestSnapshot {
+  vmid: number;
+  name: string;
+  type: "qemu" | "lxc";
+  status: string;
+  passthrough?: boolean;
+}
+
+export interface CreateRollingUpdateRequest {
+  nodes: string[];
+  parallelism: number;
+  reboot_after_update: boolean;
+  auto_restore_guests: boolean;
+  package_excludes: string[];
+  ha_policy: "strict" | "warn";
+  auto_upgrade: boolean;
+  notify_channel_id?: string | undefined;
+}
+
+export interface SSHCredential {
+  cluster_id: string;
+  username: string;
+  port: number;
+  auth_type: "password" | "key";
+  has_key: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SSHTestResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface HAConflict {
+  source: string;
+  rule_name: string;
+  type: string;
+  severity: "error" | "warning";
+  vmid: number;
+  vm_name?: string;
+  message: string;
+  node: string;
+}
+
+export interface HAPreFlightReport {
+  conflicts: HAConflict[];
+  has_errors: boolean;
+}
