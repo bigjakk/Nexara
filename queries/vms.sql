@@ -48,5 +48,8 @@ JOIN clusters c ON c.id = v.cluster_id
 WHERE v.template = false
 ORDER BY v.name;
 
+-- name: UpdateVMPool :exec
+UPDATE vms SET pool = $2 WHERE id = $1;
+
 -- name: DeleteStaleVMs :exec
 DELETE FROM vms WHERE cluster_id = $1 AND last_seen_at < $2;

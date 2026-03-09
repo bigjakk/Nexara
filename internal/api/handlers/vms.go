@@ -1339,6 +1339,9 @@ func mapProxmoxError(err error) error {
 		return fiber.NewError(fiber.StatusNotFound, "Resource not found on Proxmox")
 	}
 	if errors.Is(err, proxmox.ErrForbidden) {
+		if unwrapped := err.Error(); unwrapped != "" && unwrapped != "forbidden" {
+			return fiber.NewError(fiber.StatusForbidden, "Proxmox API: "+unwrapped)
+		}
 		return fiber.NewError(fiber.StatusForbidden, "Proxmox API permission denied")
 	}
 	if errors.Is(err, proxmox.ErrConnectionFailed) {
@@ -1346,6 +1349,19 @@ func mapProxmoxError(err error) error {
 	}
 	var apiErr *proxmox.APIError
 	if errors.As(err, &apiErr) {
+		// Try to parse Proxmox validation error format:
+		// {"errors":{"field":"message"},"message":"Parameter verification failed.\n","data":null}
+		var pxResp struct {
+			Message string            `json:"message"`
+			Errors  map[string]string `json:"errors"`
+		}
+		if jsonErr := json.Unmarshal([]byte(apiErr.Message), &pxResp); jsonErr == nil && len(pxResp.Errors) > 0 {
+			var parts []string
+			for field, msg := range pxResp.Errors {
+				parts = append(parts, field+": "+msg)
+			}
+			return fiber.NewError(fiber.StatusBadRequest, strings.Join(parts, "; "))
+		}
 		return fiber.NewError(fiber.StatusBadGateway, apiErr.Message)
 	}
 	return fiber.NewError(fiber.StatusInternalServerError, "Proxmox operation failed: "+err.Error())
@@ -1636,4 +1652,79 @@ func (h *VMHandler) ListNodePCIDevices(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(devices)
+}
+
+// SetVMPool handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/pool.
+// Moves a VM/CT into a pool (or removes from current pool if pool is empty).
+func (h *VMHandler) SetVMPool(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "pool"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var body struct {
+		Pool string `json:"pool"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	vm, err := h.queries.GetVM(c.Context(), vmID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusNotFound, "VM not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up VM")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	vmidStr := strconv.Itoa(int(vm.Vmid))
+	newPool := strings.TrimSpace(body.Pool)
+	oldPool := vm.Pool
+
+	// Remove from old pool if it had one.
+	if oldPool != "" && oldPool != newPool {
+		if err := pxClient.UpdateResourcePool(c.Context(), oldPool, proxmox.UpdatePoolParams{
+			VMs:    vmidStr,
+			Delete: "1",
+		}); err != nil {
+			return mapProxmoxError(err)
+		}
+	}
+
+	// Add to new pool if specified.
+	if newPool != "" && newPool != oldPool {
+		if err := pxClient.UpdateResourcePool(c.Context(), newPool, proxmox.UpdatePoolParams{
+			VMs: vmidStr,
+		}); err != nil {
+			return mapProxmoxError(err)
+		}
+	}
+
+	// Update local DB immediately so the UI reflects the change.
+	if err := h.queries.UpdateVMPool(c.Context(), db.UpdateVMPoolParams{
+		ID:   vmID,
+		Pool: newPool,
+	}); err != nil {
+		// Non-fatal: collector will sync eventually.
+		_ = err
+	}
+
+	details, _ := json.Marshal(map[string]string{"old_pool": oldPool, "new_pool": newPool})
+	h.auditLog(c, clusterID, vmID.String(), "set_pool", details)
+
+	return c.JSON(fiber.Map{"pool": newPool})
 }

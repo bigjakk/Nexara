@@ -2,12 +2,15 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/proxdash/proxdash/internal/crypto"
 	db "github.com/proxdash/proxdash/internal/db/generated"
@@ -26,6 +29,8 @@ type SyncQueries interface {
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
 	DeleteStaleVMs(ctx context.Context, arg db.DeleteStaleVMsParams) error
 	UpdateNodeAddress(ctx context.Context, arg db.UpdateNodeAddressParams) error
+	// Audit
+	InsertAuditLog(ctx context.Context, arg db.InsertAuditLogParams) error
 	// PBS queries
 	ListActivePBSServers(ctx context.Context) ([]db.PbsServer, error)
 	UpsertPBSSnapshot(ctx context.Context, arg db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error)
@@ -47,11 +52,18 @@ type ProxmoxClient interface {
 	GetCephOSDs(ctx context.Context, node string) (*proxmox.CephOSDResponse, error)
 	GetCephPools(ctx context.Context, node string) ([]proxmox.CephPool, error)
 	GetClusterStatus(ctx context.Context) ([]proxmox.ClusterStatusEntry, error)
+	GetClusterResources(ctx context.Context, resourceType string) ([]proxmox.ClusterResource, error)
 }
 
 // ClientFactory creates a ProxmoxClient from cluster credentials.
 // Extracted for testability.
 type ClientFactory func(apiURL, tokenID, tokenSecret, tlsFingerprint string) (ProxmoxClient, error)
+
+// vmExtraFields holds per-VM data only available from the cluster resources endpoint.
+type vmExtraFields struct {
+	HAState string
+	Pool    string
+}
 
 // PBSProxmoxClient defines the PBS API methods needed by the Syncer.
 type PBSProxmoxClient interface {
@@ -64,6 +76,9 @@ type PBSProxmoxClient interface {
 
 // PBSClientFactory creates a PBSProxmoxClient from server credentials.
 type PBSClientFactory func(apiURL, tokenID, tokenSecret, tlsFingerprint string) (PBSProxmoxClient, error)
+
+// systemUserID is the well-known UUID for system-initiated actions (migration 000013).
+var systemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // DefaultClientFactory creates a real proxmox.Client.
 func DefaultClientFactory(apiURL, tokenID, tokenSecret, tlsFingerprint string) (ProxmoxClient, error) {
@@ -96,6 +111,7 @@ type Syncer struct {
 	healthMonitor    *HealthMonitor
 	eventPub         *events.Publisher
 	logger           *slog.Logger
+	lastSyncError    map[uuid.UUID]time.Time // rate-limit sync error reporting per cluster
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
@@ -137,6 +153,22 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 		return nil, fmt.Errorf("sync cluster %s: get nodes: %w", cluster.ID, err)
 	}
 
+	// Fetch cluster-level resource data for HA state and pool membership.
+	// These fields are only available from /cluster/resources, not per-node endpoints.
+	vmExtra := make(map[int32]vmExtraFields)
+	if resources, resErr := client.GetClusterResources(ctx, ""); resErr == nil {
+		for _, r := range resources {
+			if (r.Type == "qemu" || r.Type == "lxc") && r.VMID > 0 {
+				vmExtra[int32(r.VMID)] = vmExtraFields{HAState: r.HAState, Pool: r.Pool}
+			}
+		}
+	} else {
+		s.logger.Warn("failed to get cluster resources for HA/pool data",
+			"cluster_id", cluster.ID,
+			"error", resErr,
+		)
+	}
+
 	// Snapshot current VM statuses so we can detect changes after sync.
 	var oldStatuses map[int32]string
 	if s.eventPub != nil {
@@ -155,7 +187,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 	}
 
 	for _, node := range nodes {
-		nr, err := s.syncNode(ctx, client, cluster.ID, node)
+		nr, err := s.syncNode(ctx, client, cluster.ID, node, vmExtra)
 		if err != nil {
 			s.logger.Warn("failed to sync node",
 				"cluster_id", cluster.ID,
@@ -231,7 +263,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 
 // syncNode syncs a single node and all its resources (VMs, containers, storage)
 // and returns collected metric snapshots.
-func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID, node proxmox.NodeListEntry) (*nodeCollectionResult, error) {
+func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID, node proxmox.NodeListEntry, vmExtra map[int32]vmExtraFields) (*nodeCollectionResult, error) {
 	// Fetch detailed node status for PVE version, CPU info, and metrics.
 	var pveVersion string
 	var cpuCount int32
@@ -276,7 +308,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	}
 
 	// Sync VMs and collect metric snapshots.
-	vmSnapshots, err := s.syncVMs(ctx, client, clusterID, dbNode.ID, node.Node)
+	vmSnapshots, err := s.syncVMs(ctx, client, clusterID, dbNode.ID, node.Node, vmExtra)
 	if err != nil {
 		s.logger.Warn("failed to sync VMs",
 			"node", node.Node,
@@ -285,7 +317,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	}
 
 	// Sync containers and collect metric snapshots.
-	ctSnapshots, err := s.syncContainers(ctx, client, clusterID, dbNode.ID, node.Node)
+	ctSnapshots, err := s.syncContainers(ctx, client, clusterID, dbNode.ID, node.Node, vmExtra)
 	if err != nil {
 		s.logger.Warn("failed to sync containers",
 			"node", node.Node,
@@ -327,7 +359,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	}, nil
 }
 
-func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string) ([]vmMetricSnapshot, error) {
+func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string, vmExtra map[int32]vmExtraFields) ([]vmMetricSnapshot, error) {
 	vms, err := client.GetVMs(ctx, nodeName)
 	if err != nil {
 		return nil, fmt.Errorf("get VMs on %s: %w", nodeName, err)
@@ -335,6 +367,7 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 
 	var snapshots []vmMetricSnapshot
 	for _, vm := range vms {
+		extra := vmExtra[int32(vm.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{
 			ClusterID: clusterID,
 			NodeID:    nodeID,
@@ -348,6 +381,8 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 			Uptime:    vm.Uptime,
 			Template:  vm.Template == 1,
 			Tags:      vm.Tags,
+			HaState:   extra.HAState,
+			Pool:      extra.Pool,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upsert VM %d on %s: %w", vm.VMID, nodeName, err)
@@ -368,7 +403,7 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 	return snapshots, nil
 }
 
-func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string) ([]vmMetricSnapshot, error) {
+func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string, vmExtra map[int32]vmExtraFields) ([]vmMetricSnapshot, error) {
 	cts, err := client.GetContainers(ctx, nodeName)
 	if err != nil {
 		return nil, fmt.Errorf("get containers on %s: %w", nodeName, err)
@@ -376,6 +411,7 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 
 	var snapshots []vmMetricSnapshot
 	for _, ct := range cts {
+		extra := vmExtra[int32(ct.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{
 			ClusterID: clusterID,
 			NodeID:    nodeID,
@@ -389,6 +425,8 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 			Uptime:    ct.Uptime,
 			Template:  ct.Template == 1,
 			Tags:      ct.Tags,
+			HaState:   extra.HAState,
+			Pool:      extra.Pool,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upsert container %d on %s: %w", ct.VMID, nodeName, err)
@@ -758,6 +796,7 @@ func (s *Syncer) SyncAll(ctx context.Context) []*clusterMetricResult {
 				"name", cluster.Name,
 				"error", err,
 			)
+			s.reportSyncError(ctx, cluster, err)
 			continue
 		}
 		if result != nil {
@@ -766,4 +805,41 @@ func (s *Syncer) SyncAll(ctx context.Context) []*clusterMetricResult {
 	}
 
 	return results
+}
+
+// reportSyncError writes an audit log entry and publishes an event when a cluster sync fails.
+// Rate-limited to one report per cluster per 5 minutes to avoid flooding the audit log.
+func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncErr error) {
+	if s.lastSyncError == nil {
+		s.lastSyncError = make(map[uuid.UUID]time.Time)
+	}
+	if last, ok := s.lastSyncError[cluster.ID]; ok && time.Since(last) < 5*time.Minute {
+		return
+	}
+	s.lastSyncError[cluster.ID] = time.Now()
+
+	errMsg := syncErr.Error()
+
+	action := "sync_failed"
+	if strings.Contains(errMsg, "fingerprint mismatch") {
+		action = "tls_fingerprint_mismatch"
+	}
+
+	details, _ := json.Marshal(map[string]string{
+		"cluster_name": cluster.Name,
+		"error":        errMsg,
+	})
+
+	_ = s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
+		UserID:       systemUserID,
+		ResourceType: "cluster",
+		ResourceID:   cluster.ID.String(),
+		Action:       action,
+		Details:      details,
+	})
+
+	if s.eventPub != nil {
+		s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindAuditEntry, "cluster", cluster.ID.String(), action)
+	}
 }

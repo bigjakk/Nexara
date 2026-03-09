@@ -312,6 +312,10 @@ func checkStatus(statusCode int, body []byte) error {
 	case statusCode == http.StatusNotFound:
 		return ErrNotFound
 	case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
+		msg := strings.TrimSpace(string(body))
+		if msg != "" {
+			return fmt.Errorf("%w: %s", ErrForbidden, msg)
+		}
 		return ErrForbidden
 	case statusCode >= 400:
 		return &APIError{

@@ -11,12 +11,21 @@ import type {
   SDNZone,
   SDNVNet,
   SDNSubnet,
+  SDNController,
+  SDNIPAM,
+  SDNDNS,
   CreateSDNZoneRequest,
   UpdateSDNZoneRequest,
   CreateSDNVNetRequest,
   UpdateSDNVNetRequest,
   CreateSDNSubnetRequest,
   UpdateSDNSubnetRequest,
+  CreateSDNControllerRequest,
+  UpdateSDNControllerRequest,
+  CreateSDNIPAMRequest,
+  UpdateSDNIPAMRequest,
+  CreateSDNDNSRequest,
+  UpdateSDNDNSRequest,
   FirewallTemplate,
   CreateTemplateRequest,
   ApplyTemplateResponse,
@@ -478,6 +487,204 @@ export function useApplySDN(clusterId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["sdn"],
+      });
+    },
+  });
+}
+
+// --- SDN Controllers ---
+
+export function useSDNControllers(clusterId: string) {
+  return useQuery({
+    queryKey: ["sdn", "controllers", clusterId],
+    queryFn: () =>
+      apiClient.get<SDNController[]>(
+        `/api/v1/clusters/${clusterId}/sdn/controllers`,
+      ),
+    enabled: clusterId.length > 0,
+  });
+}
+
+export function useCreateSDNController(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateSDNControllerRequest) =>
+      apiClient.post<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/controllers`,
+        req,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "controllers", clusterId],
+      });
+    },
+  });
+}
+
+export function useUpdateSDNController(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      controller,
+      params,
+    }: {
+      controller: string;
+      params: UpdateSDNControllerRequest;
+    }) =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/controllers/${controller}`,
+        params,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "controllers", clusterId],
+      });
+    },
+  });
+}
+
+export function useDeleteSDNController(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (controller: string) =>
+      apiClient.delete<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/controllers/${controller}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "controllers", clusterId],
+      });
+    },
+  });
+}
+
+// --- SDN IPAM ---
+
+export function useSDNIPAMs(clusterId: string) {
+  return useQuery({
+    queryKey: ["sdn", "ipams", clusterId],
+    queryFn: () =>
+      apiClient.get<SDNIPAM[]>(
+        `/api/v1/clusters/${clusterId}/sdn/ipams`,
+      ),
+    enabled: clusterId.length > 0,
+  });
+}
+
+export function useCreateSDNIPAM(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateSDNIPAMRequest) =>
+      apiClient.post<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/ipams`,
+        req,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "ipams", clusterId],
+      });
+    },
+  });
+}
+
+export function useUpdateSDNIPAM(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      ipam,
+      params,
+    }: {
+      ipam: string;
+      params: UpdateSDNIPAMRequest;
+    }) =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/ipams/${ipam}`,
+        params,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "ipams", clusterId],
+      });
+    },
+  });
+}
+
+export function useDeleteSDNIPAM(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ipam: string) =>
+      apiClient.delete<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/ipams/${ipam}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "ipams", clusterId],
+      });
+    },
+  });
+}
+
+// --- SDN DNS ---
+
+export function useSDNDNSPlugins(clusterId: string) {
+  return useQuery({
+    queryKey: ["sdn", "dns", clusterId],
+    queryFn: () =>
+      apiClient.get<SDNDNS[]>(
+        `/api/v1/clusters/${clusterId}/sdn/dns`,
+      ),
+    enabled: clusterId.length > 0,
+  });
+}
+
+export function useCreateSDNDNS(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateSDNDNSRequest) =>
+      apiClient.post<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/dns`,
+        req,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "dns", clusterId],
+      });
+    },
+  });
+}
+
+export function useUpdateSDNDNS(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      dns,
+      params,
+    }: {
+      dns: string;
+      params: UpdateSDNDNSRequest;
+    }) =>
+      apiClient.put<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/dns/${dns}`,
+        params,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "dns", clusterId],
+      });
+    },
+  });
+}
+
+export function useDeleteSDNDNS(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dns: string) =>
+      apiClient.delete<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/sdn/dns/${dns}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["sdn", "dns", clusterId],
       });
     },
   });

@@ -2,6 +2,8 @@ package proxmox
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1641,7 +1643,7 @@ func (c *Client) GetSDNVNets(ctx context.Context) ([]SDNVNet, error) {
 
 // CreateSDNZone creates a new SDN zone.
 func (c *Client) CreateSDNZone(ctx context.Context, params CreateSDNZoneParams) error {
-	form := sdnZoneToForm(params.Zone, params.Type, params.Bridge, params.Peers, params.Nodes, params.IPAM, params.VLANProtocol, params.Tag, params.MTU)
+	form := sdnZoneCreateToForm(params)
 	if err := c.doPost(ctx, "/cluster/sdn/zones", form, nil); err != nil {
 		return fmt.Errorf("create SDN zone %s: %w", params.Zone, err)
 	}
@@ -1650,7 +1652,7 @@ func (c *Client) CreateSDNZone(ctx context.Context, params CreateSDNZoneParams) 
 
 // UpdateSDNZone updates an existing SDN zone.
 func (c *Client) UpdateSDNZone(ctx context.Context, zone string, params UpdateSDNZoneParams) error {
-	form := sdnZoneToForm("", "", params.Bridge, params.Peers, params.Nodes, params.IPAM, params.VLANProtocol, params.Tag, params.MTU)
+	form := sdnZoneUpdateToForm(params)
 	path := "/cluster/sdn/zones/" + url.PathEscape(zone)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update SDN zone %s: %w", zone, err)
@@ -1669,7 +1671,7 @@ func (c *Client) DeleteSDNZone(ctx context.Context, zone string) error {
 
 // CreateSDNVNet creates a new SDN VNet.
 func (c *Client) CreateSDNVNet(ctx context.Context, params CreateSDNVNetParams) error {
-	form := sdnVNetToForm(params.VNet, params.Zone, params.Alias, params.Tag, params.VLANAware)
+	form := sdnVNetCreateToForm(params)
 	if err := c.doPost(ctx, "/cluster/sdn/vnets", form, nil); err != nil {
 		return fmt.Errorf("create SDN vnet %s: %w", params.VNet, err)
 	}
@@ -1678,7 +1680,7 @@ func (c *Client) CreateSDNVNet(ctx context.Context, params CreateSDNVNetParams) 
 
 // UpdateSDNVNet updates an existing SDN VNet.
 func (c *Client) UpdateSDNVNet(ctx context.Context, vnet string, params UpdateSDNVNetParams) error {
-	form := sdnVNetToForm("", params.Zone, params.Alias, params.Tag, params.VLANAware)
+	form := sdnVNetUpdateToForm(params)
 	path := "/cluster/sdn/vnets/" + url.PathEscape(vnet)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update SDN vnet %s: %w", vnet, err)
@@ -1707,7 +1709,7 @@ func (c *Client) GetSDNSubnets(ctx context.Context, vnet string) ([]SDNSubnet, e
 
 // CreateSDNSubnet creates a new subnet under a VNet.
 func (c *Client) CreateSDNSubnet(ctx context.Context, vnet string, params CreateSDNSubnetParams) error {
-	form := sdnSubnetToForm(params.Subnet, params.Gateway, params.Type, params.SNAT)
+	form := sdnSubnetCreateToForm(params)
 	path := "/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets"
 	if err := c.doPost(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("create SDN subnet %s on %s: %w", params.Subnet, vnet, err)
@@ -1717,7 +1719,7 @@ func (c *Client) CreateSDNSubnet(ctx context.Context, vnet string, params Create
 
 // UpdateSDNSubnet updates an existing subnet under a VNet.
 func (c *Client) UpdateSDNSubnet(ctx context.Context, vnet string, subnet string, params UpdateSDNSubnetParams) error {
-	form := sdnSubnetToForm("", params.Gateway, "", params.SNAT)
+	form := sdnSubnetUpdateToForm(params)
 	path := "/cluster/sdn/vnets/" + url.PathEscape(vnet) + "/subnets/" + url.PathEscape(subnet)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update SDN subnet %s on %s: %w", subnet, vnet, err)
@@ -1742,76 +1744,402 @@ func (c *Client) ApplySDN(ctx context.Context) error {
 	return nil
 }
 
-// sdnZoneToForm converts SDN zone parameters to url.Values.
-func sdnZoneToForm(zone, zoneType, bridge, peers, nodes, ipam, vlanProtocol string, tag, mtu int) url.Values {
+// sdnZoneCreateToForm converts SDN zone create params to url.Values.
+func sdnZoneCreateToForm(p CreateSDNZoneParams) url.Values {
 	form := url.Values{}
-	if zone != "" {
-		form.Set("zone", zone)
+	form.Set("zone", p.Zone)
+	form.Set("type", p.Type)
+	if p.Bridge != "" {
+		form.Set("bridge", p.Bridge)
 	}
-	if zoneType != "" {
-		form.Set("type", zoneType)
+	if p.Peers != "" {
+		form.Set("peers", p.Peers)
 	}
-	if bridge != "" {
-		form.Set("bridge", bridge)
+	if p.Nodes != "" {
+		form.Set("nodes", p.Nodes)
 	}
-	if peers != "" {
-		form.Set("peers", peers)
+	if p.IPAM != "" {
+		form.Set("ipam", p.IPAM)
 	}
-	if nodes != "" {
-		form.Set("nodes", nodes)
+	if p.DNS != "" {
+		form.Set("dns", p.DNS)
 	}
-	if ipam != "" {
-		form.Set("ipam", ipam)
+	if p.ReverseDNS != "" {
+		form.Set("reversedns", p.ReverseDNS)
 	}
-	if vlanProtocol != "" {
-		form.Set("vlan-protocol", vlanProtocol)
+	if p.DNSZone != "" {
+		form.Set("dnszone", p.DNSZone)
 	}
-	if tag != 0 {
-		form.Set("tag", strconv.Itoa(tag))
+	if p.VLANProtocol != "" {
+		form.Set("vlan-protocol", p.VLANProtocol)
 	}
-	if mtu != 0 {
-		form.Set("mtu", strconv.Itoa(mtu))
+	if p.Controller != "" {
+		form.Set("controller", p.Controller)
+	}
+	if p.ExitNodes != "" {
+		form.Set("exitnodes", p.ExitNodes)
+	}
+	if p.Mac != "" {
+		form.Set("mac", p.Mac)
+	}
+	if p.Tag != 0 {
+		form.Set("tag", strconv.Itoa(p.Tag))
+	}
+	if p.MTU != 0 {
+		form.Set("mtu", strconv.Itoa(p.MTU))
+	}
+	if p.VRFVxlan != 0 {
+		form.Set("vrf-vxlan", strconv.Itoa(p.VRFVxlan))
+	}
+	if p.AdvSubnets != 0 {
+		form.Set("advertise-subnets", strconv.Itoa(p.AdvSubnets))
+	}
+	if p.DisableArp != 0 {
+		form.Set("disable-arp-nd-suppression", strconv.Itoa(p.DisableArp))
 	}
 	return form
 }
 
-// sdnVNetToForm converts SDN VNet parameters to url.Values.
-func sdnVNetToForm(vnet, zone, alias string, tag, vlanAware int) url.Values {
+// sdnZoneUpdateToForm converts SDN zone update params to url.Values.
+func sdnZoneUpdateToForm(p UpdateSDNZoneParams) url.Values {
 	form := url.Values{}
-	if vnet != "" {
-		form.Set("vnet", vnet)
+	if p.Bridge != "" {
+		form.Set("bridge", p.Bridge)
 	}
-	if zone != "" {
-		form.Set("zone", zone)
+	if p.Peers != "" {
+		form.Set("peers", p.Peers)
 	}
-	if alias != "" {
-		form.Set("alias", alias)
+	if p.Nodes != "" {
+		form.Set("nodes", p.Nodes)
 	}
-	if tag != 0 {
-		form.Set("tag", strconv.Itoa(tag))
+	if p.IPAM != "" {
+		form.Set("ipam", p.IPAM)
 	}
-	if vlanAware != 0 {
-		form.Set("vlanaware", strconv.Itoa(vlanAware))
+	if p.DNS != "" {
+		form.Set("dns", p.DNS)
+	}
+	if p.ReverseDNS != "" {
+		form.Set("reversedns", p.ReverseDNS)
+	}
+	if p.DNSZone != "" {
+		form.Set("dnszone", p.DNSZone)
+	}
+	if p.VLANProtocol != "" {
+		form.Set("vlan-protocol", p.VLANProtocol)
+	}
+	if p.Controller != "" {
+		form.Set("controller", p.Controller)
+	}
+	if p.ExitNodes != "" {
+		form.Set("exitnodes", p.ExitNodes)
+	}
+	if p.Mac != "" {
+		form.Set("mac", p.Mac)
+	}
+	if p.Tag != 0 {
+		form.Set("tag", strconv.Itoa(p.Tag))
+	}
+	if p.MTU != 0 {
+		form.Set("mtu", strconv.Itoa(p.MTU))
+	}
+	if p.VRFVxlan != 0 {
+		form.Set("vrf-vxlan", strconv.Itoa(p.VRFVxlan))
+	}
+	if p.AdvSubnets != 0 {
+		form.Set("advertise-subnets", strconv.Itoa(p.AdvSubnets))
+	}
+	if p.DisableArp != 0 {
+		form.Set("disable-arp-nd-suppression", strconv.Itoa(p.DisableArp))
 	}
 	return form
 }
 
-// sdnSubnetToForm converts SDN subnet parameters to url.Values.
-func sdnSubnetToForm(subnet, gateway, subnetType string, snat int) url.Values {
+// sdnVNetCreateToForm converts SDN VNet create params to url.Values.
+func sdnVNetCreateToForm(p CreateSDNVNetParams) url.Values {
 	form := url.Values{}
-	if subnet != "" {
-		form.Set("subnet", subnet)
+	form.Set("vnet", p.VNet)
+	form.Set("zone", p.Zone)
+	if p.Alias != "" {
+		form.Set("alias", p.Alias)
 	}
-	if gateway != "" {
-		form.Set("gateway", gateway)
+	if p.Tag != 0 {
+		form.Set("tag", strconv.Itoa(p.Tag))
 	}
-	if subnetType != "" {
-		form.Set("type", subnetType)
+	if p.VLANAware != 0 {
+		form.Set("vlanaware", strconv.Itoa(p.VLANAware))
 	}
-	if snat != 0 {
-		form.Set("snat", strconv.Itoa(snat))
+	if p.Isolate != 0 {
+		form.Set("isolate", strconv.Itoa(p.Isolate))
 	}
 	return form
+}
+
+// sdnVNetUpdateToForm converts SDN VNet update params to url.Values.
+func sdnVNetUpdateToForm(p UpdateSDNVNetParams) url.Values {
+	form := url.Values{}
+	if p.Zone != "" {
+		form.Set("zone", p.Zone)
+	}
+	if p.Alias != "" {
+		form.Set("alias", p.Alias)
+	}
+	if p.Tag != 0 {
+		form.Set("tag", strconv.Itoa(p.Tag))
+	}
+	if p.VLANAware != 0 {
+		form.Set("vlanaware", strconv.Itoa(p.VLANAware))
+	}
+	if p.Isolate != 0 {
+		form.Set("isolate", strconv.Itoa(p.Isolate))
+	}
+	return form
+}
+
+// sdnSubnetCreateToForm converts SDN subnet create params to url.Values.
+func sdnSubnetCreateToForm(p CreateSDNSubnetParams) url.Values {
+	form := url.Values{}
+	form.Set("subnet", p.Subnet)
+	if p.Gateway != "" {
+		form.Set("gateway", p.Gateway)
+	}
+	if p.Type != "" {
+		form.Set("type", p.Type)
+	}
+	if p.SNAT != 0 {
+		form.Set("snat", strconv.Itoa(p.SNAT))
+	}
+	if p.DHCPRange != "" {
+		form.Set("dhcp-range", p.DHCPRange)
+	}
+	if p.DHCPDNSServer != "" {
+		form.Set("dhcp-dns-server", p.DHCPDNSServer)
+	}
+	return form
+}
+
+// sdnSubnetUpdateToForm converts SDN subnet update params to url.Values.
+func sdnSubnetUpdateToForm(p UpdateSDNSubnetParams) url.Values {
+	form := url.Values{}
+	if p.Gateway != "" {
+		form.Set("gateway", p.Gateway)
+	}
+	if p.SNAT != 0 {
+		form.Set("snat", strconv.Itoa(p.SNAT))
+	}
+	if p.DHCPRange != "" {
+		form.Set("dhcp-range", p.DHCPRange)
+	}
+	if p.DHCPDNSServer != "" {
+		form.Set("dhcp-dns-server", p.DHCPDNSServer)
+	}
+	return form
+}
+
+// --- SDN Controller Methods ---
+
+// GetSDNControllers returns all SDN controllers.
+func (c *Client) GetSDNControllers(ctx context.Context) ([]SDNController, error) {
+	var controllers []SDNController
+	if err := c.do(ctx, "/cluster/sdn/controllers", &controllers); err != nil {
+		return nil, fmt.Errorf("get SDN controllers: %w", err)
+	}
+	return controllers, nil
+}
+
+// CreateSDNController creates a new SDN controller.
+func (c *Client) CreateSDNController(ctx context.Context, params CreateSDNControllerParams) error {
+	form := url.Values{}
+	form.Set("controller", params.Controller)
+	form.Set("type", params.Type)
+	if params.ASN != 0 {
+		form.Set("asn", strconv.Itoa(params.ASN))
+	}
+	if params.Peers != "" {
+		form.Set("peers", params.Peers)
+	}
+	if params.Nodes != "" {
+		form.Set("nodes", params.Nodes)
+	}
+	if params.ISISDomain != "" {
+		form.Set("isis-domain", params.ISISDomain)
+	}
+	if params.ISISIfaces != "" {
+		form.Set("isis-ifaces", params.ISISIfaces)
+	}
+	if params.ISISNET != "" {
+		form.Set("isis-net", params.ISISNET)
+	}
+	if params.EBGPMultihop != 0 {
+		form.Set("ebgp-multihop", strconv.Itoa(params.EBGPMultihop))
+	}
+	if params.Loopback != "" {
+		form.Set("loopback", params.Loopback)
+	}
+	if params.Node != "" {
+		form.Set("node", params.Node)
+	}
+	if err := c.doPost(ctx, "/cluster/sdn/controllers", form, nil); err != nil {
+		return fmt.Errorf("create SDN controller %s: %w", params.Controller, err)
+	}
+	return nil
+}
+
+// UpdateSDNController updates an existing SDN controller.
+func (c *Client) UpdateSDNController(ctx context.Context, controller string, params UpdateSDNControllerParams) error {
+	form := url.Values{}
+	if params.ASN != 0 {
+		form.Set("asn", strconv.Itoa(params.ASN))
+	}
+	if params.Peers != "" {
+		form.Set("peers", params.Peers)
+	}
+	if params.Nodes != "" {
+		form.Set("nodes", params.Nodes)
+	}
+	if params.ISISDomain != "" {
+		form.Set("isis-domain", params.ISISDomain)
+	}
+	if params.ISISIfaces != "" {
+		form.Set("isis-ifaces", params.ISISIfaces)
+	}
+	if params.ISISNET != "" {
+		form.Set("isis-net", params.ISISNET)
+	}
+	if params.EBGPMultihop != 0 {
+		form.Set("ebgp-multihop", strconv.Itoa(params.EBGPMultihop))
+	}
+	if params.Loopback != "" {
+		form.Set("loopback", params.Loopback)
+	}
+	if params.Node != "" {
+		form.Set("node", params.Node)
+	}
+	path := "/cluster/sdn/controllers/" + url.PathEscape(controller)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update SDN controller %s: %w", controller, err)
+	}
+	return nil
+}
+
+// DeleteSDNController deletes an SDN controller.
+func (c *Client) DeleteSDNController(ctx context.Context, controller string) error {
+	path := "/cluster/sdn/controllers/" + url.PathEscape(controller)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete SDN controller %s: %w", controller, err)
+	}
+	return nil
+}
+
+// --- SDN IPAM Methods ---
+
+// GetSDNIPAMs returns all SDN IPAM plugins.
+func (c *Client) GetSDNIPAMs(ctx context.Context) ([]SDNIPAM, error) {
+	var ipams []SDNIPAM
+	if err := c.do(ctx, "/cluster/sdn/ipams", &ipams); err != nil {
+		return nil, fmt.Errorf("get SDN IPAMs: %w", err)
+	}
+	return ipams, nil
+}
+
+// CreateSDNIPAM creates a new IPAM plugin.
+func (c *Client) CreateSDNIPAM(ctx context.Context, params CreateSDNIPAMParams) error {
+	form := url.Values{}
+	form.Set("ipam", params.IPAM)
+	form.Set("type", params.Type)
+	if params.URL != "" {
+		form.Set("url", params.URL)
+	}
+	if params.Token != "" {
+		form.Set("token", params.Token)
+	}
+	if params.SectionID != 0 {
+		form.Set("section", strconv.Itoa(params.SectionID))
+	}
+	if err := c.doPost(ctx, "/cluster/sdn/ipams", form, nil); err != nil {
+		return fmt.Errorf("create SDN IPAM %s: %w", params.IPAM, err)
+	}
+	return nil
+}
+
+// UpdateSDNIPAM updates an IPAM plugin.
+func (c *Client) UpdateSDNIPAM(ctx context.Context, ipam string, params UpdateSDNIPAMParams) error {
+	form := url.Values{}
+	if params.URL != "" {
+		form.Set("url", params.URL)
+	}
+	if params.Token != "" {
+		form.Set("token", params.Token)
+	}
+	if params.SectionID != 0 {
+		form.Set("section", strconv.Itoa(params.SectionID))
+	}
+	path := "/cluster/sdn/ipams/" + url.PathEscape(ipam)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update SDN IPAM %s: %w", ipam, err)
+	}
+	return nil
+}
+
+// DeleteSDNIPAM deletes an IPAM plugin.
+func (c *Client) DeleteSDNIPAM(ctx context.Context, ipam string) error {
+	path := "/cluster/sdn/ipams/" + url.PathEscape(ipam)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete SDN IPAM %s: %w", ipam, err)
+	}
+	return nil
+}
+
+// --- SDN DNS Methods ---
+
+// GetSDNDNSPlugins returns all SDN DNS plugins.
+func (c *Client) GetSDNDNSPlugins(ctx context.Context) ([]SDNDNS, error) {
+	var plugins []SDNDNS
+	if err := c.do(ctx, "/cluster/sdn/dns", &plugins); err != nil {
+		return nil, fmt.Errorf("get SDN DNS plugins: %w", err)
+	}
+	return plugins, nil
+}
+
+// CreateSDNDNS creates a new DNS plugin.
+func (c *Client) CreateSDNDNS(ctx context.Context, params CreateSDNDNSParams) error {
+	form := url.Values{}
+	form.Set("dns", params.DNS)
+	form.Set("type", params.Type)
+	if params.URL != "" {
+		form.Set("url", params.URL)
+	}
+	if params.Key != "" {
+		form.Set("key", params.Key)
+	}
+	if err := c.doPost(ctx, "/cluster/sdn/dns", form, nil); err != nil {
+		return fmt.Errorf("create SDN DNS %s: %w", params.DNS, err)
+	}
+	return nil
+}
+
+// UpdateSDNDNS updates a DNS plugin.
+func (c *Client) UpdateSDNDNS(ctx context.Context, dns string, params UpdateSDNDNSParams) error {
+	form := url.Values{}
+	if params.URL != "" {
+		form.Set("url", params.URL)
+	}
+	if params.Key != "" {
+		form.Set("key", params.Key)
+	}
+	path := "/cluster/sdn/dns/" + url.PathEscape(dns)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update SDN DNS %s: %w", dns, err)
+	}
+	return nil
+}
+
+// DeleteSDNDNS deletes a DNS plugin.
+func (c *Client) DeleteSDNDNS(ctx context.Context, dns string) error {
+	path := "/cluster/sdn/dns/" + url.PathEscape(dns)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete SDN DNS %s: %w", dns, err)
+	}
+	return nil
 }
 
 // --- Network Interface CRUD Methods ---
@@ -3060,7 +3388,10 @@ func (c *Client) CreateACMEPlugin(ctx context.Context, params CreateACMEPluginPa
 		form.Set("api", params.API)
 	}
 	if params.Data != "" {
-		form.Set("data", params.Data)
+		form.Set("data", base64.StdEncoding.EncodeToString([]byte(params.Data)))
+	}
+	if params.ValidationDelay != nil {
+		form.Set("validation-delay", fmt.Sprintf("%d", *params.ValidationDelay))
 	}
 	if err := c.doPost(ctx, "/cluster/acme/plugins", form, nil); err != nil {
 		return fmt.Errorf("create ACME plugin %s: %w", params.ID, err)
@@ -3085,7 +3416,10 @@ func (c *Client) UpdateACMEPlugin(ctx context.Context, id string, params UpdateA
 		form.Set("api", params.API)
 	}
 	if params.Data != "" {
-		form.Set("data", params.Data)
+		form.Set("data", base64.StdEncoding.EncodeToString([]byte(params.Data)))
+	}
+	if params.ValidationDelay != nil {
+		form.Set("validation-delay", fmt.Sprintf("%d", *params.ValidationDelay))
 	}
 	if params.Digest != "" {
 		form.Set("digest", params.Digest)
@@ -3122,6 +3456,65 @@ func (c *Client) GetACMETOS(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("get ACME TOS: %w", err)
 	}
 	return tos, nil
+}
+
+// GetACMEChallengeSchema returns challenge plugin schemas via GET /cluster/acme/challenge-schema.
+func (c *Client) GetACMEChallengeSchema(ctx context.Context) ([]ACMEChallengeSchema, error) {
+	var schemas []ACMEChallengeSchema
+	if err := c.do(ctx, "/cluster/acme/challenge-schema", &schemas); err != nil {
+		return nil, fmt.Errorf("get ACME challenge schema: %w", err)
+	}
+	return schemas, nil
+}
+
+// GetACMEChallengeSchemaRaw returns challenge plugin schemas as raw JSON.
+func (c *Client) GetACMEChallengeSchemaRaw(ctx context.Context, dst *json.RawMessage) error {
+	return c.do(ctx, "/cluster/acme/challenge-schema", dst)
+}
+
+// GetNodeACMEConfig returns ACME-related fields from GET /nodes/{node}/config.
+func (c *Client) GetNodeACMEConfig(ctx context.Context, node string) (*NodeACMEConfig, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var cfg NodeACMEConfig
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/config", &cfg); err != nil {
+		return nil, fmt.Errorf("get node %s config: %w", node, err)
+	}
+	return &cfg, nil
+}
+
+// SetNodeACMEConfig updates ACME-related fields via PUT /nodes/{node}/config.
+func (c *Client) SetNodeACMEConfig(ctx context.Context, node string, cfg NodeACMEConfig) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form := url.Values{}
+	if cfg.ACME != "" {
+		form.Set("acme", cfg.ACME)
+	}
+	if cfg.ACMEDomain0 != "" {
+		form.Set("acmedomain0", cfg.ACMEDomain0)
+	}
+	if cfg.ACMEDomain1 != "" {
+		form.Set("acmedomain1", cfg.ACMEDomain1)
+	}
+	if cfg.ACMEDomain2 != "" {
+		form.Set("acmedomain2", cfg.ACMEDomain2)
+	}
+	if cfg.ACMEDomain3 != "" {
+		form.Set("acmedomain3", cfg.ACMEDomain3)
+	}
+	if cfg.ACMEDomain4 != "" {
+		form.Set("acmedomain4", cfg.ACMEDomain4)
+	}
+	if cfg.ACMEDomain5 != "" {
+		form.Set("acmedomain5", cfg.ACMEDomain5)
+	}
+	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/config", form, nil); err != nil {
+		return fmt.Errorf("set node %s ACME config: %w", node, err)
+	}
+	return nil
 }
 
 // GetNodeCertificates returns certificate info for a node via GET /nodes/{node}/certificates/info.

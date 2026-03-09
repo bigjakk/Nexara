@@ -471,6 +471,11 @@ export interface CreateClusterResponse {
   connectivity: ConnectivityResult;
 }
 
+export interface UpdateClusterResponse {
+  cluster: ClusterResponse;
+  connectivity: ConnectivityResult;
+}
+
 export interface ClusterResponse {
   id: string;
   name: string;

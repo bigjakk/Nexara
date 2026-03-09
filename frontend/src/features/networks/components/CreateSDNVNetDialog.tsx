@@ -41,6 +41,7 @@ export function CreateSDNVNetDialog({
   const [tag, setTag] = useState("");
   const [alias, setAlias] = useState("");
   const [vlanaware, setVlanaware] = useState(false);
+  const [isolate, setIsolate] = useState(false);
 
   const { data: zones } = useSDNZones(clusterId);
   const create = useCreateSDNVNet(clusterId);
@@ -56,6 +57,7 @@ export function CreateSDNVNetDialog({
       setTag(initialData.tag ? String(initialData.tag) : "");
       setAlias(initialData.alias ?? "");
       setVlanaware(initialData.vlanaware === 1);
+      setIsolate(initialData.isolate === 1);
     }
     if (open && !initialData) {
       setVnet("");
@@ -63,6 +65,7 @@ export function CreateSDNVNetDialog({
       setTag("");
       setAlias("");
       setVlanaware(false);
+      setIsolate(false);
     }
   }, [open, initialData]);
 
@@ -72,6 +75,7 @@ export function CreateSDNVNetDialog({
     if (tag) params.tag = Number(tag);
     if (alias) params.alias = alias;
     if (vlanaware) params.vlanaware = 1;
+    if (isolate) params.isolate = 1;
 
     if (isEdit) {
       const updateParams: Omit<CreateSDNVNetRequest, "vnet"> = Object.fromEntries(
@@ -157,6 +161,14 @@ export function CreateSDNVNetDialog({
               onCheckedChange={(checked) => { setVlanaware(checked === true); }}
             />
             <Label htmlFor="vlanaware">VLAN Aware</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="isolate"
+              checked={isolate}
+              onCheckedChange={(checked) => { setIsolate(checked === true); }}
+            />
+            <Label htmlFor="isolate">Isolate Ports</Label>
           </div>
           {errorMessage && (
             <p className="text-sm text-destructive">{errorMessage}</p>

@@ -12,7 +12,7 @@ import { useVMHistoricalMetrics } from "@/features/dashboard/api/historical-quer
 import { useConsoleStore } from "@/stores/console-store";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
-import { useVM, useSetResourceConfig, useGuestAgentInfo } from "../api/vm-queries";
+import { useVM, useSetResourceConfig, useGuestAgentInfo, useResourcePools, useSetVMPool } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
 import { CloneDialog } from "../components/CloneDialog";
 import { MigrateJobDialog } from "../components/MigrateJobDialog";
@@ -252,7 +252,7 @@ export function VMDetailPage() {
               <InfoItem label="Disk" value={formatBytes(vm.disk_total)} />
               <InfoItem label="Uptime" value={formatUptime(vm.uptime)} />
               <InfoItem label="HA State" value={vm.ha_state || "--"} />
-              <InfoItem label="Pool" value={vm.pool || "--"} />
+              <PoolSelector clusterId={clusterId} vmId={vmId} currentPool={vm.pool} />
               {vm.tags && <InfoItem label="Tags" value={vm.tags} />}
             </div>
           </div>
@@ -394,7 +394,7 @@ function GuestAgentSection({ clusterId, vmId }: { clusterId: string; vmId: strin
                           ({iface["hardware-address"]})
                         </span>
                       )}
-                      {iface["ip-addresses"].length > 0 && (
+                      {iface["ip-addresses"] != null && iface["ip-addresses"].length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-2">
                           {iface["ip-addresses"].map((ip) => (
                             <Badge key={`${ip["ip-address"]}/${String(ip.prefix)}`} variant="secondary" className="font-mono text-xs">
@@ -477,48 +477,24 @@ function VMMetricsPanel({
 
       {/* Historical charts */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <MetricChart
-          title="CPU Usage"
-          data={chartData}
-          dataKey="cpuPercent"
-          color="hsl(221, 83%, 53%)"
-          timeRange={timeRange}
-        />
-        <MetricChart
-          title="Memory Usage"
-          data={chartData}
-          dataKey="memPercent"
-          color="hsl(142, 71%, 45%)"
-          timeRange={timeRange}
-        />
-        <MetricChart
-          title="Disk Read"
-          data={chartData}
-          dataKey="diskReadBps"
-          color="hsl(38, 92%, 50%)"
-          timeRange={timeRange}
-        />
-        <MetricChart
-          title="Disk Write"
-          data={chartData}
-          dataKey="diskWriteBps"
-          color="hsl(0, 84%, 60%)"
-          timeRange={timeRange}
-        />
-        <MetricChart
-          title="Network In"
-          data={chartData}
-          dataKey="netInBps"
-          color="hsl(262, 83%, 58%)"
-          timeRange={timeRange}
-        />
-        <MetricChart
-          title="Network Out"
-          data={chartData}
-          dataKey="netOutBps"
-          color="hsl(330, 81%, 60%)"
-          timeRange={timeRange}
-        />
+        <div className="h-64">
+          <MetricChart title="CPU Usage" data={chartData} dataKey="cpuPercent" color="hsl(221, 83%, 53%)" timeRange={timeRange} />
+        </div>
+        <div className="h-64">
+          <MetricChart title="Memory Usage" data={chartData} dataKey="memPercent" color="hsl(142, 71%, 45%)" timeRange={timeRange} />
+        </div>
+        <div className="h-64">
+          <MetricChart title="Disk Read" data={chartData} dataKey="diskReadBps" color="hsl(38, 92%, 50%)" timeRange={timeRange} />
+        </div>
+        <div className="h-64">
+          <MetricChart title="Disk Write" data={chartData} dataKey="diskWriteBps" color="hsl(0, 84%, 60%)" timeRange={timeRange} />
+        </div>
+        <div className="h-64">
+          <MetricChart title="Network In" data={chartData} dataKey="netInBps" color="hsl(262, 83%, 58%)" timeRange={timeRange} />
+        </div>
+        <div className="h-64">
+          <MetricChart title="Network Out" data={chartData} dataKey="netOutBps" color="hsl(330, 81%, 60%)" timeRange={timeRange} />
+        </div>
       </div>
     </div>
   );
@@ -529,6 +505,77 @@ function InfoItem({ label, value }: { label: string; value: string }) {
     <div className="py-1">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-sm font-medium">{value}</p>
+    </div>
+  );
+}
+
+function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmId: string; currentPool: string }) {
+  const { data: pools } = useResourcePools(clusterId);
+  const setPool = useSetVMPool(clusterId, vmId);
+  const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState(currentPool);
+
+  // Sync local state when prop changes (e.g. after mutation invalidates query).
+  useEffect(() => { setSelected(currentPool); }, [currentPool]);
+
+  if (!editing) {
+    return (
+      <div className="py-1">
+        <p className="text-xs text-muted-foreground">Pool</p>
+        <div className="flex items-center gap-1">
+          <p className="text-sm font-medium">{currentPool || "--"}</p>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 w-5 p-0"
+            onClick={() => { setEditing(true); }}
+            title="Change pool"
+          >
+            <Pencil className="h-3 w-3" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="py-1">
+      <p className="text-xs text-muted-foreground">Pool</p>
+      <div className="flex items-center gap-1">
+        <select
+          className="h-7 rounded-md border bg-transparent px-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+          value={selected}
+          onChange={(e) => { setSelected(e.target.value); }}
+          disabled={setPool.isPending}
+        >
+          <option value="">None</option>
+          {pools?.map((p) => (
+            <option key={p.poolid} value={p.poolid}>{p.poolid}</option>
+          ))}
+        </select>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-5 w-5 p-0 text-green-600"
+          disabled={setPool.isPending}
+          onClick={() => {
+            setPool.mutate(selected, {
+              onSuccess: () => { setEditing(false); },
+            });
+          }}
+        >
+          <Check className="h-3 w-3" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-5 w-5 p-0 text-destructive"
+          disabled={setPool.isPending}
+          onClick={() => { setSelected(currentPool); setEditing(false); }}
+        >
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
     </div>
   );
 }

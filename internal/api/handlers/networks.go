@@ -678,7 +678,7 @@ func (h *NetworkHandler) ListSDNZones(c *fiber.Ctx) error {
 
 	zones, err := pxClient.GetSDNZones(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get SDN zones")
+		return mapProxmoxError(err)
 	}
 
 	return c.JSON(zones)
@@ -702,7 +702,7 @@ func (h *NetworkHandler) ListSDNVNets(c *fiber.Ctx) error {
 
 	vnets, err := pxClient.GetSDNVNets(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get SDN VNets")
+		return mapProxmoxError(err)
 	}
 
 	return c.JSON(vnets)
@@ -736,7 +736,7 @@ func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.CreateSDNZone(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create SDN zone: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"zone": req.Zone, "type": req.Type})
@@ -772,7 +772,7 @@ func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.UpdateSDNZone(c.Context(), zone, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update SDN zone: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"zone": zone})
@@ -803,7 +803,7 @@ func (h *NetworkHandler) DeleteSDNZone(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.DeleteSDNZone(c.Context(), zone); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete SDN zone: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"zone": zone})
@@ -838,7 +838,7 @@ func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.CreateSDNVNet(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create SDN VNet: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": req.VNet, "zone": req.Zone})
@@ -874,7 +874,7 @@ func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.UpdateSDNVNet(c.Context(), vnet, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update SDN VNet: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet})
@@ -905,7 +905,7 @@ func (h *NetworkHandler) DeleteSDNVNet(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.DeleteSDNVNet(c.Context(), vnet); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete SDN VNet: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet})
@@ -937,7 +937,7 @@ func (h *NetworkHandler) ListSDNSubnets(c *fiber.Ctx) error {
 
 	subnets, err := pxClient.GetSDNSubnets(c.Context(), vnet)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get SDN subnets: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	return c.JSON(subnets)
@@ -967,6 +967,9 @@ func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
 	if req.Subnet == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "subnet is required")
 	}
+	if req.Type == "" {
+		req.Type = "subnet"
+	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -974,7 +977,7 @@ func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.CreateSDNSubnet(c.Context(), vnet, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create SDN subnet: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": req.Subnet})
@@ -1011,7 +1014,7 @@ func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.UpdateSDNSubnet(c.Context(), vnet, subnet, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update SDN subnet: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
@@ -1043,7 +1046,7 @@ func (h *NetworkHandler) DeleteSDNSubnet(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.DeleteSDNSubnet(c.Context(), vnet, subnet); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete SDN subnet: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
@@ -1069,11 +1072,323 @@ func (h *NetworkHandler) ApplySDN(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.ApplySDN(c.Context()); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to apply SDN config: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	h.auditLog(c, clusterID, "sdn", "cluster", "sdn_applied", nil)
 
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// --- SDN Controller Endpoints ---
+
+// ListSDNControllers handles GET /clusters/:cluster_id/sdn/controllers.
+func (h *NetworkHandler) ListSDNControllers(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	controllers, err := pxClient.GetSDNControllers(c.Context())
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	return c.JSON(controllers)
+}
+
+// CreateSDNController handles POST /clusters/:cluster_id/sdn/controllers.
+func (h *NetworkHandler) CreateSDNController(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	var req proxmox.CreateSDNControllerParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Controller == "" || req.Type == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "controller and type are required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.CreateSDNController(c.Context(), req); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"controller": req.Controller, "type": req.Type})
+	h.auditLog(c, clusterID, "sdn", req.Controller, "sdn_controller_created", details)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// UpdateSDNController handles PUT /clusters/:cluster_id/sdn/controllers/:controller.
+func (h *NetworkHandler) UpdateSDNController(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	controller := c.Params("controller")
+	if controller == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "controller is required")
+	}
+	var req proxmox.UpdateSDNControllerParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.UpdateSDNController(c.Context(), controller, req); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"controller": controller})
+	h.auditLog(c, clusterID, "sdn", controller, "sdn_controller_updated", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteSDNController handles DELETE /clusters/:cluster_id/sdn/controllers/:controller.
+func (h *NetworkHandler) DeleteSDNController(c *fiber.Ctx) error {
+	if err := requirePerm(c, "delete", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	controller := c.Params("controller")
+	if controller == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "controller is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DeleteSDNController(c.Context(), controller); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"controller": controller})
+	h.auditLog(c, clusterID, "sdn", controller, "sdn_controller_deleted", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// --- SDN IPAM Endpoints ---
+
+// ListSDNIPAMs handles GET /clusters/:cluster_id/sdn/ipams.
+func (h *NetworkHandler) ListSDNIPAMs(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	ipams, err := pxClient.GetSDNIPAMs(c.Context())
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	return c.JSON(ipams)
+}
+
+// CreateSDNIPAM handles POST /clusters/:cluster_id/sdn/ipams.
+func (h *NetworkHandler) CreateSDNIPAM(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	var req proxmox.CreateSDNIPAMParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.IPAM == "" || req.Type == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "ipam and type are required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.CreateSDNIPAM(c.Context(), req); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"ipam": req.IPAM, "type": req.Type})
+	h.auditLog(c, clusterID, "sdn", req.IPAM, "sdn_ipam_created", details)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// UpdateSDNIPAM handles PUT /clusters/:cluster_id/sdn/ipams/:ipam.
+func (h *NetworkHandler) UpdateSDNIPAM(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	ipam := c.Params("ipam")
+	if ipam == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "ipam is required")
+	}
+	var req proxmox.UpdateSDNIPAMParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.UpdateSDNIPAM(c.Context(), ipam, req); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"ipam": ipam})
+	h.auditLog(c, clusterID, "sdn", ipam, "sdn_ipam_updated", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteSDNIPAM handles DELETE /clusters/:cluster_id/sdn/ipams/:ipam.
+func (h *NetworkHandler) DeleteSDNIPAM(c *fiber.Ctx) error {
+	if err := requirePerm(c, "delete", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	ipam := c.Params("ipam")
+	if ipam == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "ipam is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DeleteSDNIPAM(c.Context(), ipam); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"ipam": ipam})
+	h.auditLog(c, clusterID, "sdn", ipam, "sdn_ipam_deleted", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// --- SDN DNS Endpoints ---
+
+// ListSDNDNS handles GET /clusters/:cluster_id/sdn/dns.
+func (h *NetworkHandler) ListSDNDNS(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	plugins, err := pxClient.GetSDNDNSPlugins(c.Context())
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	return c.JSON(plugins)
+}
+
+// CreateSDNDNS handles POST /clusters/:cluster_id/sdn/dns.
+func (h *NetworkHandler) CreateSDNDNS(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	var req proxmox.CreateSDNDNSParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.DNS == "" || req.Type == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "dns and type are required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.CreateSDNDNS(c.Context(), req); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"dns": req.DNS, "type": req.Type})
+	h.auditLog(c, clusterID, "sdn", req.DNS, "sdn_dns_created", details)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// UpdateSDNDNS handles PUT /clusters/:cluster_id/sdn/dns/:dns.
+func (h *NetworkHandler) UpdateSDNDNS(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	dns := c.Params("dns")
+	if dns == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "dns is required")
+	}
+	var req proxmox.UpdateSDNDNSParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.UpdateSDNDNS(c.Context(), dns, req); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"dns": dns})
+	h.auditLog(c, clusterID, "sdn", dns, "sdn_dns_updated", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteSDNDNS handles DELETE /clusters/:cluster_id/sdn/dns/:dns.
+func (h *NetworkHandler) DeleteSDNDNS(c *fiber.Ctx) error {
+	if err := requirePerm(c, "delete", "network"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	dns := c.Params("dns")
+	if dns == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "dns is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DeleteSDNDNS(c.Context(), dns); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"dns": dns})
+	h.auditLog(c, clusterID, "sdn", dns, "sdn_dns_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

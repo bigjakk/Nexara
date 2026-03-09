@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // response is the standard Proxmox API envelope.
@@ -821,6 +822,13 @@ type SDNZone struct {
 	VLANProtocol string `json:"vlan-protocol,omitempty"`
 	Peers        string `json:"peers,omitempty"`
 	MTU          int    `json:"mtu,omitempty"`
+	Controller   string `json:"controller,omitempty"`
+	VRFVxlan     int    `json:"vrf-vxlan,omitempty"`
+	ExitNodes    string `json:"exitnodes,omitempty"`
+	Mac          string `json:"mac,omitempty"`
+	AdvSubnets   int    `json:"advertise-subnets,omitempty"`
+	DisableArp   int    `json:"disable-arp-nd-suppression,omitempty"`
+	BridgeDisableMacLearning int `json:"bridge-disable-mac-learning,omitempty"`
 }
 
 // SDNVNet represents an SDN VNet from GET /cluster/sdn/vnets.
@@ -830,15 +838,110 @@ type SDNVNet struct {
 	Tag       int    `json:"tag,omitempty"`
 	Alias     string `json:"alias,omitempty"`
 	VLANAware int    `json:"vlanaware,omitempty"`
+	Isolate   int    `json:"isolate,omitempty"`
 }
 
 // SDNSubnet represents an SDN subnet from GET /cluster/sdn/vnets/{vnet}/subnets.
 type SDNSubnet struct {
-	Subnet  string `json:"subnet"`
-	Type    string `json:"type,omitempty"`
-	Gateway string `json:"gateway,omitempty"`
-	SNAT    int    `json:"snat,omitempty"`
-	VNet    string `json:"vnet,omitempty"`
+	Subnet        string          `json:"subnet"`
+	Type          string          `json:"type,omitempty"`
+	Gateway       string          `json:"gateway,omitempty"`
+	SNAT          int             `json:"snat,omitempty"`
+	VNet          string          `json:"vnet,omitempty"`
+	DHCPRange     json.RawMessage `json:"dhcp-range,omitempty"`
+	DHCPDNSServer string          `json:"dhcp-dns-server,omitempty"`
+}
+
+// SDNController represents an SDN controller from GET /cluster/sdn/controllers.
+type SDNController struct {
+	Controller string `json:"controller"`
+	Type       string `json:"type"`
+	Nodes      string `json:"nodes,omitempty"`
+	ASN        int    `json:"asn,omitempty"`
+	Peers      string `json:"peers,omitempty"`
+	ISISDomain string `json:"isis-domain,omitempty"`
+	ISISIfaces string `json:"isis-ifaces,omitempty"`
+	ISISNET    string `json:"isis-net,omitempty"`
+	BGPMultipath int  `json:"bgp-multipath-as-path-relax,omitempty"`
+	EBGPMultihop int  `json:"ebgp-multihop,omitempty"`
+	Loopback   string `json:"loopback,omitempty"`
+	Node       string `json:"node,omitempty"`
+}
+
+// CreateSDNControllerParams holds parameters for creating an SDN controller.
+type CreateSDNControllerParams struct {
+	Controller string `json:"controller"`
+	Type       string `json:"type"`
+	ASN        int    `json:"asn,omitempty"`
+	Peers      string `json:"peers,omitempty"`
+	Nodes      string `json:"nodes,omitempty"`
+	ISISDomain string `json:"isis-domain,omitempty"`
+	ISISIfaces string `json:"isis-ifaces,omitempty"`
+	ISISNET    string `json:"isis-net,omitempty"`
+	EBGPMultihop int  `json:"ebgp-multihop,omitempty"`
+	Loopback   string `json:"loopback,omitempty"`
+	Node       string `json:"node,omitempty"`
+}
+
+// UpdateSDNControllerParams holds parameters for updating an SDN controller.
+type UpdateSDNControllerParams struct {
+	ASN        int    `json:"asn,omitempty"`
+	Peers      string `json:"peers,omitempty"`
+	Nodes      string `json:"nodes,omitempty"`
+	ISISDomain string `json:"isis-domain,omitempty"`
+	ISISIfaces string `json:"isis-ifaces,omitempty"`
+	ISISNET    string `json:"isis-net,omitempty"`
+	EBGPMultihop int  `json:"ebgp-multihop,omitempty"`
+	Loopback   string `json:"loopback,omitempty"`
+	Node       string `json:"node,omitempty"`
+}
+
+// SDNIPAM represents an SDN IPAM plugin from GET /cluster/sdn/ipams.
+type SDNIPAM struct {
+	IPAM      string `json:"ipam"`
+	Type      string `json:"type"`
+	URL       string `json:"url,omitempty"`
+	Token     string `json:"token,omitempty"`
+	SectionID int    `json:"section,omitempty"`
+}
+
+// CreateSDNIPAMParams holds parameters for creating an IPAM plugin.
+type CreateSDNIPAMParams struct {
+	IPAM      string `json:"ipam"`
+	Type      string `json:"type"`
+	URL       string `json:"url,omitempty"`
+	Token     string `json:"token,omitempty"`
+	SectionID int    `json:"section,omitempty"`
+}
+
+// UpdateSDNIPAMParams holds parameters for updating an IPAM plugin.
+type UpdateSDNIPAMParams struct {
+	URL       string `json:"url,omitempty"`
+	Token     string `json:"token,omitempty"`
+	SectionID int    `json:"section,omitempty"`
+}
+
+// SDNDNS represents an SDN DNS plugin from GET /cluster/sdn/dns.
+type SDNDNS struct {
+	DNS        string `json:"dns"`
+	Type       string `json:"type"`
+	URL        string `json:"url,omitempty"`
+	Key        string `json:"key,omitempty"`
+	ReverseMaskV6 int `json:"reversemaskv6,omitempty"`
+}
+
+// CreateSDNDNSParams holds parameters for creating a DNS plugin.
+type CreateSDNDNSParams struct {
+	DNS  string `json:"dns"`
+	Type string `json:"type"`
+	URL  string `json:"url,omitempty"`
+	Key  string `json:"key,omitempty"`
+}
+
+// UpdateSDNDNSParams holds parameters for updating a DNS plugin.
+type UpdateSDNDNSParams struct {
+	URL string `json:"url,omitempty"`
+	Key string `json:"key,omitempty"`
 }
 
 // CreateSDNZoneParams holds parameters for creating an SDN zone.
@@ -852,6 +955,15 @@ type CreateSDNZoneParams struct {
 	MTU          int    `json:"mtu,omitempty"`
 	Nodes        string `json:"nodes,omitempty"`
 	IPAM         string `json:"ipam,omitempty"`
+	DNS          string `json:"dns,omitempty"`
+	ReverseDNS   string `json:"reversedns,omitempty"`
+	DNSZone      string `json:"dnszone,omitempty"`
+	Controller   string `json:"controller,omitempty"`
+	VRFVxlan     int    `json:"vrf-vxlan,omitempty"`
+	ExitNodes    string `json:"exitnodes,omitempty"`
+	Mac          string `json:"mac,omitempty"`
+	AdvSubnets   int    `json:"advertise-subnets,omitempty"`
+	DisableArp   int    `json:"disable-arp-nd-suppression,omitempty"`
 }
 
 // UpdateSDNZoneParams holds parameters for updating an SDN zone.
@@ -863,6 +975,15 @@ type UpdateSDNZoneParams struct {
 	MTU          int    `json:"mtu,omitempty"`
 	Nodes        string `json:"nodes,omitempty"`
 	IPAM         string `json:"ipam,omitempty"`
+	DNS          string `json:"dns,omitempty"`
+	ReverseDNS   string `json:"reversedns,omitempty"`
+	DNSZone      string `json:"dnszone,omitempty"`
+	Controller   string `json:"controller,omitempty"`
+	VRFVxlan     int    `json:"vrf-vxlan,omitempty"`
+	ExitNodes    string `json:"exitnodes,omitempty"`
+	Mac          string `json:"mac,omitempty"`
+	AdvSubnets   int    `json:"advertise-subnets,omitempty"`
+	DisableArp   int    `json:"disable-arp-nd-suppression,omitempty"`
 }
 
 // CreateSDNVNetParams holds parameters for creating an SDN VNet.
@@ -872,6 +993,7 @@ type CreateSDNVNetParams struct {
 	Tag       int    `json:"tag,omitempty"`
 	Alias     string `json:"alias,omitempty"`
 	VLANAware int    `json:"vlanaware,omitempty"`
+	Isolate   int    `json:"isolate,omitempty"`
 }
 
 // UpdateSDNVNetParams holds parameters for updating an SDN VNet.
@@ -880,20 +1002,25 @@ type UpdateSDNVNetParams struct {
 	Tag       int    `json:"tag,omitempty"`
 	Alias     string `json:"alias,omitempty"`
 	VLANAware int    `json:"vlanaware,omitempty"`
+	Isolate   int    `json:"isolate,omitempty"`
 }
 
 // CreateSDNSubnetParams holds parameters for creating an SDN subnet.
 type CreateSDNSubnetParams struct {
-	Subnet  string `json:"subnet"`
-	Gateway string `json:"gateway,omitempty"`
-	SNAT    int    `json:"snat,omitempty"`
-	Type    string `json:"type,omitempty"`
+	Subnet        string `json:"subnet"`
+	Gateway       string `json:"gateway,omitempty"`
+	SNAT          int    `json:"snat,omitempty"`
+	Type          string `json:"type,omitempty"`
+	DHCPRange     string `json:"dhcp-range,omitempty"`
+	DHCPDNSServer string `json:"dhcp-dns-server,omitempty"`
 }
 
 // UpdateSDNSubnetParams holds parameters for updating an SDN subnet.
 type UpdateSDNSubnetParams struct {
-	Gateway string `json:"gateway,omitempty"`
-	SNAT    int    `json:"snat,omitempty"`
+	Gateway       string `json:"gateway,omitempty"`
+	SNAT          int    `json:"snat,omitempty"`
+	DHCPRange     string `json:"dhcp-range,omitempty"`
+	DHCPDNSServer string `json:"dhcp-dns-server,omitempty"`
 }
 
 // HARuleEntry represents an HA rule from GET /cluster/ha/rules (PVE 9+).
@@ -1293,17 +1420,19 @@ type ACMEPlugin struct {
 
 // CreateACMEPluginParams holds parameters for POST /cluster/acme/plugins.
 type CreateACMEPluginParams struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	API  string `json:"api,omitempty"`
-	Data string `json:"data,omitempty"`
+	ID              string `json:"id"`
+	Type            string `json:"type"`
+	API             string `json:"api,omitempty"`
+	Data            string `json:"data,omitempty"`
+	ValidationDelay *int   `json:"validation-delay,omitempty"`
 }
 
 // UpdateACMEPluginParams holds parameters for PUT /cluster/acme/plugins/{id}.
 type UpdateACMEPluginParams struct {
-	API    string `json:"api,omitempty"`
-	Data   string `json:"data,omitempty"`
-	Digest string `json:"digest,omitempty"`
+	API             string `json:"api,omitempty"`
+	Data            string `json:"data,omitempty"`
+	ValidationDelay *int   `json:"validation-delay,omitempty"`
+	Digest          string `json:"digest,omitempty"`
 }
 
 // ACMEDirectory represents a directory from GET /cluster/acme/directories.
@@ -1312,18 +1441,72 @@ type ACMEDirectory struct {
 	URL  string `json:"url"`
 }
 
+// ACMEChallengeSchema represents a challenge plugin schema from GET /cluster/acme/challenge-schema.
+type ACMEChallengeSchema struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Type   string          `json:"type"`
+	Schema json.RawMessage `json:"schema,omitempty"`
+}
+
+// NodeACMEConfig holds ACME-related fields from GET /nodes/{node}/config.
+type NodeACMEConfig struct {
+	ACME        string `json:"acme,omitempty"`
+	ACMEDomain0 string `json:"acmedomain0,omitempty"`
+	ACMEDomain1 string `json:"acmedomain1,omitempty"`
+	ACMEDomain2 string `json:"acmedomain2,omitempty"`
+	ACMEDomain3 string `json:"acmedomain3,omitempty"`
+	ACMEDomain4 string `json:"acmedomain4,omitempty"`
+	ACMEDomain5 string `json:"acmedomain5,omitempty"`
+}
+
 // NodeCertificate represents a certificate from GET /nodes/{node}/certificates/info.
 type NodeCertificate struct {
-	Filename    string `json:"filename,omitempty"`
-	Fingerprint string `json:"fingerprint,omitempty"`
-	Issuer      string `json:"issuer,omitempty"`
-	NotAfter    int64  `json:"notafter,omitempty"`
-	NotBefore   int64  `json:"notbefore,omitempty"`
-	Subject     string `json:"subject,omitempty"`
-	SANs        string `json:"san,omitempty"`
-	PublicKeyBits int  `json:"public-key-bits,omitempty"`
-	PublicKeyType string `json:"public-key-type,omitempty"`
-	PEM         string `json:"pem,omitempty"`
+	Filename      string          `json:"filename,omitempty"`
+	Fingerprint   string          `json:"fingerprint,omitempty"`
+	Issuer        string          `json:"issuer,omitempty"`
+	NotAfter      int64           `json:"notafter,omitempty"`
+	NotBefore     int64           `json:"notbefore,omitempty"`
+	Subject       string          `json:"subject,omitempty"`
+	RawSANs       json.RawMessage `json:"san,omitempty"`
+	SANs          []string        `json:"-"`
+	PublicKeyBits int             `json:"public-key-bits,omitempty"`
+	PublicKeyType string          `json:"public-key-type,omitempty"`
+	PEM           string          `json:"pem,omitempty"`
+}
+
+// UnmarshalJSON handles the san field being either a string or an array in Proxmox responses.
+func (n *NodeCertificate) UnmarshalJSON(data []byte) error {
+	type Alias NodeCertificate
+	aux := &struct{ *Alias }{Alias: (*Alias)(n)}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if len(n.RawSANs) > 0 {
+		// Try array first
+		if err := json.Unmarshal(n.RawSANs, &n.SANs); err != nil {
+			// Fall back to single string
+			var s string
+			if err2 := json.Unmarshal(n.RawSANs, &s); err2 == nil {
+				if s != "" {
+					n.SANs = []string{s}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// MarshalJSON outputs SANs as a comma-separated string for frontend compatibility.
+func (n NodeCertificate) MarshalJSON() ([]byte, error) {
+	type Alias NodeCertificate
+	return json.Marshal(&struct {
+		SANs string `json:"san,omitempty"`
+		*Alias
+	}{
+		SANs:  strings.Join(n.SANs, ", "),
+		Alias: (*Alias)(&n),
+	})
 }
 
 // MetricServerConfig represents a metric server from GET /cluster/metrics/server.

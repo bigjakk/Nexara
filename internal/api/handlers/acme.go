@@ -48,7 +48,7 @@ func (h *ACMEHandler) ListAccounts(c *fiber.Ctx) error {
 	}
 	accounts, err := pxClient.GetACMEAccounts(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get ACME accounts")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(accounts)
 }
@@ -75,7 +75,7 @@ func (h *ACMEHandler) CreateAccount(c *fiber.Ctx) error {
 	}
 	upid, err := pxClient.CreateACMEAccount(c.Context(), req)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create ACME account")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "contact": req.Contact})
 	h.auditLog(c, clusterID, "acme_account", req.Name, "created", details)
@@ -99,7 +99,7 @@ func (h *ACMEHandler) GetAccount(c *fiber.Ctx) error {
 	}
 	account, err := pxClient.GetACMEAccount(c.Context(), name)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get ACME account")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(account)
 }
@@ -123,7 +123,7 @@ func (h *ACMEHandler) UpdateAccount(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateACMEAccount(c.Context(), name, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update ACME account")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
 	h.auditLog(c, clusterID, "acme_account", name, "updated", details)
@@ -146,7 +146,7 @@ func (h *ACMEHandler) DeleteAccount(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteACMEAccount(c.Context(), name); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete ACME account")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
 	h.auditLog(c, clusterID, "acme_account", name, "deleted", details)
@@ -171,7 +171,7 @@ func (h *ACMEHandler) ListPlugins(c *fiber.Ctx) error {
 	}
 	plugins, err := pxClient.GetACMEPlugins(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get ACME plugins")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(plugins)
 }
@@ -197,7 +197,7 @@ func (h *ACMEHandler) CreatePlugin(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateACMEPlugin(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create ACME plugin")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": req.ID, "type": req.Type})
 	h.auditLog(c, clusterID, "acme_plugin", req.ID, "created", details)
@@ -224,7 +224,7 @@ func (h *ACMEHandler) UpdatePlugin(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateACMEPlugin(c.Context(), pluginID, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update ACME plugin")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": pluginID})
 	h.auditLog(c, clusterID, "acme_plugin", pluginID, "updated", details)
@@ -247,7 +247,7 @@ func (h *ACMEHandler) DeletePlugin(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteACMEPlugin(c.Context(), pluginID); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete ACME plugin")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": pluginID})
 	h.auditLog(c, clusterID, "acme_plugin", pluginID, "deleted", details)
@@ -255,7 +255,28 @@ func (h *ACMEHandler) DeletePlugin(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// --- ACME Directories & TOS ---
+// --- ACME Challenge Schema, Directories & TOS ---
+
+// ListChallengeSchema handles GET /clusters/:cluster_id/acme/challenge-schema.
+func (h *ACMEHandler) ListChallengeSchema(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "certificate"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	var raw json.RawMessage
+	if err := pxClient.GetACMEChallengeSchemaRaw(c.Context(), &raw); err != nil {
+		return mapProxmoxError(err)
+	}
+	c.Set("Content-Type", "application/json")
+	return c.Send(raw)
+}
 
 // ListDirectories handles GET /clusters/:cluster_id/acme/directories.
 func (h *ACMEHandler) ListDirectories(c *fiber.Ctx) error {
@@ -272,7 +293,7 @@ func (h *ACMEHandler) ListDirectories(c *fiber.Ctx) error {
 	}
 	dirs, err := pxClient.GetACMEDirectories(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get ACME directories")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(dirs)
 }
@@ -292,9 +313,64 @@ func (h *ACMEHandler) GetTOS(c *fiber.Ctx) error {
 	}
 	tos, err := pxClient.GetACMETOS(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get ACME TOS")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(fiber.Map{"url": tos})
+}
+
+// --- Node ACME Config ---
+
+// GetNodeACMEConfig handles GET /clusters/:cluster_id/nodes/:node/acme-config.
+func (h *ACMEHandler) GetNodeACMEConfig(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "certificate"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	node := c.Params("node")
+	if node == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	cfg, err := pxClient.GetNodeACMEConfig(c.Context(), node)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	return c.JSON(cfg)
+}
+
+// SetNodeACMEConfig handles PUT /clusters/:cluster_id/nodes/:node/acme-config.
+func (h *ACMEHandler) SetNodeACMEConfig(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "certificate"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	node := c.Params("node")
+	if node == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
+	}
+	var req proxmox.NodeACMEConfig
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.SetNodeACMEConfig(c.Context(), node, req); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"node": node})
+	h.auditLog(c, clusterID, "acme_config", node, "updated", details)
+	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // --- Node Certificates ---
@@ -318,7 +394,7 @@ func (h *ACMEHandler) ListNodeCertificates(c *fiber.Ctx) error {
 	}
 	certs, err := pxClient.GetNodeCertificates(c.Context(), node)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get node certificates")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(certs)
 }
@@ -343,7 +419,7 @@ func (h *ACMEHandler) OrderNodeCertificate(c *fiber.Ctx) error {
 	}
 	upid, err := pxClient.OrderNodeCertificate(c.Context(), node, req.Force)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to order certificate")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"node": node})
 	h.auditLog(c, clusterID, "certificate", node, "ordered", details)
@@ -371,7 +447,7 @@ func (h *ACMEHandler) RenewNodeCertificate(c *fiber.Ctx) error {
 	}
 	upid, err := pxClient.RenewNodeCertificate(c.Context(), node, req.Force)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to renew certificate")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"node": node})
 	h.auditLog(c, clusterID, "certificate", node, "renewed", details)
@@ -395,7 +471,7 @@ func (h *ACMEHandler) RevokeNodeCertificate(c *fiber.Ctx) error {
 	}
 	upid, err := pxClient.RevokeNodeCertificate(c.Context(), node)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to revoke certificate")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"node": node})
 	h.auditLog(c, clusterID, "certificate", node, "revoked", details)

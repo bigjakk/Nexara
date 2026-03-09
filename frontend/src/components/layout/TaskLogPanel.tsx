@@ -37,6 +37,47 @@ function formatAction(action: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+type Severity = "info" | "warning" | "error";
+
+function deriveSeverity(action: string, details: string): Severity {
+  if (details && details !== "{}" && details !== "null") {
+    try {
+      const d = JSON.parse(details) as Record<string, unknown>;
+      if (typeof d["error"] === "string" && d["error"] !== "") return "error";
+      if (d["status"] === "failed" || d["status"] === "error") return "error";
+    } catch {
+      // ignore
+    }
+  }
+  const a = action.toLowerCase();
+  if (a.includes("error") || a.includes("failed") || a.includes("fail")) return "error";
+  if (
+    a.includes("delete") ||
+    a.includes("destroy") ||
+    a.includes("disable") ||
+    a.includes("revoke") ||
+    a.includes("reset") ||
+    a.includes("stop") ||
+    a.includes("shutdown") ||
+    a.includes("suspend") ||
+    a.includes("cancel")
+  )
+    return "warning";
+  return "info";
+}
+
+const SEVERITY_STYLES: Record<Severity, string> = {
+  info: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+  warning: "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400",
+  error: "bg-red-500/15 text-red-600 dark:text-red-400",
+};
+
+const SEVERITY_LABELS: Record<Severity, string> = {
+  info: "info",
+  warning: "warn",
+  error: "error",
+};
+
 interface ParsedDetails {
   upid?: string;
   node?: string;
@@ -126,6 +167,10 @@ function ActivityRow({
       taskStatus.exitStatus.startsWith("WARNINGS"));
   const isFailed = isStopped && !isOk;
 
+  // Derive severity — task failure overrides to error
+  let severity = deriveSeverity(entry.action, entry.details);
+  if (isFailed) severity = "error";
+
   const resourceLabel =
     entry.resource_name && entry.resource_vmid
       ? `${entry.resource_name} (${String(entry.resource_vmid)})`
@@ -170,6 +215,11 @@ function ActivityRow({
           </div>
         </td>
         <td className="px-2 py-1">
+          <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none ${SEVERITY_STYLES[severity]}`}>
+            {SEVERITY_LABELS[severity]}
+          </span>
+        </td>
+        <td className="px-2 py-1">
           <div className="flex items-center gap-2">
             <span>{formatAction(entry.action)}</span>
             {resourceLabel && (
@@ -191,7 +241,7 @@ function ActivityRow({
       </tr>
       {expanded && (
         <tr className="border-b bg-muted/10">
-          <td colSpan={4} className="px-4 py-2">
+          <td colSpan={5} className="px-4 py-2">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               <span className="text-muted-foreground">Action</span>
               <span>{entry.action}</span>
@@ -415,6 +465,7 @@ export function TaskLogPanel() {
               <thead>
                 <tr className="border-b bg-muted/30 text-left">
                   <th className="w-12 px-2 py-1" />
+                  <th className="w-14 px-2 py-1 font-medium">Level</th>
                   <th className="px-2 py-1 font-medium">Action</th>
                   <th className="px-2 py-1 font-medium">Cluster</th>
                   <th className="w-24 px-2 py-1 text-right font-medium">

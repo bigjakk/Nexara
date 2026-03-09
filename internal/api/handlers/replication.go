@@ -47,7 +47,7 @@ func (h *ReplicationHandler) ListJobs(c *fiber.Ctx) error {
 	}
 	jobs, err := pxClient.GetReplicationJobs(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get replication jobs")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(jobs)
 }
@@ -76,7 +76,7 @@ func (h *ReplicationHandler) CreateJob(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateReplicationJob(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create replication job")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": req.ID, "target": req.Target})
 	h.auditLog(c, clusterID, "replication", req.ID, "created", details)
@@ -100,7 +100,7 @@ func (h *ReplicationHandler) GetJob(c *fiber.Ctx) error {
 	}
 	job, err := pxClient.GetReplicationJob(c.Context(), jobID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get replication job")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(job)
 }
@@ -124,7 +124,7 @@ func (h *ReplicationHandler) UpdateJob(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateReplicationJob(c.Context(), jobID, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update replication job")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": jobID})
 	h.auditLog(c, clusterID, "replication", jobID, "updated", details)
@@ -147,7 +147,7 @@ func (h *ReplicationHandler) DeleteJob(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteReplicationJob(c.Context(), jobID); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete replication job")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": jobID})
 	h.auditLog(c, clusterID, "replication", jobID, "deleted", details)
@@ -175,7 +175,7 @@ func (h *ReplicationHandler) TriggerSync(c *fiber.Ctx) error {
 	}
 	upid, err := pxClient.TriggerReplication(c.Context(), node, jobID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to trigger replication")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": jobID, "node": node})
 	h.auditLog(c, clusterID, "replication", jobID, "triggered", details)
@@ -202,7 +202,7 @@ func (h *ReplicationHandler) GetStatus(c *fiber.Ctx) error {
 	}
 	status, err := pxClient.GetReplicationStatus(c.Context(), node, jobID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get replication status")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(status)
 }
@@ -228,7 +228,7 @@ func (h *ReplicationHandler) GetLog(c *fiber.Ctx) error {
 	}
 	entries, err := pxClient.GetReplicationLog(c.Context(), node, jobID, limit)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get replication log")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(entries)
 }

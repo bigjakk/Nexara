@@ -350,6 +350,20 @@ func (q *Queries) ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, er
 	return items, nil
 }
 
+const updateVMPool = `-- name: UpdateVMPool :exec
+UPDATE vms SET pool = $2 WHERE id = $1
+`
+
+type UpdateVMPoolParams struct {
+	ID   uuid.UUID `json:"id"`
+	Pool string    `json:"pool"`
+}
+
+func (q *Queries) UpdateVMPool(ctx context.Context, arg UpdateVMPoolParams) error {
+	_, err := q.db.Exec(ctx, updateVMPool, arg.ID, arg.Pool)
+	return err
+}
+
 const updateVMStatus = `-- name: UpdateVMStatus :exec
 UPDATE vms SET status = $2, updated_at = now() WHERE id = $1
 `

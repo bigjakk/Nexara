@@ -899,3 +899,17 @@ export function useNodePCIDevices(clusterId: string, nodeName: string) {
     staleTime: 30_000,
   });
 }
+
+export function useSetVMPool(clusterId: string, vmId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (pool: string) =>
+      apiClient.put<{ pool: string }>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/pool`,
+        { pool },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["vm", clusterId, vmId] });
+    },
+  });
+}

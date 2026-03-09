@@ -30,6 +30,8 @@ export function CreateSDNSubnetDialog({
   const [subnet, setSubnet] = useState("");
   const [gateway, setGateway] = useState("");
   const [snat, setSnat] = useState(false);
+  const [dhcpRange, setDhcpRange] = useState("");
+  const [dhcpDnsServer, setDhcpDnsServer] = useState("");
 
   const create = useCreateSDNSubnet(clusterId, vnet);
   const update = useUpdateSDNSubnet(clusterId, vnet);
@@ -42,25 +44,33 @@ export function CreateSDNSubnetDialog({
       setSubnet(initialData.subnet);
       setGateway(initialData.gateway ?? "");
       setSnat(initialData.snat === 1);
+      setDhcpRange(initialData["dhcp-range"] ?? "");
+      setDhcpDnsServer(initialData["dhcp-dns-server"] ?? "");
     }
     if (open && !initialData) {
       setSubnet("");
       setGateway("");
       setSnat(false);
+      setDhcpRange("");
+      setDhcpDnsServer("");
     }
   }, [open, initialData]);
 
   const handleSubmit = () => {
     if (!subnet) return;
-    const params: CreateSDNSubnetRequest = { subnet };
+    const params: CreateSDNSubnetRequest = { subnet, type: "subnet" };
     if (gateway) params.gateway = gateway;
     if (snat) params.snat = 1;
+    if (dhcpRange) params["dhcp-range"] = dhcpRange;
+    if (dhcpDnsServer) params["dhcp-dns-server"] = dhcpDnsServer;
 
     if (isEdit) {
-      const updateParams: { gateway?: string; snat?: number } = {
+      const updateParams: { gateway?: string; snat?: number; "dhcp-range"?: string; "dhcp-dns-server"?: string } = {
         snat: snat ? 1 : 0,
       };
       if (gateway) updateParams.gateway = gateway;
+      if (dhcpRange) updateParams["dhcp-range"] = dhcpRange;
+      if (dhcpDnsServer) updateParams["dhcp-dns-server"] = dhcpDnsServer;
       update.mutate(
         { subnet: initialData.subnet, params: updateParams },
         { onSuccess: () => { setOpen(false); } },
@@ -115,6 +125,22 @@ export function CreateSDNSubnetDialog({
               onCheckedChange={(checked) => { setSnat(checked === true); }}
             />
             <Label htmlFor="snat">Enable SNAT</Label>
+          </div>
+          <div className="space-y-2">
+            <Label>DHCP Range (optional)</Label>
+            <Input
+              placeholder="start-address=10.0.0.50,end-address=10.0.0.200"
+              value={dhcpRange}
+              onChange={(e) => { setDhcpRange(e.target.value); }}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>DHCP DNS Server (optional)</Label>
+            <Input
+              placeholder="8.8.8.8"
+              value={dhcpDnsServer}
+              onChange={(e) => { setDhcpDnsServer(e.target.value); }}
+            />
           </div>
           {errorMessage && (
             <p className="text-sm text-destructive">{errorMessage}</p>

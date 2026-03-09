@@ -326,6 +326,7 @@ type Querier interface {
 	UpdateTaskLastRun(ctx context.Context, arg UpdateTaskLastRunParams) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
+	UpdateVMPool(ctx context.Context, arg UpdateVMPoolParams) error
 	UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error
 	UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) error
 	UpsertCVEScanSchedule(ctx context.Context, arg UpsertCVEScanScheduleParams) (CveScanSchedule, error)

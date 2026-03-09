@@ -26,14 +26,77 @@ import {
   useDeleteSDNSubnet,
   useSDNSubnets,
   useApplySDN,
+  useSDNControllers,
+  useDeleteSDNController,
+  useSDNIPAMs,
+  useDeleteSDNIPAM,
+  useSDNDNSPlugins,
+  useDeleteSDNDNS,
 } from "../api/network-queries";
 import { CreateSDNZoneDialog } from "./CreateSDNZoneDialog";
 import { CreateSDNVNetDialog } from "./CreateSDNVNetDialog";
 import { CreateSDNSubnetDialog } from "./CreateSDNSubnetDialog";
+import { CreateSDNControllerDialog } from "./CreateSDNControllerDialog";
+import { CreateSDNIPAMDialog } from "./CreateSDNIPAMDialog";
+import { CreateSDNDNSDialog } from "./CreateSDNDNSDialog";
 import type { SDNVNet } from "../types/network";
 
 interface SDNTableProps {
   clusterId: string;
+}
+
+interface DeleteConfirmButtonProps {
+  name: string;
+  kind: string;
+  onConfirm: () => void;
+  isPending: boolean;
+}
+
+function DeleteConfirmButton({
+  name,
+  kind,
+  onConfirm,
+  isPending,
+}: DeleteConfirmButtonProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => { setOpen(true); }}
+      >
+        <Trash2 className="h-4 w-4 text-destructive" />
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {kind}</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete {kind} &quot;{name}&quot;? This
+              action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => { setOpen(false); }}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                onConfirm();
+                setOpen(false);
+              }}
+              disabled={isPending}
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 function VNetSubnetsRow({
@@ -49,6 +112,7 @@ function VNetSubnetsRow({
     expanded ? vnet.vnet : "",
   );
   const deleteSubnet = useDeleteSDNSubnet(clusterId, vnet.vnet);
+  const deleteVNet = useDeleteSDNVNet(clusterId);
 
   return (
     <>
@@ -76,10 +140,8 @@ function VNetSubnetsRow({
             <DeleteConfirmButton
               name={vnet.vnet}
               kind="VNet"
-              clusterId={clusterId}
-              onDelete={() => undefined}
-              deleteFn={useDeleteSDNVNet}
-              id={vnet.vnet}
+              onConfirm={() => { deleteVNet.mutate(vnet.vnet); }}
+              isPending={deleteVNet.isPending}
             />
           </div>
         </TableCell>
@@ -159,65 +221,196 @@ function VNetSubnetsRow({
   );
 }
 
-function DeleteConfirmButton({
-  name,
-  kind,
-  clusterId,
-  deleteFn,
-  id,
-}: {
-  name: string;
-  kind: string;
-  clusterId: string;
-  onDelete: () => void;
-  deleteFn: (clusterId: string) => { mutate: (id: string) => void; isPending: boolean };
-  id: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const mutation = deleteFn(clusterId);
+function ControllersTab({ clusterId }: { clusterId: string }) {
+  const { data: controllers, isLoading } = useSDNControllers(clusterId);
+  const deleteController = useDeleteSDNController(clusterId);
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">Loading...</p>;
+  }
 
   return (
-    <>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => { setOpen(true); }}
-      >
-        <Trash2 className="h-4 w-4 text-destructive" />
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete {kind}</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete {kind} &quot;{name}&quot;? This
-              action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                mutation.mutate(id);
-                setOpen(false);
-              }}
-              disabled={mutation.isPending}
-            >
-              Delete
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <CreateSDNControllerDialog clusterId={clusterId} />
+      </div>
+      {!controllers || controllers.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No SDN controllers configured.
+        </p>
+      ) : (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Controller</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>ASN</TableHead>
+                <TableHead>Peers</TableHead>
+                <TableHead>Nodes</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {controllers.map((ctrl) => (
+                <TableRow key={ctrl.controller}>
+                  <TableCell className="font-medium">
+                    {ctrl.controller}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{ctrl.type}</Badge>
+                  </TableCell>
+                  <TableCell>{ctrl.asn ?? "-"}</TableCell>
+                  <TableCell>{ctrl.peers || "-"}</TableCell>
+                  <TableCell>{ctrl.nodes || "-"}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <CreateSDNControllerDialog
+                        clusterId={clusterId}
+                        initialData={ctrl}
+                      />
+                      <DeleteConfirmButton
+                        name={ctrl.controller}
+                        kind="Controller"
+                        onConfirm={() => { deleteController.mutate(ctrl.controller); }}
+                        isPending={deleteController.isPending}
+                      />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IPAMTab({ clusterId }: { clusterId: string }) {
+  const { data: ipams, isLoading } = useSDNIPAMs(clusterId);
+  const deleteIPAM = useDeleteSDNIPAM(clusterId);
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">Loading...</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <CreateSDNIPAMDialog clusterId={clusterId} />
+      </div>
+      {!ipams || ipams.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No IPAM plugins configured.
+        </p>
+      ) : (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>IPAM</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>URL</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {ipams.map((ipam) => (
+                <TableRow key={ipam.ipam}>
+                  <TableCell className="font-medium">{ipam.ipam}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{ipam.type}</Badge>
+                  </TableCell>
+                  <TableCell>{ipam.url || "-"}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <CreateSDNIPAMDialog
+                        clusterId={clusterId}
+                        initialData={ipam}
+                      />
+                      <DeleteConfirmButton
+                        name={ipam.ipam}
+                        kind="IPAM"
+                        onConfirm={() => { deleteIPAM.mutate(ipam.ipam); }}
+                        isPending={deleteIPAM.isPending}
+                      />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DNSTab({ clusterId }: { clusterId: string }) {
+  const { data: dnsPlugins, isLoading } = useSDNDNSPlugins(clusterId);
+  const deleteDNS = useDeleteSDNDNS(clusterId);
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">Loading...</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <CreateSDNDNSDialog clusterId={clusterId} />
+      </div>
+      {!dnsPlugins || dnsPlugins.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No DNS plugins configured.
+        </p>
+      ) : (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>DNS</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>URL</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {dnsPlugins.map((dns) => (
+                <TableRow key={dns.dns}>
+                  <TableCell className="font-medium">{dns.dns}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{dns.type}</Badge>
+                  </TableCell>
+                  <TableCell>{dns.url || "-"}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <CreateSDNDNSDialog
+                        clusterId={clusterId}
+                        initialData={dns}
+                      />
+                      <DeleteConfirmButton
+                        name={dns.dns}
+                        kind="DNS"
+                        onConfirm={() => { deleteDNS.mutate(dns.dns); }}
+                        isPending={deleteDNS.isPending}
+                      />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
   );
 }
 
 export function SDNTable({ clusterId }: SDNTableProps) {
   const { data: zones, isLoading: zonesLoading } = useSDNZones(clusterId);
   const { data: vnets, isLoading: vnetsLoading } = useSDNVNets(clusterId);
+  const deleteZone = useDeleteSDNZone(clusterId);
   const applySDN = useApplySDN(clusterId);
   const [applyOpen, setApplyOpen] = useState(false);
 
@@ -271,6 +464,9 @@ export function SDNTable({ clusterId }: SDNTableProps) {
         <TabsList>
           <TabsTrigger value="zones">Zones</TabsTrigger>
           <TabsTrigger value="vnets">VNets</TabsTrigger>
+          <TabsTrigger value="controllers">Controllers</TabsTrigger>
+          <TabsTrigger value="ipam">IPAM</TabsTrigger>
+          <TabsTrigger value="dns">DNS</TabsTrigger>
         </TabsList>
 
         <TabsContent value="zones" className="space-y-4">
@@ -315,10 +511,8 @@ export function SDNTable({ clusterId }: SDNTableProps) {
                           <DeleteConfirmButton
                             name={zone.zone}
                             kind="Zone"
-                            clusterId={clusterId}
-                            onDelete={() => undefined}
-                            deleteFn={useDeleteSDNZone}
-                            id={zone.zone}
+                            onConfirm={() => { deleteZone.mutate(zone.zone); }}
+                            isPending={deleteZone.isPending}
                           />
                         </div>
                       </TableCell>
@@ -363,6 +557,18 @@ export function SDNTable({ clusterId }: SDNTableProps) {
               </Table>
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="controllers" className="space-y-4">
+          <ControllersTab clusterId={clusterId} />
+        </TabsContent>
+
+        <TabsContent value="ipam" className="space-y-4">
+          <IPAMTab clusterId={clusterId} />
+        </TabsContent>
+
+        <TabsContent value="dns" className="space-y-4">
+          <DNSTab clusterId={clusterId} />
         </TabsContent>
       </Tabs>
     </div>

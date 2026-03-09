@@ -382,7 +382,12 @@ func testClusterConnectivity(apiURL, tokenID, tokenSecret, tlsFingerprint string
 		if errors.Is(err, proxmox.ErrForbidden) {
 			msg = "Authentication failed: check token credentials"
 		} else if errors.Is(err, proxmox.ErrConnectionFailed) {
-			msg = "Host unreachable or connection refused"
+			errStr := err.Error()
+			if strings.Contains(errStr, "fingerprint mismatch") {
+				msg = "TLS certificate has changed. The stored fingerprint no longer matches the server certificate. Please re-fetch the fingerprint."
+			} else {
+				msg = "Host unreachable or connection refused"
+			}
 		}
 		return connectivityTestResult{Result: connectivityResult{Reachable: false, Message: msg}}
 	}

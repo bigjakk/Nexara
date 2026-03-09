@@ -102,6 +102,7 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/nodes/:node_name/machine-types", s.vmHandler.ListMachineTypes)
 			clusters.Get("/:cluster_id/nodes/:node_name/isos", s.vmHandler.ListNodeISOs)
 			clusters.Post("/:cluster_id/vms/:vm_id/media", s.vmHandler.ChangeMedia)
+			clusters.Put("/:cluster_id/vms/:vm_id/pool", s.vmHandler.SetVMPool)
 			clusters.Get("/:cluster_id/pools", s.vmHandler.ListResourcePools)
 		}
 		if s.storageHandler != nil {
@@ -171,6 +172,18 @@ func (s *Server) setupRoutes() {
 		netClusters.Put("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.UpdateSDNSubnet)
 		netClusters.Delete("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.DeleteSDNSubnet)
 		netClusters.Put("/:cluster_id/sdn/apply", s.networkHandler.ApplySDN)
+		netClusters.Get("/:cluster_id/sdn/controllers", s.networkHandler.ListSDNControllers)
+		netClusters.Post("/:cluster_id/sdn/controllers", s.networkHandler.CreateSDNController)
+		netClusters.Put("/:cluster_id/sdn/controllers/:controller", s.networkHandler.UpdateSDNController)
+		netClusters.Delete("/:cluster_id/sdn/controllers/:controller", s.networkHandler.DeleteSDNController)
+		netClusters.Get("/:cluster_id/sdn/ipams", s.networkHandler.ListSDNIPAMs)
+		netClusters.Post("/:cluster_id/sdn/ipams", s.networkHandler.CreateSDNIPAM)
+		netClusters.Put("/:cluster_id/sdn/ipams/:ipam", s.networkHandler.UpdateSDNIPAM)
+		netClusters.Delete("/:cluster_id/sdn/ipams/:ipam", s.networkHandler.DeleteSDNIPAM)
+		netClusters.Get("/:cluster_id/sdn/dns", s.networkHandler.ListSDNDNS)
+		netClusters.Post("/:cluster_id/sdn/dns", s.networkHandler.CreateSDNDNS)
+		netClusters.Put("/:cluster_id/sdn/dns/:dns", s.networkHandler.UpdateSDNDNS)
+		netClusters.Delete("/:cluster_id/sdn/dns/:dns", s.networkHandler.DeleteSDNDNS)
 
 		netClusters.Post("/:cluster_id/firewall-templates/:id/apply", s.networkHandler.ApplyTemplate)
 	}
@@ -494,8 +507,11 @@ func (s *Server) setupRoutes() {
 		acmeClusters.Post("/:cluster_id/acme/plugins", s.acmeHandler.CreatePlugin)
 		acmeClusters.Put("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.UpdatePlugin)
 		acmeClusters.Delete("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.DeletePlugin)
+		acmeClusters.Get("/:cluster_id/acme/challenge-schema", s.acmeHandler.ListChallengeSchema)
 		acmeClusters.Get("/:cluster_id/acme/directories", s.acmeHandler.ListDirectories)
 		acmeClusters.Get("/:cluster_id/acme/tos", s.acmeHandler.GetTOS)
+		acmeClusters.Get("/:cluster_id/nodes/:node/acme-config", s.acmeHandler.GetNodeACMEConfig)
+		acmeClusters.Put("/:cluster_id/nodes/:node/acme-config", s.acmeHandler.SetNodeACMEConfig)
 		acmeClusters.Get("/:cluster_id/nodes/:node/certificates", s.acmeHandler.ListNodeCertificates)
 		acmeClusters.Post("/:cluster_id/nodes/:node/certificates/order", s.acmeHandler.OrderNodeCertificate)
 		acmeClusters.Put("/:cluster_id/nodes/:node/certificates/renew", s.acmeHandler.RenewNodeCertificate)

@@ -103,6 +103,13 @@ export interface SDNZone {
   "vlan-protocol"?: string;
   peers?: string;
   mtu?: number;
+  controller?: string;
+  "vrf-vxlan"?: number;
+  exitnodes?: string;
+  mac?: string;
+  "advertise-subnets"?: number;
+  "disable-arp-nd-suppression"?: number;
+  "bridge-disable-mac-learning"?: number;
 }
 
 export interface SDNVNet {
@@ -111,6 +118,7 @@ export interface SDNVNet {
   tag?: number;
   alias?: string;
   vlanaware?: number;
+  isolate?: number;
 }
 
 export interface SDNSubnet {
@@ -119,6 +127,39 @@ export interface SDNSubnet {
   gateway?: string;
   snat?: number;
   vnet?: string;
+  "dhcp-range"?: string;
+  "dhcp-dns-server"?: string;
+}
+
+export interface SDNController {
+  controller: string;
+  type: string;
+  nodes?: string;
+  asn?: number;
+  peers?: string;
+  "isis-domain"?: string;
+  "isis-ifaces"?: string;
+  "isis-net"?: string;
+  "bgp-multipath-as-path-relax"?: number;
+  "ebgp-multihop"?: number;
+  loopback?: string;
+  node?: string;
+}
+
+export interface SDNIPAM {
+  ipam: string;
+  type: string;
+  url?: string;
+  token?: string;
+  section?: number;
+}
+
+export interface SDNDNS {
+  dns: string;
+  type: string;
+  url?: string;
+  key?: string;
+  reversemaskv6?: number;
 }
 
 export interface CreateSDNZoneRequest {
@@ -131,6 +172,15 @@ export interface CreateSDNZoneRequest {
   mtu?: number;
   nodes?: string;
   ipam?: string;
+  dns?: string;
+  reversedns?: string;
+  dnszone?: string;
+  controller?: string;
+  "vrf-vxlan"?: number;
+  exitnodes?: string;
+  mac?: string;
+  "advertise-subnets"?: number;
+  "disable-arp-nd-suppression"?: number;
 }
 
 export interface UpdateSDNZoneRequest {
@@ -141,6 +191,15 @@ export interface UpdateSDNZoneRequest {
   mtu?: number;
   nodes?: string;
   ipam?: string;
+  dns?: string;
+  reversedns?: string;
+  dnszone?: string;
+  controller?: string;
+  "vrf-vxlan"?: number;
+  exitnodes?: string;
+  mac?: string;
+  "advertise-subnets"?: number;
+  "disable-arp-nd-suppression"?: number;
 }
 
 export interface CreateSDNVNetRequest {
@@ -149,6 +208,7 @@ export interface CreateSDNVNetRequest {
   tag?: number;
   alias?: string;
   vlanaware?: number;
+  isolate?: number;
 }
 
 export interface UpdateSDNVNetRequest {
@@ -156,6 +216,7 @@ export interface UpdateSDNVNetRequest {
   tag?: number;
   alias?: string;
   vlanaware?: number;
+  isolate?: number;
 }
 
 export interface CreateSDNSubnetRequest {
@@ -163,11 +224,67 @@ export interface CreateSDNSubnetRequest {
   gateway?: string;
   snat?: number;
   type?: string;
+  "dhcp-range"?: string;
+  "dhcp-dns-server"?: string;
 }
 
 export interface UpdateSDNSubnetRequest {
   gateway?: string;
   snat?: number;
+  "dhcp-range"?: string;
+  "dhcp-dns-server"?: string;
+}
+
+export interface CreateSDNControllerRequest {
+  controller: string;
+  type: string;
+  asn?: number;
+  peers?: string;
+  nodes?: string;
+  "isis-domain"?: string;
+  "isis-ifaces"?: string;
+  "isis-net"?: string;
+  "ebgp-multihop"?: number;
+  loopback?: string;
+  node?: string;
+}
+
+export interface UpdateSDNControllerRequest {
+  asn?: number;
+  peers?: string;
+  nodes?: string;
+  "isis-domain"?: string;
+  "isis-ifaces"?: string;
+  "isis-net"?: string;
+  "ebgp-multihop"?: number;
+  loopback?: string;
+  node?: string;
+}
+
+export interface CreateSDNIPAMRequest {
+  ipam: string;
+  type: string;
+  url?: string;
+  token?: string;
+  section?: number;
+}
+
+export interface UpdateSDNIPAMRequest {
+  url?: string;
+  token?: string;
+  section?: number;
+}
+
+export interface CreateSDNDNSRequest {
+  dns: string;
+  type: string;
+  url?: string;
+  key?: string;
+}
+
+export interface UpdateSDNDNSRequest {
+  url?: string;
+  key?: string;
 }
 
 export interface FirewallTemplate {

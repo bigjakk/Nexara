@@ -4,6 +4,7 @@ import type {
   ClusterResponse,
   CreateClusterRequest,
   CreateClusterResponse,
+  UpdateClusterResponse,
   NodeResponse,
   VMResponse,
   StorageResponse,
@@ -154,7 +155,7 @@ export function useUpdateCluster() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: UpdateClusterRequest }) =>
-      apiClient.put<ClusterResponse>(`/api/v1/clusters/${id}`, body),
+      apiClient.put<UpdateClusterResponse>(`/api/v1/clusters/${id}`, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["clusters"] });
     },

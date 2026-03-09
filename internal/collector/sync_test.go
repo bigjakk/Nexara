@@ -143,6 +143,10 @@ func (m *mockQueries) DeleteStalePBSVerifyJobs(_ context.Context, _ db.DeleteSta
 	return nil
 }
 
+func (m *mockQueries) InsertAuditLog(_ context.Context, _ db.InsertAuditLogParams) error {
+	return nil
+}
+
 // --- Test helpers ---
 
 func testLogger() *slog.Logger {
