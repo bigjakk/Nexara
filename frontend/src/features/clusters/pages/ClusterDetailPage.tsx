@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,9 +20,17 @@ import { ClusterCephTab } from "../components/ClusterCephTab";
 import { ClusterNetworksTab } from "../components/ClusterNetworksTab";
 import { ClusterFirewallTab } from "../components/ClusterFirewallTab";
 import { ClusterDRSTab } from "../components/ClusterDRSTab";
+import { ClusterOptionsTab } from "../components/ClusterOptionsTab";
+import { ClusterHATab } from "../components/ClusterHATab";
+import { ClusterPoolsTab } from "../components/ClusterPoolsTab";
+import { ClusterReplicationTab } from "../components/ClusterReplicationTab";
+import { ClusterACMETab } from "../components/ClusterACMETab";
+import { ClusterMetricServersTab } from "../components/ClusterMetricServersTab";
 
 export function ClusterDetailPage() {
   const { clusterId } = useParams<{ clusterId: string }>();
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab") ?? "";
   const clusterQuery = useCluster(clusterId ?? "");
   const nodesQuery = useClusterNodes(clusterId ?? "");
   const addTab = useConsoleStore((s) => s.addTab);
@@ -88,12 +96,18 @@ export function ClusterDetailPage() {
             )}
           </Card>
 
-          <Tabs defaultValue="nodes">
+          <Tabs defaultValue={tabParam || "nodes"} {...(tabParam ? { value: tabParam } : {})}>
             <TabsList>
               <TabsTrigger value="nodes">Nodes</TabsTrigger>
+              <TabsTrigger value="options">Options</TabsTrigger>
+              <TabsTrigger value="ha">HA</TabsTrigger>
+              <TabsTrigger value="pools">Pools</TabsTrigger>
+              <TabsTrigger value="replication">Replication</TabsTrigger>
               <TabsTrigger value="ceph">Ceph</TabsTrigger>
               <TabsTrigger value="networks">Networks</TabsTrigger>
               <TabsTrigger value="firewall">Firewall</TabsTrigger>
+              <TabsTrigger value="certificates">Certificates</TabsTrigger>
+              <TabsTrigger value="metric-servers">Metrics</TabsTrigger>
               <TabsTrigger value="drs">DRS</TabsTrigger>
             </TabsList>
 
@@ -185,6 +199,30 @@ export function ClusterDetailPage() {
 
             <TabsContent value="firewall">
               <ClusterFirewallTab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="options">
+              <ClusterOptionsTab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="ha">
+              <ClusterHATab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="pools">
+              <ClusterPoolsTab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="replication">
+              <ClusterReplicationTab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="certificates">
+              <ClusterACMETab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="metric-servers">
+              <ClusterMetricServersTab clusterId={clusterId ?? ""} />
             </TabsContent>
 
             <TabsContent value="drs">

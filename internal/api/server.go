@@ -54,6 +54,13 @@ type Server struct {
 	reportHandler       *handlers.ReportHandler
 	rollingUpdateHandler *handlers.RollingUpdateHandler
 	settingsHandler      *handlers.SettingsHandler
+	clusterOptionsHandler *handlers.ClusterOptionsHandler
+	haHandler            *handlers.HAHandler
+	poolHandler          *handlers.PoolHandler
+	replicationHandler   *handlers.ReplicationHandler
+	acmeHandler          *handlers.ACMEHandler
+	metricServerHandler  *handlers.MetricServerHandler
+	searchHandler        *handlers.SearchHandler
 	rbacEngine          *auth.RBACEngine
 	eventPub            *events.Publisher
 }
@@ -162,6 +169,13 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.reportHandler = handlers.NewReportHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		rollingOrch := rolling.NewOrchestrator(s.queries, cfg.EncryptionKey, slog.Default().With("component", "rolling-update"), s.eventPub, nil)
 		s.rollingUpdateHandler = handlers.NewRollingUpdateHandler(s.queries, cfg.EncryptionKey, s.eventPub, rollingOrch)
+		s.clusterOptionsHandler = handlers.NewClusterOptionsHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.haHandler = handlers.NewHAHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.poolHandler = handlers.NewPoolHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.replicationHandler = handlers.NewReplicationHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.acmeHandler = handlers.NewACMEHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.metricServerHandler = handlers.NewMetricServerHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.searchHandler = handlers.NewSearchHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}
 
 	// Wire LDAP handler into auth handler for LDAP-aware login

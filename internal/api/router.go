@@ -428,6 +428,115 @@ func (s *Server) setupRoutes() {
 		ruClusters.Post("/:cluster_id/ssh-credentials/test", s.rollingUpdateHandler.TestSSHConnection)
 	}
 
+	// Cluster options, tags, and config routes.
+	if s.clusterOptionsHandler != nil && s.clusterHandler != nil {
+		optClusters := v1.Group("/clusters", s.authRequired())
+		optClusters.Get("/:cluster_id/options", s.clusterOptionsHandler.GetOptions)
+		optClusters.Put("/:cluster_id/options", s.clusterOptionsHandler.UpdateOptions)
+		optClusters.Get("/:cluster_id/description", s.clusterOptionsHandler.GetDescription)
+		optClusters.Put("/:cluster_id/description", s.clusterOptionsHandler.UpdateDescription)
+		optClusters.Get("/:cluster_id/tags", s.clusterOptionsHandler.GetTags)
+		optClusters.Put("/:cluster_id/tags", s.clusterOptionsHandler.UpdateTags)
+		optClusters.Get("/:cluster_id/config", s.clusterOptionsHandler.GetClusterConfig)
+		optClusters.Get("/:cluster_id/config/join", s.clusterOptionsHandler.GetJoinInfo)
+		optClusters.Get("/:cluster_id/config/nodes", s.clusterOptionsHandler.ListCorosyncNodes)
+	}
+
+	// HA management routes.
+	if s.haHandler != nil && s.clusterHandler != nil {
+		haClusters := v1.Group("/clusters", s.authRequired())
+		haClusters.Get("/:cluster_id/ha/resources", s.haHandler.ListResources)
+		haClusters.Post("/:cluster_id/ha/resources", s.haHandler.CreateResource)
+		haClusters.Get("/:cluster_id/ha/resources/:sid", s.haHandler.GetResource)
+		haClusters.Put("/:cluster_id/ha/resources/:sid", s.haHandler.UpdateResource)
+		haClusters.Delete("/:cluster_id/ha/resources/:sid", s.haHandler.DeleteResource)
+		haClusters.Get("/:cluster_id/ha/groups", s.haHandler.ListGroups)
+		haClusters.Post("/:cluster_id/ha/groups", s.haHandler.CreateGroup)
+		haClusters.Put("/:cluster_id/ha/groups/:group", s.haHandler.UpdateGroup)
+		haClusters.Delete("/:cluster_id/ha/groups/:group", s.haHandler.DeleteGroup)
+		haClusters.Get("/:cluster_id/ha/status", s.haHandler.GetStatus)
+	}
+
+	// Resource pool CRUD routes (GET list already registered via vmHandler).
+	if s.poolHandler != nil && s.clusterHandler != nil {
+		poolClusters := v1.Group("/clusters", s.authRequired())
+		poolClusters.Post("/:cluster_id/pools", s.poolHandler.CreatePool)
+		poolClusters.Get("/:cluster_id/pools/:pool_id", s.poolHandler.GetPool)
+		poolClusters.Put("/:cluster_id/pools/:pool_id", s.poolHandler.UpdatePool)
+		poolClusters.Delete("/:cluster_id/pools/:pool_id", s.poolHandler.DeletePool)
+	}
+
+	// Replication routes.
+	if s.replicationHandler != nil && s.clusterHandler != nil {
+		replClusters := v1.Group("/clusters", s.authRequired())
+		replClusters.Get("/:cluster_id/replication", s.replicationHandler.ListJobs)
+		replClusters.Post("/:cluster_id/replication", s.replicationHandler.CreateJob)
+		replClusters.Get("/:cluster_id/replication/:job_id", s.replicationHandler.GetJob)
+		replClusters.Put("/:cluster_id/replication/:job_id", s.replicationHandler.UpdateJob)
+		replClusters.Delete("/:cluster_id/replication/:job_id", s.replicationHandler.DeleteJob)
+		replClusters.Post("/:cluster_id/replication/:job_id/trigger", s.replicationHandler.TriggerSync)
+		replClusters.Get("/:cluster_id/replication/:job_id/status", s.replicationHandler.GetStatus)
+		replClusters.Get("/:cluster_id/replication/:job_id/log", s.replicationHandler.GetLog)
+	}
+
+	// ACME certificate routes.
+	if s.acmeHandler != nil && s.clusterHandler != nil {
+		acmeClusters := v1.Group("/clusters", s.authRequired())
+		acmeClusters.Get("/:cluster_id/acme/accounts", s.acmeHandler.ListAccounts)
+		acmeClusters.Post("/:cluster_id/acme/accounts", s.acmeHandler.CreateAccount)
+		acmeClusters.Get("/:cluster_id/acme/accounts/:name", s.acmeHandler.GetAccount)
+		acmeClusters.Put("/:cluster_id/acme/accounts/:name", s.acmeHandler.UpdateAccount)
+		acmeClusters.Delete("/:cluster_id/acme/accounts/:name", s.acmeHandler.DeleteAccount)
+		acmeClusters.Get("/:cluster_id/acme/plugins", s.acmeHandler.ListPlugins)
+		acmeClusters.Post("/:cluster_id/acme/plugins", s.acmeHandler.CreatePlugin)
+		acmeClusters.Put("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.UpdatePlugin)
+		acmeClusters.Delete("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.DeletePlugin)
+		acmeClusters.Get("/:cluster_id/acme/directories", s.acmeHandler.ListDirectories)
+		acmeClusters.Get("/:cluster_id/acme/tos", s.acmeHandler.GetTOS)
+		acmeClusters.Get("/:cluster_id/nodes/:node/certificates", s.acmeHandler.ListNodeCertificates)
+		acmeClusters.Post("/:cluster_id/nodes/:node/certificates/order", s.acmeHandler.OrderNodeCertificate)
+		acmeClusters.Put("/:cluster_id/nodes/:node/certificates/renew", s.acmeHandler.RenewNodeCertificate)
+		acmeClusters.Delete("/:cluster_id/nodes/:node/certificates/revoke", s.acmeHandler.RevokeNodeCertificate)
+	}
+
+	// Metric server routes.
+	if s.metricServerHandler != nil && s.clusterHandler != nil {
+		msClusters := v1.Group("/clusters", s.authRequired())
+		msClusters.Get("/:cluster_id/metric-servers", s.metricServerHandler.ListServers)
+		msClusters.Post("/:cluster_id/metric-servers", s.metricServerHandler.CreateServer)
+		msClusters.Get("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.GetServer)
+		msClusters.Put("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.UpdateServer)
+		msClusters.Delete("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.DeleteServer)
+	}
+
+	// Firewall extras (aliases, IPsets, security groups, log).
+	if s.networkHandler != nil && s.clusterHandler != nil {
+		fwClusters := v1.Group("/clusters", s.authRequired())
+		fwClusters.Get("/:cluster_id/firewall/aliases", s.networkHandler.ListFirewallAliases)
+		fwClusters.Post("/:cluster_id/firewall/aliases", s.networkHandler.CreateFirewallAlias)
+		fwClusters.Put("/:cluster_id/firewall/aliases/:name", s.networkHandler.UpdateFirewallAlias)
+		fwClusters.Delete("/:cluster_id/firewall/aliases/:name", s.networkHandler.DeleteFirewallAlias)
+		fwClusters.Get("/:cluster_id/firewall/ipset", s.networkHandler.ListFirewallIPSets)
+		fwClusters.Post("/:cluster_id/firewall/ipset", s.networkHandler.CreateFirewallIPSet)
+		fwClusters.Delete("/:cluster_id/firewall/ipset/:name", s.networkHandler.DeleteFirewallIPSet)
+		fwClusters.Get("/:cluster_id/firewall/ipset/:name/entries", s.networkHandler.ListFirewallIPSetEntries)
+		fwClusters.Post("/:cluster_id/firewall/ipset/:name/entries", s.networkHandler.AddFirewallIPSetEntry)
+		fwClusters.Delete("/:cluster_id/firewall/ipset/:name/entries/:cidr", s.networkHandler.DeleteFirewallIPSetEntry)
+		fwClusters.Get("/:cluster_id/firewall/groups", s.networkHandler.ListSecurityGroups)
+		fwClusters.Post("/:cluster_id/firewall/groups", s.networkHandler.CreateSecurityGroup)
+		fwClusters.Delete("/:cluster_id/firewall/groups/:group", s.networkHandler.DeleteSecurityGroup)
+		fwClusters.Get("/:cluster_id/firewall/groups/:group/rules", s.networkHandler.ListSecurityGroupRules)
+		fwClusters.Post("/:cluster_id/firewall/groups/:group/rules", s.networkHandler.CreateSecurityGroupRule)
+		fwClusters.Put("/:cluster_id/firewall/groups/:group/rules/:pos", s.networkHandler.UpdateSecurityGroupRule)
+		fwClusters.Delete("/:cluster_id/firewall/groups/:group/rules/:pos", s.networkHandler.DeleteSecurityGroupRule)
+		fwClusters.Get("/:cluster_id/firewall/log", s.networkHandler.GetFirewallLog)
+	}
+
+	// Global search.
+	if s.searchHandler != nil {
+		v1.Get("/search", s.authRequired(), s.searchHandler.GlobalSearch)
+	}
+
 	// Settings routes.
 	if s.settingsHandler != nil {
 		settings := v1.Group("/settings", s.authRequired())

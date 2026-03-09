@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { HardDrive, ChevronDown, ChevronRight, Server, Share2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -87,12 +88,22 @@ function groupStorage(
 }
 
 export function StoragePage() {
+  const [searchParams] = useSearchParams();
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
-  const [selectedClusterId, setSelectedClusterId] = useState<string>("");
+  const clusterParam = searchParams.get("cluster") ?? "";
+  const [selectedClusterId, setSelectedClusterId] = useState<string>(clusterParam);
   const [selectedPool, setSelectedPool] = useState<StorageResponse | null>(
     null,
   );
+
+  // Sync with URL query param when it changes (e.g. navigating from search)
+  useEffect(() => {
+    if (clusterParam) {
+      setSelectedClusterId(clusterParam);
+      setSelectedPool(null);
+    }
+  }, [clusterParam]);
 
   const activeClusterId =
     selectedClusterId || (clusters.length > 0 ? clusters[0]?.id ?? "" : "");

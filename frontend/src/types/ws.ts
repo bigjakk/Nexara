@@ -124,7 +124,11 @@ export type EventKind =
   | "cve_scan"
   | "alert_fired"
   | "alert_state_change"
-  | "rolling_update";
+  | "rolling_update"
+  | "ha_change"
+  | "pool_change"
+  | "replication_change"
+  | "acme_change";
 
 /** Event pushed from the backend through the WS pipeline. */
 export interface ProxDashEvent {

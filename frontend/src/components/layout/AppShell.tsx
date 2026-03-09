@@ -24,6 +24,7 @@ import { TaskLogPanel } from "./TaskLogPanel";
 import { TaskProgressDialog } from "./TaskProgressDialog";
 import { ThemeToggle } from "./ThemeToggle";
 import { FloatingConsole } from "@/features/console/components/FloatingConsole";
+import { SearchBar } from "./SearchBar";
 
 function getInitials(name: string): string {
   return name
@@ -75,7 +76,11 @@ export function AppShell() {
     <div className="flex h-screen">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden transition-all duration-200">
-        <header className="flex h-14 items-center justify-end gap-2 border-b px-4">
+        <header className="flex h-14 items-center border-b px-4">
+          <div className="flex flex-1 items-center justify-center">
+            <SearchBar />
+          </div>
+          <div className="flex items-center gap-2">
           <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -115,6 +120,7 @@ export function AppShell() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         </header>
         <Separator />
         <main className="flex-1 overflow-auto p-6">

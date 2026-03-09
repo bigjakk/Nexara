@@ -1003,3 +1003,417 @@ type BackupJobParams struct {
 	MailTo           string `json:"mailto,omitempty"`
 	Comment          string `json:"comment,omitempty"`
 }
+
+// --- Phase 9: Datacenter Feature Parity Types ---
+
+// ClusterOptions represents the datacenter.cfg options from GET /cluster/options.
+type ClusterOptions struct {
+	Console       string `json:"console,omitempty"`
+	Keyboard      string `json:"keyboard,omitempty"`
+	Language      string `json:"language,omitempty"`
+	EmailFrom     string `json:"email_from,omitempty"`
+	HTTPProxy     string `json:"http_proxy,omitempty"`
+	MacPrefix     string `json:"mac_prefix,omitempty"`
+	Migration     string `json:"migration,omitempty"`
+	MigrationType string `json:"migration_type,omitempty"`
+	BWLimit       string `json:"bwlimit,omitempty"`
+	NextID        string `json:"next-id,omitempty"`
+	HA            string `json:"ha,omitempty"`
+	Fencing       string `json:"fencing,omitempty"`
+	CRS           string `json:"crs,omitempty"`
+	MaxWorkers    int    `json:"max_workers,omitempty"`
+	Description   string `json:"description,omitempty"`
+	U2F           string `json:"u2f,omitempty"`
+	WebAuthn      string `json:"webauthn,omitempty"`
+	RegisteredTags string `json:"registered-tags,omitempty"`
+	UserTagAccess string `json:"user-tag-access,omitempty"`
+	TagStyle      string `json:"tag-style,omitempty"`
+	Digest        string `json:"digest,omitempty"`
+}
+
+// UpdateClusterOptionsParams holds parameters for PUT /cluster/options.
+type UpdateClusterOptionsParams struct {
+	Console       *string `json:"console,omitempty"`
+	Keyboard      *string `json:"keyboard,omitempty"`
+	Language      *string `json:"language,omitempty"`
+	EmailFrom     *string `json:"email_from,omitempty"`
+	HTTPProxy     *string `json:"http_proxy,omitempty"`
+	MacPrefix     *string `json:"mac_prefix,omitempty"`
+	Migration     *string `json:"migration,omitempty"`
+	MigrationType *string `json:"migration_type,omitempty"`
+	BWLimit       *string `json:"bwlimit,omitempty"`
+	NextID        *string `json:"next-id,omitempty"`
+	HA            *string `json:"ha,omitempty"`
+	Fencing       *string `json:"fencing,omitempty"`
+	CRS           *string `json:"crs,omitempty"`
+	MaxWorkers    *int    `json:"max_workers,omitempty"`
+	Description   *string `json:"description,omitempty"`
+	RegisteredTags *string `json:"registered-tags,omitempty"`
+	UserTagAccess *string `json:"user-tag-access,omitempty"`
+	TagStyle      *string `json:"tag-style,omitempty"`
+	Delete        string  `json:"delete,omitempty"`
+}
+
+// CreateHAResourceParams holds parameters for POST /cluster/ha/resources.
+type CreateHAResourceParams struct {
+	SID         string `json:"sid"`
+	State       string `json:"state,omitempty"`
+	Group       string `json:"group,omitempty"`
+	MaxRestart  int    `json:"max_restart,omitempty"`
+	MaxRelocate int    `json:"max_relocate,omitempty"`
+	Comment     string `json:"comment,omitempty"`
+}
+
+// UpdateHAResourceParams holds parameters for PUT /cluster/ha/resources/{sid}.
+type UpdateHAResourceParams struct {
+	State       *string `json:"state,omitempty"`
+	Group       *string `json:"group,omitempty"`
+	MaxRestart  *int    `json:"max_restart,omitempty"`
+	MaxRelocate *int    `json:"max_relocate,omitempty"`
+	Comment     *string `json:"comment,omitempty"`
+	Digest      string  `json:"digest,omitempty"`
+}
+
+// CreateHAGroupParams holds parameters for POST /cluster/ha/groups.
+type CreateHAGroupParams struct {
+	Group      string `json:"group"`
+	Nodes      string `json:"nodes"`
+	Restricted int    `json:"restricted,omitempty"`
+	NoFailback int    `json:"nofailback,omitempty"`
+	Comment    string `json:"comment,omitempty"`
+}
+
+// UpdateHAGroupParams holds parameters for PUT /cluster/ha/groups/{group}.
+type UpdateHAGroupParams struct {
+	Nodes      *string `json:"nodes,omitempty"`
+	Restricted *int    `json:"restricted,omitempty"`
+	NoFailback *int    `json:"nofailback,omitempty"`
+	Comment    *string `json:"comment,omitempty"`
+	Digest     string  `json:"digest,omitempty"`
+}
+
+// HAStatusEntry represents an entry from GET /cluster/ha/status/current.
+type HAStatusEntry struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Node      string `json:"node,omitempty"`
+	Status    string `json:"status"`
+	State     string `json:"state,omitempty"`
+	CRMState  string `json:"crm_state,omitempty"`
+	Quorum    int    `json:"quorum,omitempty"`
+	Timestamp int64  `json:"timestamp,omitempty"`
+	RequestState string `json:"request_state,omitempty"`
+	SID       string `json:"sid,omitempty"`
+}
+
+// FirewallAlias represents a firewall alias from GET /cluster/firewall/aliases.
+type FirewallAlias struct {
+	Name    string `json:"name"`
+	CIDR    string `json:"cidr"`
+	Comment string `json:"comment,omitempty"`
+	Digest  string `json:"digest,omitempty"`
+}
+
+// FirewallAliasParams holds parameters for creating/updating a firewall alias.
+type FirewallAliasParams struct {
+	Name    string `json:"name"`
+	CIDR    string `json:"cidr"`
+	Comment string `json:"comment,omitempty"`
+	Rename  string `json:"rename,omitempty"`
+}
+
+// FirewallIPSet represents an IP set from GET /cluster/firewall/ipset.
+type FirewallIPSet struct {
+	Name    string `json:"name"`
+	Comment string `json:"comment,omitempty"`
+	Digest  string `json:"digest,omitempty"`
+}
+
+// FirewallIPSetEntry represents an entry in an IP set.
+type FirewallIPSetEntry struct {
+	CIDR    string `json:"cidr"`
+	NoMatch int    `json:"nomatch,omitempty"`
+	Comment string `json:"comment,omitempty"`
+	Digest  string `json:"digest,omitempty"`
+}
+
+// FirewallIPSetEntryParams holds parameters for creating/updating an IP set entry.
+type FirewallIPSetEntryParams struct {
+	CIDR    string `json:"cidr"`
+	NoMatch *int   `json:"nomatch,omitempty"`
+	Comment string `json:"comment,omitempty"`
+}
+
+// FirewallSecurityGroup represents a security group from GET /cluster/firewall/groups.
+type FirewallSecurityGroup struct {
+	Group   string `json:"group"`
+	Comment string `json:"comment,omitempty"`
+	Digest  string `json:"digest,omitempty"`
+}
+
+// FirewallSecurityGroupParams holds parameters for creating a security group.
+type FirewallSecurityGroupParams struct {
+	Group   string `json:"group"`
+	Comment string `json:"comment,omitempty"`
+}
+
+// FirewallLogEntry represents a log entry from GET /nodes/{node}/firewall/log.
+type FirewallLogEntry struct {
+	N int    `json:"n"`
+	T string `json:"t"`
+}
+
+// ResourcePoolDetail represents a resource pool with members from GET /pools/{poolid}.
+type ResourcePoolDetail struct {
+	PoolID  string       `json:"poolid"`
+	Comment string       `json:"comment,omitempty"`
+	Members []PoolMember `json:"members,omitempty"`
+}
+
+// PoolMember represents a member of a resource pool.
+type PoolMember struct {
+	ID      string  `json:"id"`
+	Node    string  `json:"node"`
+	Type    string  `json:"type"`
+	VMID    int     `json:"vmid,omitempty"`
+	Name    string  `json:"name,omitempty"`
+	Storage string  `json:"storage,omitempty"`
+	Status  string  `json:"status,omitempty"`
+	Uptime  int64   `json:"uptime,omitempty"`
+	CPU     float64 `json:"cpu,omitempty"`
+	MaxCPU  int     `json:"maxcpu,omitempty"`
+	Mem     int64   `json:"mem,omitempty"`
+	MaxMem  int64   `json:"maxmem,omitempty"`
+	Disk    int64   `json:"disk,omitempty"`
+	MaxDisk int64   `json:"maxdisk,omitempty"`
+}
+
+// CreatePoolParams holds parameters for POST /pools.
+type CreatePoolParams struct {
+	PoolID  string `json:"poolid"`
+	Comment string `json:"comment,omitempty"`
+}
+
+// UpdatePoolParams holds parameters for PUT /pools/{poolid}.
+type UpdatePoolParams struct {
+	Comment *string `json:"comment,omitempty"`
+	VMs     string  `json:"vms,omitempty"`
+	Storage string  `json:"storage,omitempty"`
+	Delete  string  `json:"delete,omitempty"`
+}
+
+// ReplicationJob represents a replication job from GET /cluster/replication.
+type ReplicationJob struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Source   string `json:"source,omitempty"`
+	Target   string `json:"target"`
+	Guest    int    `json:"guest"`
+	JobNum   int    `json:"jobnum,omitempty"`
+	Schedule string `json:"schedule,omitempty"`
+	Rate     string `json:"rate,omitempty"`
+	Comment  string `json:"comment,omitempty"`
+	Disable  int    `json:"disable,omitempty"`
+	RemoveJob string `json:"remove_job,omitempty"`
+	Error    string `json:"error,omitempty"`
+	Duration float64 `json:"duration,omitempty"`
+	FailCount int   `json:"fail_count,omitempty"`
+	LastSync int64  `json:"last_sync,omitempty"`
+	LastTry  int64  `json:"last_try,omitempty"`
+	NextSync int64  `json:"next_sync,omitempty"`
+}
+
+// CreateReplicationJobParams holds parameters for POST /cluster/replication.
+type CreateReplicationJobParams struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Target   string `json:"target"`
+	Schedule string `json:"schedule,omitempty"`
+	Rate     string `json:"rate,omitempty"`
+	Comment  string `json:"comment,omitempty"`
+	Disable  *int   `json:"disable,omitempty"`
+}
+
+// UpdateReplicationJobParams holds parameters for PUT /cluster/replication/{id}.
+type UpdateReplicationJobParams struct {
+	Schedule string `json:"schedule,omitempty"`
+	Rate     string `json:"rate,omitempty"`
+	Comment  string `json:"comment,omitempty"`
+	Disable  *int   `json:"disable,omitempty"`
+	RemoveJob string `json:"remove_job,omitempty"`
+}
+
+// ReplicationStatus represents replication status from GET /nodes/{node}/replication/{id}/status.
+type ReplicationStatus struct {
+	ID     string `json:"id"`
+	Type   string `json:"type"`
+	Source string `json:"source,omitempty"`
+	Target string `json:"target,omitempty"`
+	Guest  int    `json:"guest,omitempty"`
+}
+
+// ReplicationLogEntry represents a log entry from GET /nodes/{node}/replication/{id}/log.
+type ReplicationLogEntry struct {
+	N int    `json:"n"`
+	T string `json:"t"`
+}
+
+// ACMEAccount represents an ACME account from GET /cluster/acme/account.
+type ACMEAccount struct {
+	Name      string `json:"name,omitempty"`
+	Account   interface{} `json:"account,omitempty"`
+	Directory string `json:"directory,omitempty"`
+	Location  string `json:"location,omitempty"`
+	TOS       string `json:"tos,omitempty"`
+}
+
+// CreateACMEAccountParams holds parameters for POST /cluster/acme/account.
+type CreateACMEAccountParams struct {
+	Name      string `json:"name,omitempty"`
+	Contact   string `json:"contact"`
+	Directory string `json:"directory,omitempty"`
+	TOSUrl    string `json:"tos_url,omitempty"`
+}
+
+// UpdateACMEAccountParams holds parameters for PUT /cluster/acme/account/{name}.
+type UpdateACMEAccountParams struct {
+	Contact string `json:"contact,omitempty"`
+}
+
+// ACMEPlugin represents an ACME plugin from GET /cluster/acme/plugins.
+type ACMEPlugin struct {
+	Plugin string `json:"plugin"`
+	Type   string `json:"type"`
+	API    string `json:"api,omitempty"`
+	Data   string `json:"data,omitempty"`
+	Digest string `json:"digest,omitempty"`
+}
+
+// CreateACMEPluginParams holds parameters for POST /cluster/acme/plugins.
+type CreateACMEPluginParams struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	API  string `json:"api,omitempty"`
+	Data string `json:"data,omitempty"`
+}
+
+// UpdateACMEPluginParams holds parameters for PUT /cluster/acme/plugins/{id}.
+type UpdateACMEPluginParams struct {
+	API    string `json:"api,omitempty"`
+	Data   string `json:"data,omitempty"`
+	Digest string `json:"digest,omitempty"`
+}
+
+// ACMEDirectory represents a directory from GET /cluster/acme/directories.
+type ACMEDirectory struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// NodeCertificate represents a certificate from GET /nodes/{node}/certificates/info.
+type NodeCertificate struct {
+	Filename    string `json:"filename,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Issuer      string `json:"issuer,omitempty"`
+	NotAfter    int64  `json:"notafter,omitempty"`
+	NotBefore   int64  `json:"notbefore,omitempty"`
+	Subject     string `json:"subject,omitempty"`
+	SANs        string `json:"san,omitempty"`
+	PublicKeyBits int  `json:"public-key-bits,omitempty"`
+	PublicKeyType string `json:"public-key-type,omitempty"`
+	PEM         string `json:"pem,omitempty"`
+}
+
+// MetricServerConfig represents a metric server from GET /cluster/metrics/server.
+type MetricServerConfig struct {
+	ID             string `json:"id"`
+	Type           string `json:"type"`
+	Server         string `json:"server"`
+	Port           int    `json:"port"`
+	Disable        int    `json:"disable,omitempty"`
+	MTU            int    `json:"mtu,omitempty"`
+	Timeout        int    `json:"timeout,omitempty"`
+	Proto          string `json:"proto,omitempty"`
+	Path           string `json:"path,omitempty"`
+	InfluxDBProto  string `json:"influxdbproto,omitempty"`
+	Organization   string `json:"organization,omitempty"`
+	Bucket         string `json:"bucket,omitempty"`
+	Token          string `json:"token,omitempty"`
+	MaxBodySize    int    `json:"max-body-size,omitempty"`
+	VerifyCert     *int   `json:"verify-certificate,omitempty"`
+}
+
+// CreateMetricServerParams holds parameters for POST /cluster/metrics/server/{id}.
+type CreateMetricServerParams struct {
+	ID             string `json:"id"`
+	Type           string `json:"type"`
+	Server         string `json:"server"`
+	Port           int    `json:"port"`
+	Disable        *int   `json:"disable,omitempty"`
+	MTU            int    `json:"mtu,omitempty"`
+	Timeout        int    `json:"timeout,omitempty"`
+	Proto          string `json:"proto,omitempty"`
+	Path           string `json:"path,omitempty"`
+	InfluxDBProto  string `json:"influxdbproto,omitempty"`
+	Organization   string `json:"organization,omitempty"`
+	Bucket         string `json:"bucket,omitempty"`
+	Token          string `json:"token,omitempty"`
+	MaxBodySize    int    `json:"max-body-size,omitempty"`
+	VerifyCert     *int   `json:"verify-certificate,omitempty"`
+}
+
+// UpdateMetricServerParams holds parameters for PUT /cluster/metrics/server/{id}.
+type UpdateMetricServerParams struct {
+	Server         string `json:"server,omitempty"`
+	Port           *int   `json:"port,omitempty"`
+	Disable        *int   `json:"disable,omitempty"`
+	MTU            int    `json:"mtu,omitempty"`
+	Timeout        int    `json:"timeout,omitempty"`
+	Proto          string `json:"proto,omitempty"`
+	Path           string `json:"path,omitempty"`
+	InfluxDBProto  string `json:"influxdbproto,omitempty"`
+	Organization   string `json:"organization,omitempty"`
+	Bucket         string `json:"bucket,omitempty"`
+	Token          string `json:"token,omitempty"`
+	MaxBodySize    int    `json:"max-body-size,omitempty"`
+	VerifyCert     *int   `json:"verify-certificate,omitempty"`
+	Delete         string `json:"delete,omitempty"`
+}
+
+// ClusterConfig represents cluster configuration from GET /cluster/config.
+type ClusterConfig struct {
+	Nodes    []CorosyncNode `json:"nodes,omitempty"`
+	Totem    interface{}    `json:"totem,omitempty"`
+	Version  int            `json:"version,omitempty"`
+}
+
+// ClusterJoinInfo represents join information from GET /cluster/config/join.
+type ClusterJoinInfo struct {
+	ConfigDigest string        `json:"config_digest,omitempty"`
+	Fingerprint  string        `json:"fingerprint,omitempty"`
+	NodeList     []CorosyncNode `json:"nodelist,omitempty"`
+	Totem        interface{}   `json:"totem,omitempty"`
+}
+
+// CorosyncNode represents a corosync node.
+type CorosyncNode struct {
+	Name     string `json:"name"`
+	NodeID   int    `json:"nodeid,omitempty"`
+	PVEAddr  string `json:"pve_addr,omitempty"`
+	PVEFP    string `json:"pve_fp,omitempty"`
+	Quorate  int    `json:"quorum_votes,omitempty"`
+	Ring0Addr string `json:"ring0_addr,omitempty"`
+	Ring1Addr string `json:"ring1_addr,omitempty"`
+}
+
+// SearchResult represents a unified search result.
+type SearchResult struct {
+	Type      string `json:"type"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Node      string `json:"node,omitempty"`
+	Status    string `json:"status,omitempty"`
+	ClusterID string `json:"cluster_id"`
+	ClusterName string `json:"cluster_name"`
+	VMID      int    `json:"vmid,omitempty"`
+}

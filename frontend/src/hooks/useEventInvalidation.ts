@@ -134,6 +134,38 @@ export function useEventInvalidation(clusterIds: string[]): void {
             );
           }
           break;
+
+        case "ha_change":
+          if (cid) {
+            scheduleInvalidation(
+              ["clusters", cid, "ha"],
+            );
+          }
+          break;
+
+        case "pool_change":
+          if (cid) {
+            scheduleInvalidation(
+              ["clusters", cid, "pools"],
+            );
+          }
+          break;
+
+        case "replication_change":
+          if (cid) {
+            scheduleInvalidation(
+              ["clusters", cid, "replication"],
+            );
+          }
+          break;
+
+        case "acme_change":
+          if (cid) {
+            scheduleInvalidation(
+              ["clusters", cid, "acme"],
+            );
+          }
+          break;
       }
     },
     [scheduleInvalidation],

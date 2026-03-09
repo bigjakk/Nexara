@@ -1300,3 +1300,452 @@ func (h *NetworkHandler) ApplyTemplate(c *fiber.Ctx) error {
 		"total":   len(rules),
 	})
 }
+
+// --- Firewall Aliases ---
+
+// ListFirewallAliases handles GET /clusters/:cluster_id/firewall/aliases.
+func (h *NetworkHandler) ListFirewallAliases(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	aliases, err := pxClient.GetFirewallAliases(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to get firewall aliases")
+	}
+	return c.JSON(aliases)
+}
+
+// CreateFirewallAlias handles POST /clusters/:cluster_id/firewall/aliases.
+func (h *NetworkHandler) CreateFirewallAlias(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	var req proxmox.FirewallAliasParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Name == "" || req.CIDR == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Name and CIDR are required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.CreateFirewallAlias(c.Context(), req); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to create firewall alias")
+	}
+	details, _ := json.Marshal(map[string]string{"name": req.Name, "cidr": req.CIDR})
+	h.auditLog(c, clusterID, "firewall_alias", req.Name, "created", details)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// UpdateFirewallAlias handles PUT /clusters/:cluster_id/firewall/aliases/:name.
+func (h *NetworkHandler) UpdateFirewallAlias(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	name := c.Params("name")
+	var req proxmox.FirewallAliasParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.UpdateFirewallAlias(c.Context(), name, req); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to update firewall alias")
+	}
+	details, _ := json.Marshal(map[string]string{"name": name})
+	h.auditLog(c, clusterID, "firewall_alias", name, "updated", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteFirewallAlias handles DELETE /clusters/:cluster_id/firewall/aliases/:name.
+func (h *NetworkHandler) DeleteFirewallAlias(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	name := c.Params("name")
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DeleteFirewallAlias(c.Context(), name); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete firewall alias")
+	}
+	details, _ := json.Marshal(map[string]string{"name": name})
+	h.auditLog(c, clusterID, "firewall_alias", name, "deleted", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// --- Firewall IP Sets ---
+
+// ListFirewallIPSets handles GET /clusters/:cluster_id/firewall/ipset.
+func (h *NetworkHandler) ListFirewallIPSets(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	sets, err := pxClient.GetFirewallIPSets(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to get IP sets")
+	}
+	return c.JSON(sets)
+}
+
+// CreateFirewallIPSet handles POST /clusters/:cluster_id/firewall/ipset.
+func (h *NetworkHandler) CreateFirewallIPSet(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	var req struct {
+		Name    string `json:"name"`
+		Comment string `json:"comment"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Name == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Name is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.CreateFirewallIPSet(c.Context(), req.Name, req.Comment); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to create IP set")
+	}
+	details, _ := json.Marshal(map[string]string{"name": req.Name})
+	h.auditLog(c, clusterID, "firewall_ipset", req.Name, "created", details)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteFirewallIPSet handles DELETE /clusters/:cluster_id/firewall/ipset/:name.
+func (h *NetworkHandler) DeleteFirewallIPSet(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	name := c.Params("name")
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DeleteFirewallIPSet(c.Context(), name); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete IP set")
+	}
+	details, _ := json.Marshal(map[string]string{"name": name})
+	h.auditLog(c, clusterID, "firewall_ipset", name, "deleted", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// ListFirewallIPSetEntries handles GET /clusters/:cluster_id/firewall/ipset/:name/entries.
+func (h *NetworkHandler) ListFirewallIPSetEntries(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	name := c.Params("name")
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	entries, err := pxClient.GetFirewallIPSetEntries(c.Context(), name)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to get IP set entries")
+	}
+	return c.JSON(entries)
+}
+
+// AddFirewallIPSetEntry handles POST /clusters/:cluster_id/firewall/ipset/:name/entries.
+func (h *NetworkHandler) AddFirewallIPSetEntry(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	name := c.Params("name")
+	var req proxmox.FirewallIPSetEntryParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.CIDR == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "CIDR is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.AddFirewallIPSetEntry(c.Context(), name, req); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to add IP set entry")
+	}
+	details, _ := json.Marshal(map[string]string{"set": name, "cidr": req.CIDR})
+	h.auditLog(c, clusterID, "firewall_ipset_entry", name+"/"+req.CIDR, "created", details)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteFirewallIPSetEntry handles DELETE /clusters/:cluster_id/firewall/ipset/:name/entries/:cidr.
+func (h *NetworkHandler) DeleteFirewallIPSetEntry(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	name := c.Params("name")
+	cidr := c.Params("cidr")
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DeleteFirewallIPSetEntry(c.Context(), name, cidr); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete IP set entry")
+	}
+	details, _ := json.Marshal(map[string]string{"set": name, "cidr": cidr})
+	h.auditLog(c, clusterID, "firewall_ipset_entry", name+"/"+cidr, "deleted", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// --- Firewall Security Groups ---
+
+// ListSecurityGroups handles GET /clusters/:cluster_id/firewall/groups.
+func (h *NetworkHandler) ListSecurityGroups(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	groups, err := pxClient.GetFirewallSecurityGroups(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to get security groups")
+	}
+	return c.JSON(groups)
+}
+
+// CreateSecurityGroup handles POST /clusters/:cluster_id/firewall/groups.
+func (h *NetworkHandler) CreateSecurityGroup(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	var req proxmox.FirewallSecurityGroupParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Group == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Group name is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.CreateFirewallSecurityGroup(c.Context(), req); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to create security group")
+	}
+	details, _ := json.Marshal(map[string]string{"group": req.Group})
+	h.auditLog(c, clusterID, "firewall_security_group", req.Group, "created", details)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteSecurityGroup handles DELETE /clusters/:cluster_id/firewall/groups/:group.
+func (h *NetworkHandler) DeleteSecurityGroup(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	group := c.Params("group")
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DeleteFirewallSecurityGroup(c.Context(), group); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete security group")
+	}
+	details, _ := json.Marshal(map[string]string{"group": group})
+	h.auditLog(c, clusterID, "firewall_security_group", group, "deleted", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// ListSecurityGroupRules handles GET /clusters/:cluster_id/firewall/groups/:group/rules.
+func (h *NetworkHandler) ListSecurityGroupRules(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	group := c.Params("group")
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	rules, err := pxClient.GetSecurityGroupRules(c.Context(), group)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to get security group rules")
+	}
+	return c.JSON(rules)
+}
+
+// CreateSecurityGroupRule handles POST /clusters/:cluster_id/firewall/groups/:group/rules.
+func (h *NetworkHandler) CreateSecurityGroupRule(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	group := c.Params("group")
+	var req proxmox.FirewallRuleParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.CreateSecurityGroupRule(c.Context(), group, req); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to create security group rule")
+	}
+	details, _ := json.Marshal(map[string]string{"group": group, "action": req.Action})
+	h.auditLog(c, clusterID, "firewall_security_group_rule", group, "rule_created", details)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// UpdateSecurityGroupRule handles PUT /clusters/:cluster_id/firewall/groups/:group/rules/:pos.
+func (h *NetworkHandler) UpdateSecurityGroupRule(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	group := c.Params("group")
+	pos, err := strconv.Atoi(c.Params("pos"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid position")
+	}
+	var req proxmox.FirewallRuleParams
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.UpdateSecurityGroupRule(c.Context(), group, pos, req); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to update security group rule")
+	}
+	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})
+	h.auditLog(c, clusterID, "firewall_security_group_rule", group, "rule_updated", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteSecurityGroupRule handles DELETE /clusters/:cluster_id/firewall/groups/:group/rules/:pos.
+func (h *NetworkHandler) DeleteSecurityGroupRule(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	group := c.Params("group")
+	pos, err := strconv.Atoi(c.Params("pos"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid position")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DeleteSecurityGroupRule(c.Context(), group, pos); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete security group rule")
+	}
+	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})
+	h.auditLog(c, clusterID, "firewall_security_group_rule", group, "rule_deleted", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// --- Firewall Log ---
+
+// GetFirewallLog handles GET /clusters/:cluster_id/firewall/log.
+func (h *NetworkHandler) GetFirewallLog(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "firewall"); err != nil {
+		return err
+	}
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	nodeName := c.Query("node")
+	if nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Node query parameter is required")
+	}
+	limit, _ := strconv.Atoi(c.Query("limit", "500"))
+	start, _ := strconv.Atoi(c.Query("start", "0"))
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	entries, err := pxClient.GetNodeFirewallLog(c.Context(), nodeName, limit, start)
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to get firewall log")
+	}
+	return c.JSON(entries)
+}

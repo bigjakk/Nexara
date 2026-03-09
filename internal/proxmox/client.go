@@ -2350,3 +2350,989 @@ func (c *Client) DeleteBackupJob(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// --- Phase 9: Datacenter Feature Parity ---
+
+// GetClusterOptions returns datacenter.cfg options via GET /cluster/options.
+func (c *Client) GetClusterOptions(ctx context.Context) (*ClusterOptions, error) {
+	var opts ClusterOptions
+	if err := c.do(ctx, "/cluster/options", &opts); err != nil {
+		return nil, fmt.Errorf("get cluster options: %w", err)
+	}
+	return &opts, nil
+}
+
+// SetClusterOptions updates datacenter.cfg options via PUT /cluster/options.
+func (c *Client) SetClusterOptions(ctx context.Context, params UpdateClusterOptionsParams) error {
+	form := url.Values{}
+	if params.Console != nil {
+		form.Set("console", *params.Console)
+	}
+	if params.Keyboard != nil {
+		form.Set("keyboard", *params.Keyboard)
+	}
+	if params.Language != nil {
+		form.Set("language", *params.Language)
+	}
+	if params.EmailFrom != nil {
+		form.Set("email_from", *params.EmailFrom)
+	}
+	if params.HTTPProxy != nil {
+		form.Set("http_proxy", *params.HTTPProxy)
+	}
+	if params.MacPrefix != nil {
+		form.Set("mac_prefix", *params.MacPrefix)
+	}
+	if params.Migration != nil {
+		form.Set("migration", *params.Migration)
+	}
+	if params.MigrationType != nil {
+		form.Set("migration_type", *params.MigrationType)
+	}
+	if params.BWLimit != nil {
+		form.Set("bwlimit", *params.BWLimit)
+	}
+	if params.NextID != nil {
+		form.Set("next-id", *params.NextID)
+	}
+	if params.HA != nil {
+		form.Set("ha", *params.HA)
+	}
+	if params.Fencing != nil {
+		form.Set("fencing", *params.Fencing)
+	}
+	if params.CRS != nil {
+		form.Set("crs", *params.CRS)
+	}
+	if params.MaxWorkers != nil {
+		form.Set("max_workers", strconv.Itoa(*params.MaxWorkers))
+	}
+	if params.Description != nil {
+		form.Set("description", *params.Description)
+	}
+	if params.RegisteredTags != nil {
+		form.Set("registered-tags", *params.RegisteredTags)
+	}
+	if params.UserTagAccess != nil {
+		form.Set("user-tag-access", *params.UserTagAccess)
+	}
+	if params.TagStyle != nil {
+		form.Set("tag-style", *params.TagStyle)
+	}
+	if params.Delete != "" {
+		form.Set("delete", params.Delete)
+	}
+	if err := c.doPut(ctx, "/cluster/options", form, nil); err != nil {
+		return fmt.Errorf("set cluster options: %w", err)
+	}
+	return nil
+}
+
+// CreateHAResource creates a new HA resource via POST /cluster/ha/resources.
+func (c *Client) CreateHAResource(ctx context.Context, params CreateHAResourceParams) error {
+	form := url.Values{}
+	form.Set("sid", params.SID)
+	if params.State != "" {
+		form.Set("state", params.State)
+	}
+	if params.Group != "" {
+		form.Set("group", params.Group)
+	}
+	if params.MaxRestart > 0 {
+		form.Set("max_restart", strconv.Itoa(params.MaxRestart))
+	}
+	if params.MaxRelocate > 0 {
+		form.Set("max_relocate", strconv.Itoa(params.MaxRelocate))
+	}
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	if err := c.doPost(ctx, "/cluster/ha/resources", form, nil); err != nil {
+		return fmt.Errorf("create HA resource %s: %w", params.SID, err)
+	}
+	return nil
+}
+
+// GetHAResource returns a single HA resource via GET /cluster/ha/resources/{sid}.
+func (c *Client) GetHAResource(ctx context.Context, sid string) (*HAResource, error) {
+	path := "/cluster/ha/resources/" + url.PathEscape(sid)
+	var res HAResource
+	if err := c.do(ctx, path, &res); err != nil {
+		return nil, fmt.Errorf("get HA resource %s: %w", sid, err)
+	}
+	return &res, nil
+}
+
+// UpdateHAResource updates an HA resource via PUT /cluster/ha/resources/{sid}.
+func (c *Client) UpdateHAResource(ctx context.Context, sid string, params UpdateHAResourceParams) error {
+	form := url.Values{}
+	if params.State != nil {
+		form.Set("state", *params.State)
+	}
+	if params.Group != nil {
+		form.Set("group", *params.Group)
+	}
+	if params.MaxRestart != nil {
+		form.Set("max_restart", strconv.Itoa(*params.MaxRestart))
+	}
+	if params.MaxRelocate != nil {
+		form.Set("max_relocate", strconv.Itoa(*params.MaxRelocate))
+	}
+	if params.Comment != nil {
+		form.Set("comment", *params.Comment)
+	}
+	if params.Digest != "" {
+		form.Set("digest", params.Digest)
+	}
+	path := "/cluster/ha/resources/" + url.PathEscape(sid)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update HA resource %s: %w", sid, err)
+	}
+	return nil
+}
+
+// DeleteHAResource deletes an HA resource via DELETE /cluster/ha/resources/{sid}.
+func (c *Client) DeleteHAResource(ctx context.Context, sid string) error {
+	path := "/cluster/ha/resources/" + url.PathEscape(sid)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete HA resource %s: %w", sid, err)
+	}
+	return nil
+}
+
+// CreateHAGroup creates a new HA group via POST /cluster/ha/groups.
+func (c *Client) CreateHAGroup(ctx context.Context, params CreateHAGroupParams) error {
+	form := url.Values{}
+	form.Set("group", params.Group)
+	form.Set("nodes", params.Nodes)
+	if params.Restricted != 0 {
+		form.Set("restricted", strconv.Itoa(params.Restricted))
+	}
+	if params.NoFailback != 0 {
+		form.Set("nofailback", strconv.Itoa(params.NoFailback))
+	}
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	if err := c.doPost(ctx, "/cluster/ha/groups", form, nil); err != nil {
+		return fmt.Errorf("create HA group %s: %w", params.Group, err)
+	}
+	return nil
+}
+
+// GetHAGroup returns a single HA group via GET /cluster/ha/groups/{group}.
+func (c *Client) GetHAGroup(ctx context.Context, group string) (*HAGroup, error) {
+	path := "/cluster/ha/groups/" + url.PathEscape(group)
+	var g HAGroup
+	if err := c.do(ctx, path, &g); err != nil {
+		return nil, fmt.Errorf("get HA group %s: %w", group, err)
+	}
+	return &g, nil
+}
+
+// UpdateHAGroup updates an HA group via PUT /cluster/ha/groups/{group}.
+func (c *Client) UpdateHAGroup(ctx context.Context, group string, params UpdateHAGroupParams) error {
+	form := url.Values{}
+	if params.Nodes != nil {
+		form.Set("nodes", *params.Nodes)
+	}
+	if params.Restricted != nil {
+		form.Set("restricted", strconv.Itoa(*params.Restricted))
+	}
+	if params.NoFailback != nil {
+		form.Set("nofailback", strconv.Itoa(*params.NoFailback))
+	}
+	if params.Comment != nil {
+		form.Set("comment", *params.Comment)
+	}
+	if params.Digest != "" {
+		form.Set("digest", params.Digest)
+	}
+	path := "/cluster/ha/groups/" + url.PathEscape(group)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update HA group %s: %w", group, err)
+	}
+	return nil
+}
+
+// DeleteHAGroup deletes an HA group via DELETE /cluster/ha/groups/{group}.
+func (c *Client) DeleteHAGroup(ctx context.Context, group string) error {
+	path := "/cluster/ha/groups/" + url.PathEscape(group)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete HA group %s: %w", group, err)
+	}
+	return nil
+}
+
+// GetHAStatus returns the current HA status via GET /cluster/ha/status/current.
+func (c *Client) GetHAStatus(ctx context.Context) ([]HAStatusEntry, error) {
+	var entries []HAStatusEntry
+	if err := c.do(ctx, "/cluster/ha/status/current", &entries); err != nil {
+		return nil, fmt.Errorf("get HA status: %w", err)
+	}
+	return entries, nil
+}
+
+// GetFirewallAliases returns all firewall aliases via GET /cluster/firewall/aliases.
+func (c *Client) GetFirewallAliases(ctx context.Context) ([]FirewallAlias, error) {
+	var aliases []FirewallAlias
+	if err := c.do(ctx, "/cluster/firewall/aliases", &aliases); err != nil {
+		return nil, fmt.Errorf("get firewall aliases: %w", err)
+	}
+	return aliases, nil
+}
+
+// CreateFirewallAlias creates a firewall alias via POST /cluster/firewall/aliases.
+func (c *Client) CreateFirewallAlias(ctx context.Context, params FirewallAliasParams) error {
+	form := url.Values{}
+	form.Set("name", params.Name)
+	form.Set("cidr", params.CIDR)
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	if err := c.doPost(ctx, "/cluster/firewall/aliases", form, nil); err != nil {
+		return fmt.Errorf("create firewall alias %s: %w", params.Name, err)
+	}
+	return nil
+}
+
+// GetFirewallAlias returns a single firewall alias via GET /cluster/firewall/aliases/{name}.
+func (c *Client) GetFirewallAlias(ctx context.Context, name string) (*FirewallAlias, error) {
+	path := "/cluster/firewall/aliases/" + url.PathEscape(name)
+	var alias FirewallAlias
+	if err := c.do(ctx, path, &alias); err != nil {
+		return nil, fmt.Errorf("get firewall alias %s: %w", name, err)
+	}
+	return &alias, nil
+}
+
+// UpdateFirewallAlias updates a firewall alias via PUT /cluster/firewall/aliases/{name}.
+func (c *Client) UpdateFirewallAlias(ctx context.Context, name string, params FirewallAliasParams) error {
+	form := url.Values{}
+	form.Set("cidr", params.CIDR)
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	if params.Rename != "" {
+		form.Set("rename", params.Rename)
+	}
+	path := "/cluster/firewall/aliases/" + url.PathEscape(name)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update firewall alias %s: %w", name, err)
+	}
+	return nil
+}
+
+// DeleteFirewallAlias deletes a firewall alias via DELETE /cluster/firewall/aliases/{name}.
+func (c *Client) DeleteFirewallAlias(ctx context.Context, name string) error {
+	path := "/cluster/firewall/aliases/" + url.PathEscape(name)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete firewall alias %s: %w", name, err)
+	}
+	return nil
+}
+
+// GetFirewallIPSets returns all firewall IP sets via GET /cluster/firewall/ipset.
+func (c *Client) GetFirewallIPSets(ctx context.Context) ([]FirewallIPSet, error) {
+	var sets []FirewallIPSet
+	if err := c.do(ctx, "/cluster/firewall/ipset", &sets); err != nil {
+		return nil, fmt.Errorf("get firewall IP sets: %w", err)
+	}
+	return sets, nil
+}
+
+// CreateFirewallIPSet creates a firewall IP set via POST /cluster/firewall/ipset.
+func (c *Client) CreateFirewallIPSet(ctx context.Context, name, comment string) error {
+	form := url.Values{}
+	form.Set("name", name)
+	if comment != "" {
+		form.Set("comment", comment)
+	}
+	if err := c.doPost(ctx, "/cluster/firewall/ipset", form, nil); err != nil {
+		return fmt.Errorf("create firewall IP set %s: %w", name, err)
+	}
+	return nil
+}
+
+// DeleteFirewallIPSet deletes a firewall IP set via DELETE /cluster/firewall/ipset/{name}.
+func (c *Client) DeleteFirewallIPSet(ctx context.Context, name string) error {
+	path := "/cluster/firewall/ipset/" + url.PathEscape(name)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete firewall IP set %s: %w", name, err)
+	}
+	return nil
+}
+
+// GetFirewallIPSetEntries returns entries in an IP set via GET /cluster/firewall/ipset/{name}.
+func (c *Client) GetFirewallIPSetEntries(ctx context.Context, name string) ([]FirewallIPSetEntry, error) {
+	path := "/cluster/firewall/ipset/" + url.PathEscape(name)
+	var entries []FirewallIPSetEntry
+	if err := c.do(ctx, path, &entries); err != nil {
+		return nil, fmt.Errorf("get firewall IP set %s entries: %w", name, err)
+	}
+	return entries, nil
+}
+
+// AddFirewallIPSetEntry adds an entry to an IP set via POST /cluster/firewall/ipset/{name}.
+func (c *Client) AddFirewallIPSetEntry(ctx context.Context, setName string, params FirewallIPSetEntryParams) error {
+	form := url.Values{}
+	form.Set("cidr", params.CIDR)
+	if params.NoMatch != nil {
+		form.Set("nomatch", strconv.Itoa(*params.NoMatch))
+	}
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	path := "/cluster/firewall/ipset/" + url.PathEscape(setName)
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("add entry to IP set %s: %w", setName, err)
+	}
+	return nil
+}
+
+// UpdateFirewallIPSetEntry updates an entry in an IP set via PUT /cluster/firewall/ipset/{name}/{cidr}.
+func (c *Client) UpdateFirewallIPSetEntry(ctx context.Context, setName, cidr string, params FirewallIPSetEntryParams) error {
+	form := url.Values{}
+	if params.NoMatch != nil {
+		form.Set("nomatch", strconv.Itoa(*params.NoMatch))
+	}
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	path := "/cluster/firewall/ipset/" + url.PathEscape(setName) + "/" + url.PathEscape(cidr)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update entry %s in IP set %s: %w", cidr, setName, err)
+	}
+	return nil
+}
+
+// DeleteFirewallIPSetEntry deletes an entry from an IP set via DELETE /cluster/firewall/ipset/{name}/{cidr}.
+func (c *Client) DeleteFirewallIPSetEntry(ctx context.Context, setName, cidr string) error {
+	path := "/cluster/firewall/ipset/" + url.PathEscape(setName) + "/" + url.PathEscape(cidr)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete entry %s from IP set %s: %w", cidr, setName, err)
+	}
+	return nil
+}
+
+// GetFirewallSecurityGroups returns all security groups via GET /cluster/firewall/groups.
+func (c *Client) GetFirewallSecurityGroups(ctx context.Context) ([]FirewallSecurityGroup, error) {
+	var groups []FirewallSecurityGroup
+	if err := c.do(ctx, "/cluster/firewall/groups", &groups); err != nil {
+		return nil, fmt.Errorf("get firewall security groups: %w", err)
+	}
+	return groups, nil
+}
+
+// CreateFirewallSecurityGroup creates a security group via POST /cluster/firewall/groups.
+func (c *Client) CreateFirewallSecurityGroup(ctx context.Context, params FirewallSecurityGroupParams) error {
+	form := url.Values{}
+	form.Set("group", params.Group)
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	if err := c.doPost(ctx, "/cluster/firewall/groups", form, nil); err != nil {
+		return fmt.Errorf("create security group %s: %w", params.Group, err)
+	}
+	return nil
+}
+
+// DeleteFirewallSecurityGroup deletes a security group via DELETE /cluster/firewall/groups/{group}.
+func (c *Client) DeleteFirewallSecurityGroup(ctx context.Context, group string) error {
+	path := "/cluster/firewall/groups/" + url.PathEscape(group)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete security group %s: %w", group, err)
+	}
+	return nil
+}
+
+// GetSecurityGroupRules returns rules in a security group via GET /cluster/firewall/groups/{group}.
+func (c *Client) GetSecurityGroupRules(ctx context.Context, group string) ([]FirewallRule, error) {
+	path := "/cluster/firewall/groups/" + url.PathEscape(group)
+	var rules []FirewallRule
+	if err := c.do(ctx, path, &rules); err != nil {
+		return nil, fmt.Errorf("get security group %s rules: %w", group, err)
+	}
+	return rules, nil
+}
+
+// CreateSecurityGroupRule creates a rule in a security group via POST /cluster/firewall/groups/{group}.
+func (c *Client) CreateSecurityGroupRule(ctx context.Context, group string, params FirewallRuleParams) error {
+	form := firewallRuleToForm(params)
+	path := "/cluster/firewall/groups/" + url.PathEscape(group)
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("create rule in security group %s: %w", group, err)
+	}
+	return nil
+}
+
+// UpdateSecurityGroupRule updates a rule in a security group via PUT /cluster/firewall/groups/{group}/{pos}.
+func (c *Client) UpdateSecurityGroupRule(ctx context.Context, group string, pos int, params FirewallRuleParams) error {
+	form := firewallRuleToForm(params)
+	path := "/cluster/firewall/groups/" + url.PathEscape(group) + "/" + strconv.Itoa(pos)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update rule %d in security group %s: %w", pos, group, err)
+	}
+	return nil
+}
+
+// DeleteSecurityGroupRule deletes a rule from a security group via DELETE /cluster/firewall/groups/{group}/{pos}.
+func (c *Client) DeleteSecurityGroupRule(ctx context.Context, group string, pos int) error {
+	path := "/cluster/firewall/groups/" + url.PathEscape(group) + "/" + strconv.Itoa(pos)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete rule %d from security group %s: %w", pos, group, err)
+	}
+	return nil
+}
+
+// GetNodeFirewallLog returns the firewall log for a node via GET /nodes/{node}/firewall/log.
+func (c *Client) GetNodeFirewallLog(ctx context.Context, node string, limit, start int) ([]FirewallLogEntry, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/firewall/log"
+	q := url.Values{}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	if start > 0 {
+		q.Set("start", strconv.Itoa(start))
+	}
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var entries []FirewallLogEntry
+	if err := c.do(ctx, path, &entries); err != nil {
+		return nil, fmt.Errorf("get firewall log for node %s: %w", node, err)
+	}
+	return entries, nil
+}
+
+// CreateResourcePool creates a new resource pool via POST /pools.
+func (c *Client) CreateResourcePool(ctx context.Context, params CreatePoolParams) error {
+	form := url.Values{}
+	form.Set("poolid", params.PoolID)
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	if err := c.doPost(ctx, "/pools", form, nil); err != nil {
+		return fmt.Errorf("create resource pool %s: %w", params.PoolID, err)
+	}
+	return nil
+}
+
+// GetResourcePool returns a single resource pool with members via GET /pools/{poolid}.
+func (c *Client) GetResourcePool(ctx context.Context, poolID string) (*ResourcePoolDetail, error) {
+	path := "/pools/" + url.PathEscape(poolID)
+	var pool ResourcePoolDetail
+	if err := c.do(ctx, path, &pool); err != nil {
+		return nil, fmt.Errorf("get resource pool %s: %w", poolID, err)
+	}
+	return &pool, nil
+}
+
+// UpdateResourcePool updates a resource pool via PUT /pools/{poolid}.
+func (c *Client) UpdateResourcePool(ctx context.Context, poolID string, params UpdatePoolParams) error {
+	form := url.Values{}
+	if params.Comment != nil {
+		form.Set("comment", *params.Comment)
+	}
+	if params.VMs != "" {
+		form.Set("vms", params.VMs)
+	}
+	if params.Storage != "" {
+		form.Set("storage", params.Storage)
+	}
+	if params.Delete != "" {
+		form.Set("delete", params.Delete)
+	}
+	path := "/pools/" + url.PathEscape(poolID)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update resource pool %s: %w", poolID, err)
+	}
+	return nil
+}
+
+// DeleteResourcePool deletes a resource pool via DELETE /pools/{poolid}.
+func (c *Client) DeleteResourcePool(ctx context.Context, poolID string) error {
+	path := "/pools/" + url.PathEscape(poolID)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete resource pool %s: %w", poolID, err)
+	}
+	return nil
+}
+
+// GetReplicationJobs returns all replication jobs via GET /cluster/replication.
+func (c *Client) GetReplicationJobs(ctx context.Context) ([]ReplicationJob, error) {
+	var jobs []ReplicationJob
+	if err := c.do(ctx, "/cluster/replication", &jobs); err != nil {
+		return nil, fmt.Errorf("get replication jobs: %w", err)
+	}
+	return jobs, nil
+}
+
+// CreateReplicationJob creates a replication job via POST /cluster/replication.
+func (c *Client) CreateReplicationJob(ctx context.Context, params CreateReplicationJobParams) error {
+	form := url.Values{}
+	form.Set("id", params.ID)
+	form.Set("type", params.Type)
+	form.Set("target", params.Target)
+	if params.Schedule != "" {
+		form.Set("schedule", params.Schedule)
+	}
+	if params.Rate != "" {
+		form.Set("rate", params.Rate)
+	}
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	if params.Disable != nil {
+		form.Set("disable", strconv.Itoa(*params.Disable))
+	}
+	if err := c.doPost(ctx, "/cluster/replication", form, nil); err != nil {
+		return fmt.Errorf("create replication job %s: %w", params.ID, err)
+	}
+	return nil
+}
+
+// GetReplicationJob returns a single replication job via GET /cluster/replication/{id}.
+func (c *Client) GetReplicationJob(ctx context.Context, id string) (*ReplicationJob, error) {
+	path := "/cluster/replication/" + url.PathEscape(id)
+	var job ReplicationJob
+	if err := c.do(ctx, path, &job); err != nil {
+		return nil, fmt.Errorf("get replication job %s: %w", id, err)
+	}
+	return &job, nil
+}
+
+// UpdateReplicationJob updates a replication job via PUT /cluster/replication/{id}.
+func (c *Client) UpdateReplicationJob(ctx context.Context, id string, params UpdateReplicationJobParams) error {
+	form := url.Values{}
+	if params.Schedule != "" {
+		form.Set("schedule", params.Schedule)
+	}
+	if params.Rate != "" {
+		form.Set("rate", params.Rate)
+	}
+	if params.Comment != "" {
+		form.Set("comment", params.Comment)
+	}
+	if params.Disable != nil {
+		form.Set("disable", strconv.Itoa(*params.Disable))
+	}
+	if params.RemoveJob != "" {
+		form.Set("remove_job", params.RemoveJob)
+	}
+	path := "/cluster/replication/" + url.PathEscape(id)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update replication job %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteReplicationJob deletes a replication job via DELETE /cluster/replication/{id}.
+func (c *Client) DeleteReplicationJob(ctx context.Context, id string) error {
+	path := "/cluster/replication/" + url.PathEscape(id)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete replication job %s: %w", id, err)
+	}
+	return nil
+}
+
+// TriggerReplication triggers immediate replication via POST /nodes/{node}/replication/{id}/schedule_now.
+func (c *Client) TriggerReplication(ctx context.Context, node, id string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/replication/" + url.PathEscape(id) + "/schedule_now"
+	var upid string
+	if err := c.doPost(ctx, path, nil, &upid); err != nil {
+		return "", fmt.Errorf("trigger replication %s on %s: %w", id, node, err)
+	}
+	return upid, nil
+}
+
+// GetReplicationStatus returns replication status via GET /nodes/{node}/replication/{id}/status.
+func (c *Client) GetReplicationStatus(ctx context.Context, node, id string) (*ReplicationStatus, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/replication/" + url.PathEscape(id) + "/status"
+	var status ReplicationStatus
+	if err := c.do(ctx, path, &status); err != nil {
+		return nil, fmt.Errorf("get replication status %s on %s: %w", id, node, err)
+	}
+	return &status, nil
+}
+
+// GetReplicationLog returns replication log via GET /nodes/{node}/replication/{id}/log.
+func (c *Client) GetReplicationLog(ctx context.Context, node, id string, limit int) ([]ReplicationLogEntry, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/replication/" + url.PathEscape(id) + "/log"
+	if limit > 0 {
+		path += "?limit=" + strconv.Itoa(limit)
+	}
+	var entries []ReplicationLogEntry
+	if err := c.do(ctx, path, &entries); err != nil {
+		return nil, fmt.Errorf("get replication log %s on %s: %w", id, node, err)
+	}
+	return entries, nil
+}
+
+// GetACMEAccounts returns all ACME accounts via GET /cluster/acme/account.
+func (c *Client) GetACMEAccounts(ctx context.Context) ([]ACMEAccount, error) {
+	var accounts []ACMEAccount
+	if err := c.do(ctx, "/cluster/acme/account", &accounts); err != nil {
+		return nil, fmt.Errorf("get ACME accounts: %w", err)
+	}
+	return accounts, nil
+}
+
+// CreateACMEAccount creates an ACME account via POST /cluster/acme/account.
+func (c *Client) CreateACMEAccount(ctx context.Context, params CreateACMEAccountParams) (string, error) {
+	form := url.Values{}
+	form.Set("contact", params.Contact)
+	if params.Name != "" {
+		form.Set("name", params.Name)
+	}
+	if params.Directory != "" {
+		form.Set("directory", params.Directory)
+	}
+	if params.TOSUrl != "" {
+		form.Set("tos_url", params.TOSUrl)
+	}
+	var upid string
+	if err := c.doPost(ctx, "/cluster/acme/account", form, &upid); err != nil {
+		return "", fmt.Errorf("create ACME account: %w", err)
+	}
+	return upid, nil
+}
+
+// GetACMEAccount returns a single ACME account via GET /cluster/acme/account/{name}.
+func (c *Client) GetACMEAccount(ctx context.Context, name string) (*ACMEAccount, error) {
+	path := "/cluster/acme/account/" + url.PathEscape(name)
+	var account ACMEAccount
+	if err := c.do(ctx, path, &account); err != nil {
+		return nil, fmt.Errorf("get ACME account %s: %w", name, err)
+	}
+	return &account, nil
+}
+
+// UpdateACMEAccount updates an ACME account via PUT /cluster/acme/account/{name}.
+func (c *Client) UpdateACMEAccount(ctx context.Context, name string, params UpdateACMEAccountParams) error {
+	form := url.Values{}
+	if params.Contact != "" {
+		form.Set("contact", params.Contact)
+	}
+	path := "/cluster/acme/account/" + url.PathEscape(name)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update ACME account %s: %w", name, err)
+	}
+	return nil
+}
+
+// DeleteACMEAccount deletes an ACME account via DELETE /cluster/acme/account/{name}.
+func (c *Client) DeleteACMEAccount(ctx context.Context, name string) error {
+	path := "/cluster/acme/account/" + url.PathEscape(name)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete ACME account %s: %w", name, err)
+	}
+	return nil
+}
+
+// GetACMEPlugins returns all ACME plugins via GET /cluster/acme/plugins.
+func (c *Client) GetACMEPlugins(ctx context.Context) ([]ACMEPlugin, error) {
+	var plugins []ACMEPlugin
+	if err := c.do(ctx, "/cluster/acme/plugins", &plugins); err != nil {
+		return nil, fmt.Errorf("get ACME plugins: %w", err)
+	}
+	return plugins, nil
+}
+
+// CreateACMEPlugin creates an ACME plugin via POST /cluster/acme/plugins.
+func (c *Client) CreateACMEPlugin(ctx context.Context, params CreateACMEPluginParams) error {
+	form := url.Values{}
+	form.Set("id", params.ID)
+	form.Set("type", params.Type)
+	if params.API != "" {
+		form.Set("api", params.API)
+	}
+	if params.Data != "" {
+		form.Set("data", params.Data)
+	}
+	if err := c.doPost(ctx, "/cluster/acme/plugins", form, nil); err != nil {
+		return fmt.Errorf("create ACME plugin %s: %w", params.ID, err)
+	}
+	return nil
+}
+
+// GetACMEPlugin returns a single ACME plugin via GET /cluster/acme/plugins/{id}.
+func (c *Client) GetACMEPlugin(ctx context.Context, id string) (*ACMEPlugin, error) {
+	path := "/cluster/acme/plugins/" + url.PathEscape(id)
+	var plugin ACMEPlugin
+	if err := c.do(ctx, path, &plugin); err != nil {
+		return nil, fmt.Errorf("get ACME plugin %s: %w", id, err)
+	}
+	return &plugin, nil
+}
+
+// UpdateACMEPlugin updates an ACME plugin via PUT /cluster/acme/plugins/{id}.
+func (c *Client) UpdateACMEPlugin(ctx context.Context, id string, params UpdateACMEPluginParams) error {
+	form := url.Values{}
+	if params.API != "" {
+		form.Set("api", params.API)
+	}
+	if params.Data != "" {
+		form.Set("data", params.Data)
+	}
+	if params.Digest != "" {
+		form.Set("digest", params.Digest)
+	}
+	path := "/cluster/acme/plugins/" + url.PathEscape(id)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update ACME plugin %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteACMEPlugin deletes an ACME plugin via DELETE /cluster/acme/plugins/{id}.
+func (c *Client) DeleteACMEPlugin(ctx context.Context, id string) error {
+	path := "/cluster/acme/plugins/" + url.PathEscape(id)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete ACME plugin %s: %w", id, err)
+	}
+	return nil
+}
+
+// GetACMEDirectories returns available ACME directories via GET /cluster/acme/directories.
+func (c *Client) GetACMEDirectories(ctx context.Context) ([]ACMEDirectory, error) {
+	var dirs []ACMEDirectory
+	if err := c.do(ctx, "/cluster/acme/directories", &dirs); err != nil {
+		return nil, fmt.Errorf("get ACME directories: %w", err)
+	}
+	return dirs, nil
+}
+
+// GetACMETOS returns the ACME terms of service URL via GET /cluster/acme/tos.
+func (c *Client) GetACMETOS(ctx context.Context) (string, error) {
+	var tos string
+	if err := c.do(ctx, "/cluster/acme/tos", &tos); err != nil {
+		return "", fmt.Errorf("get ACME TOS: %w", err)
+	}
+	return tos, nil
+}
+
+// GetNodeCertificates returns certificate info for a node via GET /nodes/{node}/certificates/info.
+func (c *Client) GetNodeCertificates(ctx context.Context, node string) ([]NodeCertificate, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/certificates/info"
+	var certs []NodeCertificate
+	if err := c.do(ctx, path, &certs); err != nil {
+		return nil, fmt.Errorf("get node %s certificates: %w", node, err)
+	}
+	return certs, nil
+}
+
+// OrderNodeCertificate orders an ACME certificate for a node via POST /nodes/{node}/certificates/acme/certificate.
+func (c *Client) OrderNodeCertificate(ctx context.Context, node string, force bool) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	if force {
+		form.Set("force", "1")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/certificates/acme/certificate"
+	var upid string
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("order certificate for node %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// RenewNodeCertificate renews an ACME certificate for a node via PUT /nodes/{node}/certificates/acme/certificate.
+func (c *Client) RenewNodeCertificate(ctx context.Context, node string, force bool) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	if force {
+		form.Set("force", "1")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/certificates/acme/certificate"
+	var upid string
+	if err := c.doPut(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("renew certificate for node %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// RevokeNodeCertificate revokes an ACME certificate for a node via DELETE /nodes/{node}/certificates/acme/certificate.
+func (c *Client) RevokeNodeCertificate(ctx context.Context, node string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/certificates/acme/certificate"
+	var upid string
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("revoke certificate for node %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// GetMetricServers returns all metric server configs via GET /cluster/metrics/server.
+func (c *Client) GetMetricServers(ctx context.Context) ([]MetricServerConfig, error) {
+	var servers []MetricServerConfig
+	if err := c.do(ctx, "/cluster/metrics/server", &servers); err != nil {
+		return nil, fmt.Errorf("get metric servers: %w", err)
+	}
+	return servers, nil
+}
+
+// CreateMetricServer creates a metric server via POST /cluster/metrics/server/{id}.
+func (c *Client) CreateMetricServer(ctx context.Context, params CreateMetricServerParams) error {
+	form := url.Values{}
+	form.Set("type", params.Type)
+	form.Set("server", params.Server)
+	form.Set("port", strconv.Itoa(params.Port))
+	if params.Disable != nil {
+		form.Set("disable", strconv.Itoa(*params.Disable))
+	}
+	if params.MTU > 0 {
+		form.Set("mtu", strconv.Itoa(params.MTU))
+	}
+	if params.Timeout > 0 {
+		form.Set("timeout", strconv.Itoa(params.Timeout))
+	}
+	if params.Proto != "" {
+		form.Set("proto", params.Proto)
+	}
+	if params.Path != "" {
+		form.Set("path", params.Path)
+	}
+	if params.InfluxDBProto != "" {
+		form.Set("influxdbproto", params.InfluxDBProto)
+	}
+	if params.Organization != "" {
+		form.Set("organization", params.Organization)
+	}
+	if params.Bucket != "" {
+		form.Set("bucket", params.Bucket)
+	}
+	if params.Token != "" {
+		form.Set("token", params.Token)
+	}
+	if params.MaxBodySize > 0 {
+		form.Set("max-body-size", strconv.Itoa(params.MaxBodySize))
+	}
+	if params.VerifyCert != nil {
+		form.Set("verify-certificate", strconv.Itoa(*params.VerifyCert))
+	}
+	path := "/cluster/metrics/server/" + url.PathEscape(params.ID)
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("create metric server %s: %w", params.ID, err)
+	}
+	return nil
+}
+
+// GetMetricServer returns a single metric server via GET /cluster/metrics/server/{id}.
+func (c *Client) GetMetricServer(ctx context.Context, id string) (*MetricServerConfig, error) {
+	path := "/cluster/metrics/server/" + url.PathEscape(id)
+	var server MetricServerConfig
+	if err := c.do(ctx, path, &server); err != nil {
+		return nil, fmt.Errorf("get metric server %s: %w", id, err)
+	}
+	return &server, nil
+}
+
+// UpdateMetricServer updates a metric server via PUT /cluster/metrics/server/{id}.
+func (c *Client) UpdateMetricServer(ctx context.Context, id string, params UpdateMetricServerParams) error {
+	form := url.Values{}
+	if params.Server != "" {
+		form.Set("server", params.Server)
+	}
+	if params.Port != nil {
+		form.Set("port", strconv.Itoa(*params.Port))
+	}
+	if params.Disable != nil {
+		form.Set("disable", strconv.Itoa(*params.Disable))
+	}
+	if params.MTU > 0 {
+		form.Set("mtu", strconv.Itoa(params.MTU))
+	}
+	if params.Timeout > 0 {
+		form.Set("timeout", strconv.Itoa(params.Timeout))
+	}
+	if params.Proto != "" {
+		form.Set("proto", params.Proto)
+	}
+	if params.Path != "" {
+		form.Set("path", params.Path)
+	}
+	if params.InfluxDBProto != "" {
+		form.Set("influxdbproto", params.InfluxDBProto)
+	}
+	if params.Organization != "" {
+		form.Set("organization", params.Organization)
+	}
+	if params.Bucket != "" {
+		form.Set("bucket", params.Bucket)
+	}
+	if params.Token != "" {
+		form.Set("token", params.Token)
+	}
+	if params.MaxBodySize > 0 {
+		form.Set("max-body-size", strconv.Itoa(params.MaxBodySize))
+	}
+	if params.VerifyCert != nil {
+		form.Set("verify-certificate", strconv.Itoa(*params.VerifyCert))
+	}
+	if params.Delete != "" {
+		form.Set("delete", params.Delete)
+	}
+	path := "/cluster/metrics/server/" + url.PathEscape(id)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update metric server %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteMetricServer deletes a metric server via DELETE /cluster/metrics/server/{id}.
+func (c *Client) DeleteMetricServer(ctx context.Context, id string) error {
+	path := "/cluster/metrics/server/" + url.PathEscape(id)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete metric server %s: %w", id, err)
+	}
+	return nil
+}
+
+// GetClusterConfig returns cluster configuration via GET /cluster/config.
+func (c *Client) GetClusterConfig(ctx context.Context) (*ClusterConfig, error) {
+	var cfg ClusterConfig
+	if err := c.do(ctx, "/cluster/config", &cfg); err != nil {
+		return nil, fmt.Errorf("get cluster config: %w", err)
+	}
+	return &cfg, nil
+}
+
+// GetClusterJoinInfo returns cluster join information via GET /cluster/config/join.
+func (c *Client) GetClusterJoinInfo(ctx context.Context) (*ClusterJoinInfo, error) {
+	var info ClusterJoinInfo
+	if err := c.do(ctx, "/cluster/config/join", &info); err != nil {
+		return nil, fmt.Errorf("get cluster join info: %w", err)
+	}
+	return &info, nil
+}
+
+// GetCorosyncNodes returns corosync node list via GET /cluster/config/nodes.
+func (c *Client) GetCorosyncNodes(ctx context.Context) ([]CorosyncNode, error) {
+	var nodes []CorosyncNode
+	if err := c.do(ctx, "/cluster/config/nodes", &nodes); err != nil {
+		return nil, fmt.Errorf("get corosync nodes: %w", err)
+	}
+	return nodes, nil
+}
