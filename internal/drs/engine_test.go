@@ -3,7 +3,7 @@ package drs
 import (
 	"testing"
 
-	"github.com/proxdash/proxdash/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 func TestScoreNode(t *testing.T) {

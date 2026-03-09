@@ -125,7 +125,7 @@ func (f *Forwarder) Test(cfg Config) error {
 	}
 	pri := facility*8 + 6 // informational
 
-	msg := fmt.Sprintf("<%d>1 %s proxdash audit - - - ProxDash syslog forwarding test message\n",
+	msg := fmt.Sprintf("<%d>1 %s nexara audit - - - Nexara syslog forwarding test message\n",
 		pri,
 		time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 	)
@@ -213,7 +213,7 @@ func (f *Forwarder) formatRFC5424(msg Message) []byte {
 		body += fmt.Sprintf(" details=%s", msg.Details)
 	}
 
-	line := fmt.Sprintf("<%d>1 %s proxdash audit - - - %s\n", pri, ts, body)
+	line := fmt.Sprintf("<%d>1 %s nexara audit - - - %s\n", pri, ts, body)
 	return []byte(line)
 }
 

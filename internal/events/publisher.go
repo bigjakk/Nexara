@@ -9,7 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	proxsyslog "github.com/proxdash/proxdash/internal/syslog"
+	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
 // Event kinds published through the WebSocket pipeline.
@@ -92,9 +92,9 @@ func (p *Publisher) Publish(ctx context.Context, event Event) {
 
 	var channel string
 	if event.ClusterID != "" {
-		channel = fmt.Sprintf("proxdash:events:%s", event.ClusterID)
+		channel = fmt.Sprintf("nexara:events:%s", event.ClusterID)
 	} else {
-		channel = "proxdash:events:system"
+		channel = "nexara:events:system"
 	}
 
 	if err := p.client.Publish(ctx, channel, data).Err(); err != nil {

@@ -6,7 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // NodeHandler handles node read endpoints.

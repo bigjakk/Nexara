@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/proxdash/proxdash/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // Plan generates migration recommendations using a greedy approach:

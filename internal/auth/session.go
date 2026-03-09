@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // SessionManager handles session lifecycle in Redis + PostgreSQL.
@@ -43,7 +43,7 @@ func HashToken(token string) string {
 }
 
 func redisKey(sessionID string) string {
-	return "proxdash:session:" + sessionID
+	return "nexara:session:" + sessionID
 }
 
 // CreateSession stores a new session in both PostgreSQL and Redis.

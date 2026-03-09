@@ -17,10 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/proxdash/proxdash/internal/auth"
-	"github.com/proxdash/proxdash/internal/crypto"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
+	"github.com/bigjakk/nexara/internal/auth"
+	"github.com/bigjakk/nexara/internal/crypto"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 )
 
 // OIDCHandler handles OIDC/SSO configuration and auth flow endpoints.

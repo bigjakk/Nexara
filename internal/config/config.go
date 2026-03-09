@@ -25,7 +25,7 @@ type Config struct {
 	WSPort                 int           `envconfig:"WS_PORT" default:"8081"`
 	WSPingInterval         time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
 	WSPongTimeout          time.Duration `envconfig:"WS_PONG_TIMEOUT" default:"30s"`
-	DataDir                string        `envconfig:"DATA_DIR" default:"/data/proxdash"`
+	DataDir                string        `envconfig:"DATA_DIR" default:"/data/nexara"`
 }
 
 // NewMetricsTicker creates a time.Ticker using the configured metrics collection interval.

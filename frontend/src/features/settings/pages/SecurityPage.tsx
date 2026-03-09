@@ -129,7 +129,7 @@ export function SecurityPage() {
   const downloadRecoveryCodes = () => {
     const blob = new Blob(
       [
-        "ProxDash Recovery Codes\n",
+        "Nexara Recovery Codes\n",
         "========================\n",
         "Store these codes in a safe place.\n",
         "Each code can only be used once.\n\n",
@@ -140,7 +140,7 @@ export function SecurityPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "proxdash-recovery-codes.txt";
+    a.download = "nexara-recovery-codes.txt";
     a.click();
     URL.revokeObjectURL(url);
   };

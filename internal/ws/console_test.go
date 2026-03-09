@@ -11,7 +11,7 @@ import (
 
 	gorillaws "github.com/gorilla/websocket"
 
-	"github.com/proxdash/proxdash/internal/auth"
+	"github.com/bigjakk/nexara/internal/auth"
 )
 
 func TestConsoleEndpointRequiresAuth(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/proxdash/proxdash/internal/crypto"
+	"github.com/bigjakk/nexara/internal/crypto"
 )
 
 // TOTPService provides TOTP enrollment and verification.
@@ -23,7 +23,7 @@ type TOTPService struct {
 func NewTOTPService(encryptionKey string) *TOTPService {
 	return &TOTPService{
 		encryptionKey: encryptionKey,
-		issuer:        "ProxDash",
+		issuer:        "Nexara",
 	}
 }
 

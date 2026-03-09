@@ -20,7 +20,7 @@ interface PreferencesState {
   toJSON: () => UserPreferences;
 }
 
-const STORAGE_KEY = "proxdash-preferences";
+const STORAGE_KEY = "nexara-preferences";
 
 const defaultPreferences: UserPreferences = {
   byteUnit: "binary",
@@ -50,7 +50,7 @@ export const usePreferencesStore = create<PreferencesState>()((set, get) => ({
     const updated = { ...get().preferences, ...prefs };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     if (prefs.language) {
-      localStorage.setItem("proxdash-language", prefs.language);
+      localStorage.setItem("nexara-language", prefs.language);
       void i18n.changeLanguage(prefs.language);
     }
     set({ preferences: updated });
@@ -61,7 +61,7 @@ export const usePreferencesStore = create<PreferencesState>()((set, get) => ({
       const merged = { ...defaultPreferences, ...prefs };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       if (merged.language && merged.language !== i18n.language) {
-        localStorage.setItem("proxdash-language", merged.language);
+        localStorage.setItem("nexara-language", merged.language);
         void i18n.changeLanguage(merged.language);
       }
       set({ preferences: merged, loaded: true });

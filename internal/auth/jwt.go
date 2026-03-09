@@ -57,7 +57,7 @@ func (j *JWTService) GenerateAccessToken(userID uuid.UUID, email, role string) (
 			Subject:   userID.String(),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(now),
-			Issuer:    "proxdash",
+			Issuer:    "nexara",
 		},
 		UserID: userID,
 		Email:  email,

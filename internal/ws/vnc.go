@@ -11,10 +11,10 @@ import (
 	gorillaWs "github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/proxdash/proxdash/internal/auth"
-	"github.com/proxdash/proxdash/internal/crypto"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/auth"
+	"github.com/bigjakk/nexara/internal/crypto"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/proxmox"
 
 	fiberWs "github.com/gofiber/contrib/websocket"
 	"github.com/google/uuid"

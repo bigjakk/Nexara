@@ -177,7 +177,7 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
       },
     }),
     {
-      name: "proxdash-console-tabs",
+      name: "nexara-console-tabs",
       partialize: (state) => ({
         tabs: state.tabs.map((t) => ({
           ...t,

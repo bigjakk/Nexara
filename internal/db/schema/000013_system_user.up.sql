@@ -4,7 +4,7 @@
 INSERT INTO users (id, email, password_hash, display_name, is_active, role)
 VALUES (
     '00000000-0000-0000-0000-000000000001',
-    'system@proxdash.local',
+    'system@nexara.local',
     '', -- no password, cannot log in
     'DRS Scheduler',
     false, -- cannot log in

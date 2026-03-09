@@ -141,7 +141,7 @@ export function UploadDialog({
             </p>
           )}
 
-          {/* Upload progress (browser → ProxDash → Proxmox) */}
+          {/* Upload progress (browser → Nexara → Proxmox) */}
           {progress !== null && (
             <div className="space-y-1">
               <div className="flex justify-between text-xs text-muted-foreground">

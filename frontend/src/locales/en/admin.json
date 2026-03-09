@@ -100,7 +100,7 @@
   "deleteOIDCConfirm": "Delete this OIDC configuration? SSO users will no longer be able to log in.",
   "testDiscoveryEndpoint": "Test Discovery Endpoint",
   "branding": "Branding",
-  "customizeBranding": "Customize the appearance and branding of your ProxDash instance.",
+  "customizeBranding": "Customize the appearance and branding of your Nexara instance.",
   "applicationTitle": "Application Title",
   "setTitleSidebar": "Set the title shown in the sidebar and browser tab.",
   "logo": "Logo",

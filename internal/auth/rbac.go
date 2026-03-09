@@ -10,11 +10,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 const (
-	rbacCachePrefix = "proxdash:rbac:"
+	rbacCachePrefix = "nexara:rbac:"
 	rbacCacheTTL    = 5 * time.Minute
 )
 

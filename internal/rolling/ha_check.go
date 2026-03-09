@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/drs"
-	"github.com/proxdash/proxdash/internal/proxmox"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/drs"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // HAConflict describes a single HA/DRS conflict detected during pre-flight analysis.
@@ -73,7 +73,7 @@ func AnalyzeHAConstraints(
 		resSID[r.SID] = r
 	}
 
-	// Fetch DRS rules from ProxDash DB.
+	// Fetch DRS rules from Nexara DB.
 	dbRules, err := queries.ListDRSRules(ctx, clusterID)
 	if err != nil {
 		dbRules = nil
@@ -256,7 +256,7 @@ func AnalyzeHAConstraints(
 				}
 			}
 
-			// Check ProxDash DRS rules.
+			// Check Nexara DRS rules.
 			checkDRSConflicts(report, guest, drainNode, targets, drsRules, nodeWorkloads)
 		}
 	}

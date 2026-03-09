@@ -9,11 +9,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/proxdash/proxdash/internal/crypto"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
-	"github.com/proxdash/proxdash/internal/rolling"
-	sshpkg "github.com/proxdash/proxdash/internal/ssh"
+	"github.com/bigjakk/nexara/internal/crypto"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/rolling"
+	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 )
 
 // RollingUpdateHandler handles rolling update API endpoints.

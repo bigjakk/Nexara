@@ -37,13 +37,13 @@ func TestClientChannelToRedis(t *testing.T) {
 		{
 			"metrics",
 			"cluster:550e8400-e29b-41d4-a716-446655440000:metrics",
-			"proxdash:metrics:550e8400-e29b-41d4-a716-446655440000",
+			"nexara:metrics:550e8400-e29b-41d4-a716-446655440000",
 			false,
 		},
 		{
 			"alerts",
 			"cluster:550e8400-e29b-41d4-a716-446655440000:alerts",
-			"proxdash:alerts:550e8400-e29b-41d4-a716-446655440000",
+			"nexara:alerts:550e8400-e29b-41d4-a716-446655440000",
 			false,
 		},
 		{"invalid", "bad:channel", "", true},
@@ -72,18 +72,18 @@ func TestRedisChannelToClient(t *testing.T) {
 	}{
 		{
 			"metrics",
-			"proxdash:metrics:550e8400-e29b-41d4-a716-446655440000",
+			"nexara:metrics:550e8400-e29b-41d4-a716-446655440000",
 			"cluster:550e8400-e29b-41d4-a716-446655440000:metrics",
 			false,
 		},
 		{
 			"alerts",
-			"proxdash:alerts:550e8400-e29b-41d4-a716-446655440000",
+			"nexara:alerts:550e8400-e29b-41d4-a716-446655440000",
 			"cluster:550e8400-e29b-41d4-a716-446655440000:alerts",
 			false,
 		},
 		{"unknown prefix", "other:metrics:uuid", "", true},
-		{"unknown kind", "proxdash:logs:uuid", "", true},
+		{"unknown kind", "nexara:logs:uuid", "", true},
 	}
 
 	for _, tt := range tests {

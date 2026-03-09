@@ -158,7 +158,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
               <Label htmlFor="token-id">API Token ID</Label>
               <Input
                 id="token-id"
-                placeholder="root@pam!proxdash"
+                placeholder="root@pam!nexara"
                 value={tokenId}
                 onChange={(e) => { setTokenId(e.target.value); }}
                 required

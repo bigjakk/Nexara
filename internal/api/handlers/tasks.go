@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 )
 
 // auditLog writes an audit log entry for task operations.

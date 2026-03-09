@@ -54,7 +54,7 @@ export const supportedLanguages = [
 
 void i18n.use(initReactI18next).init({
   resources,
-  lng: localStorage.getItem("proxdash-language") ?? "en",
+  lng: localStorage.getItem("nexara-language") ?? "en",
   fallbackLng: "en",
   defaultNS,
   ns: Object.keys(resources.en),

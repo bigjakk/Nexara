@@ -12,7 +12,7 @@ interface BrandingState {
 }
 
 export const useBrandingStore = create<BrandingState>()((set) => ({
-  appTitle: "ProxDash",
+  appTitle: "Nexara",
   logoUrl: null,
   faviconUrl: null,
   loaded: false,

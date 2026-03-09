@@ -16,21 +16,21 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w \
-    -X github.com/proxdash/proxdash/internal/api.Version=${VERSION} \
-    -X github.com/proxdash/proxdash/internal/api.Commit=${COMMIT} \
-    -X github.com/proxdash/proxdash/internal/api.BuildTime=${BUILD_TIME}" \
-    -o /build/proxdash-api ./cmd/api
+    -X github.com/nexara/nexara/internal/api.Version=${VERSION} \
+    -X github.com/nexara/nexara/internal/api.Commit=${COMMIT} \
+    -X github.com/nexara/nexara/internal/api.BuildTime=${BUILD_TIME}" \
+    -o /build/nexara-api ./cmd/api
 
 # Runtime stage
 FROM gcr.io/distroless/static-debian12
 
-COPY --from=builder /build/proxdash-api /proxdash-api
+COPY --from=builder /build/nexara-api /nexara-api
 
 USER nonroot:nonroot
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/proxdash-api", "healthcheck"]
+    CMD ["/nexara-api", "healthcheck"]
 
-ENTRYPOINT ["/proxdash-api"]
+ENTRYPOINT ["/nexara-api"]

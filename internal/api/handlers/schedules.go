@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
-	"github.com/proxdash/proxdash/internal/scheduler"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/scheduler"
 )
 
 // ScheduleHandler handles scheduled task CRUD endpoints.

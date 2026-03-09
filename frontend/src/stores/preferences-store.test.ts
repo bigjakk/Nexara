@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { usePreferencesStore } from "./preferences-store";
 import type { UserPreferences } from "./preferences-store";
 
-const STORAGE_KEY = "proxdash-preferences";
+const STORAGE_KEY = "nexara-preferences";
 
 const defaultPreferences: UserPreferences = {
   byteUnit: "binary",

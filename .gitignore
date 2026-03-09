@@ -41,10 +41,10 @@ coverage.out
 coverage.html
 
 # Build artifacts
-/proxdash-api
-/proxdash-ws
-/proxdash-collector
-/proxdash-scheduler
+/nexara-api
+/nexara-ws
+/nexara-collector
+/nexara-scheduler
 
 # Logs
 *.log

@@ -9,7 +9,7 @@ import type {
 
 const MAX_HISTORY_POINTS = 60;
 const DEFAULT_REFRESH_INTERVAL = 10_000;
-const REFRESH_INTERVAL_KEY = "proxdash:refreshInterval";
+const REFRESH_INTERVAL_KEY = "nexara:refreshInterval";
 
 function loadRefreshInterval(): number {
   try {

@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // SettingsHandler handles application settings endpoints.

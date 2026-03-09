@@ -12,7 +12,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/proxdash/proxdash/internal/auth"
+	"github.com/bigjakk/nexara/internal/auth"
 )
 
 func TestRegister_MissingFields(t *testing.T) {

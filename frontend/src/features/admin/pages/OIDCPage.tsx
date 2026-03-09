@@ -418,7 +418,7 @@ export function OIDCPage() {
                   <Input
                     value={form.client_id}
                     onChange={(e) => { setForm({ ...form, client_id: e.target.value }); }}
-                    placeholder="proxdash"
+                    placeholder="nexara"
                   />
                 </div>
                 <div className="space-y-2">

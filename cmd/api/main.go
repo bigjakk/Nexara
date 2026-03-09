@@ -13,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/proxdash/proxdash/internal/api"
-	"github.com/proxdash/proxdash/internal/config"
-	"github.com/proxdash/proxdash/internal/db"
+	"github.com/bigjakk/nexara/internal/api"
+	"github.com/bigjakk/nexara/internal/config"
+	"github.com/bigjakk/nexara/internal/db"
 )
 
 func main() {

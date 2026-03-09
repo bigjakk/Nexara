@@ -59,7 +59,7 @@ func (p *Publisher) PublishClusterMetrics(ctx context.Context, result *clusterMe
 		return
 	}
 
-	channel := fmt.Sprintf("proxdash:metrics:%s", result.ClusterID)
+	channel := fmt.Sprintf("nexara:metrics:%s", result.ClusterID)
 	if err := p.client.Publish(ctx, channel, data).Err(); err != nil {
 		p.logger.Error("failed to publish metrics to Redis",
 			"channel", channel,
@@ -83,7 +83,7 @@ func (p *Publisher) PublishNodeOffline(ctx context.Context, clusterID, nodeID uu
 		return
 	}
 
-	channel := fmt.Sprintf("proxdash:alerts:%s", clusterID)
+	channel := fmt.Sprintf("nexara:alerts:%s", clusterID)
 	if err := p.client.Publish(ctx, channel, data).Err(); err != nil {
 		p.logger.Error("failed to publish alert to Redis",
 			"channel", channel,

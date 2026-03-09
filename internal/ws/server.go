@@ -9,7 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
-	"github.com/proxdash/proxdash/internal/auth"
+	"github.com/bigjakk/nexara/internal/auth"
 )
 
 // Server is the WebSocket server backed by Fiber.

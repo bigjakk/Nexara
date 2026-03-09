@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/proxdash/proxdash/internal/config"
+	"github.com/bigjakk/nexara/internal/config"
 )
 
 func newTestServer(t *testing.T) *Server {

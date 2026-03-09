@@ -1,6 +1,6 @@
 import { DEFAULT_VISIBLE_COLUMNS } from "../types/inventory";
 
-const STORAGE_KEY = "proxdash:inventory:columns";
+const STORAGE_KEY = "nexara:inventory:columns";
 
 export function loadColumnVisibility(): Record<string, boolean> {
   try {

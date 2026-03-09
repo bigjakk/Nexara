@@ -11,13 +11,13 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" -o /build/proxdash-scheduler ./cmd/scheduler
+    go build -ldflags="-s -w" -o /build/nexara-scheduler ./cmd/scheduler
 
 # Runtime stage
 FROM gcr.io/distroless/static-debian12
 
-COPY --from=builder /build/proxdash-scheduler /proxdash-scheduler
+COPY --from=builder /build/nexara-scheduler /nexara-scheduler
 
 USER nonroot:nonroot
 
-ENTRYPOINT ["/proxdash-scheduler"]
+ENTRYPOINT ["/nexara-scheduler"]

@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/proxdash/proxdash/internal/auth"
+	"github.com/bigjakk/nexara/internal/auth"
 )
 
 type testEnv struct {
@@ -206,7 +206,7 @@ func TestIntegrationSubscribeAndReceive(t *testing.T) {
 	}
 
 	// Publish metrics via Redis (like the collector does).
-	redisChannel := fmt.Sprintf("proxdash:metrics:%s", clusterUUID)
+	redisChannel := fmt.Sprintf("nexara:metrics:%s", clusterUUID)
 	payload := `{"cpu":0.75,"mem_used":1024}`
 	if err := env.redisClient.Publish(context.Background(), redisChannel, payload).Err(); err != nil {
 		t.Fatalf("redis publish: %v", err)

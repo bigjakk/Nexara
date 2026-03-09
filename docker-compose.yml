@@ -1,31 +1,31 @@
 services:
   # ---- PostgreSQL 16 + TimescaleDB ----
-  proxdash-db:
+  nexara-db:
     image: timescale/timescaledb:latest-pg16
-    container_name: proxdash-db
+    container_name: nexara-db
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-proxdash}
+      POSTGRES_USER: ${POSTGRES_USER:-nexara}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-      POSTGRES_DB: ${POSTGRES_DB:-proxdash}
+      POSTGRES_DB: ${POSTGRES_DB:-nexara}
     ports:
       - "5432:5432"
     volumes:
-      - proxdash-db-data:/var/lib/postgresql/data
+      - nexara-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-proxdash}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexara}"]
       interval: 5s
       timeout: 3s
       retries: 5
     restart: unless-stopped
 
   # ---- Redis 7 ----
-  proxdash-redis:
+  nexara-redis:
     image: redis:7-alpine
-    container_name: proxdash-redis
+    container_name: nexara-redis
     ports:
       - "6379:6379"
     volumes:
-      - proxdash-redis-data:/data
+      - nexara-redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -34,91 +34,91 @@ services:
     restart: unless-stopped
 
   # ---- Go API Server ----
-  proxdash-api:
+  nexara-api:
     build:
       context: .
       dockerfile: docker/api/Dockerfile
-    container_name: proxdash-api
+    container_name: nexara-api
     ports:
       - "8080:8080"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://proxdash:changeme@proxdash-db:5432/proxdash?sslmode=disable}
-      REDIS_URL: ${REDIS_URL:-redis://proxdash-redis:6379/0}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexara:changeme@nexara-db:5432/nexara?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://nexara-redis:6379/0}
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       API_PORT: ${API_PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
-      proxdash-db:
+      nexara-db:
         condition: service_healthy
-      proxdash-redis:
+      nexara-redis:
         condition: service_healthy
     restart: unless-stopped
 
   # ---- WebSocket Server ----
-  proxdash-ws:
+  nexara-ws:
     build:
       context: .
       dockerfile: docker/ws/Dockerfile
-    container_name: proxdash-ws
+    container_name: nexara-ws
     ports:
       - "8081:8081"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://proxdash:changeme@proxdash-db:5432/proxdash?sslmode=disable}
-      REDIS_URL: ${REDIS_URL:-redis://proxdash-redis:6379/0}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexara:changeme@nexara-db:5432/nexara?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://nexara-redis:6379/0}
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       WS_PORT: ${WS_PORT:-8081}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
-      proxdash-api:
+      nexara-api:
         condition: service_healthy
-      proxdash-redis:
+      nexara-redis:
         condition: service_healthy
     restart: unless-stopped
 
   # ---- Metric Collector ----
-  proxdash-collector:
+  nexara-collector:
     build:
       context: .
       dockerfile: docker/collector/Dockerfile
-    container_name: proxdash-collector
+    container_name: nexara-collector
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://proxdash:changeme@proxdash-db:5432/proxdash?sslmode=disable}
-      REDIS_URL: ${REDIS_URL:-redis://proxdash-redis:6379/0}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexara:changeme@nexara-db:5432/nexara?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://nexara-redis:6379/0}
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       METRICS_COLLECT_INTERVAL: ${METRICS_COLLECT_INTERVAL:-10s}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
-      proxdash-api:
+      nexara-api:
         condition: service_healthy
     restart: unless-stopped
 
   # ---- Task Scheduler ----
-  proxdash-scheduler:
+  nexara-scheduler:
     build:
       context: .
       dockerfile: docker/scheduler/Dockerfile
-    container_name: proxdash-scheduler
+    container_name: nexara-scheduler
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://proxdash:changeme@proxdash-db:5432/proxdash?sslmode=disable}
-      REDIS_URL: ${REDIS_URL:-redis://proxdash-redis:6379/0}
+      DATABASE_URL: ${DATABASE_URL:-postgres://nexara:changeme@nexara-db:5432/nexara?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://nexara-redis:6379/0}
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       SCHEDULER_TICK: ${SCHEDULER_TICK:-60s}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
-      proxdash-api:
+      nexara-api:
         condition: service_healthy
     restart: unless-stopped
 
   # ---- React Frontend ----
-  proxdash-frontend:
+  nexara-frontend:
     build:
       context: .
       dockerfile: docker/frontend/Dockerfile
-    container_name: proxdash-frontend
+    container_name: nexara-frontend
     ports:
       - "3000:3000"
     healthcheck:
@@ -129,26 +129,26 @@ services:
     restart: unless-stopped
 
   # ---- Caddy Reverse Proxy ----
-  proxdash-proxy:
+  nexara-proxy:
     image: caddy:2-alpine
-    container_name: proxdash-proxy
+    container_name: nexara-proxy
     ports:
       - "80:80"
       - "443:443"
     environment:
-      PROXDASH_DOMAIN: ${PROXDASH_DOMAIN:-localhost}
+      NEXARA_DOMAIN: ${NEXARA_DOMAIN:-localhost}
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - proxdash-caddy-data:/data
-      - proxdash-caddy-config:/config
+      - nexara-caddy-data:/data
+      - nexara-caddy-config:/config
     depends_on:
-      - proxdash-api
-      - proxdash-ws
-      - proxdash-frontend
+      - nexara-api
+      - nexara-ws
+      - nexara-frontend
     restart: unless-stopped
 
 volumes:
-  proxdash-db-data:
-  proxdash-redis-data:
-  proxdash-caddy-data:
-  proxdash-caddy-config:
+  nexara-db-data:
+  nexara-redis-data:
+  nexara-caddy-data:
+  nexara-caddy-config:

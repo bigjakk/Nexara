@@ -3,7 +3,7 @@ package rolling
 import (
 	"fmt"
 
-	"github.com/proxdash/proxdash/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // GuestSnapshot describes a VM or container that was drained from a node.

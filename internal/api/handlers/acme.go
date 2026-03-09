@@ -6,9 +6,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
-	"github.com/proxdash/proxdash/internal/proxmox"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // ACMEHandler handles ACME certificate management endpoints.

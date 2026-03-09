@@ -11,13 +11,13 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" -o /build/proxdash-collector ./cmd/collector
+    go build -ldflags="-s -w" -o /build/nexara-collector ./cmd/collector
 
 # Runtime stage
 FROM gcr.io/distroless/static-debian12
 
-COPY --from=builder /build/proxdash-collector /proxdash-collector
+COPY --from=builder /build/nexara-collector /nexara-collector
 
 USER nonroot:nonroot
 
-ENTRYPOINT ["/proxdash-collector"]
+ENTRYPOINT ["/nexara-collector"]

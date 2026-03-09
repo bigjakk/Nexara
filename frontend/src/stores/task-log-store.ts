@@ -18,7 +18,7 @@ interface TaskLogActions {
   setFocusedTask: (task: FocusedTask | null) => void;
 }
 
-const STORAGE_KEY = "proxdash-task-log";
+const STORAGE_KEY = "nexara-task-log";
 
 function loadPersistedState(): Pick<TaskLogState, "panelOpen" | "panelHeight"> {
   try {

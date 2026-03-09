@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
-	proxsyslog "github.com/proxdash/proxdash/internal/syslog"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
+	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
 // AuditHandler handles audit log endpoints.
@@ -406,7 +406,7 @@ func (h *AuditHandler) exportSyslog(c *fiber.Ctx, items []db.ListAuditLogAdvance
 			msg += fmt.Sprintf(" details=%s", details)
 		}
 
-		line := fmt.Sprintf("<%d>1 %s proxdash audit - - - %s\n",
+		line := fmt.Sprintf("<%d>1 %s nexara audit - - - %s\n",
 			pri,
 			a.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			msg,

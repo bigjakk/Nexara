@@ -13,16 +13,16 @@ describe("branding-store — default values", () => {
   beforeEach(() => {
     resetFavicon();
     useBrandingStore.setState({
-      appTitle: "ProxDash",
+      appTitle: "Nexara",
       logoUrl: null,
       faviconUrl: null,
       loaded: false,
     });
-    document.title = "ProxDash";
+    document.title = "Nexara";
   });
 
-  it("default appTitle is 'ProxDash'", () => {
-    expect(useBrandingStore.getState().appTitle).toBe("ProxDash");
+  it("default appTitle is 'Nexara'", () => {
+    expect(useBrandingStore.getState().appTitle).toBe("Nexara");
   });
 
   it("default logoUrl is null", () => {
@@ -42,12 +42,12 @@ describe("branding-store — setAppTitle", () => {
   beforeEach(() => {
     resetFavicon();
     useBrandingStore.setState({
-      appTitle: "ProxDash",
+      appTitle: "Nexara",
       logoUrl: null,
       faviconUrl: null,
       loaded: false,
     });
-    document.title = "ProxDash";
+    document.title = "Nexara";
   });
 
   it("updates appTitle in the store", () => {
@@ -77,7 +77,7 @@ describe("branding-store — setLogoUrl", () => {
   beforeEach(() => {
     resetFavicon();
     useBrandingStore.setState({
-      appTitle: "ProxDash",
+      appTitle: "Nexara",
       logoUrl: null,
       faviconUrl: null,
       loaded: false,
@@ -99,7 +99,7 @@ describe("branding-store — setLogoUrl", () => {
 
   it("does not affect appTitle or faviconUrl", () => {
     useBrandingStore.getState().setLogoUrl("https://example.com/logo.png");
-    expect(useBrandingStore.getState().appTitle).toBe("ProxDash");
+    expect(useBrandingStore.getState().appTitle).toBe("Nexara");
     expect(useBrandingStore.getState().faviconUrl).toBeNull();
   });
 });
@@ -108,7 +108,7 @@ describe("branding-store — setFaviconUrl", () => {
   beforeEach(() => {
     resetFavicon();
     useBrandingStore.setState({
-      appTitle: "ProxDash",
+      appTitle: "Nexara",
       logoUrl: null,
       faviconUrl: null,
       loaded: false,
@@ -161,12 +161,12 @@ describe("branding-store — loadFromBranding", () => {
   beforeEach(() => {
     resetFavicon();
     useBrandingStore.setState({
-      appTitle: "ProxDash",
+      appTitle: "Nexara",
       logoUrl: null,
       faviconUrl: null,
       loaded: false,
     });
-    document.title = "ProxDash";
+    document.title = "Nexara";
   });
 
   afterEach(() => {
@@ -241,7 +241,7 @@ describe("branding-store — loadFromBranding", () => {
     useBrandingStore.getState().loadFromBranding({
       "branding.app_title": 42,
     });
-    expect(useBrandingStore.getState().appTitle).toBe("ProxDash");
+    expect(useBrandingStore.getState().appTitle).toBe("Nexara");
   });
 
   it("ignores non-string branding.logo_url values", () => {
@@ -265,7 +265,7 @@ describe("branding-store — loadFromBranding", () => {
         "branding.app_title": "{not-valid-json",
       });
     }).not.toThrow();
-    expect(useBrandingStore.getState().appTitle).toBe("ProxDash");
+    expect(useBrandingStore.getState().appTitle).toBe("Nexara");
   });
 
   it("silently ignores malformed JSON in branding.logo_url", () => {
@@ -296,6 +296,6 @@ describe("branding-store — loadFromBranding", () => {
     useBrandingStore.getState().loadFromBranding({
       "branding.logo_url": JSON.stringify("https://example.com/logo.png"),
     });
-    expect(useBrandingStore.getState().appTitle).toBe("ProxDash");
+    expect(useBrandingStore.getState().appTitle).toBe("Nexara");
   });
 });

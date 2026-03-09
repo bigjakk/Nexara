@@ -80,16 +80,16 @@ export function BrandingPage() {
   };
 
   const handleResetTitle = () => {
-    setAppTitle("ProxDash");
+    setAppTitle("Nexara");
     upsertSetting.mutate(
       {
         key: "branding.app_title",
-        value: "ProxDash",
+        value: "Nexara",
         scope: "global",
       },
       {
         onSuccess: () => {
-          branding.setAppTitle("ProxDash");
+          branding.setAppTitle("Nexara");
         },
       },
     );
@@ -102,7 +102,7 @@ export function BrandingPage() {
       <div>
         <h1 className="text-2xl font-bold">Branding</h1>
         <p className="text-muted-foreground">
-          Customize the appearance and branding of your ProxDash instance.
+          Customize the appearance and branding of your Nexara instance.
         </p>
       </div>
 
@@ -122,7 +122,7 @@ export function BrandingPage() {
             <Input
               value={appTitle}
               onChange={(e) => { setAppTitle(e.target.value); }}
-              placeholder="ProxDash"
+              placeholder="Nexara"
               className="max-w-xs"
               maxLength={50}
             />

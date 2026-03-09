@@ -26,7 +26,7 @@ func NewRedisSubscriber(client *redis.Client, hub *Hub, logger *slog.Logger) *Re
 
 // Run starts the Redis pattern subscription. It blocks until ctx is cancelled.
 func (s *RedisSubscriber) Run(ctx context.Context) {
-	patterns := []string{"proxdash:metrics:*", "proxdash:alerts:*", "proxdash:events:*"}
+	patterns := []string{"nexara:metrics:*", "nexara:alerts:*", "nexara:events:*"}
 	pubsub := s.client.PSubscribe(ctx, patterns...)
 	defer pubsub.Close()
 

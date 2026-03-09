@@ -48,29 +48,29 @@ func ValidateChannel(ch string) bool {
 }
 
 // ClientChannelToRedis converts a client-facing channel name to the corresponding Redis pub/sub channel.
-// Example: "cluster:<uuid>:metrics" → "proxdash:metrics:<uuid>"
-// Example: "system:events"          → "proxdash:events:system"
+// Example: "cluster:<uuid>:metrics" → "nexara:metrics:<uuid>"
+// Example: "system:events"          → "nexara:events:system"
 func ClientChannelToRedis(ch string) (string, error) {
 	if !ValidateChannel(ch) {
 		return "", fmt.Errorf("invalid channel format: %s", ch)
 	}
 	if ch == "system:events" {
-		return "proxdash:events:system", nil
+		return "nexara:events:system", nil
 	}
 	parts := strings.SplitN(ch, ":", 3)
 	// parts = ["cluster", "<uuid>", "metrics|alerts|events"]
-	return fmt.Sprintf("proxdash:%s:%s", parts[2], parts[1]), nil
+	return fmt.Sprintf("nexara:%s:%s", parts[2], parts[1]), nil
 }
 
 // RedisChannelToClient converts a Redis pub/sub channel name to the client-facing channel name.
-// Example: "proxdash:metrics:<uuid>" → "cluster:<uuid>:metrics"
-// Example: "proxdash:events:system"  → "system:events"
+// Example: "nexara:metrics:<uuid>" → "cluster:<uuid>:metrics"
+// Example: "nexara:events:system"  → "system:events"
 func RedisChannelToClient(ch string) (string, error) {
-	// Strip "proxdash:" prefix.
-	if !strings.HasPrefix(ch, "proxdash:") {
+	// Strip "nexara:" prefix.
+	if !strings.HasPrefix(ch, "nexara:") {
 		return "", fmt.Errorf("unknown Redis channel: %s", ch)
 	}
-	rest := strings.TrimPrefix(ch, "proxdash:")
+	rest := strings.TrimPrefix(ch, "nexara:")
 	parts := strings.SplitN(rest, ":", 2)
 	if len(parts) != 2 {
 		return "", fmt.Errorf("malformed Redis channel: %s", ch)

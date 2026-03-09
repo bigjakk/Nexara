@@ -13,7 +13,7 @@ interface SidebarActions {
   expandNode: (key: string) => void;
 }
 
-const STORAGE_KEY = "proxdash-sidebar";
+const STORAGE_KEY = "nexara-sidebar";
 
 function loadPersistedState(): SidebarState {
   try {

@@ -60,7 +60,7 @@ describe("i18n configuration", () => {
 
   it("translates auth keys correctly", () => {
     expect(i18n.t("auth:signIn")).toBe("Sign In");
-    expect(i18n.t("auth:welcomeToProxDash")).toBe("Welcome to ProxDash");
+    expect(i18n.t("auth:welcomeToNexara")).toBe("Welcome to Nexara");
     expect(i18n.t("auth:email")).toBe("Email");
     expect(i18n.t("auth:password")).toBe("Password");
   });

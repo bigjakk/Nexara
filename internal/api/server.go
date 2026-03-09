@@ -9,14 +9,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/proxdash/proxdash/internal/api/handlers"
-	"github.com/proxdash/proxdash/internal/auth"
-	"github.com/proxdash/proxdash/internal/config"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
-	"github.com/proxdash/proxdash/internal/notifications"
-	"github.com/proxdash/proxdash/internal/rolling"
-	proxsyslog "github.com/proxdash/proxdash/internal/syslog"
+	"github.com/bigjakk/nexara/internal/api/handlers"
+	"github.com/bigjakk/nexara/internal/auth"
+	"github.com/bigjakk/nexara/internal/config"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/notifications"
+	"github.com/bigjakk/nexara/internal/rolling"
+	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
 // Server is the API server that holds all dependencies.

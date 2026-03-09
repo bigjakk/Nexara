@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/proxdash/proxdash/internal/auth"
-	"github.com/proxdash/proxdash/internal/config"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/ws"
+	"github.com/bigjakk/nexara/internal/auth"
+	"github.com/bigjakk/nexara/internal/config"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/ws"
 )
 
 func main() {

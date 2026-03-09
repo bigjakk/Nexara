@@ -1,4 +1,4 @@
-Execute ProxDash development task: $ARGUMENTS
+Execute Nexara development task: $ARGUMENTS
 
 Follow this process:
 1. Read CLAUDE.md for project context

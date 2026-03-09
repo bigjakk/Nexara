@@ -10,15 +10,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/proxdash/proxdash/internal/crypto"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/drs"
-	"github.com/proxdash/proxdash/internal/events"
-	"github.com/proxdash/proxdash/internal/notifications"
-	"github.com/proxdash/proxdash/internal/proxmox"
-	"github.com/proxdash/proxdash/internal/reports"
-	"github.com/proxdash/proxdash/internal/rolling"
-	"github.com/proxdash/proxdash/internal/scanner"
+	"github.com/bigjakk/nexara/internal/crypto"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/drs"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/notifications"
+	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/reports"
+	"github.com/bigjakk/nexara/internal/rolling"
+	"github.com/bigjakk/nexara/internal/scanner"
 )
 
 // Scheduler runs due scheduled tasks.
@@ -447,7 +447,7 @@ func (s *Scheduler) generateScheduledReport(ctx context.Context, sched db.Report
 	// Send email if configured.
 	if sched.EmailEnabled && sched.EmailChannelID.Valid {
 		channelID, _ := uuid.FromBytes(sched.EmailChannelID.Bytes[:])
-		subject := fmt.Sprintf("ProxDash Report: %s", data.Title)
+		subject := fmt.Sprintf("Nexara Report: %s", data.Title)
 		if err := reports.SendReportEmail(ctx, s.queries, s.encryptionKey, channelID, sched.EmailRecipients, subject, htmlOutput, s.logger); err != nil {
 			s.logger.Error("failed to send report email", "schedule_id", sched.ID, "error", err)
 		}

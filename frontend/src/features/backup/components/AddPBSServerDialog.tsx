@@ -171,7 +171,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
               <Label htmlFor="pbs-token-id">API Token ID</Label>
               <Input
                 id="pbs-token-id"
-                placeholder="root@pam!proxdash"
+                placeholder="root@pam!nexara"
                 value={tokenId}
                 onChange={(e) => {
                   setTokenId(e.target.value);

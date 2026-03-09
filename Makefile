@@ -5,23 +5,23 @@ GOCMD=go
 GOBUILD=$(GOCMD) build
 GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
-BINARY_API=proxdash-api
-BINARY_WS=proxdash-ws
-BINARY_COLLECTOR=proxdash-collector
-BINARY_SCHEDULER=proxdash-scheduler
+BINARY_API=nexara-api
+BINARY_WS=nexara-ws
+BINARY_COLLECTOR=nexara-collector
+BINARY_SCHEDULER=nexara-scheduler
 
 # Version injection
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_TIME?=$(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS=-s -w \
-	-X github.com/proxdash/proxdash/internal/api.Version=$(VERSION) \
-	-X github.com/proxdash/proxdash/internal/api.Commit=$(COMMIT) \
-	-X github.com/proxdash/proxdash/internal/api.BuildTime=$(BUILD_TIME)
+	-X github.com/bigjakk/nexara/internal/api.Version=$(VERSION) \
+	-X github.com/bigjakk/nexara/internal/api.Commit=$(COMMIT) \
+	-X github.com/bigjakk/nexara/internal/api.BuildTime=$(BUILD_TIME)
 
 # Database
 MIGRATIONS_DIR=migrations
-DATABASE_URL?=postgres://proxdash:proxdash@localhost:5432/proxdash?sslmode=disable
+DATABASE_URL?=postgres://nexara:nexara@localhost:5432/nexara?sslmode=disable
 
 ## build: Build all Go binaries
 build:

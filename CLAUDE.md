@@ -1,7 +1,7 @@
-# ProxDash
+# Nexara
 
 ## Project Overview
-ProxDash: free, open-source Proxmox VE/PBS centralized management platform.
+Nexara: free, open-source Proxmox VE/PBS centralized management platform.
 Think vCenter for Proxmox. Docker-deployable, API-first, real-time dashboards.
 
 ## Tech Stack

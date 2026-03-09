@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/proxdash/proxdash/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // RunPreFlightChecks performs all pre-flight validations for a migration.

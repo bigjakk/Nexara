@@ -38,7 +38,7 @@ func (d *PagerDutyDispatcher) Send(ctx context.Context, config json.RawMessage, 
 	body := map[string]interface{}{
 		"routing_key":  cfg.RoutingKey,
 		"event_action": eventAction,
-		"dedup_key":    fmt.Sprintf("proxdash-%s", payload.RuleID),
+		"dedup_key":    fmt.Sprintf("nexara-%s", payload.RuleID),
 		"payload": map[string]interface{}{
 			"summary":  fmt.Sprintf("%s: %s on %s", payload.Severity, payload.RuleName, payload.ResourceName),
 			"severity": pdSeverity,

@@ -7,7 +7,7 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
-	"github.com/proxdash/proxdash/internal/crypto"
+	"github.com/bigjakk/nexara/internal/crypto"
 )
 
 // testEncryptionKey is a valid 64 hex-character (32 byte) AES key for testing.

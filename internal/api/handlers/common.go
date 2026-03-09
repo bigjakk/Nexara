@@ -1,4 +1,4 @@
-// Package handlers provides HTTP request handlers for the ProxDash API.
+// Package handlers provides HTTP request handlers for the Nexara API.
 package handlers
 
 import (
@@ -11,11 +11,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/proxdash/proxdash/internal/crypto"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
-	"github.com/proxdash/proxdash/internal/proxmox"
-	proxsyslog "github.com/proxdash/proxdash/internal/syslog"
+	"github.com/bigjakk/nexara/internal/crypto"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
+	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
 // AuditLog writes an audit log entry and publishes an audit_entry WS event.

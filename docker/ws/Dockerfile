@@ -11,18 +11,18 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" -o /build/proxdash-ws ./cmd/ws
+    go build -ldflags="-s -w" -o /build/nexara-ws ./cmd/ws
 
 # Runtime stage
 FROM gcr.io/distroless/static-debian12
 
-COPY --from=builder /build/proxdash-ws /proxdash-ws
+COPY --from=builder /build/nexara-ws /nexara-ws
 
 USER nonroot:nonroot
 
 EXPOSE 8081
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/proxdash-ws", "healthcheck"]
+    CMD ["/nexara-ws", "healthcheck"]
 
-ENTRYPOINT ["/proxdash-ws"]
+ENTRYPOINT ["/nexara-ws"]

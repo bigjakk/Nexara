@@ -131,7 +131,7 @@ export type EventKind =
   | "acme_change";
 
 /** Event pushed from the backend through the WS pipeline. */
-export interface ProxDashEvent {
+export interface NexaraEvent {
   kind: EventKind;
   cluster_id?: string;
   resource_type?: string;

@@ -1,6 +1,6 @@
-# Contributing Translations to ProxDash
+# Contributing Translations to Nexara
 
-Thank you for helping translate ProxDash! This guide explains how to add a new language or improve existing translations.
+Thank you for helping translate Nexara! This guide explains how to add a new language or improve existing translations.
 
 ## Directory Structure
 
@@ -116,7 +116,7 @@ That's it! The language will automatically appear in the language selector at Se
 ### Don't
 - Don't change JSON keys — only translate values
 - Don't translate technical terms like "VMID", "CIDR", "OSD", "CRUSH"
-- Don't translate brand names: "ProxDash", "Proxmox", "Ceph", "Proxmox Backup Server"
+- Don't translate brand names: "Nexara", "Proxmox", "Ceph", "Proxmox Backup Server"
 - Don't add or remove keys — keep the same structure as English
 
 ### Pluralization

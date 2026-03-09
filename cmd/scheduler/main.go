@@ -11,10 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/proxdash/proxdash/internal/config"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
-	"github.com/proxdash/proxdash/internal/scheduler"
+	"github.com/bigjakk/nexara/internal/config"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/scheduler"
 )
 
 func main() {
@@ -64,7 +64,7 @@ func main() {
 
 	sched := scheduler.New(queries, cfg.EncryptionKey, logger, eventPub)
 
-	logger.Info("ProxDash scheduler started", "task_interval", "60s", "drs_interval", "60s", "cve_interval", "6h", "alert_interval", "60s", "report_interval", "60s", "rolling_update_interval", "15s")
+	logger.Info("Nexara scheduler started", "task_interval", "60s", "drs_interval", "60s", "cve_interval", "6h", "alert_interval", "60s", "report_interval", "60s", "rolling_update_interval", "15s")
 
 	// Clean up stale DRS history entries from previous interrupted runs.
 	if err := queries.CleanupStaleDRSHistory(ctx); err != nil {

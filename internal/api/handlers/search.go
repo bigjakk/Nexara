@@ -6,8 +6,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 )
 
 // SearchHandler handles global search endpoints.

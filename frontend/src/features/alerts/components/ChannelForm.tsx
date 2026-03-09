@@ -71,11 +71,11 @@ export function ChannelForm({
   // Slack fields
   const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
   const [slackChannel, setSlackChannel] = useState("");
-  const [slackUsername, setSlackUsername] = useState("ProxDash");
+  const [slackUsername, setSlackUsername] = useState("Nexara");
 
   // Discord fields
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
-  const [discordUsername, setDiscordUsername] = useState("ProxDash Alerts");
+  const [discordUsername, setDiscordUsername] = useState("Nexara Alerts");
 
   // Teams fields
   const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");

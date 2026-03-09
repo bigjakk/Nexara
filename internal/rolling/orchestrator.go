@@ -12,13 +12,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/proxdash/proxdash/internal/crypto"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/drs"
-	"github.com/proxdash/proxdash/internal/events"
-	"github.com/proxdash/proxdash/internal/notifications"
-	"github.com/proxdash/proxdash/internal/proxmox"
-	sshpkg "github.com/proxdash/proxdash/internal/ssh"
+	"github.com/bigjakk/nexara/internal/crypto"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/drs"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/notifications"
+	"github.com/bigjakk/nexara/internal/proxmox"
+	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 )
 
 // SystemUserID is the well-known UUID for automated system operations.

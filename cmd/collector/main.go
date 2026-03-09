@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/proxdash/proxdash/internal/collector"
-	"github.com/proxdash/proxdash/internal/config"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
+	"github.com/bigjakk/nexara/internal/collector"
+	"github.com/bigjakk/nexara/internal/config"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 )
 
 func main() {
@@ -68,7 +68,7 @@ func main() {
 
 	mc := collector.NewMetricCollector(pool, publisher, logger)
 
-	logger.Info("ProxDash collector started",
+	logger.Info("Nexara collector started",
 		"metrics_interval", cfg.MetricsCollectInterval,
 	)
 

@@ -151,7 +151,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="manual">ProxDash Only</SelectItem>
+                <SelectItem value="manual">Nexara Only</SelectItem>
                 <SelectItem value="ha">Proxmox HA</SelectItem>
               </SelectContent>
             </Select>

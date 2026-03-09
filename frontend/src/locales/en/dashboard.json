@@ -56,7 +56,7 @@
   "apiUrl": "API URL",
   "apiUrlPlaceholder": "https://pve.example.com:8006",
   "apiTokenId": "API Token ID",
-  "apiTokenIdPlaceholder": "root@pam!proxdash",
+  "apiTokenIdPlaceholder": "root@pam!nexara",
   "apiTokenSecret": "API Token Secret",
   "apiTokenSecretPlaceholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
   "failedTLSCertificate": "Failed to fetch TLS certificate",

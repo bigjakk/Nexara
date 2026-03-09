@@ -1,4 +1,4 @@
-# ProxDash
+# Nexara
 
 Centralized management platform for Proxmox VE and PBS — like vCenter for Proxmox. Free and open-source.
 
@@ -29,8 +29,8 @@ Centralized management platform for Proxmox VE and PBS — like vCenter for Prox
 ### Deploy
 
 ```bash
-git clone https://github.com/proxdash/proxdash.git
-cd proxdash
+git clone https://github.com/nexara/nexara.git
+cd nexara
 
 # Create your environment file
 cp .env.example .env
@@ -93,7 +93,7 @@ All configuration is via environment variables in `.env`. See [`.env.example`](.
 | `JWT_SECRET` | Yes | Secret for signing auth tokens (min 16 chars) |
 | `ENCRYPTION_KEY` | Yes | 32-byte hex key for encrypting API tokens at rest |
 | `POSTGRES_PASSWORD` | Yes | Database password |
-| `PROXDASH_DOMAIN` | No | Domain for Caddy (default: `localhost`) |
+| `NEXARA_DOMAIN` | No | Domain for Caddy (default: `localhost`) |
 | `COLLECT_INTERVAL` | No | Metric collection interval (default: `30s`) |
 | `LOG_LEVEL` | No | Log verbosity: `debug`, `info`, `warn`, `error` |
 

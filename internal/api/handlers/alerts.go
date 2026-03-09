@@ -10,10 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/proxdash/proxdash/internal/crypto"
-	db "github.com/proxdash/proxdash/internal/db/generated"
-	"github.com/proxdash/proxdash/internal/events"
-	"github.com/proxdash/proxdash/internal/notifications"
+	"github.com/bigjakk/nexara/internal/crypto"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/notifications"
 )
 
 // AlertHandler handles alert rules, history, notification channels, and maintenance windows.
@@ -1149,7 +1149,7 @@ func (h *AlertHandler) TestChannel(c *fiber.Ctx) error {
 		ResourceName:    "test-node-01",
 		NodeName:        "test-node-01",
 		ClusterID:       "test-cluster",
-		Message:         "This is a test notification from ProxDash.",
+		Message:         "This is a test notification from Nexara.",
 		FiredAt:         time.Now().UTC().Format(time.RFC3339),
 		EscalationLevel: 0,
 	}

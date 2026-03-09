@@ -3,7 +3,7 @@ package drs
 import (
 	"encoding/json"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // Rule type constants.

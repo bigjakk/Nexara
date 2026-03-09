@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWebSocketStore } from "@/stores/websocket-store";
-import type { ProxDashEvent } from "@/types/ws";
+import type { NexaraEvent } from "@/types/ws";
 
 const DEBOUNCE_MS = 300;
 
@@ -44,7 +44,7 @@ export function useEventInvalidation(clusterIds: string[]): void {
 
   const handleEvent = useCallback(
     (payload: unknown) => {
-      const event = payload as Partial<ProxDashEvent>;
+      const event = payload as Partial<NexaraEvent>;
       if (!event.kind) return;
 
       const cid = event.cluster_id;

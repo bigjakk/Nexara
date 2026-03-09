@@ -109,7 +109,7 @@ export function RegisterPage() {
             <Server className="h-6 w-6 text-primary-foreground" />
           </div>
           <CardTitle className="text-2xl">
-            {isFirstRun ? t("setupProxDash") : t("createAccount")}
+            {isFirstRun ? t("setupNexara") : t("createAccount")}
           </CardTitle>
           <CardDescription>
             {isFirstRun

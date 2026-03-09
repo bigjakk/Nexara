@@ -1,15 +1,15 @@
 # Development overrides — use with:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 services:
-  proxdash-db:
+  nexara-db:
     ports:
       - "5432:5432"
 
-  proxdash-redis:
+  nexara-redis:
     ports:
       - "6379:6379"
 
-  proxdash-api:
+  nexara-api:
     build:
       context: .
       dockerfile: docker/api/Dockerfile
@@ -23,7 +23,7 @@ services:
     environment:
       LOG_LEVEL: debug
 
-  proxdash-ws:
+  nexara-ws:
     build:
       context: .
       dockerfile: docker/ws/Dockerfile
@@ -37,7 +37,7 @@ services:
     environment:
       LOG_LEVEL: debug
 
-  proxdash-collector:
+  nexara-collector:
     build:
       context: .
       dockerfile: docker/collector/Dockerfile
@@ -49,7 +49,7 @@ services:
       LOG_LEVEL: debug
       COLLECT_INTERVAL: 10s
 
-  proxdash-scheduler:
+  nexara-scheduler:
     build:
       context: .
       dockerfile: docker/scheduler/Dockerfile
@@ -61,7 +61,7 @@ services:
       LOG_LEVEL: debug
       SCHEDULER_TICK: 15s
 
-  proxdash-frontend:
+  nexara-frontend:
     build:
       context: .
       dockerfile: docker/frontend/Dockerfile
@@ -73,6 +73,6 @@ services:
     ports:
       - "3000:3000"
 
-  proxdash-proxy:
+  nexara-proxy:
     ports:
       - "80:80"

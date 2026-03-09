@@ -7,7 +7,7 @@ interface ThemeState {
   setMode: (mode: ThemeMode) => void;
 }
 
-const STORAGE_KEY = "proxdash-theme";
+const STORAGE_KEY = "nexara-theme";
 
 function getStoredMode(): ThemeMode {
   try {
@@ -64,7 +64,7 @@ const accentColorMap: Record<string, { hsl: string; darkHsl: string }> = {
 
 function reapplyAccentColor() {
   try {
-    const raw = localStorage.getItem("proxdash-preferences");
+    const raw = localStorage.getItem("nexara-preferences");
     if (!raw) return;
     const prefs = JSON.parse(raw) as { accentColor?: string };
     if (!prefs.accentColor || prefs.accentColor === "default") {

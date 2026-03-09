@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	db "github.com/proxdash/proxdash/internal/db/generated"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // Generator builds report data from database queries.
