@@ -26,8 +26,8 @@ export interface ClusterOptions {
 
 export interface TagsResponse {
   registered_tags: string;
-  user_tag_access: string;
-  tag_style: string;
+  user_tag_access: unknown;
+  tag_style: unknown;
   [key: string]: unknown;
 }
 
@@ -48,10 +48,10 @@ export interface ClusterJoinInfo {
 
 export interface CorosyncNode {
   name: string;
-  nodeid?: number;
+  nodeid?: string | number;
   pve_addr?: string;
   pve_fp?: string;
-  quorum_votes?: number;
+  quorum_votes?: string | number;
   ring0_addr?: string;
   ring1_addr?: string;
   [key: string]: unknown;

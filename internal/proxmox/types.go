@@ -1007,28 +1007,30 @@ type BackupJobParams struct {
 // --- Phase 9: Datacenter Feature Parity Types ---
 
 // ClusterOptions represents the datacenter.cfg options from GET /cluster/options.
+// Fields that Proxmox may return as either a string or a JSON object (property strings)
+// are typed as interface{} to handle both PVE versions gracefully.
 type ClusterOptions struct {
-	Console       string `json:"console,omitempty"`
-	Keyboard      string `json:"keyboard,omitempty"`
-	Language      string `json:"language,omitempty"`
-	EmailFrom     string `json:"email_from,omitempty"`
-	HTTPProxy     string `json:"http_proxy,omitempty"`
-	MacPrefix     string `json:"mac_prefix,omitempty"`
-	Migration     string `json:"migration,omitempty"`
-	MigrationType string `json:"migration_type,omitempty"`
-	BWLimit       string `json:"bwlimit,omitempty"`
-	NextID        string `json:"next-id,omitempty"`
-	HA            string `json:"ha,omitempty"`
-	Fencing       string `json:"fencing,omitempty"`
-	CRS           string `json:"crs,omitempty"`
-	MaxWorkers    int    `json:"max_workers,omitempty"`
-	Description   string `json:"description,omitempty"`
-	U2F           string `json:"u2f,omitempty"`
-	WebAuthn      string `json:"webauthn,omitempty"`
-	RegisteredTags string `json:"registered-tags,omitempty"`
-	UserTagAccess string `json:"user-tag-access,omitempty"`
-	TagStyle      string `json:"tag-style,omitempty"`
-	Digest        string `json:"digest,omitempty"`
+	Console        string      `json:"console,omitempty"`
+	Keyboard       string      `json:"keyboard,omitempty"`
+	Language       string      `json:"language,omitempty"`
+	EmailFrom      string      `json:"email_from,omitempty"`
+	HTTPProxy      string      `json:"http_proxy,omitempty"`
+	MacPrefix      string      `json:"mac_prefix,omitempty"`
+	Migration      interface{} `json:"migration,omitempty"`
+	MigrationType  string      `json:"migration_type,omitempty"`
+	BWLimit        interface{} `json:"bwlimit,omitempty"`
+	NextID         interface{} `json:"next-id,omitempty"`
+	HA             interface{} `json:"ha,omitempty"`
+	Fencing        string      `json:"fencing,omitempty"`
+	CRS            interface{} `json:"crs,omitempty"`
+	MaxWorkers     int         `json:"max_workers,omitempty"`
+	Description    string      `json:"description,omitempty"`
+	U2F            interface{} `json:"u2f,omitempty"`
+	WebAuthn       interface{} `json:"webauthn,omitempty"`
+	RegisteredTags string      `json:"registered-tags,omitempty"`
+	UserTagAccess  interface{} `json:"user-tag-access,omitempty"`
+	TagStyle       interface{} `json:"tag-style,omitempty"`
+	Digest         string      `json:"digest,omitempty"`
 }
 
 // UpdateClusterOptionsParams holds parameters for PUT /cluster/options.
@@ -1396,14 +1398,15 @@ type ClusterJoinInfo struct {
 }
 
 // CorosyncNode represents a corosync node.
+// Proxmox returns nodeid and quorum_votes as strings, not integers.
 type CorosyncNode struct {
-	Name     string `json:"name"`
-	NodeID   int    `json:"nodeid,omitempty"`
-	PVEAddr  string `json:"pve_addr,omitempty"`
-	PVEFP    string `json:"pve_fp,omitempty"`
-	Quorate  int    `json:"quorum_votes,omitempty"`
-	Ring0Addr string `json:"ring0_addr,omitempty"`
-	Ring1Addr string `json:"ring1_addr,omitempty"`
+	Name      string      `json:"name"`
+	NodeID    interface{} `json:"nodeid,omitempty"`
+	PVEAddr   string      `json:"pve_addr,omitempty"`
+	PVEFP     string      `json:"pve_fp,omitempty"`
+	Quorate   interface{} `json:"quorum_votes,omitempty"`
+	Ring0Addr string      `json:"ring0_addr,omitempty"`
+	Ring1Addr string      `json:"ring1_addr,omitempty"`
 }
 
 // SearchResult represents a unified search result.

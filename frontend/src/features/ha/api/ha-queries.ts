@@ -135,6 +135,54 @@ export function useDeleteHAGroup(clusterId: string) {
   });
 }
 
+export interface HARuleEntry {
+  rule: string;
+  type: string;
+  resources: string;
+  nodes?: string;
+  strict?: number;
+  affinity?: string;
+  comment?: string;
+  disable?: number;
+  [key: string]: unknown;
+}
+
+export interface CreateHARuleRequest {
+  rule: string;
+  type: string;
+  resources: string;
+  nodes?: string;
+  strict?: number;
+  affinity?: string;
+  comment?: string;
+}
+
+export function useHARules(clusterId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "ha", "rules"],
+    queryFn: () => apiClient.get<HARuleEntry[]>(`/api/v1/clusters/${clusterId}/ha/rules`),
+    enabled: clusterId.length > 0,
+  });
+}
+
+export function useCreateHARule(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateHARuleRequest) =>
+      apiClient.post(`/api/v1/clusters/${clusterId}/ha/rules`, data),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+  });
+}
+
+export function useDeleteHARule(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rule: string) =>
+      apiClient.delete(`/api/v1/clusters/${clusterId}/ha/rules/${encodeURIComponent(rule)}`),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+  });
+}
+
 export function useHAStatus(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "status"],

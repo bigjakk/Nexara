@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -52,7 +53,7 @@ func (h *HAHandler) ListResources(c *fiber.Ctx) error {
 	}
 	resources, err := pxClient.GetHAResources(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get HA resources")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(resources)
 }
@@ -78,7 +79,7 @@ func (h *HAHandler) CreateResource(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateHAResource(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create HA resource")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"sid": req.SID})
 	h.auditLog(c, clusterID, "ha_resource", req.SID, "created", details)
@@ -105,7 +106,7 @@ func (h *HAHandler) GetResource(c *fiber.Ctx) error {
 	}
 	resource, err := pxClient.GetHAResource(c.Context(), sid)
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get HA resource")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(resource)
 }
@@ -132,7 +133,7 @@ func (h *HAHandler) UpdateResource(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateHAResource(c.Context(), sid, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update HA resource")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"sid": sid})
 	h.auditLog(c, clusterID, "ha_resource", sid, "updated", details)
@@ -158,7 +159,7 @@ func (h *HAHandler) DeleteResource(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteHAResource(c.Context(), sid); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete HA resource")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"sid": sid})
 	h.auditLog(c, clusterID, "ha_resource", sid, "deleted", details)
@@ -169,6 +170,7 @@ func (h *HAHandler) DeleteResource(c *fiber.Ctx) error {
 // --- HA Groups ---
 
 // ListGroups handles GET /clusters/:cluster_id/ha/groups.
+// On PVE 8.3+ where groups have been migrated to rules, returns an empty array.
 func (h *HAHandler) ListGroups(c *fiber.Ctx) error {
 	if err := requirePerm(c, "view", "ha"); err != nil {
 		return err
@@ -183,7 +185,11 @@ func (h *HAHandler) ListGroups(c *fiber.Ctx) error {
 	}
 	groups, err := pxClient.GetHAGroups(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get HA groups")
+		// PVE 8.3+ migrated groups to rules — return empty list gracefully
+		if strings.Contains(err.Error(), "migrated to rules") {
+			return c.JSON([]proxmox.HAGroup{})
+		}
+		return mapProxmoxError(err)
 	}
 	return c.JSON(groups)
 }
@@ -212,7 +218,7 @@ func (h *HAHandler) CreateGroup(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateHAGroup(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to create HA group")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": req.Group})
 	h.auditLog(c, clusterID, "ha_group", req.Group, "created", details)
@@ -242,7 +248,7 @@ func (h *HAHandler) UpdateGroup(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateHAGroup(c.Context(), group, req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update HA group")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group})
 	h.auditLog(c, clusterID, "ha_group", group, "updated", details)
@@ -268,11 +274,98 @@ func (h *HAHandler) DeleteGroup(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.DeleteHAGroup(c.Context(), group); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete HA group")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"group": group})
 	h.auditLog(c, clusterID, "ha_group", group, "deleted", details)
 	h.publishHA(c, clusterID, group, "group_deleted")
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// --- HA Rules (PVE 8.3+) ---
+
+// ListRules handles GET /clusters/:cluster_id/ha/rules.
+func (h *HAHandler) ListRules(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "ha"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	rules, err := pxClient.GetHARules(c.Context())
+	if err != nil {
+		// Older PVE without rules support — return empty list
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
+			return c.JSON([]proxmox.HARuleEntry{})
+		}
+		return mapProxmoxError(err)
+	}
+	return c.JSON(rules)
+}
+
+// CreateRule handles POST /clusters/:cluster_id/ha/rules.
+func (h *HAHandler) CreateRule(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "ha"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	var req struct {
+		Type string `json:"type"` // "node-affinity" or "resource-affinity"
+		proxmox.CreateHARuleParams
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Rule == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Rule name is required")
+	}
+	if req.Type == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Rule type is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.CreateHARule(c.Context(), req.Type, req.CreateHARuleParams); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"rule": req.Rule, "type": req.Type})
+	h.auditLog(c, clusterID, "ha_rule", req.Rule, "created", details)
+	h.publishHA(c, clusterID, req.Rule, "rule_created")
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
+}
+
+// DeleteRule handles DELETE /clusters/:cluster_id/ha/rules/:rule.
+func (h *HAHandler) DeleteRule(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "ha"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	rule := c.Params("rule")
+	if rule == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Rule name is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DeleteHARule(c.Context(), rule); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"rule": rule})
+	h.auditLog(c, clusterID, "ha_rule", rule, "deleted", details)
+	h.publishHA(c, clusterID, rule, "rule_deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -293,7 +386,7 @@ func (h *HAHandler) GetStatus(c *fiber.Ctx) error {
 	}
 	status, err := pxClient.GetHAStatus(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get HA status")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(status)
 }

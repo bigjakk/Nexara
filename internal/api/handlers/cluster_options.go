@@ -46,7 +46,7 @@ func (h *ClusterOptionsHandler) GetOptions(c *fiber.Ctx) error {
 	}
 	opts, err := pxClient.GetClusterOptions(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get cluster options")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(opts)
 }
@@ -69,7 +69,7 @@ func (h *ClusterOptionsHandler) UpdateOptions(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.SetClusterOptions(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update cluster options")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"action": "update_options"})
 	h.auditLog(c, clusterID, "cluster_options", clusterID.String(), "updated", details)
@@ -91,7 +91,7 @@ func (h *ClusterOptionsHandler) GetDescription(c *fiber.Ctx) error {
 	}
 	opts, err := pxClient.GetClusterOptions(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get cluster description")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(fiber.Map{"description": opts.Description})
 }
@@ -118,7 +118,7 @@ func (h *ClusterOptionsHandler) UpdateDescription(c *fiber.Ctx) error {
 	if err := pxClient.SetClusterOptions(c.Context(), proxmox.UpdateClusterOptionsParams{
 		Description: &req.Description,
 	}); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update cluster description")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"action": "update_description"})
 	h.auditLog(c, clusterID, "cluster_options", clusterID.String(), "description_updated", details)
@@ -140,7 +140,7 @@ func (h *ClusterOptionsHandler) GetTags(c *fiber.Ctx) error {
 	}
 	opts, err := pxClient.GetClusterOptions(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get tags")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(fiber.Map{
 		"registered_tags": opts.RegisteredTags,
@@ -175,7 +175,7 @@ func (h *ClusterOptionsHandler) UpdateTags(c *fiber.Ctx) error {
 		UserTagAccess:  req.UserTagAccess,
 		TagStyle:       req.TagStyle,
 	}); err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to update tags")
+		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"action": "update_tags"})
 	h.auditLog(c, clusterID, "cluster_options", clusterID.String(), "tags_updated", details)
@@ -197,7 +197,7 @@ func (h *ClusterOptionsHandler) GetClusterConfig(c *fiber.Ctx) error {
 	}
 	cfg, err := pxClient.GetClusterConfig(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get cluster config")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(cfg)
 }
@@ -217,7 +217,7 @@ func (h *ClusterOptionsHandler) GetJoinInfo(c *fiber.Ctx) error {
 	}
 	info, err := pxClient.GetClusterJoinInfo(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get join info")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(info)
 }
@@ -237,7 +237,7 @@ func (h *ClusterOptionsHandler) ListCorosyncNodes(c *fiber.Ctx) error {
 	}
 	nodes, err := pxClient.GetCorosyncNodes(c.Context())
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get corosync nodes")
+		return mapProxmoxError(err)
 	}
 	return c.JSON(nodes)
 }

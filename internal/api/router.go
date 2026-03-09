@@ -455,6 +455,9 @@ func (s *Server) setupRoutes() {
 		haClusters.Put("/:cluster_id/ha/groups/:group", s.haHandler.UpdateGroup)
 		haClusters.Delete("/:cluster_id/ha/groups/:group", s.haHandler.DeleteGroup)
 		haClusters.Get("/:cluster_id/ha/status", s.haHandler.GetStatus)
+		haClusters.Get("/:cluster_id/ha/rules", s.haHandler.ListRules)
+		haClusters.Post("/:cluster_id/ha/rules", s.haHandler.CreateRule)
+		haClusters.Delete("/:cluster_id/ha/rules/:rule", s.haHandler.DeleteRule)
 	}
 
 	// Resource pool CRUD routes (GET list already registered via vmHandler).
