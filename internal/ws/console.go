@@ -204,9 +204,9 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 					continue
 				}
 				if useTermProxy {
-					// termproxy: prefix with "0:" data channel.
-					prefixed := append([]byte("0:"), msg...)
-					if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, prefixed); writeErr != nil {
+					// termproxy data channel: "0:LENGTH:DATA" format.
+					prefixed := "0:" + strconv.Itoa(len(msg)) + ":" + string(msg)
+					if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, []byte(prefixed)); writeErr != nil {
 						return
 					}
 				} else {
@@ -216,9 +216,9 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 				}
 			case fiberWs.BinaryMessage:
 				if useTermProxy {
-					// termproxy: prefix with "0:" data channel.
-					prefixed := append([]byte("0:"), msg...)
-					if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, prefixed); writeErr != nil {
+					// termproxy data channel: "0:LENGTH:DATA" format.
+					prefixed := "0:" + strconv.Itoa(len(msg)) + ":" + string(msg)
+					if writeErr := pxConn.WriteMessage(gorillaWs.BinaryMessage, []byte(prefixed)); writeErr != nil {
 						return
 					}
 				} else {

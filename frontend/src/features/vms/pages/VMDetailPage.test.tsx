@@ -110,6 +110,14 @@ vi.mock("../api/vm-queries", () => ({
     data: [],
     isLoading: false,
   }),
+  useSetVMPool: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useMoveDisk: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
   useTaskHistory: () => ({
     data: [],
     isLoading: false,
@@ -159,6 +167,12 @@ vi.mock("@/features/clusters/api/cluster-queries", () => ({
     data: [],
   }),
   useNodeBridges: () => ({
+    data: [],
+  }),
+  useMachineTypes: () => ({
+    data: [],
+  }),
+  useCPUModels: () => ({
     data: [],
   }),
 }));

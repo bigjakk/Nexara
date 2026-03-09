@@ -6,6 +6,7 @@ import {
   Server,
   Monitor,
   Container,
+  FileBox,
   MoreVertical,
   Plus,
   Pencil,
@@ -41,7 +42,10 @@ function StatusDot({ status }: { status: string }) {
   return <span className={cn("inline-block h-2 w-2 shrink-0 rounded-full", color)} />;
 }
 
-function VMIcon({ type }: { type: string }) {
+function VMIcon({ type, template }: { type: string; template?: boolean }) {
+  if (template) {
+    return <FileBox className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
+  }
   if (type === "lxc") {
     return <Container className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
   }
@@ -129,9 +133,9 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
                       vmActive && "bg-accent text-accent-foreground",
                     )}
                   >
-                    <VMIcon type={vm.type} />
+                    <VMIcon type={vm.type} template={vm.template} />
                     <StatusDot status={vm.status} />
-                    <span className="truncate">
+                    <span className={cn("truncate", vm.template && "text-amber-700 dark:text-amber-400")}>
                       {vm.vmid} {vm.name}
                     </span>
                   </button>

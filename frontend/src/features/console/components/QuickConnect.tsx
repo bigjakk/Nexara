@@ -169,7 +169,7 @@ export function QuickConnect() {
                       </div>
 
                       <div className="flex items-center gap-1">
-                        {isVM && (
+                        {isVM ? (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -181,20 +181,19 @@ export function QuickConnect() {
                             <Monitor className="h-3.5 w-3.5" />
                             VNC
                           </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-xs"
+                            disabled={!isRunning}
+                            title="Container Attach"
+                            onClick={() => { openConsole(vm, "attach"); }}
+                          >
+                            <TerminalSquare className="h-3.5 w-3.5" />
+                            Attach
+                          </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 gap-1 px-2 text-xs"
-                          disabled={!isRunning}
-                          title={isVM ? "Serial Console" : "Container Attach"}
-                          onClick={() => {
-                            openConsole(vm, isVM ? "serial" : "attach");
-                          }}
-                        >
-                          <TerminalSquare className="h-3.5 w-3.5" />
-                          {isVM ? "Serial" : "Attach"}
-                        </Button>
                       </div>
                     </div>
                   );

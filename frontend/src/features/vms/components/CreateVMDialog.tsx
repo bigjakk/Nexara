@@ -19,6 +19,7 @@ import {
   useNodeBridges,
   useClusterVMs,
   useMachineTypes,
+  useCPUModels,
 } from "@/features/clusters/api/cluster-queries";
 import { useStorageContent } from "@/features/storage/api/storage-queries";
 import { useClusterVMIDs, useCreateVM, useResourcePools } from "../api/vm-queries";
@@ -27,7 +28,7 @@ import type { NodeResponse, VMResponse } from "@/types/api";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import {
   osTypes,
-  cpuTypes,
+  cpuTypes as fallbackCpuTypes,
   scsiControllers,
   netModels,
   diskFormats,
@@ -279,6 +280,21 @@ export function CreateVMDialog({
 
   // Fetch network bridges for the selected node
   const { data: bridges } = useNodeBridges(clusterId, node);
+
+  // Fetch CPU models for the selected node
+  const { data: rawCpuModels } = useCPUModels(clusterId, node);
+  const cpuTypeOptions = useMemo(() => {
+    if (!rawCpuModels || rawCpuModels.length === 0) {
+      return fallbackCpuTypes.map((t) => t);
+    }
+    // Sort: custom first, then by name
+    return [...rawCpuModels]
+      .sort((a, b) => {
+        if (a.custom !== b.custom) return a.custom ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      })
+      .map((m) => m.name);
+  }, [rawCpuModels]);
 
   // Fetch machine types for the selected node
   const { data: rawMachineTypes } = useMachineTypes(clusterId, node);
@@ -1265,7 +1281,7 @@ export function CreateVMDialog({
                     }}
                     className={selectClass}
                   >
-                    {cpuTypes.map((ct) => (
+                    {cpuTypeOptions.map((ct) => (
                       <option key={ct} value={ct}>
                         {ct}
                       </option>

@@ -322,6 +322,13 @@ type MachineType struct {
 	Type string `json:"type"`
 }
 
+// CPUModel represents a CPU model from GET /nodes/{node}/capabilities/qemu/cpu.
+type CPUModel struct {
+	Name   string `json:"name"`
+	Vendor string `json:"vendor"`
+	Custom int    `json:"custom"` // Proxmox uses 0/1 integer booleans
+}
+
 // ResourcePool represents a resource pool from GET /pools.
 type ResourcePool struct {
 	PoolID  string `json:"poolid"`

@@ -9,8 +9,8 @@ import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
 import { useNodeHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
-import { useConsoleStore } from "@/stores/console-store";
 import { useClusterNodes } from "../api/cluster-queries";
+import { useConsoleStore } from "@/stores/console-store";
 import { formatBytes, formatUptime } from "@/lib/format";
 import type { TimeRange } from "@/types/api";
 
@@ -26,14 +26,13 @@ export function NodeDetailPage() {
     clusterId: string;
     nodeId: string;
   }>();
-  const addTab = useConsoleStore((s) => s.addTab);
-  const showConsole = useConsoleStore((s) => s.showConsole);
-
   const { data: nodes, isLoading } = useClusterNodes(clusterId);
   const node = nodes?.find((n) => n.id === nodeId);
 
   const clusterMetrics = useClusterMetrics(clusterId);
   const liveMetric = clusterMetrics?.nodeMetrics.get(nodeId);
+  const addTab = useConsoleStore((s) => s.addTab);
+  const showConsole = useConsoleStore((s) => s.showConsole);
 
   function openShell() {
     if (!node) return;
@@ -86,15 +85,17 @@ export function NodeDetailPage() {
             Proxmox Node
           </p>
         </div>
-        <Button
-          variant="outline"
-          className="gap-2"
-          disabled={node.status !== "online"}
-          onClick={openShell}
-        >
-          <Terminal className="h-4 w-4" />
-          Open Shell
-        </Button>
+        {node.status === "online" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={openShell}
+          >
+            <Terminal className="h-4 w-4" />
+            Shell
+          </Button>
+        )}
       </div>
 
       {/* Tabs */}

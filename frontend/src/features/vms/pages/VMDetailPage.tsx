@@ -202,16 +202,18 @@ export function VMDetailPage() {
             VNC Console
           </Button>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          onClick={() => { openConsole("terminal"); }}
-          disabled={normalizedStatus !== "running"}
-        >
-          <Terminal className="h-4 w-4" />
-          {kind === "ct" ? "Attach" : "Serial"}
-        </Button>
+        {kind === "ct" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => { openConsole("terminal"); }}
+            disabled={normalizedStatus !== "running"}
+          >
+            <Terminal className="h-4 w-4" />
+            Attach
+          </Button>
+        )}
       </div>
 
       <VMActions

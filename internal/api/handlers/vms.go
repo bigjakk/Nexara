@@ -1194,6 +1194,59 @@ func (h *VMHandler) ListMachineTypes(c *fiber.Ctx) error {
 	return c.JSON(result)
 }
 
+// --- CPU models ---
+
+type cpuModelResponse struct {
+	Name   string `json:"name"`
+	Vendor string `json:"vendor"`
+	Custom bool   `json:"custom"`
+}
+
+// ListCPUModels handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-models.
+func (h *VMHandler) ListCPUModels(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "node"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	nodeName := c.Params("node_name")
+	if nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
+	}
+
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	models, err := pxClient.GetCPUModels(c.Context(), nodeName)
+	if err != nil {
+		// Graceful fallback: older Proxmox versions (< 8.1) don't implement
+		// the capabilities/qemu/cpus endpoint. Return an empty list so the
+		// frontend falls back to its built-in CPU model list.
+		var apiErr *proxmox.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 501 {
+			return c.JSON([]cpuModelResponse{})
+		}
+		return mapProxmoxError(err)
+	}
+
+	result := make([]cpuModelResponse, 0, len(models))
+	for _, m := range models {
+		result = append(result, cpuModelResponse{
+			Name:   m.Name,
+			Vendor: m.Vendor,
+			Custom: m.Custom != 0,
+		})
+	}
+
+	return c.JSON(result)
+}
+
 // --- Resource pools ---
 
 type resourcePoolResponse struct {

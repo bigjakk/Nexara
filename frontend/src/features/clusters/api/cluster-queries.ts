@@ -67,6 +67,24 @@ export function useMachineTypes(clusterId: string, nodeName: string) {
   });
 }
 
+export interface CPUModelResponse {
+  name: string;
+  vendor: string;
+  custom: boolean;
+}
+
+export function useCPUModels(clusterId: string, nodeName: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeName, "cpu-models"],
+    queryFn: () =>
+      apiClient.get<CPUModelResponse[]>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/cpu-models`,
+      ),
+    enabled: clusterId.length > 0 && nodeName.length > 0,
+    staleTime: 300_000,
+  });
+}
+
 export function useClusterVMs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vms"],

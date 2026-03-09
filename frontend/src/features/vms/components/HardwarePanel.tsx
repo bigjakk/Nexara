@@ -12,17 +12,18 @@ import { useNodeBridges } from "@/features/clusters/api/cluster-queries";
 import { MoveDiskDialog } from "@/features/storage/components/DiskActions";
 import { AddDeviceMenu } from "./hardware/AddDeviceMenu";
 import {
-  cpuTypes,
+  cpuTypes as fallbackCpuTypes,
   scsiControllers,
   netModels,
   vgaTypes,
   biosOptions,
-  machineTypes,
+  machineTypes as fallbackMachineTypes,
   cacheModes,
   diskFormats,
   osTypes,
   audioDevices,
 } from "../lib/vm-config-constants";
+import { useCPUModels, useMachineTypes } from "@/features/clusters/api/cluster-queries";
 import {
   parseNet,
   buildNet,
@@ -157,6 +158,42 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
   const { data: pciDevices } = useNodePCIDevices(clusterId, nodeName);
   const { data: bridges } = useNodeBridges(clusterId, nodeName);
   const bridgeNames = useMemo(() => bridges?.map((b) => b.iface) ?? [], [bridges]);
+
+  // Dynamic CPU models from Proxmox
+  const { data: rawCpuModels } = useCPUModels(clusterId, nodeName);
+  const cpuTypes = useMemo(() => {
+    if (!rawCpuModels || rawCpuModels.length === 0) return fallbackCpuTypes.map((t) => t);
+    return [...rawCpuModels]
+      .sort((a, b) => {
+        if (a.custom !== b.custom) return a.custom ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      })
+      .map((m) => m.name);
+  }, [rawCpuModels]);
+
+  // Dynamic machine types from Proxmox
+  const { data: rawMachineTypes } = useMachineTypes(clusterId, nodeName);
+  const machineTypes = useMemo(() => {
+    if (!rawMachineTypes || rawMachineTypes.length === 0) {
+      return [...fallbackMachineTypes];
+    }
+    const pveTypes = rawMachineTypes
+      .filter((mt) => mt.id.includes("+pve"))
+      .sort((a, b) => b.id.localeCompare(a.id));
+    const result: { value: string; label: string }[] = [];
+    const q35pve = pveTypes.find((mt) => mt.id.includes("q35"));
+    const i440pve = pveTypes.find((mt) => mt.id.includes("i440fx"));
+    if (q35pve) result.push({ value: q35pve.id, label: `${q35pve.id} (Recommended)` });
+    if (i440pve) result.push({ value: i440pve.id, label: i440pve.id });
+    for (const mt of pveTypes) {
+      if (mt.id !== q35pve?.id && mt.id !== i440pve?.id) {
+        result.push({ value: mt.id, label: mt.id });
+      }
+    }
+    result.push({ value: "q35", label: "q35 (generic)" });
+    result.push({ value: "pc", label: "i440fx (generic)" });
+    return result;
+  }, [rawMachineTypes]);
 
   // --- Original config snapshot for diff comparison ---
   const [original, setOriginal] = useState<VMConfig | null>(null);

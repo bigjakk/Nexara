@@ -100,6 +100,7 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/nodes/:node_name/hardware/usb", s.vmHandler.ListNodeUSBDevices)
 			clusters.Get("/:cluster_id/nodes/:node_name/hardware/pci", s.vmHandler.ListNodePCIDevices)
 			clusters.Get("/:cluster_id/nodes/:node_name/machine-types", s.vmHandler.ListMachineTypes)
+			clusters.Get("/:cluster_id/nodes/:node_name/cpu-models", s.vmHandler.ListCPUModels)
 			clusters.Get("/:cluster_id/nodes/:node_name/isos", s.vmHandler.ListNodeISOs)
 			clusters.Post("/:cluster_id/vms/:vm_id/media", s.vmHandler.ChangeMedia)
 			clusters.Put("/:cluster_id/vms/:vm_id/pool", s.vmHandler.SetVMPool)

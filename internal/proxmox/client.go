@@ -528,6 +528,18 @@ func (c *Client) GetMachineTypes(ctx context.Context, node string) ([]MachineTyp
 	return types, nil
 }
 
+// GetCPUModels returns the available CPU models for a node.
+func (c *Client) GetCPUModels(ctx context.Context, node string) ([]CPUModel, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var models []CPUModel
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/capabilities/qemu/cpu", &models); err != nil {
+		return nil, fmt.Errorf("get CPU models on %s: %w", node, err)
+	}
+	return models, nil
+}
+
 // GetResourcePools returns the list of resource pools from the Proxmox cluster.
 func (c *Client) GetResourcePools(ctx context.Context) ([]ResourcePool, error) {
 	var pools []ResourcePool

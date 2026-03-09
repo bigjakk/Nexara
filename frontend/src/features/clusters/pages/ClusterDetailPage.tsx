@@ -1,7 +1,6 @@
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -13,8 +12,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ArrowLeft, Terminal } from "lucide-react";
-import { useCluster, useClusterNodes } from "../api/cluster-queries";
+import { Button } from "@/components/ui/button";
 import { useConsoleStore } from "@/stores/console-store";
+import { useCluster, useClusterNodes } from "../api/cluster-queries";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { ClusterCephTab } from "../components/ClusterCephTab";
 import { ClusterNetworksTab } from "../components/ClusterNetworksTab";
@@ -33,11 +33,11 @@ export function ClusterDetailPage() {
   const tabParam = searchParams.get("tab") ?? "";
   const clusterQuery = useCluster(clusterId ?? "");
   const nodesQuery = useClusterNodes(clusterId ?? "");
-  const addTab = useConsoleStore((s) => s.addTab);
-  const showConsole = useConsoleStore((s) => s.showConsole);
-
   const cluster = clusterQuery.data;
   const nodes = nodesQuery.data ?? [];
+
+  const addTab = useConsoleStore((s) => s.addTab);
+  const showConsole = useConsoleStore((s) => s.showConsole);
 
   const isLoading = clusterQuery.isLoading || nodesQuery.isLoading;
   const error = clusterQuery.error ?? nodesQuery.error;
@@ -138,7 +138,7 @@ export function ClusterDetailPage() {
                           <TableHead>Disk</TableHead>
                           <TableHead>PVE Version</TableHead>
                           <TableHead>Uptime</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
+                          <TableHead className="w-20">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -168,17 +168,19 @@ export function ClusterDetailPage() {
                             <TableCell>{formatBytes(node.disk_total)}</TableCell>
                             <TableCell>{node.pve_version}</TableCell>
                             <TableCell>{formatUptime(node.uptime)}</TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="gap-1"
-                                disabled={node.status !== "online"}
-                                onClick={() => { openNodeShell(node.name); }}
-                                title="Open Shell"
-                              >
-                                <Terminal className="h-4 w-4" />
-                              </Button>
+                            <TableCell>
+                              {node.status === "online" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 gap-1 px-2 text-xs"
+                                  title="Open Shell"
+                                  onClick={() => { openNodeShell(node.name); }}
+                                >
+                                  <Terminal className="h-3.5 w-3.5" />
+                                  Shell
+                                </Button>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
