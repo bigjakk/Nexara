@@ -25,6 +25,7 @@ import { TaskProgressDialog } from "./TaskProgressDialog";
 import { ThemeToggle } from "./ThemeToggle";
 import { FloatingConsole } from "@/features/console/components/FloatingConsole";
 import { SearchBar } from "./SearchBar";
+import { CreateResourceMenu } from "./CreateResourceMenu";
 
 function getInitials(name: string): string {
   return name
@@ -81,6 +82,7 @@ export function AppShell() {
             <SearchBar />
           </div>
           <div className="flex items-center gap-2">
+          <CreateResourceMenu />
           <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

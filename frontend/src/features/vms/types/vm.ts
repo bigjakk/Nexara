@@ -24,6 +24,11 @@ export interface CloneRequest {
   storage: string;
 }
 
+export interface ConvertToTemplateResponse {
+  upid: string;
+  status: string;
+}
+
 export interface MigrateRequest {
   target: string;
   online: boolean;

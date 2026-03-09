@@ -42,8 +42,8 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
   const allRules = useMemo(() => {
     const normalize = (r: DRSRule): DRSRule => ({
       ...r,
-      vm_ids: r.vm_ids,
-      node_names: r.node_names,
+      vm_ids: r.vm_ids ?? [],
+      node_names: r.node_names ?? [],
       source: r.source,
     });
     const manual = (manualRules ?? []).map(normalize);
@@ -114,11 +114,11 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                     </Badge>
                   </TableCell>
                   <TableCell className="font-mono text-sm">
-                    {rule.vm_ids.join(", ")}
+                    {(rule.vm_ids ?? []).join(", ")}
                   </TableCell>
                   <TableCell className="text-sm">
-                    {rule.node_names.length > 0
-                      ? rule.node_names.join(", ")
+                    {(rule.node_names ?? []).length > 0
+                      ? (rule.node_names ?? []).join(", ")
                       : "-"}
                   </TableCell>
                   <TableCell>

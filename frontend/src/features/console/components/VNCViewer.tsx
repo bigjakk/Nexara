@@ -60,23 +60,32 @@ function buildVncWsUrl(
   return `${protocol}//${host}/ws/vnc?${params.toString()}`;
 }
 
+const MAX_AUTO_RETRIES = 3;
+
 export function VNCViewer({ tab, visible }: VNCViewerProps) {
   const { id: tabId, clusterID, node, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
+  const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
   const [rfb, setRfb] = useState<RFB | null>(null);
+  const retryCountRef = useRef(0);
+  const intentionalCloseRef = useRef(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Store latest callbacks in refs so the effect doesn't depend on them.
   const updateTabStatusRef = useRef(updateTabStatus);
   updateTabStatusRef.current = updateTabStatus;
+  const resolveAndReconnectRef = useRef(resolveAndReconnect);
+  resolveAndReconnectRef.current = resolveAndReconnect;
   const tabIdRef = useRef(tabId);
   tabIdRef.current = tabId;
 
   const guestType = tab.type === "ct_vnc" ? "lxc" : undefined;
 
   useEffect(() => {
+    intentionalCloseRef.current = false;
     const wsUrl = buildVncWsUrl(clusterID, node, vmid, guestType);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
@@ -94,6 +103,8 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
             // Backend proxy is connected to Proxmox — now initialize noVNC RFB.
             if (!containerRef.current) return;
 
+            retryCountRef.current = 0;
+
             const options: Record<string, unknown> = {};
             if (msg.password) {
               options["credentials"] = { password: msg.password };
@@ -109,9 +120,26 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
             });
 
             rfbInstance.addEventListener("disconnect", () => {
-              updateTabStatusRef.current(tabIdRef.current, "disconnected");
+              if (intentionalCloseRef.current) {
+                updateTabStatusRef.current(tabIdRef.current, "disconnected");
+                rfbRef.current = null;
+                setRfb(null);
+                return;
+              }
+
               rfbRef.current = null;
               setRfb(null);
+
+              if (retryCountRef.current < MAX_AUTO_RETRIES) {
+                const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
+                retryCountRef.current++;
+                updateTabStatusRef.current(tabIdRef.current, "reconnecting");
+                retryTimerRef.current = setTimeout(() => {
+                  void resolveAndReconnectRef.current(tabIdRef.current);
+                }, delay);
+              } else {
+                updateTabStatusRef.current(tabIdRef.current, "disconnected");
+              }
             });
 
             rfbInstance.addEventListener("securityfailure", () => {
@@ -133,16 +161,31 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     };
 
     ws.onclose = () => {
+      if (intentionalCloseRef.current) return;
       if (!rfbRef.current) {
-        updateTabStatusRef.current(tabIdRef.current, "disconnected");
+        // WS closed before RFB was established — auto-reconnect
+        if (retryCountRef.current < MAX_AUTO_RETRIES) {
+          const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
+          retryCountRef.current++;
+          updateTabStatusRef.current(tabIdRef.current, "reconnecting");
+          retryTimerRef.current = setTimeout(() => {
+            void resolveAndReconnectRef.current(tabIdRef.current);
+          }, delay);
+        } else {
+          updateTabStatusRef.current(tabIdRef.current, "disconnected");
+        }
       }
     };
 
     ws.onerror = () => {
-      updateTabStatusRef.current(tabIdRef.current, "error");
+      if (!intentionalCloseRef.current) {
+        updateTabStatusRef.current(tabIdRef.current, "error");
+      }
     };
 
     return () => {
+      intentionalCloseRef.current = true;
+      clearTimeout(retryTimerRef.current);
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;

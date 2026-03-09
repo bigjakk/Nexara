@@ -2,8 +2,11 @@ import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMAction } from "../api/vm-queries";
 import { CloneDialog } from "./CloneDialog";
+import { CloneToTemplateDialog } from "./CloneToTemplateDialog";
+import { DeployTemplateDialog } from "./DeployTemplateDialog";
 import { MigrateJobDialog } from "./MigrateJobDialog";
 import { DestroyDialog } from "./DestroyDialog";
+import { ConvertToTemplateDialog } from "./ConvertToTemplateDialog";
 import {
   Dialog,
   DialogContent,
@@ -48,6 +51,33 @@ export function VMContextDialogs() {
 
       <DestroyDialog
         open={openDialog === "destroy"}
+        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        clusterId={target.clusterId}
+        resourceId={target.resourceId}
+        kind={target.kind}
+        resourceName={target.name}
+      />
+
+      <CloneToTemplateDialog
+        open={openDialog === "clone-to-template"}
+        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        clusterId={target.clusterId}
+        resourceId={target.resourceId}
+        kind={target.kind}
+        sourceName={target.name}
+      />
+
+      <DeployTemplateDialog
+        open={openDialog === "deploy"}
+        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        clusterId={target.clusterId}
+        vmId={target.resourceId}
+        kind={target.kind}
+        templateName={target.name}
+      />
+
+      <ConvertToTemplateDialog
+        open={openDialog === "convert-to-template"}
         onOpenChange={(open) => { if (!open) closeDialog(); }}
         clusterId={target.clusterId}
         resourceId={target.resourceId}

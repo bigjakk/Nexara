@@ -9,6 +9,8 @@ function StatusIcon({ status }: { status: ConsoleStatus }) {
       return <Loader2 className="h-3 w-3 animate-spin text-yellow-500" />;
     case "connected":
       return <Terminal className="h-3 w-3 text-green-500" />;
+    case "reconnecting":
+      return <RotateCcw className="h-3 w-3 animate-spin text-yellow-500" />;
     case "disconnected":
       return <Unplug className="h-3 w-3 text-muted-foreground" />;
     case "error":

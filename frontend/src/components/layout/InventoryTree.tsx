@@ -12,6 +12,13 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useClusterNodes, useClusterVMs } from "@/features/clusters/api/cluster-queries";
@@ -21,6 +28,8 @@ import { EditClusterDialog } from "@/features/clusters/components/EditClusterDia
 import { DeleteClusterDialog } from "@/features/clusters/components/DeleteClusterDialog";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
+import { CreateVMDialog } from "@/features/vms/components/CreateVMDialog";
+import { CreateCTDialog } from "@/features/vms/components/CreateCTDialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -124,6 +133,7 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
                     kind: vm.type === "lxc" ? "ct" : "vm",
                     status: vm.status,
                     currentNode: node.name,
+                    template: vm.template,
                   }}
                 >
                   <button
@@ -162,6 +172,8 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
 
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [createVMOpen, setCreateVMOpen] = useState(false);
+  const [createCTOpen, setCreateCTOpen] = useState(false);
 
   // Only fetch children when expanded
   const { data: nodes } = useClusterNodes(isExpanded ? cluster.id : "");
@@ -179,71 +191,97 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
 
   return (
     <>
-      <div>
-        <div
-          className={cn(
-            "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-            isActive && "bg-accent text-accent-foreground",
-          )}
-        >
-          <button
-            onClick={() => { toggleNode(clusterKey); }}
-            className="shrink-0"
-          >
-            <ChevronRight
-              className={cn(
-                "h-3 w-3 transition-transform",
-                isExpanded && "rotate-90",
-              )}
-            />
-          </button>
-          <button
-            onClick={() => { void navigate(`/clusters/${cluster.id}`); }}
-            className="flex min-w-0 flex-1 items-center gap-1.5"
-          >
-            <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
-            <StatusDot status={cluster.is_active ? "active" : "offline"} />
-            <span className="truncate font-medium">{cluster.name}</span>
-          </button>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="shrink-0 rounded p-0.5 opacity-0 hover:bg-accent group-hover:opacity-100">
-                <MoreVertical className="h-3 w-3" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-32">
-              <DropdownMenuItem onClick={() => { setEditOpen(true); }}>
-                <Pencil className="mr-2 h-3.5 w-3.5" />
-                Edit
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => { setDeleteOpen(true); }}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="mr-2 h-3.5 w-3.5" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {isExpanded && nodes && (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
           <div>
-            {nodes
-              .slice()
-              .sort((a, b) => a.name.localeCompare(b.name))
-              .map((node) => (
-                <NodeBranch
-                  key={node.id}
-                  node={node}
-                  vms={vms ?? []}
-                  clusterId={cluster.id}
+            <div
+              className={cn(
+                "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
+                isActive && "bg-accent text-accent-foreground",
+              )}
+            >
+              <button
+                onClick={() => { toggleNode(clusterKey); }}
+                className="shrink-0"
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3 w-3 transition-transform",
+                    isExpanded && "rotate-90",
+                  )}
                 />
-              ))}
+              </button>
+              <button
+                onClick={() => { void navigate(`/clusters/${cluster.id}`); }}
+                className="flex min-w-0 flex-1 items-center gap-1.5"
+              >
+                <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <StatusDot status={cluster.is_active ? "active" : "offline"} />
+                <span className="truncate font-medium">{cluster.name}</span>
+              </button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="shrink-0 rounded p-0.5 opacity-0 hover:bg-accent group-hover:opacity-100">
+                    <MoreVertical className="h-3 w-3" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-32">
+                  <DropdownMenuItem onClick={() => { setEditOpen(true); }}>
+                    <Pencil className="mr-2 h-3.5 w-3.5" />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setDeleteOpen(true); }}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="mr-2 h-3.5 w-3.5" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            {isExpanded && nodes && (
+              <div>
+                {nodes
+                  .slice()
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((node) => (
+                    <NodeBranch
+                      key={node.id}
+                      node={node}
+                      vms={vms ?? []}
+                      clusterId={cluster.id}
+                    />
+                  ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-40">
+          <ContextMenuItem onClick={() => { setCreateVMOpen(true); }}>
+            <Monitor className="mr-2 h-3.5 w-3.5" />
+            Create VM
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => { setCreateCTOpen(true); }}>
+            <Container className="mr-2 h-3.5 w-3.5" />
+            Create CT
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => { setEditOpen(true); }}>
+            <Pencil className="mr-2 h-3.5 w-3.5" />
+            Edit
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => { setDeleteOpen(true); }}
+            className="text-destructive focus:text-destructive"
+          >
+            <Trash2 className="mr-2 h-3.5 w-3.5" />
+            Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
 
       {editOpen && (
         <EditClusterDialog
@@ -257,6 +295,20 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
           cluster={cluster}
           open={deleteOpen}
           onOpenChange={setDeleteOpen}
+        />
+      )}
+      {createVMOpen && (
+        <CreateVMDialog
+          open={createVMOpen}
+          onOpenChange={setCreateVMOpen}
+          clusterId={cluster.id}
+        />
+      )}
+      {createCTOpen && (
+        <CreateCTDialog
+          open={createCTOpen}
+          onOpenChange={setCreateCTOpen}
+          clusterId={cluster.id}
         />
       )}
     </>

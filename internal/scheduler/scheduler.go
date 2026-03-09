@@ -33,6 +33,7 @@ type Scheduler struct {
 	reportGen     *reports.Generator
 	rollingOrch   *rolling.Orchestrator
 	eventPub      *events.Publisher
+	drsLastEval   map[uuid.UUID]time.Time
 }
 
 // New creates a new Scheduler.
@@ -49,6 +50,7 @@ func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPu
 		reportGen:     reports.NewGenerator(queries, logger.With("component", "report-gen")),
 		rollingOrch:   rolling.NewOrchestrator(queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry),
 		eventPub:      eventPub,
+		drsLastEval:   make(map[uuid.UUID]time.Time),
 	}
 }
 
@@ -89,7 +91,8 @@ func (s *Scheduler) Run(ctx context.Context) {
 	}
 }
 
-// RunDRS evaluates DRS for all enabled clusters.
+// RunDRS evaluates DRS for all enabled clusters, respecting each cluster's
+// configured evaluation interval (eval_interval_seconds).
 func (s *Scheduler) RunDRS(ctx context.Context) {
 	configs, err := s.queries.ListEnabledDRSConfigs(ctx)
 	if err != nil {
@@ -101,7 +104,23 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 		return
 	}
 
+	now := time.Now()
+
 	for _, cfg := range configs {
+		// Respect the per-cluster evaluation interval.
+		interval := time.Duration(cfg.EvalIntervalSeconds) * time.Second
+		if interval <= 0 {
+			interval = 300 * time.Second // default 5 minutes
+		}
+
+		if lastEval, ok := s.drsLastEval[cfg.ClusterID]; ok {
+			if now.Sub(lastEval) < interval {
+				continue
+			}
+		}
+
+		s.drsLastEval[cfg.ClusterID] = now
+
 		recommendations, err := s.drsEngine.Evaluate(ctx, cfg.ClusterID)
 		if err != nil {
 			s.logger.Error("DRS evaluation failed",

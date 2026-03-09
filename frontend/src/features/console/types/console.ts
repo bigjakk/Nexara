@@ -1,6 +1,6 @@
 export type ConsoleType = "node_shell" | "vm_serial" | "ct_attach" | "vm_vnc" | "ct_vnc";
 
-export type ConsoleStatus = "connecting" | "connected" | "disconnected" | "error";
+export type ConsoleStatus = "connecting" | "connected" | "disconnected" | "reconnecting" | "error";
 
 export type ConsoleResourceKind = "vm" | "ct";
 

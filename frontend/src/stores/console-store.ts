@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { apiClient } from "@/lib/api-client";
 import type {
   ConsoleTab,
   ConsoleStatus,
@@ -24,6 +25,8 @@ interface ConsoleActions {
   reconnectTab: (id: string) => void;
   /** Update node for all tabs matching a VM and trigger reconnect. */
   updateTabNode: (clusterID: string, vmid: number, newNode: string) => void;
+  /** Resolve the VM's current node via API and reconnect. */
+  resolveAndReconnect: (id: string) => Promise<void>;
   setWindowMode: (mode: WindowMode) => void;
   setWindowPosition: (pos: { x: number; y: number }) => void;
   setWindowSize: (size: { width: number; height: number }) => void;
@@ -104,6 +107,51 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
           tabs: state.tabs.map((t) =>
             t.clusterID === clusterID && t.vmid === vmid && t.node !== newNode
               ? { ...t, node: newNode, status: "connecting" as ConsoleStatus, reconnectKey: t.reconnectKey + 1 }
+              : t,
+          ),
+        }));
+      },
+
+      resolveAndReconnect: async (id) => {
+        const state = get();
+        const tab = state.tabs.find((t) => t.id === id);
+        if (!tab) return;
+
+        // For VM/CT tabs with a resourceId, resolve the current node before reconnecting.
+        // This handles DRS migrations where the VM has moved to a different node.
+        if (tab.vmid !== undefined && tab.resourceId && tab.kind) {
+          try {
+            const vmEndpoint =
+              tab.kind === "ct"
+                ? `/api/v1/clusters/${tab.clusterID}/containers/${tab.resourceId}`
+                : `/api/v1/clusters/${tab.clusterID}/vms/${tab.resourceId}`;
+            const vm = await apiClient.get<{ node_id: string }>(vmEndpoint);
+
+            const nodesEndpoint = `/api/v1/clusters/${tab.clusterID}/nodes`;
+            const nodes = await apiClient.get<Array<{ id: string; name: string }>>(nodesEndpoint);
+            const resolved = nodes.find((n) => n.id === vm.node_id);
+
+            if (resolved && resolved.name !== tab.node) {
+              // Node changed (migration) — update node and reconnect
+              set((s) => ({
+                tabs: s.tabs.map((t) =>
+                  t.id === id
+                    ? { ...t, node: resolved.name, status: "connecting" as ConsoleStatus, reconnectKey: t.reconnectKey + 1 }
+                    : t,
+                ),
+              }));
+              return;
+            }
+          } catch {
+            // Failed to resolve — reconnect with current node
+          }
+        }
+
+        // Same node or node_shell — just reconnect
+        set((s) => ({
+          tabs: s.tabs.map((t) =>
+            t.id === id
+              ? { ...t, status: "connecting" as ConsoleStatus, reconnectKey: t.reconnectKey + 1 }
               : t,
           ),
         }));

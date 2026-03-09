@@ -154,6 +154,18 @@ vi.mock("../api/vm-queries", () => ({
     data: { running: false },
     isLoading: false,
   }),
+  useConvertToTemplate: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    isError: false,
+    reset: vi.fn(),
+  }),
+  useCloneToTemplate: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    isError: false,
+    reset: vi.fn(),
+  }),
 }));
 
 vi.mock("@/features/clusters/api/cluster-queries", () => ({
@@ -173,6 +185,12 @@ vi.mock("@/features/clusters/api/cluster-queries", () => ({
     data: [],
   }),
   useCPUModels: () => ({
+    data: [],
+  }),
+}));
+
+vi.mock("@/features/storage/api/storage-queries", () => ({
+  useClusterStorage: () => ({
     data: [],
   }),
 }));
@@ -223,6 +241,6 @@ describe("VMDetailPage", () => {
   it("shows action buttons for running VM", () => {
     renderPage();
     expect(screen.getByRole("button", { name: /shutdown/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /clone/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Clone$/i })).toBeInTheDocument();
   });
 });

@@ -24,7 +24,7 @@ interface VMContextMenuProps {
 }
 
 export function VMContextMenu({ target, children }: VMContextMenuProps) {
-  const { openClone, openMigrate, openDestroy, openConfirmAction } =
+  const { openClone, openCloneToTemplate, openDeploy, openMigrate, openDestroy, openConvertToTemplate, openConfirmAction } =
     useVMContextMenuStore();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
@@ -39,7 +39,7 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
   );
 
   const visibleManagement = managementActions.filter((a) =>
-    a.showWhen(normalizedStatus, target.kind),
+    a.showWhen(normalizedStatus, target.kind, target.template),
   );
 
   function handleLifecycleAction(action: VMAction, needsConfirm: boolean, label: string) {
@@ -67,9 +67,12 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
     }
   }
 
-  function handleManagementAction(action: "clone" | "migrate" | "destroy") {
+  function handleManagementAction(action: "clone" | "clone-to-template" | "deploy" | "migrate" | "convert-to-template" | "destroy") {
     if (action === "clone") openClone(target);
+    if (action === "clone-to-template") openCloneToTemplate(target);
+    if (action === "deploy") openDeploy(target);
     if (action === "migrate") openMigrate(target);
+    if (action === "convert-to-template") openConvertToTemplate(target);
     if (action === "destroy") openDestroy(target);
   }
 

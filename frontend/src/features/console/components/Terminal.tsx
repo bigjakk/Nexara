@@ -32,6 +32,8 @@ function buildConsoleWsUrl(
   return `${protocol}//${host}/ws/console?${params.toString()}`;
 }
 
+const MAX_AUTO_RETRIES = 3;
+
 export function Terminal({ tab, visible }: TerminalProps) {
   const { id: tabId, clusterID, node, type, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,6 +41,10 @@ export function Terminal({ tab, visible }: TerminalProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
+  const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
+  const retryCountRef = useRef(0);
+  const intentionalCloseRef = useRef(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const handleResize = useCallback(() => {
     if (fitAddonRef.current && termRef.current && visible) {
@@ -87,6 +93,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
     });
 
     // Connect WebSocket.
+    intentionalCloseRef.current = false;
     const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
@@ -102,6 +109,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
         try {
           const msg = JSON.parse(event.data) as { type: string; message?: string };
           if (msg.type === "connected") {
+            retryCountRef.current = 0;
             updateTabStatus(tabId, "connected");
             // Send initial resize.
             ws.send(
@@ -128,12 +136,26 @@ export function Terminal({ tab, visible }: TerminalProps) {
     };
 
     ws.onclose = () => {
-      updateTabStatus(tabId, "disconnected");
-      term.writeln("\r\n\r\n[Connection closed]");
+      if (intentionalCloseRef.current) return;
+
+      if (retryCountRef.current < MAX_AUTO_RETRIES) {
+        const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
+        retryCountRef.current++;
+        updateTabStatus(tabId, "reconnecting");
+        term.writeln(`\r\n[Connection lost \u2014 reconnecting in ${String(delay / 1000)}s...]`);
+        retryTimerRef.current = setTimeout(() => {
+          void resolveAndReconnect(tabId);
+        }, delay);
+      } else {
+        updateTabStatus(tabId, "disconnected");
+        term.writeln("\r\n\r\n[Connection closed]");
+      }
     };
 
     ws.onerror = () => {
-      updateTabStatus(tabId, "error");
+      if (!intentionalCloseRef.current) {
+        updateTabStatus(tabId, "error");
+      }
     };
 
     // Wire terminal input to WebSocket.
@@ -165,6 +187,8 @@ export function Terminal({ tab, visible }: TerminalProps) {
     observer.observe(containerRef.current);
 
     return () => {
+      intentionalCloseRef.current = true;
+      clearTimeout(retryTimerRef.current);
       observer.disconnect();
       dataDisposable.dispose();
       resizeDisposable.dispose();
@@ -174,7 +198,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
       wsRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [tabId, clusterID, node, type, vmid, reconnectKey, updateTabStatus]);
+  }, [tabId, clusterID, node, type, vmid, reconnectKey, updateTabStatus, resolveAndReconnect]);
 
   // Re-fit when visibility changes.
   useEffect(() => {

@@ -15,8 +15,11 @@ import { useClusterMetrics } from "@/hooks/useMetrics";
 import { useVM, useSetResourceConfig, useGuestAgentInfo, useResourcePools, useSetVMPool } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
 import { CloneDialog } from "../components/CloneDialog";
+import { CloneToTemplateDialog } from "../components/CloneToTemplateDialog";
+import { DeployTemplateDialog } from "../components/DeployTemplateDialog";
 import { MigrateJobDialog } from "../components/MigrateJobDialog";
 import { DestroyDialog } from "../components/DestroyDialog";
+import { ConvertToTemplateDialog } from "../components/ConvertToTemplateDialog";
 import { SnapshotPanel } from "../components/SnapshotPanel";
 import { CloudInitPanel } from "../components/CloudInitPanel";
 import { HardwarePanel } from "../components/HardwarePanel";
@@ -49,7 +52,7 @@ export function VMDetailPage() {
     vmId: string;
     kind: string;
   }>();
-  const kind: ResourceKind = rawKind === "ct" ? "ct" : "vm";
+  const kind: ResourceKind = rawKind === "ct" || rawKind === "lxc" ? "ct" : "vm";
   const { data: vm, isLoading, error } = useVM(clusterId, vmId, kind);
 
   const clusterMetrics = useClusterMetrics(clusterId);
@@ -74,8 +77,11 @@ export function VMDetailPage() {
   }, [nodeName, clusterId, vm, updateTabNode]);
 
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [cloneToTemplateOpen, setCloneToTemplateOpen] = useState(false);
+  const [deployOpen, setDeployOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [destroyOpen, setDestroyOpen] = useState(false);
+  const [convertTemplateOpen, setConvertTemplateOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [newName, setNewName] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -222,9 +228,13 @@ export function VMDetailPage() {
         kind={kind}
         status={vm.status}
         name={vm.name}
+        template={vm.template}
         onClone={() => { setCloneOpen(true); }}
+        onCloneToTemplate={() => { setCloneToTemplateOpen(true); }}
+        onDeploy={() => { setDeployOpen(true); }}
         onMigrate={() => { setMigrateOpen(true); }}
         onDestroy={() => { setDestroyOpen(true); }}
+        onConvertToTemplate={() => { setConvertTemplateOpen(true); }}
       />
 
       {/* Tabs */}
@@ -334,6 +344,33 @@ export function VMDetailPage() {
       <DestroyDialog
         open={destroyOpen}
         onOpenChange={setDestroyOpen}
+        clusterId={clusterId}
+        resourceId={vmId}
+        kind={kind}
+        resourceName={vm.name}
+      />
+
+      <CloneToTemplateDialog
+        open={cloneToTemplateOpen}
+        onOpenChange={setCloneToTemplateOpen}
+        clusterId={clusterId}
+        resourceId={vmId}
+        kind={kind}
+        sourceName={vm.name}
+      />
+
+      <DeployTemplateDialog
+        open={deployOpen}
+        onOpenChange={setDeployOpen}
+        clusterId={clusterId}
+        vmId={vmId}
+        kind={kind}
+        templateName={vm.name}
+      />
+
+      <ConvertToTemplateDialog
+        open={convertTemplateOpen}
+        onOpenChange={setConvertTemplateOpen}
         clusterId={clusterId}
         resourceId={vmId}
         kind={kind}

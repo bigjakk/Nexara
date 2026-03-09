@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/url"
@@ -274,6 +275,195 @@ func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
 		UPID:   upid,
 		Status: "dispatched",
 	})
+}
+
+// ConvertToTemplate handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/convert-to-template.
+// This converts a stopped VM to a template. The operation is irreversible in Proxmox.
+func (h *VMHandler) ConvertToTemplate(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "vm"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	if vm.Template {
+		return fiber.NewError(fiber.StatusConflict, "Resource is already a template")
+	}
+
+	if vm.Status != "stopped" {
+		return fiber.NewError(fiber.StatusConflict, "Resource must be stopped before converting to template")
+	}
+
+	var upid string
+	if vm.Type == "lxc" {
+		upid, err = pxClient.ConvertCTToTemplate(c.Context(), node.Name, int(vm.Vmid))
+	} else {
+		upid, err = pxClient.ConvertVMToTemplate(c.Context(), node.Name, int(vm.Vmid))
+	}
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
+	h.auditLog(c, cluster.ID, vm.ID.String(), "convert-to-template", detailsJSON)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "convert-to-template")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// CloneToTemplate handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template.
+// This clones a VM/CT and then automatically converts the clone to a template.
+func (h *VMHandler) CloneToTemplate(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "vm"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	var req vmCloneRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.NewID <= 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "new_id is required and must be positive")
+	}
+
+	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	// Step 1: Clone the VM/CT
+	var cloneUpid string
+	if vm.Type == "lxc" {
+		cloneUpid, err = pxClient.CloneCT(c.Context(), node.Name, int(vm.Vmid), proxmox.CloneParams{
+			NewID:   req.NewID,
+			Name:    req.Name,
+			Target:  req.Target,
+			Full:    req.Full,
+			Storage: req.Storage,
+		})
+	} else {
+		cloneUpid, err = pxClient.CloneVM(c.Context(), node.Name, int(vm.Vmid), proxmox.CloneParams{
+			NewID:   req.NewID,
+			Name:    req.Name,
+			Target:  req.Target,
+			Full:    req.Full,
+			Storage: req.Storage,
+		})
+	}
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	detailsJSON, _ := json.Marshal(map[string]any{
+		"upid": cloneUpid, "node": node.Name, "vmid": vm.Vmid,
+		"new_id": req.NewID, "clone_to_template": true,
+	})
+	h.auditLog(c, cluster.ID, vm.ID.String(), "clone-to-template", detailsJSON)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "clone-to-template")
+
+	// Step 2: Background goroutine polls clone task then converts clone to template
+	targetNode := node.Name
+	if req.Target != "" {
+		targetNode = req.Target
+	}
+	go h.convertCloneToTemplate(pxClient, targetNode, req.NewID, vm.Type, cluster.ID.String())
+
+	return c.JSON(vmActionResponse{
+		UPID:   cloneUpid,
+		Status: "dispatched",
+	})
+}
+
+// convertCloneToTemplate polls a clone task and converts the result to a template.
+func (h *VMHandler) convertCloneToTemplate(pxClient *proxmox.Client, node string, newVMID int, vmType string, clusterID string) {
+	// Use a detached context with a generous timeout for the background operation
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	// Wait for the clone to appear as a stopped VM on the node (Proxmox doesn't
+	// return a UPID for template conversion if the VM doesn't exist yet)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Check if the clone VM exists and is stopped by trying to get its status
+			var vms []proxmox.VirtualMachine
+			var cts []proxmox.Container
+			var err error
+
+			if vmType == "lxc" {
+				cts, err = pxClient.GetContainers(ctx, node)
+				if err != nil {
+					continue
+				}
+				found := false
+				for _, ct := range cts {
+					if ct.VMID == newVMID && ct.Status == "stopped" && ct.Template == 0 {
+						found = true
+						break
+					}
+				}
+				if !found {
+					continue
+				}
+			} else {
+				vms, err = pxClient.GetVMs(ctx, node)
+				if err != nil {
+					continue
+				}
+				found := false
+				for _, vm := range vms {
+					if vm.VMID == newVMID && vm.Status == "stopped" && vm.Template == 0 {
+						found = true
+						break
+					}
+				}
+				if !found {
+					continue
+				}
+			}
+
+			// Clone exists and is stopped — convert to template
+			if vmType == "lxc" {
+				_, _ = pxClient.ConvertCTToTemplate(ctx, node, newVMID)
+			} else {
+				_, _ = pxClient.ConvertVMToTemplate(ctx, node, newVMID)
+			}
+			h.eventPub.ClusterEvent(ctx, clusterID, events.KindInventoryChange, "vm", "", "clone-to-template-complete")
+			return
+		}
+	}
 }
 
 // DestroyVM handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id.

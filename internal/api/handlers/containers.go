@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -265,6 +266,148 @@ func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
 		UPID:   upid,
 		Status: "dispatched",
 	})
+}
+
+// ConvertToTemplate handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/convert-to-template.
+// This converts a stopped container to a template. The operation is irreversible in Proxmox.
+func (h *ContainerHandler) ConvertToTemplate(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "container"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	if ct.Template {
+		return fiber.NewError(fiber.StatusConflict, "Container is already a template")
+	}
+
+	if ct.Status != "stopped" {
+		return fiber.NewError(fiber.StatusConflict, "Container must be stopped before converting to template")
+	}
+
+	upid, err := pxClient.ConvertCTToTemplate(c.Context(), node.Name, int(ct.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": ct.Vmid})
+	h.auditLog(c, cluster.ID, ct.ID.String(), "convert-to-template", detailsJSON)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "container", ct.ID.String(), "convert-to-template")
+
+	return c.JSON(vmActionResponse{
+		UPID:   upid,
+		Status: "dispatched",
+	})
+}
+
+// CloneToTemplate handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone-to-template.
+// This clones a container and then automatically converts the clone to a template.
+func (h *ContainerHandler) CloneToTemplate(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "container"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	var req ctCloneRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.NewID <= 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "new_id is required and must be positive")
+	}
+
+	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	cloneUpid, err := pxClient.CloneCT(c.Context(), node.Name, int(ct.Vmid), proxmox.CloneParams{
+		NewID:   req.NewID,
+		Name:    req.Name,
+		Target:  req.Target,
+		Full:    req.Full,
+		Storage: req.Storage,
+	})
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	detailsJSON, _ := json.Marshal(map[string]any{
+		"upid": cloneUpid, "node": node.Name, "vmid": ct.Vmid,
+		"new_id": req.NewID, "clone_to_template": true,
+	})
+	h.auditLog(c, cluster.ID, ct.ID.String(), "clone-to-template", detailsJSON)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "container", ct.ID.String(), "clone-to-template")
+
+	// Background: poll clone task then convert the clone to template
+	targetNode := node.Name
+	if req.Target != "" {
+		targetNode = req.Target
+	}
+	go h.convertCloneToTemplate(pxClient, targetNode, req.NewID, cluster.ID.String())
+
+	return c.JSON(vmActionResponse{
+		UPID:   cloneUpid,
+		Status: "dispatched",
+	})
+}
+
+// convertCloneToTemplate polls until the cloned CT appears then converts it to a template.
+func (h *ContainerHandler) convertCloneToTemplate(pxClient *proxmox.Client, node string, newVMID int, clusterID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cts, err := pxClient.GetContainers(ctx, node)
+			if err != nil {
+				continue
+			}
+			found := false
+			for _, ct := range cts {
+				if ct.VMID == newVMID && ct.Status == "stopped" && ct.Template == 0 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+
+			_, _ = pxClient.ConvertCTToTemplate(ctx, node, newVMID)
+			h.eventPub.ClusterEvent(ctx, clusterID, events.KindInventoryChange, "container", "", "clone-to-template-complete")
+			return
+		}
+	}
 }
 
 // DestroyContainer handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id.

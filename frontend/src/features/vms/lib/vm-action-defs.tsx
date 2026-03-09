@@ -9,6 +9,8 @@ import {
   Copy,
   ArrowRightLeft,
   Trash2,
+  FileBox,
+  Rocket,
 } from "lucide-react";
 import type { VMAction, ResourceKind } from "../types/vm";
 
@@ -21,14 +23,14 @@ export interface ActionConfig {
   showWhen: (status: string, kind: ResourceKind) => boolean;
 }
 
-export type ManagementAction = "clone" | "migrate" | "destroy";
+export type ManagementAction = "clone" | "clone-to-template" | "deploy" | "migrate" | "convert-to-template" | "destroy";
 
 export interface ManagementActionConfig {
   action: ManagementAction;
   label: string;
   icon: React.ReactNode;
   variant: "outline" | "destructive";
-  showWhen: (status: string, kind: ResourceKind) => boolean;
+  showWhen: (status: string, kind: ResourceKind, template?: boolean) => boolean;
 }
 
 export const lifecycleActions: ActionConfig[] = [
@@ -92,6 +94,13 @@ export const lifecycleActions: ActionConfig[] = [
 
 export const managementActions: ManagementActionConfig[] = [
   {
+    action: "deploy",
+    label: "Deploy from Template",
+    icon: <Rocket className="h-4 w-4" />,
+    variant: "outline",
+    showWhen: (_s, _k, template) => template === true,
+  },
+  {
     action: "clone",
     label: "Clone",
     icon: <Copy className="h-4 w-4" />,
@@ -99,11 +108,25 @@ export const managementActions: ManagementActionConfig[] = [
     showWhen: () => true,
   },
   {
+    action: "clone-to-template",
+    label: "Clone to Template",
+    icon: <FileBox className="h-4 w-4" />,
+    variant: "outline",
+    showWhen: (_s, _k, template) => !template,
+  },
+  {
     action: "migrate",
     label: "Migrate",
     icon: <ArrowRightLeft className="h-4 w-4" />,
     variant: "outline",
     showWhen: () => true,
+  },
+  {
+    action: "convert-to-template",
+    label: "Convert to Template",
+    icon: <FileBox className="h-4 w-4" />,
+    variant: "outline",
+    showWhen: (s, _k, template) => s === "stopped" && !template,
   },
   {
     action: "destroy",

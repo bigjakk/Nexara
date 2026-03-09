@@ -76,6 +76,7 @@ function toContextTarget(row: InventoryRow): VMContextTarget | null {
     kind: row.type === "ct" ? "ct" : "vm",
     status: row.status,
     currentNode: row.nodeName,
+    template: row.template,
   };
 }
 
@@ -87,7 +88,7 @@ interface MenuState {
 
 function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const { openClone, openMigrate, openDestroy, openConfirmAction } =
+  const { openClone, openCloneToTemplate, openDeploy, openMigrate, openDestroy, openConvertToTemplate, openConfirmAction } =
     useVMContextMenuStore();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
@@ -102,7 +103,7 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
     a.showWhen(normalizedStatus, target.kind),
   );
   const visibleManagement = managementActions.filter((a) =>
-    a.showWhen(normalizedStatus, target.kind),
+    a.showWhen(normalizedStatus, target.kind, target.template),
   );
 
   useEffect(() => {
@@ -154,9 +155,12 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
     onClose();
   }
 
-  function handleManagementAction(action: "clone" | "migrate" | "destroy") {
+  function handleManagementAction(action: "clone" | "clone-to-template" | "deploy" | "migrate" | "convert-to-template" | "destroy") {
     if (action === "clone") openClone(target);
+    if (action === "clone-to-template") openCloneToTemplate(target);
+    if (action === "deploy") openDeploy(target);
     if (action === "migrate") openMigrate(target);
+    if (action === "convert-to-template") openConvertToTemplate(target);
     if (action === "destroy") openDestroy(target);
     onClose();
   }

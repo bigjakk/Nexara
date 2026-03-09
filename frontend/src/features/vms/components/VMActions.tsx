@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, ArrowRightLeft, Trash2 } from "lucide-react";
+import { Copy, ArrowRightLeft, Trash2, FileBox, Rocket } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,9 +38,13 @@ interface VMActionsProps {
   kind: ResourceKind;
   status: string;
   name: string;
+  template?: boolean;
   onClone: () => void;
+  onCloneToTemplate?: () => void;
+  onDeploy?: () => void;
   onMigrate: () => void;
   onDestroy: () => void;
+  onConvertToTemplate?: () => void;
 }
 
 
@@ -50,9 +54,13 @@ export function VMActions({
   kind,
   status,
   name,
+  template,
   onClone,
+  onCloneToTemplate,
+  onDeploy,
   onMigrate,
   onDestroy,
+  onConvertToTemplate,
 }: VMActionsProps) {
   const queryClient = useQueryClient();
   const actionMutation = useVMAction();
@@ -130,6 +138,19 @@ export function VMActions({
 
         <div className="h-6 w-px bg-border" />
 
+        {template && onDeploy && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isPending}
+            onClick={onDeploy}
+          >
+            <Rocket className="h-4 w-4" />
+            Deploy from Template
+          </Button>
+        )}
+
         <Button
           variant="outline"
           size="sm"
@@ -140,6 +161,32 @@ export function VMActions({
           <Copy className="h-4 w-4" />
           Clone
         </Button>
+
+        {!template && onCloneToTemplate && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isPending}
+            onClick={onCloneToTemplate}
+          >
+            <FileBox className="h-4 w-4" />
+            Clone to Template
+          </Button>
+        )}
+
+        {!template && normalizedStatus === "stopped" && onConvertToTemplate && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isPending}
+            onClick={onConvertToTemplate}
+          >
+            <FileBox className="h-4 w-4" />
+            Convert to Template
+          </Button>
+        )}
 
         <Button
           variant="outline"

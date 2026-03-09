@@ -146,6 +146,23 @@ func (c *Client) DestroyVM(ctx context.Context, node string, vmid int) (string, 
 	return upid, nil
 }
 
+// ConvertVMToTemplate converts a QEMU VM to a template and returns the task UPID.
+// The VM must be stopped before conversion. This operation is irreversible in Proxmox.
+func (c *Client) ConvertVMToTemplate(ctx context.Context, node string, vmid int) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/template"
+	var upid string
+	if err := c.doPost(ctx, path, nil, &upid); err != nil {
+		return "", fmt.Errorf("convert VM %d to template on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
 // ctStatusAction sends a POST to /nodes/{node}/lxc/{vmid}/status/{action} and returns the UPID.
 func (c *Client) ctStatusAction(ctx context.Context, node string, vmid int, action string) (string, error) {
 	if err := validateNodeName(node); err != nil {
@@ -239,6 +256,23 @@ func (c *Client) DestroyCT(ctx context.Context, node string, vmid int) (string, 
 	var upid string
 	if err := c.doDelete(ctx, path, &upid); err != nil {
 		return "", fmt.Errorf("destroy CT %d on %s: %w", vmid, node, err)
+	}
+	return upid, nil
+}
+
+// ConvertCTToTemplate converts an LXC container to a template and returns the task UPID.
+// The container must be stopped before conversion. This operation is irreversible in Proxmox.
+func (c *Client) ConvertCTToTemplate(ctx context.Context, node string, vmid int) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return "", err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/template"
+	var upid string
+	if err := c.doPost(ctx, path, nil, &upid); err != nil {
+		return "", fmt.Errorf("convert CT %d to template on %s: %w", vmid, node, err)
 	}
 	return upid, nil
 }

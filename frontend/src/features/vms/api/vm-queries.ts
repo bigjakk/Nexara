@@ -121,6 +121,70 @@ export function useCloneVM() {
   });
 }
 
+// --- Clone to Template ---
+
+interface CloneToTemplateParams {
+  clusterId: string;
+  resourceId: string;
+  kind: ResourceKind;
+  body: CloneRequest;
+}
+
+export function useCloneToTemplate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, resourceId, kind, body }: CloneToTemplateParams) => {
+      const base =
+        kind === "ct"
+          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/clone-to-template`
+          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/clone-to-template`;
+      return apiClient.post<VMActionResponse>(base, body);
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vms"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "containers"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vmids"],
+      });
+    },
+  });
+}
+
+// --- Convert to Template ---
+
+interface ConvertToTemplateParams {
+  clusterId: string;
+  resourceId: string;
+  kind: ResourceKind;
+}
+
+export function useConvertToTemplate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, resourceId, kind }: ConvertToTemplateParams) => {
+      const base =
+        kind === "ct"
+          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/convert-to-template`
+          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/convert-to-template`;
+      return apiClient.post<VMActionResponse>(base, {});
+    },
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "vms"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "containers"],
+      });
+    },
+  });
+}
+
 // --- Migrate ---
 
 interface MigrateParams {
