@@ -132,4 +132,8 @@ func (s *Server) handleWS(conn *websocket.Conn) {
 
 	// readPump blocks until the connection is closed.
 	client.readPump()
+
+	// Wait for writePump to finish before returning, so Fiber's
+	// releaseConn doesn't reset the conn while writePump still uses it.
+	<-client.done
 }

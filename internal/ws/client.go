@@ -23,6 +23,7 @@ type Client struct {
 	conn      *websocket.Conn
 	hub       *Hub
 	send      chan []byte
+	done      chan struct{} // closed when writePump exits
 	closeOnce sync.Once
 	logger    *slog.Logger
 
@@ -44,6 +45,7 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub, logger *slog.Logger, p
 		conn:         conn,
 		hub:          hub,
 		send:         make(chan []byte, clientSendBuffer),
+		done:         make(chan struct{}),
 		logger:       logger,
 		pingInterval: pingInterval,
 		pongTimeout:  pongTimeout,
@@ -91,6 +93,7 @@ func (c *Client) writePump() {
 	defer func() {
 		ticker.Stop()
 		c.conn.Close()
+		close(c.done)
 	}()
 
 	for {
