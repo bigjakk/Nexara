@@ -26,6 +26,10 @@ type Config struct {
 	WSPingInterval         time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
 	WSPongTimeout          time.Duration `envconfig:"WS_PONG_TIMEOUT" default:"30s"`
 	DataDir                string        `envconfig:"DATA_DIR" default:"/data/nexara"`
+	MaxUploadSize          int64         `envconfig:"MAX_UPLOAD_SIZE" default:"16106127360"`
+	WSMaxConnections       int           `envconfig:"WS_MAX_CONNECTIONS" default:"1000"`
+	PprofEnabled           bool          `envconfig:"PPROF_ENABLED" default:"false"`
+	PprofPort              string        `envconfig:"PPROF_PORT" default:"6060"`
 }
 
 // NewMetricsTicker creates a time.Ticker using the configured metrics collection interval.

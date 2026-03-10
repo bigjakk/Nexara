@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/config"
+	"github.com/bigjakk/nexara/internal/debug"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/scheduler"
@@ -60,6 +61,11 @@ func main() {
 			eventPub = events.NewPublisher(rdb, logger.With("component", "events"))
 			defer rdb.Close()
 		}
+	}
+
+	// Start pprof if enabled.
+	if cfg.PprofEnabled {
+		debug.StartPprof(cfg.PprofPort, logger)
 	}
 
 	sched := scheduler.New(queries, cfg.EncryptionKey, logger, eventPub)

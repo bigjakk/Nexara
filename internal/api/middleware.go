@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -14,6 +15,15 @@ import (
 func (s *Server) setupMiddleware() {
 	// Recover from panics.
 	s.app.Use(recover.New())
+
+	// Security headers (proxy-agnostic — always present regardless of reverse proxy choice).
+	s.app.Use(func(c *fiber.Ctx) error {
+		c.Set("X-Content-Type-Options", "nosniff")
+		c.Set("X-Frame-Options", "DENY")
+		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		return c.Next()
+	})
 
 	// Add unique request ID.
 	s.app.Use(requestid.New())
@@ -29,6 +39,23 @@ func (s *Server) setupMiddleware() {
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 	}))
+
+	// Body size limit for non-upload API traffic (10 MB).
+	// Upload endpoints use the global BodyLimit (MaxUploadSize, default 15GB).
+	const apiBodyLimit = 10 * 1024 * 1024
+	s.app.Use(func(c *fiber.Ctx) error {
+		if strings.Contains(c.Path(), "/storage/") && strings.HasSuffix(c.Path(), "/upload") {
+			return c.Next()
+		}
+		cl := c.Get("Content-Length")
+		if cl != "" {
+			size, err := strconv.ParseInt(cl, 10, 64)
+			if err == nil && size > apiBodyLimit {
+				return fiber.ErrRequestEntityTooLarge
+			}
+		}
+		return c.Next()
+	})
 
 	// Rate limiting (in-memory storage).
 	s.app.Use(limiter.New(limiter.Config{

@@ -18,7 +18,7 @@ func TestConsoleEndpointRequiresAuth(t *testing.T) {
 	// Set up a server with console handler set to nil (no DB).
 	// The /ws/console route should still require auth.
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	hub := NewHub(logger)
+	hub := NewHub(logger, 0)
 	hub.Run()
 	defer hub.Stop()
 
@@ -84,7 +84,7 @@ func TestConsoleEndpointRequiresAuth(t *testing.T) {
 func TestConsoleRouteRegistered(t *testing.T) {
 	// Verify the /ws/console endpoint exists (responds to HTTP GET, even if not a WS upgrade).
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	hub := NewHub(logger)
+	hub := NewHub(logger, 0)
 	hub.Run()
 	defer hub.Stop()
 

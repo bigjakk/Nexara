@@ -19,7 +19,8 @@ type Hub struct {
 	broadcastCh  chan broadcastMsg
 	stopCh       chan struct{}
 
-	logger *slog.Logger
+	logger         *slog.Logger
+	maxConnections int
 
 	// wg tracks the run goroutine for graceful shutdown.
 	wg sync.WaitGroup
@@ -35,16 +36,17 @@ type broadcastMsg struct {
 	payload json.RawMessage
 }
 
-// NewHub creates a new Hub.
-func NewHub(logger *slog.Logger) *Hub {
+// NewHub creates a new Hub with an optional max connection limit (0 = unlimited).
+func NewHub(logger *slog.Logger, maxConnections int) *Hub {
 	return &Hub{
-		registerCh:   make(chan *Client, 64),
-		unregisterCh: make(chan *Client, 64),
-		subscribeCh:  make(chan subscribeReq, 64),
-		unsubCh:      make(chan subscribeReq, 64),
-		broadcastCh:  make(chan broadcastMsg, 256),
-		stopCh:       make(chan struct{}),
-		logger:       logger,
+		registerCh:     make(chan *Client, 64),
+		unregisterCh:   make(chan *Client, 64),
+		subscribeCh:    make(chan subscribeReq, 64),
+		unsubCh:        make(chan subscribeReq, 64),
+		broadcastCh:    make(chan broadcastMsg, 256),
+		stopCh:         make(chan struct{}),
+		logger:         logger,
+		maxConnections: maxConnections,
 	}
 }
 
@@ -116,6 +118,11 @@ func (h *Hub) run() {
 			return
 
 		case c := <-h.registerCh:
+			if h.maxConnections > 0 && len(st.clients) >= h.maxConnections {
+				h.logger.Warn("rejecting client, max connections reached", "client", c.id, "max", h.maxConnections)
+				c.closeSend()
+				continue
+			}
 			st.clients[c] = struct{}{}
 			h.logger.Debug("client registered", "client", c.id)
 

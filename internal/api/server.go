@@ -197,7 +197,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	s.app = fiber.New(fiber.Config{
 		ErrorHandler:          errorHandler,
 		DisableStartupMessage: true,
-		BodyLimit:             4 * 1024 * 1024 * 1024, // 4 GB for ISO uploads
+		BodyLimit:             int(cfg.MaxUploadSize), // Max upload size (default 15GB) for ISO uploads
 	})
 
 	s.setupMiddleware()

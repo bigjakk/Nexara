@@ -12,6 +12,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/collector"
 	"github.com/bigjakk/nexara/internal/config"
+	"github.com/bigjakk/nexara/internal/debug"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 )
@@ -53,6 +54,11 @@ func main() {
 
 	if err := redisClient.Ping(ctx).Err(); err != nil {
 		logger.Warn("Redis not reachable, metrics will still be collected but not published", "error", err)
+	}
+
+	// Start pprof if enabled.
+	if cfg.PprofEnabled {
+		debug.StartPprof(cfg.PprofPort, logger)
 	}
 
 	queries := db.New(pool)

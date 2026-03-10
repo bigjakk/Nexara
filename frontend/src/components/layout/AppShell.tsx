@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LogOut, LogOutIcon, ShieldCheck, User } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -126,7 +127,9 @@ export function AppShell() {
         </header>
         <Separator />
         <main className="flex-1 overflow-auto p-6">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
         <TaskLogPanel />
         <TaskProgressDialog />

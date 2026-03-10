@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"github.com/bigjakk/nexara/internal/api"
 	"github.com/bigjakk/nexara/internal/config"
 	"github.com/bigjakk/nexara/internal/db"
+	"github.com/bigjakk/nexara/internal/debug"
 )
 
 func main() {
@@ -64,6 +66,11 @@ func main() {
 			log.Println("connected to Redis")
 			defer rdb.Close()
 		}
+	}
+
+	// Start pprof if enabled.
+	if cfg.PprofEnabled {
+		debug.StartPprof(cfg.PprofPort, slog.Default())
 	}
 
 	// Create and start the server.

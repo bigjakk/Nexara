@@ -41,7 +41,7 @@ func assertNoMessage(t *testing.T, c *Client) {
 }
 
 func TestHubSubscribeAndBroadcast(t *testing.T) {
-	h := NewHub(testLogger())
+	h := NewHub(testLogger(), 0)
 	h.Run()
 	defer h.Stop()
 
@@ -82,7 +82,7 @@ func TestHubSubscribeAndBroadcast(t *testing.T) {
 }
 
 func TestHubUnsubscribe(t *testing.T) {
-	h := NewHub(testLogger())
+	h := NewHub(testLogger(), 0)
 	h.Run()
 	defer h.Stop()
 
@@ -104,7 +104,7 @@ func TestHubUnsubscribe(t *testing.T) {
 }
 
 func TestHubUnregisterCleansUpRooms(t *testing.T) {
-	h := NewHub(testLogger())
+	h := NewHub(testLogger(), 0)
 	h.Run()
 	defer h.Stop()
 
@@ -129,7 +129,7 @@ func TestHubUnregisterCleansUpRooms(t *testing.T) {
 }
 
 func TestHubReconnectBuffer(t *testing.T) {
-	h := NewHub(testLogger())
+	h := NewHub(testLogger(), 0)
 	h.Run()
 	defer h.Stop()
 
@@ -173,7 +173,7 @@ func TestHubReconnectBuffer(t *testing.T) {
 }
 
 func TestHubSlowClientEviction(t *testing.T) {
-	h := NewHub(testLogger())
+	h := NewHub(testLogger(), 0)
 	h.Run()
 	defer h.Stop()
 

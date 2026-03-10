@@ -1,4 +1,4 @@
-.PHONY: build test lint generate migrate-up migrate-down docker-build docker-up docker-down clean
+.PHONY: build test lint generate migrate-up migrate-down docker-build docker-up docker-down clean audit audit-go audit-npm coverage-html
 
 # Go parameters
 GOCMD=go
@@ -66,6 +66,23 @@ docker-down:
 ## clean: Remove build artifacts
 clean:
 	rm -rf bin/ coverage.out
+
+## audit-go: Run Go vulnerability check
+audit-go:
+	govulncheck ./...
+
+## audit-npm: Run npm audit on frontend
+audit-npm:
+	cd frontend && npm audit
+
+## audit: Run all security audits
+audit: audit-go audit-npm
+
+## coverage-html: Generate HTML coverage report
+coverage-html:
+	$(GOTEST) -race -coverprofile=coverage.out ./...
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
 
 ## help: Show this help
 help:

@@ -2,35 +2,117 @@ import { lazy, Suspense } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AppShell } from "@/components/layout/AppShell";
+import { PageLoader } from "@/components/PageLoader";
 import { LoginPage } from "@/features/auth/pages/LoginPage";
 import { RegisterPage } from "@/features/auth/pages/RegisterPage";
 import { DashboardPage } from "@/features/dashboard/pages/DashboardPage";
-import { ClustersListPage } from "@/features/clusters/pages/ClustersListPage";
-import { ClusterDetailPage } from "@/features/clusters/pages/ClusterDetailPage";
-import { NodeDetailPage } from "@/features/clusters/pages/NodeDetailPage";
-import { InventoryPage } from "@/features/inventory/pages/InventoryPage";
-import { VMDetailPage } from "@/features/vms/pages/VMDetailPage";
-import { StoragePage } from "@/features/storage/pages/StoragePage";
-import { BackupDashboardPage } from "@/features/backup/pages/BackupDashboardPage";
-import { EventsPage } from "@/features/events/pages/EventsPage";
-import { UsersPage } from "@/features/admin/pages/UsersPage";
-import { RolesPage } from "@/features/admin/pages/RolesPage";
-import { LDAPPage } from "@/features/admin/pages/LDAPPage";
-import { OIDCPage } from "@/features/admin/pages/OIDCPage";
-import { BrandingPage } from "@/features/admin/pages/BrandingPage";
 import { OIDCCallbackPage } from "@/features/auth/pages/OIDCCallbackPage";
-import { SecurityPage } from "@/features/settings/pages/SecurityPage";
-import { AppearancePage } from "@/features/settings/pages/AppearancePage";
-import { SecurityDashboardPage } from "@/features/security/pages/SecurityDashboardPage";
-import { AlertsPage } from "@/features/alerts/pages/AlertsPage";
-import { ReportsPage } from "@/features/reports/pages/ReportsPage";
-import { TopologyPage } from "@/features/topology/pages/TopologyPage";
 
+// Lazy-loaded route pages — keeps initial bundle small.
+const ClustersListPage = lazy(() =>
+  import("@/features/clusters/pages/ClustersListPage").then((m) => ({
+    default: m.ClustersListPage,
+  })),
+);
+const ClusterDetailPage = lazy(() =>
+  import("@/features/clusters/pages/ClusterDetailPage").then((m) => ({
+    default: m.ClusterDetailPage,
+  })),
+);
+const NodeDetailPage = lazy(() =>
+  import("@/features/clusters/pages/NodeDetailPage").then((m) => ({
+    default: m.NodeDetailPage,
+  })),
+);
+const InventoryPage = lazy(() =>
+  import("@/features/inventory/pages/InventoryPage").then((m) => ({
+    default: m.InventoryPage,
+  })),
+);
+const VMDetailPage = lazy(() =>
+  import("@/features/vms/pages/VMDetailPage").then((m) => ({
+    default: m.VMDetailPage,
+  })),
+);
+const StoragePage = lazy(() =>
+  import("@/features/storage/pages/StoragePage").then((m) => ({
+    default: m.StoragePage,
+  })),
+);
+const BackupDashboardPage = lazy(() =>
+  import("@/features/backup/pages/BackupDashboardPage").then((m) => ({
+    default: m.BackupDashboardPage,
+  })),
+);
+const EventsPage = lazy(() =>
+  import("@/features/events/pages/EventsPage").then((m) => ({
+    default: m.EventsPage,
+  })),
+);
 const ConsolePage = lazy(() =>
   import("@/features/console/pages/ConsolePage").then((m) => ({
     default: m.ConsolePage,
   })),
 );
+const UsersPage = lazy(() =>
+  import("@/features/admin/pages/UsersPage").then((m) => ({
+    default: m.UsersPage,
+  })),
+);
+const RolesPage = lazy(() =>
+  import("@/features/admin/pages/RolesPage").then((m) => ({
+    default: m.RolesPage,
+  })),
+);
+const LDAPPage = lazy(() =>
+  import("@/features/admin/pages/LDAPPage").then((m) => ({
+    default: m.LDAPPage,
+  })),
+);
+const OIDCPage = lazy(() =>
+  import("@/features/admin/pages/OIDCPage").then((m) => ({
+    default: m.OIDCPage,
+  })),
+);
+const BrandingPage = lazy(() =>
+  import("@/features/admin/pages/BrandingPage").then((m) => ({
+    default: m.BrandingPage,
+  })),
+);
+const SecurityPage = lazy(() =>
+  import("@/features/settings/pages/SecurityPage").then((m) => ({
+    default: m.SecurityPage,
+  })),
+);
+const AppearancePage = lazy(() =>
+  import("@/features/settings/pages/AppearancePage").then((m) => ({
+    default: m.AppearancePage,
+  })),
+);
+const SecurityDashboardPage = lazy(() =>
+  import("@/features/security/pages/SecurityDashboardPage").then((m) => ({
+    default: m.SecurityDashboardPage,
+  })),
+);
+const AlertsPage = lazy(() =>
+  import("@/features/alerts/pages/AlertsPage").then((m) => ({
+    default: m.AlertsPage,
+  })),
+);
+const ReportsPage = lazy(() =>
+  import("@/features/reports/pages/ReportsPage").then((m) => ({
+    default: m.ReportsPage,
+  })),
+);
+const TopologyPage = lazy(() =>
+  import("@/features/topology/pages/TopologyPage").then((m) => ({
+    default: m.TopologyPage,
+  })),
+);
+
+function LazyPage({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
+}
 
 const router = createBrowserRouter([
   {
@@ -57,87 +139,83 @@ const router = createBrowserRouter([
           },
           {
             path: "clusters",
-            element: <ClustersListPage />,
+            element: <LazyPage><ClustersListPage /></LazyPage>,
           },
           {
             path: "clusters/:clusterId",
-            element: <ClusterDetailPage />,
+            element: <LazyPage><ClusterDetailPage /></LazyPage>,
           },
           {
             path: "clusters/:clusterId/nodes/:nodeId",
-            element: <NodeDetailPage />,
+            element: <LazyPage><NodeDetailPage /></LazyPage>,
           },
           {
             path: "inventory",
-            element: <InventoryPage />,
+            element: <LazyPage><InventoryPage /></LazyPage>,
           },
           {
             path: "inventory/:kind/:clusterId/:vmId",
-            element: <VMDetailPage />,
+            element: <LazyPage><VMDetailPage /></LazyPage>,
           },
           {
             path: "storage",
-            element: <StoragePage />,
+            element: <LazyPage><StoragePage /></LazyPage>,
           },
           {
             path: "backup",
-            element: <BackupDashboardPage />,
+            element: <LazyPage><BackupDashboardPage /></LazyPage>,
           },
           {
             path: "events",
-            element: <EventsPage />,
+            element: <LazyPage><EventsPage /></LazyPage>,
           },
           {
             path: "console",
-            element: (
-              <Suspense fallback={<div className="flex h-full items-center justify-center">Loading...</div>}>
-                <ConsolePage />
-              </Suspense>
-            ),
+            element: <LazyPage><ConsolePage /></LazyPage>,
           },
           {
             path: "admin/users",
-            element: <UsersPage />,
+            element: <LazyPage><UsersPage /></LazyPage>,
           },
           {
             path: "admin/roles",
-            element: <RolesPage />,
+            element: <LazyPage><RolesPage /></LazyPage>,
           },
           {
             path: "admin/ldap",
-            element: <LDAPPage />,
+            element: <LazyPage><LDAPPage /></LazyPage>,
           },
           {
             path: "admin/oidc",
-            element: <OIDCPage />,
+            element: <LazyPage><OIDCPage /></LazyPage>,
           },
           {
             path: "admin/branding",
-            element: <BrandingPage />,
+            element: <LazyPage><BrandingPage /></LazyPage>,
           },
           {
             path: "alerts",
-            element: <AlertsPage />,
+            element: <LazyPage><AlertsPage /></LazyPage>,
           },
           {
             path: "reports",
-            element: <ReportsPage />,
+            element: <LazyPage><ReportsPage /></LazyPage>,
           },
           {
             path: "topology",
-            element: <TopologyPage />,
+            element: <LazyPage><TopologyPage /></LazyPage>,
           },
           {
             path: "security",
-            element: <SecurityDashboardPage />,
+            element: <LazyPage><SecurityDashboardPage /></LazyPage>,
           },
-{
+          {
             path: "settings/security",
-            element: <SecurityPage />,
+            element: <LazyPage><SecurityPage /></LazyPage>,
           },
           {
             path: "settings/appearance",
-            element: <AppearancePage />,
+            element: <LazyPage><AppearancePage /></LazyPage>,
           },
         ],
       },

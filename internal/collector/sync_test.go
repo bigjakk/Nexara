@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -145,6 +146,30 @@ func (m *mockQueries) DeleteStalePBSVerifyJobs(_ context.Context, _ db.DeleteSta
 
 func (m *mockQueries) InsertAuditLog(_ context.Context, _ db.InsertAuditLogParams) error {
 	return nil
+}
+
+func (m *mockQueries) InsertAuditLogWithSource(_ context.Context, _ db.InsertAuditLogWithSourceParams) error {
+	return nil
+}
+
+func (m *mockQueries) GetTaskSyncState(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 0, errors.New("no sync state")
+}
+
+func (m *mockQueries) UpsertTaskSyncState(_ context.Context, _ db.UpsertTaskSyncStateParams) error {
+	return nil
+}
+
+func (m *mockQueries) ExistsTaskHistoryByUPID(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockQueries) ExistsAuditLogByUPID(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockQueries) GetVMByClusterAndVmid(_ context.Context, _ db.GetVMByClusterAndVmidParams) (db.Vm, error) {
+	return db.Vm{}, fmt.Errorf("not found")
 }
 
 // --- Test helpers ---

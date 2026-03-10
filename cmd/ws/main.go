@@ -14,6 +14,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/config"
+	"github.com/bigjakk/nexara/internal/debug"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/ws"
 )
@@ -59,6 +60,11 @@ func main() {
 	}
 	logger.Info("connected to database")
 
+	// Start pprof if enabled.
+	if cfg.PprofEnabled {
+		debug.StartPprof(cfg.PprofPort, logger)
+	}
+
 	// Create JWT service for token validation.
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
@@ -68,7 +74,7 @@ func main() {
 	vncHandler := ws.NewVNCHandler(queries, cfg.EncryptionKey, jwtSvc, logger)
 
 	// Create and start Hub.
-	hub := ws.NewHub(logger)
+	hub := ws.NewHub(logger, cfg.WSMaxConnections)
 	hub.Run()
 
 	// Create and start Redis subscriber.

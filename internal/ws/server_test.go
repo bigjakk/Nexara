@@ -35,7 +35,7 @@ func setupIntegration(t *testing.T) (*testEnv, func()) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	hub := NewHub(logger)
+	hub := NewHub(logger, 0)
 	hub.Run()
 
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)

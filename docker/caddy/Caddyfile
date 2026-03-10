@@ -1,8 +1,25 @@
 :80 {
-    # API routes
+    # Security headers (defense-in-depth — duplicates Go middleware for users who keep Caddy).
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    # API routes — upload endpoint gets a higher limit for ISO files.
+    handle /api/v1/clusters/*/storage/*/upload {
+        request_body {
+            max_size 15GB
+        }
+        reverse_proxy nexara-api:8080
+    }
+
+    # API routes — normal traffic capped at 10MB.
     handle /api/* {
         request_body {
-            max_size 4GB
+            max_size 10MB
         }
         reverse_proxy nexara-api:8080
     }
