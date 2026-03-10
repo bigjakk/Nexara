@@ -393,7 +393,7 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 		return nil, fmt.Errorf("get VMs on %s: %w", nodeName, err)
 	}
 
-	var snapshots []vmMetricSnapshot
+	snapshots := make([]vmMetricSnapshot, 0, len(vms))
 	for _, vm := range vms {
 		extra := vmExtra[safeInt32(vm.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{
@@ -437,7 +437,7 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 		return nil, fmt.Errorf("get containers on %s: %w", nodeName, err)
 	}
 
-	var snapshots []vmMetricSnapshot
+	snapshots := make([]vmMetricSnapshot, 0, len(cts))
 	for _, ct := range cts {
 		extra := vmExtra[safeInt32(ct.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{

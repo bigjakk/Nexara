@@ -548,7 +548,7 @@ func (g *Generator) generateVMResourceUsage(ctx context.Context, data *ReportDat
 	}
 
 	// Collect per-VM metrics.
-	var stats []vmReportStats
+	stats := make([]vmReportStats, 0, len(vms))
 
 	for _, vm := range vms {
 		if vm.Template {

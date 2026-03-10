@@ -308,7 +308,7 @@ func computePostureScore(critical, high, medium, low int32) float32 {
 }
 
 func securityUpdatesToVulns(updates []AptUpdateInfo) []VulnResult {
-	var results []VulnResult
+	results := make([]VulnResult, 0, len(updates))
 	for _, u := range updates {
 		if !u.IsSecurityUpdate {
 			continue

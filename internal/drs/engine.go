@@ -446,7 +446,7 @@ func (e *Engine) importHARulesLegacy(ctx context.Context, client *proxmox.Client
 		return nil
 	}
 
-	var rules []Rule
+	rules := make([]Rule, 0, len(haResources))
 	for _, res := range haResources {
 		if res.Group == "" {
 			continue

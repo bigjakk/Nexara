@@ -232,12 +232,14 @@ func (h *AuditHandler) ListByCluster(c *fiber.Ctx) error {
 	}
 
 	limit := c.QueryInt("limit", 50)
-	if limit > 200 {
+	if limit < 1 {
+		limit = 1
+	} else if limit > 200 {
 		limit = 200
 	}
 
 	items, err := h.queries.ListAuditLogAdvanced(c.Context(), db.ListAuditLogAdvancedParams{
-		Limit:     int32(limit),
+		Limit:     int32(limit), //nolint:gosec // bounds checked above (1-200)
 		Offset:    0,
 		ClusterID: pgtype.UUID{Bytes: clusterID, Valid: true},
 	})
