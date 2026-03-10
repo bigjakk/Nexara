@@ -58,6 +58,9 @@ func newAPIClient(cfg ClientConfig, authPrefix string) (*apiClient, error) {
 		expected := strings.ToLower(strings.ReplaceAll(cfg.TLSFingerprint, ":", ""))
 
 		tlsCfg.InsecureSkipVerify = true //nolint:gosec // Custom VerifyPeerCertificate provides fingerprint verification
+		// Disable TLS session tickets to ensure VerifyPeerCertificate is called on every connection.
+		// Without this, resumed sessions could bypass fingerprint verification (gosec G123).
+		tlsCfg.SessionTicketsDisabled = true
 		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			if len(rawCerts) == 0 {
 				return fmt.Errorf("proxmox: server presented no certificates")

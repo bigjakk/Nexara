@@ -25,7 +25,7 @@ func TestClusterMetricSummary_Fields(t *testing.T) {
 	nodeID := uuid.New()
 	vmID := uuid.New()
 
-	result := &clusterMetricResult{
+	result := &ClusterMetricResult{
 		ClusterID:   clusterID,
 		CollectedAt: time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC),
 		NodeMetrics: []nodeMetricSnapshot{
@@ -53,7 +53,7 @@ func TestMetricCollector_ProcessResults_NilResults(t *testing.T) {
 
 	// Should not panic with nil results.
 	mc.ProcessResults(context.Background(), nil)
-	mc.ProcessResults(context.Background(), []*clusterMetricResult{nil, nil})
+	mc.ProcessResults(context.Background(), []*ClusterMetricResult{nil, nil})
 
 	if len(copier.calls) != 0 {
 		t.Errorf("expected 0 CopyFrom calls for nil results, got %d", len(copier.calls))
@@ -64,7 +64,7 @@ func TestMetricCollector_ProcessResults_InsertsMetrics(t *testing.T) {
 	copier := &mockCopyFromer{}
 	mc := NewMetricCollector(copier, nil, testLogger())
 
-	result := &clusterMetricResult{
+	result := &ClusterMetricResult{
 		ClusterID:   uuid.New(),
 		CollectedAt: time.Now(),
 		NodeMetrics: []nodeMetricSnapshot{
@@ -76,7 +76,7 @@ func TestMetricCollector_ProcessResults_InsertsMetrics(t *testing.T) {
 		},
 	}
 
-	mc.ProcessResults(context.Background(), []*clusterMetricResult{result})
+	mc.ProcessResults(context.Background(), []*ClusterMetricResult{result})
 
 	// Should have 2 CopyFrom calls: one for node_metrics, one for vm_metrics.
 	if len(copier.calls) != 2 {
@@ -102,12 +102,12 @@ func TestMetricCollector_ProcessResults_EmptyMetrics(t *testing.T) {
 	copier := &mockCopyFromer{}
 	mc := NewMetricCollector(copier, nil, testLogger())
 
-	result := &clusterMetricResult{
+	result := &ClusterMetricResult{
 		ClusterID:   uuid.New(),
 		CollectedAt: time.Now(),
 	}
 
-	mc.ProcessResults(context.Background(), []*clusterMetricResult{result})
+	mc.ProcessResults(context.Background(), []*ClusterMetricResult{result})
 
 	// Empty snapshots skip CopyFrom.
 	if len(copier.calls) != 0 {

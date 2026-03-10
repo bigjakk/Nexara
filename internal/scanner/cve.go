@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -14,6 +15,17 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
+
+// safeInt32 converts an int to int32 with bounds clamping (gosec G115).
+func safeInt32(v int) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v) //nolint:gosec // bounds checked above
+}
 
 // Engine performs CVE scanning on Proxmox clusters.
 type Engine struct {
@@ -48,7 +60,7 @@ func (e *Engine) ScanCluster(ctx context.Context, clusterID uuid.UUID) (uuid.UUI
 	scan, err := e.queries.InsertCVEScan(ctx, db.InsertCVEScanParams{
 		ClusterID:  clusterID,
 		Status:     "running",
-		TotalNodes: int32(len(nodes)),
+		TotalNodes: safeInt32(len(nodes)),
 	})
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("create scan: %w", err)
@@ -183,14 +195,14 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 			}
 		}
 
-		nodeVulns := int32(len(vulns))
+		nodeVulns := safeInt32(len(vulns))
 		postureScore := computePostureScore(nodeCritical, nodeHigh, nodeMedium, nodeLow)
 
 		now := time.Now()
 		_ = e.queries.UpdateCVEScanNode(ctx, db.UpdateCVEScanNodeParams{
 			ID:            scanNode.ID,
 			Status:        "completed",
-			PackagesTotal: int32(len(updates)),
+			PackagesTotal: safeInt32(len(updates)),
 			VulnsFound:    nodeVulns,
 			PostureScore:  pgtype.Float4{Float32: postureScore, Valid: true},
 			ScannedAt:     pgtype.Timestamptz{Time: now, Valid: true},

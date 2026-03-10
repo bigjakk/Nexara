@@ -753,8 +753,7 @@ func (c *Client) GetCephMonitors(ctx context.Context, node string) ([]CephMon, e
 			Addr: stringVal(entry, "addr"),
 		}
 		if r, ok := entry["rank"]; ok {
-			switch v := r.(type) {
-			case float64:
+			if v, isFloat := r.(float64); isFloat {
 				mon.Rank = FlexInt(int(v))
 			}
 		}

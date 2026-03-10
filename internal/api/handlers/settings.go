@@ -289,7 +289,7 @@ func (h *SettingsHandler) UploadLogo(c *fiber.Ctx) error {
 		}
 	}
 
-	if err := os.WriteFile(destPath, content, 0o640); err != nil {
+	if err := os.WriteFile(destPath, content, 0o600); err != nil {
 		return fmt.Errorf("write logo file: %w", err)
 	}
 
@@ -374,7 +374,7 @@ func (h *SettingsHandler) UploadFavicon(c *fiber.Ctx) error {
 		}
 	}
 
-	if err := os.WriteFile(destPath, content, 0o640); err != nil {
+	if err := os.WriteFile(destPath, content, 0o600); err != nil {
 		return fmt.Errorf("write favicon file: %w", err)
 	}
 

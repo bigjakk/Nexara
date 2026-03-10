@@ -43,7 +43,7 @@ type nodeOfflineAlert struct {
 }
 
 // PublishClusterMetrics publishes a metric summary to Redis. Errors are logged, never returned.
-func (p *Publisher) PublishClusterMetrics(ctx context.Context, result *clusterMetricResult) {
+func (p *Publisher) PublishClusterMetrics(ctx context.Context, result *ClusterMetricResult) {
 	summary := clusterMetricSummary{
 		ClusterID:   result.ClusterID,
 		CollectedAt: result.CollectedAt.UTC().Format("2006-01-02T15:04:05Z"),

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -17,6 +18,19 @@ import (
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
+
+// safeInt32 converts an int to int32 with bounds clamping.
+// Values from the Proxmox API (VMID, CPU count, etc.) always fit in int32,
+// but this satisfies gosec G115.
+func safeInt32(v int) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v) //nolint:gosec // bounds checked above
+}
 
 // SyncQueries defines the database operations needed by the Syncer.
 // This interface enables testing with mock implementations.
@@ -145,7 +159,7 @@ func (s *Syncer) SetHealthMonitor(h *HealthMonitor) {
 
 // SyncCluster discovers nodes, VMs, containers, and storage from a Proxmox cluster,
 // upserts them into the database, and returns collected metric snapshots.
-func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterMetricResult, error) {
+func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterMetricResult, error) {
 	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("sync cluster %s: decrypt token: %w", cluster.ID, err)
@@ -167,7 +181,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 	if resources, resErr := client.GetClusterResources(ctx, ""); resErr == nil {
 		for _, r := range resources {
 			if (r.Type == "qemu" || r.Type == "lxc") && r.VMID > 0 {
-				vmExtra[int32(r.VMID)] = vmExtraFields{HAState: r.HAState, Pool: r.Pool}
+				vmExtra[safeInt32(r.VMID)] = vmExtraFields{HAState: r.HAState, Pool: r.Pool}
 			}
 		}
 	} else {
@@ -189,7 +203,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 	}
 
 	now := time.Now()
-	result := &clusterMetricResult{
+	result := &ClusterMetricResult{
 		ClusterID:   cluster.ID,
 		CollectedAt: now,
 	}
@@ -290,14 +304,14 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 			"node", node.Node,
 			"error", err,
 		)
-		cpuCount = int32(node.MaxCPU)
+		cpuCount = safeInt32(node.MaxCPU)
 		memTotal = node.MaxMem
 		diskTotal = node.MaxDisk
 		cpuUsage = node.CPU
 		memUsed = node.Mem
 	} else {
 		pveVersion = status.PVEVersion
-		cpuCount = int32(status.CPUInfo.CPUs)
+		cpuCount = safeInt32(status.CPUInfo.CPUs)
 		memTotal = status.Memory.Total
 		diskTotal = status.RootFS.Total
 		cpuUsage = status.CPU
@@ -347,7 +361,9 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 
 	// Sum VM/CT disk and network I/O into the node metric snapshot.
 	var nodeDiskRead, nodeDiskWrite, nodeNetIn, nodeNetOut int64
-	allVMSnapshots := append(vmSnapshots, ctSnapshots...)
+	allVMSnapshots := make([]vmMetricSnapshot, 0, len(vmSnapshots)+len(ctSnapshots))
+	allVMSnapshots = append(allVMSnapshots, vmSnapshots...)
+	allVMSnapshots = append(allVMSnapshots, ctSnapshots...)
 	for _, vm := range allVMSnapshots {
 		nodeDiskRead += vm.DiskRead
 		nodeDiskWrite += vm.DiskWrite
@@ -379,15 +395,15 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 
 	var snapshots []vmMetricSnapshot
 	for _, vm := range vms {
-		extra := vmExtra[int32(vm.VMID)]
+		extra := vmExtra[safeInt32(vm.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{
 			ClusterID: clusterID,
 			NodeID:    nodeID,
-			Vmid:      int32(vm.VMID),
+			Vmid:      safeInt32(vm.VMID),
 			Name:      vm.Name,
 			Type:      "qemu",
 			Status:    vm.EffectiveStatus(),
-			CpuCount:  int32(vm.CPUs),
+			CpuCount:  safeInt32(vm.CPUs),
 			MemTotal:  vm.MaxMem,
 			DiskTotal: vm.MaxDisk,
 			Uptime:    vm.Uptime,
@@ -423,15 +439,15 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 
 	var snapshots []vmMetricSnapshot
 	for _, ct := range cts {
-		extra := vmExtra[int32(ct.VMID)]
+		extra := vmExtra[safeInt32(ct.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{
 			ClusterID: clusterID,
 			NodeID:    nodeID,
-			Vmid:      int32(ct.VMID),
+			Vmid:      safeInt32(ct.VMID),
 			Name:      ct.Name,
 			Type:      "lxc",
 			Status:    ct.Status,
-			CpuCount:  int32(ct.CPUs),
+			CpuCount:  safeInt32(ct.CPUs),
 			MemTotal:  ct.MaxMem,
 			DiskTotal: ct.MaxDisk,
 			Uptime:    ct.Uptime,
@@ -591,14 +607,14 @@ func flattenOSDs(clusterID uuid.UUID, node *proxmox.CephOSDTreeNode) []cephOSDMe
 }
 
 // SyncAllPBS syncs all active PBS servers and returns collected metric results.
-func (s *Syncer) SyncAllPBS(ctx context.Context) []*pbsMetricResult {
+func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 	servers, err := s.queries.ListActivePBSServers(ctx)
 	if err != nil {
 		s.logger.Error("failed to list active PBS servers", "error", err)
 		return nil
 	}
 
-	var results []*pbsMetricResult
+	var results []*PBSMetricResult
 	for _, server := range servers {
 		s.logger.Info("syncing PBS server", "pbs_id", server.ID, "name", server.Name)
 		result, err := s.syncPBSServer(ctx, server)
@@ -619,7 +635,7 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*pbsMetricResult {
 }
 
 // syncPBSServer syncs a single PBS server: datastores, snapshots, sync jobs, verify jobs.
-func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMetricResult, error) {
+func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMetricResult, error) {
 	tokenSecret, err := crypto.Decrypt(server.TokenSecretEncrypted, s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("sync PBS %s: decrypt token: %w", server.ID, err)
@@ -631,7 +647,7 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*pbsMe
 	}
 
 	now := time.Now()
-	result := &pbsMetricResult{
+	result := &PBSMetricResult{
 		PBSServerID: server.ID,
 		CollectedAt: now,
 	}
@@ -791,14 +807,14 @@ func (s *Syncer) syncNodeAddresses(ctx context.Context, client ProxmoxClient, cl
 }
 
 // SyncAll syncs all active clusters and returns collected metric results.
-func (s *Syncer) SyncAll(ctx context.Context) []*clusterMetricResult {
+func (s *Syncer) SyncAll(ctx context.Context) []*ClusterMetricResult {
 	clusters, err := s.queries.ListActiveClusters(ctx)
 	if err != nil {
 		s.logger.Error("failed to list active clusters", "error", err)
 		return nil
 	}
 
-	var results []*clusterMetricResult
+	var results []*ClusterMetricResult
 	for _, cluster := range clusters {
 		s.logger.Info("syncing cluster", "cluster_id", cluster.ID, "name", cluster.Name)
 		result, err := s.SyncCluster(ctx, cluster)

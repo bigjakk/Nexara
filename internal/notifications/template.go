@@ -53,13 +53,13 @@ func (lw *limitWriter) Write(p []byte) (int, error) {
 // defaultMessage builds a plain-text notification message from a payload.
 func defaultMessage(payload AlertPayload) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[%s] %s\n", strings.ToUpper(payload.Severity), payload.RuleName))
-	sb.WriteString(fmt.Sprintf("Resource: %s\n", payload.ResourceName))
-	sb.WriteString(fmt.Sprintf("Metric: %s %s %.2f (current: %.2f)\n",
-		payload.Metric, payload.Operator, payload.Threshold, payload.CurrentValue))
-	sb.WriteString(fmt.Sprintf("State: %s\n", payload.State))
+	fmt.Fprintf(&sb, "[%s] %s\n", strings.ToUpper(payload.Severity), payload.RuleName)
+	fmt.Fprintf(&sb, "Resource: %s\n", payload.ResourceName)
+	fmt.Fprintf(&sb, "Metric: %s %s %.2f (current: %.2f)\n",
+		payload.Metric, payload.Operator, payload.Threshold, payload.CurrentValue)
+	fmt.Fprintf(&sb, "State: %s\n", payload.State)
 	if payload.FiredAt != "" {
-		sb.WriteString(fmt.Sprintf("Fired at: %s\n", payload.FiredAt))
+		fmt.Fprintf(&sb, "Fired at: %s\n", payload.FiredAt)
 	}
 	return sb.String()
 }

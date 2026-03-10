@@ -92,15 +92,15 @@ type pbsDatastoreMetricSnapshot struct {
 	Avail       int64
 }
 
-// pbsMetricResult holds all metric data from a single PBS server sync cycle.
-type pbsMetricResult struct {
+// PBSMetricResult holds all metric data from a single PBS server sync cycle.
+type PBSMetricResult struct {
 	PBSServerID      uuid.UUID
 	CollectedAt      time.Time
 	DatastoreMetrics []pbsDatastoreMetricSnapshot
 }
 
-// clusterMetricResult holds all metric data from a single cluster sync cycle.
-type clusterMetricResult struct {
+// ClusterMetricResult holds all metric data from a single cluster sync cycle.
+type ClusterMetricResult struct {
 	ClusterID   uuid.UUID
 	CollectedAt time.Time
 	NodeMetrics []nodeMetricSnapshot
@@ -127,7 +127,7 @@ func NewMetricCollector(copier CopyFromer, publisher *Publisher, logger *slog.Lo
 }
 
 // ProcessPBSResults batch-inserts PBS datastore metrics for each PBS server result.
-func (mc *MetricCollector) ProcessPBSResults(ctx context.Context, results []*pbsMetricResult) {
+func (mc *MetricCollector) ProcessPBSResults(ctx context.Context, results []*PBSMetricResult) {
 	for _, result := range results {
 		if result == nil || len(result.DatastoreMetrics) == 0 {
 			continue
@@ -149,7 +149,7 @@ func (mc *MetricCollector) ProcessPBSResults(ctx context.Context, results []*pbs
 }
 
 // ProcessResults batch-inserts metrics and publishes summaries for each cluster result.
-func (mc *MetricCollector) ProcessResults(ctx context.Context, results []*clusterMetricResult) {
+func (mc *MetricCollector) ProcessResults(ctx context.Context, results []*ClusterMetricResult) {
 	for _, result := range results {
 		if result == nil {
 			continue

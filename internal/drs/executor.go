@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -15,6 +16,18 @@ import (
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
+
+// safeInt32 converts an int to int32 with bounds clamping.
+// Proxmox VMIDs always fit in int32, but this satisfies gosec G115.
+func safeInt32(v int) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v) //nolint:gosec // bounds checked above
+}
 
 // SystemUserID is the well-known UUID for the DRS scheduler system user.
 // Created by migration 000013_system_user.
@@ -44,7 +57,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			ClusterID:   clusterID,
 			SourceNode:  rec.SourceNode,
 			TargetNode:  rec.TargetNode,
-			VmID:        int32(rec.VMID),
+			VmID:        safeInt32(rec.VMID),
 			VmType:      rec.VMType,
 			Reason:      rec.Reason,
 			ScoreBefore: rec.ScoreBefore,
@@ -173,7 +186,7 @@ func taskSucceeded(exitStatus string) bool {
 	return upper == "" || upper == "OK" || strings.HasPrefix(upper, "OK ") || upper == "WARNINGS"
 }
 
-func (e *Executor) waitForTask(ctx context.Context, client *proxmox.Client, node string, upid string) (string, string) {
+func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) (status string, detail string) {
 	// Use a dedicated timeout context so that scheduler shutdown doesn't
 	// prematurely mark in-flight migrations as cancelled. Live migrations
 	// can take 15+ minutes for large VMs.
@@ -189,8 +202,8 @@ func (e *Executor) waitForTask(ctx context.Context, client *proxmox.Client, node
 			// Do one final check — the migration may have finished while we
 			// were waiting. Use a short independent context for the API call.
 			finalCtx, finalCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer finalCancel()
 			ts, err := client.GetTaskStatus(finalCtx, node, upid)
+			finalCancel()
 			if err == nil && ts.Status == "stopped" {
 				if taskSucceeded(ts.ExitStatus) {
 					return "completed", ts.ExitStatus
@@ -218,7 +231,7 @@ func (e *Executor) waitForTask(ctx context.Context, client *proxmox.Client, node
 func (e *Executor) resolveVMDBID(ctx context.Context, clusterID uuid.UUID, vmid int) string {
 	vm, err := e.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
 		ClusterID: clusterID,
-		Vmid:      int32(vmid),
+		Vmid:      safeInt32(vmid),
 	})
 	if err != nil {
 		return ""

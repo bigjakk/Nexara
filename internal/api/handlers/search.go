@@ -148,17 +148,15 @@ func (h *SearchHandler) GlobalSearch(c *fiber.Ctx) error {
 	}
 
 	// Search clusters themselves.
-	if clusters != nil {
-		for _, cluster := range clusters {
-			if strings.Contains(strings.ToLower(cluster.Name), queryLower) {
-				results = append(results, searchResult{
-					Type:        "cluster",
-					ID:          cluster.ID.String(),
-					Name:        cluster.Name,
-					ClusterID:   cluster.ID.String(),
-					ClusterName: cluster.Name,
-				})
-			}
+	for _, cluster := range clusters {
+		if strings.Contains(strings.ToLower(cluster.Name), queryLower) {
+			results = append(results, searchResult{
+				Type:        "cluster",
+				ID:          cluster.ID.String(),
+				Name:        cluster.Name,
+				ClusterID:   cluster.ID.String(),
+				ClusterName: cluster.Name,
+			})
 		}
 	}
 

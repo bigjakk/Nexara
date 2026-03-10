@@ -1069,8 +1069,8 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 		select {
 		case <-pollCtx.Done():
 			finalCtx, finalCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer finalCancel()
 			ts, err := client.GetTaskStatus(finalCtx, node, upid)
+			finalCancel()
 			if err == nil && ts.Status == "stopped" {
 				if taskSucceeded(ts.ExitStatus) {
 					return "completed"

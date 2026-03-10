@@ -77,7 +77,7 @@ func (m *mockQueries) UpsertVM(_ context.Context, arg db.UpsertVMParams) (db.Vm,
 		Type:      arg.Type,
 		Status:    arg.Status,
 	}
-	key := arg.ClusterID.String() + ":" + string(rune(arg.Vmid))
+	key := fmt.Sprintf("%s:%d", arg.ClusterID.String(), arg.Vmid)
 	m.vms[key] = vm
 	return vm, nil
 }

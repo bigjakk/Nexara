@@ -205,5 +205,5 @@ func TestHubSlowClientEviction(t *testing.T) {
 			break
 		}
 	}
-	// If we get here, channel was closed — test passes.
+	t.Log("slow client was evicted and send channel closed")
 }

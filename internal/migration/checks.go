@@ -15,7 +15,7 @@ func RunPreFlightChecks(
 	targetClient *proxmox.Client,
 	sourceNode string,
 	targetNode string,
-	vmid int,
+	_ int,
 	vmType string,
 	migrationType string,
 	storageMap StorageMapping,
@@ -186,7 +186,7 @@ func checkTargetNodeOnline(ctx context.Context, client *proxmox.Client, node str
 	}
 }
 
-func checkTargetVMIDAvailable(ctx context.Context, client *proxmox.Client, node string, vmid int, vmType string) CheckResult {
+func checkTargetVMIDAvailable(ctx context.Context, client *proxmox.Client, _ string, vmid int, _ string) CheckResult {
 	if vmid <= 0 {
 		return CheckResult{
 			Name:     "target_vmid",

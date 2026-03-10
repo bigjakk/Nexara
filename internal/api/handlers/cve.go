@@ -235,7 +235,7 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 	h.auditLog(c, clusterID, "cve_scan", scan.ID.String(), "cve_scan_triggered", nil)
 
 	// Use a detached context for the background goroutine (Fiber recycles its context)
-	bgCtx := context.Background()
+	bgCtx := context.Background() //nolint:gosec // G118: intentionally detached from request scope for background scan
 
 	// Run scan in background goroutine with panic recovery
 	go func() {

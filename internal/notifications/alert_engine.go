@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -337,9 +338,11 @@ func (e *Engine) checkEscalations(ctx context.Context) {
 		}
 
 		channelID := pgtype.UUID{Bytes: step.ChannelID, Valid: true}
+		// nextLevel is an escalation chain index (always small), but guard for gosec G115.
+		escalationLevel := safeInt32(nextLevel)
 		if err := e.queries.UpdateAlertEscalation(ctx, db.UpdateAlertEscalationParams{
 			ID:              alert.ID,
-			EscalationLevel: int32(nextLevel),
+			EscalationLevel: escalationLevel,
 			ChannelID:       channelID,
 		}); err != nil {
 			e.logger.Error("failed to escalate alert", "alert_id", alert.ID, "error", err)
@@ -551,6 +554,17 @@ func extractVMMetric(m db.GetVMRecentMetricsRow, metric string) float64 {
 	default:
 		return 0
 	}
+}
+
+// safeInt32 converts an int to int32 with bounds clamping (gosec G115).
+func safeInt32(v int) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v) //nolint:gosec // bounds checked above
 }
 
 func uuidFromPgtype(p pgtype.UUID) uuid.UUID {

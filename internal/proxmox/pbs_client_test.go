@@ -30,24 +30,6 @@ func pbsTestServer(t *testing.T, routes map[string]interface{}) *httptest.Server
 	}))
 }
 
-func newTestPBSClient(t *testing.T, serverURL string) *PBSClient {
-	t.Helper()
-	client, err := NewPBSClient(ClientConfig{
-		BaseURL:     serverURL,
-		TokenID:     "test@pam!token",
-		TokenSecret: "secret",
-	})
-	if err != nil {
-		t.Fatalf("failed to create PBS client: %v", err)
-	}
-	// Replace the HTTP client with one that trusts the test server.
-	client.httpClient = &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: client.tlsCfg,
-		},
-	}
-	return client
-}
 
 func TestPBSClient_GetDatastores(t *testing.T) {
 	tests := []struct {

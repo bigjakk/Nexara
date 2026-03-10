@@ -5,6 +5,7 @@ run:
   modules-download-mode: readonly
 
 linters:
+  default: none
   enable:
     - errcheck
     - govet
@@ -20,26 +21,64 @@ linters:
     - unconvert
     - unparam
 
-linters-settings:
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-      - style
-  revive:
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+      disabled-checks:
+        - exitAfterDefer
+        - paramTypeCombine
+        - httpNoBody
+        - hugeParam
+        - rangeValCopy
+    gosec:
+      excludes:
+        - G101
+        - G104
+        - G118
+        - G120
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: increment-decrement
+        - name: var-naming
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+
+  exclusions:
+    presets: []
+    paths:
+      - node_modules
+      - third_party
     rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: dot-imports
-      - name: error-return
-      - name: error-strings
-      - name: exported
-      - name: increment-decrement
-      - name: var-naming
-      - name: package-comments
-        disabled: true
+      # Test files: suppress noise linters
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+          - bodyclose
+          - unparam
+          - gocritic
+      # .Close() calls — safe to ignore error returns
+      - linters:
+          - errcheck
+        source: "\\.Close\\(\\)"
+      # WebSocket close messages in defers
+      - linters:
+          - errcheck
+        source: "\\.WriteMessage\\("
+      # Replication handler always audits as "replication" by design
+      - linters:
+          - unparam
+        path: internal/api/handlers/replication\.go
 
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0

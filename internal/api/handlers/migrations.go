@@ -361,7 +361,7 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
 
 	// Launch execution in background goroutine.
-	go orch.Execute(context.Background(), jobID, userID)
+	go orch.Execute(context.Background(), jobID, userID) //nolint:gosec // G118: intentionally detached; Fiber recycles request context
 
 	h.eventPub.ClusterEvent(c.Context(), job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "started")
 

@@ -276,7 +276,7 @@ func (o *Orchestrator) executeIntraCluster(ctx context.Context, client *proxmox.
 // executeStorageMigration moves all disks of a VM to a target storage on the same node.
 // Each disk move creates a real Proxmox task with its own UPID, so the task panel
 // shows real progress and logs — identical to moving a disk from the hardware tab.
-func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *proxmox.Client, job db.MigrationJob, jobID, userID uuid.UUID, mc *migrationContext) {
+func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *proxmox.Client, job db.MigrationJob, jobID, _ uuid.UUID, mc *migrationContext) {
 	targetStorage := job.TargetStorage
 	if targetStorage == "" {
 		o.failJob(ctx, jobID, "target_storage is required for storage migration", mc)
@@ -374,7 +374,7 @@ func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *prox
 }
 
 // executeBothMigration does a live migration first, then a storage migration.
-func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox.Client, srcCluster db.Cluster, job db.MigrationJob, jobID, userID uuid.UUID, mc *migrationContext) {
+func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox.Client, _ db.Cluster, job db.MigrationJob, jobID, userID uuid.UUID, mc *migrationContext) {
 	// Phase 1: Live migration to target node.
 	upid, err := o.executeIntraCluster(ctx, client, job)
 	if err != nil {
@@ -616,7 +616,7 @@ func isQEMUDiskKey(key string) bool {
 	return false
 }
 
-func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxmox.Client, srcCluster db.Cluster, job db.MigrationJob) (string, error) {
+func (o *Orchestrator) executeCrossCluster(ctx context.Context, srcClient *proxmox.Client, _ db.Cluster, job db.MigrationJob) (string, error) {
 	_, tgtCluster, err := o.clientForCluster(ctx, job.TargetClusterID)
 	if err != nil {
 		return "", fmt.Errorf("target cluster client: %w", err)

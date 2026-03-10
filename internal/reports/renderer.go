@@ -62,7 +62,7 @@ func RenderHTML(data *ReportData) (string, error) {
 		ClusterName:  data.ClusterName,
 		GeneratedAt:  data.GeneratedAt,
 		TimeRange:    data.TimeRange,
-		SectionsHTML: template.HTML(sectBuf.String()),
+		SectionsHTML: template.HTML(sectBuf.String()), //nolint:gosec // G203: all user data is escaped via template.HTMLEscapeString above
 	}
 
 	if err := tmpl.Execute(&buf, td); err != nil {

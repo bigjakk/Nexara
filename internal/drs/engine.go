@@ -350,7 +350,7 @@ func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmo
 // importHARules fetches HA rules from Proxmox. It first tries the PVE 9+ rules API
 // (GET /cluster/ha/rules) which supports node-affinity and resource-affinity rules.
 // If that fails (PVE 8 or earlier), it falls back to the legacy HA resources + groups approach.
-func (e *Engine) importHARules(ctx context.Context, client *proxmox.Client, nodeWorkloads map[string][]Workload) []Rule {
+func (e *Engine) importHARules(ctx context.Context, client *proxmox.Client, _ map[string][]Workload) []Rule {
 	// Try PVE 9+ HA rules API first.
 	if rules := e.importHARulesPVE9(ctx, client); rules != nil {
 		return rules
