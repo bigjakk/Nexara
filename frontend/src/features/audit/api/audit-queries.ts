@@ -10,6 +10,7 @@ export interface AuditLogEntry {
   action: string;
   details: string;
   created_at: string;
+  source: string;
   user_email: string;
   user_display_name: string;
   cluster_name: string;

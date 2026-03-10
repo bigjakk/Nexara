@@ -91,7 +91,12 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="flex items-center justify-between">
-          <Label htmlFor="drs-enabled">Enabled</Label>
+          <div>
+            <Label htmlFor="drs-enabled">Enabled</Label>
+            <p className="text-xs text-muted-foreground">
+              Enable automatic workload balancing across nodes
+            </p>
+          </div>
           <Switch
             id="drs-enabled"
             checked={enabled}
@@ -107,20 +112,30 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="disabled">Disabled</SelectItem>
-              <SelectItem value="advisory">Advisory</SelectItem>
-              <SelectItem value="automatic">Automatic</SelectItem>
+              <SelectItem value="advisory">Advisory &mdash; recommend only</SelectItem>
+              <SelectItem value="automatic">Automatic &mdash; migrate VMs</SelectItem>
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Advisory logs recommendations without acting. Automatic will live-migrate VMs.
+          </p>
         </div>
 
         <div className="space-y-4">
-          <Label>Resource Weights</Label>
+          <div>
+            <Label>Resource Weights</Label>
+            <p className="text-xs text-muted-foreground">
+              How much each resource type influences balance scoring. Higher
+              memory weight means DRS prioritizes evening out memory usage.
+              Must sum to 1.0.
+            </p>
+          </div>
           <div className="space-y-3">
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
                 <span>CPU</span>
-                <span className="text-muted-foreground">
-                  {cpuWeight.toFixed(2)}
+                <span className="font-mono text-muted-foreground">
+                  {(cpuWeight * 100).toFixed(0)}%
                 </span>
               </div>
               <Slider
@@ -136,8 +151,8 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             <div className="space-y-1">
               <div className="flex justify-between text-sm">
                 <span>Memory</span>
-                <span className="text-muted-foreground">
-                  {memWeight.toFixed(2)}
+                <span className="font-mono text-muted-foreground">
+                  {(memWeight * 100).toFixed(0)}%
                 </span>
               </div>
               <Slider
@@ -152,7 +167,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             </div>
             {Math.abs(weightSum - 1.0) > 0.01 && (
               <p className="text-sm text-destructive">
-                Weights must sum to 1.0 (current: {weightSum.toFixed(2)})
+                Weights must sum to 1.0 (current: {(weightSum * 100).toFixed(0)}%)
               </p>
             )}
           </div>
@@ -161,8 +176,8 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <Label>Imbalance Threshold</Label>
-            <span className="text-muted-foreground">
-              {threshold.toFixed(2)}
+            <span className="font-mono text-muted-foreground">
+              {(threshold * 100).toFixed(0)}%
             </span>
           </div>
           <Slider
@@ -174,17 +189,34 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             max={1}
             step={0.05}
           />
+          <p className="text-xs text-muted-foreground">
+            {threshold <= 0.15
+              ? "Aggressive — triggers on small load differences between nodes."
+              : threshold <= 0.30
+                ? "Balanced — triggers when node loads diverge moderately."
+                : "Conservative — only triggers on large load imbalances."}
+            {" "}Lower values cause more frequent migrations.
+          </p>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="eval-interval">Evaluation Interval (seconds)</Label>
-          <Input
-            id="eval-interval"
-            type="number"
-            min={60}
-            value={evalInterval}
-            onChange={(e) => { setEvalInterval(Number(e.target.value)); }}
-          />
+          <Label htmlFor="eval-interval">Evaluation Interval</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="eval-interval"
+              type="number"
+              min={60}
+              value={evalInterval}
+              onChange={(e) => { setEvalInterval(Number(e.target.value)); }}
+            />
+            <span className="text-sm text-muted-foreground whitespace-nowrap">seconds</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            How often DRS checks cluster balance.
+            {evalInterval >= 300
+              ? ` Every ${String(Math.round(evalInterval / 60))} minutes.`
+              : ` Every ${String(evalInterval)} seconds.`}
+          </p>
         </div>
 
         <div className="flex items-center gap-3">

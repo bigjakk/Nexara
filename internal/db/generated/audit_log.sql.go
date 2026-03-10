@@ -38,8 +38,9 @@ WHERE ($1::uuid IS NULL OR cluster_id = $1)
   AND ($2::text IS NULL OR resource_type = $2)
   AND ($3::uuid IS NULL OR user_id = $3)
   AND ($4::text IS NULL OR action = $4)
-  AND ($5::timestamptz IS NULL OR created_at >= $5)
-  AND ($6::timestamptz IS NULL OR created_at <= $6)
+  AND ($5::text IS NULL OR source = $5)
+  AND ($6::timestamptz IS NULL OR created_at >= $6)
+  AND ($7::timestamptz IS NULL OR created_at <= $7)
 `
 
 type CountAuditLogAdvancedParams struct {
@@ -47,6 +48,7 @@ type CountAuditLogAdvancedParams struct {
 	ResourceType pgtype.Text        `json:"resource_type"`
 	UserID       pgtype.UUID        `json:"user_id"`
 	Action       pgtype.Text        `json:"action"`
+	Source       pgtype.Text        `json:"source"`
 	StartTime    pgtype.Timestamptz `json:"start_time"`
 	EndTime      pgtype.Timestamptz `json:"end_time"`
 }
@@ -57,6 +59,7 @@ func (q *Queries) CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAd
 		arg.ResourceType,
 		arg.UserID,
 		arg.Action,
+		arg.Source,
 		arg.StartTime,
 		arg.EndTime,
 	)
@@ -91,8 +94,38 @@ func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) 
 	return err
 }
 
+const insertAuditLogWithSource = `-- name: InsertAuditLogWithSource :exec
+INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details, source, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type InsertAuditLogWithSourceParams struct {
+	ClusterID    pgtype.UUID     `json:"cluster_id"`
+	UserID       uuid.UUID       `json:"user_id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceID   string          `json:"resource_id"`
+	Action       string          `json:"action"`
+	Details      json.RawMessage `json:"details"`
+	Source       string          `json:"source"`
+	CreatedAt    time.Time       `json:"created_at"`
+}
+
+func (q *Queries) InsertAuditLogWithSource(ctx context.Context, arg InsertAuditLogWithSourceParams) error {
+	_, err := q.db.Exec(ctx, insertAuditLogWithSource,
+		arg.ClusterID,
+		arg.UserID,
+		arg.ResourceType,
+		arg.ResourceID,
+		arg.Action,
+		arg.Details,
+		arg.Source,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const listAuditLog = `-- name: ListAuditLog :many
-SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at FROM audit_log ORDER BY created_at DESC LIMIT $1 OFFSET $2
+SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at, source FROM audit_log ORDER BY created_at DESC LIMIT $1 OFFSET $2
 `
 
 type ListAuditLogParams struct {
@@ -118,6 +151,7 @@ func (q *Queries) ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]A
 			&i.Action,
 			&i.Details,
 			&i.CreatedAt,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -139,6 +173,7 @@ SELECT
   a.action,
   a.details,
   a.created_at,
+  a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
   COALESCE(c.name, '') AS cluster_name,
@@ -152,8 +187,9 @@ WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
   AND ($4::text IS NULL OR a.resource_type = $4)
   AND ($5::uuid IS NULL OR a.user_id = $5)
   AND ($6::text IS NULL OR a.action = $6)
-  AND ($7::timestamptz IS NULL OR a.created_at >= $7)
-  AND ($8::timestamptz IS NULL OR a.created_at <= $8)
+  AND ($7::text IS NULL OR a.source = $7)
+  AND ($8::timestamptz IS NULL OR a.created_at >= $8)
+  AND ($9::timestamptz IS NULL OR a.created_at <= $9)
 ORDER BY a.created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -165,6 +201,7 @@ type ListAuditLogAdvancedParams struct {
 	ResourceType pgtype.Text        `json:"resource_type"`
 	UserID       pgtype.UUID        `json:"user_id"`
 	Action       pgtype.Text        `json:"action"`
+	Source       pgtype.Text        `json:"source"`
 	StartTime    pgtype.Timestamptz `json:"start_time"`
 	EndTime      pgtype.Timestamptz `json:"end_time"`
 }
@@ -178,6 +215,7 @@ type ListAuditLogAdvancedRow struct {
 	Action          string          `json:"action"`
 	Details         json.RawMessage `json:"details"`
 	CreatedAt       time.Time       `json:"created_at"`
+	Source          string          `json:"source"`
 	UserEmail       string          `json:"user_email"`
 	UserDisplayName string          `json:"user_display_name"`
 	ClusterName     string          `json:"cluster_name"`
@@ -193,6 +231,7 @@ func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdva
 		arg.ResourceType,
 		arg.UserID,
 		arg.Action,
+		arg.Source,
 		arg.StartTime,
 		arg.EndTime,
 	)
@@ -212,6 +251,7 @@ func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdva
 			&i.Action,
 			&i.Details,
 			&i.CreatedAt,
+			&i.Source,
 			&i.UserEmail,
 			&i.UserDisplayName,
 			&i.ClusterName,
@@ -229,7 +269,7 @@ func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdva
 }
 
 const listAuditLogByCluster = `-- name: ListAuditLogByCluster :many
-SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at FROM audit_log WHERE cluster_id = $1 ORDER BY created_at DESC LIMIT $2
+SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at, source FROM audit_log WHERE cluster_id = $1 ORDER BY created_at DESC LIMIT $2
 `
 
 type ListAuditLogByClusterParams struct {
@@ -255,6 +295,7 @@ func (q *Queries) ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByC
 			&i.Action,
 			&i.Details,
 			&i.CreatedAt,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -276,6 +317,7 @@ SELECT
   a.action,
   a.details,
   a.created_at,
+  a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
   COALESCE(c.name, '') AS cluster_name,
@@ -307,6 +349,7 @@ type ListAuditLogEnrichedRow struct {
 	Action          string          `json:"action"`
 	Details         json.RawMessage `json:"details"`
 	CreatedAt       time.Time       `json:"created_at"`
+	Source          string          `json:"source"`
 	UserEmail       string          `json:"user_email"`
 	UserDisplayName string          `json:"user_display_name"`
 	ClusterName     string          `json:"cluster_name"`
@@ -337,6 +380,7 @@ func (q *Queries) ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnri
 			&i.Action,
 			&i.Details,
 			&i.CreatedAt,
+			&i.Source,
 			&i.UserEmail,
 			&i.UserDisplayName,
 			&i.ClusterName,
@@ -354,7 +398,7 @@ func (q *Queries) ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnri
 }
 
 const listAuditLogFiltered = `-- name: ListAuditLogFiltered :many
-SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at FROM audit_log
+SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at, source FROM audit_log
 WHERE ($3::uuid IS NULL OR cluster_id = $3)
   AND ($4::text IS NULL OR resource_type = $4)
 ORDER BY created_at DESC
@@ -391,6 +435,7 @@ func (q *Queries) ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilt
 			&i.Action,
 			&i.Details,
 			&i.CreatedAt,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -469,6 +514,7 @@ SELECT
   a.action,
   a.details,
   a.created_at,
+  a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
   COALESCE(c.name, '') AS cluster_name,
@@ -491,6 +537,7 @@ type ListRecentAuditLogEnrichedRow struct {
 	Action          string          `json:"action"`
 	Details         json.RawMessage `json:"details"`
 	CreatedAt       time.Time       `json:"created_at"`
+	Source          string          `json:"source"`
 	UserEmail       string          `json:"user_email"`
 	UserDisplayName string          `json:"user_display_name"`
 	ClusterName     string          `json:"cluster_name"`
@@ -516,6 +563,7 @@ func (q *Queries) ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentA
 			&i.Action,
 			&i.Details,
 			&i.CreatedAt,
+			&i.Source,
 			&i.UserEmail,
 			&i.UserDisplayName,
 			&i.ClusterName,

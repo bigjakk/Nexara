@@ -2,6 +2,7 @@ package drs
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -16,6 +17,7 @@ func Plan(
 	rules []Rule,
 	weights Weights,
 	threshold float64,
+	logger *slog.Logger,
 ) []Recommendation {
 	if len(scores) < 2 {
 		return nil
@@ -56,8 +58,17 @@ func Plan(
 
 			workloads := currentWorkloads[source]
 			if len(workloads) == 0 {
+				logger.Debug("DRS planner: no workloads on source", "source", source)
 				continue
 			}
+
+			logger.Info("DRS planner: trying pair",
+				"source", source,
+				"target", target,
+				"source_score", fmt.Sprintf("%.4f", currentScores[source].Score),
+				"target_score", fmt.Sprintf("%.4f", currentScores[target].Score),
+				"source_workloads", len(workloads),
+			)
 
 			// Sort by estimated impact (largest contributors first).
 			sort.Slice(workloads, func(a, b int) bool {
@@ -73,6 +84,8 @@ func Plan(
 				}
 
 				if !IsMigrationAllowed(migration, currentWorkloads, rules) {
+					logger.Info("DRS planner: migration blocked by rule",
+						"vmid", w.VMID, "source", source, "target", target)
 					continue
 				}
 
@@ -93,6 +106,14 @@ func Plan(
 				scoreAfter := CalculateImbalance(currentScores)
 
 				if scoreAfter >= scoreBefore {
+					logger.Info("DRS planner: move worsens balance, reverting",
+						"vmid", w.VMID,
+						"name", w.Name,
+						"source", source,
+						"target", target,
+						"before", fmt.Sprintf("%.4f", scoreBefore),
+						"after", fmt.Sprintf("%.4f", scoreAfter),
+					)
 					// Undo the move.
 					currentWorkloads[target] = currentWorkloads[target][:len(currentWorkloads[target])-1]
 					w.Node = source

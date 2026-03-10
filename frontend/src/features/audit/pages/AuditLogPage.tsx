@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  Monitor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -143,11 +144,45 @@ function parseDetails(entry: AuditLogEntry): Array<[string, string]> | null {
   }
 }
 
+function sourceBadge(entry: AuditLogEntry) {
+  if (entry.source === "proxmox") {
+    let proxmoxUser = "";
+    try {
+      const d = JSON.parse(entry.details) as Record<string, unknown>;
+      if (typeof d["proxmox_user"] === "string") proxmoxUser = d["proxmox_user"];
+    } catch {
+      // ignore
+    }
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-600 dark:text-orange-400">
+        <Monitor className="h-3 w-3" />
+        PVE
+        {proxmoxUser && <span className="text-muted-foreground">({proxmoxUser})</span>}
+      </span>
+    );
+  }
+  return (
+    <span className="text-sm">
+      {entry.user_display_name || entry.user_email}
+    </span>
+  );
+}
+
 /** When the VM record no longer exists (e.g. cross-cluster migration changed the UUID),
  *  extract VMID/name from the details JSON so the row isn't just a truncated UUID. */
 function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
   try {
     const d = JSON.parse(entry.details) as Record<string, unknown>;
+    const resName = typeof d["resource_name"] === "string" ? d["resource_name"] : null;
+    const resId = typeof d["resource_id"] === "string" ? d["resource_id"] : null;
+    if (resName) {
+      return (
+        <span className="ml-2 text-xs">
+          {resName}
+          {resId && <span className="text-muted-foreground"> ({resId})</span>}
+        </span>
+      );
+    }
     const vmid = typeof d["vmid"] === "number" ? d["vmid"] : null;
     const vmType = typeof d["vm_type"] === "string" ? d["vm_type"] : null;
     if (vmid != null) {
@@ -155,6 +190,11 @@ function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
         <span className="ml-2 text-xs">
           {vmType ?? "VM"} {String(vmid)}
         </span>
+      );
+    }
+    if (resId) {
+      return (
+        <span className="ml-2 text-xs text-muted-foreground">VMID {resId}</span>
       );
     }
   } catch {
@@ -216,7 +256,7 @@ function AuditRow({
           {summary ?? ""}
         </td>
         <td className="px-4 py-2">
-          {entry.user_display_name || entry.user_email}
+          {sourceBadge(entry)}
         </td>
       </tr>
       {expanded && (
@@ -247,6 +287,9 @@ function AuditRow({
 
               <span className="text-muted-foreground">Action</span>
               <span className="font-medium">{formatAction(entry.action)}</span>
+
+              <span className="text-muted-foreground">Source</span>
+              <span>{sourceBadge(entry)}</span>
 
               <span className="text-muted-foreground">User</span>
               <span>

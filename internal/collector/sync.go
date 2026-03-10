@@ -31,6 +31,13 @@ type SyncQueries interface {
 	UpdateNodeAddress(ctx context.Context, arg db.UpdateNodeAddressParams) error
 	// Audit
 	InsertAuditLog(ctx context.Context, arg db.InsertAuditLogParams) error
+	InsertAuditLogWithSource(ctx context.Context, arg db.InsertAuditLogWithSourceParams) error
+	// Task sync
+	GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (int64, error)
+	UpsertTaskSyncState(ctx context.Context, arg db.UpsertTaskSyncStateParams) error
+	ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error)
+	ExistsAuditLogByUPID(ctx context.Context, upid string) (bool, error)
+	GetVMByClusterAndVmid(ctx context.Context, arg db.GetVMByClusterAndVmidParams) (db.Vm, error)
 	// PBS queries
 	ListActivePBSServers(ctx context.Context) ([]db.PbsServer, error)
 	UpsertPBSSnapshot(ctx context.Context, arg db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error)
@@ -53,6 +60,7 @@ type ProxmoxClient interface {
 	GetCephPools(ctx context.Context, node string) ([]proxmox.CephPool, error)
 	GetClusterStatus(ctx context.Context) ([]proxmox.ClusterStatusEntry, error)
 	GetClusterResources(ctx context.Context, resourceType string) ([]proxmox.ClusterResource, error)
+	GetNodeTasks(ctx context.Context, node string, since int64, limit int) ([]proxmox.NodeTask, error)
 }
 
 // ClientFactory creates a ProxmoxClient from cluster credentials.
@@ -257,6 +265,10 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*clusterM
 			"error", err,
 		)
 	}
+
+	// Ingest completed Proxmox tasks into the audit log (deduplicating
+	// against tasks that Nexara itself initiated).
+	s.syncTasks(ctx, client, cluster)
 
 	return result, nil
 }

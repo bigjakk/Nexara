@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Download,
   Activity,
+  Monitor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,6 +47,8 @@ const resourceTypes = [
   { value: "role", label: "Role" },
   { value: "rolling_update", label: "Rolling Update" },
   { value: "cve_scan", label: "CVE Scan" },
+  { value: "proxmox_task", label: "Proxmox Task" },
+  { value: "node", label: "Node" },
 ] as const;
 
 type Severity = "info" | "warning" | "error" | "all";
@@ -170,15 +173,59 @@ function parseDetails(entry: AuditLogEntry): Array<[string, string]> | null {
   }
 }
 
+function sourceBadge(entry: AuditLogEntry) {
+  if (entry.source === "proxmox") {
+    let proxmoxUser = "";
+    try {
+      const d = JSON.parse(entry.details) as Record<string, unknown>;
+      if (typeof d["proxmox_user"] === "string") proxmoxUser = d["proxmox_user"];
+    } catch {
+      // ignore
+    }
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-600 dark:text-orange-400">
+        <Monitor className="h-3 w-3" />
+        PVE
+        {proxmoxUser && <span className="text-muted-foreground">({proxmoxUser})</span>}
+      </span>
+    );
+  }
+  return (
+    <span className="text-sm">
+      {entry.user_display_name || entry.user_email}
+    </span>
+  );
+}
+
 function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
   try {
     const d = JSON.parse(entry.details) as Record<string, unknown>;
+    // Proxmox-sourced entries store name + VMID in details
+    const resName = typeof d["resource_name"] === "string" ? d["resource_name"] : null;
+    const resId = typeof d["resource_id"] === "string" ? d["resource_id"] : null;
+    if (resName) {
+      return (
+        <span className="ml-2 text-xs">
+          {resName}
+          {resId && <span className="text-muted-foreground"> ({resId})</span>}
+        </span>
+      );
+    }
+    // Nexara-initiated entries with VMID in details
     const vmid = typeof d["vmid"] === "number" ? d["vmid"] : null;
     const vmType = typeof d["vm_type"] === "string" ? d["vm_type"] : null;
     if (vmid != null) {
       return (
         <span className="ml-2 text-xs">
           {vmType ?? "VM"} {String(vmid)}
+        </span>
+      );
+    }
+    // Proxmox task with VMID but no name resolved
+    if (resId) {
+      return (
+        <span className="ml-2 text-xs text-muted-foreground">
+          VMID {resId}
         </span>
       );
     }
@@ -243,7 +290,7 @@ function EventRow({
           {summary ?? ""}
         </td>
         <td className="px-4 py-2">
-          {entry.user_display_name || entry.user_email}
+          {sourceBadge(entry)}
         </td>
       </tr>
       {expanded && (
@@ -277,6 +324,9 @@ function EventRow({
 
               <span className="text-muted-foreground">Action</span>
               <span className="font-medium">{formatAction(entry.action)}</span>
+
+              <span className="text-muted-foreground">Source</span>
+              <span>{sourceBadge(entry)}</span>
 
               <span className="text-muted-foreground">User</span>
               <span>
@@ -339,6 +389,7 @@ export function EventsPage() {
   const [resourceFilter, setResourceFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [actionFilter, setActionFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
   const [severityFilter, setSeverityFilter] = useState<Severity>("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -360,6 +411,7 @@ export function EventsPage() {
     resourceType: resourceFilter || undefined,
     userId: userFilter || undefined,
     action: actionFilter || undefined,
+    source: sourceFilter || undefined,
     startTime,
     endTime,
   });
@@ -396,6 +448,7 @@ export function EventsPage() {
     setResourceFilter("");
     setUserFilter("");
     setActionFilter("");
+    setSourceFilter("");
     setSeverityFilter("all");
     setStartDate("");
     setEndDate("");
@@ -407,6 +460,7 @@ export function EventsPage() {
     resourceFilter !== "" ||
     userFilter !== "" ||
     actionFilter !== "" ||
+    sourceFilter !== "" ||
     severityFilter !== "all" ||
     startDate !== "" ||
     endDate !== "";
@@ -522,6 +576,22 @@ export function EventsPage() {
                 {formatAction(a)}
               </option>
             ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">Source</label>
+          <select
+            className={selectClass}
+            value={sourceFilter}
+            onChange={(e) => {
+              setSourceFilter(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="">All Sources</option>
+            <option value="nexara">Nexara</option>
+            <option value="proxmox">Proxmox</option>
           </select>
         </div>
 

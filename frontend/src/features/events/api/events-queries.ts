@@ -10,6 +10,7 @@ export interface AuditLogEntry {
   action: string;
   details: string;
   created_at: string;
+  source: string;
   user_email: string;
   user_display_name: string;
   cluster_name: string;
@@ -35,6 +36,7 @@ interface EventsParams {
   resourceType?: string | undefined;
   userId?: string | undefined;
   action?: string | undefined;
+  source?: string | undefined;
   startTime?: string | undefined;
   endTime?: string | undefined;
 }
@@ -46,6 +48,7 @@ export function useEvents({
   resourceType,
   userId,
   action,
+  source,
   startTime,
   endTime,
 }: EventsParams) {
@@ -56,6 +59,7 @@ export function useEvents({
   if (resourceType) params.set("resource_type", resourceType);
   if (userId) params.set("user_id", userId);
   if (action) params.set("action", action);
+  if (source) params.set("source", source);
   if (startTime) params.set("start_time", startTime);
   if (endTime) params.set("end_time", endTime);
 
@@ -68,6 +72,7 @@ export function useEvents({
       resourceType,
       userId,
       action,
+      source,
       startTime,
       endTime,
     ],

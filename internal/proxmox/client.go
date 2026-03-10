@@ -2725,6 +2725,23 @@ func (c *Client) DeleteBackupJob(ctx context.Context, id string) error {
 	return nil
 }
 
+// GetNodeTasks returns completed tasks for a node from GET /nodes/{node}/tasks.
+// The since parameter filters tasks to those started after the given unix epoch.
+func (c *Client) GetNodeTasks(ctx context.Context, node string, since int64, limit int) ([]NodeTask, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 500
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/tasks?limit=" + strconv.Itoa(limit) + "&since=" + strconv.FormatInt(since, 10) + "&start=0"
+	var tasks []NodeTask
+	if err := c.do(ctx, path, &tasks); err != nil {
+		return nil, fmt.Errorf("get tasks on %s: %w", node, err)
+	}
+	return tasks, nil
+}
+
 // --- Phase 9: Datacenter Feature Parity ---
 
 // GetClusterOptions returns datacenter.cfg options via GET /cluster/options.

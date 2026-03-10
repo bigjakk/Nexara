@@ -36,6 +36,7 @@ type auditLogResponse struct {
 	Action          string    `json:"action"`
 	Details         string    `json:"details"`
 	CreatedAt       string    `json:"created_at"`
+	Source          string    `json:"source"`
 	UserEmail       string    `json:"user_email"`
 	UserDisplayName string    `json:"user_display_name"`
 	ClusterName     string    `json:"cluster_name"`
@@ -57,6 +58,7 @@ func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow) auditLogResponse {
 		Action:          a.Action,
 		Details:         string(a.Details),
 		CreatedAt:       a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		Source:          a.Source,
 		UserEmail:       a.UserEmail,
 		UserDisplayName: a.UserDisplayName,
 		ClusterName:     a.ClusterName,
@@ -113,6 +115,12 @@ func (h *AuditHandler) parseAuditFilters(c *fiber.Ctx) (db.ListAuditLogAdvancedP
 		v := pgtype.Text{String: a, Valid: true}
 		listP.Action = v
 		countP.Action = v
+	}
+
+	if src := c.Query("source"); src != "" {
+		v := pgtype.Text{String: src, Valid: true}
+		listP.Source = v
+		countP.Source = v
 	}
 
 	if st := c.Query("start_time"); st != "" {
@@ -198,6 +206,7 @@ func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow) auditLogResponse 
 		Action:          a.Action,
 		Details:         string(a.Details),
 		CreatedAt:       a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		Source:          a.Source,
 		UserEmail:       a.UserEmail,
 		UserDisplayName: a.UserDisplayName,
 		ClusterName:     a.ClusterName,

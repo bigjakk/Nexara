@@ -71,6 +71,8 @@ type Querier interface {
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	ExistsAuditLogByUPID(ctx context.Context, upid string) (bool, error)
+	ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error)
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) error
 	GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error)
@@ -135,6 +137,7 @@ type Querier interface {
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	GetSetting(ctx context.Context, arg GetSettingParams) (Setting, error)
 	GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error)
+	GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (int64, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
@@ -155,6 +158,7 @@ type Querier interface {
 	// Alert Rules
 	InsertAlertRule(ctx context.Context, arg InsertAlertRuleParams) (AlertRule, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
+	InsertAuditLogWithSource(ctx context.Context, arg InsertAuditLogWithSourceParams) error
 	InsertCVEScan(ctx context.Context, arg InsertCVEScanParams) (CveScan, error)
 	InsertCVEScanNode(ctx context.Context, arg InsertCVEScanNodeParams) (CveScanNode, error)
 	InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnParams) (CveScanVuln, error)
@@ -338,6 +342,7 @@ type Querier interface {
 	UpsertPBSVerifyJob(ctx context.Context, arg UpsertPBSVerifyJobParams) (PbsVerifyJob, error)
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error)
 	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (StoragePool, error)
+	UpsertTaskSyncState(ctx context.Context, arg UpsertTaskSyncStateParams) error
 	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
 }
 

@@ -68,6 +68,7 @@ type AuditLog struct {
 	Action       string          `json:"action"`
 	Details      json.RawMessage `json:"details"`
 	CreatedAt    time.Time       `json:"created_at"`
+	Source       string          `json:"source"`
 }
 
 type CephClusterMetric struct {
@@ -517,6 +518,11 @@ type Permission struct {
 	Action      string    `json:"action"`
 	Resource    string    `json:"resource"`
 	Description string    `json:"description"`
+}
+
+type ProxmoxTaskSyncState struct {
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	LastSyncedAt int64     `json:"last_synced_at"`
 }
 
 type ReportRun struct {

@@ -1085,6 +1085,20 @@ type UpdateNetworkInterfaceParams struct {
 	Method6     string `json:"method6,omitempty"`
 }
 
+// NodeTask represents a completed or running task from GET /nodes/{node}/tasks.
+type NodeTask struct {
+	UPID      string `json:"upid"`
+	Node      string `json:"node"`
+	PID       int    `json:"pid"`
+	PStart    int    `json:"pstart"`
+	StartTime int64  `json:"starttime"`
+	EndTime   int64  `json:"endtime"`
+	Type      string `json:"type"`
+	ID        string `json:"id"`
+	User      string `json:"user"`
+	Status    string `json:"status"`
+}
+
 // AptUpdate represents a pending package update from GET /nodes/{node}/apt/update.
 type AptUpdate struct {
 	Package      string `json:"Package"`

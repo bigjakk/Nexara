@@ -2,6 +2,10 @@
 INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details)
 VALUES ($1, $2, $3, $4, $5, $6);
 
+-- name: InsertAuditLogWithSource :exec
+INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details, source, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
 -- name: ListAuditLogByCluster :many
 SELECT * FROM audit_log WHERE cluster_id = $1 ORDER BY created_at DESC LIMIT $2;
 
@@ -25,6 +29,7 @@ SELECT
   a.action,
   a.details,
   a.created_at,
+  a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
   COALESCE(c.name, '') AS cluster_name,
@@ -49,6 +54,7 @@ SELECT
   a.action,
   a.details,
   a.created_at,
+  a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
   COALESCE(c.name, '') AS cluster_name,
@@ -76,6 +82,7 @@ SELECT
   a.action,
   a.details,
   a.created_at,
+  a.source,
   u.email AS user_email,
   u.display_name AS user_display_name,
   COALESCE(c.name, '') AS cluster_name,
@@ -89,6 +96,7 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluste
   AND (sqlc.narg('resource_type')::text IS NULL OR a.resource_type = sqlc.narg('resource_type'))
   AND (sqlc.narg('user_id')::uuid IS NULL OR a.user_id = sqlc.narg('user_id'))
   AND (sqlc.narg('action')::text IS NULL OR a.action = sqlc.narg('action'))
+  AND (sqlc.narg('source')::text IS NULL OR a.source = sqlc.narg('source'))
   AND (sqlc.narg('start_time')::timestamptz IS NULL OR a.created_at >= sqlc.narg('start_time'))
   AND (sqlc.narg('end_time')::timestamptz IS NULL OR a.created_at <= sqlc.narg('end_time'))
 ORDER BY a.created_at DESC
@@ -100,6 +108,7 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_
   AND (sqlc.narg('resource_type')::text IS NULL OR resource_type = sqlc.narg('resource_type'))
   AND (sqlc.narg('user_id')::uuid IS NULL OR user_id = sqlc.narg('user_id'))
   AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action'))
+  AND (sqlc.narg('source')::text IS NULL OR source = sqlc.narg('source'))
   AND (sqlc.narg('start_time')::timestamptz IS NULL OR created_at >= sqlc.narg('start_time'))
   AND (sqlc.narg('end_time')::timestamptz IS NULL OR created_at <= sqlc.narg('end_time'));
 

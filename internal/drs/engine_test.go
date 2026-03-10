@@ -1,6 +1,7 @@
 package drs
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -148,7 +149,7 @@ func TestPlanProducesMigrations(t *testing.T) {
 		t.Fatalf("expected imbalanced cluster, got %f", imbalance)
 	}
 
-	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25)
+	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25, slog.Default())
 
 	if len(recommendations) == 0 {
 		t.Fatal("expected at least one migration recommendation")
@@ -195,7 +196,7 @@ func TestPlanRejectsSingleVMThrashing(t *testing.T) {
 		t.Fatalf("expected imbalanced cluster, got %f", imbalance)
 	}
 
-	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25)
+	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25, slog.Default())
 
 	if len(recommendations) != 0 {
 		t.Errorf("expected no recommendations for single VM on 3 nodes, got %d: %+v",
@@ -234,7 +235,7 @@ func TestPlanThreeNodesWithEmptyNode(t *testing.T) {
 		t.Fatalf("expected imbalanced cluster, got %f", imbalance)
 	}
 
-	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25)
+	recommendations := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.25, slog.Default())
 
 	if len(recommendations) == 0 {
 		t.Fatal("expected at least one migration recommendation to spread VMs to empty node3")

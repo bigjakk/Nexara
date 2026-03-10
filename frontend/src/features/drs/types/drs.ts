@@ -66,9 +66,19 @@ export interface DRSRecommendation {
   improvement: number;
 }
 
+export interface NodeScore {
+  node: string;
+  score: number;
+  cpu_load: number;
+  mem_load: number;
+}
+
 export interface EvaluateResponse {
   recommendations: DRSRecommendation[];
   count: number;
+  node_scores: NodeScore[] | null;
+  imbalance: number;
+  threshold: number;
 }
 
 export interface DRSHistoryEntry {

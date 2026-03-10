@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   XCircle,
   Activity,
+  Monitor,
 } from "lucide-react";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import {
@@ -171,10 +172,18 @@ function ActivityRow({
   let severity = deriveSeverity(entry.action, entry.details);
   if (isFailed) severity = "error";
 
-  const resourceLabel =
+  // For Proxmox-sourced entries, resolve resource_name from details JSON
+  let resourceLabel =
     entry.resource_name && entry.resource_vmid
       ? `${entry.resource_name} (${String(entry.resource_vmid)})`
       : entry.resource_name || entry.resource_id;
+  if (!entry.resource_name && details["resource_name"]) {
+    const rn = typeof details["resource_name"] === "string" ? details["resource_name"] : null;
+    const ri = typeof details["resource_id"] === "string" ? details["resource_id"] : null;
+    if (rn) {
+      resourceLabel = ri ? `${rn} (${ri})` : rn;
+    }
+  }
 
   const { data: logLines, isLoading: logLoading } = useTaskLog(
     clusterId,
@@ -221,6 +230,12 @@ function ActivityRow({
         </td>
         <td className="px-2 py-1">
           <div className="flex items-center gap-2">
+            {entry.source === "proxmox" && (
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-orange-600 dark:text-orange-400">
+                <Monitor className="h-2.5 w-2.5" />
+                PVE
+              </span>
+            )}
             <span>{formatAction(entry.action)}</span>
             {resourceLabel && (
               <span className="text-muted-foreground">

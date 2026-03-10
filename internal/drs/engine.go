@@ -3,6 +3,7 @@ package drs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -24,8 +26,10 @@ type Weights struct {
 }
 
 // DefaultWeights returns the default scoring weights.
+// Memory is weighted higher because it is a more stable and constraining
+// resource than CPU, which tends to be spiky and transient.
 func DefaultWeights() Weights {
-	return Weights{CPU: 0.5, Memory: 0.5}
+	return Weights{CPU: 0.3, Memory: 0.7}
 }
 
 // NodeScore holds the computed load score for a node.
@@ -64,6 +68,15 @@ type Recommendation struct {
 	ExpectedImprovement float64
 }
 
+// EvalResult contains the full evaluation output including node scores.
+type EvalResult struct {
+	Recommendations []Recommendation
+	NodeScores      map[string]NodeScore
+	Imbalance       float64
+	Threshold       float64
+	Weights         Weights
+}
+
 // Engine is the DRS evaluation engine.
 type Engine struct {
 	queries       *db.Queries
@@ -81,9 +94,12 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger) *
 }
 
 // Evaluate runs DRS evaluation for a single cluster and returns recommendations.
-func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) ([]Recommendation, error) {
+func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult, error) {
 	cfg, err := e.queries.GetDRSConfig(ctx, clusterID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("get DRS config: %w", err)
 	}
 	if !cfg.Enabled || cfg.Mode == "disabled" {
@@ -177,13 +193,38 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) ([]Recommend
 	}
 
 	imbalance := CalculateImbalance(scores)
+
+	// Log per-node scores and per-dimension imbalance for debugging.
+	for name, s := range scores {
+		totalWL := len(nodeWorkloads[name])
+		e.logger.Info("DRS node score",
+			"cluster_id", clusterID,
+			"node", name,
+			"score", fmt.Sprintf("%.4f", s.Score),
+			"cpu_load", fmt.Sprintf("%.4f", s.CPULoad),
+			"mem_load", fmt.Sprintf("%.4f", s.MemLoad),
+			"workloads", totalWL,
+		)
+	}
+
+	result := &EvalResult{
+		NodeScores: scores,
+		Imbalance:  imbalance,
+		Threshold:  cfg.ImbalanceThreshold,
+		Weights:    weights,
+	}
+
 	if imbalance <= cfg.ImbalanceThreshold {
-		e.logger.Info("cluster balanced", "cluster_id", clusterID, "imbalance", imbalance, "threshold", cfg.ImbalanceThreshold)
-		return nil, nil
+		e.logger.Info("cluster balanced", "cluster_id", clusterID,
+			"imbalance", fmt.Sprintf("%.4f", imbalance),
+			"threshold", cfg.ImbalanceThreshold)
+		return result, nil
 	}
 
 	e.logger.Info("cluster imbalanced, planning migrations",
-		"cluster_id", clusterID, "imbalance", imbalance, "threshold", cfg.ImbalanceThreshold)
+		"cluster_id", clusterID,
+		"imbalance", fmt.Sprintf("%.4f", imbalance),
+		"threshold", cfg.ImbalanceThreshold)
 
 	// Load rules.
 	dbRules, err := e.queries.ListDRSRules(ctx, clusterID)
@@ -195,18 +236,27 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) ([]Recommend
 
 	// Build filtered workloads for the planner (exclude pinned VMs).
 	plannerWorkloads := make(map[string][]Workload, len(nodeWorkloads))
+	pinnedCount := 0
 	for node, wls := range nodeWorkloads {
 		for _, w := range wls {
 			if !w.Pinned {
 				plannerWorkloads[node] = append(plannerWorkloads[node], w)
+			} else {
+				pinnedCount++
 			}
 		}
 	}
 
-	// Plan migrations using filtered workloads but original scores.
-	recommendations := Plan(scores, plannerWorkloads, nodeEntries, rules, weights, cfg.ImbalanceThreshold)
+	e.logger.Info("DRS planner input",
+		"cluster_id", clusterID,
+		"pinned_count", pinnedCount,
+		"rule_count", len(rules),
+	)
 
-	return recommendations, nil
+	// Plan migrations using filtered workloads but original scores.
+	result.Recommendations = Plan(scores, plannerWorkloads, nodeEntries, rules, weights, cfg.ImbalanceThreshold, e.logger)
+
+	return result, nil
 }
 
 // ScoreNode computes a weighted load score for a node (0.0 = idle, 1.0 = fully loaded).

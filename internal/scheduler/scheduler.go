@@ -121,17 +121,18 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 
 		s.drsLastEval[cfg.ClusterID] = now
 
-		recommendations, err := s.drsEngine.Evaluate(ctx, cfg.ClusterID)
+		result, err := s.drsEngine.Evaluate(ctx, cfg.ClusterID)
 		if err != nil {
 			s.logger.Error("DRS evaluation failed",
 				"cluster_id", cfg.ClusterID, "error", err)
 			continue
 		}
 
-		if len(recommendations) == 0 {
+		if result == nil || len(result.Recommendations) == 0 {
 			continue
 		}
 
+		recommendations := result.Recommendations
 		s.logger.Info("DRS produced recommendations",
 			"cluster_id", cfg.ClusterID, "count", len(recommendations))
 

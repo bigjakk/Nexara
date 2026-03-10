@@ -177,7 +177,7 @@ func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
 			ClusterID:           clusterID,
 			Mode:                "disabled",
 			Enabled:             false,
-			Weights:             json.RawMessage(`{"cpu":0.5,"memory":0.5}`),
+			Weights:             json.RawMessage(`{"cpu":0.3,"memory":0.7}`),
 			ImbalanceThreshold:  0.25,
 			EvalIntervalSeconds: 300,
 		})
@@ -215,7 +215,7 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 	}
 
 	if req.Weights == nil {
-		req.Weights = json.RawMessage(`{"cpu":0.5,"memory":0.5}`)
+		req.Weights = json.RawMessage(`{"cpu":0.3,"memory":0.7}`)
 	}
 
 	cfg, err := h.queries.UpsertDRSConfig(c.Context(), db.UpsertDRSConfigParams{
@@ -338,9 +338,14 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 	}
 
 	engine := drs.NewEngine(h.queries, h.encryptionKey, slog.Default())
-	recommendations, err := engine.Evaluate(c.Context(), clusterID)
+	result, err := engine.Evaluate(c.Context(), clusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+	}
+
+	var recommendations []drs.Recommendation
+	if result != nil {
+		recommendations = result.Recommendations
 	}
 
 	// Record advisory results.
@@ -359,7 +364,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 		})
 	}
 
-	type evalResponse struct {
+	type evalRecommendation struct {
 		VMID        int     `json:"vmid"`
 		VMType      string  `json:"vm_type"`
 		From        string  `json:"from"`
@@ -368,9 +373,16 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 		Improvement float64 `json:"improvement"`
 	}
 
-	resp := make([]evalResponse, len(recommendations))
+	type nodeScoreResponse struct {
+		Node       string  `json:"node"`
+		Score      float64 `json:"score"`
+		CPULoad    float64 `json:"cpu_load"`
+		MemLoad    float64 `json:"mem_load"`
+	}
+
+	resp := make([]evalRecommendation, len(recommendations))
 	for i, r := range recommendations {
-		resp[i] = evalResponse{
+		resp[i] = evalRecommendation{
 			VMID:        r.VMID,
 			VMType:      r.VMType,
 			From:        r.SourceNode,
@@ -380,6 +392,22 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 		}
 	}
 
+	// Build node scores for the response.
+	var nodeScores []nodeScoreResponse
+	var imbalance, threshold float64
+	if result != nil {
+		for _, s := range result.NodeScores {
+			nodeScores = append(nodeScores, nodeScoreResponse{
+				Node:    s.Node,
+				Score:   s.Score,
+				CPULoad: s.CPULoad,
+				MemLoad: s.MemLoad,
+			})
+		}
+		imbalance = result.Imbalance
+		threshold = result.Threshold
+	}
+
 	details, _ := json.Marshal(map[string]interface{}{"recommendation_count": len(resp)})
 	h.auditLog(c, clusterID, "drs", clusterID.String(), "evaluate_triggered", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindDRSAction, "drs", clusterID.String(), "evaluate_triggered")
@@ -387,6 +415,9 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"recommendations": resp,
 		"count":           len(resp),
+		"node_scores":     nodeScores,
+		"imbalance":       imbalance,
+		"threshold":       threshold,
 	})
 }
 
