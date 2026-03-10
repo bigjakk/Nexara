@@ -68,10 +68,8 @@ Free, open-source, Docker-deployable. Manage multiple Proxmox clusters from a si
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/nexara/nexara.git && cd nexara
-cp .env.example .env
-sed -i "s/change-this-to-a-secure-random-string/$(openssl rand -base64 32)/" .env
-sed -i "s/change-this-to-a-32-byte-hex-key/$(openssl rand -hex 32)/" .env
+git clone https://gitea.crjlab.net/bigjakk/nexara.git && cd nexara
+./scripts/setup-env.sh   # generates .env with secure random secrets
 
 # 2. Start
 docker compose up -d
@@ -82,7 +80,16 @@ docker compose up -d
 Or use the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nexara/nexara/master/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bigjakk/nexara/master/scripts/install.sh | bash
+```
+
+### Production Deployment
+
+For production, use pre-built images from the container registry instead of building locally:
+
+```bash
+# Pull a specific release
+NEXARA_VERSION=0.1.0 docker compose -f docker-compose.prod.yml up -d
 ```
 
 See the [Installation Guide](docs/installation.md) for detailed setup, configuration, and troubleshooting.
@@ -156,6 +163,19 @@ Full configuration reference in the [Installation Guide](docs/installation.md#co
 | [API Reference](docs/api-reference.md) | REST API endpoint catalog with examples |
 | [Contributing](docs/contributing.md) | Development setup, conventions, PR process |
 | [Security Policy](SECURITY.md) | Vulnerability reporting and security features |
+
+## CI/CD
+
+Nexara uses Gitea Actions for continuous integration and releases.
+
+- **CI** — every push and PR runs Go lint/test/build, frontend typecheck/lint/test/build, and Docker build validation
+- **Release** — pushing a `v*` tag builds and pushes all Docker images to the Gitea container registry and creates a release with auto-generated notes
+
+```bash
+# Tag a release
+git tag -a v0.1.0 -m "Release v0.1.0"
+git push origin v0.1.0
+```
 
 ## Contributing
 

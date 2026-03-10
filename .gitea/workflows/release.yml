@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  REGISTRY: gitea.crjlab.net
+  OWNER: bigjakk
+  REPO: nexara
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          COMMIT=$(git rev-parse --short HEAD)
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to container registry
+        run: |
+          echo "${{ secrets.REGISTRY_TOKEN }}" | docker login ${{ env.REGISTRY }} \
+            -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+
+      - name: Build and push images
+        run: |
+          SERVICES="api ws collector scheduler frontend"
+          for SERVICE in $SERVICES; do
+            IMAGE="${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/${SERVICE}"
+            docker build \
+              -f "docker/${SERVICE}/Dockerfile" \
+              --build-arg "VERSION=${{ steps.version.outputs.version }}" \
+              --build-arg "COMMIT=${{ steps.version.outputs.commit }}" \
+              --build-arg "BUILD_TIME=${{ steps.version.outputs.build_time }}" \
+              -t "${IMAGE}:${{ steps.version.outputs.version }}" \
+              -t "${IMAGE}:latest" \
+              .
+            docker push "${IMAGE}:${{ steps.version.outputs.version }}"
+            docker push "${IMAGE}:latest"
+          done
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          chmod +x scripts/generate-release-notes.sh
+          NOTES=$(scripts/generate-release-notes.sh "${{ steps.version.outputs.tag }}")
+          # Write to file for multiline output
+          echo "$NOTES" > /tmp/release-notes.md
+
+      - name: Create Gitea release
+        run: |
+          BODY=$(cat /tmp/release-notes.md)
+          # Escape JSON special characters
+          BODY_JSON=$(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+          curl -s -X POST \
+            "${{ env.REGISTRY }}/api/v1/repos/${{ env.OWNER }}/nexara/releases" \
+            -H "Authorization: token ${{ secrets.REGISTRY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"tag_name\": \"${{ steps.version.outputs.tag }}\",
+              \"name\": \"Nexara ${{ steps.version.outputs.tag }}\",
+              \"body\": ${BODY_JSON},
+              \"draft\": false,
+              \"prerelease\": false
+            }"

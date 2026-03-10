@@ -16,9 +16,9 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w \
-    -X github.com/nexara/nexara/internal/api.Version=${VERSION} \
-    -X github.com/nexara/nexara/internal/api.Commit=${COMMIT} \
-    -X github.com/nexara/nexara/internal/api.BuildTime=${BUILD_TIME}" \
+    -X github.com/bigjakk/nexara/internal/api.Version=${VERSION} \
+    -X github.com/bigjakk/nexara/internal/api.Commit=${COMMIT} \
+    -X github.com/bigjakk/nexara/internal/api.BuildTime=${BUILD_TIME}" \
     -o /build/nexara-api ./cmd/api
 
 # Runtime stage
