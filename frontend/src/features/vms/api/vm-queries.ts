@@ -688,7 +688,7 @@ export interface GuestIPAddress {
 export interface GuestNetworkInterface {
   name: string;
   "hardware-address": string;
-  "ip-addresses": GuestIPAddress[];
+  "ip-addresses": GuestIPAddress[] | null;
 }
 
 export interface GuestOSInfo {
