@@ -68,7 +68,7 @@ Free, open-source, Docker-deployable. Manage multiple Proxmox clusters from a si
 
 ```bash
 # 1. Clone and configure
-git clone https://gitea.crjlab.net/bigjakk/nexara.git && cd nexara
+git clone https://gitea.crjlab.net/bigjakk/nexara.git && cd Nexara
 ./scripts/setup-env.sh   # generates .env with secure random secrets
 
 # 2. Start
