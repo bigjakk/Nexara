@@ -117,9 +117,20 @@ func applyPendingSchemaFiles(ctx context.Context, pool *pgxpool.Pool, files []st
 		return nil
 	}
 
+	// If the tracking table is empty but the database already exists, this is
+	// a first-time upgrade from a version that predated the tracking table.
+	// Many "pending" files are already applied — their non-idempotent operations
+	// (e.g. create_hypertable, CREATE MATERIALIZED VIEW) will fail. Treat these
+	// errors as non-fatal so that genuinely new migrations still get applied.
+	firstTimeUpgrade := len(applied) == 0
+
 	log.Printf("applying %d pending schema file(s)...", len(pending))
 	for _, name := range pending {
 		if err := applySchemaFile(ctx, pool, name); err != nil {
+			if firstTimeUpgrade {
+				log.Printf("  skipped %s (likely already applied): %v", name, err)
+				continue
+			}
 			return err
 		}
 	}
