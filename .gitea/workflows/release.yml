@@ -46,6 +46,9 @@ jobs:
               --build-arg "VERSION=${{ steps.version.outputs.version }}" \
               --build-arg "COMMIT=${{ steps.version.outputs.commit }}" \
               --build-arg "BUILD_TIME=${{ steps.version.outputs.build_time }}" \
+              --label "org.opencontainers.image.source=https://${{ env.REGISTRY }}/${{ env.OWNER }}/nexara" \
+              --label "org.opencontainers.image.description=Nexara ${SERVICE}" \
+              --label "org.opencontainers.image.version=${{ steps.version.outputs.version }}" \
               -t "${IMAGE}:${{ steps.version.outputs.version }}" \
               -t "${IMAGE}:latest" \
               .
