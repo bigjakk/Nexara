@@ -114,6 +114,18 @@ jobs:
             docker push "${IMAGE}:latest"
           done
 
+      - name: Link packages to repository
+        run: |
+          SERVICES="api ws collector scheduler frontend"
+          for SERVICE in $SERVICES; do
+            PKG="${{ env.REPO }}-${SERVICE}"
+            echo "Linking ${PKG} to nexara..."
+            curl -sf -X POST \
+              -H "Authorization: token ${{ secrets.REGISTRY_TOKEN }}" \
+              "https://${{ env.REGISTRY }}/api/v1/packages/${{ env.OWNER }}/container/${PKG}/-/link/nexara" \
+              || echo "  (already linked or not available)"
+          done
+
       - name: Generate release notes
         id: notes
         run: |
