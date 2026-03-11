@@ -36,9 +36,11 @@ jobs:
 
       - name: Build and push images
         run: |
+          set -e
           SERVICES="api ws collector scheduler frontend"
           for SERVICE in $SERVICES; do
-            IMAGE="${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/${SERVICE}"
+            IMAGE="${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}-${SERVICE}"
+            echo "Building ${IMAGE}..."
             docker build \
               -f "docker/${SERVICE}/Dockerfile" \
               --build-arg "VERSION=${{ steps.version.outputs.version }}" \
@@ -47,6 +49,7 @@ jobs:
               -t "${IMAGE}:${{ steps.version.outputs.version }}" \
               -t "${IMAGE}:latest" \
               .
+            echo "Pushing ${IMAGE}:${{ steps.version.outputs.version }}..."
             docker push "${IMAGE}:${{ steps.version.outputs.version }}"
             docker push "${IMAGE}:latest"
           done

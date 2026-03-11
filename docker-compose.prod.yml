@@ -50,7 +50,7 @@ services:
 
   # ---- Go API Server ----
   nexara-api:
-    image: gitea.crjlab.net/bigjakk/nexara/api:${NEXARA_VERSION:-latest}
+    image: gitea.crjlab.net/bigjakk/nexara-api:${NEXARA_VERSION:-latest}
     container_name: nexara-api
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://nexara:changeme@nexara-db:5432/nexara?sslmode=disable}
@@ -80,7 +80,7 @@ services:
 
   # ---- WebSocket Server ----
   nexara-ws:
-    image: gitea.crjlab.net/bigjakk/nexara/ws:${NEXARA_VERSION:-latest}
+    image: gitea.crjlab.net/bigjakk/nexara-ws:${NEXARA_VERSION:-latest}
     container_name: nexara-ws
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://nexara:changeme@nexara-db:5432/nexara?sslmode=disable}
@@ -108,7 +108,7 @@ services:
 
   # ---- Metric Collector ----
   nexara-collector:
-    image: gitea.crjlab.net/bigjakk/nexara/collector:${NEXARA_VERSION:-latest}
+    image: gitea.crjlab.net/bigjakk/nexara-collector:${NEXARA_VERSION:-latest}
     container_name: nexara-collector
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://nexara:changeme@nexara-db:5432/nexara?sslmode=disable}
@@ -134,7 +134,7 @@ services:
 
   # ---- Task Scheduler ----
   nexara-scheduler:
-    image: gitea.crjlab.net/bigjakk/nexara/scheduler:${NEXARA_VERSION:-latest}
+    image: gitea.crjlab.net/bigjakk/nexara-scheduler:${NEXARA_VERSION:-latest}
     container_name: nexara-scheduler
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://nexara:changeme@nexara-db:5432/nexara?sslmode=disable}
@@ -160,7 +160,7 @@ services:
 
   # ---- React Frontend ----
   nexara-frontend:
-    image: gitea.crjlab.net/bigjakk/nexara/frontend:${NEXARA_VERSION:-latest}
+    image: gitea.crjlab.net/bigjakk/nexara-frontend:${NEXARA_VERSION:-latest}
     container_name: nexara-frontend
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
