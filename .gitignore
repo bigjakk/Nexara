@@ -51,6 +51,7 @@ coverage.html
 /nexara-collector
 /nexara-scheduler
 /scheduler
+/collector
 
 # Root-level node (if any)
 /node_modules/
