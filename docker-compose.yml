@@ -61,6 +61,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=256M
+    healthcheck:
+      test: ["CMD", "/nexara-api", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 30s
     depends_on:
       nexara-db:
         condition: service_healthy
