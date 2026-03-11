@@ -1,0 +1,32 @@
+# Development overrides — builds images locally instead of pulling from registry.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+services:
+  nexara-api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    image: nexara-api:dev
+
+  nexara-ws:
+    build:
+      context: .
+      dockerfile: docker/ws/Dockerfile
+    image: nexara-ws:dev
+
+  nexara-collector:
+    build:
+      context: .
+      dockerfile: docker/collector/Dockerfile
+    image: nexara-collector:dev
+
+  nexara-scheduler:
+    build:
+      context: .
+      dockerfile: docker/scheduler/Dockerfile
+    image: nexara-scheduler:dev
+
+  nexara-frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    image: nexara-frontend:dev
