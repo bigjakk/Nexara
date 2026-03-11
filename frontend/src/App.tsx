@@ -89,6 +89,11 @@ const AppearancePage = lazy(() =>
     default: m.AppearancePage,
   })),
 );
+const ProfilePage = lazy(() =>
+  import("@/features/settings/pages/ProfilePage").then((m) => ({
+    default: m.ProfilePage,
+  })),
+);
 const SecurityDashboardPage = lazy(() =>
   import("@/features/security/pages/SecurityDashboardPage").then((m) => ({
     default: m.SecurityDashboardPage,
@@ -208,6 +213,10 @@ const router = createBrowserRouter([
           {
             path: "security",
             element: <LazyPage><SecurityDashboardPage /></LazyPage>,
+          },
+          {
+            path: "settings/profile",
+            element: <LazyPage><ProfilePage /></LazyPage>,
           },
           {
             path: "settings/security",

@@ -16,6 +16,9 @@ func (s *Server) setupRoutes() {
 		authGroup.Post("/refresh", s.authHandler.Refresh)
 		authGroup.Post("/logout", s.authRequired(), s.authHandler.Logout)
 		authGroup.Post("/logout-all", s.authRequired(), s.authHandler.LogoutAll)
+		authGroup.Get("/me", s.authRequired(), s.authHandler.GetMe)
+		authGroup.Put("/profile", s.authRequired(), s.authHandler.UpdateProfile)
+		authGroup.Post("/change-password", s.authRequired(), s.authHandler.ChangePassword)
 		authGroup.Get("/setup-status", s.authHandler.SetupStatus)
 		authGroup.Get("/sso-status", s.authHandler.SSOStatus)
 

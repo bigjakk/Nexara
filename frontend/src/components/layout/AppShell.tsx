@@ -104,7 +104,7 @@ export function AppShell() {
                 <p className="text-xs text-muted-foreground">{user?.email}</p>
               </div>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { void navigate("/settings/profile"); }}>
                 <User className="mr-2 h-4 w-4" />
                 {t("profile", { ns: "common" })}
               </DropdownMenuItem>

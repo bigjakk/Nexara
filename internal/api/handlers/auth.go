@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/mail"
 	"strings"
 
@@ -595,6 +596,157 @@ func (h *AuthHandler) issueOrTOTP(c *fiber.Ctx, user db.User, auditAction string
 		})
 	}
 	return h.issueTokens(c, user, auditAction)
+}
+
+// profileResponse is the response for GET /api/v1/auth/me.
+type profileResponse struct {
+	ID          uuid.UUID `json:"id"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"display_name"`
+	Role        string    `json:"role"`
+	AuthSource  string    `json:"auth_source"`
+	TOTPEnabled bool      `json:"totp_enabled"`
+	CreatedAt   string    `json:"created_at"`
+}
+
+// GetMe returns the current user's profile.
+func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
+	}
+
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to fetch user")
+	}
+
+	return c.JSON(profileResponse{
+		ID:          user.ID,
+		Email:       user.Email,
+		DisplayName: user.DisplayName,
+		Role:        user.Role,
+		AuthSource:  user.AuthSource,
+		TOTPEnabled: user.TotpSecret.Valid,
+		CreatedAt:   user.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	})
+}
+
+type updateProfileRequest struct {
+	DisplayName string `json:"display_name"`
+}
+
+// UpdateProfile allows the current user to update their own display name.
+// Only local users can edit their profile — LDAP/OIDC profiles are managed externally.
+func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
+	}
+
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to fetch user")
+	}
+
+	if user.AuthSource != "local" {
+		return fiber.NewError(fiber.StatusForbidden, "Profile is managed by your identity provider")
+	}
+
+	var req updateProfileRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	if req.DisplayName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Display name is required")
+	}
+	if len(req.DisplayName) > 200 {
+		return fiber.NewError(fiber.StatusBadRequest, "Display name must be 200 characters or fewer")
+	}
+
+	updated, err := h.queries.UpdateUserDisplayName(c.Context(), db.UpdateUserDisplayNameParams{
+		ID:          userID,
+		DisplayName: req.DisplayName,
+	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update profile")
+	}
+
+	details, _ := json.Marshal(map[string]string{"display_name": req.DisplayName})
+	h.authAuditLog(c, userID, "profile_updated", details)
+
+	return c.JSON(profileResponse{
+		ID:          updated.ID,
+		Email:       updated.Email,
+		DisplayName: updated.DisplayName,
+		Role:        updated.Role,
+		AuthSource:  updated.AuthSource,
+		TOTPEnabled: updated.TotpSecret.Valid,
+		CreatedAt:   updated.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	})
+}
+
+type changePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+// ChangePassword allows the current user to change their own password.
+// Only available for local auth users.
+func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
+	}
+
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to fetch user")
+	}
+
+	if user.AuthSource != "local" {
+		return fiber.NewError(fiber.StatusForbidden, "Password is managed by your identity provider")
+	}
+
+	var req changePasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.OldPassword == "" || req.NewPassword == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Both old and new passwords are required")
+	}
+
+	if err := auth.CheckPassword(user.PasswordHash, req.OldPassword); err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "Current password is incorrect")
+	}
+
+	hashedPassword, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		if errors.Is(err, auth.ErrPasswordTooShort) || errors.Is(err, auth.ErrPasswordTooLong) || errors.Is(err, auth.ErrPasswordWeak) {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process password")
+	}
+
+	if err := h.queries.UpdatePassword(c.Context(), db.UpdatePasswordParams{
+		ID:           userID,
+		PasswordHash: hashedPassword,
+	}); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update password")
+	}
+
+	// Revoke all sessions to force re-authentication on all devices.
+	if err := h.sessionManager.RevokeAllUserSessions(c.Context(), userID); err != nil {
+		// Password already changed — log the session revocation failure but don't fail the request.
+		slog.Warn("failed to revoke sessions after password change", "user_id", userID, "error", err)
+	}
+
+	h.authAuditLog(c, userID, "password_changed", nil)
+
+	return c.JSON(fiber.Map{"message": "Password changed successfully"})
 }
 
 // isDuplicateKeyError checks if a pgx error is a unique constraint violation.
