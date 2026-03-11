@@ -433,7 +433,7 @@ function GuestAgentSection({ clusterId, vmId }: { clusterId: string; vmId: strin
                           ({iface["hardware-address"]})
                         </span>
                       )}
-                      {iface["ip-addresses"] != null && iface["ip-addresses"].length > 0 && (
+                      {iface["ip-addresses"].length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-2">
                           {iface["ip-addresses"].map((ip) => (
                             <Badge key={`${ip["ip-address"]}/${String(ip.prefix)}`} variant="secondary" className="font-mono text-xs">

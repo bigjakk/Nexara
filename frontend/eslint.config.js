@@ -29,4 +29,12 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ["vite.config.ts", "vitest.config.ts", "tailwind.config.ts"],
+    rules: {
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
 );
