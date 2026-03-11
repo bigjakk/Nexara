@@ -758,6 +758,14 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 		}
 	}
 
+	// Warn if PBS returned no data at all — likely a token permissions issue.
+	if len(dsStatus) == 0 && len(datastores) == 0 && len(syncJobs) == 0 && len(verifyJobs) == 0 {
+		s.logger.Warn("PBS server returned no data — check API token permissions (ACLs)",
+			"pbs_id", server.ID,
+			"name", server.Name,
+		)
+	}
+
 	// Prune stale inventory.
 	if err := s.queries.DeleteStalePBSSnapshots(ctx, db.DeleteStalePBSSnapshotsParams{
 		PbsServerID: server.ID,

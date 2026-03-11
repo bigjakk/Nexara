@@ -4,6 +4,7 @@ interface SidebarState {
   collapsed: boolean;
   treeVisible: boolean;
   expandedNodes: Set<string>;
+  width: number;
 }
 
 interface SidebarActions {
@@ -11,6 +12,7 @@ interface SidebarActions {
   setTreeVisible: (visible: boolean) => void;
   toggleNode: (key: string) => void;
   expandNode: (key: string) => void;
+  setWidth: (width: number) => void;
 }
 
 const STORAGE_KEY = "nexara-sidebar";
@@ -28,13 +30,14 @@ function loadPersistedState(): SidebarState {
           expandedNodes: Array.isArray(obj["expandedNodes"])
             ? new Set(obj["expandedNodes"] as string[])
             : new Set<string>(),
+          width: typeof obj["width"] === "number" ? obj["width"] : 240,
         };
       }
     }
   } catch {
     // ignore
   }
-  return { collapsed: false, treeVisible: true, expandedNodes: new Set<string>() };
+  return { collapsed: false, treeVisible: true, expandedNodes: new Set<string>(), width: 240 };
 }
 
 function persist(state: SidebarState) {
@@ -45,6 +48,7 @@ function persist(state: SidebarState) {
         collapsed: state.collapsed,
         treeVisible: state.treeVisible,
         expandedNodes: [...state.expandedNodes],
+        width: state.width,
       }),
     );
   } catch {
@@ -85,6 +89,12 @@ export const useSidebarStore = create<SidebarState & SidebarActions>()(
         set({ expandedNodes: expanded });
         persist(state);
       }
+    },
+    setWidth: (width: number) => {
+      const clamped = Math.min(480, Math.max(180, width));
+      const state = { ...get(), width: clamped };
+      set({ width: clamped });
+      persist(state);
     },
   }),
 );

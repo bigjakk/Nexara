@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -61,7 +61,7 @@ function isInventoryRoute(pathname: string): boolean {
 export function Sidebar() {
   const { t } = useTranslation("navigation");
   const { hasPermission } = useAuth();
-  const { collapsed, toggleCollapsed, treeVisible, setTreeVisible } = useSidebarStore();
+  const { collapsed, toggleCollapsed, treeVisible, setTreeVisible, width, setWidth } = useSidebarStore();
   const { appTitle, logoUrl } = useBrandingStore();
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
@@ -82,14 +82,47 @@ export function Sidebar() {
   });
 
   const showTree = !collapsed && treeVisible;
+  const isResizing = useRef(false);
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (collapsed) return;
+      e.preventDefault();
+      isResizing.current = true;
+      const startX = e.clientX;
+      const startWidth = width;
+
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!isResizing.current) return;
+        const newWidth = startWidth + (ev.clientX - startX);
+        setWidth(newWidth);
+      };
+
+      const onMouseUp = () => {
+        isResizing.current = false;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [collapsed, width, setWidth],
+  );
 
   return (
     <TooltipProvider delayDuration={0}>
       <aside
         className={cn(
-          "flex h-full flex-col border-r bg-card transition-all duration-200",
-          collapsed ? "w-12" : "w-60",
+          "relative flex h-full shrink-0 flex-col border-r bg-card",
+          collapsed ? "w-12" : "",
+          collapsed ? "transition-all duration-200" : "",
         )}
+        style={collapsed ? undefined : { width: `${width}px` }}
       >
         {/* Header */}
         <div className="flex h-14 shrink-0 items-center border-b px-2">
@@ -194,6 +227,13 @@ export function Sidebar() {
             );
           })}
         </nav>
+        {/* Resize handle */}
+        {!collapsed && (
+          <div
+            onMouseDown={handleMouseDown}
+            className="absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-primary/20 active:bg-primary/30 transition-colors"
+          />
+        )}
       </aside>
     </TooltipProvider>
   );
