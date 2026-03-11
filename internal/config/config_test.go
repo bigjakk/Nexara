@@ -30,8 +30,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.RedisURL != "redis://localhost:6379" {
 		t.Errorf("RedisURL = %q, want %q", cfg.RedisURL, "redis://localhost:6379")
 	}
-	if cfg.RateLimitMax != 100 {
-		t.Errorf("RateLimitMax = %d, want 100", cfg.RateLimitMax)
+	if cfg.RateLimitMax != 600 {
+		t.Errorf("RateLimitMax = %d, want 600", cfg.RateLimitMax)
 	}
 	if cfg.RateLimitExpiration != time.Minute {
 		t.Errorf("RateLimitExpiration = %v, want 1m", cfg.RateLimitExpiration)
