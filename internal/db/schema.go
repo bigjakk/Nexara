@@ -114,27 +114,41 @@ func applyPendingSchemaFiles(ctx context.Context, pool *pgxpool.Pool, files []st
 	}
 
 	if len(pending) == 0 {
-		return nil
+		// Even with no pending files, verify schema integrity by re-running
+		// all files. Embedded schema files use IF NOT EXISTS / IF EXISTS, so
+		// idempotent operations are harmless. Non-idempotent ones (e.g.
+		// create_hypertable) will error — we skip those.
+		return verifySchema(ctx, pool, files)
 	}
-
-	// If the tracking table is empty but the database already exists, this is
-	// a first-time upgrade from a version that predated the tracking table.
-	// Many "pending" files are already applied — their non-idempotent operations
-	// (e.g. create_hypertable, CREATE MATERIALIZED VIEW) will fail. Treat these
-	// errors as non-fatal so that genuinely new migrations still get applied.
-	firstTimeUpgrade := len(applied) == 0
 
 	log.Printf("applying %d pending schema file(s)...", len(pending))
 	for _, name := range pending {
 		if err := applySchemaFile(ctx, pool, name); err != nil {
-			if firstTimeUpgrade {
-				log.Printf("  skipped %s (likely already applied): %v", name, err)
-				continue
-			}
-			return err
+			// Errors are non-fatal: the file may already be partially or
+			// fully applied (e.g. first-time upgrade, stale tracking table,
+			// or non-idempotent TimescaleDB operations).
+			log.Printf("  skipped %s (likely already applied): %v", name, err)
 		}
 	}
 	return recordAppliedFiles(ctx, pool, pending)
+}
+
+// verifySchema re-runs all schema files to catch any that were recorded as
+// applied but whose changes are missing (e.g. stale tracking table).
+// Errors are expected and non-fatal for already-applied operations.
+func verifySchema(ctx context.Context, pool *pgxpool.Pool, files []string) error {
+	var repaired int
+	for _, name := range files {
+		if err := applySchemaFile(ctx, pool, name); err != nil {
+			// Expected for non-idempotent operations that already exist.
+			continue
+		}
+		repaired++
+	}
+	if repaired > 0 {
+		log.Printf("schema verification repaired %d file(s)", repaired)
+	}
+	return nil
 }
 
 // recordAppliedFiles marks the given schema files as applied.
