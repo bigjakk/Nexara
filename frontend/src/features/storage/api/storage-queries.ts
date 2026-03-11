@@ -90,6 +90,7 @@ function uploadFile({ clusterId, storageId, content, file, onProgress }: UploadP
 
     const formData = new FormData();
     formData.append("content", content);
+    formData.append("filesize", String(file.size));
     formData.append("file", file);
     xhr.send(formData);
   });

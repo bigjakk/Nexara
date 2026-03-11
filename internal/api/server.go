@@ -195,9 +195,11 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	}
 
 	s.app = fiber.New(fiber.Config{
-		ErrorHandler:          errorHandler,
-		DisableStartupMessage: true,
-		BodyLimit:             int(cfg.MaxUploadSize), // Max upload size (default 15GB) for ISO uploads
+		ErrorHandler:                 errorHandler,
+		DisableStartupMessage:        true,
+		BodyLimit:                    32 * 1024 * 1024, // 32MB — bodies above this are streamed, not buffered
+		StreamRequestBody:            true,             // Enable streaming for large uploads (ISO/vztmpl)
+		DisablePreParseMultipartForm: true,             // Don't buffer multipart bodies; upload handler parses the stream itself
 	})
 
 	s.setupMiddleware()

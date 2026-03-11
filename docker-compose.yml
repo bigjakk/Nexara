@@ -62,7 +62,7 @@ services:
       - nexara-data:/data/nexara
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=256M
     depends_on:
       nexara-db:
         condition: service_healthy
@@ -71,8 +71,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: "1"
+          memory: 1G
+          cpus: "2"
     networks:
       - backend
     restart: unless-stopped

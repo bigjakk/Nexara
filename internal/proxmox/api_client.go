@@ -140,6 +140,37 @@ func (a *apiClient) do(ctx context.Context, path string, dst interface{}) error 
 	return unmarshalData(body, dst)
 }
 
+// doPostRaw performs an authenticated POST request with a pre-encoded form body.
+// Use this instead of doPost when url.Values.Encode() over-encodes characters
+// that the target API requires unescaped (e.g. colons in Proxmox HA SIDs).
+func (a *apiClient) doPostRaw(ctx context.Context, path string, rawBody string, dst interface{}) error {
+	apiURL := a.baseURL + "/api2/json" + path
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader(rawBody))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", a.authHeader)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	if err != nil {
+		return fmt.Errorf("read response body: %w", err)
+	}
+
+	if err := checkStatus(resp.StatusCode, respBody); err != nil {
+		return err
+	}
+
+	return unmarshalData(respBody, dst)
+}
+
 // doPost performs an authenticated POST request with form-encoded body.
 func (a *apiClient) doPost(ctx context.Context, path string, params url.Values, dst interface{}) error {
 	apiURL := a.baseURL + "/api2/json" + path
@@ -291,7 +322,17 @@ func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[str
 	req.Header.Set("Content-Type", contentType)
 	req.ContentLength = totalSize
 
-	resp, err := a.httpClient.Do(req)
+	// Use a separate client with no timeout and a transport tuned for
+	// large uploads (bigger write buffer, longer idle timeout).
+	uploadTransport := a.httpClient.Transport.(*http.Transport).Clone()
+	uploadTransport.WriteBufferSize = 256 * 1024 // 256KB write buffer (default 4KB)
+	uploadTransport.ReadBufferSize = 64 * 1024   // 64KB read buffer for the response
+	uploadClient := &http.Client{
+		Transport: uploadTransport,
+		Timeout:   0, // no timeout; context controls cancellation
+	}
+
+	resp, err := uploadClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrConnectionFailed, err)
 	}

@@ -3,7 +3,6 @@ import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
@@ -98,32 +97,23 @@ export function NodeDetailPage() {
         )}
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="overview">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="metrics">Metrics</TabsTrigger>
-        </TabsList>
+      {/* Overview + Metrics combined */}
+      <div className="space-y-6">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <InfoCard label="Status" value={node.status} />
+          <InfoCard label="CPUs" value={String(node.cpu_count)} />
+          <InfoCard label="Memory" value={formatBytes(node.mem_total)} />
+          <InfoCard label="Disk" value={formatBytes(node.disk_total)} />
+          <InfoCard label="PVE Version" value={node.pve_version || "--"} />
+          <InfoCard label="Uptime" value={formatUptime(node.uptime)} />
+        </div>
 
-        <TabsContent value="overview" className="mt-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <InfoCard label="Status" value={node.status} />
-            <InfoCard label="CPUs" value={String(node.cpu_count)} />
-            <InfoCard label="Memory" value={formatBytes(node.mem_total)} />
-            <InfoCard label="Disk" value={formatBytes(node.disk_total)} />
-            <InfoCard label="PVE Version" value={node.pve_version || "--"} />
-            <InfoCard label="Uptime" value={formatUptime(node.uptime)} />
-          </div>
-        </TabsContent>
-
-        <TabsContent value="metrics" className="mt-4">
-          <NodeMetricsPanel
-            clusterId={clusterId}
-            nodeId={nodeId}
-            liveMetric={liveMetric}
-          />
-        </TabsContent>
-      </Tabs>
+        <NodeMetricsPanel
+          clusterId={clusterId}
+          nodeId={nodeId}
+          liveMetric={liveMetric}
+        />
+      </div>
     </div>
   );
 }

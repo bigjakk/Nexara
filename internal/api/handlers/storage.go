@@ -1,11 +1,18 @@
 package handlers
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
+	"mime"
+	"mime/multipart"
 	"net/url"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -148,6 +155,13 @@ func (h *StorageHandler) GetContent(c *fiber.Ctx) error {
 }
 
 // UploadFile handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload.
+//
+// This handler uses streaming multipart parsing to avoid buffering the entire
+// file in memory. With StreamRequestBody enabled on the server, fasthttp
+// provides a body stream for requests exceeding BodyLimit. We parse the
+// multipart stream directly and pipe the file part to Proxmox.
+//
+// The frontend must send form fields in order: content, filesize, file.
 func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "storage"); err != nil {
 		return err
@@ -163,38 +177,85 @@ func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node for storage pool")
 	}
 
-	contentType := c.FormValue("content")
-	if contentType != "iso" && contentType != "vztmpl" {
-		return fiber.NewError(fiber.StatusBadRequest, "content must be 'iso' or 'vztmpl'")
+	// Parse the multipart boundary from the Content-Type header.
+	ct := c.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(ct)
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
+		return fiber.NewError(fiber.StatusBadRequest, "Expected multipart form data")
+	}
+	boundary := params["boundary"]
+	if boundary == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Missing multipart boundary")
 	}
 
-	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "file is required")
+	// Get the body stream. For large uploads (> BodyLimit), fasthttp provides
+	// a streaming reader that avoids buffering the entire body in memory.
+	// For smaller bodies, fall back to the in-memory buffer.
+	bodyStream := c.Context().RequestBodyStream()
+	if bodyStream == nil {
+		bodyStream = bytes.NewReader(c.Body())
 	}
 
-	filename := filepath.Base(fileHeader.Filename)
-	if filename == "." || filename == "/" || filename == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid filename")
+	mr := multipart.NewReader(bodyStream, boundary)
+
+	var uploadContent string
+	var fileSize int64
+
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Failed to parse multipart form")
+		}
+
+		switch part.FormName() {
+		case "content":
+			val, _ := io.ReadAll(io.LimitReader(part, 64))
+			uploadContent = strings.TrimSpace(string(val))
+
+		case "filesize":
+			val, _ := io.ReadAll(io.LimitReader(part, 32))
+			fileSize, _ = strconv.ParseInt(strings.TrimSpace(string(val)), 10, 64)
+
+		case "file":
+			filename := filepath.Base(part.FileName())
+			if filename == "" || filename == "." || filename == "/" {
+				return fiber.NewError(fiber.StatusBadRequest, "Invalid filename")
+			}
+			if uploadContent != "iso" && uploadContent != "vztmpl" {
+				return fiber.NewError(fiber.StatusBadRequest, "content must be 'iso' or 'vztmpl'")
+			}
+			if fileSize <= 0 {
+				return fiber.NewError(fiber.StatusBadRequest, "filesize field is required before file")
+			}
+
+			// Wrap the part reader in a large buffer to reduce syscalls.
+			// multipart.Part does byte-level boundary scanning; buffering
+			// amortises that overhead across 256KB chunks.
+			bufferedPart := bufio.NewReaderSize(part, 256*1024)
+
+			// Stream the file part directly to Proxmox without buffering.
+			upid, uploadErr := pxClient.UploadToStorage(c.Context(), node.Name, pool.Storage, uploadContent, filename, bufferedPart, fileSize)
+			if uploadErr != nil {
+				return mapProxmoxError(uploadErr)
+			}
+
+			h.auditLog(c, pool.ClusterID, pool.ID.String(), "upload")
+
+			return c.JSON(uploadResponse{
+				UPID:   upid,
+				Status: "dispatched",
+			})
+
+		default:
+			// Discard unknown form fields.
+			_, _ = io.Copy(io.Discard, part)
+		}
 	}
 
-	file, err := fileHeader.Open()
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to open uploaded file")
-	}
-	defer func() { _ = file.Close() }()
-
-	upid, err := pxClient.UploadToStorage(c.Context(), node.Name, pool.Storage, contentType, filename, file, fileHeader.Size)
-	if err != nil {
-		return mapProxmoxError(err)
-	}
-
-	h.auditLog(c, pool.ClusterID, pool.ID.String(), "upload")
-
-	return c.JSON(uploadResponse{
-		UPID:   upid,
-		Status: "dispatched",
-	})
+	return fiber.NewError(fiber.StatusBadRequest, "No file provided in upload")
 }
 
 // DeleteContent handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/:volume.

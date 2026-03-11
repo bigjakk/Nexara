@@ -71,9 +71,12 @@ export function useEventInvalidation(clusterIds: string[]): void {
         case "inventory_change":
           if (cid) {
             scheduleInvalidation(
+              ["clusters"],
+              ["clusters", cid, "nodes"],
               ["clusters", cid, "vms"],
               ["clusters", cid, "vmids"],
               ["clusters", cid, "containers"],
+              ["clusters", cid, "storage"],
             );
           }
           break;

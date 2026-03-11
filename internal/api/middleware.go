@@ -41,7 +41,8 @@ func (s *Server) setupMiddleware() {
 	}))
 
 	// Body size limit for non-upload API traffic (10 MB).
-	// Upload endpoints use the global BodyLimit (MaxUploadSize, default 15GB).
+	// Upload endpoints bypass this check — their bodies are streamed via
+	// StreamRequestBody and parsed incrementally by the handler.
 	const apiBodyLimit = 10 * 1024 * 1024
 	s.app.Use(func(c *fiber.Ctx) error {
 		if strings.Contains(c.Path(), "/storage/") && strings.HasSuffix(c.Path(), "/upload") {
@@ -58,9 +59,15 @@ func (s *Server) setupMiddleware() {
 	})
 
 	// Rate limiting (in-memory storage).
+	// Skip auth endpoints so token refresh is never blocked — a 429 on
+	// /auth/refresh causes the frontend to interpret it as an auth failure
+	// and log the user out.
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        s.config.RateLimitMax,
 		Expiration: s.config.RateLimitExpiration,
+		Next: func(c *fiber.Ctx) bool {
+			return strings.HasPrefix(c.Path(), "/api/v1/auth/")
+		},
 	}))
 }
 

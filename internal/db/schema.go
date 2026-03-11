@@ -136,7 +136,7 @@ func applyPendingSchemaFiles(ctx context.Context, pool *pgxpool.Pool, files []st
 // verifySchema re-runs all schema files to catch any that were recorded as
 // applied but whose changes are missing (e.g. stale tracking table).
 // Errors are expected and non-fatal for already-applied operations.
-func verifySchema(ctx context.Context, pool *pgxpool.Pool, files []string) error {
+func verifySchema(ctx context.Context, pool *pgxpool.Pool, files []string) error { //nolint:unparam // error return kept for future use and caller consistency
 	var repaired int
 	for _, name := range files {
 		if err := applySchemaFile(ctx, pool, name); err != nil {

@@ -9,11 +9,18 @@
     }
 
     # API routes — upload endpoint gets a higher limit for ISO files.
+    # flush_interval -1 disables response buffering for immediate streaming.
     handle /api/v1/clusters/*/storage/*/upload {
         request_body {
             max_size 15GB
         }
-        reverse_proxy nexara-api:8080
+        reverse_proxy nexara-api:8080 {
+            flush_interval -1
+            transport http {
+                read_buffer  256kb
+                write_buffer 256kb
+            }
+        }
     }
 
     # API routes — normal traffic capped at 10MB.

@@ -2837,6 +2837,9 @@ func (c *Client) SetClusterOptions(ctx context.Context, params UpdateClusterOpti
 }
 
 // CreateHAResource creates a new HA resource via POST /cluster/ha/resources.
+// Note: the SID (e.g. "vm:100") must be sent with a literal colon — Go's
+// url.Values.Encode() percent-encodes it to %3A which Proxmox rejects during
+// parameter validation. We use doPostRaw to send the form body unescaped.
 func (c *Client) CreateHAResource(ctx context.Context, params CreateHAResourceParams) error {
 	form := url.Values{}
 	form.Set("sid", params.SID)
@@ -2855,7 +2858,9 @@ func (c *Client) CreateHAResource(ctx context.Context, params CreateHAResourcePa
 	if params.Comment != "" {
 		form.Set("comment", params.Comment)
 	}
-	if err := c.doPost(ctx, "/cluster/ha/resources", form, nil); err != nil {
+	// Replace %3A back to literal colon — Proxmox validates SID before URL-decoding.
+	body := strings.ReplaceAll(form.Encode(), "%3A", ":")
+	if err := c.doPostRaw(ctx, "/cluster/ha/resources", body, nil); err != nil {
 		return fmt.Errorf("create HA resource %s: %w", params.SID, err)
 	}
 	return nil
@@ -2863,7 +2868,8 @@ func (c *Client) CreateHAResource(ctx context.Context, params CreateHAResourcePa
 
 // GetHAResource returns a single HA resource via GET /cluster/ha/resources/{sid}.
 func (c *Client) GetHAResource(ctx context.Context, sid string) (*HAResource, error) {
-	path := "/cluster/ha/resources/" + url.PathEscape(sid)
+	// Use raw SID (e.g. "vm:100") — Proxmox rejects percent-encoded colons in HA SID paths.
+	path := "/cluster/ha/resources/" + sid
 	var res HAResource
 	if err := c.do(ctx, path, &res); err != nil {
 		return nil, fmt.Errorf("get HA resource %s: %w", sid, err)
@@ -2892,7 +2898,8 @@ func (c *Client) UpdateHAResource(ctx context.Context, sid string, params Update
 	if params.Digest != "" {
 		form.Set("digest", params.Digest)
 	}
-	path := "/cluster/ha/resources/" + url.PathEscape(sid)
+	// Use raw SID — Proxmox rejects percent-encoded colons in HA SID paths.
+	path := "/cluster/ha/resources/" + sid
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update HA resource %s: %w", sid, err)
 	}
@@ -2901,7 +2908,8 @@ func (c *Client) UpdateHAResource(ctx context.Context, sid string, params Update
 
 // DeleteHAResource deletes an HA resource via DELETE /cluster/ha/resources/{sid}.
 func (c *Client) DeleteHAResource(ctx context.Context, sid string) error {
-	path := "/cluster/ha/resources/" + url.PathEscape(sid)
+	// Use raw SID — Proxmox rejects percent-encoded colons in HA SID paths.
+	path := "/cluster/ha/resources/" + sid
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("delete HA resource %s: %w", sid, err)
 	}

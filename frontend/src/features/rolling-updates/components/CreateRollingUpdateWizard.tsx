@@ -115,7 +115,7 @@ export function CreateRollingUpdateWizard({
   useEffect(() => {
     if (step === "ha_review" && selectedNodes.length > 0) {
       preflight.mutate(
-        { clusterId, nodes: selectedNodes },
+        { clusterId, nodes: selectedNodes, parallelism },
         {
           onSuccess: (report) => {
             setPreflightReport(report);

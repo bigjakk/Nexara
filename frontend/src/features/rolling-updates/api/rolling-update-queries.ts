@@ -247,13 +247,15 @@ export function usePreflightHA() {
     mutationFn: ({
       clusterId,
       nodes,
+      parallelism,
     }: {
       clusterId: string;
       nodes: string[];
+      parallelism?: number;
     }) =>
       apiClient.post<HAPreFlightReport>(
         `/api/v1/clusters/${clusterId}/rolling-updates/preflight-ha`,
-        { nodes },
+        { nodes, parallelism: parallelism ?? 1 },
       ),
   });
 }

@@ -284,6 +284,13 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// against tasks that Nexara itself initiated).
 	s.syncTasks(ctx, client, cluster)
 
+	// Notify the frontend that inventory data has been refreshed so
+	// dashboards update without requiring a manual page reload.
+	if s.eventPub != nil {
+		s.eventPub.ClusterEvent(ctx, cluster.ID.String(),
+			events.KindInventoryChange, "cluster", cluster.ID.String(), "sync_complete")
+	}
+
 	return result, nil
 }
 

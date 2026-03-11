@@ -18,7 +18,7 @@ type Config struct {
 	EncryptionKey          string        `envconfig:"ENCRYPTION_KEY" required:"true"`
 	AccessTokenTTL         time.Duration `envconfig:"ACCESS_TOKEN_TTL" default:"15m"`
 	RefreshTokenTTL        time.Duration `envconfig:"REFRESH_TOKEN_TTL" default:"168h"`
-	RateLimitMax           int           `envconfig:"RATE_LIMIT_MAX" default:"100"`
+	RateLimitMax           int           `envconfig:"RATE_LIMIT_MAX" default:"600"`
 	RateLimitExpiration    time.Duration `envconfig:"RATE_LIMIT_EXPIRATION" default:"1m"`
 	CORSAllowOrigins       string        `envconfig:"CORS_ALLOW_ORIGINS" default:"http://localhost:3001"`
 	MetricsCollectInterval time.Duration `envconfig:"METRICS_COLLECT_INTERVAL" default:"30s"`

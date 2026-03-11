@@ -268,21 +268,36 @@ func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "ha_policy must be 'strict' or 'warn'")
 	}
 
-	// Run HA pre-flight check.
+	// Run pre-flight checks: HA constraints + capacity analysis.
 	var haWarningsJSON json.RawMessage
 	client, clientErr := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 	if clientErr == nil {
+		var allConflicts []rolling.HAConflict
+		preflightHasErrors := false
+
+		// HA/DRS constraint check.
 		report, err := rolling.AnalyzeHAConstraints(c.Context(), client, h.queries, clusterID, req.Nodes)
 		if err == nil && report != nil {
-			if haPolicy == "strict" && report.HasErrors {
-				return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-					"error":     "ha_conflict",
-					"message":   "HA constraints would be violated and policy is strict",
-					"conflicts": report.Conflicts,
-				})
-			}
-			haWarningsJSON, _ = json.Marshal(report.Conflicts)
+			allConflicts = append(allConflicts, report.Conflicts...)
+			preflightHasErrors = preflightHasErrors || report.HasErrors
 		}
+
+		// Capacity feasibility check — verifies remaining nodes can absorb
+		// the workload when each batch of nodes is drained.
+		capConflicts, capHasErrors, capErr := rolling.AnalyzeCapacity(c.Context(), client, req.Nodes, req.Parallelism)
+		if capErr == nil && len(capConflicts) > 0 {
+			allConflicts = append(allConflicts, capConflicts...)
+			preflightHasErrors = preflightHasErrors || capHasErrors
+		}
+
+		if haPolicy == "strict" && preflightHasErrors {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error":     "preflight_conflict",
+				"message":   "Pre-flight checks failed and policy is strict",
+				"conflicts": allConflicts,
+			})
+		}
+		haWarningsJSON, _ = json.Marshal(allConflicts)
 	}
 	if haWarningsJSON == nil {
 		haWarningsJSON = json.RawMessage(`[]`)
@@ -656,7 +671,7 @@ func (h *RollingUpdateHandler) PreviewPackages(c *fiber.Ctx) error {
 	return c.JSON(updates)
 }
 
-// PreflightHA analyzes HA/DRS constraints for a proposed set of nodes.
+// PreflightHA analyzes HA/DRS constraints and capacity feasibility for a proposed set of nodes.
 func (h *RollingUpdateHandler) PreflightHA(c *fiber.Ctx) error {
 	if err := requirePerm(c, "view", "rolling_update"); err != nil {
 		return err
@@ -668,10 +683,14 @@ func (h *RollingUpdateHandler) PreflightHA(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		Nodes []string `json:"nodes"`
+		Nodes       []string `json:"nodes"`
+		Parallelism int32    `json:"parallelism"`
 	}
 	if err := c.BodyParser(&req); err != nil || len(req.Nodes) == 0 {
 		return fiber.NewError(fiber.StatusBadRequest, "nodes array is required")
+	}
+	if req.Parallelism <= 0 {
+		req.Parallelism = 1
 	}
 
 	client, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
@@ -682,6 +701,16 @@ func (h *RollingUpdateHandler) PreflightHA(c *fiber.Ctx) error {
 	report, err := rolling.AnalyzeHAConstraints(c.Context(), client, h.queries, clusterID, req.Nodes)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to analyze HA constraints")
+	}
+	if report == nil {
+		report = &rolling.HAPreFlightReport{Conflicts: []rolling.HAConflict{}}
+	}
+
+	// Capacity feasibility check.
+	capConflicts, capHasErrors, capErr := rolling.AnalyzeCapacity(c.Context(), client, req.Nodes, req.Parallelism)
+	if capErr == nil && len(capConflicts) > 0 {
+		report.Conflicts = append(report.Conflicts, capConflicts...)
+		report.HasErrors = report.HasErrors || capHasErrors
 	}
 
 	return c.JSON(report)

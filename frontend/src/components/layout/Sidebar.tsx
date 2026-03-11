@@ -122,7 +122,7 @@ export function Sidebar() {
           collapsed ? "w-12" : "",
           collapsed ? "transition-all duration-200" : "",
         )}
-        style={collapsed ? undefined : { width: `${width}px` }}
+        style={collapsed ? undefined : { width: `${String(width)}px` }}
       >
         {/* Header */}
         <div className="flex h-14 shrink-0 items-center border-b px-2">

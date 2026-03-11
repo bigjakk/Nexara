@@ -92,27 +92,36 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
 
   return (
     <div className="border-l border-border pl-3 ml-3">
-      <button
-        onClick={() => {
-          if (nodeVMs.length > 0) toggleNode(nodeKey);
-          void navigate(`/clusters/${clusterId}/nodes/${node.id}`);
-        }}
+      <div
         className={cn(
           "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
           isActive && "bg-accent text-accent-foreground",
         )}
       >
-        <ChevronRight
-          className={cn(
-            "h-3 w-3 shrink-0 transition-transform",
-            nodeVMs.length === 0 && "invisible",
-            isExpanded && "rotate-90",
-          )}
-        />
-        <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <StatusDot status={node.status} />
-        <span className="truncate">{node.name}</span>
-      </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (nodeVMs.length > 0) toggleNode(nodeKey);
+          }}
+          className="shrink-0"
+        >
+          <ChevronRight
+            className={cn(
+              "h-3 w-3 transition-transform",
+              nodeVMs.length === 0 && "invisible",
+              isExpanded && "rotate-90",
+            )}
+          />
+        </button>
+        <button
+          onClick={() => { void navigate(`/clusters/${clusterId}/nodes/${node.id}`); }}
+          className="flex min-w-0 flex-1 items-center gap-1.5"
+        >
+          <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <StatusDot status={node.status} />
+          <span className="truncate">{node.name}</span>
+        </button>
+      </div>
 
       {isExpanded && nodeVMs.length > 0 && (
         <div className="border-l border-border pl-3 ml-3">
