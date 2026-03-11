@@ -85,11 +85,10 @@ curl -fsSL https://raw.githubusercontent.com/bigjakk/nexara/master/scripts/insta
 
 ### Production Deployment
 
-For production, use pre-built images from the container registry instead of building locally:
+For production, use pre-built images from the container registry:
 
 ```bash
-# Pull a specific release
-NEXARA_VERSION=0.1.0 docker compose -f docker-compose.prod.yml up -d
+docker compose up -d
 ```
 
 See the [Installation Guide](docs/installation.md) for detailed setup, configuration, and troubleshooting.
