@@ -2,14 +2,15 @@
 SELECT * FROM drs_configs WHERE cluster_id = $1;
 
 -- name: UpsertDRSConfig :one
-INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, include_containers)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (cluster_id) DO UPDATE SET
     mode = EXCLUDED.mode,
     enabled = EXCLUDED.enabled,
     weights = EXCLUDED.weights,
     imbalance_threshold = EXCLUDED.imbalance_threshold,
     eval_interval_seconds = EXCLUDED.eval_interval_seconds,
+    include_containers = EXCLUDED.include_containers,
     updated_at = now()
 RETURNING *;
 

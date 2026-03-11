@@ -23,6 +23,7 @@ import { ConvertToTemplateDialog } from "../components/ConvertToTemplateDialog";
 import { SnapshotPanel } from "../components/SnapshotPanel";
 import { CloudInitPanel } from "../components/CloudInitPanel";
 import { HardwarePanel } from "../components/HardwarePanel";
+import { ContainerResourcesPanel } from "../components/ContainerResourcesPanel";
 import { SchedulePanel } from "../components/SchedulePanel";
 import { BackupPanel } from "../components/BackupPanel";
 import type { ResourceKind } from "../types/vm";
@@ -244,6 +245,9 @@ export function VMDetailPage() {
           {kind === "vm" && (
             <TabsTrigger value="hardware">Hardware</TabsTrigger>
           )}
+          {kind === "ct" && (
+            <TabsTrigger value="resources">Resources</TabsTrigger>
+          )}
           <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
           {kind === "vm" && (
             <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
@@ -285,6 +289,12 @@ export function VMDetailPage() {
         {kind === "vm" && (
           <TabsContent value="hardware" className="mt-4">
             <HardwarePanel clusterId={clusterId} vmId={vmId} vmStatus={vm.status} nodeName={nodeName} />
+          </TabsContent>
+        )}
+
+        {kind === "ct" && (
+          <TabsContent value="resources" className="mt-4">
+            <ContainerResourcesPanel clusterId={clusterId} ctId={vmId} ctStatus={vm.status} nodeName={nodeName} />
           </TabsContent>
         )}
 

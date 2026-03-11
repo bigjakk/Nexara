@@ -15,6 +15,7 @@ export interface DRSConfig {
   weights: DRSWeights;
   imbalance_threshold: number;
   eval_interval_seconds: number;
+  include_containers: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +26,7 @@ export interface DRSConfigRequest {
   weights: DRSWeights;
   imbalance_threshold: number;
   eval_interval_seconds: number;
+  include_containers: boolean;
 }
 
 export type RuleSource = "manual" | "ha";

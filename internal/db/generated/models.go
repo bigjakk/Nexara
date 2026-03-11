@@ -246,6 +246,7 @@ type DrsConfig struct {
 	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
 	CreatedAt           time.Time       `json:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"`
+	IncludeContainers   bool            `json:"include_containers"`
 }
 
 type DrsHistory struct {

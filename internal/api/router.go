@@ -92,7 +92,9 @@ func (s *Server) setupRoutes() {
 			clusters.Post("/:cluster_id/containers/:ct_id/snapshots", s.containerHandler.CreateSnapshot)
 			clusters.Delete("/:cluster_id/containers/:ct_id/snapshots/:snap_name", s.containerHandler.DeleteSnapshot)
 			clusters.Post("/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback", s.containerHandler.RollbackSnapshot)
+			clusters.Get("/:cluster_id/containers/:ct_id/config", s.containerHandler.GetContainerConfig)
 			clusters.Put("/:cluster_id/containers/:ct_id/config", s.containerHandler.SetContainerConfig)
+			clusters.Post("/:cluster_id/containers/:ct_id/disks/resize", s.containerHandler.ResizeDisk)
 			clusters.Post("/:cluster_id/containers/:ct_id/volumes/move", s.containerHandler.MoveVolume)
 		}
 		if s.vmHandler != nil {

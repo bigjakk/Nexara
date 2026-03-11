@@ -34,7 +34,7 @@ func (q *Queries) DeleteDRSRule(ctx context.Context, id uuid.UUID) error {
 }
 
 const getDRSConfig = `-- name: GetDRSConfig :one
-SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at FROM drs_configs WHERE cluster_id = $1
+SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers FROM drs_configs WHERE cluster_id = $1
 `
 
 func (q *Queries) GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error) {
@@ -50,6 +50,7 @@ func (q *Queries) GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsCon
 		&i.EvalIntervalSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IncludeContainers,
 	)
 	return i, err
 }
@@ -271,7 +272,7 @@ func (q *Queries) ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsR
 }
 
 const listEnabledDRSConfigs = `-- name: ListEnabledDRSConfigs :many
-SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at FROM drs_configs WHERE enabled = true AND mode != 'disabled'
+SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers FROM drs_configs WHERE enabled = true AND mode != 'disabled'
 `
 
 func (q *Queries) ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error) {
@@ -293,6 +294,7 @@ func (q *Queries) ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error
 			&i.EvalIntervalSeconds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IncludeContainers,
 		); err != nil {
 			return nil, err
 		}
@@ -359,16 +361,17 @@ func (q *Queries) UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) er
 }
 
 const upsertDRSConfig = `-- name: UpsertDRSConfig :one
-INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, include_containers)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (cluster_id) DO UPDATE SET
     mode = EXCLUDED.mode,
     enabled = EXCLUDED.enabled,
     weights = EXCLUDED.weights,
     imbalance_threshold = EXCLUDED.imbalance_threshold,
     eval_interval_seconds = EXCLUDED.eval_interval_seconds,
+    include_containers = EXCLUDED.include_containers,
     updated_at = now()
-RETURNING id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at
+RETURNING id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers
 `
 
 type UpsertDRSConfigParams struct {
@@ -378,6 +381,7 @@ type UpsertDRSConfigParams struct {
 	Weights             json.RawMessage `json:"weights"`
 	ImbalanceThreshold  float64         `json:"imbalance_threshold"`
 	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
+	IncludeContainers   bool            `json:"include_containers"`
 }
 
 func (q *Queries) UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error) {
@@ -388,6 +392,7 @@ func (q *Queries) UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams
 		arg.Weights,
 		arg.ImbalanceThreshold,
 		arg.EvalIntervalSeconds,
+		arg.IncludeContainers,
 	)
 	var i DrsConfig
 	err := row.Scan(
@@ -400,6 +405,7 @@ func (q *Queries) UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams
 		&i.EvalIntervalSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IncludeContainers,
 	)
 	return i, err
 }

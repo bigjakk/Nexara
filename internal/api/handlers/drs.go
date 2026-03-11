@@ -47,6 +47,7 @@ type drsConfigRequest struct {
 	Weights             json.RawMessage `json:"weights"`
 	ImbalanceThreshold  float64         `json:"imbalance_threshold"`
 	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
+	IncludeContainers   bool            `json:"include_containers"`
 }
 
 type drsConfigResponse struct {
@@ -57,6 +58,7 @@ type drsConfigResponse struct {
 	Weights             json.RawMessage `json:"weights"`
 	ImbalanceThreshold  float64         `json:"imbalance_threshold"`
 	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
+	IncludeContainers   bool            `json:"include_containers"`
 	CreatedAt           string          `json:"created_at"`
 	UpdatedAt           string          `json:"updated_at"`
 }
@@ -70,6 +72,7 @@ func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 		Weights:             c.Weights,
 		ImbalanceThreshold:  c.ImbalanceThreshold,
 		EvalIntervalSeconds: c.EvalIntervalSeconds,
+		IncludeContainers:   c.IncludeContainers,
 		CreatedAt:           c.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:           c.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
@@ -180,6 +183,7 @@ func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
 			Weights:             json.RawMessage(`{"cpu":0.3,"memory":0.7}`),
 			ImbalanceThreshold:  0.25,
 			EvalIntervalSeconds: 300,
+			IncludeContainers:   false,
 		})
 	}
 
@@ -225,6 +229,7 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 		Weights:             req.Weights,
 		ImbalanceThreshold:  req.ImbalanceThreshold,
 		EvalIntervalSeconds: req.EvalIntervalSeconds,
+		IncludeContainers:   req.IncludeContainers,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update DRS config")

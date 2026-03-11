@@ -12,10 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useDRSConfig, useUpdateDRSConfig } from "../api/drs-queries";
 import type { DRSMode, DRSConfigRequest } from "../types/drs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Settings } from "lucide-react";
+import { Settings, AlertTriangle } from "lucide-react";
 
 interface DRSConfigCardProps {
   clusterId: string;
@@ -31,6 +32,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   const [memWeight, setMemWeight] = useState(0.5);
   const [threshold, setThreshold] = useState(0.25);
   const [evalInterval, setEvalInterval] = useState(300);
+  const [includeContainers, setIncludeContainers] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">(
     "idle",
   );
@@ -52,6 +54,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       }
       setThreshold(config.imbalance_threshold);
       setEvalInterval(config.eval_interval_seconds);
+      setIncludeContainers(config.include_containers);
     }
   }, [config]);
 
@@ -67,6 +70,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       weights: { cpu: cpuWeight, memory: memWeight },
       imbalance_threshold: threshold,
       eval_interval_seconds: evalInterval,
+      include_containers: includeContainers,
     };
     updateConfig.mutate(request, {
       onSuccess: () => {
@@ -217,6 +221,27 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
               ? ` Every ${String(Math.round(evalInterval / 60))} minutes.`
               : ` Every ${String(evalInterval)} seconds.`}
           </p>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="include-containers"
+              checked={includeContainers}
+              onCheckedChange={(v) => { setIncludeContainers(v === true); }}
+            />
+            <Label htmlFor="include-containers">Include containers in balancing</Label>
+          </div>
+          {includeContainers && (
+            <div className="flex items-start gap-2 rounded-md border border-yellow-500/50 bg-yellow-500/10 p-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+              <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                Container migration requires downtime. Unlike VMs which support live migration,
+                containers must be stopped, moved, and restarted. Only enable this if container
+                downtime during rebalancing is acceptable.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">

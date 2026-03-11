@@ -863,6 +863,24 @@ func (c *Client) ResizeDisk(ctx context.Context, node string, vmid int, params D
 	return nil
 }
 
+// ResizeCTDisk resizes an LXC container disk (rootfs or mount point).
+func (c *Client) ResizeCTDisk(ctx context.Context, node string, vmid int, params DiskResizeParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	form := url.Values{}
+	form.Set("disk", params.Disk)
+	form.Set("size", params.Size)
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/resize"
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("resize disk on CT %d: %w", vmid, err)
+	}
+	return nil
+}
+
 // MoveDisk moves a VM disk to another storage and returns the task UPID.
 func (c *Client) MoveDisk(ctx context.Context, node string, vmid int, params DiskMoveParams) (string, error) {
 	if err := validateNodeName(node); err != nil {

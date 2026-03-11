@@ -122,6 +122,11 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 	}
 
 	// Collect workloads per node.
+	// When include_containers is false, containers still count toward node load
+	// scoring (so DRS has accurate scores) but are marked as pinned so they
+	// won't be selected for migration. Container migration requires downtime
+	// (stop → move → start) unlike VM live migration.
+	includeContainers := cfg.IncludeContainers
 	nodeWorkloads := make(map[string][]Workload)
 	nodeEntries := make(map[string]proxmox.NodeListEntry)
 	for _, n := range nodes {
@@ -175,6 +180,7 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 				NetIn:    ct.NetIn,
 				NetOut:   ct.NetOut,
 				Status:   ct.Status,
+				Pinned:   !includeContainers,
 			})
 		}
 	}

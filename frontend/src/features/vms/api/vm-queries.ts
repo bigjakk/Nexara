@@ -526,6 +526,51 @@ export function useVMConfig(clusterId: string, vmId: string) {
   });
 }
 
+// --- Container Config ---
+
+export function useContainerConfig(clusterId: string, ctId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "containers", ctId, "config"],
+    queryFn: () =>
+      apiClient.get<VMConfig>(
+        `/api/v1/clusters/${clusterId}/containers/${ctId}/config`,
+      ),
+    enabled: clusterId.length > 0 && ctId.length > 0,
+  });
+}
+
+// --- Container Disk Resize ---
+
+interface ResizeContainerDiskParams {
+  clusterId: string;
+  ctId: string;
+  disk: string;
+  size: string;
+}
+
+export function useResizeContainerDisk() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, ctId, disk, size }: ResizeContainerDiskParams) =>
+      apiClient.post<VMActionResponse>(
+        `/api/v1/clusters/${clusterId}/containers/${ctId}/disks/resize`,
+        { disk, size },
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "containers",
+          variables.ctId,
+          "config",
+        ],
+      });
+    },
+  });
+}
+
 interface SetVMConfigParams {
   clusterId: string;
   vmId: string;
@@ -749,6 +794,36 @@ export function useMoveDisk() {
       });
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "vms"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "storage"],
+      });
+    },
+  });
+}
+
+// --- Container Volume Move ---
+
+interface MoveContainerVolumeParams {
+  clusterId: string;
+  ctId: string;
+  volume: string;
+  storage: string;
+  deleteOriginal: boolean;
+}
+
+export function useMoveContainerVolume() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ clusterId, ctId, volume, storage, deleteOriginal }: MoveContainerVolumeParams) =>
+      apiClient.post<VMActionResponse>(
+        `/api/v1/clusters/${clusterId}/containers/${ctId}/volumes/move`,
+        { volume, storage, delete: deleteOriginal },
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", variables.clusterId, "containers", variables.ctId, "config"],
       });
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "storage"],

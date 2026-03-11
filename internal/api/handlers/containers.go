@@ -763,6 +763,84 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 
 // --- Container Config handlers ---
 
+// GetContainerConfig handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/config.
+func (h *ContainerHandler) GetContainerConfig(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "container"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	ct, node, _, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	config, err := pxClient.GetCTConfig(c.Context(), node.Name, int(ct.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	return c.JSON(config)
+}
+
+// ResizeDisk handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/disks/resize.
+func (h *ContainerHandler) ResizeDisk(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "container"); err != nil {
+		return err
+	}
+
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	var req struct {
+		Disk string `json:"disk"`
+		Size string `json:"size"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	if req.Disk == "" || req.Size == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "disk and size are required")
+	}
+
+	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	if err := pxClient.ResizeCTDisk(c.Context(), node.Name, int(ct.Vmid), proxmox.DiskResizeParams{
+		Disk: req.Disk,
+		Size: req.Size,
+	}); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	h.auditLog(c, cluster.ID, ct.ID.String(), "disk_resize", nil)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "disk_resize")
+
+	return c.JSON(vmActionResponse{
+		UPID:   "",
+		Status: "ok",
+	})
+}
+
 // MoveVolume handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/volumes/move.
 func (h *ContainerHandler) MoveVolume(c *fiber.Ctx) error {
 	if err := requirePerm(c, "execute", "container"); err != nil {
