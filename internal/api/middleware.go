@@ -66,7 +66,8 @@ func (s *Server) setupMiddleware() {
 		Max:        s.config.RateLimitMax,
 		Expiration: s.config.RateLimitExpiration,
 		Next: func(c *fiber.Ctx) bool {
-			return strings.HasPrefix(c.Path(), "/api/v1/auth/")
+			return strings.HasPrefix(c.Path(), "/api/v1/auth/") ||
+				strings.HasPrefix(c.Path(), "/ws")
 		},
 	}))
 }

@@ -1,14 +1,11 @@
-.PHONY: build test lint generate migrate-up migrate-down docker-build docker-up docker-down clean audit audit-go audit-npm coverage-html
+.PHONY: build frontend-build test lint generate migrate-up migrate-down docker-build docker-up docker-down clean audit audit-go audit-npm coverage-html
 
 # Go parameters
 GOCMD=go
 GOBUILD=$(GOCMD) build
 GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
-BINARY_API=nexara-api
-BINARY_WS=nexara-ws
-BINARY_COLLECTOR=nexara-collector
-BINARY_SCHEDULER=nexara-scheduler
+BINARY=nexara
 
 # Version injection
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -23,12 +20,19 @@ LDFLAGS=-s -w \
 MIGRATIONS_DIR=migrations
 DATABASE_URL?=postgres://nexara:nexara@localhost:5432/nexara?sslmode=disable
 
-## build: Build all Go binaries
+## build: Build unified Go binary (copies frontend dist if available)
 build:
-	$(GOBUILD) -ldflags="$(LDFLAGS)" -o bin/$(BINARY_API) ./cmd/api
-	$(GOBUILD) -o bin/$(BINARY_WS) ./cmd/ws
-	$(GOBUILD) -o bin/$(BINARY_COLLECTOR) ./cmd/collector
-	$(GOBUILD) -o bin/$(BINARY_SCHEDULER) ./cmd/scheduler
+	@if [ -d frontend/dist ]; then \
+		rm -rf cmd/nexara/dist && \
+		cp -r frontend/dist cmd/nexara/dist; \
+	fi
+	$(GOBUILD) -ldflags="$(LDFLAGS)" -o bin/$(BINARY) ./cmd/nexara
+
+## frontend-build: Build frontend and copy to embed directory
+frontend-build:
+	cd frontend && npm ci && npm run build
+	rm -rf cmd/nexara/dist
+	cp -r frontend/dist cmd/nexara/dist
 
 ## test: Run all tests
 test:
@@ -51,7 +55,7 @@ migrate-up:
 migrate-down:
 	migrate -database "$(DATABASE_URL)" -path $(MIGRATIONS_DIR) down 1
 
-## docker-build: Build all Docker images
+## docker-build: Build Docker image
 docker-build:
 	docker compose build
 

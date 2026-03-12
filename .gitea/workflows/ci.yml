@@ -27,12 +27,8 @@ jobs:
       - name: Test
         run: go test -race -count=1 ./...
 
-      - name: Build binaries
-        run: |
-          CGO_ENABLED=0 go build -o /dev/null ./cmd/api
-          CGO_ENABLED=0 go build -o /dev/null ./cmd/ws
-          CGO_ENABLED=0 go build -o /dev/null ./cmd/collector
-          CGO_ENABLED=0 go build -o /dev/null ./cmd/scheduler
+      - name: Build unified binary
+        run: CGO_ENABLED=0 go build -o /dev/null ./cmd/nexara
 
   frontend-ci:
     runs-on: ubuntu-latest
@@ -66,20 +62,12 @@ jobs:
   docker-build:
     runs-on: ubuntu-latest
     needs: [go-ci, frontend-ci]
-    strategy:
-      matrix:
-        service:
-          - { name: api, dockerfile: docker/api/Dockerfile }
-          - { name: ws, dockerfile: docker/ws/Dockerfile }
-          - { name: collector, dockerfile: docker/collector/Dockerfile }
-          - { name: scheduler, dockerfile: docker/scheduler/Dockerfile }
-          - { name: frontend, dockerfile: docker/frontend/Dockerfile }
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build ${{ matrix.service.name }}
+      - name: Build unified image
         run: |
           docker build \
-            -f ${{ matrix.service.dockerfile }} \
-            -t nexara/${{ matrix.service.name }}:ci \
+            -f docker/nexara/Dockerfile \
+            -t nexara:ci \
             .

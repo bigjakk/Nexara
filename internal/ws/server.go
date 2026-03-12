@@ -87,6 +87,23 @@ func (s *Server) App() *fiber.App {
 	return s.app
 }
 
+// RegisterRoutes mounts WebSocket routes onto an external Fiber app.
+// Used by the unified binary to serve WS on the same port as the API.
+func (s *Server) RegisterRoutes(app *fiber.App) {
+	if s.consoleHandler != nil {
+		app.Use("/ws/console", s.authMiddleware)
+		app.Get("/ws/console", websocket.New(s.consoleHandler.HandleConsole))
+	}
+
+	if s.vncHandler != nil {
+		app.Use("/ws/vnc", s.authMiddleware)
+		app.Get("/ws/vnc", websocket.New(s.vncHandler.HandleVNC))
+	}
+
+	app.Use("/ws", s.authMiddleware)
+	app.Get("/ws", websocket.New(s.handleWS))
+}
+
 // healthz returns a 200 OK for health checks.
 func (s *Server) healthz(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})

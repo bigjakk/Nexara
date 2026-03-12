@@ -46,12 +46,17 @@ coverage.out
 coverage.html
 
 # Build artifacts
+/nexara
 /nexara-api
 /nexara-ws
 /nexara-collector
 /nexara-scheduler
 /scheduler
 /collector
+
+# Embedded frontend (placeholder kept, built files ignored)
+cmd/nexara/dist/
+!cmd/nexara/dist/index.html
 
 # Root-level node (if any)
 /node_modules/

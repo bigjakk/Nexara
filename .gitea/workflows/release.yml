@@ -31,12 +31,8 @@ jobs:
       - name: Test
         run: go test -race -count=1 ./...
 
-      - name: Build binaries
-        run: |
-          CGO_ENABLED=0 go build -o /dev/null ./cmd/api
-          CGO_ENABLED=0 go build -o /dev/null ./cmd/ws
-          CGO_ENABLED=0 go build -o /dev/null ./cmd/collector
-          CGO_ENABLED=0 go build -o /dev/null ./cmd/scheduler
+      - name: Build unified binary
+        run: CGO_ENABLED=0 go build -o /dev/null ./cmd/nexara
 
   frontend-ci:
     runs-on: ubuntu-latest
@@ -91,40 +87,29 @@ jobs:
           echo "${{ secrets.REGISTRY_TOKEN }}" | docker login ${{ env.REGISTRY }} \
             -u "${{ secrets.REGISTRY_USER }}" --password-stdin
 
-      - name: Build and push images
+      - name: Build and push image
         run: |
-          set -e
-          SERVICES="api ws collector scheduler frontend"
-          for SERVICE in $SERVICES; do
-            IMAGE="${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}-${SERVICE}"
-            echo "Building ${IMAGE}..."
-            docker build \
-              -f "docker/${SERVICE}/Dockerfile" \
-              --build-arg "VERSION=${{ steps.version.outputs.version }}" \
-              --build-arg "COMMIT=${{ steps.version.outputs.commit }}" \
-              --build-arg "BUILD_TIME=${{ steps.version.outputs.build_time }}" \
-              --label "org.opencontainers.image.source=https://${{ env.REGISTRY }}/${{ env.OWNER }}/nexara" \
-              --label "org.opencontainers.image.description=Nexara ${SERVICE}" \
-              --label "org.opencontainers.image.version=${{ steps.version.outputs.version }}" \
-              -t "${IMAGE}:${{ steps.version.outputs.version }}" \
-              -t "${IMAGE}:latest" \
-              .
-            echo "Pushing ${IMAGE}:${{ steps.version.outputs.version }}..."
-            docker push "${IMAGE}:${{ steps.version.outputs.version }}"
-            docker push "${IMAGE}:latest"
-          done
+          IMAGE="${{ env.REGISTRY }}/${{ env.OWNER }}/nexara"
+          docker build \
+            -f docker/nexara/Dockerfile \
+            --build-arg "VERSION=${{ steps.version.outputs.version }}" \
+            --build-arg "COMMIT=${{ steps.version.outputs.commit }}" \
+            --build-arg "BUILD_TIME=${{ steps.version.outputs.build_time }}" \
+            --label "org.opencontainers.image.source=https://${{ env.REGISTRY }}/${{ env.OWNER }}/nexara" \
+            --label "org.opencontainers.image.description=Nexara - Proxmox management platform" \
+            --label "org.opencontainers.image.version=${{ steps.version.outputs.version }}" \
+            -t "${IMAGE}:${{ steps.version.outputs.version }}" \
+            -t "${IMAGE}:latest" \
+            .
+          docker push "${IMAGE}:${{ steps.version.outputs.version }}"
+          docker push "${IMAGE}:latest"
 
-      - name: Link packages to repository
+      - name: Link package to repository
         run: |
-          SERVICES="api ws collector scheduler frontend"
-          for SERVICE in $SERVICES; do
-            PKG="${{ env.REPO }}-${SERVICE}"
-            echo "Linking ${PKG} to nexara..."
-            curl -sf -X POST \
-              -H "Authorization: token ${{ secrets.REGISTRY_TOKEN }}" \
-              "https://${{ env.REGISTRY }}/api/v1/packages/${{ env.OWNER }}/container/${PKG}/-/link/nexara" \
-              || echo "  (already linked or not available)"
-          done
+          curl -sf -X POST \
+            -H "Authorization: token ${{ secrets.REGISTRY_TOKEN }}" \
+            "https://${{ env.REGISTRY }}/api/v1/packages/${{ env.OWNER }}/container/nexara/-/link/nexara" \
+            || echo "(already linked or not available)"
 
       - name: Generate release notes
         id: notes
