@@ -53,20 +53,13 @@ sed -i "s/change-this-to-a-32-byte-hex-key/$(openssl rand -hex 32)/" .env
 sed -i "s/changeme/$(openssl rand -base64 16 | tr -d '=/+')/" .env
 ```
 
-Set your domain (optional — defaults to `localhost`):
-
-```bash
-# For production with automatic HTTPS via Caddy
-sed -i "s/NEXARA_DOMAIN=localhost/NEXARA_DOMAIN=nexara.example.com/" .env
-```
-
 ### 3. Start the Stack
 
 ```bash
 docker compose up -d
 ```
 
-The database schema is applied automatically on first startup. All 7 services will start in dependency order with health checks.
+The database schema is applied automatically on first startup. All 3 services will start in dependency order with health checks.
 
 ### 4. Verify
 
@@ -92,11 +85,7 @@ All configuration is via environment variables in `.env`:
 | `API_PORT` | No | `8080` | API server listen port |
 | `JWT_SECRET` | **Yes** | — | Secret for signing JWT tokens (min 16 chars) |
 | `ENCRYPTION_KEY` | **Yes** | — | 32-byte hex key for AES-256-GCM encryption of secrets at rest |
-| `WS_PORT` | No | `8081` | WebSocket server listen port |
-| `COLLECT_INTERVAL` | No | `30s` | How often the collector syncs Proxmox inventory |
 | `METRICS_COLLECT_INTERVAL` | No | `10s` | How often metrics are collected from Proxmox |
-| `SCHEDULER_TICK` | No | `60s` | Scheduler evaluation interval |
-| `NEXARA_DOMAIN` | No | `localhost` | Domain for Caddy reverse proxy (enables auto-HTTPS) |
 | `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 
 ## First-Time Setup
@@ -139,14 +128,9 @@ user@realm!tokenid=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 | Service | Container | Port | Description |
 |---------|-----------|------|-------------|
-| Caddy | `nexara-proxy` | 80, 443 | Reverse proxy, automatic HTTPS |
-| API | `nexara-api` | 8080 | REST API server |
-| WebSocket | `nexara-ws` | 8081 | Real-time metrics and events |
-| Frontend | `nexara-frontend` | 3000 | React SPA (served by nginx) |
+| Nexara | `nexara` | 8080 (mapped to 80) | Unified: API + WebSocket + frontend + collector + scheduler |
 | PostgreSQL | `nexara-db` | 5432 | Primary database + TimescaleDB |
 | Redis | `nexara-redis` | 6379 | Pub/sub, caching, session store |
-| Collector | `nexara-collector` | — | Proxmox inventory and metric sync |
-| Scheduler | `nexara-scheduler` | — | Scheduled tasks, DRS, alerts, CVE scans |
 
 ## Updating
 
@@ -179,7 +163,7 @@ docker exec nexara-db pg_dump -U nexara -Fc nexara > nexara-backup-$(date +%Y%m%
 
 ```bash
 # Stop the application (keep DB running)
-docker compose stop nexara-api nexara-ws nexara-collector nexara-scheduler
+docker compose stop nexara
 
 # Restore from SQL dump
 docker exec -i nexara-db psql -U nexara nexara < nexara-backup-20240101.sql
@@ -193,7 +177,7 @@ docker compose up -d
 
 ### Volume Backup
 
-For a full backup including Redis data and Caddy certificates:
+For a full backup including Redis data:
 
 ```bash
 # Stop all services
@@ -213,7 +197,7 @@ docker compose up -d
 
 ```bash
 # Check container logs
-docker compose logs nexara-api
+docker compose logs nexara
 docker compose logs nexara-db
 
 # Verify all containers are running
@@ -232,24 +216,23 @@ You need to generate secrets before starting. See [Configure Environment](#2-con
 
 ### Port conflicts
 
-If ports 80, 443, 5432, or 6379 are already in use:
+If ports 80, 5432, or 6379 are already in use:
 
 1. Edit `docker-compose.yml` to change the host port mappings
-2. For the Caddy proxy, change `"80:80"` to e.g. `"8443:80"`
+2. For the Nexara service, change `"80:8080"` to e.g. `"8443:8080"`
 3. Internal service-to-service communication uses container names, not host ports
 
 ### Frontend shows blank page
 
-- Check the frontend container: `docker compose logs nexara-frontend`
-- Verify the Caddy proxy is running: `docker compose logs nexara-proxy`
-- Try accessing the frontend directly at `http://localhost:3000`
+- Check the Nexara container logs: `docker compose logs nexara`
+- Verify the container is healthy: `docker compose ps`
 
 ### Proxmox connection fails
 
 - Verify the API URL is reachable from the Docker host
 - Check that the API token has sufficient privileges
 - For self-signed certificates, use the **Fetch Fingerprint** button when adding the cluster
-- Check collector logs: `docker compose logs nexara-collector`
+- Check logs: `docker compose logs nexara`
 
 ### Reset admin password
 

@@ -8,7 +8,7 @@ Nexara exposes a REST API at `/api/v1`. All endpoints (except auth and health) r
 http://localhost/api/v1
 ```
 
-In production, Caddy provides HTTPS automatically:
+In production behind a reverse proxy with TLS:
 ```
 https://nexara.example.com/api/v1
 ```
@@ -710,7 +710,7 @@ Returns the application version, commit hash, and build time.
 
 ## WebSocket
 
-The WebSocket server runs on port 8081 and provides:
+The WebSocket server runs on the same port as the API and provides:
 
 - **Real-time metrics** — CPU, memory, disk, network metrics streamed per cluster
 - **Event notifications** — inventory changes, VM state changes, alerts, task completions
@@ -718,7 +718,7 @@ The WebSocket server runs on port 8081 and provides:
 
 Connect with:
 ```
-ws://localhost:8081/ws?token=<access_token>
+ws://localhost:8080/ws?token=<access_token>
 ```
 
 Subscribe to channels by sending JSON messages:

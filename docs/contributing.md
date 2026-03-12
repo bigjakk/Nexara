@@ -27,15 +27,15 @@ docker compose up -d nexara-db nexara-redis
 # Apply migrations
 make migrate-up
 
-# Build Go binaries
+# Build the unified binary
 make build
 
-# Start the API server
+# Start the server
 DATABASE_URL="postgres://nexara:changeme@localhost:5432/nexara?sslmode=disable" \
 REDIS_URL="redis://localhost:6379/0" \
 JWT_SECRET="dev-secret-change-me-1234567890" \
 ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-./bin/nexara-api
+./bin/nexara
 
 # In another terminal — start the frontend
 cd frontend
@@ -49,11 +49,8 @@ The frontend dev server runs at `http://localhost:5173` with hot reload.
 
 ```
 nexara/
-├── cmd/                    # Go entry points
-│   ├── api/                # REST API server
-│   ├── ws/                 # WebSocket server
-│   ├── collector/          # Proxmox metric collector
-│   └── scheduler/          # Task scheduler
+├── cmd/
+│   └── nexara/             # Unified entry point (API + WS + collector + scheduler + embedded frontend)
 ├── internal/               # Private Go packages
 │   ├── api/                # HTTP handlers, router, middleware
 │   │   └── handlers/       # Handler files (one per domain)
@@ -271,13 +268,13 @@ chore: upgrade Go dependencies
 ## Common Commands
 
 ```bash
-make build          # Build all Go binaries
+make build          # Build unified Go binary
 make test           # Run Go tests with race detection
 make lint           # Run golangci-lint
 make generate       # Run sqlc generate
 make migrate-up     # Apply pending migrations
 make migrate-down   # Rollback last migration
-make docker-build   # Build all Docker images
+make docker-build   # Build Docker image
 make docker-up      # Start full stack
 make docker-down    # Stop full stack
 make clean          # Remove build artifacts

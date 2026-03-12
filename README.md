@@ -104,82 +104,50 @@ See the [Installation Guide](docs/installation.md) for detailed setup, configura
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌────────────────┐
-│   Caddy      │────▶│  React SPA   │     │  PostgreSQL    │
-│   (port 80)  │     │  (nginx)     │     │  + TimescaleDB │
-│              │     └──────────────┘     └────────────────┘
-│              │                                 ▲
-│              │────▶ API Server (Go) ───────────┤
-│              │                                 │
-│              │────▶ WebSocket Server (Go) ─────┤
-└─────────────┘                                  │
-                     Collector (Go) ─────────────┤
-                     Scheduler (Go) ─────────────┘
-                                                 │
-                     Redis ◀─────────────────────┘
+┌──────────────────────────────────────────┐
+│  Nexara (single Go binary, port 8080)    │
+│                                          │     ┌────────────────┐
+│  ├── /api/v1/*    REST API               │────▶│  PostgreSQL    │
+│  ├── /ws/*        WebSocket              │     │  + TimescaleDB │
+│  ├── /*           Embedded React SPA     │     └────────────────┘
+│  ├── Collector    goroutine              │
+│  └── Scheduler    goroutine              │────▶ Redis
+└──────────────────────────────────────────┘
 ```
 
-| Service | Port | Description |
-|---------|------|-------------|
-| Caddy proxy | 80, 443 | Reverse proxy with automatic HTTPS |
-| API server | 8080 | REST API (200+ endpoints) |
-| WebSocket server | 8081 | Real-time metrics and event streaming |
-| Frontend | 3000 | React SPA served by nginx |
-| PostgreSQL | 5432 | Primary database with TimescaleDB for time-series |
-| Redis | 6379 | Pub/sub, caching, session management |
-| Collector | — | Syncs Proxmox inventory and metrics |
-| Scheduler | — | DRS, alerts, CVE scans, scheduled tasks |
+| Service | Container | Port | Description |
+|---------|-----------|------|-------------|
+| Nexara | `nexara` | 8080 (mapped to 80) | Unified: API + WebSocket + frontend + collector + scheduler |
+| PostgreSQL | `nexara-db` | 5432 | Primary database with TimescaleDB for time-series |
+| Redis | `nexara-redis` | 6379 | Pub/sub, caching, session management |
 
-## Using Your Own Reverse Proxy
+## Using a Reverse Proxy
 
-Nexara ships with Caddy, but you can replace it with Traefik, nginx, HAProxy, or any reverse proxy. The three upstream services you need to route to:
+Nexara serves everything on a single port (8080), so reverse proxy configuration is straightforward — just proxy all traffic to the `nexara` container:
 
-| Path Pattern | Upstream | Notes |
-|-------------|----------|-------|
-| `/api/*` | `nexara-api:8080` | REST API |
-| `/ws`, `/ws/*` | `nexara-ws:8081` | WebSocket — requires upgrade headers |
-| Everything else | `nexara-frontend:3000` | SPA (catch-all, lowest priority) |
-
-### Steps
-
-1. **Disable Caddy** — create a `docker-compose.override.yml` to remove the proxy service:
-
-```yaml
-services:
-  nexara-proxy:
-    profiles: ["disabled"]
+```nginx
+# nginx example
+location / {
+    proxy_pass http://nexara:8080;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400s;
+}
 ```
 
-2. **Join the Docker networks** — your proxy container needs access to both `nexara_frontend` and `nexara_backend` networks (or place all services on a shared network).
-
-3. **Configure routing** — example Traefik labels:
-
 ```yaml
-# nexara-api
+# Traefik labels example
 labels:
   - "traefik.enable=true"
-  - "traefik.http.routers.nexara-api.rule=Host(`nexara.example.com`) && PathPrefix(`/api`)"
-  - "traefik.http.services.nexara-api.loadbalancer.server.port=8080"
-
-# nexara-ws
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.nexara-ws.rule=Host(`nexara.example.com`) && PathPrefix(`/ws`)"
-  - "traefik.http.services.nexara-ws.loadbalancer.server.port=8081"
-
-# nexara-frontend (catch-all — lowest priority)
-labels:
-  - "traefik.enable=true"
-  - "traefik.http.routers.nexara-frontend.rule=Host(`nexara.example.com`)"
-  - "traefik.http.routers.nexara-frontend.priority=1"
-  - "traefik.http.services.nexara-frontend.loadbalancer.server.port=3000"
+  - "traefik.http.routers.nexara.rule=Host(`nexara.example.com`)"
+  - "traefik.http.services.nexara.loadbalancer.server.port=8080"
 ```
 
 ### Things to watch for
 
 - **Upload size** — the ISO upload endpoint (`/api/v1/clusters/*/storage/*/upload`) accepts files up to 15GB. Configure your proxy's max body size accordingly.
-- **WebSocket upgrades** — Traefik and nginx handle these automatically. For nginx, add `proxy_set_header Upgrade $http_upgrade` and `proxy_set_header Connection "upgrade"`.
-- **Security headers** — the Go API already sets security headers (X-Content-Type-Options, X-Frame-Options, etc.), but you may want to duplicate them at the proxy level.
+- **WebSocket upgrades** — ensure your proxy passes `Upgrade` and `Connection` headers for `/ws` paths.
+- **Security headers** — the Go server already sets security headers (X-Content-Type-Options, X-Frame-Options, etc.), but you may want to duplicate them at the proxy level.
 - **Timeouts** — WebSocket connections are long-lived. Increase proxy read/write timeouts (e.g., nginx `proxy_read_timeout 86400s`).
 
 ## Configuration
@@ -191,7 +159,7 @@ All configuration is via environment variables in `.env`. See [`.env.example`](.
 | `JWT_SECRET` | Yes | Secret for signing auth tokens |
 | `ENCRYPTION_KEY` | Yes | 32-byte hex key for encrypting secrets at rest |
 | `POSTGRES_PASSWORD` | Yes | Database password |
-| `NEXARA_DOMAIN` | No | Domain for Caddy auto-HTTPS (default: `localhost`) |
+| `API_PORT` | No | Server listen port (default: `8080`) |
 | `COLLECT_INTERVAL` | No | Inventory sync interval (default: `30s`) |
 | `LOG_LEVEL` | No | Log verbosity: `debug`, `info`, `warn`, `error` |
 
@@ -203,7 +171,7 @@ Full configuration reference in the [Installation Guide](docs/installation.md#co
 - **Frontend:** React 19, TypeScript 5, Vite 6, Shadcn/ui, TanStack Query/Table, Zustand, Recharts, xterm.js, noVNC, React Flow
 - **Database:** PostgreSQL 16 + TimescaleDB
 - **Cache:** Redis 7 (Valkey compatible)
-- **Proxy:** Caddy 2 (automatic HTTPS)
+- **Deploy:** Docker Compose (3 containers)
 
 ## Documentation
 
@@ -220,7 +188,7 @@ Full configuration reference in the [Installation Guide](docs/installation.md#co
 Nexara uses GitHub Actions for continuous integration and releases.
 
 - **CI** — every push and PR runs Go lint/test/build, frontend typecheck/lint/test/build, and Docker build validation
-- **Release** — pushing a `v*` tag builds and pushes all Docker images to the GitHub Container Registry (ghcr.io) and creates a release with auto-generated notes
+- **Release** — pushing a `v*` tag builds and pushes the Docker image to the GitHub Container Registry (ghcr.io) and creates a release with auto-generated notes
 
 ```bash
 # Tag a release
@@ -233,7 +201,7 @@ git push origin v0.1.0
 We welcome contributions! See [docs/contributing.md](docs/contributing.md) for development setup and guidelines.
 
 ```bash
-make build          # Build all Go binaries
+make build          # Build unified Go binary
 make test           # Run tests
 make lint           # Run linters
 make generate       # Regenerate sqlc code
