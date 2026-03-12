@@ -130,6 +130,58 @@ See the [Installation Guide](docs/installation.md) for detailed setup, configura
 | Collector | — | Syncs Proxmox inventory and metrics |
 | Scheduler | — | DRS, alerts, CVE scans, scheduled tasks |
 
+## Using Your Own Reverse Proxy
+
+Nexara ships with Caddy, but you can replace it with Traefik, nginx, HAProxy, or any reverse proxy. The three upstream services you need to route to:
+
+| Path Pattern | Upstream | Notes |
+|-------------|----------|-------|
+| `/api/*` | `nexara-api:8080` | REST API |
+| `/ws`, `/ws/*` | `nexara-ws:8081` | WebSocket — requires upgrade headers |
+| Everything else | `nexara-frontend:3000` | SPA (catch-all, lowest priority) |
+
+### Steps
+
+1. **Disable Caddy** — create a `docker-compose.override.yml` to remove the proxy service:
+
+```yaml
+services:
+  nexara-proxy:
+    profiles: ["disabled"]
+```
+
+2. **Join the Docker networks** — your proxy container needs access to both `nexara_frontend` and `nexara_backend` networks (or place all services on a shared network).
+
+3. **Configure routing** — example Traefik labels:
+
+```yaml
+# nexara-api
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.nexara-api.rule=Host(`nexara.example.com`) && PathPrefix(`/api`)"
+  - "traefik.http.services.nexara-api.loadbalancer.server.port=8080"
+
+# nexara-ws
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.nexara-ws.rule=Host(`nexara.example.com`) && PathPrefix(`/ws`)"
+  - "traefik.http.services.nexara-ws.loadbalancer.server.port=8081"
+
+# nexara-frontend (catch-all — lowest priority)
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.nexara-frontend.rule=Host(`nexara.example.com`)"
+  - "traefik.http.routers.nexara-frontend.priority=1"
+  - "traefik.http.services.nexara-frontend.loadbalancer.server.port=3000"
+```
+
+### Things to watch for
+
+- **Upload size** — the ISO upload endpoint (`/api/v1/clusters/*/storage/*/upload`) accepts files up to 15GB. Configure your proxy's max body size accordingly.
+- **WebSocket upgrades** — Traefik and nginx handle these automatically. For nginx, add `proxy_set_header Upgrade $http_upgrade` and `proxy_set_header Connection "upgrade"`.
+- **Security headers** — the Go API already sets security headers (X-Content-Type-Options, X-Frame-Options, etc.), but you may want to duplicate them at the proxy level.
+- **Timeouts** — WebSocket connections are long-lived. Increase proxy read/write timeouts (e.g., nginx `proxy_read_timeout 86400s`).
+
 ## Configuration
 
 All configuration is via environment variables in `.env`. See [`.env.example`](.env.example) for defaults.
