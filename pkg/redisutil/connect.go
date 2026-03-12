@@ -32,7 +32,7 @@ func ConnectWithRetry(ctx context.Context, redisURL string, logger *slog.Logger)
 
 		if attempt == maxAttempts {
 			client.Close()
-			return nil, fmt.Errorf("Redis not reachable after %d attempts", maxAttempts)
+			return nil, fmt.Errorf("redis not reachable after %d attempts", maxAttempts)
 		}
 
 		logger.Warn("Redis not ready, retrying...", "attempt", attempt, "backoff", backoff)
@@ -52,5 +52,5 @@ func ConnectWithRetry(ctx context.Context, redisURL string, logger *slog.Logger)
 		}
 	}
 
-	return nil, fmt.Errorf("Redis not reachable after %d attempts", maxAttempts)
+	return nil, fmt.Errorf("redis not reachable after %d attempts", maxAttempts)
 }
