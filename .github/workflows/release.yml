@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/nexara
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  go-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.11.2
+
+      - name: Lint
+        run: golangci-lint run ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Build binaries
+        run: |
+          CGO_ENABLED=0 go build -o /dev/null ./cmd/api
+          CGO_ENABLED=0 go build -o /dev/null ./cmd/ws
+          CGO_ENABLED=0 go build -o /dev/null ./cmd/collector
+          CGO_ENABLED=0 go build -o /dev/null ./cmd/scheduler
+
+  frontend-ci:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test -- --run
+
+      - name: Build
+        run: npm run build
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [go-ci, frontend-ci]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          COMMIT=$(git rev-parse --short HEAD)
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push images
+        run: |
+          set -e
+          SERVICES="api ws collector scheduler frontend"
+          for SERVICE in $SERVICES; do
+            IMAGE="${{ env.IMAGE_PREFIX }}-${SERVICE}"
+            echo "Building ${IMAGE}..."
+            docker build \
+              -f "docker/${SERVICE}/Dockerfile" \
+              --build-arg "VERSION=${{ steps.version.outputs.version }}" \
+              --build-arg "COMMIT=${{ steps.version.outputs.commit }}" \
+              --build-arg "BUILD_TIME=${{ steps.version.outputs.build_time }}" \
+              --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+              --label "org.opencontainers.image.description=Nexara ${SERVICE}" \
+              --label "org.opencontainers.image.version=${{ steps.version.outputs.version }}" \
+              -t "${IMAGE}:${{ steps.version.outputs.version }}" \
+              -t "${IMAGE}:latest" \
+              .
+            echo "Pushing ${IMAGE}..."
+            docker push "${IMAGE}:${{ steps.version.outputs.version }}"
+            docker push "${IMAGE}:latest"
+          done
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          chmod +x scripts/generate-release-notes.sh
+          scripts/generate-release-notes.sh "${{ steps.version.outputs.tag }}" > /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Nexara ${{ steps.version.outputs.tag }}
+          body_path: /tmp/release-notes.md
+          draft: false
+          prerelease: false
