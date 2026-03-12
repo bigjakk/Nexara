@@ -119,6 +119,21 @@ jobs:
             docker push "${IMAGE}:latest"
           done
 
+      - name: Set packages to public
+        run: |
+          SERVICES="api ws collector scheduler frontend"
+          for SERVICE in $SERVICES; do
+            PKG="nexara-${SERVICE}"
+            echo "Setting ${PKG} to public..."
+            gh api \
+              --method PUT \
+              /user/packages/container/${PKG}/visibility \
+              -f visibility=public \
+              2>/dev/null || echo "  (skipped — may already be public or not yet created)"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.PKG_VISIBILITY_TOKEN }}
+
       - name: Generate release notes
         id: notes
         run: |
