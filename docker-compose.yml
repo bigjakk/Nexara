@@ -166,7 +166,7 @@ services:
     image: ghcr.io/bigjakk/nexara-frontend:${NEXARA_VERSION:-latest}
     container_name: nexara-frontend
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 10s
       timeout: 3s
       retries: 3
