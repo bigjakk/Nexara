@@ -68,7 +68,7 @@ Free, open-source, Docker-deployable. Manage multiple Proxmox clusters from a si
 
 ```bash
 # 1. Clone and configure
-git clone https://gitea.crjlab.net/bigjakk/nexara.git && cd Nexara
+git clone https://github.com/bigjakk/Nexara.git && cd Nexara
 ./scripts/setup-env.sh   # generates .env with secure random secrets
 
 # 2. Start
@@ -217,10 +217,10 @@ Full configuration reference in the [Installation Guide](docs/installation.md#co
 
 ## CI/CD
 
-Nexara uses Gitea Actions for continuous integration and releases.
+Nexara uses GitHub Actions for continuous integration and releases.
 
 - **CI** — every push and PR runs Go lint/test/build, frontend typecheck/lint/test/build, and Docker build validation
-- **Release** — pushing a `v*` tag builds and pushes all Docker images to the Gitea container registry and creates a release with auto-generated notes
+- **Release** — pushing a `v*` tag builds and pushes all Docker images to the GitHub Container Registry (ghcr.io) and creates a release with auto-generated notes
 
 ```bash
 # Tag a release
