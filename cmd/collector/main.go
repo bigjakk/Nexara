@@ -7,14 +7,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
-
 	"github.com/bigjakk/nexara/internal/collector"
 	"github.com/bigjakk/nexara/internal/config"
+	"github.com/bigjakk/nexara/internal/db"
 	"github.com/bigjakk/nexara/internal/debug"
-	db "github.com/bigjakk/nexara/internal/db/generated"
+	dbgen "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/pkg/redisutil"
 )
 
 func main() {
@@ -31,29 +30,20 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := db.ConnectWithRetry(ctx, cfg.DatabaseURL, logger)
 	if err != nil {
 		logger.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		logger.Error("failed to ping database", "error", err)
-		os.Exit(1)
-	}
+	logger.Info("connected to database")
 
 	// Redis client for publishing metrics and alerts.
-	redisOpts, err := redis.ParseURL(cfg.RedisURL)
+	redisClient, err := redisutil.ConnectWithRetry(ctx, cfg.RedisURL, logger)
 	if err != nil {
-		logger.Error("failed to parse Redis URL", "error", err)
-		os.Exit(1)
-	}
-	redisClient := redis.NewClient(redisOpts)
-	defer redisClient.Close()
-
-	if err := redisClient.Ping(ctx).Err(); err != nil {
 		logger.Warn("Redis not reachable, metrics will still be collected but not published", "error", err)
+	} else {
+		defer redisClient.Close()
 	}
 
 	// Start pprof if enabled.
@@ -61,7 +51,7 @@ func main() {
 		debug.StartPprof(cfg.PprofPort, logger)
 	}
 
-	queries := db.New(pool)
+	queries := dbgen.New(pool)
 	syncer := collector.NewSyncer(queries, cfg.EncryptionKey, logger)
 
 	// Set up event publisher for VM status change notifications.

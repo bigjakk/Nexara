@@ -11,13 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-
 	"github.com/bigjakk/nexara/internal/api"
 	"github.com/bigjakk/nexara/internal/config"
 	"github.com/bigjakk/nexara/internal/db"
 	"github.com/bigjakk/nexara/internal/debug"
+	"github.com/bigjakk/nexara/pkg/redisutil"
 )
 
 func main() {
@@ -34,17 +33,14 @@ func main() {
 	}
 
 	ctx := context.Background()
+	logger := slog.Default()
 
-	// Connect to PostgreSQL (required).
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	// Connect to PostgreSQL with retry (required).
+	pool, err := db.ConnectWithRetry(ctx, cfg.DatabaseURL, logger)
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("failed to ping database: %v", err)
-	}
 	log.Println("connected to database")
 
 	// Create schema on fresh database.
@@ -52,15 +48,12 @@ func main() {
 		log.Fatalf("failed to ensure database schema: %v", err)
 	}
 
-	// Connect to Redis (optional).
+	// Connect to Redis with retry (optional).
 	var rdb *redis.Client
-	opts, err := redis.ParseURL(cfg.RedisURL)
-	if err != nil {
-		log.Printf("warning: invalid REDIS_URL, skipping Redis: %v", err)
-	} else {
-		rdb = redis.NewClient(opts)
-		if err := rdb.Ping(ctx).Err(); err != nil {
-			log.Printf("warning: failed to connect to Redis: %v", err)
+	if cfg.RedisURL != "" {
+		rdb, err = redisutil.ConnectWithRetry(ctx, cfg.RedisURL, logger)
+		if err != nil {
+			log.Printf("warning: Redis unavailable, continuing without it: %v", err)
 			rdb = nil
 		} else {
 			log.Println("connected to Redis")
@@ -98,7 +91,7 @@ func main() {
 
 func runHealthcheck() {
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://localhost:8080/healthz")
+	resp, err := client.Get("http://127.0.0.1:8080/healthz")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "healthcheck failed: %v\n", err)
 		os.Exit(1)

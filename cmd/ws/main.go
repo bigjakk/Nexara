@@ -9,14 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
-
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/config"
+	"github.com/bigjakk/nexara/internal/db"
 	"github.com/bigjakk/nexara/internal/debug"
-	db "github.com/bigjakk/nexara/internal/db/generated"
+	dbgen "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/ws"
+	"github.com/bigjakk/nexara/pkg/redisutil"
 )
 
 func main() {
@@ -33,29 +32,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Parse Redis URL.
-	opts, err := redis.ParseURL(cfg.RedisURL)
+	// Connect to Redis with retry.
+	redisClient, err := redisutil.ConnectWithRetry(context.Background(), cfg.RedisURL, logger)
 	if err != nil {
-		logger.Error("failed to parse Redis URL", "error", err)
-		os.Exit(1)
-	}
-	redisClient := redis.NewClient(opts)
-
-	// Verify Redis connection.
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		logger.Error("failed to connect to Redis", "error", err)
 		os.Exit(1)
 	}
 	logger.Info("connected to Redis")
 
-	// Connect to PostgreSQL for console proxy.
-	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	// Connect to PostgreSQL with retry.
+	pool, err := db.ConnectWithRetry(context.Background(), cfg.DatabaseURL, logger)
 	if err != nil {
 		logger.Error("failed to connect to database", "error", err)
-		os.Exit(1)
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		logger.Error("failed to ping database", "error", err)
 		os.Exit(1)
 	}
 	logger.Info("connected to database")
@@ -69,7 +57,7 @@ func main() {
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
 	// Create console and VNC handlers for terminal/graphical proxy.
-	queries := db.New(pool)
+	queries := dbgen.New(pool)
 	consoleHandler := ws.NewConsoleHandler(queries, cfg.EncryptionKey, jwtSvc, logger)
 	vncHandler := ws.NewVNCHandler(queries, cfg.EncryptionKey, jwtSvc, logger)
 
@@ -119,7 +107,7 @@ func healthcheck() {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)
 	}
-	url := fmt.Sprintf("http://localhost:%d/healthz", cfg.WSPort)
+	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", cfg.WSPort)
 	resp, err := http.Get(url) //nolint:gosec // localhost health check
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "healthcheck failed: %v\n", err)

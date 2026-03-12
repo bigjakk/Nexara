@@ -8,14 +8,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
-
 	"github.com/bigjakk/nexara/internal/config"
+	"github.com/bigjakk/nexara/internal/db"
 	"github.com/bigjakk/nexara/internal/debug"
-	db "github.com/bigjakk/nexara/internal/db/generated"
+	dbgen "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/scheduler"
+	"github.com/bigjakk/nexara/pkg/redisutil"
 )
 
 func main() {
@@ -32,31 +31,22 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := db.ConnectWithRetry(ctx, cfg.DatabaseURL, logger)
 	if err != nil {
 		logger.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
+	logger.Info("connected to database")
 
-	if err := pool.Ping(ctx); err != nil {
-		logger.Error("failed to ping database", "error", err)
-		os.Exit(1)
-	}
-
-	queries := db.New(pool)
+	queries := dbgen.New(pool)
 
 	// Connect to Redis for event publishing.
 	var eventPub *events.Publisher
 	if cfg.RedisURL != "" {
-		opts, err := redis.ParseURL(cfg.RedisURL)
-		if err != nil {
-			logger.Error("failed to parse Redis URL", "error", err)
-			os.Exit(1)
-		}
-		rdb := redis.NewClient(opts)
-		if err := rdb.Ping(ctx).Err(); err != nil {
-			logger.Warn("Redis unavailable, events disabled", "error", err)
+		rdb, redisErr := redisutil.ConnectWithRetry(ctx, cfg.RedisURL, logger)
+		if redisErr != nil {
+			logger.Warn("Redis unavailable, events disabled", "error", redisErr)
 		} else {
 			eventPub = events.NewPublisher(rdb, logger.With("component", "events"))
 			defer rdb.Close()
