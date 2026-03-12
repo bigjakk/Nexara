@@ -55,7 +55,7 @@ coverage.html
 /collector
 
 # Embedded frontend (placeholder kept, built files ignored)
-cmd/nexara/dist/
+cmd/nexara/dist/*
 !cmd/nexara/dist/index.html
 
 # Root-level node (if any)
