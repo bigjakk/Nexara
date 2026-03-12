@@ -114,11 +114,11 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                     </Badge>
                   </TableCell>
                   <TableCell className="font-mono text-sm">
-                    {rule.vm_ids.join(", ")}
+                    {(rule.vm_ids ?? []).join(", ")}
                   </TableCell>
                   <TableCell className="text-sm">
-                    {rule.node_names.length > 0
-                      ? rule.node_names.join(", ")
+                    {(rule.node_names ?? []).length > 0
+                      ? (rule.node_names ?? []).join(", ")
                       : "-"}
                   </TableCell>
                   <TableCell>

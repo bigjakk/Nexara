@@ -35,8 +35,8 @@ export interface DRSRule {
   id: string;
   cluster_id: string;
   rule_type: RuleType;
-  vm_ids: number[];
-  node_names: string[];
+  vm_ids: number[] | null;
+  node_names: string[] | null;
   enabled: boolean;
   source: RuleSource;
   ha_rule_name?: string;
