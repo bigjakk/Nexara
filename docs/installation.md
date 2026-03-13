@@ -40,18 +40,13 @@ cd nexara
 cp .env.example .env
 ```
 
-Generate the required secrets:
+Set a database password:
 
 ```bash
-# JWT signing secret (required)
-sed -i "s/change-this-to-a-secure-random-string/$(openssl rand -base64 32)/" .env
-
-# Encryption key for secrets at rest — must be exactly 64 hex chars (required)
-sed -i "s/change-this-to-a-32-byte-hex-key/$(openssl rand -hex 32)/" .env
-
-# Database password
 sed -i "s/changeme/$(openssl rand -base64 16 | tr -d '=/+')/" .env
 ```
+
+**Secrets (JWT_SECRET, ENCRYPTION_KEY) are auto-generated on first start** and persisted to the data volume at `/data/nexara/.secrets.json`. No manual secret generation is needed. If you prefer to manage secrets externally (e.g., via a secrets manager), you can still set them as env vars — they take precedence over the auto-generated file.
 
 ### 3. Start the Stack
 
@@ -83,8 +78,8 @@ All configuration is via environment variables in `.env`:
 | `DATABASE_URL` | No | auto | Full PostgreSQL connection string |
 | `REDIS_URL` | No | `redis://nexara-redis:6379/0` | Redis connection string |
 | `API_PORT` | No | `8080` | API server listen port |
-| `JWT_SECRET` | **Yes** | — | Secret for signing JWT tokens (min 16 chars) |
-| `ENCRYPTION_KEY` | **Yes** | — | 32-byte hex key for AES-256-GCM encryption of secrets at rest |
+| `JWT_SECRET` | No | auto-generated | Secret for signing JWT tokens (min 16 chars) |
+| `ENCRYPTION_KEY` | No | auto-generated | 32-byte hex key for AES-256-GCM encryption of secrets at rest |
 | `METRICS_COLLECT_INTERVAL` | No | `10s` | How often metrics are collected from Proxmox |
 | `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 

@@ -69,7 +69,7 @@ Free, open-source, Docker-deployable. Manage multiple Proxmox clusters from a si
 ```bash
 # 1. Clone and configure
 git clone https://github.com/bigjakk/Nexara.git && cd Nexara
-./scripts/setup-env.sh   # generates .env with secure random secrets
+cp .env.example .env     # secrets auto-generated on first start
 
 # 2. Start
 docker compose up -d
@@ -156,8 +156,8 @@ All configuration is via environment variables in `.env`. See [`.env.example`](.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `JWT_SECRET` | Yes | Secret for signing auth tokens |
-| `ENCRYPTION_KEY` | Yes | 32-byte hex key for encrypting secrets at rest |
+| `JWT_SECRET` | No | Auto-generated on first start, persisted to data volume |
+| `ENCRYPTION_KEY` | No | Auto-generated on first start, persisted to data volume |
 | `POSTGRES_PASSWORD` | Yes | Database password |
 | `API_PORT` | No | Server listen port (default: `8080`) |
 | `COLLECT_INTERVAL` | No | Inventory sync interval (default: `30s`) |

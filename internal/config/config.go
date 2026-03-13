@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
@@ -14,8 +15,8 @@ type Config struct {
 	LogLevel               string        `envconfig:"LOG_LEVEL" default:"info"`
 	DatabaseURL            string        `envconfig:"DATABASE_URL" required:"true"`
 	RedisURL               string        `envconfig:"REDIS_URL" default:"redis://localhost:6379"`
-	JWTSecret              string        `envconfig:"JWT_SECRET" required:"true"`
-	EncryptionKey          string        `envconfig:"ENCRYPTION_KEY" required:"true"`
+	JWTSecret              string        `envconfig:"JWT_SECRET"`
+	EncryptionKey          string        `envconfig:"ENCRYPTION_KEY"`
 	AccessTokenTTL         time.Duration `envconfig:"ACCESS_TOKEN_TTL" default:"15m"`
 	RefreshTokenTTL        time.Duration `envconfig:"REFRESH_TOKEN_TTL" default:"168h"`
 	RateLimitMax           int           `envconfig:"RATE_LIMIT_MAX" default:"600"`
@@ -37,11 +38,15 @@ func (c *Config) NewMetricsTicker() *time.Ticker {
 	return time.NewTicker(c.MetricsCollectInterval)
 }
 
-// Load reads configuration from environment variables.
+// Load reads configuration from environment variables, auto-generates
+// any missing secrets, and validates the result.
 func Load() (*Config, error) {
 	var cfg Config
 	if err := envconfig.Process("", &cfg); err != nil {
 		return nil, err
+	}
+	if err := cfg.ResolveSecrets(slog.Default()); err != nil {
+		return nil, fmt.Errorf("resolve secrets: %w", err)
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -50,14 +55,14 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) validate() error {
-	if c.JWTSecret == "" || c.JWTSecret == "change-this-to-a-secure-random-string" {
-		return fmt.Errorf("JWT_SECRET must be set to a secure random value (see .env.example)")
+	if c.JWTSecret == "" {
+		return fmt.Errorf("JWT_SECRET is empty (should have been resolved by ResolveSecrets)")
 	}
 	if len(c.JWTSecret) < 16 {
 		return fmt.Errorf("JWT_SECRET must be at least 16 characters")
 	}
-	if c.EncryptionKey == "" || c.EncryptionKey == "change-this-to-a-32-byte-hex-key" {
-		return fmt.Errorf("ENCRYPTION_KEY must be set to a 64-character hex string (32 bytes). Generate with: openssl rand -hex 32")
+	if c.EncryptionKey == "" {
+		return fmt.Errorf("ENCRYPTION_KEY is empty (should have been resolved by ResolveSecrets)")
 	}
 	if _, err := hex.DecodeString(c.EncryptionKey); err != nil || len(c.EncryptionKey) != 64 {
 		return fmt.Errorf("ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32")
