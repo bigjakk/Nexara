@@ -27,19 +27,40 @@ echo -e "${GREEN}║  Centralized Proxmox Management      ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
 echo ""
 
+# ── Detect privilege level ───────────────────────────────────────────────────
+
+SUDO=""
+if [ "$(id -u)" -eq 0 ]; then
+    ok "Running as root"
+elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+    SUDO="sudo"
+    ok "sudo available (passwordless)"
+elif command -v sudo &>/dev/null; then
+    # sudo exists but needs a password — test it
+    info "sudo requires a password. You may be prompted."
+    if sudo true < /dev/tty; then
+        SUDO="sudo"
+        ok "sudo authenticated"
+    else
+        error "Failed to authenticate with sudo. Run as root or configure sudo."
+    fi
+else
+    error "This script requires root privileges. Run with: sudo bash or install sudo."
+fi
+
 # ── Detect package manager ───────────────────────────────────────────────────
 
 install_pkg() {
     if command -v apt-get &>/dev/null; then
-        sudo apt-get update -qq && sudo apt-get install -y -qq "$@"
+        $SUDO apt-get update -qq && $SUDO apt-get install -y -qq "$@"
     elif command -v dnf &>/dev/null; then
-        sudo dnf install -y "$@"
+        $SUDO dnf install -y "$@"
     elif command -v yum &>/dev/null; then
-        sudo yum install -y "$@"
+        $SUDO yum install -y "$@"
     elif command -v pacman &>/dev/null; then
-        sudo pacman -S --noconfirm "$@"
+        $SUDO pacman -S --noconfirm "$@"
     elif command -v zypper &>/dev/null; then
-        sudo zypper install -y "$@"
+        $SUDO zypper install -y "$@"
     else
         error "Could not detect package manager. Please install '$*' manually."
     fi
@@ -47,11 +68,11 @@ install_pkg() {
 
 install_docker() {
     info "Installing Docker via get.docker.com..."
-    curl -fsSL https://get.docker.com | sh
-    sudo systemctl enable --now docker
-    # Add current user to docker group
-    if ! groups | grep -q docker; then
-        sudo usermod -aG docker "$USER"
+    curl -fsSL https://get.docker.com | $SUDO sh
+    $SUDO systemctl enable --now docker
+    # Add current user to docker group (skip if already root)
+    if [ "$(id -u)" -ne 0 ] && ! groups | grep -q docker; then
+        $SUDO usermod -aG docker "$USER"
         warn "Added $USER to docker group. You may need to log out and back in."
     fi
 }
@@ -117,15 +138,30 @@ else
     ok "docker compose installed"
 fi
 
-# Check Docker is running
+# Check Docker is running (try with $SUDO if direct access fails)
 if ! docker info &>/dev/null; then
-    warn "Docker daemon is not running."
-    read -rp "  Start Docker now? (Y/n): " answer < /dev/tty
-    answer="${answer:-y}"
-    if [[ "$answer" != [yY] ]]; then
-        error "Docker must be running to continue."
+    if [ -n "$SUDO" ] && $SUDO docker info &>/dev/null; then
+        # Docker works with sudo but not without — offer to fix
+        warn "Docker requires sudo to run."
+        read -rp "  Add $USER to the docker group for sudoless access? (Y/n): " answer < /dev/tty
+        answer="${answer:-y}"
+        if [[ "$answer" == [yY] ]]; then
+            $SUDO usermod -aG docker "$USER"
+            ok "Added $USER to docker group"
+            warn "Group change takes effect on next login. Using sudo for this session."
+        fi
+        # Use sudo-wrapped docker for the rest of this run
+        docker() { $SUDO "$(command -v docker)" "$@"; }
+        export -f docker 2>/dev/null || true
+    else
+        warn "Docker daemon is not running."
+        read -rp "  Start Docker now? (Y/n): " answer < /dev/tty
+        answer="${answer:-y}"
+        if [[ "$answer" != [yY] ]]; then
+            error "Docker must be running to continue."
+        fi
+        $SUDO systemctl start docker
     fi
-    sudo systemctl start docker
 fi
 ok "Docker daemon is running"
 
