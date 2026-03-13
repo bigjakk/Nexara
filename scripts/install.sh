@@ -27,19 +27,76 @@ echo -e "${GREEN}║  Centralized Proxmox Management      ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════╝${NC}"
 echo ""
 
-# ── Check prerequisites ──────────────────────────────────────────────────────
+# ── Detect package manager ───────────────────────────────────────────────────
 
-check_command() {
-    if ! command -v "$1" &>/dev/null; then
-        error "'$1' is required but not installed. Please install it first."
+install_pkg() {
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update -qq && sudo apt-get install -y -qq "$@"
+    elif command -v dnf &>/dev/null; then
+        sudo dnf install -y "$@"
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y "$@"
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -S --noconfirm "$@"
+    elif command -v zypper &>/dev/null; then
+        sudo zypper install -y "$@"
+    else
+        error "Could not detect package manager. Please install '$*' manually."
     fi
-    ok "$1 found: $(command -v "$1")"
 }
 
+install_docker() {
+    info "Installing Docker via get.docker.com..."
+    curl -fsSL https://get.docker.com | sh
+    sudo systemctl enable --now docker
+    # Add current user to docker group
+    if ! groups | grep -q docker; then
+        sudo usermod -aG docker "$USER"
+        warn "Added $USER to docker group. You may need to log out and back in."
+    fi
+}
+
+prompt_install() {
+    local cmd="$1"
+    warn "'$cmd' is not installed."
+    read -rp "  Install $cmd now? (Y/n): " answer
+    answer="${answer:-y}"
+    if [[ "$answer" != [yY] ]]; then
+        error "Cannot continue without '$cmd'. Please install it and try again."
+    fi
+}
+
+# ── Check prerequisites ──────────────────────────────────────────────────────
+
 info "Checking prerequisites..."
-check_command docker
-check_command openssl
-check_command git
+
+# Docker
+if ! command -v docker &>/dev/null; then
+    prompt_install docker
+    install_docker
+fi
+ok "docker found: $(command -v docker)"
+
+# openssl
+if ! command -v openssl &>/dev/null; then
+    prompt_install openssl
+    install_pkg openssl
+fi
+ok "openssl found: $(command -v openssl)"
+
+# git
+if ! command -v git &>/dev/null; then
+    prompt_install git
+    install_pkg git
+fi
+ok "git found: $(command -v git)"
+
+# curl (needed for health checks later)
+if ! command -v curl &>/dev/null; then
+    prompt_install curl
+    install_pkg curl
+fi
+ok "curl found: $(command -v curl)"
 
 # Check for docker compose (v2 plugin or standalone)
 if docker compose version &>/dev/null; then
@@ -49,12 +106,26 @@ elif command -v docker-compose &>/dev/null; then
     COMPOSE_CMD="docker-compose"
     ok "docker-compose found (standalone)"
 else
-    error "Docker Compose is required. Install it with: https://docs.docker.com/compose/install/"
+    warn "Docker Compose is not installed."
+    read -rp "  Install docker-compose-plugin now? (Y/n): " answer
+    answer="${answer:-y}"
+    if [[ "$answer" != [yY] ]]; then
+        error "Cannot continue without Docker Compose. Please install it and try again."
+    fi
+    install_pkg docker-compose-plugin
+    COMPOSE_CMD="docker compose"
+    ok "docker compose installed"
 fi
 
 # Check Docker is running
 if ! docker info &>/dev/null; then
-    error "Docker is not running. Start Docker and try again."
+    warn "Docker daemon is not running."
+    read -rp "  Start Docker now? (Y/n): " answer
+    answer="${answer:-y}"
+    if [[ "$answer" != [yY] ]]; then
+        error "Docker must be running to continue."
+    fi
+    sudo systemctl start docker
 fi
 ok "Docker daemon is running"
 
