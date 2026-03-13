@@ -35,20 +35,19 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     -X github.com/bigjakk/nexara/internal/api.BuildTime=${BUILD_TIME}" \
     -o /build/nexara ./cmd/nexara
 
-# Create empty data dir owned by nonroot for the runtime stage
-RUN mkdir -p /build/data-dir && chown 65534:65534 /build/data-dir
-
 # Stage 3: Runtime
-FROM gcr.io/distroless/static-debian12
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates su-exec tzdata
 
 COPY --from=go-builder /build/nexara /nexara
-COPY --from=go-builder --chown=65534:65534 /build/data-dir /data/nexara
+COPY docker/nexara/entrypoint.sh /entrypoint.sh
 
-USER nonroot:nonroot
+RUN mkdir -p /data/nexara
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=5 \
     CMD ["/nexara", "healthcheck"]
 
-ENTRYPOINT ["/nexara"]
+ENTRYPOINT ["/entrypoint.sh"]

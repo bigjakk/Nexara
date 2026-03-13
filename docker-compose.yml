@@ -52,6 +52,8 @@ services:
     ports:
       - "80:8080"
     environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
       DATABASE_URL: ${DATABASE_URL:-postgres://nexara:changeme@nexara-db:5432/nexara?sslmode=disable}
       REDIS_URL: ${REDIS_URL:-redis://nexara-redis:6379/0}
       JWT_SECRET: ${JWT_SECRET}
@@ -61,9 +63,6 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - ${DATA_DIR:-nexara-data}${DATA_DIR:+/data}:/data/nexara
-    read_only: true
-    tmpfs:
-      - /tmp:size=256M
     healthcheck:
       test: ["CMD", "/nexara", "healthcheck"]
       interval: 10s
