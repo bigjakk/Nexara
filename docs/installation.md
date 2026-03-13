@@ -13,7 +13,7 @@
 Run the install script for an automated setup:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nexara/nexara/master/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/bigjakk/Nexara/master/scripts/install.sh | bash
 ```
 
 The script will:
@@ -30,8 +30,8 @@ For manual setup, follow the steps below.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/nexara/nexara.git
-cd nexara
+git clone https://github.com/bigjakk/Nexara.git
+cd Nexara
 ```
 
 ### 2. Configure Environment

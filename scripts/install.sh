@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Nexara Install Script
-# Usage: curl -fsSL https://raw.githubusercontent.com/nexara/nexara/master/scripts/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/bigjakk/Nexara/master/scripts/install.sh | bash
 
-REPO="https://github.com/nexara/nexara.git"
+REPO="https://github.com/bigjakk/Nexara.git"
 INSTALL_DIR="${NEXARA_DIR:-$HOME/nexara}"
 BRANCH="${NEXARA_BRANCH:-master}"
 
