@@ -59,7 +59,7 @@ install_docker() {
 prompt_install() {
     local cmd="$1"
     warn "'$cmd' is not installed."
-    read -rp "  Install $cmd now? (Y/n): " answer
+    read -rp "  Install $cmd now? (Y/n): " answer < /dev/tty
     answer="${answer:-y}"
     if [[ "$answer" != [yY] ]]; then
         error "Cannot continue without '$cmd'. Please install it and try again."
@@ -107,7 +107,7 @@ elif command -v docker-compose &>/dev/null; then
     ok "docker-compose found (standalone)"
 else
     warn "Docker Compose is not installed."
-    read -rp "  Install docker-compose-plugin now? (Y/n): " answer
+    read -rp "  Install docker-compose-plugin now? (Y/n): " answer < /dev/tty
     answer="${answer:-y}"
     if [[ "$answer" != [yY] ]]; then
         error "Cannot continue without Docker Compose. Please install it and try again."
@@ -120,7 +120,7 @@ fi
 # Check Docker is running
 if ! docker info &>/dev/null; then
     warn "Docker daemon is not running."
-    read -rp "  Start Docker now? (Y/n): " answer
+    read -rp "  Start Docker now? (Y/n): " answer < /dev/tty
     answer="${answer:-y}"
     if [[ "$answer" != [yY] ]]; then
         error "Docker must be running to continue."
@@ -135,7 +135,7 @@ echo ""
 
 if [ -d "$INSTALL_DIR" ]; then
     warn "Directory $INSTALL_DIR already exists."
-    read -rp "Overwrite? (y/N): " confirm
+    read -rp "Overwrite? (y/N): " confirm < /dev/tty
     if [[ "$confirm" != [yY] ]]; then
         error "Aborted. Remove or rename the existing directory and try again."
     fi
@@ -166,7 +166,7 @@ sed -i "s|changeme|${POSTGRES_PASSWORD}|g" .env
 ok "Secrets generated and written to .env"
 
 # Ask for domain
-read -rp "Enter your domain (or press Enter for 'localhost'): " domain
+read -rp "Enter your domain (or press Enter for 'localhost'): " domain < /dev/tty
 domain="${domain:-localhost}"
 sed -i "s|NEXARA_DOMAIN=localhost|NEXARA_DOMAIN=${domain}|" .env
 ok "Domain set to: $domain"
