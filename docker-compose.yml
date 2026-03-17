@@ -3,6 +3,7 @@ services:
   nexara-db:
     image: timescale/timescaledb:latest-pg16
     container_name: nexara-db
+    stop_grace_period: 60s
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-nexara}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}

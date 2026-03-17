@@ -63,6 +63,12 @@ func main() {
 		log.Fatalf("failed to ensure database schema: %v", err)
 	}
 
+	// Detect and fix data integrity issues (duplicate rows from index corruption
+	// or concurrent instances). Safe to run on every startup.
+	if err := db.RepairIntegrity(ctx, pool, logger); err != nil {
+		logger.Error("integrity repair failed", "error", err)
+	}
+
 	// Connect to Redis with retry.
 	var rdb *redis.Client
 	if cfg.RedisURL != "" {
@@ -169,6 +175,13 @@ func runHealthcheck() {
 	fmt.Println("ok")
 }
 
+// Advisory lock IDs for leader election. Only one instance across the cluster
+// will run the collector or scheduler at any given time; all instances serve API traffic.
+const (
+	lockIDCollector int64 = 0x4E585241_00000001 // "NXRA" + 1
+	lockIDScheduler int64 = 0x4E585241_00000002 // "NXRA" + 2
+)
+
 // runCollector runs the metric collection loop (mirrors cmd/collector logic).
 func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, logger *slog.Logger) {
 	defer func() {
@@ -194,22 +207,43 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 
 	logger.Info("collector started", "metrics_interval", cfg.MetricsCollectInterval)
 
-	// Run initial sync immediately.
-	results := syncer.SyncAll(ctx)
-	mc.ProcessResults(ctx, results)
-	pbsResults := syncer.SyncAllPBS(ctx)
-	mc.ProcessPBSResults(ctx, pbsResults)
-
 	ticker := cfg.NewMetricsTicker()
 	defer ticker.Stop()
+
+	// collectorTick wraps a sync cycle in a transaction that holds an advisory lock.
+	// If another instance already holds the lock for this tick, we skip silently.
+	collectorTick := func() {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			logger.Error("collector tick: begin tx", "error", err)
+			return
+		}
+		defer tx.Rollback(ctx) //nolint:errcheck
+
+		var ok bool
+		if err := tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", lockIDCollector).Scan(&ok); err != nil {
+			logger.Error("collector tick: advisory lock", "error", err)
+			return
+		}
+		if !ok {
+			return // another instance is running this tick
+		}
+
+		results := syncer.SyncAll(ctx)
+		mc.ProcessResults(ctx, results)
+		pbsResults := syncer.SyncAllPBS(ctx)
+		mc.ProcessPBSResults(ctx, pbsResults)
+
+		_ = tx.Commit(ctx)
+	}
+
+	// Run initial sync immediately.
+	collectorTick()
 
 	for {
 		select {
 		case <-ticker.C:
-			results := syncer.SyncAll(ctx)
-			mc.ProcessResults(ctx, results)
-			pbsResults := syncer.SyncAllPBS(ctx)
-			mc.ProcessPBSResults(ctx, pbsResults)
+			collectorTick()
 		case <-ctx.Done():
 			logger.Info("collector stopped")
 			return
@@ -248,13 +282,35 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		logger.Warn("failed to cleanup stale DRS history", "error", err)
 	}
 
+	// schedulerTick wraps a scheduler function in a transaction-level advisory lock.
+	schedulerTick := func(name string, fn func(context.Context)) {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			logger.Error("scheduler tick: begin tx", "task", name, "error", err)
+			return
+		}
+		defer tx.Rollback(ctx) //nolint:errcheck
+
+		var ok bool
+		if err := tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", lockIDScheduler).Scan(&ok); err != nil {
+			logger.Error("scheduler tick: advisory lock", "task", name, "error", err)
+			return
+		}
+		if !ok {
+			return // another instance is running this tick
+		}
+
+		fn(ctx)
+		_ = tx.Commit(ctx)
+	}
+
 	// Run initial checks immediately.
-	sched.Run(ctx)
-	sched.RunDRS(ctx)
-	sched.RunCVEScanning(ctx)
-	sched.RunAlertEvaluation(ctx)
-	sched.RunReportGeneration(ctx)
-	sched.RunRollingUpdates(ctx)
+	schedulerTick("tasks", sched.Run)
+	schedulerTick("drs", sched.RunDRS)
+	schedulerTick("cve", sched.RunCVEScanning)
+	schedulerTick("alerts", sched.RunAlertEvaluation)
+	schedulerTick("reports", sched.RunReportGeneration)
+	schedulerTick("rolling", sched.RunRollingUpdates)
 
 	taskTicker := time.NewTicker(60 * time.Second)
 	defer taskTicker.Stop()
@@ -277,17 +333,17 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 	for {
 		select {
 		case <-taskTicker.C:
-			sched.Run(ctx)
+			schedulerTick("tasks", sched.Run)
 		case <-drsTicker.C:
-			sched.RunDRS(ctx)
+			schedulerTick("drs", sched.RunDRS)
 		case <-cveTicker.C:
-			sched.RunCVEScanning(ctx)
+			schedulerTick("cve", sched.RunCVEScanning)
 		case <-alertTicker.C:
-			sched.RunAlertEvaluation(ctx)
+			schedulerTick("alerts", sched.RunAlertEvaluation)
 		case <-reportTicker.C:
-			sched.RunReportGeneration(ctx)
+			schedulerTick("reports", sched.RunReportGeneration)
 		case <-rollingTicker.C:
-			sched.RunRollingUpdates(ctx)
+			schedulerTick("rolling", sched.RunRollingUpdates)
 		case <-ctx.Done():
 			logger.Info("scheduler stopped")
 			return

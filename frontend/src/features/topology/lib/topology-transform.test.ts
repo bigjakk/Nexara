@@ -22,6 +22,7 @@ function makeCluster(overrides: Partial<ClusterResponse> = {}): ClusterResponse 
     tls_fingerprint: "",
     sync_interval_seconds: 30,
     is_active: true,
+    status: "online",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
     ...overrides,

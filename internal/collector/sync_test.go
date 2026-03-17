@@ -172,6 +172,10 @@ func (m *mockQueries) GetVMByClusterAndVmid(_ context.Context, _ db.GetVMByClust
 	return db.Vm{}, fmt.Errorf("not found")
 }
 
+func (m *mockQueries) ListNodesByCluster(_ context.Context, _ uuid.UUID) ([]db.Node, error) {
+	return nil, nil
+}
+
 // --- Test helpers ---
 
 func testLogger() *slog.Logger {

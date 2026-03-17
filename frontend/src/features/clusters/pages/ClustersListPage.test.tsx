@@ -13,6 +13,7 @@ const mockClusters: ClusterResponse[] = [
     tls_fingerprint: "",
     sync_interval_seconds: 60,
     is_active: true,
+    status: "online",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
   },
@@ -24,6 +25,7 @@ const mockClusters: ClusterResponse[] = [
     tls_fingerprint: "",
     sync_interval_seconds: 120,
     is_active: false,
+    status: "inactive",
     created_at: "2024-02-01T00:00:00Z",
     updated_at: "2024-02-01T00:00:00Z",
   },
@@ -72,7 +74,7 @@ describe("ClustersListPage", () => {
     expect(screen.getByText("Dev Cluster")).toBeInTheDocument();
   });
 
-  it("shows active/inactive badges", () => {
+  it("shows online/inactive badges", () => {
     mockUseClusters.mockReturnValue({
       data: mockClusters,
       isLoading: false,
@@ -80,7 +82,7 @@ describe("ClustersListPage", () => {
     });
 
     renderWithProviders(<ClustersListPage />);
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.getByText("Online")).toBeInTheDocument();
     expect(screen.getByText("Inactive")).toBeInTheDocument();
   });
 

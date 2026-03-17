@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ArrowLeft, Terminal } from "lucide-react";
+import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
 import { Button } from "@/components/ui/button";
 import { useConsoleStore } from "@/stores/console-store";
 import { useCluster, useClusterNodes } from "../api/cluster-queries";
@@ -81,13 +82,7 @@ export function ClusterDetailPage() {
                   <CardTitle className="text-xl">
                     {cluster?.name ?? ""}
                   </CardTitle>
-                  <Badge
-                    variant={
-                      cluster?.is_active === true ? "default" : "secondary"
-                    }
-                  >
-                    {cluster?.is_active === true ? "Active" : "Inactive"}
-                  </Badge>
+                  <ClusterStatusBadge status={cluster?.status ?? "unknown"} />
                 </>
               )}
             </CardHeader>

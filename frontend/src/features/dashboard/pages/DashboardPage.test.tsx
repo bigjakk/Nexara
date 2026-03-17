@@ -15,6 +15,7 @@ const mockDashboardData: DashboardData = {
         tls_fingerprint: "",
         sync_interval_seconds: 60,
         is_active: true,
+        status: "online",
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       },

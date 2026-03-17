@@ -71,6 +71,7 @@ type clusterResponse struct {
 	TLSFingerprint      string    `json:"tls_fingerprint"`
 	SyncIntervalSeconds int32     `json:"sync_interval_seconds"`
 	IsActive            bool      `json:"is_active"`
+	Status              string    `json:"status"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -90,7 +91,29 @@ type updateClusterResponse struct {
 	Connectivity connectivityResult `json:"connectivity"`
 }
 
-func toClusterResponse(c db.Cluster) clusterResponse {
+// nodeStatusInfo holds per-cluster node counts for computing cluster status.
+type nodeStatusInfo struct {
+	Total  int64
+	Online int64
+}
+
+func computeClusterStatus(c db.Cluster, nsi nodeStatusInfo) string {
+	if !c.IsActive {
+		return "inactive"
+	}
+	if nsi.Total == 0 {
+		return "unknown"
+	}
+	if nsi.Online == 0 {
+		return "offline"
+	}
+	if nsi.Online < nsi.Total {
+		return "degraded"
+	}
+	return "online"
+}
+
+func toClusterResponse(c db.Cluster, nsi nodeStatusInfo) clusterResponse {
 	return clusterResponse{
 		ID:                  c.ID,
 		Name:                c.Name,
@@ -99,6 +122,7 @@ func toClusterResponse(c db.Cluster) clusterResponse {
 		TLSFingerprint:      c.TlsFingerprint,
 		SyncIntervalSeconds: c.SyncIntervalSeconds,
 		IsActive:            c.IsActive,
+		Status:              computeClusterStatus(c, nsi),
 		CreatedAt:           c.CreatedAt,
 		UpdatedAt:           c.UpdatedAt,
 	}
@@ -186,7 +210,7 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(createClusterResponse{
-		Cluster:      toClusterResponse(cluster),
+		Cluster:      toClusterResponse(cluster, nodeStatusInfo{}),
 		Connectivity: testResult.Result,
 	})
 }
@@ -202,9 +226,17 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list clusters")
 	}
 
+	// Build a map of cluster_id → node status counts for computing cluster status.
+	nsiMap := make(map[uuid.UUID]nodeStatusInfo)
+	if rows, nsErr := h.queries.CountNodeStatusesByCluster(c.Context()); nsErr == nil {
+		for _, r := range rows {
+			nsiMap[r.ClusterID] = nodeStatusInfo{Total: r.Total, Online: r.Online}
+		}
+	}
+
 	resp := make([]clusterResponse, len(clusters))
 	for i, cl := range clusters {
-		resp[i] = toClusterResponse(cl)
+		resp[i] = toClusterResponse(cl, nsiMap[cl.ID])
 	}
 
 	return c.JSON(resp)
@@ -229,7 +261,17 @@ func (h *ClusterHandler) Get(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
 	}
 
-	return c.JSON(toClusterResponse(cluster))
+	var nsi nodeStatusInfo
+	if rows, nsErr := h.queries.CountNodeStatusesByCluster(c.Context()); nsErr == nil {
+		for _, r := range rows {
+			if r.ClusterID == id {
+				nsi = nodeStatusInfo{Total: r.Total, Online: r.Online}
+				break
+			}
+		}
+	}
+
+	return c.JSON(toClusterResponse(cluster, nsi))
 }
 
 // Update handles PUT /api/v1/clusters/:id.
@@ -321,8 +363,18 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 
 	connectivity := testClusterConnectivity(params.ApiUrl, params.TokenID, tokenSecret, params.TlsFingerprint)
 
+	var updateNsi nodeStatusInfo
+	if rows, nsErr := h.queries.CountNodeStatusesByCluster(c.Context()); nsErr == nil {
+		for _, r := range rows {
+			if r.ClusterID == cluster.ID {
+				updateNsi = nodeStatusInfo{Total: r.Total, Online: r.Online}
+				break
+			}
+		}
+	}
+
 	return c.JSON(updateClusterResponse{
-		Cluster:      toClusterResponse(cluster),
+		Cluster:      toClusterResponse(cluster, updateNsi),
 		Connectivity: connectivity.Result,
 	})
 }

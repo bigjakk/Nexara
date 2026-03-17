@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
 import { Server, Monitor, Box, HardDrive } from "lucide-react";
 import { formatBytes } from "@/lib/format";
 import type { ClusterSummary } from "../api/dashboard-queries";
@@ -24,9 +24,7 @@ export function ClusterCard({ summary }: ClusterCardProps) {
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-lg">{cluster.name}</CardTitle>
-        <Badge variant={cluster.is_active ? "default" : "secondary"}>
-          {cluster.is_active ? "Active" : "Inactive"}
-        </Badge>
+        <ClusterStatusBadge status={cluster.status} />
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 gap-3 text-sm">

@@ -7,7 +7,7 @@ import { EditClusterDialog } from "@/features/clusters/components/EditClusterDia
 import { DeleteClusterDialog } from "@/features/clusters/components/DeleteClusterDialog";
 import { apiClient } from "@/lib/api-client";
 import type { NodeResponse, VMResponse, ClusterResponse } from "@/types/api";
-import { Badge } from "@/components/ui/badge";
+import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -104,9 +104,7 @@ export function ClustersListPage() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={cluster.is_active ? "default" : "secondary"}>
-                        {cluster.is_active ? "Active" : "Inactive"}
-                      </Badge>
+                      <ClusterStatusBadge status={cluster.status} />
                     </TableCell>
                     <TableCell className="text-right">
                       {nodes !== undefined ? nodes.length : "—"}

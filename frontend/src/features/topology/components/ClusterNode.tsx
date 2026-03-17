@@ -12,7 +12,7 @@ export const ClusterNode = memo(function ClusterNode({ data }: NodeProps) {
       className={`
         rounded-lg border-2 bg-card px-4 py-3 shadow-md transition-colors
         min-w-[200px] cursor-pointer
-        ${d.isActive ? "border-primary" : "border-muted"}
+        ${d.status === "online" ? "border-green-500" : d.status === "degraded" ? "border-yellow-500" : d.status === "offline" ? "border-red-500" : "border-muted"}
       `}
     >
       <div className="flex items-center gap-2">

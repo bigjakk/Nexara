@@ -484,6 +484,7 @@ export interface ClusterResponse {
   tls_fingerprint: string;
   sync_interval_seconds: number;
   is_active: boolean;
+  status: "online" | "degraded" | "offline" | "inactive" | "unknown";
   created_at: string;
   updated_at: string;
 }

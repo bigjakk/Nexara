@@ -12,6 +12,7 @@ export interface ClusterNodeData {
   kind: "cluster";
   label: string;
   isActive: boolean;
+  status: string;
   nodeCount: number;
   vmCount: number;
   clusterId: string;
@@ -111,6 +112,7 @@ export function buildTopologyGraph(
         kind: "cluster",
         label: cluster.name,
         isActive: cluster.is_active,
+        status: cluster.status,
         nodeCount: clusterNodes.length,
         vmCount: clusterVMs.length,
         clusterId: cluster.id,

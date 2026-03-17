@@ -11,6 +11,40 @@ import (
 	"github.com/google/uuid"
 )
 
+const countNodeStatusesByCluster = `-- name: CountNodeStatusesByCluster :many
+SELECT cluster_id,
+       COUNT(*)::bigint AS total,
+       COUNT(*) FILTER (WHERE status = 'online')::bigint AS online
+FROM nodes
+GROUP BY cluster_id
+`
+
+type CountNodeStatusesByClusterRow struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Total     int64     `json:"total"`
+	Online    int64     `json:"online"`
+}
+
+func (q *Queries) CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error) {
+	rows, err := q.db.Query(ctx, countNodeStatusesByCluster)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountNodeStatusesByClusterRow{}
+	for rows.Next() {
+		var i CountNodeStatusesByClusterRow
+		if err := rows.Scan(&i.ClusterID, &i.Total, &i.Online); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getNode = `-- name: GetNode :one
 SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address FROM nodes WHERE id = $1
 `

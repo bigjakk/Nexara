@@ -52,6 +52,8 @@ type SyncQueries interface {
 	ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error)
 	ExistsAuditLogByUPID(ctx context.Context, upid string) (bool, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg db.GetVMByClusterAndVmidParams) (db.Vm, error)
+	// Node queries
+	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.Node, error)
 	// PBS queries
 	ListActivePBSServers(ctx context.Context) ([]db.PbsServer, error)
 	UpsertPBSSnapshot(ctx context.Context, arg db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error)
@@ -840,6 +842,15 @@ func (s *Syncer) SyncAll(ctx context.Context) []*ClusterMetricResult {
 				"error", err,
 			)
 			s.reportSyncError(ctx, cluster, err)
+			// Record failure for every known node so the health monitor
+			// can mark them offline after the threshold is reached.
+			if s.healthMonitor != nil {
+				if nodes, listErr := s.queries.ListNodesByCluster(ctx, cluster.ID); listErr == nil {
+					for _, n := range nodes {
+						s.healthMonitor.RecordFailure(ctx, cluster.ID, n.ID, n.Name)
+					}
+				}
+			}
 			continue
 		}
 		if result != nil {

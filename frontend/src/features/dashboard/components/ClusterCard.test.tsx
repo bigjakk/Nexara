@@ -13,6 +13,7 @@ const mockSummary: ClusterSummary = {
     tls_fingerprint: "",
     sync_interval_seconds: 60,
     is_active: true,
+    status: "online",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
   },
@@ -28,15 +29,15 @@ describe("ClusterCard", () => {
     expect(screen.getByText("Production Cluster")).toBeInTheDocument();
   });
 
-  it("shows active badge for active cluster", () => {
+  it("shows online badge for online cluster", () => {
     renderWithProviders(<ClusterCard summary={mockSummary} />);
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.getByText("Online")).toBeInTheDocument();
   });
 
   it("shows inactive badge for inactive cluster", () => {
     const inactive: ClusterSummary = {
       ...mockSummary,
-      cluster: { ...mockSummary.cluster, is_active: false },
+      cluster: { ...mockSummary.cluster, is_active: false, status: "inactive" },
     };
     renderWithProviders(<ClusterCard summary={inactive} />);
     expect(screen.getByText("Inactive")).toBeInTheDocument();

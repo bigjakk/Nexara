@@ -25,6 +25,13 @@ SELECT * FROM nodes WHERE cluster_id = $1 ORDER BY name;
 UPDATE nodes SET address = $3, updated_at = now()
 WHERE cluster_id = $1 AND name = $2 AND address != $3;
 
+-- name: CountNodeStatusesByCluster :many
+SELECT cluster_id,
+       COUNT(*)::bigint AS total,
+       COUNT(*) FILTER (WHERE status = 'online')::bigint AS online
+FROM nodes
+GROUP BY cluster_id;
+
 -- name: GetNodeAddressByName :one
 SELECT address FROM nodes WHERE cluster_id = $1 AND name = $2;
 

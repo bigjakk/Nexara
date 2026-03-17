@@ -30,6 +30,7 @@ type Querier interface {
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAdvancedParams) (int64, error)
 	CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (CountCompletedNodesRow, error)
+	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
