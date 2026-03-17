@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { useConsoleStore } from "@/stores/console-store";
 import { useCluster, useClusterNodes } from "../api/cluster-queries";
 import { formatBytes, formatUptime } from "@/lib/format";
+import { useClusterMetrics } from "@/hooks/useMetrics";
+import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { ClusterCephTab } from "../components/ClusterCephTab";
 import { ClusterNetworksTab } from "../components/ClusterNetworksTab";
 import { ClusterFirewallTab } from "../components/ClusterFirewallTab";
@@ -38,6 +40,8 @@ export function ClusterDetailPage() {
 
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
+
+  const clusterMetrics = useClusterMetrics(clusterId ?? "");
 
   const isLoading = clusterQuery.isLoading || nodesQuery.isLoading;
   const error = clusterQuery.error ?? nodesQuery.error;
@@ -133,6 +137,8 @@ export function ClusterDetailPage() {
                         <TableRow>
                           <TableHead>Name</TableHead>
                           <TableHead>Status</TableHead>
+                          <TableHead>CPU Usage</TableHead>
+                          <TableHead>Memory Usage</TableHead>
                           <TableHead>CPUs</TableHead>
                           <TableHead>Memory</TableHead>
                           <TableHead>Disk</TableHead>
@@ -162,6 +168,16 @@ export function ClusterDetailPage() {
                               >
                                 {node.status}
                               </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <MetricMiniBar
+                                value={clusterMetrics?.nodeMetrics.get(node.id)?.cpuPercent ?? null}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <MetricMiniBar
+                                value={clusterMetrics?.nodeMetrics.get(node.id)?.memPercent ?? null}
+                              />
                             </TableCell>
                             <TableCell>{node.cpu_count}</TableCell>
                             <TableCell>{formatBytes(node.mem_total)}</TableCell>
