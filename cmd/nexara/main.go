@@ -218,7 +218,7 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 			logger.Error("collector tick: begin tx", "error", err)
 			return
 		}
-		defer tx.Rollback(ctx) //nolint:errcheck
+		defer tx.Rollback(ctx) //nolint:errcheck // rollback is best-effort after commit
 
 		var ok bool
 		if err := tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", lockIDCollector).Scan(&ok); err != nil {
@@ -289,7 +289,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 			logger.Error("scheduler tick: begin tx", "task", name, "error", err)
 			return
 		}
-		defer tx.Rollback(ctx) //nolint:errcheck
+		defer tx.Rollback(ctx) //nolint:errcheck // rollback is best-effort after commit
 
 		var ok bool
 		if err := tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", lockIDScheduler).Scan(&ok); err != nil {
