@@ -10,7 +10,8 @@ import (
 
 // RepairIntegrity detects and fixes common data integrity issues that can arise
 // from index corruption or concurrent collector instances. It removes duplicate
-// rows and reindexes affected tables. Safe to run on every startup.
+// rows, reindexes affected tables, and validates hypertable indexes.
+// Safe to run on every startup.
 func RepairIntegrity(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) error {
 	type dedupTarget struct {
 		table      string
@@ -55,6 +56,21 @@ func RepairIntegrity(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logge
 
 	if totalDeleted > 0 {
 		logger.Info("integrity repair complete", "total_duplicates_removed", totalDeleted)
+	}
+
+	// Validate and repair hypertable indexes. TimescaleDB chunk indexes are
+	// especially prone to corruption after unclean shutdowns. We attempt a
+	// REINDEX on each metrics hypertable and log any failures (non-fatal).
+	hypertables := []string{"node_metrics", "vm_metrics"}
+	for _, ht := range hypertables {
+		if _, err := pool.Exec(ctx, fmt.Sprintf("REINDEX TABLE %s", ht)); err != nil {
+			logger.Error("failed to reindex hypertable — index may be corrupted",
+				"table", ht,
+				"error", err,
+			)
+		} else {
+			logger.Info("reindexed hypertable", "table", ht)
+		}
 	}
 
 	return nil
