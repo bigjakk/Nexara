@@ -57,9 +57,24 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
       windowSize: { width: 800, height: 500 },
 
       addTab: (tab) => {
+        const state = get();
+
+        // If a tab already exists for the same console target, focus it instead of duplicating
+        const existing = state.tabs.find(
+          (t) =>
+            t.clusterID === tab.clusterID &&
+            t.node === tab.node &&
+            t.type === tab.type &&
+            t.vmid === tab.vmid,
+        );
+        if (existing) {
+          const newWindowMode = state.windowMode === "hidden" ? "floating" as WindowMode : state.windowMode;
+          set({ activeTabId: existing.id, windowMode: newWindowMode });
+          return existing.id;
+        }
+
         const id = generateTabId(tab.type, tab.node, tab.vmid);
         const newTab: ConsoleTab = { ...tab, id, status: "connecting", reconnectKey: 0 };
-        const state = get();
         const newWindowMode = state.windowMode === "hidden" ? "floating" as WindowMode : state.windowMode;
         set({
           tabs: [...state.tabs, newTab],
