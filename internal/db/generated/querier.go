@@ -293,6 +293,7 @@ type Querier interface {
 	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) error
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	TouchRollingUpdateNode(ctx context.Context, id uuid.UUID) error
 	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error
 	UpdateAlertEscalation(ctx context.Context, arg UpdateAlertEscalationParams) error
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)

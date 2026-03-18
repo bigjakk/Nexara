@@ -430,6 +430,151 @@ func (o *Orchestrator) completeDrain(ctx context.Context, client *proxmox.Client
 	}
 }
 
+// resumeDrain re-runs the drain for guests that are still on the node after a
+// container restart interrupted the original drain goroutine.
+func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode, remaining []GuestSnapshot) {
+	// Touch updated_at so the next tick doesn't also try to resume.
+	_ = o.queries.TouchRollingUpdateNode(ctx, node.ID)
+
+	clusterNodes, err := client.GetNodes(ctx)
+	if err != nil {
+		o.failNode(ctx, job, node, fmt.Sprintf("resume drain — list cluster nodes: %v", err))
+		return
+	}
+
+	var targets []string
+	for _, cn := range clusterNodes {
+		if cn.Node != node.NodeName && cn.Status == "online" {
+			targets = append(targets, cn.Node)
+		}
+	}
+	if len(targets) == 0 {
+		o.failNode(ctx, job, node, "resume drain — no available target nodes")
+		return
+	}
+
+	haResources, _ := client.GetHAResources(ctx)
+	haResMap := make(map[string]proxmox.HAResource, len(haResources))
+	for _, r := range haResources {
+		haResMap[r.SID] = r
+	}
+	haGroups, _ := client.GetHAGroups(ctx)
+	haGrpMap := make(map[string]proxmox.HAGroup, len(haGroups))
+	for _, g := range haGroups {
+		haGrpMap[g.Group] = g
+	}
+	haRules, _ := client.GetHARules(ctx)
+	dbRules, _ := o.queries.ListDRSRules(ctx, job.ClusterID)
+	drsRules := drs.ParseDBRules(dbRules)
+	nodeWorkloads := buildNodeWorkloads(ctx, client, clusterNodes)
+
+	for _, guest := range remaining {
+		if o.isJobCancelled(ctx, job.ID) {
+			return
+		}
+
+		if guest.Passthrough {
+			o.logger.Info("resume drain: shutting down passthrough guest",
+				"vmid", guest.VMID, "name", guest.Name, "node", node.NodeName)
+			var upid string
+			var shutErr error
+			switch guest.Type {
+			case "qemu":
+				upid, shutErr = client.ShutdownVM(ctx, node.NodeName, guest.VMID)
+			case "lxc":
+				upid, shutErr = client.ShutdownCT(ctx, node.NodeName, guest.VMID)
+			}
+			if shutErr != nil {
+				o.failNode(ctx, job, node, fmt.Sprintf("resume drain — shutdown passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
+				return
+			}
+			status := o.waitForTask(ctx, client, node.NodeName, upid)
+			if status != "completed" {
+				switch guest.Type {
+				case "qemu":
+					upid, shutErr = client.StopVM(ctx, node.NodeName, guest.VMID)
+				case "lxc":
+					upid, shutErr = client.StopCT(ctx, node.NodeName, guest.VMID)
+				}
+				if shutErr != nil {
+					o.failNode(ctx, job, node, fmt.Sprintf("resume drain — force stop passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
+					return
+				}
+				o.waitForTask(ctx, client, node.NodeName, upid)
+			}
+			continue
+		}
+
+		gs := GuestSnapshot{VMID: guest.VMID, Name: guest.Name, Type: guest.Type, Status: guest.Status}
+		target, err := SelectTarget(gs, node.NodeName, targets, haResMap, haGrpMap, haRules, drsRules, nodeWorkloads)
+		if err != nil {
+			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — no valid target for %s %d: %v", guest.Type, guest.VMID, err))
+			return
+		}
+
+		params := proxmox.MigrateParams{
+			Target: target,
+			Online: guest.Status == "running",
+		}
+
+		var upid string
+		var migrateErr error
+		switch guest.Type {
+		case "qemu":
+			upid, migrateErr = client.MigrateVM(ctx, node.NodeName, guest.VMID, params)
+		case "lxc":
+			upid, migrateErr = client.MigrateCT(ctx, node.NodeName, guest.VMID, params)
+		default:
+			continue
+		}
+		if migrateErr != nil {
+			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — migrate %s %d: %v", guest.Type, guest.VMID, migrateErr))
+			return
+		}
+
+		o.logger.Info("resume drain: migrating guest",
+			"vmid", guest.VMID, "type", guest.Type, "from", node.NodeName, "to", target)
+
+		status := o.waitForTask(ctx, client, node.NodeName, upid)
+		if status != "completed" {
+			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — migration of %s %d failed (status: %s)", guest.Type, guest.VMID, status))
+			return
+		}
+
+		w := drs.Workload{VMID: guest.VMID, Name: guest.Name, Type: guest.Type, Node: target}
+		nodeWorkloads[target] = append(nodeWorkloads[target], w)
+	}
+
+	o.completeDrain(ctx, client, job, node)
+}
+
+// getGuestStatus returns the current status of a guest on a node ("running", "stopped", etc.).
+func (o *Orchestrator) getGuestStatus(ctx context.Context, client *proxmox.Client, nodeName string, guest GuestSnapshot) string {
+	switch guest.Type {
+	case "qemu":
+		vms, err := client.GetVMs(ctx, nodeName)
+		if err != nil {
+			return ""
+		}
+		for _, vm := range vms {
+			if vm.VMID == guest.VMID {
+				return vm.Status
+			}
+		}
+	case "lxc":
+		cts, err := client.GetContainers(ctx, nodeName)
+		if err != nil {
+			return ""
+		}
+		for _, ct := range cts {
+			if ct.VMID == guest.VMID {
+				return ct.Status
+			}
+		}
+	}
+	return ""
+}
+
 func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
 	// If upgrade already started, check for timeout (30 minutes).
 	if node.UpgradeStartedAt.Valid {
@@ -580,14 +725,52 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 	}
 }
 
-func (o *Orchestrator) advanceDraining(ctx context.Context, _ *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
+func (o *Orchestrator) advanceDraining(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
 	// Check if drain has been going on too long (1 hour timeout).
 	if node.DrainStartedAt.Valid && time.Since(node.DrainStartedAt.Time) > time.Hour {
 		o.failNode(ctx, job, node, "drain timed out after 1 hour")
+		return
 	}
-	// Otherwise, drain is handled synchronously in startNode — if we see
-	// "draining" here it means a previous tick started it and it's still in
-	// progress. The startNode goroutine will advance the state when done.
+
+	// Resilience: if the drain hasn't progressed in 2 minutes (e.g. container
+	// restart killed the goroutine), check Proxmox and resume or complete.
+	if !node.UpdatedAt.IsZero() && time.Since(node.UpdatedAt) < 2*time.Minute {
+		return // Drain is actively progressing.
+	}
+
+	// Parse the original guest list from the snapshot.
+	var guests []GuestSnapshot
+	if err := json.Unmarshal(node.GuestsJson, &guests); err != nil || len(guests) == 0 {
+		o.completeDrain(ctx, client, job, node)
+		return
+	}
+
+	// Check how many guests are still on this node.
+	var remaining []GuestSnapshot
+	for _, g := range guests {
+		if o.isGuestOnNode(ctx, client, node.NodeName, g) {
+			// For passthrough guests, check if already stopped (shutdown succeeded before restart).
+			if g.Passthrough {
+				status := o.getGuestStatus(ctx, client, node.NodeName, g)
+				if status == "stopped" {
+					continue // Already shut down, don't count as remaining.
+				}
+			}
+			remaining = append(remaining, g)
+		}
+	}
+
+	if len(remaining) == 0 {
+		o.logger.Info("drain resume: all guests already drained, completing",
+			"node", node.NodeName)
+		o.completeDrain(ctx, client, job, node)
+		return
+	}
+
+	// Re-trigger drain for the remaining guests.
+	o.logger.Info("drain resume: re-triggering drain for remaining guests",
+		"node", node.NodeName, "remaining", len(remaining), "total", len(guests))
+	o.resumeDrain(ctx, client, job, node, remaining)
 }
 
 func (o *Orchestrator) advanceRebooting(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
@@ -740,16 +923,23 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 	o.logger.Info("node update completed", "node", node.NodeName)
 }
 
-func (o *Orchestrator) advanceRestoring(ctx context.Context, _ *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
-	// Restore is handled synchronously in advanceHealthCheck.
-	// If we see "restoring" here, a previous tick started it.
+func (o *Orchestrator) advanceRestoring(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
 	// Check for timeout (30 minutes).
 	if node.RestoreStartedAt.Valid && time.Since(node.RestoreStartedAt.Time) > 30*time.Minute {
-		// Don't fail the job for restore timeout — just complete the node.
 		o.logger.Warn("guest restore timed out, marking node completed", "node", node.NodeName)
+		o.restoreHAStates(ctx, client, node)
 		_ = o.queries.SetNodeRestoreCompleted(ctx, node.ID)
 		o.publishEvent(ctx, job.ClusterID, job.ID, "node_completed")
+		return
 	}
+
+	// Resilience: if restore hasn't progressed in 2 minutes, re-trigger.
+	if !node.UpdatedAt.IsZero() && time.Since(node.UpdatedAt) < 2*time.Minute {
+		return
+	}
+
+	o.logger.Info("restore resume: re-triggering guest restore after stall", "node", node.NodeName)
+	o.advanceHealthCheck(ctx, client, job, node)
 }
 
 // ConfirmUpgrade is called by the API when an admin confirms a node upgrade is done.

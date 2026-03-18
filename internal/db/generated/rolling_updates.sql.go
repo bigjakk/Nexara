@@ -755,6 +755,17 @@ func (q *Queries) StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	return err
 }
 
+const touchRollingUpdateNode = `-- name: TouchRollingUpdateNode :exec
+UPDATE rolling_update_nodes
+SET updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) TouchRollingUpdateNode(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, touchRollingUpdateNode, id)
+	return err
+}
+
 const updateRollingUpdateJobStatus = `-- name: UpdateRollingUpdateJobStatus :exec
 UPDATE rolling_update_jobs
 SET status = $2, updated_at = now()
