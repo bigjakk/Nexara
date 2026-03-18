@@ -5,6 +5,7 @@ import {
   X,
   Maximize2,
   Minimize2,
+  Maximize,
   TerminalSquare,
 } from "lucide-react";
 import { useConsoleStore } from "@/stores/console-store";
@@ -50,34 +51,36 @@ function TitleBar({
       </span>
 
       {/* Window controls */}
-      <button
-        className="rounded p-0.5 hover:bg-accent"
-        onClick={(e) => { e.stopPropagation(); setWindowMode("minimized"); }}
-        title="Minimize"
-      >
-        <Minus className="h-3 w-3" />
-      </button>
-      <button
-        className="rounded p-0.5 hover:bg-accent"
-        onClick={(e) => {
-          e.stopPropagation();
-          setWindowMode(windowMode === "maximized" ? "floating" : "maximized");
-        }}
-        title={windowMode === "maximized" ? "Restore" : "Maximize"}
-      >
-        {windowMode === "maximized" ? (
-          <Minimize2 className="h-3 w-3" />
-        ) : (
-          <Maximize2 className="h-3 w-3" />
-        )}
-      </button>
-      <button
-        className="rounded p-0.5 hover:bg-destructive/20 hover:text-destructive"
-        onClick={(e) => { e.stopPropagation(); setWindowMode("hidden"); }}
-        title="Close"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      <div className="flex items-center gap-1">
+        <button
+          className="flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
+          onClick={(e) => { e.stopPropagation(); setWindowMode("minimized"); }}
+          title="Minimize"
+        >
+          <Minus className="h-3.5 w-3.5" />
+        </button>
+        <button
+          className="flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
+          onClick={(e) => {
+            e.stopPropagation();
+            setWindowMode(windowMode === "maximized" ? "floating" : "maximized");
+          }}
+          title={windowMode === "maximized" ? "Restore" : "Maximize"}
+        >
+          {windowMode === "maximized" ? (
+            <Minimize2 className="h-3.5 w-3.5" />
+          ) : (
+            <Maximize2 className="h-3.5 w-3.5" />
+          )}
+        </button>
+        <button
+          className="flex h-6 w-6 items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive"
+          onClick={(e) => { e.stopPropagation(); setWindowMode("hidden"); }}
+          title="Close"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -249,9 +252,7 @@ export function FloatingConsole() {
           height: pipHeight,
           zIndex: 40,
         }}
-        className="cursor-pointer overflow-hidden rounded-lg border border-border/30 shadow-xl transition-opacity hover:opacity-100 opacity-70"
-        onClick={showConsole}
-        title="Click to restore console"
+        className="group overflow-hidden rounded-lg border border-border/30 shadow-xl transition-opacity hover:opacity-100 opacity-70"
       >
         {/* Live console content */}
         <div className="relative h-full w-full bg-[#1a1b26]/80 backdrop-blur-sm">
@@ -270,6 +271,24 @@ export function FloatingConsole() {
               />
             ),
           )}
+
+          {/* Top-right controls — visible on hover */}
+          <div className="absolute right-2 top-2 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-white/25 hover:text-white"
+              onClick={showConsole}
+              title="Restore"
+            >
+              <Maximize className="h-4 w-4" />
+            </button>
+            <button
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-red-500/70 hover:text-white"
+              onClick={() => { useConsoleStore.getState().setWindowMode("hidden"); }}
+              title="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
 
           {/* Subtle overlay label */}
           <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center gap-1.5 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">

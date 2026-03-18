@@ -198,12 +198,14 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     // Only re-run when the actual connection parameters change.
   }, [tabId, clusterID, node, vmid, guestType, reconnectKey]);
 
+  const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
+
   return (
     <div
       className="flex h-full flex-col"
       style={{ display: visible ? "flex" : "none" }}
     >
-      <VNCToolbar rfb={rfb} tab={tab} />
+      {!isMinimized && <VNCToolbar rfb={rfb} tab={tab} />}
       <div ref={containerRef} className="flex-1 bg-black" data-tab-id={tab.id} />
     </div>
   );

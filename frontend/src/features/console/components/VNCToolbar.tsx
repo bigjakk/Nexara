@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import {
   Keyboard,
-  Maximize,
-  Minimize,
+  Maximize2,
+  Minimize2,
   ClipboardPaste,
   RectangleHorizontal,
   Move,
@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type RFB from "@novnc/novnc/lib/rfb";
 import type { ConsoleTab } from "../types/console";
+import { useConsoleStore } from "@/stores/console-store";
 import { useVM, useVMAction, useVMConfig } from "@/features/vms/api/vm-queries";
 import { lifecycleActions } from "@/features/vms/lib/vm-action-defs";
 import type { VMAction } from "@/features/vms/types/vm";
@@ -59,7 +60,9 @@ interface VNCToolbarProps {
 }
 
 export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const windowMode = useConsoleStore((s) => s.windowMode);
+  const setWindowMode = useConsoleStore((s) => s.setWindowMode);
+  const isMaximized = windowMode === "maximized";
   const [scaleMode, setScaleMode] = useState<"scale" | "resize">("scale");
   const [pasteOpen, setPasteOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ action: VMAction; label: string } | null>(null);
@@ -136,15 +139,9 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
     }
   }
 
-  const handleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
-    }
-  }, []);
+  const handleToggleMaximize = useCallback(() => {
+    setWindowMode(isMaximized ? "floating" : "maximized");
+  }, [isMaximized, setWindowMode]);
 
   function handleSendPaste() {
     const text = pasteRef.current?.value;
@@ -318,18 +315,18 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
         <Camera className="h-3.5 w-3.5" />
       </Button>
 
-      {/* Fullscreen */}
+      {/* Maximize / Restore (console window, not browser) */}
       <Button
         variant="ghost"
         size="sm"
-        onClick={handleFullscreen}
-        title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+        onClick={handleToggleMaximize}
+        title={isMaximized ? "Restore" : "Maximize"}
         className="h-7 px-2"
       >
-        {isFullscreen ? (
-          <Minimize className="h-3.5 w-3.5" />
+        {isMaximized ? (
+          <Minimize2 className="h-3.5 w-3.5" />
         ) : (
-          <Maximize className="h-3.5 w-3.5" />
+          <Maximize2 className="h-3.5 w-3.5" />
         )}
       </Button>
 
