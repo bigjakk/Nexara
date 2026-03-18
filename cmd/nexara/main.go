@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -31,19 +30,10 @@ import (
 )
 
 func main() {
-	// CLI subcommands (no full server startup needed).
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "healthcheck":
-			runHealthcheck()
-			return
-		case "seed-export":
-			runSeedExport()
-			return
-		case "seed-import":
-			runSeedImport()
-			return
-		}
+	// Healthcheck CLI mode for Docker HEALTHCHECK.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		runHealthcheck()
+		return
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -71,14 +61,6 @@ func main() {
 	// Run embedded schema migrations.
 	if err := db.EnsureSchema(ctx, pool); err != nil {
 		log.Fatalf("failed to ensure database schema: %v", err)
-	}
-
-	// Auto-import seed data on fresh databases.
-	seedPath := filepath.Join(cfg.DataDir, "seed.json")
-	if _, statErr := os.Stat(seedPath); statErr == nil {
-		if importErr := db.ImportSeed(ctx, pool, seedPath); importErr != nil {
-			logger.Warn("seed import failed", "path", seedPath, "error", importErr)
-		}
 	}
 
 	// Detect and fix data integrity issues (duplicate rows from index corruption
@@ -191,52 +173,6 @@ func runHealthcheck() {
 		os.Exit(1)
 	}
 	fmt.Println("ok")
-}
-
-func runSeedExport() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
-	}
-	ctx := context.Background()
-	pool, err := db.ConnectWithRetry(ctx, cfg.DatabaseURL, slog.Default())
-	if err != nil {
-		log.Fatalf("failed to connect to database: %v", err)
-	}
-	defer pool.Close()
-
-	path := filepath.Join(cfg.DataDir, "seed.json")
-	if len(os.Args) > 2 {
-		path = os.Args[2]
-	}
-
-	log.Printf("exporting seed data to %s ...", path)
-	if err := db.ExportSeed(ctx, pool, path); err != nil {
-		log.Fatalf("seed export failed: %v", err)
-	}
-}
-
-func runSeedImport() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
-	}
-	ctx := context.Background()
-	pool, err := db.ConnectWithRetry(ctx, cfg.DatabaseURL, slog.Default())
-	if err != nil {
-		log.Fatalf("failed to connect to database: %v", err)
-	}
-	defer pool.Close()
-
-	path := filepath.Join(cfg.DataDir, "seed.json")
-	if len(os.Args) > 2 {
-		path = os.Args[2]
-	}
-
-	log.Printf("importing seed data from %s ...", path)
-	if err := db.ImportSeed(ctx, pool, path); err != nil {
-		log.Fatalf("seed import failed: %v", err)
-	}
 }
 
 // Advisory lock IDs for leader election. Only one instance across the cluster

@@ -18,7 +18,6 @@ frontend/tsconfig.tsbuildinfo
 
 # Database
 *.sql.bak
-seed.json
 
 # Environment
 .env
