@@ -1,4 +1,4 @@
-.PHONY: build frontend-build test lint generate migrate-up migrate-down docker-build docker-up docker-down clean audit audit-go audit-npm coverage-html
+.PHONY: build frontend-build test lint generate migrate-up migrate-down docker-build docker-up docker-down clean audit audit-go audit-npm coverage-html seed-export seed-import
 
 # Go parameters
 GOCMD=go
@@ -87,6 +87,14 @@ coverage-html:
 	$(GOTEST) -race -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
+
+## seed-export: Export config/setup tables to seed.json
+seed-export:
+	bin/$(BINARY) seed-export
+
+## seed-import: Import seed.json into the database (skips if users exist)
+seed-import:
+	bin/$(BINARY) seed-import
 
 ## help: Show this help
 help:
