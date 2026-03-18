@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -65,6 +65,14 @@ export function Sidebar() {
   const { appTitle, logoUrl } = useBrandingStore();
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    fetch("/api/v1/version")
+      .then((r) => r.json() as Promise<{ version: string }>)
+      .then((data) => { setAppVersion(data.version); })
+      .catch(() => {});
+  }, []);
 
   // Auto-expand tree when navigating to inventory/clusters routes
   useEffect(() => {
@@ -134,6 +142,9 @@ export function Sidebar() {
                 <Server className="ml-2 h-6 w-6 shrink-0 text-primary" />
               )}
               <span className="ml-2 text-lg font-semibold">{appTitle}</span>
+              {appVersion && (
+                <span className="ml-1.5 self-end mb-0.5 text-[10px] text-muted-foreground">{appVersion}</span>
+              )}
             </>
           )}
           <button

@@ -35,7 +35,7 @@ export interface InventoryRow {
   memPercent: number | null;
 }
 
-export type FilterOperator = "eq" | "gt" | "lt";
+export type FilterOperator = "eq" | "neq" | "gt" | "lt";
 
 export interface FilterCriteria {
   field: string;
