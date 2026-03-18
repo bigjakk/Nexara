@@ -36,7 +36,7 @@ function loadPersistedState(): Pick<TaskLogState, "panelOpen" | "panelHeight"> {
   } catch {
     // ignore
   }
-  return { panelOpen: false, panelHeight: 200 };
+  return { panelOpen: true, panelHeight: 200 };
 }
 
 function persist(state: Pick<TaskLogState, "panelOpen" | "panelHeight">) {
