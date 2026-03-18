@@ -252,8 +252,10 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	}
 
 	// Check for VM status changes and notify the frontend.
+	inventoryChanged := false
 	if s.eventPub != nil && oldStatuses != nil {
 		if newRows, err := s.queries.ListVMStatusesByCluster(ctx, cluster.ID); err == nil {
+			// Detect status changes for existing VMs.
 			for _, r := range newRows {
 				if old, ok := oldStatuses[r.Vmid]; ok && old != r.Status {
 					s.logger.Info("VM status changed during sync",
@@ -264,7 +266,12 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 					)
 					s.eventPub.ClusterEvent(ctx, cluster.ID.String(),
 						events.KindVMStateChange, "vm", r.ID.String(), "status_sync")
+					inventoryChanged = true
 				}
+			}
+			// Detect VMs added or removed.
+			if len(newRows) != len(oldStatuses) {
+				inventoryChanged = true
 			}
 		}
 	}
@@ -286,9 +293,10 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// against tasks that Nexara itself initiated).
 	s.syncTasks(ctx, client, cluster)
 
-	// Notify the frontend that inventory data has been refreshed so
-	// dashboards update without requiring a manual page reload.
-	if s.eventPub != nil {
+	// Only notify the frontend when inventory data actually changed
+	// (VM status transitions, VMs added/removed). This avoids triggering
+	// constant refetches on every 10-second sync cycle.
+	if s.eventPub != nil && inventoryChanged {
 		s.eventPub.ClusterEvent(ctx, cluster.ID.String(),
 			events.KindInventoryChange, "cluster", cluster.ID.String(), "sync_complete")
 	}

@@ -182,6 +182,37 @@ const (
 	lockIDScheduler int64 = 0x4E585241_00000002 // "NXRA" + 2
 )
 
+// withAdvisoryLock acquires a session-level advisory lock on a dedicated
+// connection, runs fn, then releases the lock. If another instance holds the
+// lock the function is skipped silently. Session-level locks are automatically
+// released by PostgreSQL if the connection drops, preventing the stuck-lock
+// problem that transaction-scoped locks suffer from in cross-host Docker
+// networking (where a transaction can become "idle in transaction" forever).
+func withAdvisoryLock(ctx context.Context, pool *pgxpool.Pool, lockID int64, fn func()) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire connection: %w", err)
+	}
+	defer conn.Release()
+
+	var ok bool
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", lockID).Scan(&ok); err != nil {
+		return fmt.Errorf("advisory lock: %w", err)
+	}
+	if !ok {
+		return nil // another instance holds the lock
+	}
+	defer func() {
+		// Use a short independent context so unlock succeeds even if ctx is cancelled.
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = conn.Exec(unlockCtx, "SELECT pg_advisory_unlock($1)", lockID)
+	}()
+
+	fn()
+	return nil
+}
+
 // runCollector runs the metric collection loop (mirrors cmd/collector logic).
 func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, logger *slog.Logger) {
 	defer func() {
@@ -210,31 +241,17 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 	ticker := cfg.NewMetricsTicker()
 	defer ticker.Stop()
 
-	// collectorTick wraps a sync cycle in a transaction that holds an advisory lock.
-	// If another instance already holds the lock for this tick, we skip silently.
+	// collectorTick runs a sync cycle under a session-level advisory lock.
+	// If another instance already holds the lock, we skip silently.
 	collectorTick := func() {
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			logger.Error("collector tick: begin tx", "error", err)
-			return
+		if err := withAdvisoryLock(ctx, pool, lockIDCollector, func() {
+			results := syncer.SyncAll(ctx)
+			mc.ProcessResults(ctx, results)
+			pbsResults := syncer.SyncAllPBS(ctx)
+			mc.ProcessPBSResults(ctx, pbsResults)
+		}); err != nil {
+			logger.Error("collector tick: lock", "error", err)
 		}
-		defer tx.Rollback(ctx) //nolint:errcheck // rollback is best-effort after commit
-
-		var ok bool
-		if err := tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", lockIDCollector).Scan(&ok); err != nil {
-			logger.Error("collector tick: advisory lock", "error", err)
-			return
-		}
-		if !ok {
-			return // another instance is running this tick
-		}
-
-		results := syncer.SyncAll(ctx)
-		mc.ProcessResults(ctx, results)
-		pbsResults := syncer.SyncAllPBS(ctx)
-		mc.ProcessPBSResults(ctx, pbsResults)
-
-		_ = tx.Commit(ctx)
 	}
 
 	// Run initial sync immediately.
@@ -282,26 +299,13 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		logger.Warn("failed to cleanup stale DRS history", "error", err)
 	}
 
-	// schedulerTick wraps a scheduler function in a transaction-level advisory lock.
+	// schedulerTick runs a scheduler function under a session-level advisory lock.
 	schedulerTick := func(name string, fn func(context.Context)) {
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			logger.Error("scheduler tick: begin tx", "task", name, "error", err)
-			return
+		if err := withAdvisoryLock(ctx, pool, lockIDScheduler, func() {
+			fn(ctx)
+		}); err != nil {
+			logger.Error("scheduler tick: lock", "task", name, "error", err)
 		}
-		defer tx.Rollback(ctx) //nolint:errcheck // rollback is best-effort after commit
-
-		var ok bool
-		if err := tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", lockIDScheduler).Scan(&ok); err != nil {
-			logger.Error("scheduler tick: advisory lock", "task", name, "error", err)
-			return
-		}
-		if !ok {
-			return // another instance is running this tick
-		}
-
-		fn(ctx)
-		_ = tx.Commit(ctx)
 	}
 
 	// Run initial checks immediately.

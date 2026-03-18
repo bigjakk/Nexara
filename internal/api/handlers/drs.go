@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -353,20 +354,47 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 		recommendations = result.Recommendations
 	}
 
-	// Record advisory results.
-	for _, rec := range recommendations {
-		_, _ = h.queries.InsertDRSHistory(c.Context(), db.InsertDRSHistoryParams{
-			ClusterID:   clusterID,
-			SourceNode:  rec.SourceNode,
-			TargetNode:  rec.TargetNode,
-			VmID:        safeInt32(rec.VMID),
-			VmType:      rec.VMType,
-			Reason:      rec.Reason,
-			ScoreBefore: rec.ScoreBefore,
-			ScoreAfter:  rec.ScoreAfter,
-			Status:      "advisory",
-			ExecutedAt:  pgtype.Timestamptz{Time: time.Now(), Valid: true},
-		})
+	// Look up the DRS mode to decide whether to execute or just advise.
+	cfg, cfgErr := h.queries.GetDRSConfig(c.Context(), clusterID)
+
+	if len(recommendations) > 0 && cfgErr == nil && cfg.Mode == "automatic" {
+		// Automatic mode: create a Proxmox client and execute migrations in background.
+		client, clientErr := h.createProxmoxClient(c, clusterID)
+		if clientErr != nil {
+			slog.Default().Error("DRS manual trigger: failed to create client", "error", clientErr)
+		} else {
+			executor := drs.NewExecutor(h.queries, slog.Default(), h.eventPub)
+			// Execute in a goroutine so the API response is not blocked by
+			// potentially long-running migrations. Use a detached context
+			// so the work continues after the HTTP response is sent.
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Default().Error("DRS manual execution panicked", "panic", r)
+					}
+				}()
+				execCtx := context.Background()
+				if execErr := executor.Execute(execCtx, client, clusterID, cfg.Mode, recommendations); execErr != nil {
+					slog.Default().Error("DRS manual trigger execution failed", "error", execErr)
+				}
+			}()
+		}
+	} else {
+		// Advisory mode or no config: record as advisory.
+		for _, rec := range recommendations {
+			_, _ = h.queries.InsertDRSHistory(c.Context(), db.InsertDRSHistoryParams{
+				ClusterID:   clusterID,
+				SourceNode:  rec.SourceNode,
+				TargetNode:  rec.TargetNode,
+				VmID:        safeInt32(rec.VMID),
+				VmType:      rec.VMType,
+				Reason:      rec.Reason,
+				ScoreBefore: rec.ScoreBefore,
+				ScoreAfter:  rec.ScoreAfter,
+				Status:      "advisory",
+				ExecutedAt:  pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			})
+		}
 	}
 
 	type evalRecommendation struct {
