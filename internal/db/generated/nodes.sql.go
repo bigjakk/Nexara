@@ -46,7 +46,7 @@ func (q *Queries) CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeSt
 }
 
 const getNode = `-- name: GetNode :one
-SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version FROM nodes WHERE id = $1
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version, swap_total, swap_used, swap_free, dns_servers, dns_search, timezone, subscription_status, subscription_level, load_avg, io_wait FROM nodes WHERE id = $1
 `
 
 func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (Node, error) {
@@ -73,6 +73,16 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (Node, error) {
 		&i.CpuThreads,
 		&i.CpuMhz,
 		&i.KernelVersion,
+		&i.SwapTotal,
+		&i.SwapUsed,
+		&i.SwapFree,
+		&i.DnsServers,
+		&i.DnsSearch,
+		&i.Timezone,
+		&i.SubscriptionStatus,
+		&i.SubscriptionLevel,
+		&i.LoadAvg,
+		&i.IoWait,
 	)
 	return i, err
 }
@@ -94,7 +104,7 @@ func (q *Queries) GetNodeAddressByName(ctx context.Context, arg GetNodeAddressBy
 }
 
 const getNodeByClusterAndName = `-- name: GetNodeByClusterAndName :one
-SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version FROM nodes WHERE cluster_id = $1 AND name = $2
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version, swap_total, swap_used, swap_free, dns_servers, dns_search, timezone, subscription_status, subscription_level, load_avg, io_wait FROM nodes WHERE cluster_id = $1 AND name = $2
 `
 
 type GetNodeByClusterAndNameParams struct {
@@ -126,6 +136,16 @@ func (q *Queries) GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClus
 		&i.CpuThreads,
 		&i.CpuMhz,
 		&i.KernelVersion,
+		&i.SwapTotal,
+		&i.SwapUsed,
+		&i.SwapFree,
+		&i.DnsServers,
+		&i.DnsSearch,
+		&i.Timezone,
+		&i.SubscriptionStatus,
+		&i.SubscriptionLevel,
+		&i.LoadAvg,
+		&i.IoWait,
 	)
 	return i, err
 }
@@ -160,7 +180,7 @@ func (q *Queries) ListNodeAddresses(ctx context.Context, clusterID uuid.UUID) ([
 }
 
 const listNodesByCluster = `-- name: ListNodesByCluster :many
-SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version FROM nodes WHERE cluster_id = $1 ORDER BY name
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version, swap_total, swap_used, swap_free, dns_servers, dns_search, timezone, subscription_status, subscription_level, load_avg, io_wait FROM nodes WHERE cluster_id = $1 ORDER BY name
 `
 
 func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error) {
@@ -193,6 +213,16 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) (
 			&i.CpuThreads,
 			&i.CpuMhz,
 			&i.KernelVersion,
+			&i.SwapTotal,
+			&i.SwapUsed,
+			&i.SwapFree,
+			&i.DnsServers,
+			&i.DnsSearch,
+			&i.Timezone,
+			&i.SubscriptionStatus,
+			&i.SubscriptionLevel,
+			&i.LoadAvg,
+			&i.IoWait,
 		); err != nil {
 			return nil, err
 		}
@@ -222,8 +252,11 @@ func (q *Queries) UpdateNodeAddress(ctx context.Context, arg UpdateNodeAddressPa
 
 const upsertNode = `-- name: UpsertNode :one
 INSERT INTO nodes (cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime,
-                   cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
+                   cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version,
+                   swap_total, swap_used, swap_free, dns_servers, dns_search, timezone,
+                   subscription_status, subscription_level, load_avg, io_wait, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, now())
 ON CONFLICT (cluster_id, name) DO UPDATE SET
     status = EXCLUDED.status,
     cpu_count = EXCLUDED.cpu_count,
@@ -238,26 +271,46 @@ ON CONFLICT (cluster_id, name) DO UPDATE SET
     cpu_threads = EXCLUDED.cpu_threads,
     cpu_mhz = EXCLUDED.cpu_mhz,
     kernel_version = EXCLUDED.kernel_version,
+    swap_total = EXCLUDED.swap_total,
+    swap_used = EXCLUDED.swap_used,
+    swap_free = EXCLUDED.swap_free,
+    dns_servers = EXCLUDED.dns_servers,
+    dns_search = EXCLUDED.dns_search,
+    timezone = EXCLUDED.timezone,
+    subscription_status = EXCLUDED.subscription_status,
+    subscription_level = EXCLUDED.subscription_level,
+    load_avg = EXCLUDED.load_avg,
+    io_wait = EXCLUDED.io_wait,
     last_seen_at = now()
-RETURNING id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version
+RETURNING id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version, swap_total, swap_used, swap_free, dns_servers, dns_search, timezone, subscription_status, subscription_level, load_avg, io_wait
 `
 
 type UpsertNodeParams struct {
-	ClusterID      uuid.UUID `json:"cluster_id"`
-	Name           string    `json:"name"`
-	Status         string    `json:"status"`
-	CpuCount       int32     `json:"cpu_count"`
-	MemTotal       int64     `json:"mem_total"`
-	DiskTotal      int64     `json:"disk_total"`
-	PveVersion     string    `json:"pve_version"`
-	SslFingerprint string    `json:"ssl_fingerprint"`
-	Uptime         int64     `json:"uptime"`
-	CpuModel       string    `json:"cpu_model"`
-	CpuCores       int32     `json:"cpu_cores"`
-	CpuSockets     int32     `json:"cpu_sockets"`
-	CpuThreads     int32     `json:"cpu_threads"`
-	CpuMhz         string    `json:"cpu_mhz"`
-	KernelVersion  string    `json:"kernel_version"`
+	ClusterID          uuid.UUID `json:"cluster_id"`
+	Name               string    `json:"name"`
+	Status             string    `json:"status"`
+	CpuCount           int32     `json:"cpu_count"`
+	MemTotal           int64     `json:"mem_total"`
+	DiskTotal          int64     `json:"disk_total"`
+	PveVersion         string    `json:"pve_version"`
+	SslFingerprint     string    `json:"ssl_fingerprint"`
+	Uptime             int64     `json:"uptime"`
+	CpuModel           string    `json:"cpu_model"`
+	CpuCores           int32     `json:"cpu_cores"`
+	CpuSockets         int32     `json:"cpu_sockets"`
+	CpuThreads         int32     `json:"cpu_threads"`
+	CpuMhz             string    `json:"cpu_mhz"`
+	KernelVersion      string    `json:"kernel_version"`
+	SwapTotal          int64     `json:"swap_total"`
+	SwapUsed           int64     `json:"swap_used"`
+	SwapFree           int64     `json:"swap_free"`
+	DnsServers         string    `json:"dns_servers"`
+	DnsSearch          string    `json:"dns_search"`
+	Timezone           string    `json:"timezone"`
+	SubscriptionStatus string    `json:"subscription_status"`
+	SubscriptionLevel  string    `json:"subscription_level"`
+	LoadAvg            string    `json:"load_avg"`
+	IoWait             float64   `json:"io_wait"`
 }
 
 func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error) {
@@ -277,6 +330,16 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		arg.CpuThreads,
 		arg.CpuMhz,
 		arg.KernelVersion,
+		arg.SwapTotal,
+		arg.SwapUsed,
+		arg.SwapFree,
+		arg.DnsServers,
+		arg.DnsSearch,
+		arg.Timezone,
+		arg.SubscriptionStatus,
+		arg.SubscriptionLevel,
+		arg.LoadAvg,
+		arg.IoWait,
 	)
 	var i Node
 	err := row.Scan(
@@ -300,6 +363,16 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		&i.CpuThreads,
 		&i.CpuMhz,
 		&i.KernelVersion,
+		&i.SwapTotal,
+		&i.SwapUsed,
+		&i.SwapFree,
+		&i.DnsServers,
+		&i.DnsSearch,
+		&i.Timezone,
+		&i.SubscriptionStatus,
+		&i.SubscriptionLevel,
+		&i.LoadAvg,
+		&i.IoWait,
 	)
 	return i, err
 }

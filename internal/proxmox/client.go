@@ -393,6 +393,66 @@ func (c *Client) GetNodeStatus(ctx context.Context, node string) (*NodeStatus, e
 	return &status, nil
 }
 
+// GetNodeDNS returns the DNS configuration of a node.
+func (c *Client) GetNodeDNS(ctx context.Context, node string) (*NodeDNS, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var dns NodeDNS
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/dns", &dns); err != nil {
+		return nil, fmt.Errorf("get node %s dns: %w", node, err)
+	}
+	return &dns, nil
+}
+
+// GetNodeTime returns the time/timezone configuration of a node.
+func (c *Client) GetNodeTime(ctx context.Context, node string) (*NodeTime, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var t NodeTime
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/time", &t); err != nil {
+		return nil, fmt.Errorf("get node %s time: %w", node, err)
+	}
+	return &t, nil
+}
+
+// GetNodeSubscription returns the subscription status of a node.
+func (c *Client) GetNodeSubscription(ctx context.Context, node string) (*NodeSubscription, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var sub NodeSubscription
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/subscription", &sub); err != nil {
+		return nil, fmt.Errorf("get node %s subscription: %w", node, err)
+	}
+	return &sub, nil
+}
+
+// GetNodeDisks returns the physical disks on a node.
+func (c *Client) GetNodeDisks(ctx context.Context, node string) ([]NodeDisk, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var disks []NodeDisk
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/disks/list", &disks); err != nil {
+		return nil, fmt.Errorf("get node %s disks: %w", node, err)
+	}
+	return disks, nil
+}
+
+// GetNodePCIDevices returns the PCI devices on a node.
+func (c *Client) GetNodePCIDevices(ctx context.Context, node string) ([]NodePCIDevice, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var devs []NodePCIDevice
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/hardware/pci", &devs); err != nil {
+		return nil, fmt.Errorf("get node %s pci devices: %w", node, err)
+	}
+	return devs, nil
+}
+
 // GetVMs returns all QEMU virtual machines on a node.
 func (c *Client) GetVMs(ctx context.Context, node string) ([]VirtualMachine, error) {
 	if err := validateNodeName(node); err != nil {

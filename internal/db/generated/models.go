@@ -364,26 +364,55 @@ type MigrationJob struct {
 }
 
 type Node struct {
-	ID             uuid.UUID `json:"id"`
-	ClusterID      uuid.UUID `json:"cluster_id"`
-	Name           string    `json:"name"`
-	Status         string    `json:"status"`
-	CpuCount       int32     `json:"cpu_count"`
-	MemTotal       int64     `json:"mem_total"`
-	DiskTotal      int64     `json:"disk_total"`
-	PveVersion     string    `json:"pve_version"`
-	SslFingerprint string    `json:"ssl_fingerprint"`
-	Uptime         int64     `json:"uptime"`
-	LastSeenAt     time.Time `json:"last_seen_at"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	Address        string    `json:"address"`
-	CpuModel       string    `json:"cpu_model"`
-	CpuCores       int32     `json:"cpu_cores"`
-	CpuSockets     int32     `json:"cpu_sockets"`
-	CpuThreads     int32     `json:"cpu_threads"`
-	CpuMhz         string    `json:"cpu_mhz"`
-	KernelVersion  string    `json:"kernel_version"`
+	ID                 uuid.UUID `json:"id"`
+	ClusterID          uuid.UUID `json:"cluster_id"`
+	Name               string    `json:"name"`
+	Status             string    `json:"status"`
+	CpuCount           int32     `json:"cpu_count"`
+	MemTotal           int64     `json:"mem_total"`
+	DiskTotal          int64     `json:"disk_total"`
+	PveVersion         string    `json:"pve_version"`
+	SslFingerprint     string    `json:"ssl_fingerprint"`
+	Uptime             int64     `json:"uptime"`
+	LastSeenAt         time.Time `json:"last_seen_at"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	Address            string    `json:"address"`
+	CpuModel           string    `json:"cpu_model"`
+	CpuCores           int32     `json:"cpu_cores"`
+	CpuSockets         int32     `json:"cpu_sockets"`
+	CpuThreads         int32     `json:"cpu_threads"`
+	CpuMhz             string    `json:"cpu_mhz"`
+	KernelVersion      string    `json:"kernel_version"`
+	SwapTotal          int64     `json:"swap_total"`
+	SwapUsed           int64     `json:"swap_used"`
+	SwapFree           int64     `json:"swap_free"`
+	DnsServers         string    `json:"dns_servers"`
+	DnsSearch          string    `json:"dns_search"`
+	Timezone           string    `json:"timezone"`
+	SubscriptionStatus string    `json:"subscription_status"`
+	SubscriptionLevel  string    `json:"subscription_level"`
+	LoadAvg            string    `json:"load_avg"`
+	IoWait             float64   `json:"io_wait"`
+}
+
+type NodeDisk struct {
+	ID         uuid.UUID `json:"id"`
+	NodeID     uuid.UUID `json:"node_id"`
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	DevPath    string    `json:"dev_path"`
+	Model      string    `json:"model"`
+	Serial     string    `json:"serial"`
+	Size       int64     `json:"size"`
+	DiskType   string    `json:"disk_type"`
+	Health     string    `json:"health"`
+	Wearout    string    `json:"wearout"`
+	Rpm        int32     `json:"rpm"`
+	Vendor     string    `json:"vendor"`
+	Wwn        string    `json:"wwn"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type NodeMetric struct {
@@ -424,6 +453,45 @@ type NodeMetrics5m struct {
 	AvgDiskWrite float64     `json:"avg_disk_write"`
 	AvgNetIn     float64     `json:"avg_net_in"`
 	AvgNetOut    float64     `json:"avg_net_out"`
+}
+
+type NodeNetworkInterface struct {
+	ID          uuid.UUID `json:"id"`
+	NodeID      uuid.UUID `json:"node_id"`
+	ClusterID   uuid.UUID `json:"cluster_id"`
+	Iface       string    `json:"iface"`
+	IfaceType   string    `json:"iface_type"`
+	Active      bool      `json:"active"`
+	Autostart   bool      `json:"autostart"`
+	Method      string    `json:"method"`
+	Method6     string    `json:"method6"`
+	Address     string    `json:"address"`
+	Netmask     string    `json:"netmask"`
+	Gateway     string    `json:"gateway"`
+	Cidr        string    `json:"cidr"`
+	BridgePorts string    `json:"bridge_ports"`
+	Comments    string    `json:"comments"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type NodePciDevice struct {
+	ID              uuid.UUID `json:"id"`
+	NodeID          uuid.UUID `json:"node_id"`
+	ClusterID       uuid.UUID `json:"cluster_id"`
+	PciID           string    `json:"pci_id"`
+	Class           string    `json:"class"`
+	DeviceName      string    `json:"device_name"`
+	VendorName      string    `json:"vendor_name"`
+	Device          string    `json:"device"`
+	Vendor          string    `json:"vendor"`
+	IommuGroup      int32     `json:"iommu_group"`
+	SubsystemDevice string    `json:"subsystem_device"`
+	SubsystemVendor string    `json:"subsystem_vendor"`
+	LastSeenAt      time.Time `json:"last_seen_at"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type NotificationChannel struct {

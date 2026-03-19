@@ -62,12 +62,25 @@ type SyncQueries interface {
 	DeleteStalePBSSnapshots(ctx context.Context, arg db.DeleteStalePBSSnapshotsParams) error
 	DeleteStalePBSSyncJobs(ctx context.Context, arg db.DeleteStalePBSSyncJobsParams) error
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg db.DeleteStalePBSVerifyJobsParams) error
+	// Node hardware detail queries
+	UpsertNodeDisk(ctx context.Context, arg db.UpsertNodeDiskParams) (db.NodeDisk, error)
+	DeleteStaleNodeDisks(ctx context.Context, arg db.DeleteStaleNodeDisksParams) error
+	UpsertNodeNetworkInterface(ctx context.Context, arg db.UpsertNodeNetworkInterfaceParams) (db.NodeNetworkInterface, error)
+	DeleteStaleNodeNetworkInterfaces(ctx context.Context, arg db.DeleteStaleNodeNetworkInterfacesParams) error
+	UpsertNodePCIDevice(ctx context.Context, arg db.UpsertNodePCIDeviceParams) (db.NodePciDevice, error)
+	DeleteStaleNodePCIDevices(ctx context.Context, arg db.DeleteStaleNodePCIDevicesParams) error
 }
 
 // ProxmoxClient defines the Proxmox API methods needed by the Syncer.
 type ProxmoxClient interface {
 	GetNodes(ctx context.Context) ([]proxmox.NodeListEntry, error)
 	GetNodeStatus(ctx context.Context, node string) (*proxmox.NodeStatus, error)
+	GetNodeDNS(ctx context.Context, node string) (*proxmox.NodeDNS, error)
+	GetNodeTime(ctx context.Context, node string) (*proxmox.NodeTime, error)
+	GetNodeSubscription(ctx context.Context, node string) (*proxmox.NodeSubscription, error)
+	GetNodeDisks(ctx context.Context, node string) ([]proxmox.NodeDisk, error)
+	GetNodePCIDevices(ctx context.Context, node string) ([]proxmox.NodePCIDevice, error)
+	GetNetworkInterfaces(ctx context.Context, node string) ([]proxmox.NetworkInterface, error)
 	GetVMs(ctx context.Context, node string) ([]proxmox.VirtualMachine, error)
 	GetContainers(ctx context.Context, node string) ([]proxmox.Container, error)
 	GetStoragePools(ctx context.Context, node string) ([]proxmox.StoragePool, error)
@@ -337,6 +350,9 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	var cpuThreads int32
 	var cpuMhz string
 	var kernelVersion string
+	var swapTotal, swapUsed, swapFree int64
+	var loadAvg string
+	var ioWait float64
 
 	status, err := client.GetNodeStatus(ctx, node.Node)
 	if err != nil {
@@ -362,24 +378,77 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		cpuThreads = safeInt32(status.CPUInfo.Threads)
 		cpuMhz = status.CPUInfo.MHz
 		kernelVersion = status.Kversion
+		swapTotal = status.Swap.Total
+		swapUsed = status.Swap.Used
+		swapFree = status.Swap.Free
+		ioWait = status.Wait
+		if len(status.LoadAvg) > 0 {
+			loadAvg = strings.Join(status.LoadAvg, ", ")
+		}
+	}
+
+	// Fetch DNS configuration.
+	var dnsServers, dnsSearch string
+	if dns, err := client.GetNodeDNS(ctx, node.Node); err != nil {
+		s.logger.Warn("failed to get node DNS", "node", node.Node, "error", err)
+	} else {
+		var servers []string
+		if dns.DNS1 != "" {
+			servers = append(servers, dns.DNS1)
+		}
+		if dns.DNS2 != "" {
+			servers = append(servers, dns.DNS2)
+		}
+		if dns.DNS3 != "" {
+			servers = append(servers, dns.DNS3)
+		}
+		dnsServers = strings.Join(servers, ", ")
+		dnsSearch = dns.Search
+	}
+
+	// Fetch timezone.
+	var timezone string
+	if t, err := client.GetNodeTime(ctx, node.Node); err != nil {
+		s.logger.Warn("failed to get node time", "node", node.Node, "error", err)
+	} else {
+		timezone = t.Timezone
+	}
+
+	// Fetch subscription status.
+	var subStatus, subLevel string
+	if sub, err := client.GetNodeSubscription(ctx, node.Node); err != nil {
+		s.logger.Warn("failed to get node subscription", "node", node.Node, "error", err)
+	} else {
+		subStatus = sub.Status
+		subLevel = sub.Level
 	}
 
 	dbNode, err := s.queries.UpsertNode(ctx, db.UpsertNodeParams{
-		ClusterID:      clusterID,
-		Name:           node.Node,
-		Status:         node.Status,
-		CpuCount:       cpuCount,
-		MemTotal:       memTotal,
-		DiskTotal:      diskTotal,
-		PveVersion:     pveVersion,
-		SslFingerprint: node.SSLFingerprint,
-		Uptime:         node.Uptime,
-		CpuModel:       cpuModel,
-		CpuCores:       cpuCores,
-		CpuSockets:     cpuSockets,
-		CpuThreads:     cpuThreads,
-		CpuMhz:         cpuMhz,
-		KernelVersion:  kernelVersion,
+		ClusterID:          clusterID,
+		Name:               node.Node,
+		Status:             node.Status,
+		CpuCount:           cpuCount,
+		MemTotal:           memTotal,
+		DiskTotal:          diskTotal,
+		PveVersion:         pveVersion,
+		SslFingerprint:     node.SSLFingerprint,
+		Uptime:             node.Uptime,
+		CpuModel:           cpuModel,
+		CpuCores:           cpuCores,
+		CpuSockets:         cpuSockets,
+		CpuThreads:         cpuThreads,
+		CpuMhz:             cpuMhz,
+		KernelVersion:      kernelVersion,
+		SwapTotal:          swapTotal,
+		SwapUsed:           swapUsed,
+		SwapFree:           swapFree,
+		DnsServers:         dnsServers,
+		DnsSearch:          dnsSearch,
+		Timezone:           timezone,
+		SubscriptionStatus: subStatus,
+		SubscriptionLevel:  subLevel,
+		LoadAvg:            loadAvg,
+		IoWait:             ioWait,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("upsert node %s: %w", node.Node, err)
@@ -409,6 +478,83 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 			"node", node.Node,
 			"error", err,
 		)
+	}
+
+	// Sync physical disks.
+	syncStart := time.Now()
+	if disks, err := client.GetNodeDisks(ctx, node.Node); err != nil {
+		s.logger.Warn("failed to sync node disks", "node", node.Node, "error", err)
+	} else {
+		for _, d := range disks {
+			if _, err := s.queries.UpsertNodeDisk(ctx, db.UpsertNodeDiskParams{
+				NodeID:    dbNode.ID,
+				ClusterID: clusterID,
+				DevPath:   d.DevPath,
+				Model:     d.Model,
+				Serial:    d.Serial,
+				Size:      d.Size,
+				DiskType:  d.Type,
+				Health:    d.Health,
+				Wearout:   d.Wearout,
+				Rpm:       safeInt32(d.RPM),
+				Vendor:    d.Vendor,
+				Wwn:       d.WWN,
+			}); err != nil {
+				s.logger.Warn("failed to upsert node disk", "node", node.Node, "dev", d.DevPath, "error", err)
+			}
+		}
+		_ = s.queries.DeleteStaleNodeDisks(ctx, db.DeleteStaleNodeDisksParams{NodeID: dbNode.ID, LastSeenAt: syncStart})
+	}
+
+	// Sync network interfaces.
+	if ifaces, err := client.GetNetworkInterfaces(ctx, node.Node); err != nil {
+		s.logger.Warn("failed to sync network interfaces", "node", node.Node, "error", err)
+	} else {
+		for _, iface := range ifaces {
+			if _, err := s.queries.UpsertNodeNetworkInterface(ctx, db.UpsertNodeNetworkInterfaceParams{
+				NodeID:      dbNode.ID,
+				ClusterID:   clusterID,
+				Iface:       iface.Iface,
+				IfaceType:   iface.Type,
+				Active:      iface.Active == 1,
+				Autostart:   iface.Autostart == 1,
+				Method:      iface.Method,
+				Method6:     iface.Method6,
+				Address:     iface.Address,
+				Netmask:     iface.Netmask,
+				Gateway:     iface.Gateway,
+				Cidr:        iface.CIDR,
+				BridgePorts: iface.BridgePorts,
+				Comments:    iface.Comments,
+			}); err != nil {
+				s.logger.Warn("failed to upsert network interface", "node", node.Node, "iface", iface.Iface, "error", err)
+			}
+		}
+		_ = s.queries.DeleteStaleNodeNetworkInterfaces(ctx, db.DeleteStaleNodeNetworkInterfacesParams{NodeID: dbNode.ID, LastSeenAt: syncStart})
+	}
+
+	// Sync PCI devices.
+	if devs, err := client.GetNodePCIDevices(ctx, node.Node); err != nil {
+		s.logger.Warn("failed to sync PCI devices", "node", node.Node, "error", err)
+	} else {
+		for _, d := range devs {
+			if _, err := s.queries.UpsertNodePCIDevice(ctx, db.UpsertNodePCIDeviceParams{
+				NodeID:          dbNode.ID,
+				ClusterID:       clusterID,
+				PciID:           d.ID,
+				Class:           d.Class,
+				DeviceName:      d.DeviceName,
+				VendorName:      d.VendorName,
+				Device:          d.Device,
+				Vendor:          d.Vendor,
+				IommuGroup:      safeInt32(d.IOMMUGroup),
+				SubsystemDevice: d.SubsystemDevice,
+				SubsystemVendor: d.SubsystemVendor,
+			}); err != nil {
+				s.logger.Warn("failed to upsert PCI device", "node", node.Node, "pci", d.ID, "error", err)
+			}
+		}
+		_ = s.queries.DeleteStaleNodePCIDevices(ctx, db.DeleteStaleNodePCIDevicesParams{NodeID: dbNode.ID, LastSeenAt: syncStart})
 	}
 
 	// Sum VM/CT disk and network I/O into the node metric snapshot.

@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Terminal, Cpu, MemoryStick, HardDrive, Info } from "lucide-react";
+import {
+  ArrowLeft, Terminal, Cpu, MemoryStick, HardDrive, Info,
+  Network, CircuitBoard, Globe,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,7 +11,12 @@ import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
 import { useNodeHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
-import { useClusterNodes } from "../api/cluster-queries";
+import {
+  useClusterNodes,
+  useNodeDisks,
+  useNodeNetworkInterfaces,
+  useNodePCIDevices,
+} from "../api/cluster-queries";
 import { useConsoleStore } from "@/stores/console-store";
 import { formatBytes, formatUptime } from "@/lib/format";
 import type { TimeRange } from "@/types/api";
@@ -32,6 +40,10 @@ export function NodeDetailPage() {
   const liveMetric = clusterMetrics?.nodeMetrics.get(nodeId);
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
+
+  const { data: disks } = useNodeDisks(clusterId, nodeId);
+  const { data: networkInterfaces } = useNodeNetworkInterfaces(clusterId, nodeId);
+  const { data: pciDevices } = useNodePCIDevices(clusterId, nodeId);
 
   function openShell() {
     if (!node) return;
@@ -63,6 +75,8 @@ export function NodeDetailPage() {
       </div>
     );
   }
+
+  const swapPercent = node.swap_total > 0 ? ((node.swap_used / node.swap_total) * 100).toFixed(1) : null;
 
   return (
     <div className="space-y-6 p-6">
@@ -97,52 +111,180 @@ export function NodeDetailPage() {
         )}
       </div>
 
-      {/* Hardware Info + Metrics */}
-      <div className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <HardwareSection
-            icon={<Cpu className="h-4 w-4" />}
-            title="Processor"
-            items={[
-              { label: "Model", value: node.cpu_model || "--" },
-              { label: "Sockets", value: node.cpu_sockets ? String(node.cpu_sockets) : "--" },
-              { label: "Cores", value: node.cpu_cores ? `${String(node.cpu_cores)} per socket` : "--" },
-              { label: "Threads", value: node.cpu_threads ? `${String(node.cpu_threads)} per core` : "--" },
-              { label: "Total CPUs", value: String(node.cpu_count) },
-              { label: "Frequency", value: node.cpu_mhz ? `${node.cpu_mhz} MHz` : "--" },
-            ]}
-          />
-          <HardwareSection
-            icon={<MemoryStick className="h-4 w-4" />}
-            title="Memory"
-            items={[
-              { label: "Total", value: formatBytes(node.mem_total) },
-            ]}
-          />
-          <HardwareSection
-            icon={<HardDrive className="h-4 w-4" />}
-            title="Boot Disk"
-            items={[
-              { label: "Total", value: formatBytes(node.disk_total) },
-            ]}
-          />
-          <HardwareSection
-            icon={<Info className="h-4 w-4" />}
-            title="System"
-            items={[
-              { label: "PVE Version", value: node.pve_version || "--" },
-              { label: "Kernel", value: node.kernel_version || "--" },
-              { label: "Uptime", value: formatUptime(node.uptime) },
-            ]}
-          />
-        </div>
-
-        <NodeMetricsPanel
-          clusterId={clusterId}
-          nodeId={nodeId}
-          liveMetric={liveMetric}
+      {/* Hardware Info Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <HardwareSection
+          icon={<Cpu className="h-4 w-4" />}
+          title="Processor"
+          items={[
+            { label: "Model", value: node.cpu_model || "--" },
+            { label: "Sockets", value: node.cpu_sockets ? String(node.cpu_sockets) : "--" },
+            { label: "Cores", value: node.cpu_cores ? `${String(node.cpu_cores)} per socket` : "--" },
+            { label: "Threads", value: node.cpu_threads ? `${String(node.cpu_threads)} per core` : "--" },
+            { label: "Total CPUs", value: String(node.cpu_count) },
+            { label: "Frequency", value: node.cpu_mhz ? `${node.cpu_mhz} MHz` : "--" },
+          ]}
+        />
+        <HardwareSection
+          icon={<MemoryStick className="h-4 w-4" />}
+          title="Memory"
+          items={[
+            { label: "Total RAM", value: formatBytes(node.mem_total) },
+            { label: "Swap Total", value: node.swap_total ? formatBytes(node.swap_total) : "--" },
+            { label: "Swap Used", value: node.swap_total ? `${formatBytes(node.swap_used)} (${swapPercent ?? "0"}%)` : "--" },
+          ]}
+        />
+        <HardwareSection
+          icon={<Info className="h-4 w-4" />}
+          title="System"
+          items={[
+            { label: "PVE Version", value: node.pve_version || "--" },
+            { label: "Kernel", value: node.kernel_version || "--" },
+            { label: "Uptime", value: formatUptime(node.uptime) },
+            { label: "Load Average", value: node.load_avg || "--" },
+            { label: "I/O Wait", value: node.io_wait > 0 ? `${(node.io_wait * 100).toFixed(1)}%` : "--" },
+            { label: "Timezone", value: node.timezone || "--" },
+          ]}
+        />
+        <HardwareSection
+          icon={<Globe className="h-4 w-4" />}
+          title="Network & DNS"
+          items={[
+            { label: "DNS Servers", value: node.dns_servers || "--" },
+            { label: "Search Domain", value: node.dns_search || "--" },
+            ...(node.subscription_status ? [
+              { label: "Subscription", value: `${node.subscription_status}${node.subscription_level ? ` (${node.subscription_level})` : ""}` },
+            ] : []),
+          ]}
         />
       </div>
+
+      {/* Live metrics + charts */}
+      <NodeMetricsPanel
+        clusterId={clusterId}
+        nodeId={nodeId}
+        liveMetric={liveMetric}
+      />
+
+      {/* Physical Disks */}
+      {disks && disks.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <HardDrive className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">Physical Disks</h2>
+          </div>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Device</th>
+                  <th className="px-3 py-2 text-left font-medium">Model</th>
+                  <th className="px-3 py-2 text-left font-medium">Serial</th>
+                  <th className="px-3 py-2 text-left font-medium">Size</th>
+                  <th className="px-3 py-2 text-left font-medium">Type</th>
+                  <th className="px-3 py-2 text-left font-medium">Health</th>
+                  <th className="px-3 py-2 text-left font-medium">Wearout</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {disks.map((d) => (
+                  <tr key={d.id} className="hover:bg-muted/30">
+                    <td className="px-3 py-2 font-mono text-xs">{d.dev_path}</td>
+                    <td className="px-3 py-2">{d.model || "--"}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{d.serial || "--"}</td>
+                    <td className="px-3 py-2">{formatBytes(d.size)}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className="text-xs">
+                        {d.disk_type.toUpperCase() || "unknown"}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge variant={d.health === "PASSED" ? "default" : "destructive"} className="text-xs">
+                        {d.health || "unknown"}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2">{d.wearout && d.wearout !== "N/A" ? d.wearout : "--"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Network Interfaces */}
+      {networkInterfaces && networkInterfaces.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Network className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">Network Interfaces</h2>
+          </div>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Interface</th>
+                  <th className="px-3 py-2 text-left font-medium">Type</th>
+                  <th className="px-3 py-2 text-left font-medium">Active</th>
+                  <th className="px-3 py-2 text-left font-medium">Address / CIDR</th>
+                  <th className="px-3 py-2 text-left font-medium">Gateway</th>
+                  <th className="px-3 py-2 text-left font-medium">Bridge Ports</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {networkInterfaces.map((iface) => (
+                  <tr key={iface.id} className="hover:bg-muted/30">
+                    <td className="px-3 py-2 font-mono text-xs">{iface.iface}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className="text-xs">{iface.iface_type}</Badge>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge variant={iface.active ? "default" : "secondary"} className="text-xs">
+                        {iface.active ? "up" : "down"}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">{iface.cidr || iface.address || "--"}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{iface.gateway || "--"}</td>
+                    <td className="px-3 py-2 text-xs">{iface.bridge_ports || "--"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* PCI Devices */}
+      {pciDevices && pciDevices.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <CircuitBoard className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">PCI Devices</h2>
+          </div>
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">PCI ID</th>
+                  <th className="px-3 py-2 text-left font-medium">Device</th>
+                  <th className="px-3 py-2 text-left font-medium">Vendor</th>
+                  <th className="px-3 py-2 text-left font-medium">IOMMU Group</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {pciDevices.map((d) => (
+                  <tr key={d.id} className="hover:bg-muted/30">
+                    <td className="px-3 py-2 font-mono text-xs">{d.pci_id}</td>
+                    <td className="px-3 py-2 text-xs">{d.device_name || d.device || "--"}</td>
+                    <td className="px-3 py-2 text-xs">{d.vendor_name || d.vendor || "--"}</td>
+                    <td className="px-3 py-2">{d.iommu_group >= 0 ? String(d.iommu_group) : "--"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

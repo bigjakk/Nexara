@@ -67,6 +67,9 @@ type Querier interface {
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
 	DeleteSetting(ctx context.Context, arg DeleteSettingParams) error
 	DeleteSettingByID(ctx context.Context, id uuid.UUID) error
+	DeleteStaleNodeDisks(ctx context.Context, arg DeleteStaleNodeDisksParams) error
+	DeleteStaleNodeNetworkInterfaces(ctx context.Context, arg DeleteStaleNodeNetworkInterfacesParams) error
+	DeleteStaleNodePCIDevices(ctx context.Context, arg DeleteStaleNodePCIDevicesParams) error
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
@@ -226,6 +229,9 @@ type Querier interface {
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
 	ListNodeAddresses(ctx context.Context, clusterID uuid.UUID) ([]ListNodeAddressesRow, error)
+	ListNodeDisksByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeDisk, error)
+	ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeNetworkInterface, error)
+	ListNodePCIDevicesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodePciDevice, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
 	ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error)
 	ListOIDCConfigs(ctx context.Context) ([]OidcConfig, error)
@@ -349,6 +355,9 @@ type Querier interface {
 	UpsertClusterSSHCredentials(ctx context.Context, arg UpsertClusterSSHCredentialsParams) (ClusterSshCredential, error)
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
+	UpsertNodeDisk(ctx context.Context, arg UpsertNodeDiskParams) (NodeDisk, error)
+	UpsertNodeNetworkInterface(ctx context.Context, arg UpsertNodeNetworkInterfaceParams) (NodeNetworkInterface, error)
+	UpsertNodePCIDevice(ctx context.Context, arg UpsertNodePCIDeviceParams) (NodePciDevice, error)
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)
 	UpsertPBSSyncJob(ctx context.Context, arg UpsertPBSSyncJobParams) (PbsSyncJob, error)
 	UpsertPBSVerifyJob(ctx context.Context, arg UpsertPBSVerifyJobParams) (PbsVerifyJob, error)

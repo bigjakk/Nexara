@@ -502,12 +502,65 @@ export interface NodeResponse {
   cpu_mhz: string;
   mem_total: number;
   disk_total: number;
+  swap_total: number;
+  swap_used: number;
+  swap_free: number;
   pve_version: string;
   kernel_version: string;
+  dns_servers: string;
+  dns_search: string;
+  timezone: string;
+  subscription_status: string;
+  subscription_level: string;
+  load_avg: string;
+  io_wait: number;
   uptime: number;
   last_seen_at: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface NodeDiskResponse {
+  id: string;
+  dev_path: string;
+  model: string;
+  serial: string;
+  size: number;
+  disk_type: string;
+  health: string;
+  wearout: string;
+  rpm: number;
+  vendor: string;
+  wwn: string;
+}
+
+export interface NodeNetworkInterfaceResponse {
+  id: string;
+  iface: string;
+  iface_type: string;
+  active: boolean;
+  autostart: boolean;
+  method: string;
+  method6: string;
+  address: string;
+  netmask: string;
+  gateway: string;
+  cidr: string;
+  bridge_ports: string;
+  comments: string;
+}
+
+export interface NodePCIDeviceResponse {
+  id: string;
+  pci_id: string;
+  class: string;
+  device_name: string;
+  vendor_name: string;
+  device: string;
+  vendor: string;
+  iommu_group: number;
+  subsystem_device: string;
+  subsystem_vendor: string;
 }
 
 export interface VMResponse {

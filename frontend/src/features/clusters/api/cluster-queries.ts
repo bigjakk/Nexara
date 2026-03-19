@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type { ClusterResponse, NodeResponse, StorageResponse, VMResponse } from "@/types/api";
+import type {
+  ClusterResponse,
+  NodeResponse,
+  NodeDiskResponse,
+  NodeNetworkInterfaceResponse,
+  NodePCIDeviceResponse,
+  StorageResponse,
+  VMResponse,
+} from "@/types/api";
 
 export function useCluster(id: string) {
   return useQuery({
@@ -82,6 +90,39 @@ export function useCPUModels(clusterId: string, nodeName: string) {
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
     staleTime: 300_000,
+  });
+}
+
+export function useNodeDisks(clusterId: string, nodeId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeId, "disks"],
+    queryFn: () =>
+      apiClient.get<NodeDiskResponse[]>(
+        `/api/v1/clusters/${clusterId}/nodes/${nodeId}/disks`,
+      ),
+    enabled: clusterId.length > 0 && nodeId.length > 0,
+  });
+}
+
+export function useNodeNetworkInterfaces(clusterId: string, nodeId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeId, "network-interfaces"],
+    queryFn: () =>
+      apiClient.get<NodeNetworkInterfaceResponse[]>(
+        `/api/v1/clusters/${clusterId}/nodes/${nodeId}/network-interfaces`,
+      ),
+    enabled: clusterId.length > 0 && nodeId.length > 0,
+  });
+}
+
+export function useNodePCIDevices(clusterId: string, nodeId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "nodes", nodeId, "pci-devices"],
+    queryFn: () =>
+      apiClient.get<NodePCIDeviceResponse[]>(
+        `/api/v1/clusters/${clusterId}/nodes/${nodeId}/pci-devices`,
+      ),
+    enabled: clusterId.length > 0 && nodeId.length > 0,
   });
 }
 

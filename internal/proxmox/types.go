@@ -42,10 +42,53 @@ type NodeStatus struct {
 	PVEVersion string  `json:"pveversion"`
 	CPUInfo    CPUInfo `json:"cpuinfo"`
 	Memory     Memory  `json:"memory"`
+	Swap       Memory  `json:"swap"`
 	RootFS     RootFS  `json:"rootfs"`
 	CPU        float64 `json:"cpu"`
 	Wait       float64 `json:"wait"`
 	LoadAvg    []string `json:"loadavg"`
+}
+
+// NodeDNS represents DNS configuration from GET /nodes/{node}/dns.
+type NodeDNS struct {
+	Search string `json:"search"`
+	DNS1   string `json:"dns1"`
+	DNS2   string `json:"dns2"`
+	DNS3   string `json:"dns3"`
+}
+
+// NodeTime represents time configuration from GET /nodes/{node}/time.
+type NodeTime struct {
+	Timezone  string `json:"timezone"`
+	Time      int64  `json:"time"`
+	Localtime int64  `json:"localtime"`
+}
+
+// NodeSubscription represents subscription status from GET /nodes/{node}/subscription.
+type NodeSubscription struct {
+	Status      string `json:"status"`
+	Level       string `json:"level"`
+	ServerID    string `json:"serverid"`
+	ProductName string `json:"productname"`
+	RegDate     string `json:"regdate"`
+	NextDue     string `json:"nextduedate"`
+	URL         string `json:"url"`
+	Key         string `json:"key"`
+}
+
+// NodeDisk represents a physical disk from GET /nodes/{node}/disks/list.
+type NodeDisk struct {
+	DevPath string `json:"devpath"`
+	Model   string `json:"model"`
+	Serial  string `json:"serial"`
+	Size    int64  `json:"size"`
+	Type    string `json:"type"`
+	Health  string `json:"health"`
+	Wearout string `json:"wearout"`
+	RPM     int    `json:"rpm"`
+	Vendor  string `json:"vendor"`
+	WWN     string `json:"wwn"`
+	GPT     int    `json:"gpt"`
 }
 
 // CPUInfo represents CPU information from a node status response.

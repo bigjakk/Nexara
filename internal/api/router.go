@@ -60,6 +60,9 @@ func (s *Server) setupRoutes() {
 		}
 		if s.nodeHandler != nil {
 			clusters.Get("/:cluster_id/nodes", s.nodeHandler.ListByCluster)
+			clusters.Get("/:cluster_id/nodes/:node_id/disks", s.nodeHandler.ListNodeDisks)
+			clusters.Get("/:cluster_id/nodes/:node_id/network-interfaces", s.nodeHandler.ListNodeNetworkInterfaces)
+			clusters.Get("/:cluster_id/nodes/:node_id/pci-devices", s.nodeHandler.ListNodePCIDevices)
 		}
 		if s.vmHandler != nil {
 			clusters.Get("/:cluster_id/vms", s.vmHandler.ListByCluster)
