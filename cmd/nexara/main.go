@@ -182,38 +182,65 @@ const (
 	lockIDScheduler int64 = 0x4E585241_00000002 // "NXRA" + 2
 )
 
-// withAdvisoryLock acquires a session-level advisory lock on a dedicated
-// connection, runs fn, then releases the lock. If another instance holds the
-// lock the function is skipped silently. Session-level locks are automatically
-// released by PostgreSQL if the connection drops, preventing the stuck-lock
-// problem that transaction-scoped locks suffer from in cross-host Docker
-// networking (where a transaction can become "idle in transaction" forever).
-func withAdvisoryLock(ctx context.Context, pool *pgxpool.Pool, lockID int64, fn func()) error {
+// acquireLeaderLock tries to become the leader for a given role by acquiring
+// a session-level advisory lock on a dedicated connection. The lock is held
+// for the lifetime of the returned connection — when the connection is released
+// (or the process dies), PostgreSQL automatically releases the lock and another
+// instance can become leader.
+//
+// Returns the held connection (caller must defer conn.Release()) and true if
+// leadership was acquired. Returns nil, false if another instance is leader.
+func acquireLeaderLock(ctx context.Context, pool *pgxpool.Pool, lockID int64) (*pgxpool.Conn, bool) {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
-		return fmt.Errorf("acquire connection: %w", err)
+		return nil, false
 	}
-	defer conn.Release()
 
 	var ok bool
 	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", lockID).Scan(&ok); err != nil {
-		return fmt.Errorf("advisory lock: %w", err)
+		conn.Release()
+		return nil, false
 	}
 	if !ok {
-		return nil // another instance holds the lock
+		conn.Release()
+		return nil, false
 	}
-	defer func() {
-		// Use a short independent context so unlock succeeds even if ctx is cancelled.
-		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = conn.Exec(unlockCtx, "SELECT pg_advisory_unlock($1)", lockID)
-	}()
 
-	fn()
-	return nil
+	return conn, true
 }
 
-// runCollector runs the metric collection loop (mirrors cmd/collector logic).
+// runWithLeaderRetry continuously attempts to become leader for a role. Once
+// leadership is acquired, it calls run (which should block until ctx is done).
+// If leadership is lost (connection drops), it retries after a delay.
+func runWithLeaderRetry(ctx context.Context, pool *pgxpool.Pool, lockID int64, role string, logger *slog.Logger, run func(ctx context.Context)) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		conn, ok := acquireLeaderLock(ctx, pool, lockID)
+		if !ok {
+			// Another instance is leader. Retry periodically.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+				continue
+			}
+		}
+
+		logger.Info("acquired leader lock", "role", role)
+		run(ctx)
+		// run returned — either ctx cancelled or an unexpected exit.
+		conn.Release()
+		logger.Info("released leader lock", "role", role)
+	}
+}
+
+// runCollector runs the metric collection loop. Uses leader election so only
+// one instance across the Swarm cluster runs the collector at any time.
 func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -224,7 +251,6 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 	queries := dbgen.New(pool)
 	syncer := collector.NewSyncer(queries, cfg.EncryptionKey, logger)
 
-	// Set up event publisher for VM status change notifications.
 	if rdb != nil {
 		eventPub := events.NewPublisher(rdb, logger)
 		syncer.SetEventPublisher(eventPub)
@@ -236,36 +262,31 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 
 	mc := collector.NewMetricCollector(pool, publisher, logger)
 
-	logger.Info("collector started", "metrics_interval", cfg.MetricsCollectInterval)
+	runWithLeaderRetry(ctx, pool, lockIDCollector, "collector", logger, func(ctx context.Context) {
+		logger.Info("collector started", "metrics_interval", cfg.MetricsCollectInterval)
 
-	ticker := cfg.NewMetricsTicker()
-	defer ticker.Stop()
+		ticker := cfg.NewMetricsTicker()
+		defer ticker.Stop()
 
-	// collectorTick runs a sync cycle under a session-level advisory lock.
-	// If another instance already holds the lock, we skip silently.
-	collectorTick := func() {
-		if err := withAdvisoryLock(ctx, pool, lockIDCollector, func() {
-			results := syncer.SyncAll(ctx)
-			mc.ProcessResults(ctx, results)
-			pbsResults := syncer.SyncAllPBS(ctx)
-			mc.ProcessPBSResults(ctx, pbsResults)
-		}); err != nil {
-			logger.Error("collector tick: lock", "error", err)
+		// Run initial sync immediately.
+		results := syncer.SyncAll(ctx)
+		mc.ProcessResults(ctx, results)
+		pbsResults := syncer.SyncAllPBS(ctx)
+		mc.ProcessPBSResults(ctx, pbsResults)
+
+		for {
+			select {
+			case <-ticker.C:
+				results := syncer.SyncAll(ctx)
+				mc.ProcessResults(ctx, results)
+				pbsResults := syncer.SyncAllPBS(ctx)
+				mc.ProcessPBSResults(ctx, pbsResults)
+			case <-ctx.Done():
+				logger.Info("collector stopped")
+				return
+			}
 		}
-	}
-
-	// Run initial sync immediately.
-	collectorTick()
-
-	for {
-		select {
-		case <-ticker.C:
-			collectorTick()
-		case <-ctx.Done():
-			logger.Info("collector stopped")
-			return
-		}
-	}
+	})
 }
 
 // runScheduler runs all scheduler tickers (mirrors cmd/scheduler logic).
@@ -285,72 +306,65 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 
 	sched := scheduler.New(queries, cfg.EncryptionKey, logger, eventPub)
 
-	logger.Info("scheduler started",
-		"task_interval", "60s",
-		"drs_interval", "60s",
-		"cve_interval", "6h",
-		"alert_interval", "60s",
-		"report_interval", "60s",
-		"rolling_update_interval", "15s",
-	)
+	runWithLeaderRetry(ctx, pool, lockIDScheduler, "scheduler", logger, func(ctx context.Context) {
+		logger.Info("scheduler started",
+			"task_interval", "60s",
+			"drs_interval", "60s",
+			"cve_interval", "6h",
+			"alert_interval", "60s",
+			"report_interval", "60s",
+			"rolling_update_interval", "15s",
+		)
 
-	// Clean up stale DRS history entries from previous interrupted runs.
-	if err := queries.CleanupStaleDRSHistory(ctx); err != nil {
-		logger.Warn("failed to cleanup stale DRS history", "error", err)
-	}
-
-	// schedulerTick runs a scheduler function under a session-level advisory lock.
-	schedulerTick := func(name string, fn func(context.Context)) {
-		if err := withAdvisoryLock(ctx, pool, lockIDScheduler, func() {
-			fn(ctx)
-		}); err != nil {
-			logger.Error("scheduler tick: lock", "task", name, "error", err)
+		// Clean up stale DRS history entries from previous interrupted runs.
+		if err := queries.CleanupStaleDRSHistory(ctx); err != nil {
+			logger.Warn("failed to cleanup stale DRS history", "error", err)
 		}
-	}
 
-	// Run initial checks immediately.
-	schedulerTick("tasks", sched.Run)
-	schedulerTick("drs", sched.RunDRS)
-	schedulerTick("cve", sched.RunCVEScanning)
-	schedulerTick("alerts", sched.RunAlertEvaluation)
-	schedulerTick("reports", sched.RunReportGeneration)
-	schedulerTick("rolling", sched.RunRollingUpdates)
+		// Run initial checks immediately.
+		sched.Run(ctx)
+		sched.RunDRS(ctx)
+		sched.RunCVEScanning(ctx)
+		sched.RunAlertEvaluation(ctx)
+		sched.RunReportGeneration(ctx)
+		sched.RunRollingUpdates(ctx)
 
-	taskTicker := time.NewTicker(60 * time.Second)
-	defer taskTicker.Stop()
+		taskTicker := time.NewTicker(60 * time.Second)
+		defer taskTicker.Stop()
 
-	drsTicker := time.NewTicker(60 * time.Second)
-	defer drsTicker.Stop()
+		drsTicker := time.NewTicker(60 * time.Second)
+		defer drsTicker.Stop()
 
-	cveTicker := time.NewTicker(6 * time.Hour)
-	defer cveTicker.Stop()
+		cveTicker := time.NewTicker(6 * time.Hour)
+		defer cveTicker.Stop()
 
-	alertTicker := time.NewTicker(60 * time.Second)
-	defer alertTicker.Stop()
+		alertTicker := time.NewTicker(60 * time.Second)
+		defer alertTicker.Stop()
 
-	reportTicker := time.NewTicker(60 * time.Second)
-	defer reportTicker.Stop()
+		reportTicker := time.NewTicker(60 * time.Second)
+		defer reportTicker.Stop()
 
-	rollingTicker := time.NewTicker(15 * time.Second)
-	defer rollingTicker.Stop()
+		rollingTicker := time.NewTicker(15 * time.Second)
+		defer rollingTicker.Stop()
 
-	for {
-		select {
-		case <-taskTicker.C:
-			schedulerTick("tasks", sched.Run)
-		case <-drsTicker.C:
-			schedulerTick("drs", sched.RunDRS)
-		case <-cveTicker.C:
-			schedulerTick("cve", sched.RunCVEScanning)
-		case <-alertTicker.C:
-			schedulerTick("alerts", sched.RunAlertEvaluation)
-		case <-reportTicker.C:
-			schedulerTick("reports", sched.RunReportGeneration)
-		case <-rollingTicker.C:
-			schedulerTick("rolling", sched.RunRollingUpdates)
-		case <-ctx.Done():
-			logger.Info("scheduler stopped")
-			return
+		for {
+			select {
+			case <-taskTicker.C:
+				sched.Run(ctx)
+			case <-drsTicker.C:
+				sched.RunDRS(ctx)
+			case <-cveTicker.C:
+				sched.RunCVEScanning(ctx)
+			case <-alertTicker.C:
+				sched.RunAlertEvaluation(ctx)
+			case <-reportTicker.C:
+				sched.RunReportGeneration(ctx)
+			case <-rollingTicker.C:
+				sched.RunRollingUpdates(ctx)
+			case <-ctx.Done():
+				logger.Info("scheduler stopped")
+				return
+			}
 		}
-	}
+	})
 }
