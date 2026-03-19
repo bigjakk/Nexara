@@ -61,6 +61,8 @@ type Server struct {
 	acmeHandler          *handlers.ACMEHandler
 	metricServerHandler  *handlers.MetricServerHandler
 	searchHandler        *handlers.SearchHandler
+	apiKeyHandler        *handlers.APIKeyHandler
+	apiDocsHandler       *handlers.APIDocsHandler
 	rbacEngine          *auth.RBACEngine
 	eventPub            *events.Publisher
 }
@@ -177,6 +179,11 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.metricServerHandler = handlers.NewMetricServerHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.searchHandler = handlers.NewSearchHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}
+
+	if s.queries != nil {
+		s.apiKeyHandler = handlers.NewAPIKeyHandler(s.queries, s.eventPub)
+	}
+	s.apiDocsHandler = handlers.NewAPIDocsHandler()
 
 	// Wire LDAP handler into auth handler for LDAP-aware login
 	if s.authHandler != nil && s.ldapHandler != nil {

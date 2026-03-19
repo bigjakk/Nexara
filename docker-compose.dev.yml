@@ -1,8 +1,45 @@
 # Development overrides — builds the unified image locally instead of pulling from registry.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Adds Caddy as a TLS-terminating reverse proxy so clipboard API and other
+# secure-context features work during development. Access via https://localhost.
 services:
   nexara:
     build:
       context: .
       dockerfile: docker/nexara/Dockerfile
     image: nexara:dev
+    # Remove host port 80 — Caddy handles external traffic.
+    ports: !override
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: nexara-caddy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /data/caddy/dev.crt ]; then
+          apk add --no-cache openssl >/dev/null 2>&1
+          mkdir -p /data/caddy
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout /data/caddy/dev.key -out /data/caddy/dev.crt \
+            -days 365 -nodes -subj "/CN=nexara-dev" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
+        fi
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/caddy/Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      nexara:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  caddy-data:

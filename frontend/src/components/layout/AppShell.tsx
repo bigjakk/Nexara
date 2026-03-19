@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { LogOut, LogOutIcon, ShieldCheck, User } from "lucide-react";
+import { Key, LogOut, LogOutIcon, ShieldCheck, User } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -111,6 +111,10 @@ export function AppShell() {
               <DropdownMenuItem onClick={() => { void navigate("/settings/security"); }}>
                 <ShieldCheck className="mr-2 h-4 w-4" />
                 {t("security")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { void navigate("/settings/api-keys"); }}>
+                <Key className="mr-2 h-4 w-4" />
+                API Keys
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout}>

@@ -678,3 +678,37 @@ export interface HAPreFlightReport {
   conflicts: HAConflict[];
   has_errors: boolean;
 }
+
+// API Key types
+export interface APIKeyResponse {
+  id: string;
+  name: string;
+  key_prefix: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string | null;
+  is_revoked: boolean;
+  created_at: string;
+}
+
+export interface CreateAPIKeyRequest {
+  name: string;
+  expires_in?: number | undefined;
+}
+
+export interface CreateAPIKeyResponse {
+  id: string;
+  name: string;
+  key: string;
+  key_prefix: string;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface APIEndpoint {
+  method: string;
+  path: string;
+  description: string;
+  permission: string;
+  group: string;
+}

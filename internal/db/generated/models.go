@@ -59,6 +59,19 @@ type AlertRule struct {
 	MessageTemplate string          `json:"message_template"`
 }
 
+type ApiKey struct {
+	ID         uuid.UUID          `json:"id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	Name       string             `json:"name"`
+	KeyPrefix  string             `json:"key_prefix"`
+	KeyHash    string             `json:"key_hash"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+	LastUsedIp pgtype.Text        `json:"last_used_ip"`
+	IsRevoked  bool               `json:"is_revoked"`
+	CreatedAt  time.Time          `json:"created_at"`
+}
+
 type AuditLog struct {
 	ID           uuid.UUID       `json:"id"`
 	ClusterID    pgtype.UUID     `json:"cluster_id"`

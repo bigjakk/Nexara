@@ -566,6 +566,27 @@ func (s *Server) setupRoutes() {
 		v1.Get("/search", s.authRequired(), s.searchHandler.GlobalSearch)
 	}
 
+	// API keys (self-service).
+	if s.apiKeyHandler != nil {
+		apiKeys := v1.Group("/api-keys", s.authRequired())
+		apiKeys.Post("/", s.apiKeyHandler.Create)
+		apiKeys.Get("/", s.apiKeyHandler.List)
+		apiKeys.Delete("/:id", s.apiKeyHandler.Revoke)
+		apiKeys.Delete("/", s.apiKeyHandler.RevokeAll)
+	}
+
+	// Admin API key management.
+	if s.apiKeyHandler != nil {
+		adminKeys := v1.Group("/admin/api-keys", s.authRequired())
+		adminKeys.Get("/", s.apiKeyHandler.AdminList)
+		adminKeys.Delete("/:id", s.apiKeyHandler.AdminRevoke)
+	}
+
+	// API documentation.
+	if s.apiDocsHandler != nil {
+		v1.Get("/api-docs", s.authRequired(), s.apiDocsHandler.GetDocs)
+	}
+
 	// Settings routes.
 	if s.settingsHandler != nil {
 		settings := v1.Group("/settings", s.authRequired())

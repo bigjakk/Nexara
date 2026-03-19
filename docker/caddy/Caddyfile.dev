@@ -1,0 +1,9 @@
+:443 {
+	tls /data/caddy/dev.crt /data/caddy/dev.key
+
+	reverse_proxy nexara:8080
+}
+
+:80 {
+	reverse_proxy nexara:8080
+}

@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
+	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -10,6 +13,10 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/bigjakk/nexara/internal/auth"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 func (s *Server) setupMiddleware() {
@@ -84,6 +91,14 @@ func (s *Server) authRequired() fiber.Handler {
 			return fiber.NewError(fiber.StatusUnauthorized, "Missing authorization token")
 		}
 
+		// API key tokens start with "nxra_".
+		if strings.HasPrefix(token, "nxra_") {
+			if err := s.authenticateAPIKey(c, token); err != nil {
+				return err
+			}
+			return c.Next()
+		}
+
 		claims, err := s.jwtService.ValidateAccessToken(token)
 		if err != nil {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired token")
@@ -113,6 +128,15 @@ func (s *Server) authOptional() fiber.Handler {
 			return c.Next()
 		}
 
+		// API key tokens start with "nxra_".
+		if strings.HasPrefix(token, "nxra_") {
+			// Best-effort: if API key auth fails, continue unauthenticated.
+			if err := s.authenticateAPIKey(c, token); err != nil {
+				return c.Next()
+			}
+			return c.Next()
+		}
+
 		claims, err := s.jwtService.ValidateAccessToken(token)
 		if err != nil {
 			return c.Next()
@@ -137,4 +161,46 @@ func extractBearerToken(c *fiber.Ctx) string {
 		return ""
 	}
 	return parts[1]
+}
+
+// authenticateAPIKey validates an nxra_ prefixed API key token and sets
+// the user identity in Fiber locals. Returns an error on failure.
+func (s *Server) authenticateAPIKey(c *fiber.Ctx, token string) error {
+	if s.queries == nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Database not configured")
+	}
+
+	keyHash := auth.HashToken(token)
+	row, err := s.queries.GetAPIKeyByHash(c.Context(), keyHash)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired API key")
+	}
+	if !row.UserIsActive {
+		return fiber.NewError(fiber.StatusUnauthorized, "User account is inactive")
+	}
+
+	c.Locals("user_id", row.UserID)
+	c.Locals("email", row.UserEmail)
+	c.Locals("role", row.UserRole)
+	c.Locals("auth_method", "api_key")
+
+	if s.rbacEngine != nil {
+		c.Locals("rbac_engine", s.rbacEngine)
+	}
+
+	// Update last_used asynchronously to avoid adding latency.
+	keyID := row.ID
+	ip := c.IP()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if updateErr := s.queries.UpdateAPIKeyLastUsed(ctx, db.UpdateAPIKeyLastUsedParams{
+			ID:         keyID,
+			LastUsedIp: pgtype.Text{String: ip, Valid: ip != ""},
+		}); updateErr != nil {
+			slog.Default().Warn("failed to update API key last_used", "error", updateErr)
+		}
+	}()
+
+	return nil
 }

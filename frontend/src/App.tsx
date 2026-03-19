@@ -94,6 +94,16 @@ const ProfilePage = lazy(() =>
     default: m.ProfilePage,
   })),
 );
+const APIKeysPage = lazy(() =>
+  import("@/features/settings/pages/APIKeysPage").then((m) => ({
+    default: m.APIKeysPage,
+  })),
+);
+const APIDocsPage = lazy(() =>
+  import("@/features/settings/pages/APIDocsPage").then((m) => ({
+    default: m.APIDocsPage,
+  })),
+);
 const SecurityDashboardPage = lazy(() =>
   import("@/features/security/pages/SecurityDashboardPage").then((m) => ({
     default: m.SecurityDashboardPage,
@@ -221,6 +231,14 @@ const router = createBrowserRouter([
           {
             path: "settings/security",
             element: <LazyPage><SecurityPage /></LazyPage>,
+          },
+          {
+            path: "settings/api-keys",
+            element: <LazyPage><APIKeysPage /></LazyPage>,
+          },
+          {
+            path: "settings/api-docs",
+            element: <LazyPage><APIDocsPage /></LazyPage>,
           },
           {
             path: "settings/appearance",

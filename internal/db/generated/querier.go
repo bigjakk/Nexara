@@ -25,6 +25,7 @@ type Querier interface {
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) error
+	CountActiveAPIKeysByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) (CountActiveAlertsByClusterRow, error)
 	CountActiveNodes(ctx context.Context, jobID uuid.UUID) (int64, error)
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
@@ -33,6 +34,7 @@ type Querier interface {
 	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
+	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
 	CreateFirewallTemplate(ctx context.Context, arg CreateFirewallTemplateParams) (FirewallTemplate, error)
 	CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigParams) (LdapConfig, error)
@@ -76,6 +78,8 @@ type Querier interface {
 	ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error)
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) error
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error)
+	GetAPIKeyByID(ctx context.Context, id uuid.UUID) (ApiKey, error)
 	GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error)
 	GetAlertRule(ctx context.Context, id uuid.UUID) (AlertRule, error)
 	GetAlertSummary(ctx context.Context) (GetAlertSummaryRow, error)
@@ -178,6 +182,7 @@ type Querier interface {
 	InsertRollingUpdateNode(ctx context.Context, arg InsertRollingUpdateNodeParams) (RollingUpdateNode, error)
 	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
+	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ListAPIKeysByUserRow, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
 	ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
@@ -188,6 +193,7 @@ type Querier interface {
 	ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHistoryFilteredParams) ([]AlertHistory, error)
 	ListAlertRules(ctx context.Context, arg ListAlertRulesParams) ([]AlertRule, error)
 	ListAlertRulesByCluster(ctx context.Context, arg ListAlertRulesByClusterParams) ([]AlertRule, error)
+	ListAllAPIKeys(ctx context.Context) ([]ListAllAPIKeysRow, error)
 	ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error)
 	ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error)
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
@@ -265,6 +271,8 @@ type Querier interface {
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	ResolveAlert(ctx context.Context, arg ResolveAlertParams) error
 	ResumeRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	RevokeAPIKey(ctx context.Context, id uuid.UUID) error
+	RevokeAllUserAPIKeys(ctx context.Context, userID uuid.UUID) error
 	RevokeAllUserRoles(ctx context.Context, userID uuid.UUID) error
 	RevokeAllUserSessions(ctx context.Context, userID uuid.UUID) error
 	RevokeSession(ctx context.Context, id uuid.UUID) error
@@ -295,6 +303,7 @@ type Querier interface {
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	TouchRollingUpdateNode(ctx context.Context, id uuid.UUID) error
 	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error
+	UpdateAPIKeyLastUsed(ctx context.Context, arg UpdateAPIKeyLastUsedParams) error
 	UpdateAlertEscalation(ctx context.Context, arg UpdateAlertEscalationParams) error
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)
 	UpdateAlertState(ctx context.Context, arg UpdateAlertStateParams) error
