@@ -20,34 +20,46 @@ func NewNodeHandler(queries *db.Queries) *NodeHandler {
 }
 
 type nodeResponse struct {
-	ID         uuid.UUID `json:"id"`
-	ClusterID  uuid.UUID `json:"cluster_id"`
-	Name       string    `json:"name"`
-	Status     string    `json:"status"`
-	CPUCount   int32     `json:"cpu_count"`
-	MemTotal   int64     `json:"mem_total"`
-	DiskTotal  int64     `json:"disk_total"`
-	PveVersion string    `json:"pve_version"`
-	Uptime     int64     `json:"uptime"`
-	LastSeenAt time.Time `json:"last_seen_at"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID            uuid.UUID `json:"id"`
+	ClusterID     uuid.UUID `json:"cluster_id"`
+	Name          string    `json:"name"`
+	Status        string    `json:"status"`
+	CPUCount      int32     `json:"cpu_count"`
+	CPUModel      string    `json:"cpu_model"`
+	CPUCores      int32     `json:"cpu_cores"`
+	CPUSockets    int32     `json:"cpu_sockets"`
+	CPUThreads    int32     `json:"cpu_threads"`
+	CPUMhz        string    `json:"cpu_mhz"`
+	MemTotal      int64     `json:"mem_total"`
+	DiskTotal     int64     `json:"disk_total"`
+	PveVersion    string    `json:"pve_version"`
+	KernelVersion string    `json:"kernel_version"`
+	Uptime        int64     `json:"uptime"`
+	LastSeenAt    time.Time `json:"last_seen_at"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func toNodeResponse(n db.Node) nodeResponse {
 	return nodeResponse{
-		ID:         n.ID,
-		ClusterID:  n.ClusterID,
-		Name:       n.Name,
-		Status:     n.Status,
-		CPUCount:   n.CpuCount,
-		MemTotal:   n.MemTotal,
-		DiskTotal:  n.DiskTotal,
-		PveVersion: n.PveVersion,
-		Uptime:     n.Uptime,
-		LastSeenAt: n.LastSeenAt,
-		CreatedAt:  n.CreatedAt,
-		UpdatedAt:  n.UpdatedAt,
+		ID:            n.ID,
+		ClusterID:     n.ClusterID,
+		Name:          n.Name,
+		Status:        n.Status,
+		CPUCount:      n.CpuCount,
+		CPUModel:      n.CpuModel,
+		CPUCores:      n.CpuCores,
+		CPUSockets:    n.CpuSockets,
+		CPUThreads:    n.CpuThreads,
+		CPUMhz:        n.CpuMhz,
+		MemTotal:      n.MemTotal,
+		DiskTotal:     n.DiskTotal,
+		PveVersion:    n.PveVersion,
+		KernelVersion: n.KernelVersion,
+		Uptime:        n.Uptime,
+		LastSeenAt:    n.LastSeenAt,
+		CreatedAt:     n.CreatedAt,
+		UpdatedAt:     n.UpdatedAt,
 	}
 }
 

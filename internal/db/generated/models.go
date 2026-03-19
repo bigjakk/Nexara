@@ -378,6 +378,12 @@ type Node struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Address        string    `json:"address"`
+	CpuModel       string    `json:"cpu_model"`
+	CpuCores       int32     `json:"cpu_cores"`
+	CpuSockets     int32     `json:"cpu_sockets"`
+	CpuThreads     int32     `json:"cpu_threads"`
+	CpuMhz         string    `json:"cpu_mhz"`
+	KernelVersion  string    `json:"kernel_version"`
 }
 
 type NodeMetric struct {

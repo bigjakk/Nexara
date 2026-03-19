@@ -495,9 +495,15 @@ export interface NodeResponse {
   name: string;
   status: string;
   cpu_count: number;
+  cpu_model: string;
+  cpu_cores: number;
+  cpu_sockets: number;
+  cpu_threads: number;
+  cpu_mhz: string;
   mem_total: number;
   disk_total: number;
   pve_version: string;
+  kernel_version: string;
   uptime: number;
   last_seen_at: string;
   created_at: string;

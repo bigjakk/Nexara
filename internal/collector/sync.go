@@ -331,6 +331,12 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	var diskTotal int64
 	var cpuUsage float64
 	var memUsed int64
+	var cpuModel string
+	var cpuCores int32
+	var cpuSockets int32
+	var cpuThreads int32
+	var cpuMhz string
+	var kernelVersion string
 
 	status, err := client.GetNodeStatus(ctx, node.Node)
 	if err != nil {
@@ -350,6 +356,12 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		diskTotal = status.RootFS.Total
 		cpuUsage = status.CPU
 		memUsed = status.Memory.Used
+		cpuModel = status.CPUInfo.Model
+		cpuCores = safeInt32(status.CPUInfo.Cores)
+		cpuSockets = safeInt32(status.CPUInfo.Sockets)
+		cpuThreads = safeInt32(status.CPUInfo.Threads)
+		cpuMhz = status.CPUInfo.MHz
+		kernelVersion = status.Kversion
 	}
 
 	dbNode, err := s.queries.UpsertNode(ctx, db.UpsertNodeParams{
@@ -362,6 +374,12 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		PveVersion:     pveVersion,
 		SslFingerprint: node.SSLFingerprint,
 		Uptime:         node.Uptime,
+		CpuModel:       cpuModel,
+		CpuCores:       cpuCores,
+		CpuSockets:     cpuSockets,
+		CpuThreads:     cpuThreads,
+		CpuMhz:         cpuMhz,
+		KernelVersion:  kernelVersion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("upsert node %s: %w", node.Node, err)

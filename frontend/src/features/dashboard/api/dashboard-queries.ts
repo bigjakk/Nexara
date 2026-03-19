@@ -99,7 +99,17 @@ export function useDashboardData() {
 
       const vmCount = vms.filter((v) => v.type === "qemu").length;
       const containerCount = vms.filter((v) => v.type === "lxc").length;
-      const storageTotalBytes = storage.reduce((sum, s) => sum + s.total, 0);
+      // Deduplicate shared storage — shared pools appear once per node but
+      // represent the same underlying capacity.  Count each shared pool only once.
+      const seen = new Set<string>();
+      let storageTotalBytes = 0;
+      for (const s of storage) {
+        if (s.shared) {
+          if (seen.has(s.storage)) continue;
+          seen.add(s.storage);
+        }
+        storageTotalBytes += s.total;
+      }
 
       totalNodes += nodes.length;
       totalVMs += vmCount;

@@ -46,7 +46,7 @@ func (q *Queries) CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeSt
 }
 
 const getNode = `-- name: GetNode :one
-SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address FROM nodes WHERE id = $1
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version FROM nodes WHERE id = $1
 `
 
 func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (Node, error) {
@@ -67,6 +67,12 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (Node, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Address,
+		&i.CpuModel,
+		&i.CpuCores,
+		&i.CpuSockets,
+		&i.CpuThreads,
+		&i.CpuMhz,
+		&i.KernelVersion,
 	)
 	return i, err
 }
@@ -88,7 +94,7 @@ func (q *Queries) GetNodeAddressByName(ctx context.Context, arg GetNodeAddressBy
 }
 
 const getNodeByClusterAndName = `-- name: GetNodeByClusterAndName :one
-SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address FROM nodes WHERE cluster_id = $1 AND name = $2
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version FROM nodes WHERE cluster_id = $1 AND name = $2
 `
 
 type GetNodeByClusterAndNameParams struct {
@@ -114,6 +120,12 @@ func (q *Queries) GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClus
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Address,
+		&i.CpuModel,
+		&i.CpuCores,
+		&i.CpuSockets,
+		&i.CpuThreads,
+		&i.CpuMhz,
+		&i.KernelVersion,
 	)
 	return i, err
 }
@@ -148,7 +160,7 @@ func (q *Queries) ListNodeAddresses(ctx context.Context, clusterID uuid.UUID) ([
 }
 
 const listNodesByCluster = `-- name: ListNodesByCluster :many
-SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address FROM nodes WHERE cluster_id = $1 ORDER BY name
+SELECT id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version FROM nodes WHERE cluster_id = $1 ORDER BY name
 `
 
 func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error) {
@@ -175,6 +187,12 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) (
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Address,
+			&i.CpuModel,
+			&i.CpuCores,
+			&i.CpuSockets,
+			&i.CpuThreads,
+			&i.CpuMhz,
+			&i.KernelVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -203,8 +221,9 @@ func (q *Queries) UpdateNodeAddress(ctx context.Context, arg UpdateNodeAddressPa
 }
 
 const upsertNode = `-- name: UpsertNode :one
-INSERT INTO nodes (cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+INSERT INTO nodes (cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime,
+                   cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
 ON CONFLICT (cluster_id, name) DO UPDATE SET
     status = EXCLUDED.status,
     cpu_count = EXCLUDED.cpu_count,
@@ -213,8 +232,14 @@ ON CONFLICT (cluster_id, name) DO UPDATE SET
     pve_version = EXCLUDED.pve_version,
     ssl_fingerprint = EXCLUDED.ssl_fingerprint,
     uptime = EXCLUDED.uptime,
+    cpu_model = EXCLUDED.cpu_model,
+    cpu_cores = EXCLUDED.cpu_cores,
+    cpu_sockets = EXCLUDED.cpu_sockets,
+    cpu_threads = EXCLUDED.cpu_threads,
+    cpu_mhz = EXCLUDED.cpu_mhz,
+    kernel_version = EXCLUDED.kernel_version,
     last_seen_at = now()
-RETURNING id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address
+RETURNING id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at, created_at, updated_at, address, cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version
 `
 
 type UpsertNodeParams struct {
@@ -227,6 +252,12 @@ type UpsertNodeParams struct {
 	PveVersion     string    `json:"pve_version"`
 	SslFingerprint string    `json:"ssl_fingerprint"`
 	Uptime         int64     `json:"uptime"`
+	CpuModel       string    `json:"cpu_model"`
+	CpuCores       int32     `json:"cpu_cores"`
+	CpuSockets     int32     `json:"cpu_sockets"`
+	CpuThreads     int32     `json:"cpu_threads"`
+	CpuMhz         string    `json:"cpu_mhz"`
+	KernelVersion  string    `json:"kernel_version"`
 }
 
 func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error) {
@@ -240,6 +271,12 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		arg.PveVersion,
 		arg.SslFingerprint,
 		arg.Uptime,
+		arg.CpuModel,
+		arg.CpuCores,
+		arg.CpuSockets,
+		arg.CpuThreads,
+		arg.CpuMhz,
+		arg.KernelVersion,
 	)
 	var i Node
 	err := row.Scan(
@@ -257,6 +294,12 @@ func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Address,
+		&i.CpuModel,
+		&i.CpuCores,
+		&i.CpuSockets,
+		&i.CpuThreads,
+		&i.CpuMhz,
+		&i.KernelVersion,
 	)
 	return i, err
 }

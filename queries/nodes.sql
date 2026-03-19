@@ -1,6 +1,7 @@
 -- name: UpsertNode :one
-INSERT INTO nodes (cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+INSERT INTO nodes (cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime,
+                   cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
 ON CONFLICT (cluster_id, name) DO UPDATE SET
     status = EXCLUDED.status,
     cpu_count = EXCLUDED.cpu_count,
@@ -9,6 +10,12 @@ ON CONFLICT (cluster_id, name) DO UPDATE SET
     pve_version = EXCLUDED.pve_version,
     ssl_fingerprint = EXCLUDED.ssl_fingerprint,
     uptime = EXCLUDED.uptime,
+    cpu_model = EXCLUDED.cpu_model,
+    cpu_cores = EXCLUDED.cpu_cores,
+    cpu_sockets = EXCLUDED.cpu_sockets,
+    cpu_threads = EXCLUDED.cpu_threads,
+    cpu_mhz = EXCLUDED.cpu_mhz,
+    kernel_version = EXCLUDED.kernel_version,
     last_seen_at = now()
 RETURNING *;
 

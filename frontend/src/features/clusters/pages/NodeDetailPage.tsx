@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Terminal } from "lucide-react";
+import { ArrowLeft, Terminal, Cpu, MemoryStick, HardDrive, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -97,15 +97,44 @@ export function NodeDetailPage() {
         )}
       </div>
 
-      {/* Overview + Metrics combined */}
+      {/* Hardware Info + Metrics */}
       <div className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <InfoCard label="Status" value={node.status} />
-          <InfoCard label="CPUs" value={String(node.cpu_count)} />
-          <InfoCard label="Memory" value={formatBytes(node.mem_total)} />
-          <InfoCard label="Disk" value={formatBytes(node.disk_total)} />
-          <InfoCard label="PVE Version" value={node.pve_version || "--"} />
-          <InfoCard label="Uptime" value={formatUptime(node.uptime)} />
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <HardwareSection
+            icon={<Cpu className="h-4 w-4" />}
+            title="Processor"
+            items={[
+              { label: "Model", value: node.cpu_model || "--" },
+              { label: "Sockets", value: node.cpu_sockets ? String(node.cpu_sockets) : "--" },
+              { label: "Cores", value: node.cpu_cores ? `${String(node.cpu_cores)} per socket` : "--" },
+              { label: "Threads", value: node.cpu_threads ? `${String(node.cpu_threads)} per core` : "--" },
+              { label: "Total CPUs", value: String(node.cpu_count) },
+              { label: "Frequency", value: node.cpu_mhz ? `${node.cpu_mhz} MHz` : "--" },
+            ]}
+          />
+          <HardwareSection
+            icon={<MemoryStick className="h-4 w-4" />}
+            title="Memory"
+            items={[
+              { label: "Total", value: formatBytes(node.mem_total) },
+            ]}
+          />
+          <HardwareSection
+            icon={<HardDrive className="h-4 w-4" />}
+            title="Boot Disk"
+            items={[
+              { label: "Total", value: formatBytes(node.disk_total) },
+            ]}
+          />
+          <HardwareSection
+            icon={<Info className="h-4 w-4" />}
+            title="System"
+            items={[
+              { label: "PVE Version", value: node.pve_version || "--" },
+              { label: "Kernel", value: node.kernel_version || "--" },
+              { label: "Uptime", value: formatUptime(node.uptime) },
+            ]}
+          />
         </div>
 
         <NodeMetricsPanel
@@ -118,11 +147,34 @@ export function NodeDetailPage() {
   );
 }
 
-function InfoCard({ label, value }: { label: string; value: string }) {
+interface HardwareItem {
+  label: string;
+  value: string;
+}
+
+function HardwareSection({
+  icon,
+  title,
+  items,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  items: HardwareItem[];
+}) {
   return (
-    <div className="rounded-lg border p-3">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm font-medium">{value}</p>
+    <div className="rounded-lg border p-4">
+      <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+        <span className="text-muted-foreground">{icon}</span>
+        {title}
+      </div>
+      <dl className="space-y-1.5">
+        {items.map((item) => (
+          <div key={item.label} className="flex justify-between gap-2 text-sm">
+            <dt className="text-muted-foreground">{item.label}</dt>
+            <dd className="truncate font-medium text-right" title={item.value}>{item.value}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
