@@ -44,7 +44,7 @@ type apiKeyResponse struct {
 	KeyPrefix  string     `json:"key_prefix"`
 	ExpiresAt  *string    `json:"expires_at"`
 	LastUsedAt *string    `json:"last_used_at"`
-	LastUsedIp *string    `json:"last_used_ip"`
+	LastUsedIP *string    `json:"last_used_ip"`
 	IsRevoked  bool       `json:"is_revoked"`
 	CreatedAt  string     `json:"created_at"`
 }
@@ -65,7 +65,7 @@ type adminAPIKeyResponse struct {
 	KeyPrefix       string    `json:"key_prefix"`
 	ExpiresAt       *string   `json:"expires_at"`
 	LastUsedAt      *string   `json:"last_used_at"`
-	LastUsedIp      *string   `json:"last_used_ip"`
+	LastUsedIP      *string   `json:"last_used_ip"`
 	IsRevoked       bool      `json:"is_revoked"`
 	CreatedAt       string    `json:"created_at"`
 	UserEmail       string    `json:"user_email"`
@@ -105,7 +105,7 @@ func (h *APIKeyHandler) Create(c *fiber.Ctx) error {
 	}
 
 	// Validate name.
-	if len(req.Name) == 0 || len(req.Name) > 100 {
+	if req.Name == "" || len(req.Name) > 100 {
 		return fiber.NewError(fiber.StatusBadRequest, "Name is required and must be 1-100 characters")
 	}
 
@@ -195,7 +195,7 @@ func (h *APIKeyHandler) List(c *fiber.Ctx) error {
 			KeyPrefix:  k.KeyPrefix,
 			ExpiresAt:  tsPtr(k.ExpiresAt),
 			LastUsedAt: tsPtr(k.LastUsedAt),
-			LastUsedIp: textPtr(k.LastUsedIp),
+			LastUsedIP: textPtr(k.LastUsedIp),
 			IsRevoked:  k.IsRevoked,
 			CreatedAt:  k.CreatedAt.Format(time.RFC3339),
 		}
@@ -281,7 +281,7 @@ func (h *APIKeyHandler) AdminList(c *fiber.Ctx) error {
 			KeyPrefix:       k.KeyPrefix,
 			ExpiresAt:       tsPtr(k.ExpiresAt),
 			LastUsedAt:      tsPtr(k.LastUsedAt),
-			LastUsedIp:      textPtr(k.LastUsedIp),
+			LastUsedIP:      textPtr(k.LastUsedIp),
 			IsRevoked:       k.IsRevoked,
 			CreatedAt:       k.CreatedAt.Format(time.RFC3339),
 			UserEmail:       k.UserEmail,

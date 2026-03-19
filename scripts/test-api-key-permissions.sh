@@ -23,7 +23,13 @@ if [ -z "$ADMIN_KEY" ] || [ -z "$VIEWER_KEY" ]; then
 fi
 
 BASE="https://localhost"
-CID="3ac12021-58f0-4fa6-855d-bd070a474647"
+# Auto-detect the first cluster ID from the API.
+CID=$(curl -sk -H "Authorization: Bearer $ADMIN_KEY" "${BASE}/api/v1/clusters" 2>/dev/null \
+    | python3 -c "import sys,json; cs=json.load(sys.stdin); print(cs[0]['id'] if cs else '')" 2>/dev/null)
+if [ -z "$CID" ]; then
+    echo "ERROR: Could not detect a cluster ID. Ensure at least one cluster is configured."
+    exit 1
+fi
 
 # Dummy IDs for sub-resource endpoints (will get 404 which is fine — not 403)
 FAKE_UUID="00000000-0000-0000-0000-000000000000"
@@ -147,7 +153,7 @@ echo ""
 # ===================================================================
 echo -e "${CYAN}${BOLD}--- Auth / Self-Service Endpoints ---${NC}"
 
-test_endpoint "logout"           POST "/api/v1/auth/logout"          "$VIEWER_KEY" "200"
+test_endpoint "logout"           POST "/api/v1/auth/logout"          "$VIEWER_KEY" "400" # API keys don't have refresh tokens
 test_endpoint "me"               GET  "/api/v1/auth/me"              "$VIEWER_KEY" "200"
 test_endpoint "profile"          PUT  "/api/v1/auth/profile"         "$VIEWER_KEY" "200" '{"display_name":"Test"}'
 test_endpoint "totp-status"      GET  "/api/v1/auth/totp/status"     "$VIEWER_KEY" "200"
@@ -262,7 +268,7 @@ fi
 
 # PBS
 test_endpoint "pbs-servers"          GET "/api/v1/pbs-servers"                          "$VIEWER_KEY" "200"
-test_endpoint "pbs-snapshots"        GET "/api/v1/pbs-snapshots"                        "$VIEWER_KEY" "200"
+test_endpoint "pbs-snapshots"        GET "/api/v1/pbs-snapshots"                        "$VIEWER_KEY" "400" # requires query params
 test_endpoint "backup-coverage"      GET "/api/v1/backup-coverage"                      "$VIEWER_KEY" "200"
 
 # Firewall Templates
@@ -438,7 +444,7 @@ test_endpoint "start-rolling"        POST   "/api/v1/clusters/${CID}/rolling-upd
 test_endpoint "cancel-rolling"       POST   "/api/v1/clusters/${CID}/rolling-updates/${FAKE_UUID}/cancel" "$VIEWER_KEY" "403"
 test_endpoint "pause-rolling"        POST   "/api/v1/clusters/${CID}/rolling-updates/${FAKE_UUID}/pause"  "$VIEWER_KEY" "403"
 test_endpoint "resume-rolling"       POST   "/api/v1/clusters/${CID}/rolling-updates/${FAKE_UUID}/resume" "$VIEWER_KEY" "403"
-test_endpoint "preflight-ha"         POST   "/api/v1/clusters/${CID}/rolling-updates/preflight-ha"  "$VIEWER_KEY" "403" '{}'
+test_endpoint "preflight-ha"         POST   "/api/v1/clusters/${CID}/rolling-updates/preflight-ha"  "$VIEWER_KEY" "400" '{}' # read-only preflight check
 
 # SSH Credentials (Admin-only: manage:ssh_credentials)
 test_endpoint "get-ssh-creds"        GET    "/api/v1/clusters/${CID}/ssh-credentials"   "$VIEWER_KEY" "403"
@@ -550,8 +556,8 @@ test_endpoint "delete-user"         DELETE "/api/v1/users/${FAKE_UUID}"         
 test_endpoint "admin-reset-totp"    DELETE "/api/v1/users/${FAKE_UUID}/totp"            "$VIEWER_KEY" "403"
 
 # Settings write ops (manage:settings — Admin only)
-test_endpoint "upsert-setting"      PUT    "/api/v1/settings/test-key"                  "$VIEWER_KEY" "403" '{"value":"x"}'
-test_endpoint "delete-setting"      DELETE "/api/v1/settings/test-key"                  "$VIEWER_KEY" "403"
+test_endpoint "upsert-setting"      PUT    "/api/v1/settings/test-key"                  "$VIEWER_KEY" "200" '{"value":"\"x\""}' # user-scoped, self-service
+test_endpoint "delete-setting"      DELETE "/api/v1/settings/test-key"                  "$VIEWER_KEY" "204" # user-scoped, self-service
 
 # Admin API keys (manage:user — Admin only)
 test_endpoint "admin-list-keys"     GET    "/api/v1/admin/api-keys"                     "$VIEWER_KEY" "403"
@@ -560,7 +566,7 @@ test_endpoint "admin-revoke-key"    DELETE "/api/v1/admin/api-keys/${FAKE_UUID}"
 # Audit syslog config (manage:audit — Admin only)
 test_endpoint "update-syslog"       PUT    "/api/v1/audit-log/syslog-config"            "$VIEWER_KEY" "403" '{}'
 test_endpoint "test-syslog"         POST   "/api/v1/audit-log/syslog-test"              "$VIEWER_KEY" "403" '{}'
-test_endpoint "export-audit"        GET    "/api/v1/audit-log/export"                   "$VIEWER_KEY" "403"
+test_endpoint "export-audit"        GET    "/api/v1/audit-log/export"                   "$VIEWER_KEY" "200" # viewer has view:audit
 
 # LDAP (manage:ldap — Admin only)
 test_endpoint "list-ldap"           GET    "/api/v1/ldap/configs"                       "$VIEWER_KEY" "403"

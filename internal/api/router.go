@@ -44,7 +44,7 @@ func (s *Server) setupRoutes() {
 		}
 	}
 
-	// Cluster routes.
+	// Cluster routes — single group for all cluster-scoped endpoints.
 	if s.clusterHandler != nil {
 		clusters := v1.Group("/clusters", s.authRequired())
 		clusters.Post("/", s.clusterHandler.Create)
@@ -144,58 +144,245 @@ func (s *Server) setupRoutes() {
 			ceph.Get("/osds/metrics", s.cephHandler.GetOSDMetrics)
 			ceph.Get("/pools/metrics", s.cephHandler.GetPoolMetrics)
 		}
-	}
 
-	// Network, Firewall, SDN routes under clusters.
-	if s.networkHandler != nil && s.clusterHandler != nil {
-		netClusters := v1.Group("/clusters", s.authRequired())
-		netClusters.Get("/:cluster_id/networks", s.networkHandler.ListNetworkInterfaces)
-		netClusters.Get("/:cluster_id/networks/:node_name", s.networkHandler.ListNodeNetworkInterfaces)
-		netClusters.Post("/:cluster_id/networks/:node_name", s.networkHandler.CreateNetworkInterface)
-		netClusters.Put("/:cluster_id/networks/:node_name/:iface", s.networkHandler.UpdateNetworkInterface)
-		netClusters.Delete("/:cluster_id/networks/:node_name/:iface", s.networkHandler.DeleteNetworkInterface)
-		netClusters.Post("/:cluster_id/networks/:node_name/apply", s.networkHandler.ApplyNetworkConfig)
-		netClusters.Post("/:cluster_id/networks/:node_name/revert", s.networkHandler.RevertNetworkConfig)
+		// Network, Firewall, SDN routes.
+		if s.networkHandler != nil {
+			clusters.Get("/:cluster_id/networks", s.networkHandler.ListNetworkInterfaces)
+			clusters.Get("/:cluster_id/networks/:node_name", s.networkHandler.ListNodeNetworkInterfaces)
+			clusters.Post("/:cluster_id/networks/:node_name", s.networkHandler.CreateNetworkInterface)
+			clusters.Put("/:cluster_id/networks/:node_name/:iface", s.networkHandler.UpdateNetworkInterface)
+			clusters.Delete("/:cluster_id/networks/:node_name/:iface", s.networkHandler.DeleteNetworkInterface)
+			clusters.Post("/:cluster_id/networks/:node_name/apply", s.networkHandler.ApplyNetworkConfig)
+			clusters.Post("/:cluster_id/networks/:node_name/revert", s.networkHandler.RevertNetworkConfig)
 
-		netClusters.Get("/:cluster_id/firewall/rules", s.networkHandler.ListClusterFirewallRules)
-		netClusters.Post("/:cluster_id/firewall/rules", s.networkHandler.CreateClusterFirewallRule)
-		netClusters.Put("/:cluster_id/firewall/rules/:pos", s.networkHandler.UpdateClusterFirewallRule)
-		netClusters.Delete("/:cluster_id/firewall/rules/:pos", s.networkHandler.DeleteClusterFirewallRule)
-		netClusters.Get("/:cluster_id/firewall/options", s.networkHandler.GetFirewallOptions)
-		netClusters.Put("/:cluster_id/firewall/options", s.networkHandler.SetFirewallOptions)
+			clusters.Get("/:cluster_id/firewall/rules", s.networkHandler.ListClusterFirewallRules)
+			clusters.Post("/:cluster_id/firewall/rules", s.networkHandler.CreateClusterFirewallRule)
+			clusters.Put("/:cluster_id/firewall/rules/:pos", s.networkHandler.UpdateClusterFirewallRule)
+			clusters.Delete("/:cluster_id/firewall/rules/:pos", s.networkHandler.DeleteClusterFirewallRule)
+			clusters.Get("/:cluster_id/firewall/options", s.networkHandler.GetFirewallOptions)
+			clusters.Put("/:cluster_id/firewall/options", s.networkHandler.SetFirewallOptions)
 
-		netClusters.Get("/:cluster_id/vms/:vm_id/firewall/rules", s.networkHandler.ListVMFirewallRules)
-		netClusters.Post("/:cluster_id/vms/:vm_id/firewall/rules", s.networkHandler.CreateVMFirewallRule)
-		netClusters.Put("/:cluster_id/vms/:vm_id/firewall/rules/:pos", s.networkHandler.UpdateVMFirewallRule)
-		netClusters.Delete("/:cluster_id/vms/:vm_id/firewall/rules/:pos", s.networkHandler.DeleteVMFirewallRule)
+			clusters.Get("/:cluster_id/vms/:vm_id/firewall/rules", s.networkHandler.ListVMFirewallRules)
+			clusters.Post("/:cluster_id/vms/:vm_id/firewall/rules", s.networkHandler.CreateVMFirewallRule)
+			clusters.Put("/:cluster_id/vms/:vm_id/firewall/rules/:pos", s.networkHandler.UpdateVMFirewallRule)
+			clusters.Delete("/:cluster_id/vms/:vm_id/firewall/rules/:pos", s.networkHandler.DeleteVMFirewallRule)
 
-		netClusters.Get("/:cluster_id/sdn/zones", s.networkHandler.ListSDNZones)
-		netClusters.Post("/:cluster_id/sdn/zones", s.networkHandler.CreateSDNZone)
-		netClusters.Put("/:cluster_id/sdn/zones/:zone", s.networkHandler.UpdateSDNZone)
-		netClusters.Delete("/:cluster_id/sdn/zones/:zone", s.networkHandler.DeleteSDNZone)
-		netClusters.Get("/:cluster_id/sdn/vnets", s.networkHandler.ListSDNVNets)
-		netClusters.Post("/:cluster_id/sdn/vnets", s.networkHandler.CreateSDNVNet)
-		netClusters.Put("/:cluster_id/sdn/vnets/:vnet", s.networkHandler.UpdateSDNVNet)
-		netClusters.Delete("/:cluster_id/sdn/vnets/:vnet", s.networkHandler.DeleteSDNVNet)
-		netClusters.Get("/:cluster_id/sdn/vnets/:vnet/subnets", s.networkHandler.ListSDNSubnets)
-		netClusters.Post("/:cluster_id/sdn/vnets/:vnet/subnets", s.networkHandler.CreateSDNSubnet)
-		netClusters.Put("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.UpdateSDNSubnet)
-		netClusters.Delete("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.DeleteSDNSubnet)
-		netClusters.Put("/:cluster_id/sdn/apply", s.networkHandler.ApplySDN)
-		netClusters.Get("/:cluster_id/sdn/controllers", s.networkHandler.ListSDNControllers)
-		netClusters.Post("/:cluster_id/sdn/controllers", s.networkHandler.CreateSDNController)
-		netClusters.Put("/:cluster_id/sdn/controllers/:controller", s.networkHandler.UpdateSDNController)
-		netClusters.Delete("/:cluster_id/sdn/controllers/:controller", s.networkHandler.DeleteSDNController)
-		netClusters.Get("/:cluster_id/sdn/ipams", s.networkHandler.ListSDNIPAMs)
-		netClusters.Post("/:cluster_id/sdn/ipams", s.networkHandler.CreateSDNIPAM)
-		netClusters.Put("/:cluster_id/sdn/ipams/:ipam", s.networkHandler.UpdateSDNIPAM)
-		netClusters.Delete("/:cluster_id/sdn/ipams/:ipam", s.networkHandler.DeleteSDNIPAM)
-		netClusters.Get("/:cluster_id/sdn/dns", s.networkHandler.ListSDNDNS)
-		netClusters.Post("/:cluster_id/sdn/dns", s.networkHandler.CreateSDNDNS)
-		netClusters.Put("/:cluster_id/sdn/dns/:dns", s.networkHandler.UpdateSDNDNS)
-		netClusters.Delete("/:cluster_id/sdn/dns/:dns", s.networkHandler.DeleteSDNDNS)
+			clusters.Get("/:cluster_id/sdn/zones", s.networkHandler.ListSDNZones)
+			clusters.Post("/:cluster_id/sdn/zones", s.networkHandler.CreateSDNZone)
+			clusters.Put("/:cluster_id/sdn/zones/:zone", s.networkHandler.UpdateSDNZone)
+			clusters.Delete("/:cluster_id/sdn/zones/:zone", s.networkHandler.DeleteSDNZone)
+			clusters.Get("/:cluster_id/sdn/vnets", s.networkHandler.ListSDNVNets)
+			clusters.Post("/:cluster_id/sdn/vnets", s.networkHandler.CreateSDNVNet)
+			clusters.Put("/:cluster_id/sdn/vnets/:vnet", s.networkHandler.UpdateSDNVNet)
+			clusters.Delete("/:cluster_id/sdn/vnets/:vnet", s.networkHandler.DeleteSDNVNet)
+			clusters.Get("/:cluster_id/sdn/vnets/:vnet/subnets", s.networkHandler.ListSDNSubnets)
+			clusters.Post("/:cluster_id/sdn/vnets/:vnet/subnets", s.networkHandler.CreateSDNSubnet)
+			clusters.Put("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.UpdateSDNSubnet)
+			clusters.Delete("/:cluster_id/sdn/vnets/:vnet/subnets/:subnet", s.networkHandler.DeleteSDNSubnet)
+			clusters.Put("/:cluster_id/sdn/apply", s.networkHandler.ApplySDN)
+			clusters.Get("/:cluster_id/sdn/controllers", s.networkHandler.ListSDNControllers)
+			clusters.Post("/:cluster_id/sdn/controllers", s.networkHandler.CreateSDNController)
+			clusters.Put("/:cluster_id/sdn/controllers/:controller", s.networkHandler.UpdateSDNController)
+			clusters.Delete("/:cluster_id/sdn/controllers/:controller", s.networkHandler.DeleteSDNController)
+			clusters.Get("/:cluster_id/sdn/ipams", s.networkHandler.ListSDNIPAMs)
+			clusters.Post("/:cluster_id/sdn/ipams", s.networkHandler.CreateSDNIPAM)
+			clusters.Put("/:cluster_id/sdn/ipams/:ipam", s.networkHandler.UpdateSDNIPAM)
+			clusters.Delete("/:cluster_id/sdn/ipams/:ipam", s.networkHandler.DeleteSDNIPAM)
+			clusters.Get("/:cluster_id/sdn/dns", s.networkHandler.ListSDNDNS)
+			clusters.Post("/:cluster_id/sdn/dns", s.networkHandler.CreateSDNDNS)
+			clusters.Put("/:cluster_id/sdn/dns/:dns", s.networkHandler.UpdateSDNDNS)
+			clusters.Delete("/:cluster_id/sdn/dns/:dns", s.networkHandler.DeleteSDNDNS)
 
-		netClusters.Post("/:cluster_id/firewall-templates/:id/apply", s.networkHandler.ApplyTemplate)
+			clusters.Post("/:cluster_id/firewall-templates/:id/apply", s.networkHandler.ApplyTemplate)
+
+			// Firewall extras (aliases, IPsets, security groups, log).
+			clusters.Get("/:cluster_id/firewall/aliases", s.networkHandler.ListFirewallAliases)
+			clusters.Post("/:cluster_id/firewall/aliases", s.networkHandler.CreateFirewallAlias)
+			clusters.Put("/:cluster_id/firewall/aliases/:name", s.networkHandler.UpdateFirewallAlias)
+			clusters.Delete("/:cluster_id/firewall/aliases/:name", s.networkHandler.DeleteFirewallAlias)
+			clusters.Get("/:cluster_id/firewall/ipset", s.networkHandler.ListFirewallIPSets)
+			clusters.Post("/:cluster_id/firewall/ipset", s.networkHandler.CreateFirewallIPSet)
+			clusters.Delete("/:cluster_id/firewall/ipset/:name", s.networkHandler.DeleteFirewallIPSet)
+			clusters.Get("/:cluster_id/firewall/ipset/:name/entries", s.networkHandler.ListFirewallIPSetEntries)
+			clusters.Post("/:cluster_id/firewall/ipset/:name/entries", s.networkHandler.AddFirewallIPSetEntry)
+			clusters.Delete("/:cluster_id/firewall/ipset/:name/entries/:cidr", s.networkHandler.DeleteFirewallIPSetEntry)
+			clusters.Get("/:cluster_id/firewall/groups", s.networkHandler.ListSecurityGroups)
+			clusters.Post("/:cluster_id/firewall/groups", s.networkHandler.CreateSecurityGroup)
+			clusters.Delete("/:cluster_id/firewall/groups/:group", s.networkHandler.DeleteSecurityGroup)
+			clusters.Get("/:cluster_id/firewall/groups/:group/rules", s.networkHandler.ListSecurityGroupRules)
+			clusters.Post("/:cluster_id/firewall/groups/:group/rules", s.networkHandler.CreateSecurityGroupRule)
+			clusters.Put("/:cluster_id/firewall/groups/:group/rules/:pos", s.networkHandler.UpdateSecurityGroupRule)
+			clusters.Delete("/:cluster_id/firewall/groups/:group/rules/:pos", s.networkHandler.DeleteSecurityGroupRule)
+			clusters.Get("/:cluster_id/firewall/log", s.networkHandler.GetFirewallLog)
+		}
+
+		// CVE scanning routes.
+		if s.cveHandler != nil {
+			clusters.Get("/:cluster_id/cve-scans", s.cveHandler.ListScans)
+			clusters.Post("/:cluster_id/cve-scans", s.cveHandler.TriggerScan)
+			clusters.Get("/:cluster_id/cve-scans/:scan_id", s.cveHandler.GetScan)
+			clusters.Get("/:cluster_id/cve-scans/:scan_id/vulnerabilities", s.cveHandler.ListVulnerabilities)
+			clusters.Delete("/:cluster_id/cve-scans/:scan_id", s.cveHandler.DeleteScan)
+			clusters.Get("/:cluster_id/security-posture", s.cveHandler.GetSecurityPosture)
+			clusters.Get("/:cluster_id/cve-scan-schedule", s.cveHandler.GetSchedule)
+			clusters.Put("/:cluster_id/cve-scan-schedule", s.cveHandler.UpdateSchedule)
+		}
+
+		// Cluster-scoped alert routes.
+		if s.alertHandler != nil {
+			clusters.Get("/:cluster_id/alerts", s.alertHandler.ListAlertsByCluster)
+			clusters.Get("/:cluster_id/alerts/count", s.alertHandler.CountActiveAlertsByCluster)
+			clusters.Get("/:cluster_id/maintenance-windows", s.alertHandler.ListMaintenanceWindows)
+			clusters.Post("/:cluster_id/maintenance-windows", s.alertHandler.CreateMaintenanceWindow)
+			clusters.Put("/:cluster_id/maintenance-windows/:id", s.alertHandler.UpdateMaintenanceWindow)
+			clusters.Delete("/:cluster_id/maintenance-windows/:id", s.alertHandler.DeleteMaintenanceWindow)
+		}
+
+		// DRS routes.
+		if s.drsHandler != nil {
+			clusters.Get("/:cluster_id/drs/config", s.drsHandler.GetConfig)
+			clusters.Put("/:cluster_id/drs/config", s.drsHandler.UpdateConfig)
+			clusters.Get("/:cluster_id/drs/rules", s.drsHandler.ListRules)
+			clusters.Post("/:cluster_id/drs/rules", s.drsHandler.CreateRule)
+			clusters.Delete("/:cluster_id/drs/rules/:rule_id", s.drsHandler.DeleteRule)
+			clusters.Post("/:cluster_id/drs/evaluate", s.drsHandler.TriggerEvaluate)
+			clusters.Get("/:cluster_id/drs/history", s.drsHandler.ListHistory)
+			clusters.Get("/:cluster_id/drs/ha-rules", s.drsHandler.ListHARules)
+			clusters.Post("/:cluster_id/drs/ha-rules", s.drsHandler.CreateHARule)
+			clusters.Delete("/:cluster_id/drs/ha-rules/:rule_name", s.drsHandler.DeleteHARule)
+		}
+
+		// Migration routes under clusters.
+		if s.migrationHandler != nil {
+			clusters.Get("/:cluster_id/migrations", s.migrationHandler.ListByCluster)
+		}
+
+		// Restore and backup job routes under clusters.
+		if s.backupHandler != nil {
+			clusters.Post("/:cluster_id/restore", s.backupHandler.RestoreBackup)
+			clusters.Post("/:cluster_id/backup", s.backupHandler.TriggerBackup)
+			clusters.Get("/:cluster_id/backup-jobs", s.backupHandler.ListBackupJobs)
+			clusters.Post("/:cluster_id/backup-jobs", s.backupHandler.CreateBackupJob)
+			clusters.Put("/:cluster_id/backup-jobs/:job_id", s.backupHandler.UpdateBackupJob)
+			clusters.Delete("/:cluster_id/backup-jobs/:job_id", s.backupHandler.DeleteBackupJob)
+			clusters.Post("/:cluster_id/backup-jobs/:job_id/run", s.backupHandler.RunBackupJob)
+		}
+
+		// Schedule routes.
+		if s.scheduleHandler != nil {
+			clusters.Post("/:cluster_id/schedules", s.scheduleHandler.Create)
+			clusters.Get("/:cluster_id/schedules", s.scheduleHandler.List)
+			clusters.Put("/:cluster_id/schedules/:id", s.scheduleHandler.Update)
+			clusters.Delete("/:cluster_id/schedules/:id", s.scheduleHandler.Delete)
+		}
+
+		// Audit log (cluster-scoped).
+		if s.auditHandler != nil {
+			clusters.Get("/:cluster_id/audit-log", s.auditHandler.ListByCluster)
+		}
+
+		// Rolling update routes.
+		if s.rollingUpdateHandler != nil {
+			clusters.Get("/:cluster_id/rolling-updates", s.rollingUpdateHandler.ListJobs)
+			clusters.Post("/:cluster_id/rolling-updates", s.rollingUpdateHandler.CreateJob)
+			clusters.Get("/:cluster_id/rolling-updates/:id", s.rollingUpdateHandler.GetJob)
+			clusters.Post("/:cluster_id/rolling-updates/:id/start", s.rollingUpdateHandler.StartJob)
+			clusters.Post("/:cluster_id/rolling-updates/:id/cancel", s.rollingUpdateHandler.CancelJob)
+			clusters.Post("/:cluster_id/rolling-updates/:id/pause", s.rollingUpdateHandler.PauseJob)
+			clusters.Post("/:cluster_id/rolling-updates/:id/resume", s.rollingUpdateHandler.ResumeJob)
+			clusters.Get("/:cluster_id/rolling-updates/:id/nodes", s.rollingUpdateHandler.ListNodes)
+			clusters.Post("/:cluster_id/rolling-updates/:id/nodes/:node_id/confirm-upgrade", s.rollingUpdateHandler.ConfirmUpgrade)
+			clusters.Post("/:cluster_id/rolling-updates/:id/nodes/:node_id/skip", s.rollingUpdateHandler.SkipNode)
+			clusters.Post("/:cluster_id/rolling-updates/preflight-ha", s.rollingUpdateHandler.PreflightHA)
+			clusters.Get("/:cluster_id/nodes/:node/packages", s.rollingUpdateHandler.PreviewPackages)
+
+			// SSH credential management.
+			clusters.Get("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.GetSSHCredentials)
+			clusters.Put("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.UpsertSSHCredentials)
+			clusters.Delete("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.DeleteSSHCredentials)
+			clusters.Post("/:cluster_id/ssh-credentials/test", s.rollingUpdateHandler.TestSSHConnection)
+		}
+
+		// Cluster options, tags, and config routes.
+		if s.clusterOptionsHandler != nil {
+			clusters.Get("/:cluster_id/options", s.clusterOptionsHandler.GetOptions)
+			clusters.Put("/:cluster_id/options", s.clusterOptionsHandler.UpdateOptions)
+			clusters.Get("/:cluster_id/description", s.clusterOptionsHandler.GetDescription)
+			clusters.Put("/:cluster_id/description", s.clusterOptionsHandler.UpdateDescription)
+			clusters.Get("/:cluster_id/tags", s.clusterOptionsHandler.GetTags)
+			clusters.Put("/:cluster_id/tags", s.clusterOptionsHandler.UpdateTags)
+			clusters.Get("/:cluster_id/config", s.clusterOptionsHandler.GetClusterConfig)
+			clusters.Get("/:cluster_id/config/join", s.clusterOptionsHandler.GetJoinInfo)
+			clusters.Get("/:cluster_id/config/nodes", s.clusterOptionsHandler.ListCorosyncNodes)
+		}
+
+		// HA management routes.
+		if s.haHandler != nil {
+			clusters.Get("/:cluster_id/ha/resources", s.haHandler.ListResources)
+			clusters.Post("/:cluster_id/ha/resources", s.haHandler.CreateResource)
+			clusters.Get("/:cluster_id/ha/resources/:sid", s.haHandler.GetResource)
+			clusters.Put("/:cluster_id/ha/resources/:sid", s.haHandler.UpdateResource)
+			clusters.Delete("/:cluster_id/ha/resources/:sid", s.haHandler.DeleteResource)
+			clusters.Get("/:cluster_id/ha/groups", s.haHandler.ListGroups)
+			clusters.Post("/:cluster_id/ha/groups", s.haHandler.CreateGroup)
+			clusters.Put("/:cluster_id/ha/groups/:group", s.haHandler.UpdateGroup)
+			clusters.Delete("/:cluster_id/ha/groups/:group", s.haHandler.DeleteGroup)
+			clusters.Get("/:cluster_id/ha/status", s.haHandler.GetStatus)
+			clusters.Get("/:cluster_id/ha/rules", s.haHandler.ListRules)
+			clusters.Post("/:cluster_id/ha/rules", s.haHandler.CreateRule)
+			clusters.Delete("/:cluster_id/ha/rules/:rule", s.haHandler.DeleteRule)
+		}
+
+		// Resource pool CRUD routes (GET list already registered via vmHandler).
+		if s.poolHandler != nil {
+			clusters.Post("/:cluster_id/pools", s.poolHandler.CreatePool)
+			clusters.Get("/:cluster_id/pools/:pool_id", s.poolHandler.GetPool)
+			clusters.Put("/:cluster_id/pools/:pool_id", s.poolHandler.UpdatePool)
+			clusters.Delete("/:cluster_id/pools/:pool_id", s.poolHandler.DeletePool)
+		}
+
+		// Replication routes.
+		if s.replicationHandler != nil {
+			clusters.Get("/:cluster_id/replication", s.replicationHandler.ListJobs)
+			clusters.Post("/:cluster_id/replication", s.replicationHandler.CreateJob)
+			clusters.Get("/:cluster_id/replication/:job_id", s.replicationHandler.GetJob)
+			clusters.Put("/:cluster_id/replication/:job_id", s.replicationHandler.UpdateJob)
+			clusters.Delete("/:cluster_id/replication/:job_id", s.replicationHandler.DeleteJob)
+			clusters.Post("/:cluster_id/replication/:job_id/trigger", s.replicationHandler.TriggerSync)
+			clusters.Get("/:cluster_id/replication/:job_id/status", s.replicationHandler.GetStatus)
+			clusters.Get("/:cluster_id/replication/:job_id/log", s.replicationHandler.GetLog)
+		}
+
+		// ACME certificate routes.
+		if s.acmeHandler != nil {
+			clusters.Get("/:cluster_id/acme/accounts", s.acmeHandler.ListAccounts)
+			clusters.Post("/:cluster_id/acme/accounts", s.acmeHandler.CreateAccount)
+			clusters.Get("/:cluster_id/acme/accounts/:name", s.acmeHandler.GetAccount)
+			clusters.Put("/:cluster_id/acme/accounts/:name", s.acmeHandler.UpdateAccount)
+			clusters.Delete("/:cluster_id/acme/accounts/:name", s.acmeHandler.DeleteAccount)
+			clusters.Get("/:cluster_id/acme/plugins", s.acmeHandler.ListPlugins)
+			clusters.Post("/:cluster_id/acme/plugins", s.acmeHandler.CreatePlugin)
+			clusters.Put("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.UpdatePlugin)
+			clusters.Delete("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.DeletePlugin)
+			clusters.Get("/:cluster_id/acme/challenge-schema", s.acmeHandler.ListChallengeSchema)
+			clusters.Get("/:cluster_id/acme/directories", s.acmeHandler.ListDirectories)
+			clusters.Get("/:cluster_id/acme/tos", s.acmeHandler.GetTOS)
+			clusters.Get("/:cluster_id/nodes/:node/acme-config", s.acmeHandler.GetNodeACMEConfig)
+			clusters.Put("/:cluster_id/nodes/:node/acme-config", s.acmeHandler.SetNodeACMEConfig)
+			clusters.Get("/:cluster_id/nodes/:node/certificates", s.acmeHandler.ListNodeCertificates)
+			clusters.Post("/:cluster_id/nodes/:node/certificates/order", s.acmeHandler.OrderNodeCertificate)
+			clusters.Put("/:cluster_id/nodes/:node/certificates/renew", s.acmeHandler.RenewNodeCertificate)
+			clusters.Delete("/:cluster_id/nodes/:node/certificates/revoke", s.acmeHandler.RevokeNodeCertificate)
+		}
+
+		// Metric server routes.
+		if s.metricServerHandler != nil {
+			clusters.Get("/:cluster_id/metric-servers", s.metricServerHandler.ListServers)
+			clusters.Post("/:cluster_id/metric-servers", s.metricServerHandler.CreateServer)
+			clusters.Get("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.GetServer)
+			clusters.Put("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.UpdateServer)
+			clusters.Delete("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.DeleteServer)
+		}
 	}
 
 	// Firewall template routes (not cluster-scoped).
@@ -217,19 +404,6 @@ func (s *Server) setupRoutes() {
 		migrations.Post("/:id/check", s.migrationHandler.RunCheck)
 		migrations.Post("/:id/execute", s.migrationHandler.Execute)
 		migrations.Post("/:id/cancel", s.migrationHandler.Cancel)
-	}
-
-	// CVE scanning routes.
-	if s.cveHandler != nil && s.clusterHandler != nil {
-		cveClusters := v1.Group("/clusters", s.authRequired())
-		cveClusters.Get("/:cluster_id/cve-scans", s.cveHandler.ListScans)
-		cveClusters.Post("/:cluster_id/cve-scans", s.cveHandler.TriggerScan)
-		cveClusters.Get("/:cluster_id/cve-scans/:scan_id", s.cveHandler.GetScan)
-		cveClusters.Get("/:cluster_id/cve-scans/:scan_id/vulnerabilities", s.cveHandler.ListVulnerabilities)
-		cveClusters.Delete("/:cluster_id/cve-scans/:scan_id", s.cveHandler.DeleteScan)
-		cveClusters.Get("/:cluster_id/security-posture", s.cveHandler.GetSecurityPosture)
-		cveClusters.Get("/:cluster_id/cve-scan-schedule", s.cveHandler.GetSchedule)
-		cveClusters.Put("/:cluster_id/cve-scan-schedule", s.cveHandler.UpdateSchedule)
 	}
 
 	// Alert routes.
@@ -255,17 +429,6 @@ func (s *Server) setupRoutes() {
 		notifChannels.Put("/:id", s.alertHandler.UpdateChannel)
 		notifChannels.Delete("/:id", s.alertHandler.DeleteChannel)
 		notifChannels.Post("/:id/test", s.alertHandler.TestChannel)
-
-		// Cluster-scoped alert routes
-		if s.clusterHandler != nil {
-			alertClusters := v1.Group("/clusters", s.authRequired())
-			alertClusters.Get("/:cluster_id/alerts", s.alertHandler.ListAlertsByCluster)
-			alertClusters.Get("/:cluster_id/alerts/count", s.alertHandler.CountActiveAlertsByCluster)
-			alertClusters.Get("/:cluster_id/maintenance-windows", s.alertHandler.ListMaintenanceWindows)
-			alertClusters.Post("/:cluster_id/maintenance-windows", s.alertHandler.CreateMaintenanceWindow)
-			alertClusters.Put("/:cluster_id/maintenance-windows/:id", s.alertHandler.UpdateMaintenanceWindow)
-			alertClusters.Delete("/:cluster_id/maintenance-windows/:id", s.alertHandler.DeleteMaintenanceWindow)
-		}
 	}
 
 	// Report routes.
@@ -281,21 +444,6 @@ func (s *Server) setupRoutes() {
 		rpts.Get("/runs/:id", s.reportHandler.GetRun)
 		rpts.Get("/runs/:id/html", s.reportHandler.GetRunHTML)
 		rpts.Get("/runs/:id/csv", s.reportHandler.GetRunCSV)
-	}
-
-	// DRS routes.
-	if s.drsHandler != nil && s.clusterHandler != nil {
-		drsClusters := v1.Group("/clusters", s.authRequired())
-		drsClusters.Get("/:cluster_id/drs/config", s.drsHandler.GetConfig)
-		drsClusters.Put("/:cluster_id/drs/config", s.drsHandler.UpdateConfig)
-		drsClusters.Get("/:cluster_id/drs/rules", s.drsHandler.ListRules)
-		drsClusters.Post("/:cluster_id/drs/rules", s.drsHandler.CreateRule)
-		drsClusters.Delete("/:cluster_id/drs/rules/:rule_id", s.drsHandler.DeleteRule)
-		drsClusters.Post("/:cluster_id/drs/evaluate", s.drsHandler.TriggerEvaluate)
-		drsClusters.Get("/:cluster_id/drs/history", s.drsHandler.ListHistory)
-		drsClusters.Get("/:cluster_id/drs/ha-rules", s.drsHandler.ListHARules)
-		drsClusters.Post("/:cluster_id/drs/ha-rules", s.drsHandler.CreateHARule)
-		drsClusters.Delete("/:cluster_id/drs/ha-rules/:rule_name", s.drsHandler.DeleteHARule)
 	}
 
 	// PBS server routes.
@@ -330,37 +478,10 @@ func (s *Server) setupRoutes() {
 		}
 	}
 
-	// Migration routes under clusters.
-	if s.migrationHandler != nil && s.clusterHandler != nil {
-		migClusters := v1.Group("/clusters", s.authRequired())
-		migClusters.Get("/:cluster_id/migrations", s.migrationHandler.ListByCluster)
-	}
-
 	// PBS snapshot lookup (cross-server, by backup_id / VMID).
 	if s.backupHandler != nil {
 		v1.Get("/pbs-snapshots", s.authRequired(), s.backupHandler.ListSnapshotsByBackupID)
 		v1.Get("/backup-coverage", s.authRequired(), s.backupHandler.GetBackupCoverage)
-	}
-
-	// Restore and backup job routes under clusters.
-	if s.backupHandler != nil && s.clusterHandler != nil {
-		clusters := v1.Group("/clusters", s.authRequired())
-		clusters.Post("/:cluster_id/restore", s.backupHandler.RestoreBackup)
-		clusters.Post("/:cluster_id/backup", s.backupHandler.TriggerBackup)
-		clusters.Get("/:cluster_id/backup-jobs", s.backupHandler.ListBackupJobs)
-		clusters.Post("/:cluster_id/backup-jobs", s.backupHandler.CreateBackupJob)
-		clusters.Put("/:cluster_id/backup-jobs/:job_id", s.backupHandler.UpdateBackupJob)
-		clusters.Delete("/:cluster_id/backup-jobs/:job_id", s.backupHandler.DeleteBackupJob)
-		clusters.Post("/:cluster_id/backup-jobs/:job_id/run", s.backupHandler.RunBackupJob)
-	}
-
-	// Schedule routes (under clusters).
-	if s.scheduleHandler != nil && s.clusterHandler != nil {
-		schedClusters := v1.Group("/clusters", s.authRequired())
-		schedClusters.Post("/:cluster_id/schedules", s.scheduleHandler.Create)
-		schedClusters.Get("/:cluster_id/schedules", s.scheduleHandler.List)
-		schedClusters.Put("/:cluster_id/schedules/:id", s.scheduleHandler.Update)
-		schedClusters.Delete("/:cluster_id/schedules/:id", s.scheduleHandler.Delete)
 	}
 
 	// Audit log routes.
@@ -374,11 +495,6 @@ func (s *Server) setupRoutes() {
 		audit.Put("/syslog-config", s.auditHandler.UpdateSyslogConfig)
 		audit.Post("/syslog-test", s.auditHandler.TestSyslog)
 		audit.Get("/", s.auditHandler.List)
-
-		if s.clusterHandler != nil {
-			auditClusters := v1.Group("/clusters", s.authRequired())
-			auditClusters.Get("/:cluster_id/audit-log", s.auditHandler.ListByCluster)
-		}
 	}
 
 	// Task history routes.
@@ -426,139 +542,6 @@ func (s *Server) setupRoutes() {
 		oidc.Put("/configs/:id", s.oidcHandler.Update)
 		oidc.Delete("/configs/:id", s.oidcHandler.Delete)
 		oidc.Post("/configs/:id/test", s.oidcHandler.TestConnection)
-	}
-
-	// Rolling update routes.
-	if s.rollingUpdateHandler != nil && s.clusterHandler != nil {
-		ruClusters := v1.Group("/clusters", s.authRequired())
-		ruClusters.Get("/:cluster_id/rolling-updates", s.rollingUpdateHandler.ListJobs)
-		ruClusters.Post("/:cluster_id/rolling-updates", s.rollingUpdateHandler.CreateJob)
-		ruClusters.Get("/:cluster_id/rolling-updates/:id", s.rollingUpdateHandler.GetJob)
-		ruClusters.Post("/:cluster_id/rolling-updates/:id/start", s.rollingUpdateHandler.StartJob)
-		ruClusters.Post("/:cluster_id/rolling-updates/:id/cancel", s.rollingUpdateHandler.CancelJob)
-		ruClusters.Post("/:cluster_id/rolling-updates/:id/pause", s.rollingUpdateHandler.PauseJob)
-		ruClusters.Post("/:cluster_id/rolling-updates/:id/resume", s.rollingUpdateHandler.ResumeJob)
-		ruClusters.Get("/:cluster_id/rolling-updates/:id/nodes", s.rollingUpdateHandler.ListNodes)
-		ruClusters.Post("/:cluster_id/rolling-updates/:id/nodes/:node_id/confirm-upgrade", s.rollingUpdateHandler.ConfirmUpgrade)
-		ruClusters.Post("/:cluster_id/rolling-updates/:id/nodes/:node_id/skip", s.rollingUpdateHandler.SkipNode)
-		ruClusters.Post("/:cluster_id/rolling-updates/preflight-ha", s.rollingUpdateHandler.PreflightHA)
-		ruClusters.Get("/:cluster_id/nodes/:node/packages", s.rollingUpdateHandler.PreviewPackages)
-
-		// SSH credential management.
-		ruClusters.Get("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.GetSSHCredentials)
-		ruClusters.Put("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.UpsertSSHCredentials)
-		ruClusters.Delete("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.DeleteSSHCredentials)
-		ruClusters.Post("/:cluster_id/ssh-credentials/test", s.rollingUpdateHandler.TestSSHConnection)
-	}
-
-	// Cluster options, tags, and config routes.
-	if s.clusterOptionsHandler != nil && s.clusterHandler != nil {
-		optClusters := v1.Group("/clusters", s.authRequired())
-		optClusters.Get("/:cluster_id/options", s.clusterOptionsHandler.GetOptions)
-		optClusters.Put("/:cluster_id/options", s.clusterOptionsHandler.UpdateOptions)
-		optClusters.Get("/:cluster_id/description", s.clusterOptionsHandler.GetDescription)
-		optClusters.Put("/:cluster_id/description", s.clusterOptionsHandler.UpdateDescription)
-		optClusters.Get("/:cluster_id/tags", s.clusterOptionsHandler.GetTags)
-		optClusters.Put("/:cluster_id/tags", s.clusterOptionsHandler.UpdateTags)
-		optClusters.Get("/:cluster_id/config", s.clusterOptionsHandler.GetClusterConfig)
-		optClusters.Get("/:cluster_id/config/join", s.clusterOptionsHandler.GetJoinInfo)
-		optClusters.Get("/:cluster_id/config/nodes", s.clusterOptionsHandler.ListCorosyncNodes)
-	}
-
-	// HA management routes.
-	if s.haHandler != nil && s.clusterHandler != nil {
-		haClusters := v1.Group("/clusters", s.authRequired())
-		haClusters.Get("/:cluster_id/ha/resources", s.haHandler.ListResources)
-		haClusters.Post("/:cluster_id/ha/resources", s.haHandler.CreateResource)
-		haClusters.Get("/:cluster_id/ha/resources/:sid", s.haHandler.GetResource)
-		haClusters.Put("/:cluster_id/ha/resources/:sid", s.haHandler.UpdateResource)
-		haClusters.Delete("/:cluster_id/ha/resources/:sid", s.haHandler.DeleteResource)
-		haClusters.Get("/:cluster_id/ha/groups", s.haHandler.ListGroups)
-		haClusters.Post("/:cluster_id/ha/groups", s.haHandler.CreateGroup)
-		haClusters.Put("/:cluster_id/ha/groups/:group", s.haHandler.UpdateGroup)
-		haClusters.Delete("/:cluster_id/ha/groups/:group", s.haHandler.DeleteGroup)
-		haClusters.Get("/:cluster_id/ha/status", s.haHandler.GetStatus)
-		haClusters.Get("/:cluster_id/ha/rules", s.haHandler.ListRules)
-		haClusters.Post("/:cluster_id/ha/rules", s.haHandler.CreateRule)
-		haClusters.Delete("/:cluster_id/ha/rules/:rule", s.haHandler.DeleteRule)
-	}
-
-	// Resource pool CRUD routes (GET list already registered via vmHandler).
-	if s.poolHandler != nil && s.clusterHandler != nil {
-		poolClusters := v1.Group("/clusters", s.authRequired())
-		poolClusters.Post("/:cluster_id/pools", s.poolHandler.CreatePool)
-		poolClusters.Get("/:cluster_id/pools/:pool_id", s.poolHandler.GetPool)
-		poolClusters.Put("/:cluster_id/pools/:pool_id", s.poolHandler.UpdatePool)
-		poolClusters.Delete("/:cluster_id/pools/:pool_id", s.poolHandler.DeletePool)
-	}
-
-	// Replication routes.
-	if s.replicationHandler != nil && s.clusterHandler != nil {
-		replClusters := v1.Group("/clusters", s.authRequired())
-		replClusters.Get("/:cluster_id/replication", s.replicationHandler.ListJobs)
-		replClusters.Post("/:cluster_id/replication", s.replicationHandler.CreateJob)
-		replClusters.Get("/:cluster_id/replication/:job_id", s.replicationHandler.GetJob)
-		replClusters.Put("/:cluster_id/replication/:job_id", s.replicationHandler.UpdateJob)
-		replClusters.Delete("/:cluster_id/replication/:job_id", s.replicationHandler.DeleteJob)
-		replClusters.Post("/:cluster_id/replication/:job_id/trigger", s.replicationHandler.TriggerSync)
-		replClusters.Get("/:cluster_id/replication/:job_id/status", s.replicationHandler.GetStatus)
-		replClusters.Get("/:cluster_id/replication/:job_id/log", s.replicationHandler.GetLog)
-	}
-
-	// ACME certificate routes.
-	if s.acmeHandler != nil && s.clusterHandler != nil {
-		acmeClusters := v1.Group("/clusters", s.authRequired())
-		acmeClusters.Get("/:cluster_id/acme/accounts", s.acmeHandler.ListAccounts)
-		acmeClusters.Post("/:cluster_id/acme/accounts", s.acmeHandler.CreateAccount)
-		acmeClusters.Get("/:cluster_id/acme/accounts/:name", s.acmeHandler.GetAccount)
-		acmeClusters.Put("/:cluster_id/acme/accounts/:name", s.acmeHandler.UpdateAccount)
-		acmeClusters.Delete("/:cluster_id/acme/accounts/:name", s.acmeHandler.DeleteAccount)
-		acmeClusters.Get("/:cluster_id/acme/plugins", s.acmeHandler.ListPlugins)
-		acmeClusters.Post("/:cluster_id/acme/plugins", s.acmeHandler.CreatePlugin)
-		acmeClusters.Put("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.UpdatePlugin)
-		acmeClusters.Delete("/:cluster_id/acme/plugins/:plugin_id", s.acmeHandler.DeletePlugin)
-		acmeClusters.Get("/:cluster_id/acme/challenge-schema", s.acmeHandler.ListChallengeSchema)
-		acmeClusters.Get("/:cluster_id/acme/directories", s.acmeHandler.ListDirectories)
-		acmeClusters.Get("/:cluster_id/acme/tos", s.acmeHandler.GetTOS)
-		acmeClusters.Get("/:cluster_id/nodes/:node/acme-config", s.acmeHandler.GetNodeACMEConfig)
-		acmeClusters.Put("/:cluster_id/nodes/:node/acme-config", s.acmeHandler.SetNodeACMEConfig)
-		acmeClusters.Get("/:cluster_id/nodes/:node/certificates", s.acmeHandler.ListNodeCertificates)
-		acmeClusters.Post("/:cluster_id/nodes/:node/certificates/order", s.acmeHandler.OrderNodeCertificate)
-		acmeClusters.Put("/:cluster_id/nodes/:node/certificates/renew", s.acmeHandler.RenewNodeCertificate)
-		acmeClusters.Delete("/:cluster_id/nodes/:node/certificates/revoke", s.acmeHandler.RevokeNodeCertificate)
-	}
-
-	// Metric server routes.
-	if s.metricServerHandler != nil && s.clusterHandler != nil {
-		msClusters := v1.Group("/clusters", s.authRequired())
-		msClusters.Get("/:cluster_id/metric-servers", s.metricServerHandler.ListServers)
-		msClusters.Post("/:cluster_id/metric-servers", s.metricServerHandler.CreateServer)
-		msClusters.Get("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.GetServer)
-		msClusters.Put("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.UpdateServer)
-		msClusters.Delete("/:cluster_id/metric-servers/:server_id", s.metricServerHandler.DeleteServer)
-	}
-
-	// Firewall extras (aliases, IPsets, security groups, log).
-	if s.networkHandler != nil && s.clusterHandler != nil {
-		fwClusters := v1.Group("/clusters", s.authRequired())
-		fwClusters.Get("/:cluster_id/firewall/aliases", s.networkHandler.ListFirewallAliases)
-		fwClusters.Post("/:cluster_id/firewall/aliases", s.networkHandler.CreateFirewallAlias)
-		fwClusters.Put("/:cluster_id/firewall/aliases/:name", s.networkHandler.UpdateFirewallAlias)
-		fwClusters.Delete("/:cluster_id/firewall/aliases/:name", s.networkHandler.DeleteFirewallAlias)
-		fwClusters.Get("/:cluster_id/firewall/ipset", s.networkHandler.ListFirewallIPSets)
-		fwClusters.Post("/:cluster_id/firewall/ipset", s.networkHandler.CreateFirewallIPSet)
-		fwClusters.Delete("/:cluster_id/firewall/ipset/:name", s.networkHandler.DeleteFirewallIPSet)
-		fwClusters.Get("/:cluster_id/firewall/ipset/:name/entries", s.networkHandler.ListFirewallIPSetEntries)
-		fwClusters.Post("/:cluster_id/firewall/ipset/:name/entries", s.networkHandler.AddFirewallIPSetEntry)
-		fwClusters.Delete("/:cluster_id/firewall/ipset/:name/entries/:cidr", s.networkHandler.DeleteFirewallIPSetEntry)
-		fwClusters.Get("/:cluster_id/firewall/groups", s.networkHandler.ListSecurityGroups)
-		fwClusters.Post("/:cluster_id/firewall/groups", s.networkHandler.CreateSecurityGroup)
-		fwClusters.Delete("/:cluster_id/firewall/groups/:group", s.networkHandler.DeleteSecurityGroup)
-		fwClusters.Get("/:cluster_id/firewall/groups/:group/rules", s.networkHandler.ListSecurityGroupRules)
-		fwClusters.Post("/:cluster_id/firewall/groups/:group/rules", s.networkHandler.CreateSecurityGroupRule)
-		fwClusters.Put("/:cluster_id/firewall/groups/:group/rules/:pos", s.networkHandler.UpdateSecurityGroupRule)
-		fwClusters.Delete("/:cluster_id/firewall/groups/:group/rules/:pos", s.networkHandler.DeleteSecurityGroupRule)
-		fwClusters.Get("/:cluster_id/firewall/log", s.networkHandler.GetFirewallLog)
 	}
 
 	// Global search.

@@ -340,7 +340,7 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"action": req.Action, "type": req.Type})
-	h.auditLog(c, clusterID, "firewall", "cluster", "firewall_rule_created", details)
+	h.auditLog(c, clusterID, "network", "cluster", "firewall_rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -376,7 +376,7 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"position": pos, "action": req.Action, "type": req.Type})
-	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_updated", details)
+	h.auditLog(c, clusterID, "network", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -407,7 +407,7 @@ func (h *NetworkHandler) DeleteClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"position": pos})
-	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_deleted", details)
+	h.auditLog(c, clusterID, "network", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -509,7 +509,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "action": req.Action, "type": req.Type})
-	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("vm/%d", vmid), "firewall_rule_created", details)
+	h.auditLog(c, clusterID, "network", fmt.Sprintf("vm/%d", vmid), "firewall_rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -555,7 +555,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos, "action": req.Action, "type": req.Type})
-	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_updated", details)
+	h.auditLog(c, clusterID, "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -596,7 +596,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos})
-	h.auditLog(c, clusterID, "firewall", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_deleted", details)
+	h.auditLog(c, clusterID, "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -653,7 +653,7 @@ func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, "firewall", "cluster/options", "firewall_options_updated", details)
+	h.auditLog(c, clusterID, "network", "cluster/options", "firewall_options_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -1620,7 +1620,7 @@ func (h *NetworkHandler) ApplyTemplate(c *fiber.Ctx) error {
 
 // ListFirewallAliases handles GET /clusters/:cluster_id/firewall/aliases.
 func (h *NetworkHandler) ListFirewallAliases(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "firewall"); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1640,7 +1640,7 @@ func (h *NetworkHandler) ListFirewallAliases(c *fiber.Ctx) error {
 
 // CreateFirewallAlias handles POST /clusters/:cluster_id/firewall/aliases.
 func (h *NetworkHandler) CreateFirewallAlias(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1668,7 +1668,7 @@ func (h *NetworkHandler) CreateFirewallAlias(c *fiber.Ctx) error {
 
 // UpdateFirewallAlias handles PUT /clusters/:cluster_id/firewall/aliases/:name.
 func (h *NetworkHandler) UpdateFirewallAlias(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1694,7 +1694,7 @@ func (h *NetworkHandler) UpdateFirewallAlias(c *fiber.Ctx) error {
 
 // DeleteFirewallAlias handles DELETE /clusters/:cluster_id/firewall/aliases/:name.
 func (h *NetworkHandler) DeleteFirewallAlias(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1718,7 +1718,7 @@ func (h *NetworkHandler) DeleteFirewallAlias(c *fiber.Ctx) error {
 
 // ListFirewallIPSets handles GET /clusters/:cluster_id/firewall/ipset.
 func (h *NetworkHandler) ListFirewallIPSets(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "firewall"); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1738,7 +1738,7 @@ func (h *NetworkHandler) ListFirewallIPSets(c *fiber.Ctx) error {
 
 // CreateFirewallIPSet handles POST /clusters/:cluster_id/firewall/ipset.
 func (h *NetworkHandler) CreateFirewallIPSet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1769,7 +1769,7 @@ func (h *NetworkHandler) CreateFirewallIPSet(c *fiber.Ctx) error {
 
 // DeleteFirewallIPSet handles DELETE /clusters/:cluster_id/firewall/ipset/:name.
 func (h *NetworkHandler) DeleteFirewallIPSet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1791,7 +1791,7 @@ func (h *NetworkHandler) DeleteFirewallIPSet(c *fiber.Ctx) error {
 
 // ListFirewallIPSetEntries handles GET /clusters/:cluster_id/firewall/ipset/:name/entries.
 func (h *NetworkHandler) ListFirewallIPSetEntries(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "firewall"); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1812,7 +1812,7 @@ func (h *NetworkHandler) ListFirewallIPSetEntries(c *fiber.Ctx) error {
 
 // AddFirewallIPSetEntry handles POST /clusters/:cluster_id/firewall/ipset/:name/entries.
 func (h *NetworkHandler) AddFirewallIPSetEntry(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1841,7 +1841,7 @@ func (h *NetworkHandler) AddFirewallIPSetEntry(c *fiber.Ctx) error {
 
 // DeleteFirewallIPSetEntry handles DELETE /clusters/:cluster_id/firewall/ipset/:name/entries/:cidr.
 func (h *NetworkHandler) DeleteFirewallIPSetEntry(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1866,7 +1866,7 @@ func (h *NetworkHandler) DeleteFirewallIPSetEntry(c *fiber.Ctx) error {
 
 // ListSecurityGroups handles GET /clusters/:cluster_id/firewall/groups.
 func (h *NetworkHandler) ListSecurityGroups(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "firewall"); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1886,7 +1886,7 @@ func (h *NetworkHandler) ListSecurityGroups(c *fiber.Ctx) error {
 
 // CreateSecurityGroup handles POST /clusters/:cluster_id/firewall/groups.
 func (h *NetworkHandler) CreateSecurityGroup(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1914,7 +1914,7 @@ func (h *NetworkHandler) CreateSecurityGroup(c *fiber.Ctx) error {
 
 // DeleteSecurityGroup handles DELETE /clusters/:cluster_id/firewall/groups/:group.
 func (h *NetworkHandler) DeleteSecurityGroup(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1936,7 +1936,7 @@ func (h *NetworkHandler) DeleteSecurityGroup(c *fiber.Ctx) error {
 
 // ListSecurityGroupRules handles GET /clusters/:cluster_id/firewall/groups/:group/rules.
 func (h *NetworkHandler) ListSecurityGroupRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "firewall"); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1957,7 +1957,7 @@ func (h *NetworkHandler) ListSecurityGroupRules(c *fiber.Ctx) error {
 
 // CreateSecurityGroupRule handles POST /clusters/:cluster_id/firewall/groups/:group/rules.
 func (h *NetworkHandler) CreateSecurityGroupRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -1983,7 +1983,7 @@ func (h *NetworkHandler) CreateSecurityGroupRule(c *fiber.Ctx) error {
 
 // UpdateSecurityGroupRule handles PUT /clusters/:cluster_id/firewall/groups/:group/rules/:pos.
 func (h *NetworkHandler) UpdateSecurityGroupRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -2013,7 +2013,7 @@ func (h *NetworkHandler) UpdateSecurityGroupRule(c *fiber.Ctx) error {
 
 // DeleteSecurityGroupRule handles DELETE /clusters/:cluster_id/firewall/groups/:group/rules/:pos.
 func (h *NetworkHandler) DeleteSecurityGroupRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
+	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -2041,7 +2041,7 @@ func (h *NetworkHandler) DeleteSecurityGroupRule(c *fiber.Ctx) error {
 
 // GetFirewallLog handles GET /clusters/:cluster_id/firewall/log.
 func (h *NetworkHandler) GetFirewallLog(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "firewall"); err != nil {
+	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
