@@ -143,21 +143,23 @@ export function APIKeysPage() {
     }
   };
 
-  const handleCopy = async () => {
+  const handleCopy = () => {
     setCopyError("");
-    if (!navigator.clipboard || !window.isSecureContext) {
+    if (!window.isSecureContext) {
       setCopyError("Clipboard requires HTTPS. Please select the key above and copy manually (Ctrl+C).");
       return;
     }
-    try {
-      await navigator.clipboard.writeText(createdKey);
-      setCopied(true);
-      setTimeout(() => {
-        setCopied(false);
-      }, 2000);
-    } catch {
-      setCopyError("Copy failed. Please select the key above and copy manually (Ctrl+C).");
-    }
+    navigator.clipboard.writeText(createdKey).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => {
+          setCopied(false);
+        }, 2000);
+      },
+      () => {
+        setCopyError("Copy failed. Please select the key above and copy manually (Ctrl+C).");
+      },
+    );
   };
 
   const handleRevoke = async () => {
