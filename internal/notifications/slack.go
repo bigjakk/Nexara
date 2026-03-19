@@ -88,7 +88,7 @@ func postJSON(ctx context.Context, targetURL string, body interface{}) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := safeHTTPClient(10 * time.Second)
+	client := SafeHTTPClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)

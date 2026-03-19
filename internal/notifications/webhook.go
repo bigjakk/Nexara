@@ -72,7 +72,7 @@ func (d *WebhookDispatcher) Send(ctx context.Context, config json.RawMessage, pa
 		req.Header.Set(k, v)
 	}
 
-	client := safeHTTPClient(time.Duration(timeout) * time.Second)
+	client := SafeHTTPClient(time.Duration(timeout) * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)

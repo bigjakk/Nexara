@@ -21,6 +21,7 @@ import (
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/notifications"
 )
 
 // OIDCHandler handles OIDC/SSO configuration and auth flow endpoints.
@@ -378,14 +379,9 @@ func (h *OIDCHandler) TestConnection(c *fiber.Ctx) error {
 		})
 	}
 
-	// Try to fetch the OIDC discovery document (no redirects)
+	// Try to fetch the OIDC discovery document using SSRF-safe client.
 	discoveryURL := strings.TrimRight(cfg.IssuerUrl, "/") + "/.well-known/openid-configuration"
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := notifications.SafeHTTPClient(10 * time.Second)
 	resp, err := client.Get(discoveryURL) //nolint:gosec // URL comes from admin-configured issuer
 	if err != nil {
 		slog.Error("OIDC test connection failed", "config_id", id, "error", err)

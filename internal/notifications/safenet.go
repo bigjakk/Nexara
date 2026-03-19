@@ -49,9 +49,9 @@ func validateExternalURL(ctx context.Context, rawURL string) error {
 	return nil
 }
 
-// safeHTTPClient returns an HTTP client that blocks connections to private IPs
-// and does not follow redirects.
-func safeHTTPClient(timeout time.Duration) *http.Client {
+// SafeHTTPClient returns an HTTP client that blocks connections to private IPs
+// and does not follow redirects. Exported for reuse in other packages (e.g. OIDC).
+func SafeHTTPClient(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout: timeout,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {

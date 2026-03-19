@@ -77,6 +77,9 @@ func (c *Config) validate() error {
 	if len(c.JWTSecret) < 16 {
 		return fmt.Errorf("JWT_SECRET must be at least 16 characters")
 	}
+	if c.CORSAllowOrigins == "*" {
+		slog.Warn("CORS_ALLOW_ORIGINS is set to wildcard '*' — this is insecure for production deployments")
+	}
 	if c.EncryptionKey == "" {
 		return fmt.Errorf("ENCRYPTION_KEY is empty (should have been resolved by ResolveSecrets)")
 	}

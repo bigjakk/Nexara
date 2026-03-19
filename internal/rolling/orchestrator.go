@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,13 @@ import (
 
 // SystemUserID is the well-known UUID for automated system operations.
 var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+
+// validDebianPkgName matches valid Debian package names: lowercase alphanum, dots, plus, hyphens.
+var validDebianPkgName = regexp.MustCompile(`^[a-z0-9][a-z0-9.+\-]{0,127}$`)
+
+func isValidDebianPkgName(name string) bool {
+	return validDebianPkgName.MatchString(name)
+}
 
 // Orchestrator drives the rolling update state machine on a scheduler tick.
 type Orchestrator struct {
@@ -640,11 +648,16 @@ func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Cli
 func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelFunc, job db.RollingUpdateJob, node db.RollingUpdateNode, client *proxmox.Client, sshCfg sshpkg.Config) {
 	defer cancel()
 
-	// Build package exclude args.
+	// Build package exclude args with strict validation.
+	// Debian package names: [a-z0-9][a-z0-9.+\-]+ (max 128 chars).
 	var excludeArgs string
 	if len(job.PackageExcludes) > 0 {
 		for _, pkg := range job.PackageExcludes {
-			excludeArgs += fmt.Sprintf(" --exclude %s", pkg)
+			if !isValidDebianPkgName(pkg) {
+				o.failNode(ctx, job, node, fmt.Sprintf("invalid package exclude name: %q", pkg))
+				return
+			}
+			excludeArgs += " --exclude " + pkg
 		}
 	}
 

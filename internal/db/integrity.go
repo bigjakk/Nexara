@@ -8,6 +8,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// allowedIntegrityTables is the compile-time allowlist of tables that
+// RepairIntegrity may operate on. This prevents any future code change
+// from accidentally introducing SQL injection via dynamic table names.
+var allowedIntegrityTables = map[string]bool{
+	"vms":           true,
+	"storage_pools": true,
+	"nodes":         true,
+	"node_metrics":  true,
+	"vm_metrics":    true,
+}
+
 // RepairIntegrity detects and fixes common data integrity issues that can arise
 // from index corruption or concurrent collector instances. It removes duplicate
 // rows, reindexes affected tables, and validates hypertable indexes.
@@ -28,6 +39,11 @@ func RepairIntegrity(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logge
 	totalDeleted := int64(0)
 
 	for _, t := range targets {
+		// SAFETY: All table/column names are compile-time constants defined above.
+		// Verify against the allowlist to guard against future misuse.
+		if !allowedIntegrityTables[t.table] {
+			return fmt.Errorf("integrity repair: disallowed table %q", t.table)
+		}
 		query := fmt.Sprintf(`
 			DELETE FROM %s WHERE ctid NOT IN (
 				SELECT DISTINCT ON (%s) ctid
@@ -63,6 +79,9 @@ func RepairIntegrity(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logge
 	// REINDEX on each metrics hypertable and log any failures (non-fatal).
 	hypertables := []string{"node_metrics", "vm_metrics"}
 	for _, ht := range hypertables {
+		if !allowedIntegrityTables[ht] {
+			return fmt.Errorf("integrity repair: disallowed hypertable %q", ht)
+		}
 		if _, err := pool.Exec(ctx, fmt.Sprintf("REINDEX TABLE %s", ht)); err != nil {
 			logger.Error("failed to reindex hypertable — index may be corrupted",
 				"table", ht,

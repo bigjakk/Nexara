@@ -65,7 +65,23 @@ func (s *Server) setupMiddleware() {
 		return c.Next()
 	})
 
-	// Rate limiting (in-memory storage).
+	// Strict rate limiter for login/register — 15 attempts per minute per IP.
+	// Applied before the general limiter so auth brute-force is caught early.
+	s.app.Use(limiter.New(limiter.Config{
+		Max:        15,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP() + ":auth"
+		},
+		Next: func(c *fiber.Ctx) bool {
+			p := c.Path()
+			return p != "/api/v1/auth/login" &&
+				p != "/api/v1/auth/register" &&
+				p != "/api/v1/auth/totp/verify-login"
+		},
+	}))
+
+	// General rate limiting (in-memory storage).
 	// Skip auth endpoints so token refresh is never blocked — a 429 on
 	// /auth/refresh causes the frontend to interpret it as an auth failure
 	// and log the user out.

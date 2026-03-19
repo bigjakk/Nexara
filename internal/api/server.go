@@ -146,7 +146,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil && s.rbacEngine != nil {
 		s.rbacHandler = handlers.NewRBACHandler(s.queries, s.rbacEngine, s.eventPub)
-		s.userHandler = handlers.NewUserHandler(s.queries, s.rbacEngine, s.eventPub)
+		s.userHandler = handlers.NewUserHandler(s.queries, s.rbacEngine, s.eventPub, s.sessionManager)
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" && s.rbacEngine != nil {

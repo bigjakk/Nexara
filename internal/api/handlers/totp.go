@@ -308,8 +308,10 @@ func (h *TOTPHandler) VerifyLogin(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusTooManyRequests, "Too many attempts — please log in again")
 	}
 
+	// Atomically consume the pending token BEFORE validation to prevent
+	// TOCTOU race conditions where two concurrent requests both read the token.
 	pendingKey := fmt.Sprintf("totp:pending:%s", req.TOTPPendingToken)
-	data, err := h.rdb.Get(c.Context(), pendingKey).Result()
+	data, err := h.rdb.GetDel(c.Context(), pendingKey).Result()
 	if err != nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired pending token")
 	}
@@ -352,10 +354,6 @@ func (h *TOTPHandler) VerifyLogin(c *fiber.Ctx) error {
 		}
 	}
 
-	// Atomically consume the pending token — prevents concurrent use.
-	if _, err := h.rdb.GetDel(c.Context(), pendingKey).Result(); err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, "Token already consumed")
-	}
 	h.rdb.Del(c.Context(), attemptKey)
 
 	if h.issueTokens == nil {

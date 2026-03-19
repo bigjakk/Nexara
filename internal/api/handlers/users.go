@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -19,14 +20,16 @@ type UserHandler struct {
 	queries  *db.Queries
 	rbac     *auth.RBACEngine
 	eventPub *events.Publisher
+	sessions *auth.SessionManager
 }
 
 // NewUserHandler creates a new user handler.
-func NewUserHandler(queries *db.Queries, rbac *auth.RBACEngine, eventPub *events.Publisher) *UserHandler {
+func NewUserHandler(queries *db.Queries, rbac *auth.RBACEngine, eventPub *events.Publisher, sessions *auth.SessionManager) *UserHandler {
 	return &UserHandler{
 		queries:  queries,
 		rbac:     rbac,
 		eventPub: eventPub,
+		sessions: sessions,
 	}
 }
 
@@ -172,6 +175,14 @@ func (h *UserHandler) Update(c *fiber.Ctx) error {
 	}
 
 	h.rbac.InvalidateUser(c.Context(), id)
+
+	// If the user was deactivated, immediately revoke all their sessions
+	// so the change takes effect without waiting for token expiry.
+	if req.IsActive != nil && !*req.IsActive && h.sessions != nil {
+		if err := h.sessions.RevokeAllUserSessions(c.Context(), id); err != nil {
+			slog.Error("failed to revoke sessions for deactivated user", "user_id", id, "error", err)
+		}
+	}
 
 	details, _ := json.Marshal(map[string]string{"email": user.Email})
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "user", id.String(), "user_updated", details)
