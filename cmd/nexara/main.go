@@ -36,16 +36,16 @@ func main() {
 		return
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
-
-	// Load configuration.
+	// Load configuration first so we can apply LOG_LEVEL to the logger.
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: cfg.SlogLevel(),
+	}))
+	slog.SetDefault(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

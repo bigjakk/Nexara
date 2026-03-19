@@ -193,13 +193,18 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		)
 	}
 
-	// Snapshot current VM statuses so we can detect changes after sync.
-	var oldStatuses map[int32]string
+	// Snapshot current VM statuses and node assignments so we can detect
+	// changes after sync (status transitions, VM migrations, additions/removals).
+	type vmSnapshot struct {
+		Status string
+		NodeID uuid.UUID
+	}
+	var oldVMs map[int32]vmSnapshot
 	if s.eventPub != nil {
 		if rows, err := s.queries.ListVMStatusesByCluster(ctx, cluster.ID); err == nil {
-			oldStatuses = make(map[int32]string, len(rows))
+			oldVMs = make(map[int32]vmSnapshot, len(rows))
 			for _, r := range rows {
-				oldStatuses[r.Vmid] = r.Status
+				oldVMs[r.Vmid] = vmSnapshot{Status: r.Status, NodeID: r.NodeID}
 			}
 		}
 	}
@@ -251,16 +256,21 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		}
 	}
 
-	// Check for VM status changes and notify the frontend.
+	// Check for VM changes (status, node assignment, additions/removals).
 	inventoryChanged := false
-	if s.eventPub != nil && oldStatuses != nil {
+	if s.eventPub != nil && oldVMs != nil {
 		if newRows, err := s.queries.ListVMStatusesByCluster(ctx, cluster.ID); err == nil {
-			// Detect status changes for existing VMs.
 			for _, r := range newRows {
-				if old, ok := oldStatuses[r.Vmid]; ok && old != r.Status {
+				old, existed := oldVMs[r.Vmid]
+				if !existed {
+					// New VM appeared.
+					inventoryChanged = true
+					continue
+				}
+				if old.Status != r.Status {
 					s.logger.Info("VM status changed during sync",
 						"vmid", r.Vmid,
-						"old_status", old,
+						"old_status", old.Status,
 						"new_status", r.Status,
 						"cluster_id", cluster.ID,
 					)
@@ -268,9 +278,16 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 						events.KindVMStateChange, "vm", r.ID.String(), "status_sync")
 					inventoryChanged = true
 				}
+				if old.NodeID != r.NodeID {
+					s.logger.Info("VM moved to different node during sync",
+						"vmid", r.Vmid,
+						"cluster_id", cluster.ID,
+					)
+					inventoryChanged = true
+				}
 			}
-			// Detect VMs added or removed.
-			if len(newRows) != len(oldStatuses) {
+			// Detect VMs removed.
+			if len(newRows) != len(oldVMs) {
 				inventoryChanged = true
 			}
 		}
@@ -531,8 +548,13 @@ type cephCollectionResult struct {
 func (s *Syncer) syncCeph(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID, nodeName string) *cephCollectionResult {
 	status, err := client.GetCephStatus(ctx, nodeName)
 	if err != nil {
-		// Ceph not installed or not configured — skip silently for 404.
-		if errors.Is(err, proxmox.ErrNotFound) {
+		// Ceph not installed or not configured — skip silently.
+		// Proxmox returns 404 when ceph is not configured, and 500
+		// with "binary not installed" when ceph-mon is not present.
+		errMsg := err.Error()
+		if errors.Is(err, proxmox.ErrNotFound) ||
+			strings.Contains(errMsg, "binary not installed") ||
+			strings.Contains(errMsg, "ceph-mon") {
 			return nil
 		}
 		s.logger.Warn("failed to get ceph status",

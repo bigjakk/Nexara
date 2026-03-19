@@ -39,7 +39,7 @@ SELECT * FROM vms WHERE id = $1 AND type = 'lxc';
 UPDATE vms SET status = $2, updated_at = now() WHERE id = $1;
 
 -- name: ListVMStatusesByCluster :many
-SELECT id, vmid, status FROM vms WHERE cluster_id = $1;
+SELECT id, vmid, node_id, status FROM vms WHERE cluster_id = $1;
 
 -- name: ListAllVMs :many
 SELECT v.*, c.name AS cluster_name

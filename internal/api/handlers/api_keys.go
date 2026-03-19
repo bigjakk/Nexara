@@ -95,6 +95,12 @@ func textPtr(t pgtype.Text) *string {
 
 // Create handles POST /api/v1/api-keys.
 func (h *APIKeyHandler) Create(c *fiber.Ctx) error {
+	// API keys cannot create new API keys — require an interactive JWT session.
+	// This prevents key self-replication if a key is compromised.
+	if authMethod, _ := c.Locals("auth_method").(string); authMethod == "api_key" {
+		return fiber.NewError(fiber.StatusForbidden, "API keys cannot be created using API key authentication; use an interactive login session")
+	}
+
 	if err := requirePerm(c, "manage", "api_key"); err != nil {
 		return err
 	}

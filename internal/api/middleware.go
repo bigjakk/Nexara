@@ -191,6 +191,9 @@ func (s *Server) authenticateAPIKey(c *fiber.Ctx, token string) error {
 	// Update last_used asynchronously to avoid adding latency.
 	keyID := row.ID
 	ip := c.IP()
+	if len(ip) > 45 { // max IPv6 length
+		ip = ip[:45]
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

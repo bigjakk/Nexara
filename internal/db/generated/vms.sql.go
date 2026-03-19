@@ -235,12 +235,13 @@ func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UU
 }
 
 const listVMStatusesByCluster = `-- name: ListVMStatusesByCluster :many
-SELECT id, vmid, status FROM vms WHERE cluster_id = $1
+SELECT id, vmid, node_id, status FROM vms WHERE cluster_id = $1
 `
 
 type ListVMStatusesByClusterRow struct {
 	ID     uuid.UUID `json:"id"`
 	Vmid   int32     `json:"vmid"`
+	NodeID uuid.UUID `json:"node_id"`
 	Status string    `json:"status"`
 }
 
@@ -253,7 +254,12 @@ func (q *Queries) ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UU
 	items := []ListVMStatusesByClusterRow{}
 	for rows.Next() {
 		var i ListVMStatusesByClusterRow
-		if err := rows.Scan(&i.ID, &i.Vmid, &i.Status); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.Vmid,
+			&i.NodeID,
+			&i.Status,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
@@ -36,6 +37,21 @@ type Config struct {
 // NewMetricsTicker creates a time.Ticker using the configured metrics collection interval.
 func (c *Config) NewMetricsTicker() *time.Ticker {
 	return time.NewTicker(c.MetricsCollectInterval)
+}
+
+// SlogLevel parses the configured LOG_LEVEL string into a slog.Level.
+// Supported values: debug, info, warn, error. Defaults to info.
+func (c *Config) SlogLevel() slog.Level {
+	switch strings.ToLower(c.LogLevel) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 // Load reads configuration from environment variables, auto-generates

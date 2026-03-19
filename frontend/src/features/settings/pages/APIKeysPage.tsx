@@ -71,9 +71,9 @@ const EXPIRY_LABELS: Record<ExpiryOption, string> = {
   "365": "1 year",
 };
 
-function getExpiryDays(option: ExpiryOption): number | undefined {
+function getExpirySeconds(option: ExpiryOption): number | undefined {
   if (option === "never") return undefined;
-  return Number(option);
+  return Number(option) * 86400; // days to seconds
 }
 
 function getKeyStatus(key: { is_revoked: boolean; expires_at: string | null }): {
@@ -128,7 +128,7 @@ export function APIKeysPage() {
     try {
       const res = await createMutation.mutateAsync({
         name: keyName.trim(),
-        expires_in: getExpiryDays(expiry),
+        expires_in: getExpirySeconds(expiry),
       });
       setCreatedKey(res.key);
       setCreateDialogOpen(false);
