@@ -148,6 +148,9 @@ Returns the application version, commit hash, and build time.
 | POST | `/auth/refresh` | Refresh access token |
 | POST | `/auth/logout` | Logout (invalidate tokens) |
 | POST | `/auth/logout-all` | Logout all sessions |
+| GET | `/auth/me` | Get current user profile |
+| PUT | `/auth/profile` | Update user profile |
+| POST | `/auth/change-password` | Change password |
 | GET | `/auth/setup-status` | Check if initial registration is needed |
 | GET | `/auth/sso-status` | Check if OIDC/SSO is configured |
 | GET | `/auth/oidc/authorize` | Start OIDC authorization flow |
@@ -197,6 +200,9 @@ Returns the application version, commit hash, and build time.
 | GET | `/clusters/:id/nodes/:node/cpu-models` | List available CPU models |
 | GET | `/clusters/:id/nodes/:node/isos` | List ISO images |
 | GET | `/clusters/:id/nodes/:node/packages` | Preview available package updates |
+| GET | `/clusters/:id/nodes/:node_id/disks` | List node disks (model, size, health, wearout) |
+| GET | `/clusters/:id/nodes/:node_id/network-interfaces` | List node network interfaces |
+| GET | `/clusters/:id/nodes/:node_id/pci-devices` | List node PCI devices |
 
 ### Virtual Machines
 
@@ -242,7 +248,9 @@ Returns the application version, commit hash, and build time.
 | POST | `/clusters/:id/containers/:ct_id/snapshots` | Create a snapshot |
 | DELETE | `/clusters/:id/containers/:ct_id/snapshots/:name` | Delete a snapshot |
 | POST | `/clusters/:id/containers/:ct_id/snapshots/:name/rollback` | Rollback to snapshot |
+| GET | `/clusters/:id/containers/:ct_id/config` | Get container configuration |
 | PUT | `/clusters/:id/containers/:ct_id/config` | Update container config |
+| POST | `/clusters/:id/containers/:ct_id/disks/resize` | Resize a container disk |
 | POST | `/clusters/:id/containers/:ct_id/volumes/move` | Move a volume |
 
 ### Storage
@@ -702,27 +710,56 @@ Returns the application version, commit hash, and build time.
 | PUT | `/settings/:key` | Create/update a setting |
 | DELETE | `/settings/:key` | Delete a setting |
 
+### API Keys
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api-keys` | Create an API key |
+| GET | `/api-keys` | List your API keys |
+| DELETE | `/api-keys/:id` | Revoke an API key |
+| DELETE | `/api-keys` | Revoke all your API keys |
+| GET | `/admin/api-keys` | Admin: list all API keys |
+| DELETE | `/admin/api-keys/:id` | Admin: revoke any API key |
+
 ### Search
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/search` | Global search across clusters, VMs, nodes, storage |
 
+### API Documentation
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api-docs` | Get API documentation |
+
 ## WebSocket
 
-The WebSocket server runs on the same port as the API and provides:
+The WebSocket server runs on the same port as the API and provides real-time data streaming and console access.
 
-- **Real-time metrics** — CPU, memory, disk, network metrics streamed per cluster
-- **Event notifications** — inventory changes, VM state changes, alerts, task completions
-- **Console sessions** — VNC and serial terminal connections proxied to Proxmox
+| Path | Description |
+|------|-------------|
+| `/ws` | Metric and event subscription hub |
+| `/ws/console` | Serial console proxy (xterm.js) |
+| `/ws/vnc` | VNC console proxy (noVNC) |
 
-Connect with:
+All WebSocket connections require authentication via query parameter:
 ```
 ws://localhost:8080/ws?token=<access_token>
 ```
 
-Subscribe to channels by sending JSON messages:
+### Subscribing to channels
+
+Send JSON messages to subscribe to real-time data:
 ```json
 {"action": "subscribe", "channel": "metrics:cluster:<cluster_id>"}
 {"action": "subscribe", "channel": "events:cluster:<cluster_id>"}
+```
+
+### Console connections
+
+VNC and serial console WebSocket connections proxy directly to Proxmox. Pass the cluster ID, node, VM ID, and console type as query parameters:
+```
+ws://localhost:8080/ws/vnc?token=<access_token>&cluster=<id>&node=<node>&vmid=<vmid>
+ws://localhost:8080/ws/console?token=<access_token>&cluster=<id>&node=<node>&vmid=<vmid>
 ```

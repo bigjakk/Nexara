@@ -82,6 +82,9 @@ All configuration is via environment variables in `.env`:
 | `ENCRYPTION_KEY` | No | auto-generated | 32-byte hex key for AES-256-GCM encryption of secrets at rest |
 | `METRICS_COLLECT_INTERVAL` | No | `10s` | How often metrics are collected from Proxmox |
 | `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `PUID` | No | `1000` | User ID for the container process and data directory |
+| `PGID` | No | `1000` | Group ID for the container process and data directory |
+| `DATA_DIR` | No | Docker volume | Custom data path for secrets, branding, uploads (e.g. NFS mount) |
 
 ## First-Time Setup
 
@@ -201,7 +204,7 @@ docker compose ps
 
 ### "JWT_SECRET must be set" or "ENCRYPTION_KEY must be set"
 
-You need to generate secrets before starting. See [Configure Environment](#2-configure-environment) above.
+Secrets are auto-generated on first start and persisted to `DATA_DIR/.secrets.json`. If you see this error, check that the data volume is writable. If you prefer to manage secrets externally, set `JWT_SECRET` and `ENCRYPTION_KEY` in `.env` — they take precedence over the auto-generated file.
 
 ### Database connection refused
 

@@ -277,33 +277,6 @@ nexara.example.com {
 | [Installation Guide](docs/installation.md) | Setup, configuration, backup, troubleshooting |
 | [Admin Guide](docs/admin-guide.md) | Cluster, user, RBAC, auth, alert management |
 | [API Reference](docs/api-reference.md) | REST API endpoints with examples |
-| [Contributing](docs/contributing.md) | Development setup, conventions, PR process |
-| [Security Policy](SECURITY.md) | Vulnerability reporting |
-
----
-
-## Contributing
-
-Contributions welcome! See [docs/contributing.md](docs/contributing.md) for guidelines.
-
-```bash
-make build          # Build Go binary
-make test           # Run tests
-make lint           # Run linters
-make generate       # Regenerate sqlc + oapi-codegen
-make docker-up      # Start full stack locally
-```
-
----
-
-## CI/CD
-
-Every push runs Go lint/test/build, frontend typecheck/lint/test/build, and Docker build validation. Pushing a `v*` tag builds and publishes to `ghcr.io/bigjakk/nexara` with auto-generated release notes.
-
-```bash
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin v1.0.0
-```
 
 ---
 
