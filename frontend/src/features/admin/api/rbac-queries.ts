@@ -106,6 +106,7 @@ export function useAssignRole() {
       void qc.invalidateQueries({
         queryKey: ["rbac", "user-roles", vars.userId],
       });
+      void qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });
 }
@@ -127,6 +128,7 @@ export function useRevokeRole() {
       void qc.invalidateQueries({
         queryKey: ["rbac", "user-roles", vars.userId],
       });
+      void qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },
   });
 }

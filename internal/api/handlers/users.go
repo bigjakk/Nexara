@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"strings"
 	"errors"
 	"log/slog"
 
@@ -38,6 +39,7 @@ type userListResponse struct {
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
 	Role        string    `json:"role"`
+	Roles       []string  `json:"roles"`
 	IsActive    bool      `json:"is_active"`
 	AuthSource  string    `json:"auth_source"`
 	TotpEnabled bool      `json:"totp_enabled"`
@@ -64,11 +66,19 @@ func (h *UserHandler) List(c *fiber.Ctx) error {
 
 	resp := make([]userListResponse, len(users))
 	for i, u := range users {
+		var roles []string
+		if rbacStr, ok := u.RbacRoles.(string); ok && rbacStr != "" {
+			roles = strings.Split(rbacStr, ", ")
+		}
+		if roles == nil {
+			roles = []string{}
+		}
 		resp[i] = userListResponse{
 			ID:          u.ID,
 			Email:       u.Email,
 			DisplayName: u.DisplayName,
 			Role:        u.Role,
+			Roles:       roles,
 			IsActive:    u.IsActive,
 			AuthSource:  u.AuthSource,
 			TotpEnabled: u.TotpEnabled,

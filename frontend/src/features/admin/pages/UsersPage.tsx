@@ -60,7 +60,7 @@ export function UsersPage() {
             <TableHead>Display Name</TableHead>
             <TableHead>Source</TableHead>
             <TableHead>2FA</TableHead>
-            <TableHead>Legacy Role</TableHead>
+            <TableHead>Roles</TableHead>
             <TableHead>Active</TableHead>
             <TableHead>Created</TableHead>
             <TableHead className="w-32">Actions</TableHead>
@@ -87,9 +87,17 @@ export function UsersPage() {
                 )}
               </TableCell>
               <TableCell>
-                <Badge variant={user.role === "admin" ? "default" : "secondary"}>
-                  {user.role}
-                </Badge>
+                <div className="flex flex-wrap gap-1">
+                  {user.roles.length > 0 ? (
+                    user.roles.map((roleName) => (
+                      <Badge key={roleName} variant={roleName === "Admin" ? "default" : "secondary"}>
+                        {roleName}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">No roles</span>
+                  )}
+                </div>
               </TableCell>
               <TableCell>
                 <Switch

@@ -449,22 +449,27 @@ func (q *Queries) ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUs
 
 const listUsersWithRoles = `-- name: ListUsersWithRoles :many
 SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source,
-       (u.totp_secret IS NOT NULL)::bool AS totp_enabled
+       (u.totp_secret IS NOT NULL)::bool AS totp_enabled,
+       COALESCE(string_agg(DISTINCT r.name, ', ' ORDER BY r.name), '') AS rbac_roles
 FROM users u
+LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.scope_type = 'global'
+LEFT JOIN roles r ON r.id = ur.role_id
 WHERE u.id != '00000000-0000-0000-0000-000000000000'
+GROUP BY u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source, u.totp_secret
 ORDER BY u.created_at DESC
 `
 
 type ListUsersWithRolesRow struct {
-	ID          uuid.UUID `json:"id"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name"`
-	Role        string    `json:"role"`
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	AuthSource  string    `json:"auth_source"`
-	TotpEnabled bool      `json:"totp_enabled"`
+	ID          uuid.UUID   `json:"id"`
+	Email       string      `json:"email"`
+	DisplayName string      `json:"display_name"`
+	Role        string      `json:"role"`
+	IsActive    bool        `json:"is_active"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+	AuthSource  string      `json:"auth_source"`
+	TotpEnabled bool        `json:"totp_enabled"`
+	RbacRoles   interface{} `json:"rbac_roles"`
 }
 
 func (q *Queries) ListUsersWithRoles(ctx context.Context) ([]ListUsersWithRolesRow, error) {
@@ -486,6 +491,7 @@ func (q *Queries) ListUsersWithRoles(ctx context.Context) ([]ListUsersWithRolesR
 			&i.UpdatedAt,
 			&i.AuthSource,
 			&i.TotpEnabled,
+			&i.RbacRoles,
 		); err != nil {
 			return nil, err
 		}

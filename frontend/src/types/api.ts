@@ -48,6 +48,7 @@ export interface UserListItem {
   email: string;
   display_name: string;
   role: string;
+  roles: string[];
   is_active: boolean;
   auth_source: "local" | "ldap" | "oidc";
   totp_enabled: boolean;

@@ -7,6 +7,7 @@
   "source": "Source",
   "twoFA": "2FA",
   "legacyRole": "Legacy Role",
+  "rbacRoles": "Roles",
   "local": "Local",
   "ldap": "LDAP",
   "oidc": "OIDC",

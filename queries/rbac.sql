@@ -102,9 +102,13 @@ SELECT DISTINCT user_id FROM user_roles WHERE role_id = $1;
 
 -- name: ListUsersWithRoles :many
 SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source,
-       (u.totp_secret IS NOT NULL)::bool AS totp_enabled
+       (u.totp_secret IS NOT NULL)::bool AS totp_enabled,
+       COALESCE(string_agg(DISTINCT r.name, ', ' ORDER BY r.name), '') AS rbac_roles
 FROM users u
+LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.scope_type = 'global'
+LEFT JOIN roles r ON r.id = ur.role_id
 WHERE u.id != '00000000-0000-0000-0000-000000000000'
+GROUP BY u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source, u.totp_secret
 ORDER BY u.created_at DESC;
 
 -- name: UpdateUserProfile :one
