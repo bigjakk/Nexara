@@ -14,8 +14,6 @@
 
 Manage multiple Proxmox clusters from a single pane of glass. Real-time dashboards, granular RBAC, automated operations, enterprise security — all in a single Docker container.
 
-<!-- Add your screenshots to docs/screenshots/ and uncomment the lines below.
-
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="80%">
 </p>
@@ -38,8 +36,6 @@ Manage multiple Proxmox clusters from a single pane of glass. Real-time dashboar
   </tr>
 </table>
 </details>
-
--->
 
 ---
 
