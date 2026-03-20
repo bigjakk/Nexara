@@ -74,7 +74,14 @@ export function RegisterPage() {
     apiClient
       .getPublic<SetupStatus>("/api/v1/auth/setup-status")
       .then((status) => {
-        if (!cancelled) setIsFirstRun(status.needs_setup);
+        if (!cancelled) {
+          if (!status.needs_setup) {
+            // Setup already completed - registration is admin-only via the Users page
+            void navigate("/login", { replace: true });
+            return;
+          }
+          setIsFirstRun(status.needs_setup);
+        }
       })
       .catch(() => {
         if (!cancelled) setIsFirstRun(null);
@@ -82,7 +89,7 @@ export function RegisterPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [navigate]);
 
   const onSubmit = async (data: RegisterFormValues) => {
     setError("");

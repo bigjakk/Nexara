@@ -52,6 +52,7 @@ export function LoginPage() {
   } = useAuth();
   const [error, setError] = useState("");
   const [checkingSetup, setCheckingSetup] = useState(true);
+  const [needsSetup, setNeedsSetup] = useState(false);
   const [ssoStatus, setSSOStatus] = useState<SSOStatus | null>(null);
   const [ssoLoading, setSSOLoading] = useState(false);
   const [totpCode, setTotpCode] = useState("");
@@ -80,8 +81,11 @@ export function LoginPage() {
     apiClient
       .getPublic<SetupStatus>("/api/v1/auth/setup-status")
       .then((status) => {
-        if (!cancelled && status.needs_setup) {
-          void navigate("/register", { replace: true });
+        if (!cancelled) {
+          setNeedsSetup(status.needs_setup);
+          if (status.needs_setup) {
+            void navigate("/register", { replace: true });
+          }
         }
       })
       .catch(() => {
@@ -345,15 +349,17 @@ export function LoginPage() {
                 </Button>
               </>
             )}
-            <p className="text-center text-sm text-muted-foreground">
-              {t("firstTime")}{" "}
-              <Link
-                to="/register"
-                className="font-medium text-primary underline-offset-4 hover:underline"
-              >
-                {t("createAdminAccount")}
-              </Link>
-            </p>
+            {needsSetup && (
+              <p className="text-center text-sm text-muted-foreground">
+                {t("firstTime")}{" "}
+                <Link
+                  to="/register"
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  {t("createAdminAccount")}
+                </Link>
+              </p>
+            )}
           </CardFooter>
         </form>
       </Card>
