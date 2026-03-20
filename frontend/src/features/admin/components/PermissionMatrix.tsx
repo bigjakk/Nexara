@@ -55,8 +55,8 @@ export function PermissionMatrix({
   };
 
   return (
-    <div className="rounded-md border overflow-auto">
-      <table className="w-full text-sm">
+    <div className="rounded-md border">
+      <table className="text-sm">
         <thead>
           <tr className="border-b bg-muted/50">
             <th className="px-3 py-2 text-left font-medium">

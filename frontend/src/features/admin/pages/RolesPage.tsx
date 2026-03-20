@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Table,
   TableBody,
@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import {
   useRoles,
+  useRole,
   useCreateRole,
   useUpdateRole,
   useDeleteRole,
@@ -42,6 +43,15 @@ export function RolesPage() {
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [selectedPermIds, setSelectedPermIds] = useState<string[]>([]);
+
+  // Fetch full role details (including permissions) when editing
+  const { data: editRoleDetail } = useRole(editRole?.id ?? "");
+
+  useEffect(() => {
+    if (editRoleDetail?.permissions) {
+      setSelectedPermIds(editRoleDetail.permissions.map((p) => p.id));
+    }
+  }, [editRoleDetail]);
 
   const openCreate = () => {
     setFormName("");
@@ -172,7 +182,7 @@ export function RolesPage() {
           }
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-[90vw] w-fit max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editRole ? `Edit Role: ${editRole.name}` : "Create Role"}
