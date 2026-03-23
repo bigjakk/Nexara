@@ -37,8 +37,6 @@ services:
     depends_on:
       nexara:
         condition: service_healthy
-    networks:
-      - backend
     restart: unless-stopped
 
 volumes:
