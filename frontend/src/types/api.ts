@@ -768,10 +768,10 @@ export interface CreateAPIKeyResponse {
 // APT Repository types from Proxmox GET /nodes/{node}/apt/repositories
 export interface AptRepositoryResponse {
   digest: string;
-  files: AptRepositoryFile[];
-  infos: AptRepositoryInfo[];
-  "standard-repos": AptStandardRepo[];
-  errors: AptRepositoryError[];
+  files: AptRepositoryFile[] | null;
+  infos: AptRepositoryInfo[] | null;
+  "standard-repos": AptStandardRepo[] | null;
+  errors: AptRepositoryError[] | null;
 }
 
 export interface AptRepositoryFile {
@@ -781,11 +781,11 @@ export interface AptRepositoryFile {
 }
 
 export interface AptRepository {
-  Types: string[];
-  URIs: string[];
-  Suites: string[];
-  Components: string[];
-  Options: AptRepoOption[];
+  Types: string[] | null;
+  URIs: string[] | null;
+  Suites: string[] | null;
+  Components: string[] | null;
+  Options: AptRepoOption[] | null;
   Comment: string;
   Enabled: number;
   FileType: string;
