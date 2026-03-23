@@ -2,12 +2,34 @@ import { useState } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Terminal, Cpu, MemoryStick, HardDrive, Info,
-  Network, CircuitBoard, Globe,
+  Network, CircuitBoard, Globe, Trash2, RotateCcw, Check,
+  Pencil, Power, RefreshCw, Cog, FileText, Play, Square, RotateCw,
+  ArrowRightLeft, Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
 import { useNodeHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
@@ -15,9 +37,47 @@ import { useClusterMetrics } from "@/hooks/useMetrics";
 import {
   useClusterNodes,
   useNodeDisks,
-  useNodeNetworkInterfaces,
   useNodePCIDevices,
+  useNodeDNS,
+  useSetNodeDNS,
+  useSetNodeTimezone,
+  useShutdownNode,
+  useRebootNode,
+  useDiskSMART,
+  useNodeZFSPools,
+  useNodeLVM,
+  useNodeLVMThin,
+  useInitializeGPT,
+  useWipeDisk,
+  type ZFSPoolResponse,
+  type LVMVolumeGroupResponse,
+  type LVMThinPoolResponse,
+  type DirectoryEntryResponse,
+  type LiveDiskResponse,
+  useLiveDisks,
+  useCreateZFSPool,
+  useCreateLVM,
+  useCreateLVMThin,
+  useNodeDirectories,
+  useCreateDirectory,
+  useNodeServices,
+  useServiceAction,
+  useNodeSyslog,
+  useNodeFirewallRules,
+  useCreateNodeFirewallRule,
+  useDeleteNodeFirewallRule,
+  useNodeFirewallLog,
+  useMigrateAllGuests,
 } from "../api/cluster-queries";
+import {
+  useNodeNetworkInterfaces as useNodeNetworkInterfacesLive,
+  useDeleteNetworkInterface,
+  useUpdateNetworkInterface,
+  useApplyNetworkConfig,
+  useRevertNetworkConfig,
+} from "@/features/networks/api/network-queries";
+import type { UpdateNetworkInterfaceRequest } from "@/features/networks/types/network";
+import { CreateInterfaceDialog } from "@/features/networks/components/CreateInterfaceDialog";
 import { useConsoleStore } from "@/stores/console-store";
 import { NodeAptRepositories } from "../components/NodeAptRepositories";
 import { formatBytes, formatUptime } from "@/lib/format";
@@ -99,15 +159,18 @@ export function NodeDetailPage() {
           </p>
         </div>
         {node.status === "online" && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={openShell}
-          >
-            <Terminal className="h-4 w-4" />
-            Shell
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={openShell}
+            >
+              <Terminal className="h-4 w-4" />
+              Shell
+            </Button>
+            <NodePowerActions clusterId={clusterId} nodeName={node.name} />
+          </div>
         )}
       </div>
 
@@ -117,6 +180,9 @@ export function NodeDetailPage() {
           <TabsTrigger value="summary">Summary</TabsTrigger>
           <TabsTrigger value="network">Network</TabsTrigger>
           <TabsTrigger value="disks">Disks</TabsTrigger>
+          <TabsTrigger value="services">Services</TabsTrigger>
+          <TabsTrigger value="firewall">Firewall</TabsTrigger>
+          <TabsTrigger value="syslog">Syslog</TabsTrigger>
           <TabsTrigger value="pci">PCI Devices</TabsTrigger>
           <TabsTrigger value="updates">Updates</TabsTrigger>
         </TabsList>
@@ -146,7 +212,7 @@ export function NodeDetailPage() {
                 { label: "Swap Used", value: node.swap_total ? `${formatBytes(node.swap_used)} (${swapPercent ?? "0"}%)` : "--" },
               ]}
             />
-            <HardwareSection
+            <HardwareSectionWithAction
               icon={<Info className="h-4 w-4" />}
               title="System"
               items={[
@@ -157,8 +223,13 @@ export function NodeDetailPage() {
                 { label: "I/O Wait", value: node.io_wait > 0 ? `${(node.io_wait * 100).toFixed(1)}%` : "--" },
                 { label: "Timezone", value: node.timezone || "--" },
               ]}
+              action={
+                node.status === "online" ? (
+                  <EditTimezoneDialog clusterId={clusterId} nodeName={node.name} currentTimezone={node.timezone} />
+                ) : undefined
+              }
             />
-            <HardwareSection
+            <HardwareSectionWithAction
               icon={<Globe className="h-4 w-4" />}
               title="Network & DNS"
               items={[
@@ -168,6 +239,11 @@ export function NodeDetailPage() {
                   { label: "Subscription", value: `${node.subscription_status}${node.subscription_level ? ` (${node.subscription_level})` : ""}` },
                 ] : []),
               ]}
+              action={
+                node.status === "online" ? (
+                  <EditDNSDialog clusterId={clusterId} nodeName={node.name} />
+                ) : undefined
+              }
             />
           </div>
 
@@ -181,12 +257,39 @@ export function NodeDetailPage() {
 
         {/* Network Tab */}
         <TabsContent value="network" className="mt-4">
-          <NetworkTab clusterId={clusterId} nodeId={nodeId} />
+          <NetworkTab clusterId={clusterId} nodeName={node.name} />
         </TabsContent>
 
         {/* Disks Tab */}
         <TabsContent value="disks" className="mt-4">
-          <DisksTab clusterId={clusterId} nodeId={nodeId} />
+          <DisksTab clusterId={clusterId} nodeId={nodeId} nodeName={node.name} isOnline={node.status === "online"} />
+        </TabsContent>
+
+        {/* Services Tab */}
+        <TabsContent value="services" className="mt-4">
+          {node.status === "online" ? (
+            <ServicesTab clusterId={clusterId} nodeName={node.name} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Node must be online to view services.</p>
+          )}
+        </TabsContent>
+
+        {/* Firewall Tab */}
+        <TabsContent value="firewall" className="mt-4">
+          {node.status === "online" ? (
+            <FirewallTab clusterId={clusterId} nodeName={node.name} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Node must be online to manage firewall.</p>
+          )}
+        </TabsContent>
+
+        {/* Syslog Tab */}
+        <TabsContent value="syslog" className="mt-4">
+          {node.status === "online" ? (
+            <SyslogTab clusterId={clusterId} nodeName={node.name} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Node must be online to view syslog.</p>
+          )}
         </TabsContent>
 
         {/* PCI Devices Tab */}
@@ -213,48 +316,914 @@ export function NodeDetailPage() {
 /* Tab content components                                             */
 /* ------------------------------------------------------------------ */
 
-function NetworkTab({ clusterId, nodeId }: { clusterId: string; nodeId: string }) {
-  const { data: networkInterfaces, isLoading } = useNodeNetworkInterfaces(clusterId, nodeId);
+function NetworkTab({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const { data: networkInterfaces, isLoading } = useNodeNetworkInterfacesLive(clusterId, nodeName);
+  const deleteIface = useDeleteNetworkInterface(clusterId, nodeName);
+  const updateIface = useUpdateNetworkInterface(clusterId, nodeName);
+  const apply = useApplyNetworkConfig(clusterId, nodeName);
+  const revert = useRevertNetworkConfig(clusterId, nodeName);
+  const [editIface, setEditIface] = useState<string | null>(null);
+  const [editCidr, setEditCidr] = useState("");
+  const [editGateway, setEditGateway] = useState("");
+  const [editBridgePorts, setEditBridgePorts] = useState("");
 
   if (isLoading) return <Skeleton className="h-48 w-full" />;
 
-  if (!networkInterfaces || networkInterfaces.length === 0) {
-    return <p className="text-sm text-muted-foreground">No network interfaces found.</p>;
+  const openEdit = (iface: { iface: string; type: string; cidr?: string; address?: string; gateway?: string; bridge_ports?: string }) => {
+    setEditIface(iface.iface);
+    setEditCidr(iface.cidr ?? iface.address ?? "");
+    setEditGateway(iface.gateway ?? "");
+    setEditBridgePorts(iface.bridge_ports ?? "");
+  };
+
+  const saveEdit = (ifaceName: string, ifaceType: string) => {
+    const params: UpdateNetworkInterfaceRequest = { type: ifaceType };
+    if (editCidr) params.cidr = editCidr;
+    if (editGateway) params.gateway = editGateway;
+    if (editBridgePorts) params.bridge_ports = editBridgePorts;
+    updateIface.mutate(
+      { iface: ifaceName, params },
+      { onSuccess: () => { setEditIface(null); } },
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Network className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Network Interfaces</h2>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { revert.mutate(); }}
+            disabled={revert.isPending}
+          >
+            <RotateCcw className="mr-1 h-4 w-4" />
+            Revert
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { apply.mutate(); }}
+            disabled={apply.isPending}
+          >
+            <Check className="mr-1 h-4 w-4" />
+            Apply Config
+          </Button>
+          <CreateInterfaceDialog clusterId={clusterId} nodeName={nodeName} />
+        </div>
+      </div>
+
+      {!networkInterfaces || networkInterfaces.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No network interfaces found.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Interface</th>
+                <th className="px-3 py-2 text-left font-medium">Type</th>
+                <th className="px-3 py-2 text-left font-medium">Active</th>
+                <th className="px-3 py-2 text-left font-medium">Address / CIDR</th>
+                <th className="px-3 py-2 text-left font-medium">Gateway</th>
+                <th className="px-3 py-2 text-left font-medium">Bridge Ports</th>
+                <th className="w-20 px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {networkInterfaces.map((iface) => (
+                editIface === iface.iface ? (
+                  <tr key={iface.iface} className="bg-muted/20">
+                    <td className="px-3 py-2 font-mono text-xs">{iface.iface}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className="text-xs">{iface.type}</Badge>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge variant={iface.active ? "default" : "secondary"} className="text-xs">
+                        {iface.active ? "up" : "down"}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input className="h-7 text-xs font-mono" value={editCidr} onChange={(e) => { setEditCidr(e.target.value); }} placeholder="CIDR" />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input className="h-7 text-xs font-mono" value={editGateway} onChange={(e) => { setEditGateway(e.target.value); }} placeholder="Gateway" />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input className="h-7 text-xs" value={editBridgePorts} onChange={(e) => { setEditBridgePorts(e.target.value); }} placeholder="Bridge ports" />
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { saveEdit(iface.iface, iface.type); }} disabled={updateIface.isPending}>
+                          <Check className="h-3.5 w-3.5 text-green-600" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditIface(null); }}>
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={iface.iface} className="hover:bg-muted/30">
+                    <td className="px-3 py-2 font-mono text-xs">{iface.iface}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className="text-xs">{iface.type}</Badge>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge variant={iface.active ? "default" : "secondary"} className="text-xs">
+                        {iface.active ? "up" : "down"}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">{iface.cidr || iface.address || "--"}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{iface.gateway || "--"}</td>
+                    <td className="px-3 py-2 text-xs">{iface.bridge_ports || "--"}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { openEdit(iface); }}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { deleteIface.mutate(iface.iface); }} disabled={deleteIface.isPending}>
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DisksTab({ clusterId, nodeId, nodeName, isOnline }: { clusterId: string; nodeId: string; nodeName: string; isOnline: boolean }) {
+  const { data: disks, isLoading } = useNodeDisks(clusterId, nodeId);
+  const [smartDisk, setSmartDisk] = useState<string | null>(null);
+  const initGPT = useInitializeGPT(clusterId, nodeName);
+  const wipeDisk = useWipeDisk(clusterId, nodeName);
+
+  return (
+    <div className="space-y-6">
+      {/* Physical Disks */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <HardDrive className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Physical Disks</h2>
+        </div>
+        {isLoading ? <Skeleton className="h-48 w-full" /> : !disks || disks.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No physical disks found.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Device</th>
+                  <th className="px-3 py-2 text-left font-medium">Model</th>
+                  <th className="px-3 py-2 text-left font-medium">Serial</th>
+                  <th className="px-3 py-2 text-left font-medium">Size</th>
+                  <th className="px-3 py-2 text-left font-medium">Type</th>
+                  <th className="px-3 py-2 text-left font-medium">Health</th>
+                  <th className="px-3 py-2 text-left font-medium">Wearout</th>
+                  {isOnline && <th className="w-28 px-3 py-2 text-left font-medium">Actions</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {disks.map((d) => (
+                  <tr key={d.id} className="hover:bg-muted/30">
+                    <td className="px-3 py-2 font-mono text-xs">
+                      <button
+                        type="button"
+                        className="text-primary underline-offset-4 hover:underline"
+                        onClick={() => { setSmartDisk(smartDisk === d.dev_path ? null : d.dev_path); }}
+                      >
+                        {d.dev_path}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2">{d.model || "--"}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{d.serial || "--"}</td>
+                    <td className="px-3 py-2">{formatBytes(d.size)}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="outline" className="text-xs">
+                        {d.disk_type.toUpperCase() || "unknown"}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge variant={d.health === "PASSED" ? "default" : "destructive"} className="text-xs">
+                        {d.health || "unknown"}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2">{d.wearout && d.wearout !== "N/A" ? d.wearout : "--"}</td>
+                    {isOnline && (
+                      <td className="px-3 py-2">
+                        <div className="flex gap-1">
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm" className="h-7 text-xs">Init GPT</Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Initialize {d.dev_path} with GPT?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will create a new GPT partition table on the disk. All existing data will be lost.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => { initGPT.mutate(d.dev_path); }}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Initialize
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="outline" size="sm" className="h-7 text-xs">Wipe</Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Wipe {d.dev_path}?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will wipe all data from the disk. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => { wipeDisk.mutate(d.dev_path); }}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Wipe
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* SMART detail panel */}
+        {smartDisk && isOnline && (
+          <DiskSMARTPanel clusterId={clusterId} nodeName={nodeName} disk={smartDisk} />
+        )}
+      </div>
+
+      {/* ZFS / LVM / LVM-Thin / Directory sections (only when online) */}
+      {isOnline && (
+        <>
+          <ZFSPoolsSection clusterId={clusterId} nodeName={nodeName} />
+          <LVMSection clusterId={clusterId} nodeName={nodeName} />
+          <LVMThinSection clusterId={clusterId} nodeName={nodeName} />
+          <DirectorySection clusterId={clusterId} nodeName={nodeName} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function DiskSMARTPanel({ clusterId, nodeName, disk }: { clusterId: string; nodeName: string; disk: string }) {
+  const { data: smart, isLoading } = useDiskSMART(clusterId, nodeName, disk);
+
+  if (isLoading) return <Skeleton className="h-24 w-full" />;
+  if (!smart) return null;
+
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">S.M.A.R.T. Data - {disk}</h3>
+        <Badge variant={smart.health === "PASSED" ? "default" : "destructive"} className="text-xs">
+          {smart.health}
+        </Badge>
+      </div>
+      {smart.attributes && smart.attributes.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="px-2 py-1 text-left">ID</th>
+                <th className="px-2 py-1 text-left">Attribute</th>
+                <th className="px-2 py-1 text-right">Value</th>
+                <th className="px-2 py-1 text-right">Worst</th>
+                <th className="px-2 py-1 text-right">Thresh</th>
+                <th className="px-2 py-1 text-left">Raw</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {smart.attributes.map((attr) => (
+                <tr key={attr.id} className={attr.value <= attr.threshold ? "bg-destructive/10" : ""}>
+                  <td className="px-2 py-1 font-mono">{attr.id}</td>
+                  <td className="px-2 py-1">{attr.name}</td>
+                  <td className="px-2 py-1 text-right font-mono">{attr.value}</td>
+                  <td className="px-2 py-1 text-right font-mono">{attr.worst}</td>
+                  <td className="px-2 py-1 text-right font-mono">{attr.threshold}</td>
+                  <td className="px-2 py-1 font-mono">{attr.raw}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : smart.text ? (
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-xs">{smart.text}</pre>
+      ) : (
+        <p className="text-xs text-muted-foreground">No S.M.A.R.T. attributes available.</p>
+      )}
+    </div>
+  );
+}
+
+function diskLabel(d: LiveDiskResponse): string {
+  const size = formatBytes(d.size);
+  const model = d.model ? ` - ${d.model}` : "";
+  const used = d.used ? ` [${d.used}]` : " [unused]";
+  return `${d.dev_path} (${size}${model})${used}`;
+}
+
+function ZFSPoolsSection({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const { data: pools, isLoading } = useNodeZFSPools(clusterId, nodeName);
+  const { data: liveDisks } = useLiveDisks(clusterId, nodeName);
+  const [showCreate, setShowCreate] = useState(false);
+  const [zfsName, setZfsName] = useState("");
+  const [zfsRaid, setZfsRaid] = useState("single");
+  const [zfsSelectedDisks, setZfsSelectedDisks] = useState<string[]>([]);
+  const [zfsCompression, setZfsCompression] = useState("on");
+  const createZFS = useCreateZFSPool(clusterId, nodeName);
+
+  const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
+
+  const toggleDisk = (devPath: string) => {
+    setZfsSelectedDisks((prev) =>
+      prev.includes(devPath) ? prev.filter((p) => p !== devPath) : [...prev, devPath],
+    );
+  };
+
+  const handleCreate = () => {
+    createZFS.mutate(
+      { name: zfsName, raidlevel: zfsRaid, devices: zfsSelectedDisks.join(","), compression: zfsCompression },
+      { onSuccess: () => { setShowCreate(false); setZfsName(""); setZfsSelectedDisks([]); } },
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">ZFS Pools</h2>
+        <Button variant="outline" size="sm" onClick={() => { setShowCreate(!showCreate); }}>
+          <Plus className="mr-1 h-4 w-4" />Create ZFS
+        </Button>
+      </div>
+      {showCreate && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Pool Name</Label>
+              <Input className="h-8 text-sm" value={zfsName} onChange={(e) => { setZfsName(e.target.value); }} placeholder="e.g. mypool" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">RAID Level</Label>
+              <select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value={zfsRaid} onChange={(e) => { setZfsRaid(e.target.value); }}>
+                <option value="single">Single</option>
+                <option value="mirror">Mirror</option>
+                <option value="raidz">RAIDZ</option>
+                <option value="raidz2">RAIDZ2</option>
+                <option value="raidz3">RAIDZ3</option>
+              </select>
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <Label className="text-xs">Select Disks ({zfsSelectedDisks.length} selected)</Label>
+              {unusedDisks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No unused disks available</p>
+              ) : (
+                <div className="max-h-40 overflow-auto rounded border p-2 space-y-1">
+                  {unusedDisks.map((d) => (
+                    <label key={d.dev_path} className="flex items-center gap-2 text-xs hover:bg-muted/30 rounded px-1 py-0.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={zfsSelectedDisks.includes(d.dev_path)}
+                        onChange={() => { toggleDisk(d.dev_path); }}
+                        className="rounded border"
+                      />
+                      <span className="font-mono">{d.dev_path}</span>
+                      <span className="text-muted-foreground">{formatBytes(d.size)}</span>
+                      <span className="text-muted-foreground">{d.model || ""}</span>
+                      <Badge variant="outline" className="text-[10px]">{d.disk_type.toUpperCase()}</Badge>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Compression</Label>
+              <select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value={zfsCompression} onChange={(e) => { setZfsCompression(e.target.value); }}>
+                <option value="on">On (LZ4)</option>
+                <option value="off">Off</option>
+                <option value="lz4">LZ4</option>
+                <option value="zstd">ZSTD</option>
+                <option value="gzip">GZIP</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setShowCreate(false); }}>Cancel</Button>
+            <Button size="sm" onClick={handleCreate} disabled={!zfsName || zfsSelectedDisks.length === 0 || createZFS.isPending}>Create</Button>
+          </div>
+        </div>
+      )}
+      {isLoading ? <Skeleton className="h-24 w-full" /> : !pools || pools.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No ZFS pools found.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Name</th>
+                <th className="px-3 py-2 text-left font-medium">Size</th>
+                <th className="px-3 py-2 text-left font-medium">Allocated</th>
+                <th className="px-3 py-2 text-left font-medium">Free</th>
+                <th className="px-3 py-2 text-left font-medium">Frag</th>
+                <th className="px-3 py-2 text-left font-medium">Health</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {pools.map((p: ZFSPoolResponse) => (
+                <tr key={p.name} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-mono text-xs">{p.name}</td>
+                  <td className="px-3 py-2">{formatBytes(p.size)}</td>
+                  <td className="px-3 py-2">{formatBytes(p.alloc)}</td>
+                  <td className="px-3 py-2">{formatBytes(p.free)}</td>
+                  <td className="px-3 py-2">{p.frag}%</td>
+                  <td className="px-3 py-2">
+                    <Badge variant={p.health === "ONLINE" ? "default" : "destructive"} className="text-xs">
+                      {p.health}
+                    </Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LVMSection({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const { data: vgs, isLoading } = useNodeLVM(clusterId, nodeName);
+  const { data: liveDisks } = useLiveDisks(clusterId, nodeName);
+  const [showCreate, setShowCreate] = useState(false);
+  const [lvmName, setLvmName] = useState("");
+  const [lvmDevice, setLvmDevice] = useState("");
+  const [lvmAddStorage, setLvmAddStorage] = useState(true);
+  const createLVM = useCreateLVM(clusterId, nodeName);
+  const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
+
+  const handleCreate = () => {
+    createLVM.mutate(
+      { name: lvmName, device: lvmDevice, add_storage: lvmAddStorage },
+      { onSuccess: () => { setShowCreate(false); setLvmName(""); setLvmDevice(""); } },
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">LVM Volume Groups</h2>
+        <Button variant="outline" size="sm" onClick={() => { setShowCreate(!showCreate); }}>
+          <Plus className="mr-1 h-4 w-4" />Create LVM
+        </Button>
+      </div>
+      {showCreate && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Volume Group Name</Label>
+              <Input className="h-8 text-sm" value={lvmName} onChange={(e) => { setLvmName(e.target.value); }} placeholder="e.g. myvg" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Disk</Label>
+              <select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value={lvmDevice} onChange={(e) => { setLvmDevice(e.target.value); }}>
+                <option value="">Select a disk...</option>
+                {unusedDisks.map((d) => (
+                  <option key={d.dev_path} value={d.dev_path}>{diskLabel(d)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="lvm-add-storage" checked={lvmAddStorage} onChange={(e) => { setLvmAddStorage(e.target.checked); }} className="rounded border" />
+            <Label htmlFor="lvm-add-storage" className="text-xs">Add as Proxmox storage</Label>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setShowCreate(false); }}>Cancel</Button>
+            <Button size="sm" onClick={handleCreate} disabled={!lvmName || !lvmDevice || createLVM.isPending}>Create</Button>
+          </div>
+        </div>
+      )}
+      {isLoading ? <Skeleton className="h-24 w-full" /> : !vgs || vgs.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No LVM volume groups found.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Name</th>
+                <th className="px-3 py-2 text-left font-medium">Size</th>
+                <th className="px-3 py-2 text-left font-medium">Free</th>
+                <th className="px-3 py-2 text-left font-medium">PVs</th>
+                <th className="px-3 py-2 text-left font-medium">LVs</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {vgs.map((vg: LVMVolumeGroupResponse) => (
+                <tr key={vg.name} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-mono text-xs">{vg.name}</td>
+                  <td className="px-3 py-2">{formatBytes(vg.size)}</td>
+                  <td className="px-3 py-2">{formatBytes(vg.free)}</td>
+                  <td className="px-3 py-2">{vg.pv_count}</td>
+                  <td className="px-3 py-2">{vg.lv_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LVMThinSection({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const { data: pools, isLoading } = useNodeLVMThin(clusterId, nodeName);
+  const { data: liveDisks } = useLiveDisks(clusterId, nodeName);
+  const [showCreate, setShowCreate] = useState(false);
+  const [thinName, setThinName] = useState("");
+  const [thinDevice, setThinDevice] = useState("");
+  const [thinAddStorage, setThinAddStorage] = useState(true);
+  const createThin = useCreateLVMThin(clusterId, nodeName);
+  const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
+
+  const handleCreate = () => {
+    createThin.mutate(
+      { name: thinName, device: thinDevice, add_storage: thinAddStorage },
+      { onSuccess: () => { setShowCreate(false); setThinName(""); setThinDevice(""); } },
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">LVM-Thin Pools</h2>
+        <Button variant="outline" size="sm" onClick={() => { setShowCreate(!showCreate); }}>
+          <Plus className="mr-1 h-4 w-4" />Create LVM-Thin
+        </Button>
+      </div>
+      {showCreate && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Thin Pool Name</Label>
+              <Input className="h-8 text-sm" value={thinName} onChange={(e) => { setThinName(e.target.value); }} placeholder="e.g. mythinpool" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Disk</Label>
+              <select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value={thinDevice} onChange={(e) => { setThinDevice(e.target.value); }}>
+                <option value="">Select a disk...</option>
+                {unusedDisks.map((d) => (
+                  <option key={d.dev_path} value={d.dev_path}>{diskLabel(d)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="thin-add-storage" checked={thinAddStorage} onChange={(e) => { setThinAddStorage(e.target.checked); }} className="rounded border" />
+            <Label htmlFor="thin-add-storage" className="text-xs">Add as Proxmox storage</Label>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setShowCreate(false); }}>Cancel</Button>
+            <Button size="sm" onClick={handleCreate} disabled={!thinName || !thinDevice || createThin.isPending}>Create</Button>
+          </div>
+        </div>
+      )}
+      {isLoading ? <Skeleton className="h-24 w-full" /> : !pools || pools.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No LVM thin pools found.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">LV</th>
+                <th className="px-3 py-2 text-left font-medium">VG</th>
+                <th className="px-3 py-2 text-left font-medium">Size</th>
+                <th className="px-3 py-2 text-left font-medium">Used</th>
+                <th className="px-3 py-2 text-left font-medium">Data %</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {pools.map((p: LVMThinPoolResponse) => (
+                <tr key={`${p.vg}-${p.lv}`} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-mono text-xs">{p.lv}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{p.vg}</td>
+                  <td className="px-3 py-2">{formatBytes(p.lv_size)}</td>
+                  <td className="px-3 py-2">{formatBytes(p.used)}</td>
+                  <td className="px-3 py-2">{p.data_percent.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DirectorySection({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const { data: dirs, isLoading } = useNodeDirectories(clusterId, nodeName);
+  const { data: liveDisks } = useLiveDisks(clusterId, nodeName);
+  const [showCreate, setShowCreate] = useState(false);
+  const [dirName, setDirName] = useState("");
+  const [dirDevice, setDirDevice] = useState("");
+  const [dirFs, setDirFs] = useState("ext4");
+  const [dirAddStorage, setDirAddStorage] = useState(true);
+  const createDir = useCreateDirectory(clusterId, nodeName);
+  const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
+
+  const handleCreate = () => {
+    createDir.mutate(
+      { name: dirName, device: dirDevice, filesystem: dirFs, add_storage: dirAddStorage },
+      { onSuccess: () => { setShowCreate(false); setDirName(""); setDirDevice(""); } },
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Directory Storage</h2>
+        <Button variant="outline" size="sm" onClick={() => { setShowCreate(!showCreate); }}>
+          <Plus className="mr-1 h-4 w-4" />Create Directory
+        </Button>
+      </div>
+      {showCreate && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Name</Label>
+              <Input className="h-8 text-sm" value={dirName} onChange={(e) => { setDirName(e.target.value); }} placeholder="e.g. mydir" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Disk</Label>
+              <select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value={dirDevice} onChange={(e) => { setDirDevice(e.target.value); }}>
+                <option value="">Select a disk...</option>
+                {unusedDisks.map((d) => (
+                  <option key={d.dev_path} value={d.dev_path}>{diskLabel(d)}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Filesystem</Label>
+              <select className="h-8 w-full rounded-md border bg-background px-2 text-sm" value={dirFs} onChange={(e) => { setDirFs(e.target.value); }}>
+                <option value="ext4">ext4</option>
+                <option value="xfs">XFS</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="dir-add-storage" checked={dirAddStorage} onChange={(e) => { setDirAddStorage(e.target.checked); }} className="rounded border" />
+            <Label htmlFor="dir-add-storage" className="text-xs">Add as Proxmox storage</Label>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setShowCreate(false); }}>Cancel</Button>
+            <Button size="sm" onClick={handleCreate} disabled={!dirName || !dirDevice || createDir.isPending}>Create</Button>
+          </div>
+        </div>
+      )}
+      {isLoading ? <Skeleton className="h-24 w-full" /> : !dirs || dirs.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No directory storage entries found.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Path</th>
+                <th className="px-3 py-2 text-left font-medium">Device</th>
+                <th className="px-3 py-2 text-left font-medium">Type</th>
+                <th className="px-3 py-2 text-left font-medium">Options</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {dirs.map((d: DirectoryEntryResponse) => (
+                <tr key={d.path} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-mono text-xs">{d.path}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{d.device}</td>
+                  <td className="px-3 py-2 text-xs">{d.type}</td>
+                  <td className="px-3 py-2 text-xs">{d.options || "--"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FirewallTab({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const [showLog, setShowLog] = useState(false);
+  const { data: rules, isLoading } = useNodeFirewallRules(clusterId, nodeName);
+  const deleteRule = useDeleteNodeFirewallRule(clusterId, nodeName);
+  const createRule = useCreateNodeFirewallRule(clusterId, nodeName);
+  const { data: logEntries, isLoading: logLoading } = useNodeFirewallLog(clusterId, nodeName);
+
+  const handleQuickAdd = (action: string) => {
+    createRule.mutate({
+      type: "in",
+      action,
+      enable: 1,
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Firewall Rules</h2>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => { handleQuickAdd("ACCEPT"); }} disabled={createRule.isPending}>
+            + Accept Rule
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => { handleQuickAdd("DROP"); }} disabled={createRule.isPending}>
+            + Drop Rule
+          </Button>
+          <Button variant={showLog ? "default" : "outline"} size="sm" onClick={() => { setShowLog(!showLog); }}>
+            {showLog ? "Hide Log" : "Show Log"}
+          </Button>
+        </div>
+      </div>
+
+      {isLoading ? <Skeleton className="h-32 w-full" /> : !rules || rules.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No firewall rules configured.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">#</th>
+                <th className="px-3 py-2 text-left font-medium">Type</th>
+                <th className="px-3 py-2 text-left font-medium">Action</th>
+                <th className="px-3 py-2 text-left font-medium">Macro</th>
+                <th className="px-3 py-2 text-left font-medium">Proto</th>
+                <th className="px-3 py-2 text-left font-medium">Source</th>
+                <th className="px-3 py-2 text-left font-medium">Dest</th>
+                <th className="px-3 py-2 text-left font-medium">Port</th>
+                <th className="px-3 py-2 text-left font-medium">Enabled</th>
+                <th className="px-3 py-2 text-left font-medium">Comment</th>
+                <th className="w-12 px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {rules.map((rule) => (
+                <tr key={rule.pos} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-mono text-xs">{rule.pos}</td>
+                  <td className="px-3 py-2 text-xs">{rule.type}</td>
+                  <td className="px-3 py-2">
+                    <Badge variant={rule.action === "ACCEPT" ? "default" : "destructive"} className="text-xs">
+                      {rule.action}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2 text-xs">{rule.macro || "--"}</td>
+                  <td className="px-3 py-2 text-xs">{rule.proto || "--"}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{rule.source || "--"}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{rule.dest || "--"}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{rule.dport || rule.sport || "--"}</td>
+                  <td className="px-3 py-2">
+                    <Badge variant={rule.enable ? "default" : "secondary"} className="text-xs">
+                      {rule.enable ? "yes" : "no"}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2 text-xs">{rule.comment || "--"}</td>
+                  <td className="px-3 py-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => { deleteRule.mutate(rule.pos); }}
+                      disabled={deleteRule.isPending}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showLog && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">Firewall Log</h3>
+          {logLoading ? <Skeleton className="h-32 w-full" /> : !logEntries || logEntries.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No log entries.</p>
+          ) : (
+            <div className="max-h-[400px] overflow-auto rounded-lg border bg-muted/30 p-3">
+              <pre className="text-xs leading-relaxed">
+                {logEntries.map((entry) => (
+                  <div key={entry.n}>{entry.t}</div>
+                ))}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServicesTab({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const { data: services, isLoading } = useNodeServices(clusterId, nodeName);
+  const serviceAction = useServiceAction(clusterId, nodeName);
+
+  if (isLoading) return <Skeleton className="h-48 w-full" />;
+
+  if (!services || services.length === 0) {
+    return <p className="text-sm text-muted-foreground">No services found.</p>;
   }
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Network className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-lg font-semibold">Network Interfaces</h2>
+        <Cog className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-lg font-semibold">Node Services</h2>
       </div>
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">
           <thead className="border-b bg-muted/50">
             <tr>
-              <th className="px-3 py-2 text-left font-medium">Interface</th>
-              <th className="px-3 py-2 text-left font-medium">Type</th>
-              <th className="px-3 py-2 text-left font-medium">Active</th>
-              <th className="px-3 py-2 text-left font-medium">Address / CIDR</th>
-              <th className="px-3 py-2 text-left font-medium">Gateway</th>
-              <th className="px-3 py-2 text-left font-medium">Bridge Ports</th>
+              <th className="px-3 py-2 text-left font-medium">Service</th>
+              <th className="px-3 py-2 text-left font-medium">Description</th>
+              <th className="px-3 py-2 text-left font-medium">State</th>
+              <th className="w-40 px-3 py-2 text-left font-medium">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {networkInterfaces.map((iface) => (
-              <tr key={iface.id} className="hover:bg-muted/30">
-                <td className="px-3 py-2 font-mono text-xs">{iface.iface}</td>
+            {services.map((svc) => (
+              <tr key={svc.service} className="hover:bg-muted/30">
+                <td className="px-3 py-2 font-mono text-xs">{svc.service}</td>
+                <td className="px-3 py-2 text-xs">{svc.desc || svc.name || "--"}</td>
                 <td className="px-3 py-2">
-                  <Badge variant="outline" className="text-xs">{iface.iface_type}</Badge>
-                </td>
-                <td className="px-3 py-2">
-                  <Badge variant={iface.active ? "default" : "secondary"} className="text-xs">
-                    {iface.active ? "up" : "down"}
+                  <Badge variant={svc.state === "running" ? "default" : "secondary"} className="text-xs">
+                    {svc.state}
                   </Badge>
                 </td>
-                <td className="px-3 py-2 font-mono text-xs">{iface.cidr || iface.address || "--"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{iface.gateway || "--"}</td>
-                <td className="px-3 py-2 text-xs">{iface.bridge_ports || "--"}</td>
+                <td className="px-3 py-2">
+                  <div className="flex gap-1">
+                    {svc.state !== "running" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1 text-xs"
+                        onClick={() => { serviceAction.mutate({ service: svc.service, action: "start" }); }}
+                        disabled={serviceAction.isPending}
+                      >
+                        <Play className="h-3 w-3" />
+                        Start
+                      </Button>
+                    )}
+                    {svc.state === "running" && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => { serviceAction.mutate({ service: svc.service, action: "restart" }); }}
+                          disabled={serviceAction.isPending}
+                        >
+                          <RotateCw className="h-3 w-3" />
+                          Restart
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => { serviceAction.mutate({ service: svc.service, action: "stop" }); }}
+                          disabled={serviceAction.isPending}
+                        >
+                          <Square className="h-3 w-3" />
+                          Stop
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -264,57 +1233,40 @@ function NetworkTab({ clusterId, nodeId }: { clusterId: string; nodeId: string }
   );
 }
 
-function DisksTab({ clusterId, nodeId }: { clusterId: string; nodeId: string }) {
-  const { data: disks, isLoading } = useNodeDisks(clusterId, nodeId);
-
-  if (isLoading) return <Skeleton className="h-48 w-full" />;
-
-  if (!disks || disks.length === 0) {
-    return <p className="text-sm text-muted-foreground">No physical disks found.</p>;
-  }
+function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const [serviceFilter, setServiceFilter] = useState("");
+  const { data: entries, isLoading } = useNodeSyslog(clusterId, nodeName, {
+    limit: 500,
+    service: serviceFilter || undefined,
+  });
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <HardDrive className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-lg font-semibold">Physical Disks</h2>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">System Log</h2>
+        </div>
+        <Input
+          className="w-48"
+          placeholder="Filter by service..."
+          value={serviceFilter}
+          onChange={(e) => { setServiceFilter(e.target.value); }}
+        />
       </div>
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="border-b bg-muted/50">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">Device</th>
-              <th className="px-3 py-2 text-left font-medium">Model</th>
-              <th className="px-3 py-2 text-left font-medium">Serial</th>
-              <th className="px-3 py-2 text-left font-medium">Size</th>
-              <th className="px-3 py-2 text-left font-medium">Type</th>
-              <th className="px-3 py-2 text-left font-medium">Health</th>
-              <th className="px-3 py-2 text-left font-medium">Wearout</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {disks.map((d) => (
-              <tr key={d.id} className="hover:bg-muted/30">
-                <td className="px-3 py-2 font-mono text-xs">{d.dev_path}</td>
-                <td className="px-3 py-2">{d.model || "--"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{d.serial || "--"}</td>
-                <td className="px-3 py-2">{formatBytes(d.size)}</td>
-                <td className="px-3 py-2">
-                  <Badge variant="outline" className="text-xs">
-                    {d.disk_type.toUpperCase() || "unknown"}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2">
-                  <Badge variant={d.health === "PASSED" ? "default" : "destructive"} className="text-xs">
-                    {d.health || "unknown"}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2">{d.wearout && d.wearout !== "N/A" ? d.wearout : "--"}</td>
-              </tr>
+      {isLoading ? <Skeleton className="h-64 w-full" /> : !entries || entries.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No syslog entries found.</p>
+      ) : (
+        <div className="max-h-[600px] overflow-auto rounded-lg border bg-muted/30 p-3">
+          <pre className="text-xs leading-relaxed">
+            {entries.map((entry) => (
+              <div key={entry.n} className="hover:bg-muted/50">
+                {entry.t}
+              </div>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -393,6 +1345,237 @@ function HardwareSection({
         ))}
       </dl>
     </div>
+  );
+}
+
+function HardwareSectionWithAction({
+  icon,
+  title,
+  items,
+  action,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  items: HardwareItem[];
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="mb-3 flex items-center justify-between text-sm font-medium">
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">{icon}</span>
+          {title}
+        </div>
+        {action}
+      </div>
+      <dl className="space-y-1.5">
+        {items.map((item) => (
+          <div key={item.label} className="flex justify-between gap-2 text-sm">
+            <dt className="text-muted-foreground">{item.label}</dt>
+            <dd className="truncate font-medium text-right" title={item.value}>{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function EditDNSDialog({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const [open, setOpen] = useState(false);
+  const { data: dns } = useNodeDNS(clusterId, nodeName);
+  const [search, setSearch] = useState("");
+  const [dns1, setDns1] = useState("");
+  const [dns2, setDns2] = useState("");
+  const [dns3, setDns3] = useState("");
+  const setNodeDNS = useSetNodeDNS(clusterId, nodeName);
+
+  const handleOpen = (isOpen: boolean) => {
+    if (isOpen && dns) {
+      setSearch(dns.search);
+      setDns1(dns.dns1);
+      setDns2(dns.dns2);
+      setDns3(dns.dns3);
+    }
+    setOpen(isOpen);
+  };
+
+  const handleSave = () => {
+    setNodeDNS.mutate(
+      { search, dns1, dns2, dns3 },
+      { onSuccess: () => { setOpen(false); } },
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-6 w-6">
+          <Pencil className="h-3 w-3" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit DNS Configuration - {nodeName}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Search Domain</Label>
+            <Input value={search} onChange={(e) => { setSearch(e.target.value); }} placeholder="e.g. example.com" />
+          </div>
+          <div className="space-y-2">
+            <Label>DNS Server 1</Label>
+            <Input value={dns1} onChange={(e) => { setDns1(e.target.value); }} placeholder="e.g. 8.8.8.8" />
+          </div>
+          <div className="space-y-2">
+            <Label>DNS Server 2</Label>
+            <Input value={dns2} onChange={(e) => { setDns2(e.target.value); }} placeholder="e.g. 8.8.4.4" />
+          </div>
+          <div className="space-y-2">
+            <Label>DNS Server 3</Label>
+            <Input value={dns3} onChange={(e) => { setDns3(e.target.value); }} placeholder="Optional" />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => { setOpen(false); }}>Cancel</Button>
+            <Button onClick={handleSave} disabled={!search || setNodeDNS.isPending}>Save</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditTimezoneDialog({ clusterId, nodeName, currentTimezone }: { clusterId: string; nodeName: string; currentTimezone: string }) {
+  const [open, setOpen] = useState(false);
+  const [timezone, setTimezone] = useState(currentTimezone || "UTC");
+  const setNodeTimezone = useSetNodeTimezone(clusterId, nodeName);
+
+  const handleOpen = (isOpen: boolean) => {
+    if (isOpen) {
+      setTimezone(currentTimezone || "UTC");
+    }
+    setOpen(isOpen);
+  };
+
+  const handleSave = () => {
+    setNodeTimezone.mutate(
+      { timezone },
+      { onSuccess: () => { setOpen(false); } },
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-6 w-6">
+          <Pencil className="h-3 w-3" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit Timezone - {nodeName}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Timezone</Label>
+            <Input value={timezone} onChange={(e) => { setTimezone(e.target.value); }} placeholder="e.g. America/New_York" />
+            <p className="text-xs text-muted-foreground">Enter an IANA timezone (e.g. UTC, America/New_York, Europe/London)</p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => { setOpen(false); }}>Cancel</Button>
+            <Button onClick={handleSave} disabled={!timezone || setNodeTimezone.isPending}>Save</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function NodePowerActions({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+  const shutdown = useShutdownNode(clusterId, nodeName);
+  const reboot = useRebootNode(clusterId, nodeName);
+  const migrateAll = useMigrateAllGuests(clusterId, nodeName);
+
+  return (
+    <>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="outline" size="sm" className="gap-1.5">
+            <ArrowRightLeft className="h-4 w-4" />
+            Evacuate
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Evacuate all guests from {nodeName}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will migrate all VMs and containers off this node to other available nodes in the cluster. This may take a while depending on the number and size of guests.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { migrateAll.mutate({}); }}
+              disabled={migrateAll.isPending}
+            >
+              Evacuate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="outline" size="sm" className="gap-1.5">
+            <RefreshCw className="h-4 w-4" />
+            Reboot
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reboot {nodeName}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will reboot the node. All running guests will be affected if not migrated first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { reboot.mutate(); }}
+              disabled={reboot.isPending}
+            >
+              Reboot
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="destructive" size="sm" className="gap-1.5">
+            <Power className="h-4 w-4" />
+            Shutdown
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Shutdown {nodeName}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will shut down the node. It will go offline and all running guests will be stopped. You will need physical or out-of-band access to power it back on.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { shutdown.mutate(); }}
+              disabled={shutdown.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Shutdown
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

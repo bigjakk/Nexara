@@ -89,6 +89,111 @@ type NodeDisk struct {
 	Vendor  string `json:"vendor"`
 	WWN     string `json:"wwn"`
 	GPT     int    `json:"gpt"`
+	Used    string `json:"used"`
+}
+
+// DiskSMARTData represents S.M.A.R.T. data from GET /nodes/{node}/disks/smart.
+type DiskSMARTData struct {
+	Health     string           `json:"health"`
+	Type       string           `json:"type"`
+	Text       string           `json:"text"`
+	Attributes []SMARTAttribute `json:"attributes,omitempty"`
+}
+
+// SMARTAttribute represents a single S.M.A.R.T. attribute.
+type SMARTAttribute struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Value     int    `json:"value"`
+	Worst     int    `json:"worst"`
+	Threshold int    `json:"threshold"`
+	Raw       string `json:"raw"`
+	Flags     string `json:"flags"`
+}
+
+// ZFSPool represents a ZFS pool from GET /nodes/{node}/disks/zfs.
+type ZFSPool struct {
+	Name   string  `json:"name"`
+	Size   int64   `json:"size"`
+	Alloc  int64   `json:"alloc"`
+	Free   int64   `json:"free"`
+	Frag   int     `json:"frag"`
+	Dedup  float64 `json:"dedup"`
+	Health string  `json:"health"`
+}
+
+// CreateZFSPoolParams are the parameters for creating a ZFS pool.
+type CreateZFSPoolParams struct {
+	Name        string
+	RaidLevel   string // single, mirror, raidz, raidz2, raidz3
+	Devices     string // comma-separated device paths
+	Compression string // on, off, lz4, lzjb, zle, gzip, zstd
+	Ashift      int    // 9, 12, 13, 14
+}
+
+// LVMVolumeGroup represents an LVM volume group from GET /nodes/{node}/disks/lvm.
+type LVMVolumeGroup struct {
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	Free    int64  `json:"free"`
+	PVCount int    `json:"pv_count"`
+	LVCount int    `json:"lv_count"`
+}
+
+// CreateLVMParams are the parameters for creating an LVM volume group.
+type CreateLVMParams struct {
+	Name       string
+	Device     string
+	AddStorage bool
+}
+
+// LVMThinPool represents an LVM thin pool from GET /nodes/{node}/disks/lvmthin.
+type LVMThinPool struct {
+	LV           string  `json:"lv"`
+	VG           string  `json:"vg"`
+	LVSize       int64   `json:"lv_size"`
+	Used         int64   `json:"used"`
+	MetadataSize int64   `json:"metadata_size"`
+	MetadataUsed int64   `json:"metadata_used"`
+	DataPercent  float64 `json:"data_percent"`
+}
+
+// CreateLVMThinParams are the parameters for creating an LVM thin pool.
+type CreateLVMThinParams struct {
+	Name       string
+	Device     string
+	AddStorage bool
+}
+
+// DirectoryEntry represents a directory from GET /nodes/{node}/disks/directory.
+type DirectoryEntry struct {
+	Path       string `json:"path"`
+	Device     string `json:"device"`
+	Type       string `json:"type"`
+	Options    string `json:"options"`
+	UnitFile   string `json:"unitfile"`
+}
+
+// CreateDirectoryParams are the parameters for creating a directory storage.
+type CreateDirectoryParams struct {
+	Device     string
+	Name       string
+	Filesystem string // ext4, xfs
+	AddStorage bool
+}
+
+// NodeService represents a service from GET /nodes/{node}/services.
+type NodeService struct {
+	Service string `json:"service"`
+	Name    string `json:"name"`
+	Desc    string `json:"desc"`
+	State   string `json:"state"`
+}
+
+// SyslogEntry represents a single syslog line from GET /nodes/{node}/syslog.
+type SyslogEntry struct {
+	N int    `json:"n"`
+	T string `json:"t"`
 }
 
 // CPUInfo represents CPU information from a node status response.

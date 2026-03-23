@@ -1,22 +1,38 @@
 package handlers
 
 import (
+	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// NodeHandler handles node read endpoints.
+// NodeHandler handles node endpoints.
 type NodeHandler struct {
-	queries *db.Queries
+	queries       *db.Queries
+	encryptionKey string
+	eventPub      *events.Publisher
 }
 
 // NewNodeHandler creates a new node handler.
-func NewNodeHandler(queries *db.Queries) *NodeHandler {
-	return &NodeHandler{queries: queries}
+func NewNodeHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *NodeHandler {
+	return &NodeHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
+}
+
+// createProxmoxClient creates a Proxmox client for the given cluster ID.
+func (h *NodeHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
+}
+
+// auditLog records an audit log entry for a mutating node operation.
+func (h *NodeHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string, details json.RawMessage) {
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", resourceID, action, details)
 }
 
 type nodeResponse struct {
@@ -152,7 +168,7 @@ type nodePCIDeviceResponse struct {
 	SubsystemVendor string    `json:"subsystem_vendor"`
 }
 
-// ListNodeDisks handles GET /api/v1/nodes/:node_id/disks.
+// ListNodeDisks handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/disks.
 func (h *NodeHandler) ListNodeDisks(c *fiber.Ctx) error {
 	if err := requirePerm(c, "view", "node"); err != nil {
 		return err
@@ -176,7 +192,7 @@ func (h *NodeHandler) ListNodeDisks(c *fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
-// ListNodeNetworkInterfaces handles GET /api/v1/nodes/:node_id/network-interfaces.
+// ListNodeNetworkInterfaces handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/network-interfaces.
 func (h *NodeHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
 	if err := requirePerm(c, "view", "node"); err != nil {
 		return err
@@ -202,7 +218,7 @@ func (h *NodeHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
-// ListNodePCIDevices handles GET /api/v1/nodes/:node_id/pci-devices.
+// ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/pci-devices.
 func (h *NodeHandler) ListNodePCIDevices(c *fiber.Ctx) error {
 	if err := requirePerm(c, "view", "node"); err != nil {
 		return err
@@ -226,4 +242,197 @@ func (h *NodeHandler) ListNodePCIDevices(c *fiber.Ctx) error {
 		}
 	}
 	return c.JSON(resp)
+}
+
+// --- Node management endpoints (DNS, Time, Power) ---
+
+// resolveNodeName looks up a node by cluster_id and node name param, returns the Proxmox node name.
+func (h *NodeHandler) resolveNodeName(c *fiber.Ctx) (uuid.UUID, string, error) {
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return uuid.Nil, "", fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	nodeName := c.Params("node_name")
+	if nodeName == "" {
+		return uuid.Nil, "", fiber.NewError(fiber.StatusBadRequest, "Node name is required")
+	}
+	return clusterID, nodeName, nil
+}
+
+// GetNodeDNS handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/dns.
+func (h *NodeHandler) GetNodeDNS(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	dns, err := pxClient.GetNodeDNS(c.Context(), nodeName)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node DNS configuration")
+	}
+	return c.JSON(dns)
+}
+
+type setNodeDNSRequest struct {
+	Search string `json:"search"`
+	DNS1   string `json:"dns1"`
+	DNS2   string `json:"dns2"`
+	DNS3   string `json:"dns3"`
+}
+
+// SetNodeDNS handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/dns.
+func (h *NodeHandler) SetNodeDNS(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	var req setNodeDNSRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if strings.TrimSpace(req.Search) == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Search domain is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.SetNodeDNS(c.Context(), nodeName, req.Search, req.DNS1, req.DNS2, req.DNS3); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to set node DNS configuration")
+	}
+	details, _ := json.Marshal(req)
+	h.auditLog(c, clusterID, nodeName, "set_dns", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// GetNodeTime handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/time.
+func (h *NodeHandler) GetNodeTime(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	t, err := pxClient.GetNodeTime(c.Context(), nodeName)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node time configuration")
+	}
+	return c.JSON(t)
+}
+
+type setNodeTimezoneRequest struct {
+	Timezone string `json:"timezone"`
+}
+
+// SetNodeTimezone handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/time.
+func (h *NodeHandler) SetNodeTimezone(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	var req setNodeTimezoneRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if strings.TrimSpace(req.Timezone) == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Timezone is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.SetNodeTimezone(c.Context(), nodeName, req.Timezone); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to set node timezone")
+	}
+	details, _ := json.Marshal(req)
+	h.auditLog(c, clusterID, nodeName, "set_timezone", details)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// ShutdownNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/shutdown.
+func (h *NodeHandler) ShutdownNode(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.ShutdownNode(c.Context(), nodeName); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to shutdown node")
+	}
+	h.auditLog(c, clusterID, nodeName, "shutdown", nil)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// RebootNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/reboot.
+func (h *NodeHandler) RebootNode(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.RebootNode(c.Context(), nodeName); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to reboot node")
+	}
+	h.auditLog(c, clusterID, nodeName, "reboot", nil)
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+type migrateAllRequest struct {
+	TargetNode string `json:"target_node"`
+	MaxWorkers int    `json:"max_workers"`
+}
+
+// MigrateAllGuests handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/migrateall.
+func (h *NodeHandler) MigrateAllGuests(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	var req migrateAllRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	upid, err := pxClient.MigrateAllGuests(c.Context(), nodeName, req.TargetNode, req.MaxWorkers)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to evacuate node")
+	}
+	details, _ := json.Marshal(req)
+	h.auditLog(c, clusterID, nodeName, "migrate_all", details)
+	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }

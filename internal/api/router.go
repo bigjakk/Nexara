@@ -63,6 +63,45 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/nodes/:node_id/disks", s.nodeHandler.ListNodeDisks)
 			clusters.Get("/:cluster_id/nodes/:node_id/network-interfaces", s.nodeHandler.ListNodeNetworkInterfaces)
 			clusters.Get("/:cluster_id/nodes/:node_id/pci-devices", s.nodeHandler.ListNodePCIDevices)
+
+			// Node management (DNS, Time, Power) — use node_name (Proxmox name) not UUID.
+			clusters.Get("/:cluster_id/nodes/:node_name/dns", s.nodeHandler.GetNodeDNS)
+			clusters.Put("/:cluster_id/nodes/:node_name/dns", s.nodeHandler.SetNodeDNS)
+			clusters.Get("/:cluster_id/nodes/:node_name/time", s.nodeHandler.GetNodeTime)
+			clusters.Put("/:cluster_id/nodes/:node_name/time", s.nodeHandler.SetNodeTimezone)
+			clusters.Post("/:cluster_id/nodes/:node_name/shutdown", s.nodeHandler.ShutdownNode)
+			clusters.Post("/:cluster_id/nodes/:node_name/reboot", s.nodeHandler.RebootNode)
+
+			// Node disk management (SMART, ZFS, LVM, LVMthin, Init, Wipe).
+			clusters.Get("/:cluster_id/nodes/:node_name/disks/list", s.nodeHandler.ListLiveDisks)
+			clusters.Get("/:cluster_id/nodes/:node_name/disks/smart", s.nodeHandler.GetDiskSMART)
+			clusters.Get("/:cluster_id/nodes/:node_name/disks/zfs", s.nodeHandler.ListZFSPools)
+			clusters.Post("/:cluster_id/nodes/:node_name/disks/zfs", s.nodeHandler.CreateZFSPool)
+			clusters.Get("/:cluster_id/nodes/:node_name/disks/lvm", s.nodeHandler.ListLVM)
+			clusters.Post("/:cluster_id/nodes/:node_name/disks/lvm", s.nodeHandler.CreateLVM)
+			clusters.Get("/:cluster_id/nodes/:node_name/disks/lvmthin", s.nodeHandler.ListLVMThin)
+			clusters.Post("/:cluster_id/nodes/:node_name/disks/lvmthin", s.nodeHandler.CreateLVMThin)
+			clusters.Get("/:cluster_id/nodes/:node_name/disks/directory", s.nodeHandler.ListDirectories)
+			clusters.Post("/:cluster_id/nodes/:node_name/disks/directory", s.nodeHandler.CreateDirectory)
+			clusters.Post("/:cluster_id/nodes/:node_name/disks/initgpt", s.nodeHandler.InitializeGPT)
+			clusters.Put("/:cluster_id/nodes/:node_name/disks/wipe", s.nodeHandler.WipeDisk)
+
+			// Node services.
+			clusters.Get("/:cluster_id/nodes/:node_name/services", s.nodeHandler.ListNodeServices)
+			clusters.Post("/:cluster_id/nodes/:node_name/services/:service/:action", s.nodeHandler.ServiceAction)
+
+			// Node syslog.
+			clusters.Get("/:cluster_id/nodes/:node_name/syslog", s.nodeHandler.GetNodeSyslog)
+
+			// Node firewall.
+			clusters.Get("/:cluster_id/nodes/:node_name/firewall/rules", s.nodeHandler.ListNodeFirewallRules)
+			clusters.Post("/:cluster_id/nodes/:node_name/firewall/rules", s.nodeHandler.CreateNodeFirewallRule)
+			clusters.Put("/:cluster_id/nodes/:node_name/firewall/rules/:pos", s.nodeHandler.UpdateNodeFirewallRule)
+			clusters.Delete("/:cluster_id/nodes/:node_name/firewall/rules/:pos", s.nodeHandler.DeleteNodeFirewallRule)
+			clusters.Get("/:cluster_id/nodes/:node_name/firewall/log", s.nodeHandler.GetNodeFirewallLog)
+
+			// Node bulk operations.
+			clusters.Post("/:cluster_id/nodes/:node_name/migrateall", s.nodeHandler.MigrateAllGuests)
 		}
 		if s.vmHandler != nil {
 			clusters.Get("/:cluster_id/vms", s.vmHandler.ListByCluster)

@@ -417,6 +417,54 @@ func (c *Client) GetNodeTime(ctx context.Context, node string) (*NodeTime, error
 	return &t, nil
 }
 
+// SetNodeDNS updates the DNS configuration of a node.
+func (c *Client) SetNodeDNS(ctx context.Context, node, search, dns1, dns2, dns3 string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form := url.Values{}
+	form.Set("search", search)
+	if dns1 != "" {
+		form.Set("dns1", dns1)
+	}
+	if dns2 != "" {
+		form.Set("dns2", dns2)
+	}
+	if dns3 != "" {
+		form.Set("dns3", dns3)
+	}
+	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/dns", form, nil); err != nil {
+		return fmt.Errorf("set node %s dns: %w", node, err)
+	}
+	return nil
+}
+
+// SetNodeTimezone updates the timezone of a node.
+func (c *Client) SetNodeTimezone(ctx context.Context, node, timezone string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form := url.Values{}
+	form.Set("timezone", timezone)
+	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/time", form, nil); err != nil {
+		return fmt.Errorf("set node %s timezone: %w", node, err)
+	}
+	return nil
+}
+
+// ShutdownNode initiates a shutdown of the specified node.
+func (c *Client) ShutdownNode(ctx context.Context, node string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form := url.Values{}
+	form.Set("command", "shutdown")
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/status", form, nil); err != nil {
+		return fmt.Errorf("shutdown node %s: %w", node, err)
+	}
+	return nil
+}
+
 // GetNodeSubscription returns the subscription status of a node.
 func (c *Client) GetNodeSubscription(ctx context.Context, node string) (*NodeSubscription, error) {
 	if err := validateNodeName(node); err != nil {
@@ -439,6 +487,250 @@ func (c *Client) GetNodeDisks(ctx context.Context, node string) ([]NodeDisk, err
 		return nil, fmt.Errorf("get node %s disks: %w", node, err)
 	}
 	return disks, nil
+}
+
+// GetDiskSMART returns the S.M.A.R.T. data for a specific disk on a node.
+func (c *Client) GetDiskSMART(ctx context.Context, node, disk string) (*DiskSMARTData, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var smart DiskSMARTData
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/disks/smart?disk="+url.QueryEscape(disk), &smart); err != nil {
+		return nil, fmt.Errorf("get node %s disk %s smart: %w", node, disk, err)
+	}
+	return &smart, nil
+}
+
+// GetNodeZFSPools returns the ZFS pools on a node.
+func (c *Client) GetNodeZFSPools(ctx context.Context, node string) ([]ZFSPool, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var pools []ZFSPool
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/disks/zfs", &pools); err != nil {
+		return nil, fmt.Errorf("get node %s zfs pools: %w", node, err)
+	}
+	return pools, nil
+}
+
+// CreateNodeZFSPool creates a new ZFS pool on a node. Returns a UPID for the task.
+func (c *Client) CreateNodeZFSPool(ctx context.Context, node string, params CreateZFSPoolParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	form.Set("name", params.Name)
+	form.Set("raidlevel", params.RaidLevel)
+	form.Set("devices", params.Devices)
+	if params.Compression != "" {
+		form.Set("compression", params.Compression)
+	}
+	if params.Ashift > 0 {
+		form.Set("ashift", fmt.Sprintf("%d", params.Ashift))
+	}
+	var upid string
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/disks/zfs", form, &upid); err != nil {
+		return "", fmt.Errorf("create zfs pool on node %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// GetNodeLVM returns the LVM volume groups on a node.
+func (c *Client) GetNodeLVM(ctx context.Context, node string) ([]LVMVolumeGroup, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var vgs []LVMVolumeGroup
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/disks/lvm", &vgs); err != nil {
+		return nil, fmt.Errorf("get node %s lvm: %w", node, err)
+	}
+	return vgs, nil
+}
+
+// CreateNodeLVM creates a new LVM volume group on a node. Returns a UPID for the task.
+func (c *Client) CreateNodeLVM(ctx context.Context, node string, params CreateLVMParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	form.Set("name", params.Name)
+	form.Set("device", params.Device)
+	if params.AddStorage {
+		form.Set("add_storage", "1")
+	}
+	var upid string
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/disks/lvm", form, &upid); err != nil {
+		return "", fmt.Errorf("create lvm on node %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// GetNodeLVMThin returns the LVM-Thin pools on a node.
+func (c *Client) GetNodeLVMThin(ctx context.Context, node string) ([]LVMThinPool, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var pools []LVMThinPool
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/disks/lvmthin", &pools); err != nil {
+		return nil, fmt.Errorf("get node %s lvmthin: %w", node, err)
+	}
+	return pools, nil
+}
+
+// CreateNodeLVMThin creates a new LVM-Thin pool on a node. Returns a UPID for the task.
+func (c *Client) CreateNodeLVMThin(ctx context.Context, node string, params CreateLVMThinParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	form.Set("name", params.Name)
+	form.Set("device", params.Device)
+	if params.AddStorage {
+		form.Set("add_storage", "1")
+	}
+	var upid string
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/disks/lvmthin", form, &upid); err != nil {
+		return "", fmt.Errorf("create lvmthin on node %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// GetNodeDirectories returns the directory storage entries on a node.
+func (c *Client) GetNodeDirectories(ctx context.Context, node string) ([]DirectoryEntry, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var dirs []DirectoryEntry
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/disks/directory", &dirs); err != nil {
+		return nil, fmt.Errorf("get node %s directories: %w", node, err)
+	}
+	return dirs, nil
+}
+
+// CreateNodeDirectory creates a directory-based storage on a node. Returns a UPID for the task.
+func (c *Client) CreateNodeDirectory(ctx context.Context, node string, params CreateDirectoryParams) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	form.Set("device", params.Device)
+	form.Set("name", params.Name)
+	form.Set("filesystem", params.Filesystem)
+	if params.AddStorage {
+		form.Set("add_storage", "1")
+	}
+	var upid string
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/disks/directory", form, &upid); err != nil {
+		return "", fmt.Errorf("create directory on node %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// InitializeGPT initializes a disk with GPT on a node. Returns a UPID for the task.
+func (c *Client) InitializeGPT(ctx context.Context, node, disk string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	form.Set("disk", disk)
+	var upid string
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/disks/initgpt", form, &upid); err != nil {
+		return "", fmt.Errorf("initialize gpt on node %s disk %s: %w", node, disk, err)
+	}
+	return upid, nil
+}
+
+// WipeDisk wipes a disk on a node. Returns a UPID for the task.
+func (c *Client) WipeDisk(ctx context.Context, node, disk string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	form.Set("disk", disk)
+	var upid string
+	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/disks/smart", form, &upid); err != nil {
+		return "", fmt.Errorf("wipe disk on node %s disk %s: %w", node, disk, err)
+	}
+	return upid, nil
+}
+
+// MigrateAllGuests migrates all VMs and containers off a node. Returns a UPID for the task.
+func (c *Client) MigrateAllGuests(ctx context.Context, node, targetNode string, maxWorkers int) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	form := url.Values{}
+	if targetNode != "" {
+		form.Set("target", targetNode)
+	}
+	if maxWorkers > 0 {
+		form.Set("maxworkers", fmt.Sprintf("%d", maxWorkers))
+	}
+	var upid string
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/migrateall", form, &upid); err != nil {
+		return "", fmt.Errorf("migrate all guests off node %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// --- Node Services ---
+
+// GetNodeServices returns the list of services on a node.
+func (c *Client) GetNodeServices(ctx context.Context, node string) ([]NodeService, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var svcs []NodeService
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/services", &svcs); err != nil {
+		return nil, fmt.Errorf("get node %s services: %w", node, err)
+	}
+	return svcs, nil
+}
+
+// ServiceAction performs an action (start, stop, restart, reload) on a node service. Returns a UPID.
+func (c *Client) ServiceAction(ctx context.Context, node, service, action string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	var upid string
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/services/"+url.PathEscape(service)+"/"+url.PathEscape(action), nil, &upid); err != nil {
+		return "", fmt.Errorf("%s service %s on node %s: %w", action, service, node, err)
+	}
+	return upid, nil
+}
+
+// --- Node Syslog ---
+
+// GetNodeSyslog returns syslog entries from a node.
+func (c *Client) GetNodeSyslog(ctx context.Context, node string, start, limit int, since, until, service string) ([]SyslogEntry, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	q := url.Values{}
+	if start > 0 {
+		q.Set("start", fmt.Sprintf("%d", start))
+	}
+	if limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if since != "" {
+		q.Set("since", since)
+	}
+	if until != "" {
+		q.Set("until", until)
+	}
+	if service != "" {
+		q.Set("service", service)
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/syslog"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var entries []SyslogEntry
+	if err := c.do(ctx, path, &entries); err != nil {
+		return nil, fmt.Errorf("get node %s syslog: %w", node, err)
+	}
+	return entries, nil
 }
 
 // GetNodePCIDevices returns the PCI devices on a node.
@@ -1661,6 +1953,44 @@ func (c *Client) GetNodeFirewallRules(ctx context.Context, node string) ([]Firew
 		return nil, fmt.Errorf("get firewall rules on %s: %w", node, err)
 	}
 	return rules, nil
+}
+
+// CreateNodeFirewallRule creates a firewall rule on a node.
+func (c *Client) CreateNodeFirewallRule(ctx context.Context, node string, rule FirewallRuleParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form := firewallRuleToForm(rule)
+	path := "/nodes/" + url.PathEscape(node) + "/firewall/rules"
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("create firewall rule on %s: %w", node, err)
+	}
+	return nil
+}
+
+// UpdateNodeFirewallRule updates a firewall rule on a node by position.
+func (c *Client) UpdateNodeFirewallRule(ctx context.Context, node string, pos int, rule FirewallRuleParams) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	form := firewallRuleToForm(rule)
+	path := "/nodes/" + url.PathEscape(node) + "/firewall/rules/" + strconv.Itoa(pos)
+	if err := c.doPut(ctx, path, form, nil); err != nil {
+		return fmt.Errorf("update firewall rule %d on %s: %w", pos, node, err)
+	}
+	return nil
+}
+
+// DeleteNodeFirewallRule deletes a firewall rule on a node by position.
+func (c *Client) DeleteNodeFirewallRule(ctx context.Context, node string, pos int) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/firewall/rules/" + strconv.Itoa(pos)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("delete firewall rule %d on %s: %w", pos, node, err)
+	}
+	return nil
 }
 
 // GetVMFirewallRules returns firewall rules for a specific VM.

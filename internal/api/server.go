@@ -111,8 +111,10 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.containerHandler = handlers.NewContainerHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}
 
+	if s.queries != nil && cfg.EncryptionKey != "" {
+		s.nodeHandler = handlers.NewNodeHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+	}
 	if s.queries != nil {
-		s.nodeHandler = handlers.NewNodeHandler(s.queries)
 		s.metricsHandler = handlers.NewMetricsHandler(s.queries)
 	}
 
