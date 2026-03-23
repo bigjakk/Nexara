@@ -505,6 +505,8 @@ export function useNodeSyslog(clusterId: string, nodeName: string, params?: { st
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/syslog${qs ? `?${qs}` : ""}`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
+    retry: 1,
+    staleTime: 30_000,
   });
 }
 

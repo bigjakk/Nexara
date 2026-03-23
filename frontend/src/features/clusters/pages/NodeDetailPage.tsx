@@ -1235,8 +1235,8 @@ function ServicesTab({ clusterId, nodeName }: { clusterId: string; nodeName: str
 
 function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
   const [serviceFilter, setServiceFilter] = useState("");
-  const { data: entries, isLoading } = useNodeSyslog(clusterId, nodeName, {
-    limit: 500,
+  const { data: entries, isLoading, isError } = useNodeSyslog(clusterId, nodeName, {
+    limit: 200,
     service: serviceFilter || undefined,
   });
 
@@ -1254,7 +1254,9 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
           onChange={(e) => { setServiceFilter(e.target.value); }}
         />
       </div>
-      {isLoading ? <Skeleton className="h-64 w-full" /> : !entries || entries.length === 0 ? (
+      {isLoading ? <Skeleton className="h-64 w-full" /> : isError ? (
+        <p className="text-sm text-destructive">Failed to load syslog. The node may be unreachable or the request timed out.</p>
+      ) : !entries || entries.length === 0 ? (
         <p className="text-sm text-muted-foreground">No syslog entries found.</p>
       ) : (
         <div className="max-h-[600px] overflow-auto rounded-lg border bg-muted/30 p-3">

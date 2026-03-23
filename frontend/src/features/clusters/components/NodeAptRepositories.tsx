@@ -60,10 +60,10 @@ export function NodeAptRepositories({ clusterId, nodeName }: Props) {
   if (!data) return null;
 
   const digest = data.digest;
-  const files = data.files;
-  const infos = data.infos;
-  const standardRepos = data["standard-repos"];
-  const errors = data.errors;
+  const files = data.files ?? [];
+  const infos = data.infos ?? [];
+  const standardRepos = data["standard-repos"] ?? [];
+  const errors = data.errors ?? [];
   const warnings = infos.filter((i) => i.kind === "warning");
   const unconfiguredStandard = standardRepos.filter((r) => r.status === 0);
 
@@ -204,10 +204,10 @@ function RepositoryRow({
   isToggling: boolean;
 }) {
   const enabled = repo.Enabled === 1;
-  const types = repo.Types.join(", ");
-  const uris = repo.URIs.join(" ");
-  const suites = repo.Suites.join(" ");
-  const components = repo.Components.join(" ");
+  const types = (repo.Types ?? []).join(", ");
+  const uris = (repo.URIs ?? []).join(" ");
+  const suites = (repo.Suites ?? []).join(" ");
+  const components = (repo.Components ?? []).join(" ");
 
   return (
     <div
