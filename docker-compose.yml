@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRES_DB: ${POSTGRES_DB:-nexara}
     volumes:
-      - nexara-db-data:/var/lib/postgresql/data
+      - ${DATA_DIR:-nexara-db-data}${DATA_DIR:+/db}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexara}"]
       interval: 5s
@@ -21,7 +21,7 @@ services:
     image: redis:7-alpine
     container_name: nexara-redis
     volumes:
-      - nexara-redis-data:/data
+      - ${DATA_DIR:-nexara-redis-data}${DATA_DIR:+/redis}:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -45,7 +45,7 @@ services:
       METRICS_COLLECT_INTERVAL: ${METRICS_COLLECT_INTERVAL:-10s}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
-      - nexara-data:/data/nexara
+      - ${DATA_DIR:-nexara-data}${DATA_DIR:+/data}:/data/nexara
     healthcheck:
       test: ["CMD", "/nexara", "healthcheck"]
       interval: 10s

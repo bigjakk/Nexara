@@ -1155,6 +1155,63 @@ type AptUpdate struct {
 	ChangeLogURL string `json:"ChangeLogUrl"`
 }
 
+// AptRepositoryResponse is the full response from GET /nodes/{node}/apt/repositories.
+type AptRepositoryResponse struct {
+	Digest        string               `json:"digest"`
+	Files         []AptRepositoryFile  `json:"files"`
+	Infos         []AptRepositoryInfo  `json:"infos"`
+	StandardRepos []AptStandardRepo    `json:"standard-repos"`
+	Errors        []AptRepositoryError `json:"errors"`
+}
+
+// AptRepositoryFile represents a single source file and its repositories.
+type AptRepositoryFile struct {
+	Path         string          `json:"path"`
+	FileType     string          `json:"file-type"`
+	Repositories []AptRepository `json:"repositories"`
+}
+
+// AptRepository represents a single repository entry within a source file.
+type AptRepository struct {
+	Types      []string        `json:"Types"`
+	URIs       []string        `json:"URIs"`
+	Suites     []string        `json:"Suites"`
+	Components []string        `json:"Components"`
+	Options    []AptRepoOption `json:"Options"`
+	Comment    string          `json:"Comment"`
+	Enabled    int             `json:"Enabled"`
+	FileType   string          `json:"FileType"`
+}
+
+// AptRepoOption is a key-value pair for repository options.
+type AptRepoOption struct {
+	Key    string   `json:"Key"`
+	Values []string `json:"Values"`
+}
+
+// AptRepositoryInfo holds info or warning messages about repositories.
+type AptRepositoryInfo struct {
+	Path     string `json:"path"`
+	Index    int    `json:"index"`
+	Property string `json:"property"`
+	Kind     string `json:"kind"`
+	Message  string `json:"message"`
+}
+
+// AptStandardRepo represents a well-known Proxmox repository that can be added.
+type AptStandardRepo struct {
+	Handle      string `json:"handle"`
+	Name        string `json:"name"`
+	Status      int    `json:"status"`
+	Description string `json:"description"`
+}
+
+// AptRepositoryError represents an error from parsing repository files.
+type AptRepositoryError struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
 // BackupParams holds parameters for triggering a vzdump backup.
 type BackupParams struct {
 	VMID     string `json:"vmid"`

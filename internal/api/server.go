@@ -59,6 +59,7 @@ type Server struct {
 	poolHandler          *handlers.PoolHandler
 	replicationHandler   *handlers.ReplicationHandler
 	acmeHandler          *handlers.ACMEHandler
+	aptRepositoryHandler *handlers.AptRepositoryHandler
 	metricServerHandler  *handlers.MetricServerHandler
 	searchHandler        *handlers.SearchHandler
 	apiKeyHandler        *handlers.APIKeyHandler
@@ -176,6 +177,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.poolHandler = handlers.NewPoolHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.replicationHandler = handlers.NewReplicationHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.acmeHandler = handlers.NewACMEHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.aptRepositoryHandler = handlers.NewAptRepositoryHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.metricServerHandler = handlers.NewMetricServerHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.searchHandler = handlers.NewSearchHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}

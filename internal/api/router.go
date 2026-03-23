@@ -378,6 +378,13 @@ func (s *Server) setupRoutes() {
 			clusters.Delete("/:cluster_id/nodes/:node/certificates/revoke", s.acmeHandler.RevokeNodeCertificate)
 		}
 
+		// APT repository management routes.
+		if s.aptRepositoryHandler != nil {
+			clusters.Get("/:cluster_id/nodes/:node/apt/repositories", s.aptRepositoryHandler.ListRepositories)
+			clusters.Put("/:cluster_id/nodes/:node/apt/repositories", s.aptRepositoryHandler.ToggleRepository)
+			clusters.Post("/:cluster_id/nodes/:node/apt/repositories", s.aptRepositoryHandler.AddStandardRepository)
+		}
+
 		// Metric server routes.
 		if s.metricServerHandler != nil {
 			clusters.Get("/:cluster_id/metric-servers", s.metricServerHandler.ListServers)

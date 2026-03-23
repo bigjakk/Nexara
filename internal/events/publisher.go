@@ -31,6 +31,7 @@ const (
 	KindPoolChange       = "pool_change"
 	KindReplicationChange = "replication_change"
 	KindACMEChange       = "acme_change"
+	KindAptRepoChange    = "apt_repo_change"
 )
 
 // Event is a lightweight notification pushed through Redis pub/sub.

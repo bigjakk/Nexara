@@ -2778,6 +2778,56 @@ func (c *Client) RefreshNodeAptIndex(ctx context.Context, node string) (string, 
 	return upid, nil
 }
 
+// GetNodeAptRepositories returns configured APT repositories for a node from GET /nodes/{node}/apt/repositories.
+func (c *Client) GetNodeAptRepositories(ctx context.Context, node string) (*AptRepositoryResponse, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	var resp AptRepositoryResponse
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/apt/repositories", &resp); err != nil {
+		return nil, fmt.Errorf("get apt repositories on %s: %w", node, err)
+	}
+	return &resp, nil
+}
+
+// SetNodeAptRepository enables or disables an APT repository on a node via POST /nodes/{node}/apt/repositories.
+func (c *Client) SetNodeAptRepository(ctx context.Context, node, filePath string, index int, enabled bool, digest string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	params := url.Values{}
+	params.Set("path", filePath)
+	params.Set("index", strconv.Itoa(index))
+	if enabled {
+		params.Set("enabled", "1")
+	} else {
+		params.Set("enabled", "0")
+	}
+	if digest != "" {
+		params.Set("digest", digest)
+	}
+	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/apt/repositories", params, nil); err != nil {
+		return fmt.Errorf("set apt repository on %s: %w", node, err)
+	}
+	return nil
+}
+
+// AddNodeAptStandardRepository adds a standard Proxmox repository on a node via PUT /nodes/{node}/apt/repositories.
+func (c *Client) AddNodeAptStandardRepository(ctx context.Context, node, handle, digest string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	params := url.Values{}
+	params.Set("handle", handle)
+	if digest != "" {
+		params.Set("digest", digest)
+	}
+	if err := c.doPut(ctx, "/nodes/"+url.PathEscape(node)+"/apt/repositories", params, nil); err != nil {
+		return fmt.Errorf("add standard apt repository %q on %s: %w", handle, node, err)
+	}
+	return nil
+}
+
 // RebootNode reboots a node via POST /nodes/{node}/status with command=reboot.
 func (c *Client) RebootNode(ctx context.Context, node string) error {
 	if err := validateNodeName(node); err != nil {
