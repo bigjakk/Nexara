@@ -84,9 +84,19 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 - Disk management — resize, move, attach/detach
 - Template management and resource pools
 - Live migration with pre-flight checks
+- **Node evacuation** — bulk migrate all guests off a node
 
 </td>
 <td width="50%">
+
+### Node Management
+- **DNS & timezone** — edit directly from the UI
+- **Disks** — S.M.A.R.T. data, ZFS/LVM/LVM-Thin/Directory creation with Proxmox-populated disk selectors, init GPT, wipe
+- **Services** — view status, start/stop/restart node daemons
+- **Firewall** — node-level rule CRUD with log viewer
+- **Syslog** — real-time system log viewer with service filtering
+- **Network** — create, edit, delete interfaces; apply/revert config
+- **Power** — shutdown, reboot with confirmation dialogs
 
 ### Consoles
 - **VNC** — browser-based graphical console (noVNC)
@@ -129,10 +139,10 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 <td>
 
 ### Networking
-- Firewall management with reusable templates
-- SDN — zones, VNets, subnets, controllers
-- Network interfaces — bridges, bonds, apply/revert
-- ACME certificate management
+- Firewall management at cluster, node, and VM level with reusable templates
+- SDN — zones, VNets, subnets, controllers, IPAM, DNS plugins
+- Network interfaces — bridges, bonds, VLANs, OVS; inline edit, apply/revert
+- ACME certificate management per node
 
 </td>
 <td>
