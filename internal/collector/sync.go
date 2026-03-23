@@ -495,7 +495,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				Size:      d.Size,
 				DiskType:  d.Type,
 				Health:    d.Health,
-				Wearout:   d.Wearout,
+				Wearout:   d.Wearout.String(),
 				Rpm:       safeInt32(d.RPM),
 				Vendor:    d.Vendor,
 				Wwn:       d.WWN,

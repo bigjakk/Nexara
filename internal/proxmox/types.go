@@ -76,20 +76,47 @@ type NodeSubscription struct {
 	Key         string `json:"key"`
 }
 
+// FlexString handles JSON fields that may be a string or a number.
+type FlexString string
+
+// UnmarshalJSON implements json.Unmarshaler for FlexString.
+func (f *FlexString) UnmarshalJSON(data []byte) error {
+	// Try string first
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*f = FlexString(s)
+		return nil
+	}
+	// Try number
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err == nil {
+		*f = FlexString(n.String())
+		return nil
+	}
+	// Null or other — treat as empty
+	*f = ""
+	return nil
+}
+
+// String returns the underlying string value.
+func (f FlexString) String() string {
+	return string(f)
+}
+
 // NodeDisk represents a physical disk from GET /nodes/{node}/disks/list.
 type NodeDisk struct {
-	DevPath string `json:"devpath"`
-	Model   string `json:"model"`
-	Serial  string `json:"serial"`
-	Size    int64  `json:"size"`
-	Type    string `json:"type"`
-	Health  string `json:"health"`
-	Wearout string `json:"wearout"`
-	RPM     int    `json:"rpm"`
-	Vendor  string `json:"vendor"`
-	WWN     string `json:"wwn"`
-	GPT     int    `json:"gpt"`
-	Used    string `json:"used"`
+	DevPath string     `json:"devpath"`
+	Model   string     `json:"model"`
+	Serial  string     `json:"serial"`
+	Size    int64      `json:"size"`
+	Type    string     `json:"type"`
+	Health  string     `json:"health"`
+	Wearout FlexString `json:"wearout"`
+	RPM     int        `json:"rpm"`
+	Vendor  string     `json:"vendor"`
+	WWN     string     `json:"wwn"`
+	GPT     int        `json:"gpt"`
+	Used    string     `json:"used"`
 }
 
 // DiskSMARTData represents S.M.A.R.T. data from GET /nodes/{node}/disks/smart.

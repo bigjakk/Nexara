@@ -48,7 +48,7 @@ func (h *NodeHandler) ListLiveDisks(c *fiber.Ctx) error {
 			Size:     d.Size,
 			DiskType: d.Type,
 			Health:   d.Health,
-			Wearout:  d.Wearout,
+			Wearout:  d.Wearout.String(),
 			GPT:      d.GPT,
 			Used:     d.Used,
 		}
