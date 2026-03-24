@@ -665,6 +665,8 @@ function ZFSPoolsSection({ clusterId, nodeName }: { clusterId: string; nodeName:
   const createZFS = useCreateZFSPool(clusterId, nodeName);
   const deleteZFS = useDeleteZFSPool(clusterId, nodeName);
   const deleteError = deleteZFS.error instanceof Error ? deleteZFS.error.message : "";
+  const [cleanupDisks, setCleanupDisks] = useState(true);
+  const [cleanupConfig, setCleanupConfig] = useState(true);
 
   const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
 
@@ -789,6 +791,28 @@ function ZFSPoolsSection({ clusterId, nodeName }: { clusterId: string; nodeName:
                             Are you sure you want to destroy <span className="font-mono font-semibold">{p.name}</span>? This will permanently delete the pool and all data on it. This action cannot be undone.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
+                        <div className="space-y-2 py-2">
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={cleanupDisks}
+                              onChange={(e) => { setCleanupDisks(e.target.checked); }}
+                              className="rounded border"
+                            />
+                            Cleanup Disks
+                          </label>
+                          <p className="ml-6 text-xs text-muted-foreground">Wipe partition tables of member disks</p>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={cleanupConfig}
+                              onChange={(e) => { setCleanupConfig(e.target.checked); }}
+                              className="rounded border"
+                            />
+                            Cleanup Storage Configuration
+                          </label>
+                          <p className="ml-6 text-xs text-muted-foreground">Remove associated storage from Proxmox configuration</p>
+                        </div>
                         {deleteError && (
                           <p className="text-sm text-destructive">{deleteError}</p>
                         )}
@@ -797,7 +821,7 @@ function ZFSPoolsSection({ clusterId, nodeName }: { clusterId: string; nodeName:
                           <AlertDialogAction
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             disabled={deleteZFS.isPending}
-                            onClick={() => { deleteZFS.mutate(p.name); }}
+                            onClick={() => { deleteZFS.mutate({ poolName: p.name, cleanupDisks, cleanupConfig }); }}
                           >
                             {deleteZFS.isPending ? "Destroying…" : "Destroy"}
                           </AlertDialogAction>

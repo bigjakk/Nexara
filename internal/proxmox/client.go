@@ -536,15 +536,28 @@ func (c *Client) CreateNodeZFSPool(ctx context.Context, node string, params Crea
 }
 
 // DeleteNodeZFSPool destroys a ZFS pool on a node. Returns a UPID for the task.
-func (c *Client) DeleteNodeZFSPool(ctx context.Context, node, poolName string) (string, error) {
+// cleanupDisks wipes partition tables of member disks; cleanupConfig removes the
+// associated storage entry from Proxmox configuration.
+func (c *Client) DeleteNodeZFSPool(ctx context.Context, node, poolName string, cleanupDisks, cleanupConfig bool) (string, error) {
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
 	if poolName == "" {
 		return "", fmt.Errorf("pool name is required")
 	}
+	params := url.Values{}
+	if cleanupDisks {
+		params.Set("cleanup-disks", "1")
+	}
+	if cleanupConfig {
+		params.Set("cleanup-config", "1")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/disks/zfs/" + url.PathEscape(poolName)
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
 	var upid string
-	if err := c.doDelete(ctx, "/nodes/"+url.PathEscape(node)+"/disks/zfs/"+url.PathEscape(poolName), &upid); err != nil {
+	if err := c.doDelete(ctx, path, &upid); err != nil {
 		return "", fmt.Errorf("delete zfs pool %s on %s: %w", poolName, node, err)
 	}
 	return upid, nil

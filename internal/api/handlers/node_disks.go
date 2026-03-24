@@ -161,11 +161,13 @@ func (h *NodeHandler) DeleteZFSPool(c *fiber.Ctx) error {
 	if poolName == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Pool name is required")
 	}
+	cleanupDisks := c.QueryBool("cleanup-disks", false)
+	cleanupConfig := c.QueryBool("cleanup-config", false)
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.DeleteNodeZFSPool(c.Context(), nodeName, poolName)
+	upid, err := pxClient.DeleteNodeZFSPool(c.Context(), nodeName, poolName, cleanupDisks, cleanupConfig)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy ZFS pool: %v", err))
 	}
