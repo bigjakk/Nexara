@@ -823,7 +823,7 @@ function ZFSPoolsSection({ clusterId, nodeName }: { clusterId: string; nodeName:
                           <AlertDialogAction
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             disabled={deleteZFS.isPending}
-                            onClick={() => { deleteZFS.mutate({ poolName: p.name, cleanupDisks, cleanupConfig }); }}
+                            onClick={(e) => { e.preventDefault(); deleteZFS.mutate({ poolName: p.name, cleanupDisks, cleanupConfig }); }}
                           >
                             {deleteZFS.isPending ? "Destroying…" : "Destroy"}
                           </AlertDialogAction>
@@ -954,7 +954,7 @@ function LVMSection({ clusterId, nodeName }: { clusterId: string; nodeName: stri
                           <AlertDialogAction
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             disabled={deleteLVM.isPending}
-                            onClick={() => { deleteLVM.mutate({ name: vg.name, cleanupDisks: lvmCleanupDisks, cleanupConfig: lvmCleanupConfig }); }}
+                            onClick={(e) => { e.preventDefault(); deleteLVM.mutate({ name: vg.name, cleanupDisks: lvmCleanupDisks, cleanupConfig: lvmCleanupConfig }); }}
                           >
                             {deleteLVM.isPending ? "Destroying…" : "Destroy"}
                           </AlertDialogAction>
@@ -1085,7 +1085,7 @@ function LVMThinSection({ clusterId, nodeName }: { clusterId: string; nodeName: 
                           <AlertDialogAction
                             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             disabled={deleteThin.isPending}
-                            onClick={() => { deleteThin.mutate({ name: `${p.vg}-${p.lv}`, cleanupDisks: thinCleanupDisks, cleanupConfig: thinCleanupConfig }); }}
+                            onClick={(e) => { e.preventDefault(); deleteThin.mutate({ lv: p.lv, vg: p.vg, cleanupDisks: thinCleanupDisks, cleanupConfig: thinCleanupConfig }); }}
                           >
                             {deleteThin.isPending ? "Destroying…" : "Destroy"}
                           </AlertDialogAction>

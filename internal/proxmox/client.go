@@ -663,25 +663,26 @@ func (c *Client) CreateNodeLVMThin(ctx context.Context, node string, params Crea
 }
 
 // DeleteNodeLVMThin destroys an LVM-Thin pool on a node. Returns a UPID for the task.
-// The Proxmox endpoint expects the name as "{vg}-{lv}" (e.g. "pve-data").
-func (c *Client) DeleteNodeLVMThin(ctx context.Context, node, name string, cleanupDisks, cleanupConfig bool) (string, error) {
+// Proxmox expects the LV name in the path and the VG name as a query parameter.
+func (c *Client) DeleteNodeLVMThin(ctx context.Context, node, name, volumeGroup string, cleanupDisks, cleanupConfig bool) (string, error) {
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
 	if name == "" {
 		return "", fmt.Errorf("lvmthin name is required")
 	}
+	if volumeGroup == "" {
+		return "", fmt.Errorf("volume group is required")
+	}
 	params := url.Values{}
+	params.Set("volume-group", volumeGroup)
 	if cleanupDisks {
 		params.Set("cleanup-disks", "1")
 	}
 	if cleanupConfig {
 		params.Set("cleanup-config", "1")
 	}
-	path := "/nodes/" + url.PathEscape(node) + "/disks/lvmthin/" + url.PathEscape(name)
-	if len(params) > 0 {
-		path += "?" + params.Encode()
-	}
+	path := "/nodes/" + url.PathEscape(node) + "/disks/lvmthin/" + url.PathEscape(name) + "?" + params.Encode()
 	var upid string
 	if err := c.doDelete(ctx, path, &upid); err != nil {
 		return "", fmt.Errorf("delete lvmthin %s on %s: %w", name, node, err)

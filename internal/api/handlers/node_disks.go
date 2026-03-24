@@ -339,17 +339,21 @@ func (h *NodeHandler) DeleteLVMThin(c *fiber.Ctx) error {
 	if poolName == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Pool name is required")
 	}
+	volumeGroup := c.Query("volume-group")
+	if volumeGroup == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "volume-group query parameter is required")
+	}
 	cleanupDisks := c.QueryBool("cleanup-disks", false)
 	cleanupConfig := c.QueryBool("cleanup-config", false)
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.DeleteNodeLVMThin(c.Context(), nodeName, poolName, cleanupDisks, cleanupConfig)
+	upid, err := pxClient.DeleteNodeLVMThin(c.Context(), nodeName, poolName, volumeGroup, cleanupDisks, cleanupConfig)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy LVM-Thin pool: %v", err))
 	}
-	details, _ := json.Marshal(map[string]string{"node": nodeName, "pool": poolName})
+	details, _ := json.Marshal(map[string]string{"node": nodeName, "pool": poolName, "vg": volumeGroup})
 	h.auditLog(c, clusterID, nodeName, "delete_lvmthin", details)
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
