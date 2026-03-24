@@ -566,11 +566,13 @@ export interface SyslogEntryResponse {
   t: string;
 }
 
-export function useNodeSyslog(clusterId: string, nodeName: string, params?: { start?: number | undefined; limit?: number | undefined; service?: string | undefined }) {
+export function useNodeSyslog(clusterId: string, nodeName: string, params?: { start?: number | undefined; limit?: number | undefined; service?: string | undefined; since?: string | undefined; until?: string | undefined }) {
   const searchParams = new URLSearchParams();
   if (params?.start !== undefined) searchParams.set("start", String(params.start));
   if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
   if (params?.service) searchParams.set("service", params.service);
+  if (params?.since) searchParams.set("since", params.since);
+  if (params?.until) searchParams.set("until", params.until);
   const qs = searchParams.toString();
 
   return useQuery({

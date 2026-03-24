@@ -1389,11 +1389,31 @@ function ServicesTab({ clusterId, nodeName }: { clusterId: string; nodeName: str
   );
 }
 
+const SYSLOG_TIMESPANS = [
+  { label: "Today", hours: 0 },
+  { label: "Last 24h", hours: 24 },
+  { label: "Last 3 Days", hours: 72 },
+  { label: "Last Week", hours: 168 },
+] as const;
+
+function getSyslogSince(hours: number): string {
+  if (hours === 0) {
+    // Today: start of the current day
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }
+  const d = new Date(Date.now() - hours * 3600_000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+}
+
 function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
   const [serviceFilter, setServiceFilter] = useState("");
+  const [timespanHours, setTimespanHours] = useState(24);
+  const since = getSyslogSince(timespanHours);
   const { data: entries, isLoading, isError } = useNodeSyslog(clusterId, nodeName, {
-    limit: 200,
+    limit: 500,
     service: serviceFilter || undefined,
+    since,
   });
 
   return (
@@ -1403,12 +1423,25 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
           <FileText className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-lg font-semibold">System Log</h2>
         </div>
-        <Input
-          className="w-48"
-          placeholder="Filter by service..."
-          value={serviceFilter}
-          onChange={(e) => { setServiceFilter(e.target.value); }}
-        />
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-md border">
+            {SYSLOG_TIMESPANS.map((ts) => (
+              <button
+                key={ts.hours}
+                className={`px-3 py-1 text-xs transition-colors ${timespanHours === ts.hours ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                onClick={() => { setTimespanHours(ts.hours); }}
+              >
+                {ts.label}
+              </button>
+            ))}
+          </div>
+          <Input
+            className="w-48"
+            placeholder="Filter by service..."
+            value={serviceFilter}
+            onChange={(e) => { setServiceFilter(e.target.value); }}
+          />
+        </div>
       </div>
       {isLoading ? <Skeleton className="h-64 w-full" /> : isError ? (
         <p className="text-sm text-destructive">Failed to load syslog. The node may be unreachable or the request timed out.</p>
