@@ -101,7 +101,7 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/nodes/:node_name/firewall/log", s.nodeHandler.GetNodeFirewallLog)
 
 			// Node bulk operations.
-			clusters.Post("/:cluster_id/nodes/:node_name/migrateall", s.nodeHandler.MigrateAllGuests)
+			clusters.Post("/:cluster_id/nodes/:node_name/evacuate", s.nodeHandler.EvacuateNode)
 		}
 		if s.vmHandler != nil {
 			clusters.Get("/:cluster_id/vms", s.vmHandler.ListByCluster)

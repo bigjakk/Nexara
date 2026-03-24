@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -9,8 +10,10 @@ import (
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/rolling"
 )
 
 // NodeHandler handles node endpoints.
@@ -406,13 +409,22 @@ func (h *NodeHandler) RebootNode(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-type migrateAllRequest struct {
-	TargetNode string `json:"target_node"`
-	MaxWorkers int    `json:"max_workers"`
+type evacuateRequest struct {
+	TargetNode string `json:"target_node"` // optional: if set, all guests go to this node
 }
 
-// MigrateAllGuests handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/migrateall.
-func (h *NodeHandler) MigrateAllGuests(c *fiber.Ctx) error {
+type evacuateMigration struct {
+	VMID       int    `json:"vmid"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	TargetNode string `json:"target_node"`
+	UPID       string `json:"upid"`
+	Error      string `json:"error,omitempty"`
+}
+
+// EvacuateNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/evacuate.
+// Distributes guests across available nodes using DRS-aware target selection.
+func (h *NodeHandler) EvacuateNode(c *fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "node"); err != nil {
 		return err
 	}
@@ -420,7 +432,7 @@ func (h *NodeHandler) MigrateAllGuests(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	var req migrateAllRequest
+	var req evacuateRequest
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
@@ -428,11 +440,108 @@ func (h *NodeHandler) MigrateAllGuests(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	upid, err := pxClient.MigrateAllGuests(c.Context(), nodeName, req.TargetNode, req.MaxWorkers)
+
+	ctx := c.Context()
+
+	// Get cluster nodes.
+	clusterNodes, err := pxClient.GetNodes(ctx)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to evacuate node")
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to get cluster nodes: %v", err))
 	}
-	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "migrate_all", details)
-	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
+
+	// Build workload map for DRS-aware selection.
+	nodeWorkloads := rolling.BuildNodeWorkloads(ctx, pxClient, clusterNodes)
+
+	guests := nodeWorkloads[nodeName]
+	if len(guests) == 0 {
+		return c.JSON(fiber.Map{"status": "ok", "migrations": []evacuateMigration{}, "message": "No running guests on this node"})
+	}
+
+	// Available target nodes.
+	var candidates []string
+	for _, cn := range clusterNodes {
+		if cn.Node != nodeName && cn.Status == "online" {
+			candidates = append(candidates, cn.Node)
+		}
+	}
+	if len(candidates) == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "No available target nodes in the cluster")
+	}
+
+	// If a single target is specified, skip DRS selection.
+	if req.TargetNode != "" {
+		found := false
+		for _, c := range candidates {
+			if c == req.TargetNode {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Target node %q is not available", req.TargetNode))
+		}
+	}
+
+	// Fetch HA/DRS data for constraint-aware selection.
+	haResources, _ := pxClient.GetHAResources(ctx)
+	haGroups, _ := pxClient.GetHAGroups(ctx)
+	haRules, _ := pxClient.GetHARules(ctx)
+
+	resSID := make(map[string]proxmox.HAResource, len(haResources))
+	for _, r := range haResources {
+		resSID[r.SID] = r
+	}
+	groupMap := make(map[string]proxmox.HAGroup, len(haGroups))
+	for _, g := range haGroups {
+		groupMap[g.Group] = g
+	}
+
+	dbRules, _ := h.queries.ListDRSRules(ctx, clusterID)
+	drsRules := drs.ParseDBRules(dbRules)
+
+	// Assign targets and kick off migrations.
+	migrations := make([]evacuateMigration, 0, len(guests))
+	for _, guest := range guests {
+		target := req.TargetNode
+		if target == "" {
+			snapshot := rolling.GuestSnapshot{
+				VMID: guest.VMID,
+				Name: guest.Name,
+				Type: guest.Type,
+			}
+			t, err := rolling.SelectTarget(snapshot, nodeName, candidates, resSID, groupMap, haRules, drsRules, nodeWorkloads)
+			if err != nil {
+				migrations = append(migrations, evacuateMigration{
+					VMID: guest.VMID, Name: guest.Name, Type: guest.Type,
+					Error: fmt.Sprintf("No suitable target: %v", err),
+				})
+				continue
+			}
+			target = t
+		}
+
+		var upid string
+		var migrateErr error
+		if guest.Type == "lxc" {
+			upid, migrateErr = pxClient.MigrateCT(ctx, nodeName, guest.VMID, proxmox.MigrateParams{Target: target, Online: true})
+		} else {
+			upid, migrateErr = pxClient.MigrateVM(ctx, nodeName, guest.VMID, proxmox.MigrateParams{Target: target, Online: true})
+		}
+
+		m := evacuateMigration{
+			VMID: guest.VMID, Name: guest.Name, Type: guest.Type,
+			TargetNode: target, UPID: upid,
+		}
+		if migrateErr != nil {
+			m.Error = migrateErr.Error()
+		}
+		migrations = append(migrations, m)
+
+		// Update workload map so subsequent SelectTarget calls see this migration.
+		nodeWorkloads[target] = append(nodeWorkloads[target], guest)
+	}
+
+	details, _ := json.Marshal(migrations)
+	h.auditLog(c, clusterID, nodeName, "evacuate", details)
+	return c.JSON(fiber.Map{"status": "ok", "migrations": migrations})
 }

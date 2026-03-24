@@ -86,7 +86,7 @@ func AnalyzeHAConstraints(
 		return nil, fmt.Errorf("get cluster nodes: %w", err)
 	}
 
-	nodeWorkloads := buildNodeWorkloads(ctx, client, clusterNodes)
+	nodeWorkloads := BuildNodeWorkloads(ctx, client, clusterNodes)
 
 	drainSet := make(map[string]bool, len(nodesToDrain))
 	for _, n := range nodesToDrain {
@@ -459,8 +459,8 @@ func SelectTarget(
 	return best.node, nil
 }
 
-// buildNodeWorkloads creates a workload map from the Proxmox API.
-func buildNodeWorkloads(ctx context.Context, client *proxmox.Client, nodes []proxmox.NodeListEntry) map[string][]drs.Workload {
+// BuildNodeWorkloads creates a workload map from the Proxmox API.
+func BuildNodeWorkloads(ctx context.Context, client *proxmox.Client, nodes []proxmox.NodeListEntry) map[string][]drs.Workload {
 	workloads := make(map[string][]drs.Workload)
 
 	for _, node := range nodes {

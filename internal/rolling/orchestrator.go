@@ -292,7 +292,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 	drsRules := drs.ParseDBRules(dbRules)
 
 	// Build workload map for constraint checking.
-	nodeWorkloads := buildNodeWorkloads(ctx, client, clusterNodes)
+	nodeWorkloads := BuildNodeWorkloads(ctx, client, clusterNodes)
 
 	// Migrate all guests using HA-aware target selection.
 	// Passthrough guests (PCI/USB) cannot be live-migrated — shut them down
@@ -474,7 +474,7 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 	haRules, _ := client.GetHARules(ctx)
 	dbRules, _ := o.queries.ListDRSRules(ctx, job.ClusterID)
 	drsRules := drs.ParseDBRules(dbRules)
-	nodeWorkloads := buildNodeWorkloads(ctx, client, clusterNodes)
+	nodeWorkloads := BuildNodeWorkloads(ctx, client, clusterNodes)
 
 	for _, guest := range remaining {
 		if o.isJobCancelled(ctx, job.ID) {

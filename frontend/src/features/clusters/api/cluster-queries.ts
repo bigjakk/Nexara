@@ -357,12 +357,27 @@ export function useWipeDisk(clusterId: string, nodeName: string) {
 
 // --- Node Bulk Operations ---
 
-export function useMigrateAllGuests(clusterId: string, nodeName: string) {
+export interface EvacuateMigration {
+  vmid: number;
+  name: string;
+  type: string;
+  target_node: string;
+  upid: string;
+  error?: string;
+}
+
+export interface EvacuateResponse {
+  status: string;
+  migrations: EvacuateMigration[];
+  message?: string;
+}
+
+export function useEvacuateNode(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { target_node?: string | undefined; max_workers?: number | undefined }) =>
-      apiClient.post<{ status: string; upid: string }>(
-        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/migrateall`,
+    mutationFn: (params: { target_node?: string | undefined }) =>
+      apiClient.post<EvacuateResponse>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/evacuate`,
         params,
       ),
     onSuccess: () => {
