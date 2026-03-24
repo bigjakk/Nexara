@@ -228,7 +228,22 @@ export function useCreateZFSPool(clusterId: string, nodeName: string) {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks"],
+        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "zfs"],
+      });
+    },
+  });
+}
+
+export function useDeleteZFSPool(clusterId: string, nodeName: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (poolName: string) =>
+      apiClient.delete<{ status: string; upid: string }>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/zfs/${encodeURIComponent(poolName)}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "zfs"],
       });
     },
   });
@@ -255,7 +270,7 @@ export function useCreateLVM(clusterId: string, nodeName: string) {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks"],
+        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvm"],
       });
     },
   });
@@ -282,7 +297,7 @@ export function useCreateLVMThin(clusterId: string, nodeName: string) {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks"],
+        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvmthin"],
       });
     },
   });

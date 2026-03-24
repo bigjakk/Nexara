@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -140,10 +141,36 @@ func (h *NodeHandler) CreateZFSPool(c *fiber.Ctx) error {
 		Ashift:      req.Ashift,
 	})
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create ZFS pool")
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to create ZFS pool: %v", err))
 	}
 	details, _ := json.Marshal(req)
 	h.auditLog(c, clusterID, nodeName, "create_zfs_pool", details)
+	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
+}
+
+// DeleteZFSPool handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs/:pool_name.
+func (h *NodeHandler) DeleteZFSPool(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	poolName := c.Params("pool_name")
+	if poolName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Pool name is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	upid, err := pxClient.DeleteNodeZFSPool(c.Context(), nodeName, poolName)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy ZFS pool: %v", err))
+	}
+	details, _ := json.Marshal(map[string]string{"node": nodeName, "pool": poolName})
+	h.auditLog(c, clusterID, nodeName, "delete_zfs_pool", details)
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 

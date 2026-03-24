@@ -77,6 +77,7 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/nodes/:node_name/disks/smart", s.nodeHandler.GetDiskSMART)
 			clusters.Get("/:cluster_id/nodes/:node_name/disks/zfs", s.nodeHandler.ListZFSPools)
 			clusters.Post("/:cluster_id/nodes/:node_name/disks/zfs", s.nodeHandler.CreateZFSPool)
+			clusters.Delete("/:cluster_id/nodes/:node_name/disks/zfs/:pool_name", s.nodeHandler.DeleteZFSPool)
 			clusters.Get("/:cluster_id/nodes/:node_name/disks/lvm", s.nodeHandler.ListLVM)
 			clusters.Post("/:cluster_id/nodes/:node_name/disks/lvm", s.nodeHandler.CreateLVM)
 			clusters.Get("/:cluster_id/nodes/:node_name/disks/lvmthin", s.nodeHandler.ListLVMThin)

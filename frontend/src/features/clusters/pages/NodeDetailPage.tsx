@@ -56,6 +56,7 @@ import {
   type LiveDiskResponse,
   useLiveDisks,
   useCreateZFSPool,
+  useDeleteZFSPool,
   useCreateLVM,
   useCreateLVMThin,
   useNodeDirectories,
@@ -662,6 +663,8 @@ function ZFSPoolsSection({ clusterId, nodeName }: { clusterId: string; nodeName:
   const [zfsSelectedDisks, setZfsSelectedDisks] = useState<string[]>([]);
   const [zfsCompression, setZfsCompression] = useState("on");
   const createZFS = useCreateZFSPool(clusterId, nodeName);
+  const deleteZFS = useDeleteZFSPool(clusterId, nodeName);
+  const deleteError = deleteZFS.error instanceof Error ? deleteZFS.error.message : "";
 
   const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
 
@@ -756,6 +759,7 @@ function ZFSPoolsSection({ clusterId, nodeName }: { clusterId: string; nodeName:
                 <th className="px-3 py-2 text-left font-medium">Free</th>
                 <th className="px-3 py-2 text-left font-medium">Frag</th>
                 <th className="px-3 py-2 text-left font-medium">Health</th>
+                <th className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -770,6 +774,36 @@ function ZFSPoolsSection({ clusterId, nodeName }: { clusterId: string; nodeName:
                     <Badge variant={p.health === "ONLINE" ? "default" : "destructive"} className="text-xs">
                       {p.health}
                     </Badge>
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Destroy ZFS Pool</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to destroy <span className="font-mono font-semibold">{p.name}</span>? This will permanently delete the pool and all data on it. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        {deleteError && (
+                          <p className="text-sm text-destructive">{deleteError}</p>
+                        )}
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={deleteZFS.isPending}
+                            onClick={() => { deleteZFS.mutate(p.name); }}
+                          >
+                            {deleteZFS.isPending ? "Destroying…" : "Destroy"}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </td>
                 </tr>
               ))}

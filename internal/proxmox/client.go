@@ -535,6 +535,21 @@ func (c *Client) CreateNodeZFSPool(ctx context.Context, node string, params Crea
 	return upid, nil
 }
 
+// DeleteNodeZFSPool destroys a ZFS pool on a node. Returns a UPID for the task.
+func (c *Client) DeleteNodeZFSPool(ctx context.Context, node, poolName string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if poolName == "" {
+		return "", fmt.Errorf("pool name is required")
+	}
+	var upid string
+	if err := c.doDelete(ctx, "/nodes/"+url.PathEscape(node)+"/disks/zfs/"+url.PathEscape(poolName), &upid); err != nil {
+		return "", fmt.Errorf("delete zfs pool %s on %s: %w", poolName, node, err)
+	}
+	return upid, nil
+}
+
 // GetNodeLVM returns the LVM volume groups on a node.
 func (c *Client) GetNodeLVM(ctx context.Context, node string) ([]LVMVolumeGroup, error) {
 	if err := validateNodeName(node); err != nil {
