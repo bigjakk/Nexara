@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -88,7 +89,7 @@ func (h *NodeHandler) GetNodeSyslog(c *fiber.Ctx) error {
 	}
 	entries, err := pxClient.GetNodeSyslog(c.Context(), nodeName, start, limit, since, until, service)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node syslog")
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to get node syslog: %v", err))
 	}
 	return c.JSON(entries)
 }
