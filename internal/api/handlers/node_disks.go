@@ -237,6 +237,34 @@ func (h *NodeHandler) CreateLVM(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
+// DeleteLVM handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm/:vg_name.
+func (h *NodeHandler) DeleteLVM(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	vgName := c.Params("vg_name")
+	if vgName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Volume group name is required")
+	}
+	cleanupDisks := c.QueryBool("cleanup-disks", false)
+	cleanupConfig := c.QueryBool("cleanup-config", false)
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	upid, err := pxClient.DeleteNodeLVM(c.Context(), nodeName, vgName, cleanupDisks, cleanupConfig)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy LVM volume group: %v", err))
+	}
+	details, _ := json.Marshal(map[string]string{"node": nodeName, "vg": vgName})
+	h.auditLog(c, clusterID, nodeName, "delete_lvm", details)
+	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
+}
+
 // --- LVM-Thin ---
 
 // ListLVMThin handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin.
@@ -295,6 +323,34 @@ func (h *NodeHandler) CreateLVMThin(c *fiber.Ctx) error {
 	}
 	details, _ := json.Marshal(req)
 	h.auditLog(c, clusterID, nodeName, "create_lvmthin", details)
+	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
+}
+
+// DeleteLVMThin handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin/:pool_name.
+func (h *NodeHandler) DeleteLVMThin(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "node"); err != nil {
+		return err
+	}
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	poolName := c.Params("pool_name")
+	if poolName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Pool name is required")
+	}
+	cleanupDisks := c.QueryBool("cleanup-disks", false)
+	cleanupConfig := c.QueryBool("cleanup-config", false)
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	upid, err := pxClient.DeleteNodeLVMThin(c.Context(), nodeName, poolName, cleanupDisks, cleanupConfig)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy LVM-Thin pool: %v", err))
+	}
+	details, _ := json.Marshal(map[string]string{"node": nodeName, "pool": poolName})
+	h.auditLog(c, clusterID, nodeName, "delete_lvmthin", details)
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 

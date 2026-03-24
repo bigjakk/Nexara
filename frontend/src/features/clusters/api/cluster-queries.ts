@@ -281,6 +281,26 @@ export function useCreateLVM(clusterId: string, nodeName: string) {
   });
 }
 
+export function useDeleteLVM(clusterId: string, nodeName: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { name: string; cleanupDisks?: boolean; cleanupConfig?: boolean }) => {
+      const qp = new URLSearchParams();
+      if (params.cleanupDisks) qp.set("cleanup-disks", "true");
+      if (params.cleanupConfig) qp.set("cleanup-config", "true");
+      const qs = qp.toString();
+      return apiClient.delete<{ status: string; upid: string }>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvm/${encodeURIComponent(params.name)}${qs ? `?${qs}` : ""}`,
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvm"],
+      });
+    },
+  });
+}
+
 export function useNodeLVMThin(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvmthin"],
@@ -300,6 +320,26 @@ export function useCreateLVMThin(clusterId: string, nodeName: string) {
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvmthin`,
         params,
       ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvmthin"],
+      });
+    },
+  });
+}
+
+export function useDeleteLVMThin(clusterId: string, nodeName: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { name: string; cleanupDisks?: boolean; cleanupConfig?: boolean }) => {
+      const qp = new URLSearchParams();
+      if (params.cleanupDisks) qp.set("cleanup-disks", "true");
+      if (params.cleanupConfig) qp.set("cleanup-config", "true");
+      const qs = qp.toString();
+      return apiClient.delete<{ status: string; upid: string }>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvmthin/${encodeURIComponent(params.name)}${qs ? `?${qs}` : ""}`,
+      );
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvmthin"],

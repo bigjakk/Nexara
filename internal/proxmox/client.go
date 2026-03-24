@@ -606,6 +606,32 @@ func (c *Client) CreateNodeLVM(ctx context.Context, node string, params CreateLV
 	return upid, nil
 }
 
+// DeleteNodeLVM destroys an LVM volume group on a node. Returns a UPID for the task.
+func (c *Client) DeleteNodeLVM(ctx context.Context, node, vgName string, cleanupDisks, cleanupConfig bool) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if vgName == "" {
+		return "", fmt.Errorf("volume group name is required")
+	}
+	params := url.Values{}
+	if cleanupDisks {
+		params.Set("cleanup-disks", "1")
+	}
+	if cleanupConfig {
+		params.Set("cleanup-config", "1")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/disks/lvm/" + url.PathEscape(vgName)
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+	var upid string
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("delete lvm vg %s on %s: %w", vgName, node, err)
+	}
+	return upid, nil
+}
+
 // GetNodeLVMThin returns the LVM-Thin pools on a node.
 func (c *Client) GetNodeLVMThin(ctx context.Context, node string) ([]LVMThinPool, error) {
 	if err := validateNodeName(node); err != nil {
@@ -632,6 +658,33 @@ func (c *Client) CreateNodeLVMThin(ctx context.Context, node string, params Crea
 	var upid string
 	if err := c.doPost(ctx, "/nodes/"+url.PathEscape(node)+"/disks/lvmthin", form, &upid); err != nil {
 		return "", fmt.Errorf("create lvmthin on node %s: %w", node, err)
+	}
+	return upid, nil
+}
+
+// DeleteNodeLVMThin destroys an LVM-Thin pool on a node. Returns a UPID for the task.
+// The Proxmox endpoint expects the name as "{vg}-{lv}" (e.g. "pve-data").
+func (c *Client) DeleteNodeLVMThin(ctx context.Context, node, name string, cleanupDisks, cleanupConfig bool) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if name == "" {
+		return "", fmt.Errorf("lvmthin name is required")
+	}
+	params := url.Values{}
+	if cleanupDisks {
+		params.Set("cleanup-disks", "1")
+	}
+	if cleanupConfig {
+		params.Set("cleanup-config", "1")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/disks/lvmthin/" + url.PathEscape(name)
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+	var upid string
+	if err := c.doDelete(ctx, path, &upid); err != nil {
+		return "", fmt.Errorf("delete lvmthin %s on %s: %w", name, node, err)
 	}
 	return upid, nil
 }

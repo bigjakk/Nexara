@@ -58,7 +58,9 @@ import {
   useCreateZFSPool,
   useDeleteZFSPool,
   useCreateLVM,
+  useDeleteLVM,
   useCreateLVMThin,
+  useDeleteLVMThin,
   useNodeDirectories,
   useCreateDirectory,
   useNodeServices,
@@ -847,6 +849,10 @@ function LVMSection({ clusterId, nodeName }: { clusterId: string; nodeName: stri
   const [lvmDevice, setLvmDevice] = useState("");
   const [lvmAddStorage, setLvmAddStorage] = useState(true);
   const createLVM = useCreateLVM(clusterId, nodeName);
+  const deleteLVM = useDeleteLVM(clusterId, nodeName);
+  const deleteError = deleteLVM.error instanceof Error ? deleteLVM.error.message : "";
+  const [lvmCleanupDisks, setLvmCleanupDisks] = useState(true);
+  const [lvmCleanupConfig, setLvmCleanupConfig] = useState(true);
   const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
 
   const handleCreate = () => {
@@ -903,6 +909,7 @@ function LVMSection({ clusterId, nodeName }: { clusterId: string; nodeName: stri
                 <th className="px-3 py-2 text-left font-medium">Free</th>
                 <th className="px-3 py-2 text-left font-medium">PVs</th>
                 <th className="px-3 py-2 text-left font-medium">LVs</th>
+                <th className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -913,6 +920,48 @@ function LVMSection({ clusterId, nodeName }: { clusterId: string; nodeName: stri
                   <td className="px-3 py-2">{formatBytes(vg.free)}</td>
                   <td className="px-3 py-2">{vg.pv_count}</td>
                   <td className="px-3 py-2">{vg.lv_count}</td>
+                  <td className="px-3 py-2 text-right">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Destroy LVM Volume Group</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to destroy <span className="font-mono font-semibold">{vg.name}</span>? This will permanently delete the volume group and all data on it. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <div className="space-y-2 py-2">
+                          <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={lvmCleanupDisks} onChange={(e) => { setLvmCleanupDisks(e.target.checked); }} className="rounded border" />
+                            Cleanup Disks
+                          </label>
+                          <p className="ml-6 text-xs text-muted-foreground">Wipe partition tables of member disks</p>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={lvmCleanupConfig} onChange={(e) => { setLvmCleanupConfig(e.target.checked); }} className="rounded border" />
+                            Cleanup Storage Configuration
+                          </label>
+                          <p className="ml-6 text-xs text-muted-foreground">Remove associated storage from Proxmox configuration</p>
+                        </div>
+                        {deleteError && (
+                          <p className="text-sm text-destructive">{deleteError}</p>
+                        )}
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={deleteLVM.isPending}
+                            onClick={() => { deleteLVM.mutate({ name: vg.name, cleanupDisks: lvmCleanupDisks, cleanupConfig: lvmCleanupConfig }); }}
+                          >
+                            {deleteLVM.isPending ? "Destroying…" : "Destroy"}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -931,6 +980,10 @@ function LVMThinSection({ clusterId, nodeName }: { clusterId: string; nodeName: 
   const [thinDevice, setThinDevice] = useState("");
   const [thinAddStorage, setThinAddStorage] = useState(true);
   const createThin = useCreateLVMThin(clusterId, nodeName);
+  const deleteThin = useDeleteLVMThin(clusterId, nodeName);
+  const thinDeleteError = deleteThin.error instanceof Error ? deleteThin.error.message : "";
+  const [thinCleanupDisks, setThinCleanupDisks] = useState(true);
+  const [thinCleanupConfig, setThinCleanupConfig] = useState(true);
   const unusedDisks = liveDisks?.filter((d) => !d.used) ?? [];
 
   const handleCreate = () => {
@@ -987,6 +1040,7 @@ function LVMThinSection({ clusterId, nodeName }: { clusterId: string; nodeName: 
                 <th className="px-3 py-2 text-left font-medium">Size</th>
                 <th className="px-3 py-2 text-left font-medium">Used</th>
                 <th className="px-3 py-2 text-left font-medium">Data %</th>
+                <th className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -997,6 +1051,48 @@ function LVMThinSection({ clusterId, nodeName }: { clusterId: string; nodeName: 
                   <td className="px-3 py-2">{formatBytes(p.lv_size)}</td>
                   <td className="px-3 py-2">{formatBytes(p.used)}</td>
                   <td className="px-3 py-2">{p.data_percent.toFixed(1)}%</td>
+                  <td className="px-3 py-2 text-right">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Destroy LVM-Thin Pool</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to destroy <span className="font-mono font-semibold">{p.vg}/{p.lv}</span>? This will permanently delete the thin pool and all data on it. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <div className="space-y-2 py-2">
+                          <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={thinCleanupDisks} onChange={(e) => { setThinCleanupDisks(e.target.checked); }} className="rounded border" />
+                            Cleanup Disks
+                          </label>
+                          <p className="ml-6 text-xs text-muted-foreground">Wipe partition tables of member disks</p>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={thinCleanupConfig} onChange={(e) => { setThinCleanupConfig(e.target.checked); }} className="rounded border" />
+                            Cleanup Storage Configuration
+                          </label>
+                          <p className="ml-6 text-xs text-muted-foreground">Remove associated storage from Proxmox configuration</p>
+                        </div>
+                        {thinDeleteError && (
+                          <p className="text-sm text-destructive">{thinDeleteError}</p>
+                        )}
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={deleteThin.isPending}
+                            onClick={() => { deleteThin.mutate({ name: `${p.vg}-${p.lv}`, cleanupDisks: thinCleanupDisks, cleanupConfig: thinCleanupConfig }); }}
+                          >
+                            {deleteThin.isPending ? "Destroying…" : "Destroy"}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </td>
                 </tr>
               ))}
             </tbody>
