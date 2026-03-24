@@ -140,7 +140,7 @@ func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.CreateNetworkInterface(c.Context(), nodeName, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create network interface")
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to create network interface: %v", err))
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": req.Iface, "type": req.Type})
@@ -181,7 +181,7 @@ func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.UpdateNetworkInterface(c.Context(), nodeName, ifaceName, req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update network interface")
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to update network interface: %v", err))
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": ifaceName, "type": req.Type})
@@ -213,7 +213,7 @@ func (h *NetworkHandler) DeleteNetworkInterface(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.DeleteNetworkInterface(c.Context(), nodeName, ifaceName); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete network interface")
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to delete network interface: %v", err))
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": ifaceName})
@@ -244,7 +244,7 @@ func (h *NetworkHandler) ApplyNetworkConfig(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.ApplyNetworkConfig(c.Context(), nodeName); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to apply network config")
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to apply network config: %v", err))
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName})
@@ -275,7 +275,7 @@ func (h *NetworkHandler) RevertNetworkConfig(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.RevertNetworkConfig(c.Context(), nodeName); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revert network config")
+		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to revert network config: %v", err))
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName})

@@ -364,10 +364,28 @@ func checkStatus(statusCode int, body []byte) error {
 	case statusCode >= 400:
 		return &APIError{
 			StatusCode: statusCode,
-			Message:    strings.TrimSpace(string(body)),
+			Message:    parseProxmoxError(body),
 		}
 	}
 	return nil
+}
+
+// parseProxmoxError extracts a human-readable message from the Proxmox API
+// error JSON envelope. Proxmox returns {"errors":{"field":"msg",...},"message":"..."}
+// on validation failures. If parsing fails, the raw body is returned as-is.
+func parseProxmoxError(body []byte) string {
+	var envelope struct {
+		Errors  map[string]string `json:"errors"`
+		Message string            `json:"message"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil || len(envelope.Errors) == 0 {
+		return strings.TrimSpace(string(body))
+	}
+	parts := make([]string, 0, len(envelope.Errors))
+	for field, msg := range envelope.Errors {
+		parts = append(parts, field+": "+msg)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // unmarshalData unmarshals the standard Proxmox API response envelope.

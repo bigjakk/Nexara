@@ -38,6 +38,8 @@ export function CreateInterfaceDialog({
   const [autostart, setAutostart] = useState(true);
 
   const create = useCreateNetworkInterface(clusterId, nodeName);
+  const errorMessage =
+    create.error instanceof Error ? create.error.message : "";
 
   const handleSubmit = () => {
     const req: CreateNetworkInterfaceRequest = {
@@ -137,6 +139,9 @@ export function CreateInterfaceDialog({
             />
             <Label htmlFor="autostart">Autostart</Label>
           </div>
+          {errorMessage && (
+            <p className="text-sm text-destructive">{errorMessage}</p>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => { setOpen(false); }}>
               Cancel
@@ -145,7 +150,7 @@ export function CreateInterfaceDialog({
               onClick={handleSubmit}
               disabled={!iface || !type || create.isPending}
             >
-              Create
+              {create.isPending ? "Creating…" : "Create"}
             </Button>
           </div>
         </div>
