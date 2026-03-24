@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -80,6 +81,11 @@ func (h *NodeHandler) GetNodeSyslog(c *fiber.Ctx) error {
 		limit = 5000
 	}
 	since := c.Query("since")
+	if since == "" {
+		// Default to last 24 hours to avoid Proxmox scanning the entire journal,
+		// which can hang on nodes with large log files.
+		since = time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02")
+	}
 	until := c.Query("until")
 	service := c.Query("service")
 
