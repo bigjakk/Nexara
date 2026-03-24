@@ -564,13 +564,26 @@ func (c *Client) DeleteNodeZFSPool(ctx context.Context, node, poolName string, c
 }
 
 // GetNodeLVM returns the LVM volume groups on a node.
+// Proxmox returns {"data":{"children":[...]}} with Proxmox-specific field names.
 func (c *Client) GetNodeLVM(ctx context.Context, node string) ([]LVMVolumeGroup, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err
 	}
-	var vgs []LVMVolumeGroup
-	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/disks/lvm", &vgs); err != nil {
+	var wrapper struct {
+		Children []lvmVGRaw `json:"children"`
+	}
+	if err := c.do(ctx, "/nodes/"+url.PathEscape(node)+"/disks/lvm", &wrapper); err != nil {
 		return nil, fmt.Errorf("get node %s lvm: %w", node, err)
+	}
+	vgs := make([]LVMVolumeGroup, 0, len(wrapper.Children))
+	for _, raw := range wrapper.Children {
+		vgs = append(vgs, LVMVolumeGroup{
+			Name:    raw.Name,
+			Size:    raw.Size,
+			Free:    raw.Free,
+			PVCount: len(raw.Children),
+			LVCount: raw.LVCount,
+		})
 	}
 	return vgs, nil
 }

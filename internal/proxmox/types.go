@@ -158,7 +158,24 @@ type CreateZFSPoolParams struct {
 	Ashift      int    // 9, 12, 13, 14
 }
 
-// LVMVolumeGroup represents an LVM volume group from GET /nodes/{node}/disks/lvm.
+// lvmVGRaw matches the Proxmox JSON for GET /nodes/{node}/disks/lvm children.
+type lvmVGRaw struct {
+	Name     string       `json:"name"`
+	Size     int64        `json:"size"`
+	Free     int64        `json:"free"`
+	LVCount  int          `json:"lvcount"`
+	Children []lvmPVRaw   `json:"children,omitempty"`
+	Leaf     int          `json:"leaf"`
+}
+
+type lvmPVRaw struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+	Free int64  `json:"free"`
+	Leaf int    `json:"leaf"`
+}
+
+// LVMVolumeGroup is the normalized representation returned to the frontend.
 type LVMVolumeGroup struct {
 	Name    string `json:"name"`
 	Size    int64  `json:"size"`
