@@ -1397,13 +1397,8 @@ const SYSLOG_TIMESPANS = [
 ] as const;
 
 function getSyslogSince(hours: number): string {
-  if (hours === 0) {
-    // Today: start of the current day
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  }
-  const d = new Date(Date.now() - hours * 3600_000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+  const d = hours === 0 ? new Date() : new Date(Date.now() - hours * 3600_000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
