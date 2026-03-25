@@ -846,10 +846,11 @@ func (c *Client) GetNodeSyslog(ctx context.Context, node string, start, limit in
 	}
 
 	var entries []SyslogEntry
-	if err := c.do(ctx, buildQuery(start, limit), &entries); err != nil {
+	total, err := c.doWithTotal(ctx, buildQuery(start, limit), &entries)
+	if err != nil {
 		return nil, 0, fmt.Errorf("get node %s syslog: %w", node, err)
 	}
-	return entries, 0, nil
+	return entries, total, nil
 }
 
 // GetNodePCIDevices returns the PCI devices on a node.

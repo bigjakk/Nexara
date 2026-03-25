@@ -404,6 +404,23 @@ func unmarshalData(body []byte, dst interface{}) error {
 	return nil
 }
 
+// unmarshalDataWithTotal unmarshals both data and total from the Proxmox response envelope.
+func unmarshalDataWithTotal(body []byte, dst interface{}) (int, error) {
+	var envelope response
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return 0, fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+	}
+	if dst != nil && len(envelope.Data) > 0 {
+		if err := json.Unmarshal(envelope.Data, dst); err != nil {
+			return 0, fmt.Errorf("%w: %s", ErrInvalidResponse, err)
+		}
+	}
+	if envelope.Total != nil {
+		return *envelope.Total, nil
+	}
+	return 0, nil
+}
+
 // unmarshalTotal extracts only the "total" field from the Proxmox response envelope.
 func unmarshalTotal(body []byte) (int, error) {
 	var envelope response
@@ -414,6 +431,34 @@ func unmarshalTotal(body []byte) (int, error) {
 		return 0, nil
 	}
 	return *envelope.Total, nil
+}
+
+// doWithTotal performs an authenticated GET and returns both the data and total count.
+func (a *apiClient) doWithTotal(ctx context.Context, path string, dst interface{}) (int, error) {
+	apiURL := a.baseURL + "/api2/json" + path
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return 0, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", a.authHeader)
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s", ErrConnectionFailed, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	if err != nil {
+		return 0, fmt.Errorf("read response body: %w", err)
+	}
+
+	if err := checkStatus(resp.StatusCode, body); err != nil {
+		return 0, err
+	}
+
+	return unmarshalDataWithTotal(body, dst)
 }
 
 // doGetTotal performs an authenticated GET and returns only the total count from the response.

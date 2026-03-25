@@ -4,7 +4,7 @@ import {
   ArrowLeft, Terminal, Cpu, MemoryStick, HardDrive, Info,
   Network, CircuitBoard, Globe, Trash2, RotateCcw, Check,
   Pencil, Power, RefreshCw, Cog, FileText, Play, Square, RotateCw,
-  ArrowRightLeft, Plus, Loader2,
+  ArrowRightLeft, Plus, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -1401,17 +1401,44 @@ function getSyslogSince(hours: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+const SYSLOG_PAGE_SIZE = 500;
+
 function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
   const [serviceFilter, setServiceFilter] = useState("");
   const [timespanHours, setTimespanHours] = useState(24);
+  // null page = "newest" (server resolves to last page)
+  const [page, setPage] = useState<number | null>(null);
   const since = getSyslogSince(timespanHours);
+
+  const startParam = page === null ? undefined : page * SYSLOG_PAGE_SIZE;
   const { data, isLoading, isFetching, isError } = useNodeSyslog(clusterId, nodeName, {
-    limit: 500,
+    limit: SYSLOG_PAGE_SIZE,
+    start: startParam,
     service: serviceFilter || undefined,
     since,
   });
   const entries = data?.entries;
   const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / SYSLOG_PAGE_SIZE));
+  // When page is null (newest), we're on the last page
+  const currentPage = page ?? totalPages - 1;
+  const rangeStart = currentPage * SYSLOG_PAGE_SIZE + 1;
+  const rangeEnd = Math.min(rangeStart + (entries?.length ?? 0) - 1, total);
+
+  const goToPage = (p: number) => {
+    const lastPage = totalPages - 1;
+    if (p >= lastPage) {
+      setPage(null); // use "newest" mode for last page
+    } else {
+      setPage(Math.max(0, p));
+    }
+  };
+
+  // Reset to newest page when timespan or filter changes
+  const handleTimespanChange = (hours: number) => {
+    setTimespanHours(hours);
+    setPage(null);
+  };
 
   return (
     <div className="space-y-3">
@@ -1425,11 +1452,6 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
               <span>Loading logs…</span>
             </div>
           )}
-          {!isFetching && total > 0 && entries && entries.length > 0 && (
-            <span className="text-xs text-muted-foreground">
-              Showing {entries.length.toLocaleString()} of {total.toLocaleString()} entries (newest)
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-md border">
@@ -1437,7 +1459,7 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
               <button
                 key={ts.hours}
                 className={`px-3 py-1 text-xs transition-colors ${timespanHours === ts.hours ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
-                onClick={() => { setTimespanHours(ts.hours); }}
+                onClick={() => { handleTimespanChange(ts.hours); }}
               >
                 {ts.label}
               </button>
@@ -1456,15 +1478,41 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
       ) : !entries || entries.length === 0 ? (
         <p className="text-sm text-muted-foreground">No syslog entries found.</p>
       ) : (
-        <div className="max-h-[600px] overflow-auto rounded-lg border bg-muted/30 p-3">
-          <pre className="text-xs leading-relaxed">
-            {entries.map((entry) => (
-              <div key={entry.n} className="hover:bg-muted/50">
-                {entry.t}
+        <>
+          <div className="max-h-[600px] overflow-auto rounded-lg border bg-muted/30 p-3">
+            <pre className="text-xs leading-relaxed">
+              {entries.map((entry) => (
+                <div key={entry.n} className="hover:bg-muted/50">
+                  {entry.t}
+                </div>
+              ))}
+            </pre>
+          </div>
+          {total > SYSLOG_PAGE_SIZE && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()} of {total.toLocaleString()} entries
+              </span>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="icon" className="h-7 w-7" disabled={currentPage === 0 || isFetching} onClick={() => { goToPage(0); }}>
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" className="h-7 w-7" disabled={currentPage === 0 || isFetching} onClick={() => { goToPage(currentPage - 1); }}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="px-2 text-xs text-muted-foreground">
+                  Page {(currentPage + 1).toLocaleString()} of {totalPages.toLocaleString()}
+                </span>
+                <Button variant="outline" size="icon" className="h-7 w-7" disabled={currentPage >= totalPages - 1 || isFetching} onClick={() => { goToPage(currentPage + 1); }}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon" className="h-7 w-7" disabled={page === null || isFetching} onClick={() => { goToPage(totalPages - 1); }}>
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
               </div>
-            ))}
-          </pre>
-        </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
