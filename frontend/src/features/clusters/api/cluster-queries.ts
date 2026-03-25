@@ -584,6 +584,7 @@ export function useNodeSyslog(clusterId: string, nodeName: string, params?: { st
     enabled: clusterId.length > 0 && nodeName.length > 0,
     retry: 1,
     staleTime: 30_000,
+    placeholderData: (prev) => prev,
   });
 }
 

@@ -4,7 +4,7 @@ import {
   ArrowLeft, Terminal, Cpu, MemoryStick, HardDrive, Info,
   Network, CircuitBoard, Globe, Trash2, RotateCcw, Check,
   Pencil, Power, RefreshCw, Cog, FileText, Play, Square, RotateCw,
-  ArrowRightLeft, Plus,
+  ArrowRightLeft, Plus, Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -1405,7 +1405,7 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
   const [serviceFilter, setServiceFilter] = useState("");
   const [timespanHours, setTimespanHours] = useState(24);
   const since = getSyslogSince(timespanHours);
-  const { data: entries, isLoading, isError } = useNodeSyslog(clusterId, nodeName, {
+  const { data: entries, isLoading, isFetching, isError } = useNodeSyslog(clusterId, nodeName, {
     limit: 500,
     service: serviceFilter || undefined,
     since,
@@ -1417,6 +1417,12 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-lg font-semibold">System Log</h2>
+          {isFetching && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>Loading logs…</span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-md border">
