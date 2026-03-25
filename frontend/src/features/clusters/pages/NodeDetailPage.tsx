@@ -1398,7 +1398,7 @@ const SYSLOG_TIMESPANS = [
 
 function getSyslogSince(hours: number): string {
   const d = hours === 0 ? new Date() : new Date(Date.now() - hours * 3600_000);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 const SYSLOG_PAGE_SIZE = 500;
