@@ -1405,11 +1405,13 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
   const [serviceFilter, setServiceFilter] = useState("");
   const [timespanHours, setTimespanHours] = useState(24);
   const since = getSyslogSince(timespanHours);
-  const { data: entries, isLoading, isFetching, isError } = useNodeSyslog(clusterId, nodeName, {
+  const { data, isLoading, isFetching, isError } = useNodeSyslog(clusterId, nodeName, {
     limit: 500,
     service: serviceFilter || undefined,
     since,
   });
+  const entries = data?.entries;
+  const total = data?.total ?? 0;
 
   return (
     <div className="space-y-3">
@@ -1422,6 +1424,11 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <span>Loading logs…</span>
             </div>
+          )}
+          {!isFetching && total > 0 && entries && entries.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              Showing {entries.length.toLocaleString()} of {total.toLocaleString()} entries (newest)
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2">

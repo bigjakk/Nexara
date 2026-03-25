@@ -797,35 +797,59 @@ func (c *Client) ServiceAction(ctx context.Context, node, service, action string
 // --- Node Syslog ---
 
 // GetNodeSyslog returns syslog entries from a node.
-func (c *Client) GetNodeSyslog(ctx context.Context, node string, start, limit int, since, until, service string) ([]SyslogEntry, error) {
+// When start is -1, it fetches the most recent entries by first querying the total count
+// and then requesting entries from the tail of the log.
+func (c *Client) GetNodeSyslog(ctx context.Context, node string, start, limit int, since, until, service string) ([]SyslogEntry, int, error) {
 	if err := validateNodeName(node); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	q := url.Values{}
-	if start > 0 {
-		q.Set("start", fmt.Sprintf("%d", start))
+	basePath := "/nodes/" + url.PathEscape(node) + "/syslog"
+
+	buildQuery := func(s, l int) string {
+		q := url.Values{}
+		if s > 0 {
+			q.Set("start", fmt.Sprintf("%d", s))
+		}
+		if l > 0 {
+			q.Set("limit", fmt.Sprintf("%d", l))
+		}
+		if since != "" {
+			q.Set("since", since)
+		}
+		if until != "" {
+			q.Set("until", until)
+		}
+		if service != "" {
+			q.Set("service", service)
+		}
+		if qs := q.Encode(); qs != "" {
+			return basePath + "?" + qs
+		}
+		return basePath
 	}
-	if limit > 0 {
-		q.Set("limit", fmt.Sprintf("%d", limit))
+
+	// When start == -1, fetch the newest entries by getting total first.
+	if start < 0 {
+		total, err := c.doGetTotal(ctx, buildQuery(0, 1))
+		if err != nil {
+			return nil, 0, fmt.Errorf("get node %s syslog total: %w", node, err)
+		}
+		realStart := total - limit
+		if realStart < 0 {
+			realStart = 0
+		}
+		var entries []SyslogEntry
+		if err := c.do(ctx, buildQuery(realStart, limit), &entries); err != nil {
+			return nil, 0, fmt.Errorf("get node %s syslog: %w", node, err)
+		}
+		return entries, total, nil
 	}
-	if since != "" {
-		q.Set("since", since)
-	}
-	if until != "" {
-		q.Set("until", until)
-	}
-	if service != "" {
-		q.Set("service", service)
-	}
-	path := "/nodes/" + url.PathEscape(node) + "/syslog"
-	if len(q) > 0 {
-		path += "?" + q.Encode()
-	}
+
 	var entries []SyslogEntry
-	if err := c.do(ctx, path, &entries); err != nil {
-		return nil, fmt.Errorf("get node %s syslog: %w", node, err)
+	if err := c.do(ctx, buildQuery(start, limit), &entries); err != nil {
+		return nil, 0, fmt.Errorf("get node %s syslog: %w", node, err)
 	}
-	return entries, nil
+	return entries, 0, nil
 }
 
 // GetNodePCIDevices returns the PCI devices on a node.

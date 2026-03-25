@@ -9,7 +9,8 @@ import (
 
 // response is the standard Proxmox API envelope.
 type response struct {
-	Data json.RawMessage `json:"data"`
+	Data  json.RawMessage `json:"data"`
+	Total *int            `json:"total,omitempty"`
 }
 
 // Resource type constants for GET /cluster/resources filtering.

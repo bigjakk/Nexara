@@ -566,6 +566,11 @@ export interface SyslogEntryResponse {
   t: string;
 }
 
+export interface SyslogResponse {
+  entries: SyslogEntryResponse[];
+  total: number;
+}
+
 export function useNodeSyslog(clusterId: string, nodeName: string, params?: { start?: number | undefined; limit?: number | undefined; service?: string | undefined; since?: string | undefined; until?: string | undefined }) {
   const searchParams = new URLSearchParams();
   if (params?.start !== undefined) searchParams.set("start", String(params.start));
@@ -578,7 +583,7 @@ export function useNodeSyslog(clusterId: string, nodeName: string, params?: { st
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "syslog", params],
     queryFn: () =>
-      apiClient.get<SyslogEntryResponse[]>(
+      apiClient.get<SyslogResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/syslog${qs ? `?${qs}` : ""}`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,

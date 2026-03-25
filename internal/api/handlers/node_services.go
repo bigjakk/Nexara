@@ -75,7 +75,12 @@ func (h *NodeHandler) GetNodeSyslog(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	start, _ := strconv.Atoi(c.Query("start", "0"))
+	// Default start to -1 (fetch newest entries) unless explicitly provided.
+	startStr := c.Query("start")
+	start := -1
+	if startStr != "" {
+		start, _ = strconv.Atoi(startStr)
+	}
 	limit, _ := strconv.Atoi(c.Query("limit", "500"))
 	if limit > 5000 {
 		limit = 5000
@@ -93,9 +98,9 @@ func (h *NodeHandler) GetNodeSyslog(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	entries, err := pxClient.GetNodeSyslog(c.Context(), nodeName, start, limit, since, until, service)
+	entries, total, err := pxClient.GetNodeSyslog(c.Context(), nodeName, start, limit, since, until, service)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to get node syslog: %v", err))
 	}
-	return c.JSON(entries)
+	return c.JSON(fiber.Map{"entries": entries, "total": total})
 }
