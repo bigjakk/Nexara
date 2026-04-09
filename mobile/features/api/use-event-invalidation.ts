@@ -77,6 +77,25 @@ export function useEventInvalidation(clusterIds: string[]): void {
                 event.resource_id,
               ]);
             }
+            // Snapshot operations (create/delete/rollback) arrive as
+            // vm_state_change with action "snapshot_*". Invalidate the
+            // snapshot list so the UI reflects the change without
+            // waiting for the 30s polling interval or a force-close.
+            const act = event.action ?? "";
+            if (
+              event.resource_id &&
+              (act === "snapshot_create" ||
+                act === "snapshot_delete" ||
+                act === "snapshot_rollback")
+            ) {
+              scheduleInvalidation([
+                "clusters",
+                cid,
+                "vm",
+                event.resource_id,
+                "snapshots",
+              ]);
+            }
           }
           break;
 

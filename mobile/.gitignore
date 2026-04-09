@@ -40,3 +40,25 @@ Thumbs.db
 
 expo-env.d.ts
 # @end expo-cli
+
+# Android signing keys — catastrophic if leaked
+*.keystore
+*.jks
+
+# iOS provisioning
+*.mobileprovision
+
+# Firebase / Google services config
+google-services.json
+GoogleService-Info.plist
+
+# Expo shared state
+.expo-shared/
+
+# Local config overrides
+app.config.local.js
+app.config.local.ts
+
+# Metro health checks / cache
+.metro-health-check*
+metro-cache/

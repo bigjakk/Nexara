@@ -46,10 +46,16 @@ JWT_SECRET=$(openssl rand -base64 32)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
 POSTGRES_PASSWORD=$(openssl rand -base64 16 | tr -d '=/+')
 
-# Replace placeholders
-sed -i "s|change-this-to-a-secure-random-string|${JWT_SECRET}|" "$ENV_FILE"
-sed -i "s|change-this-to-a-32-byte-hex-key|${ENCRYPTION_KEY}|" "$ENV_FILE"
+# Replace the postgres placeholder password
 sed -i "s|changeme|${POSTGRES_PASSWORD}|g" "$ENV_FILE"
+
+# JWT_SECRET and ENCRYPTION_KEY are commented out in .env.example
+# (auto-generated at runtime if omitted). Append concrete values so the
+# generated .env is fully self-contained.
+echo "" >> "$ENV_FILE"
+echo "# ---- Generated secrets (created by setup-env.sh) ----" >> "$ENV_FILE"
+echo "JWT_SECRET=${JWT_SECRET}" >> "$ENV_FILE"
+echo "ENCRYPTION_KEY=${ENCRYPTION_KEY}" >> "$ENV_FILE"
 
 info "Generated .env with secure secrets"
 info "  JWT_SECRET:      ${JWT_SECRET:0:8}..."

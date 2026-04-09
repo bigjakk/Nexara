@@ -73,3 +73,33 @@ tmp/
 # Plan docs
 *-plan.md
 *-claude-code-plan.md
+
+# Additional IDE / editor
+.fleet/
+*.sublime-*
+desktop.ini
+.Spotlight-V100
+.Trashes
+
+# Additional coverage
+*.coverage
+lcov.info
+
+# Temp / backup
+*.bak
+*.tmp
+*.orig
+
+# Frontend caches
+frontend/.eslintcache
+frontend/.stylelintcache
+frontend/.turbo/
+
+# Package manager artifacts
+.npm/
+.pnpm-debug.log*
+yarn-error.log*
+yarn-debug.log*
+
+# Local compose overrides
+docker-compose.local.yml
