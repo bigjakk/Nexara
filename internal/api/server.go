@@ -64,6 +64,7 @@ type Server struct {
 	searchHandler        *handlers.SearchHandler
 	apiKeyHandler        *handlers.APIKeyHandler
 	apiDocsHandler       *handlers.APIDocsHandler
+	mobileDeviceHandler *handlers.MobileDeviceHandler
 	rbacEngine          *auth.RBACEngine
 	eventPub            *events.Publisher
 }
@@ -170,7 +171,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
 		s.cveHandler = handlers.NewCVEHandler(s.queries, cfg.EncryptionKey, s.eventPub)
-		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub, newDispatcherRegistry())
+		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub, newDispatcherRegistry(s.queries))
 		s.reportHandler = handlers.NewReportHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		rollingOrch := rolling.NewOrchestrator(s.queries, cfg.EncryptionKey, slog.Default().With("component", "rolling-update"), s.eventPub, nil)
 		s.rollingUpdateHandler = handlers.NewRollingUpdateHandler(s.queries, cfg.EncryptionKey, s.eventPub, rollingOrch)
@@ -186,6 +187,9 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 
 	if s.queries != nil {
 		s.apiKeyHandler = handlers.NewAPIKeyHandler(s.queries, s.eventPub)
+	}
+	if s.queries != nil {
+		s.mobileDeviceHandler = handlers.NewMobileDeviceHandler(s.queries)
 	}
 	s.apiDocsHandler = handlers.NewAPIDocsHandler()
 
@@ -219,7 +223,13 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	return s
 }
 
-func newDispatcherRegistry() *notifications.Registry {
+// newDispatcherRegistry creates a registry with all notification dispatchers.
+//
+// IMPORTANT: This function is duplicated in `internal/scheduler/scheduler.go`.
+// When adding a new dispatcher, register it in BOTH files. The duplication
+// exists because the API server and the scheduler both need to dispatch
+// alerts and we don't want a circular import between the two packages.
+func newDispatcherRegistry(queries *db.Queries) *notifications.Registry {
 	r := notifications.NewRegistry()
 	r.Register(&notifications.SMTPDispatcher{})
 	r.Register(&notifications.SlackDispatcher{})
@@ -228,6 +238,7 @@ func newDispatcherRegistry() *notifications.Registry {
 	r.Register(&notifications.TelegramDispatcher{})
 	r.Register(&notifications.WebhookDispatcher{})
 	r.Register(&notifications.PagerDutyDispatcher{})
+	r.Register(notifications.NewExpoPushDispatcher(queries))
 	return r
 }
 
@@ -265,4 +276,17 @@ func (s *Server) Shutdown() error {
 // App returns the underlying Fiber app for testing.
 func (s *Server) App() *fiber.App {
 	return s.app
+}
+
+// RBACEngine returns the API server's RBAC engine so other components
+// in the unified binary (e.g. the WebSocket server) can perform their
+// own permission checks against the same engine instance. May be nil
+// if the API server was constructed without a database or Redis.
+//
+// The WebSocket server uses this for the subscribe-time view:cluster
+// check (security review H1) — without it, any authenticated user
+// could subscribe to any cluster channel and stream cross-tenant
+// metric / event / alert data.
+func (s *Server) RBACEngine() *auth.RBACEngine {
+	return s.rbacEngine
 }

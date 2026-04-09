@@ -27,6 +27,7 @@ const CHANNEL_TYPE_LABELS: Record<ChannelType, string> = {
   telegram: "Telegram",
   webhook: "Webhook",
   pagerduty: "PagerDuty",
+  expo_push: "Mobile push",
 };
 
 export function ChannelsTable() {

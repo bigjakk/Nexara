@@ -81,6 +81,72 @@ func TestValidateAccessToken_ExpiredToken(t *testing.T) {
 	}
 }
 
+func TestGenerateAndValidateConsoleToken(t *testing.T) {
+	svc := newTestJWTService()
+	userID := uuid.New()
+	scope := ConsoleScope{
+		ClusterID: uuid.NewString(),
+		Node:      "pve1",
+		VMID:      100,
+		Type:      "vm_vnc",
+	}
+
+	token, _, err := svc.GenerateConsoleToken(userID, "test@example.com", "admin", scope, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateConsoleToken() error: %v", err)
+	}
+
+	claims, err := svc.ValidateAccessToken(token)
+	if err != nil {
+		t.Fatalf("ValidateAccessToken() error: %v", err)
+	}
+	if claims.ConsoleScope == nil {
+		t.Fatal("ConsoleScope should be set on console token")
+	}
+	if claims.ConsoleScope.ClusterID != scope.ClusterID {
+		t.Errorf("ClusterID = %q, want %q", claims.ConsoleScope.ClusterID, scope.ClusterID)
+	}
+	if claims.ConsoleScope.Node != scope.Node {
+		t.Errorf("Node = %q, want %q", claims.ConsoleScope.Node, scope.Node)
+	}
+	if claims.ConsoleScope.VMID != scope.VMID {
+		t.Errorf("VMID = %d, want %d", claims.ConsoleScope.VMID, scope.VMID)
+	}
+	if claims.ConsoleScope.Type != scope.Type {
+		t.Errorf("Type = %q, want %q", claims.ConsoleScope.Type, scope.Type)
+	}
+}
+
+func TestAccessTokenHasNoConsoleScope(t *testing.T) {
+	svc := newTestJWTService()
+	token, _, err := svc.GenerateAccessToken(uuid.New(), "test@example.com", "admin")
+	if err != nil {
+		t.Fatalf("GenerateAccessToken() error: %v", err)
+	}
+
+	claims, err := svc.ValidateAccessToken(token)
+	if err != nil {
+		t.Fatalf("ValidateAccessToken() error: %v", err)
+	}
+	if claims.ConsoleScope != nil {
+		t.Errorf("regular access token should not have ConsoleScope, got %+v", claims.ConsoleScope)
+	}
+}
+
+func TestConsoleTokenExpiry(t *testing.T) {
+	svc := newTestJWTService()
+	scope := ConsoleScope{ClusterID: uuid.NewString(), Node: "pve1", Type: "node_shell"}
+
+	token, _, err := svc.GenerateConsoleToken(uuid.New(), "test@example.com", "admin", scope, -1*time.Second)
+	if err != nil {
+		t.Fatalf("GenerateConsoleToken() error: %v", err)
+	}
+
+	if _, err := svc.ValidateAccessToken(token); err == nil {
+		t.Error("expired console token should be rejected")
+	}
+}
+
 func TestGenerateRefreshToken(t *testing.T) {
 	svc := newTestJWTService()
 

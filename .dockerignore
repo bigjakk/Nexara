@@ -1,0 +1,42 @@
+# Mobile app — completely unrelated to the backend Docker image and ships
+# multi-GB of Android intermediates, node_modules, and Gradle caches.
+mobile/
+
+# Backend artifacts
+bin/
+nexara
+coverage.out
+*.test
+
+# Repo metadata
+.git/
+.github/
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# Documentation (not needed in the image)
+docs/
+
+# Tests (built into binary via Go test, no need to ship test data)
+tests/
+
+# Local node_modules at the repo root (the frontend stage uses frontend/ only)
+node_modules/
+
+# The frontend stage copies frontend/ explicitly, so its build dirs and
+# node_modules don't need to come along on the second COPY . . either.
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Go module cache leftovers
+vendor/

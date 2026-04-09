@@ -137,5 +137,14 @@ export interface NexaraEvent {
   resource_type?: string;
   resource_id?: string;
   action?: string;
+  /**
+   * Non-OK completion reason set by the backend when an action with a
+   * background lifecycle (e.g. a Proxmox task) exits with a failure
+   * status. Present iff the action failed. See `ClusterEventWithError`
+   * in `internal/events/publisher.go`. Desktop currently only uses this
+   * field via optional chaining in event consumers — the main effect is
+   * that TypeScript is happy when handlers inspect `event.error`.
+   */
+  error?: string;
   timestamp: string;
 }

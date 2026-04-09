@@ -1,6 +1,6 @@
 -- name: CreateSession :one
-INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at, device_name, device_type, device_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: GetSessionByID :one

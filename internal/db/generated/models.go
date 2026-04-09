@@ -363,6 +363,17 @@ type MigrationJob struct {
 	TargetStorage   string             `json:"target_storage"`
 }
 
+type MobileDevice struct {
+	ID            uuid.UUID `json:"id"`
+	UserID        uuid.UUID `json:"user_id"`
+	DeviceID      string    `json:"device_id"`
+	DeviceName    string    `json:"device_name"`
+	Platform      string    `json:"platform"`
+	ExpoPushToken string    `json:"expo_push_token"`
+	LastSeenAt    time.Time `json:"last_seen_at"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type Node struct {
 	ID                 uuid.UUID `json:"id"`
 	ClusterID          uuid.UUID `json:"cluster_id"`
@@ -730,15 +741,18 @@ type ScheduledTask struct {
 }
 
 type Session struct {
-	ID         uuid.UUID `json:"id"`
-	UserID     uuid.UUID `json:"user_id"`
-	TokenHash  string    `json:"token_hash"`
-	UserAgent  string    `json:"user_agent"`
-	IpAddress  string    `json:"ip_address"`
-	IsRevoked  bool      `json:"is_revoked"`
-	CreatedAt  time.Time `json:"created_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
-	LastUsedAt time.Time `json:"last_used_at"`
+	ID         uuid.UUID   `json:"id"`
+	UserID     uuid.UUID   `json:"user_id"`
+	TokenHash  string      `json:"token_hash"`
+	UserAgent  string      `json:"user_agent"`
+	IpAddress  string      `json:"ip_address"`
+	IsRevoked  bool        `json:"is_revoked"`
+	CreatedAt  time.Time   `json:"created_at"`
+	ExpiresAt  time.Time   `json:"expires_at"`
+	LastUsedAt time.Time   `json:"last_used_at"`
+	DeviceName pgtype.Text `json:"device_name"`
+	DeviceType pgtype.Text `json:"device_type"`
+	DeviceID   pgtype.Text `json:"device_id"`
 }
 
 type Setting struct {

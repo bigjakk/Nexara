@@ -47,6 +47,24 @@ func ValidateChannel(ch string) bool {
 	return channelPattern.MatchString(ch)
 }
 
+// ChannelClusterID extracts the cluster UUID from a channel name like
+// `cluster:<uuid>:metrics`. Returns ("", false) for the `system:events`
+// channel and for any malformed input. Used by the WS subscribe path
+// to enforce RBAC on cluster-scoped subscriptions (security review H1):
+// the channel format alone is no authorization — every cluster channel
+// must be cross-checked against the user's view:cluster permission for
+// that specific cluster_id before adding the client to the room.
+func ChannelClusterID(ch string) (string, bool) {
+	if !strings.HasPrefix(ch, "cluster:") {
+		return "", false
+	}
+	parts := strings.SplitN(ch, ":", 3)
+	if len(parts) != 3 {
+		return "", false
+	}
+	return parts[1], true
+}
+
 // ClientChannelToRedis converts a client-facing channel name to the corresponding Redis pub/sub channel.
 // Example: "cluster:<uuid>:metrics" → "nexara:metrics:<uuid>"
 // Example: "system:events"          → "nexara:events:system"

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/mail"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -55,6 +56,36 @@ func (h *AuthHandler) SetOIDCHandler(oh *OIDCHandler) {
 // SetTOTPHandler sets the TOTP handler reference for TOTP-aware login.
 func (h *AuthHandler) SetTOTPHandler(th *TOTPHandler) {
 	h.totpHandler = th
+}
+
+// deviceInfoFromRequest derives the DeviceInfo for a session being created.
+// Mobile clients can set X-Nexara-Device-Type (mobile|desktop), X-Nexara-Device-Name,
+// and X-Nexara-Device-ID headers to tag their sessions. If those headers are absent
+// the session is tagged as "web".
+func deviceInfoFromRequest(c *fiber.Ctx) auth.DeviceInfo {
+	deviceType := strings.ToLower(strings.TrimSpace(c.Get("X-Nexara-Device-Type")))
+	switch deviceType {
+	case "mobile", "desktop":
+		// valid, keep as-is
+	default:
+		deviceType = "web"
+	}
+
+	deviceName := strings.TrimSpace(c.Get("X-Nexara-Device-Name"))
+	if len(deviceName) > 128 {
+		deviceName = deviceName[:128]
+	}
+
+	deviceID := strings.TrimSpace(c.Get("X-Nexara-Device-ID"))
+	if len(deviceID) > 128 {
+		deviceID = deviceID[:128]
+	}
+
+	return auth.DeviceInfo{
+		Name: deviceName,
+		Type: deviceType,
+		ID:   deviceID,
+	}
 }
 
 type registerRequest struct {
@@ -194,6 +225,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		c.Context(), user.ID, refreshToken, user.Role,
 		c.Get("User-Agent"), c.IP(),
 		h.jwtService.RefreshTokenTTL(),
+		deviceInfoFromRequest(c),
 	)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create session")
@@ -363,6 +395,7 @@ func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string
 		c.Context(), user.ID, refreshToken, user.Role,
 		c.Get("User-Agent"), c.IP(),
 		h.jwtService.RefreshTokenTTL(),
+		deviceInfoFromRequest(c),
 	)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create session")
@@ -390,6 +423,114 @@ func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string
 // IssueTokens is the exported version of issueTokens for cross-handler use.
 func (h *AuthHandler) IssueTokens(c *fiber.Ctx, user db.User, auditAction string) error {
 	return h.issueTokens(c, user, auditAction)
+}
+
+type consoleTokenRequest struct {
+	ClusterID string `json:"cluster_id"`
+	Node      string `json:"node"`
+	VMID      int    `json:"vmid,omitempty"`
+	Type      string `json:"type"`
+}
+
+type consoleTokenResponse struct {
+	Token     string `json:"token"`
+	ExpiresIn int    `json:"expires_in"`
+}
+
+// ConsoleToken mints a short-lived (5 minute), scope-locked JWT that can ONLY
+// be used to open a single console WebSocket matching cluster_id/node/vmid/type.
+// Designed for mobile WebView clients that cannot attach Authorization headers
+// to the WebSocket upgrade and must pass the token via query string.
+//
+// The underlying access token + regular RBAC check happens first — a user who
+// cannot normally open this console cannot mint a token for it either.
+func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
+	}
+
+	var req consoleTokenRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	// Validate inputs.
+	if req.ClusterID == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "cluster_id is required")
+	}
+	if _, err := uuid.Parse(req.ClusterID); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "cluster_id must be a UUID")
+	}
+	if req.Node == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node is required")
+	}
+	if len(req.Node) > 128 {
+		return fiber.NewError(fiber.StatusBadRequest, "node name too long")
+	}
+
+	// Validate type and require the appropriate RBAC permission.
+	var resource string
+	switch req.Type {
+	case "node_shell":
+		resource = "node"
+		if req.VMID != 0 {
+			return fiber.NewError(fiber.StatusBadRequest, "vmid must be omitted for node_shell")
+		}
+	case "vm_serial", "vm_vnc":
+		resource = "vm"
+		if req.VMID <= 0 {
+			return fiber.NewError(fiber.StatusBadRequest, "vmid is required for vm console")
+		}
+	case "ct_attach", "ct_vnc":
+		resource = "container"
+		if req.VMID <= 0 {
+			return fiber.NewError(fiber.StatusBadRequest, "vmid is required for container console")
+		}
+	default:
+		return fiber.NewError(fiber.StatusBadRequest, "invalid console type")
+	}
+
+	if err := requirePerm(c, "view", resource); err != nil {
+		return err
+	}
+
+	// Fetch user details so we can embed them in the scoped JWT.
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "User not found")
+	}
+	if !user.IsActive {
+		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
+	}
+
+	const consoleTokenTTL = 5 * time.Minute
+	token, _, err := h.jwtService.GenerateConsoleToken(
+		user.ID, user.Email, user.Role,
+		auth.ConsoleScope{
+			ClusterID: req.ClusterID,
+			Node:      req.Node,
+			VMID:      req.VMID,
+			Type:      req.Type,
+		},
+		consoleTokenTTL,
+	)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to mint console token")
+	}
+
+	details, _ := json.Marshal(map[string]any{
+		"cluster_id": req.ClusterID,
+		"node":       req.Node,
+		"vmid":       req.VMID,
+		"type":       req.Type,
+	})
+	h.authAuditLog(c, userID, "console_token_mint", details)
+
+	return c.JSON(consoleTokenResponse{
+		Token:     token,
+		ExpiresIn: int(consoleTokenTTL.Seconds()),
+	})
 }
 
 // Refresh exchanges a valid refresh token for a new token pair.

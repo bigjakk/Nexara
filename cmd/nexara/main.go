@@ -107,6 +107,13 @@ func main() {
 	wsServer := ws.NewServer(hub, jwtSvc, logger.With("component", "ws"), cfg.WSPingInterval, cfg.WSPongTimeout, ws.ServerConfig{
 		ConsoleHandler: consoleHandler,
 		VNCHandler:     vncHandler,
+		// RBAC engine is reused from the API server so view:cluster
+		// permission lookups go through the same Redis-cached engine
+		// instance. The WS subscribe path uses it to enforce per-cluster
+		// view permissions on metric / alert / event channels (security
+		// review H1). If srv.RBACEngine() is nil here, the WS server
+		// will warn at startup and fall open on cluster channels.
+		RBACEngine: srv.RBACEngine(),
 	})
 	wsServer.RegisterRoutes(srv.App())
 

@@ -120,6 +120,13 @@ func (s *Server) authRequired() fiber.Handler {
 			return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired token")
 		}
 
+		// Scoped console tokens are single-purpose: they ONLY authorize a
+		// specific WebSocket upgrade. Reject them at the regular API boundary
+		// so a leaked console token cannot be used to call other endpoints.
+		if claims.ConsoleScope != nil {
+			return fiber.NewError(fiber.StatusUnauthorized, "Console-scoped token cannot be used for API requests")
+		}
+
 		c.Locals("user_id", claims.UserID)
 		c.Locals("email", claims.Email)
 		c.Locals("role", claims.Role)
@@ -155,6 +162,11 @@ func (s *Server) authOptional() fiber.Handler {
 
 		claims, err := s.jwtService.ValidateAccessToken(token)
 		if err != nil {
+			return c.Next()
+		}
+
+		// Scoped console tokens must not be treated as general-purpose auth.
+		if claims.ConsoleScope != nil {
 			return c.Next()
 		}
 

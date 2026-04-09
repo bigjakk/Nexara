@@ -358,7 +358,8 @@ export type ChannelType =
   | "discord"
   | "pagerduty"
   | "teams"
-  | "telegram";
+  | "telegram"
+  | "expo_push";
 
 export interface NotificationChannel {
   id: string;

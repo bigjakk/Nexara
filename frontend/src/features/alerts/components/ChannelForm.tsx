@@ -23,8 +23,16 @@ import {
   useCreateNotificationChannel,
   useUpdateNotificationChannel,
 } from "../api/alert-queries";
+import { useUsers } from "@/features/admin/api/rbac-queries";
 import type { ChannelType } from "@/types/api";
 
+// expo_push is intentionally omitted from this list — push notifications
+// are wired but disabled at the UI level because the mobile registration
+// flow isn't shipping yet. To re-enable, add `{ value: "expo_push", label:
+// "Mobile push (Expo)" }` and re-enable the validChannelTypes entry in
+// internal/api/handlers/alerts.go. The user-picker render block + the
+// buildConfig case below are kept as dead code so re-enabling is a single
+// list-entry change.
 const CHANNEL_TYPES: { value: ChannelType; label: string }[] = [
   { value: "email", label: "Email (SMTP)" },
   { value: "slack", label: "Slack" },
@@ -93,8 +101,13 @@ export function ChannelForm({
   // PagerDuty fields
   const [pdRoutingKey, setPdRoutingKey] = useState("");
 
+  // Expo push fields — recipient is a Nexara user; the dispatcher fans out
+  // to every mobile device that user has registered.
+  const [expoPushUserId, setExpoPushUserId] = useState("");
+
   const createMutation = useCreateNotificationChannel();
   const updateMutation = useUpdateNotificationChannel();
+  const usersQuery = useUsers();
 
   const buildConfig = (): Record<string, unknown> => {
     switch (channelType) {
@@ -149,6 +162,8 @@ export function ChannelForm({
       }
       case "pagerduty":
         return { routing_key: pdRoutingKey };
+      case "expo_push":
+        return { user_id: expoPushUserId };
       default:
         return {};
     }
@@ -303,6 +318,30 @@ export function ChannelForm({
                 routingKey={pdRoutingKey}
                 setRoutingKey={setPdRoutingKey}
               />
+            )}
+            {channelType === "expo_push" && (
+              <div className="space-y-2">
+                <Label>Recipient user</Label>
+                <Select
+                  value={expoPushUserId}
+                  onValueChange={setExpoPushUserId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a user…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(usersQuery.data ?? []).map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.display_name || u.email} ({u.email})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Notifications fan out to every mobile device this user has
+                  registered via the Nexara mobile app.
+                </p>
+              </div>
             )}
           </>
         )}

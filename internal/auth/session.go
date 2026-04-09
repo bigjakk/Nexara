@@ -9,10 +9,27 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
+
+// DeviceInfo describes the client device a session is being created for.
+// All fields are optional; a zero-value DeviceInfo creates an un-tagged session
+// (matching the legacy behavior).
+type DeviceInfo struct {
+	Name string // human-friendly name (e.g. "Pixel 8 Pro", "Chrome on macOS")
+	Type string // one of: "web", "mobile", "desktop" (empty = untagged)
+	ID   string // stable per-device identifier (mobile only)
+}
+
+func nullText(s string) pgtype.Text {
+	if s == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: s, Valid: true}
+}
 
 // SessionManager handles session lifecycle in Redis + PostgreSQL.
 type SessionManager struct {
@@ -47,16 +64,19 @@ func redisKey(sessionID string) string {
 }
 
 // CreateSession stores a new session in both PostgreSQL and Redis.
-func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, refreshToken, role, userAgent, ipAddress string, ttl time.Duration) (db.Session, error) {
+func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, refreshToken, role, userAgent, ipAddress string, ttl time.Duration, device DeviceInfo) (db.Session, error) {
 	tokenHash := HashToken(refreshToken)
 	expiresAt := time.Now().Add(ttl)
 
 	session, err := sm.queries.CreateSession(ctx, db.CreateSessionParams{
-		UserID:    userID,
-		TokenHash: tokenHash,
-		UserAgent: userAgent,
-		IpAddress: ipAddress,
-		ExpiresAt: expiresAt,
+		UserID:     userID,
+		TokenHash:  tokenHash,
+		UserAgent:  userAgent,
+		IpAddress:  ipAddress,
+		ExpiresAt:  expiresAt,
+		DeviceName: nullText(device.Name),
+		DeviceType: nullText(device.Type),
+		DeviceID:   nullText(device.ID),
 	})
 	if err != nil {
 		return db.Session{}, fmt.Errorf("creating session in db: %w", err)

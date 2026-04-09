@@ -41,7 +41,14 @@ type Event struct {
 	ResourceType string `json:"resource_type,omitempty"`
 	ResourceID   string `json:"resource_id,omitempty"`
 	Action       string `json:"action,omitempty"`
-	Timestamp    string `json:"timestamp"`
+	// Error carries a non-OK completion reason for actions that have a
+	// lifecycle (e.g. a Proxmox task that exits with a non-OK exit status).
+	// Empty / omitted = success. Clients that care about success-vs-failure
+	// correlation (e.g. the mobile task tracker) check this field to
+	// distinguish a fired-and-completed event from a fired-and-failed one
+	// without having to poll the Proxmox tasks API themselves.
+	Error     string `json:"error,omitempty"`
+	Timestamp string `json:"timestamp"`
 }
 
 // Publisher publishes events to Redis for fan-out via the WS pipeline.
@@ -114,6 +121,45 @@ func (p *Publisher) ClusterEvent(ctx context.Context, clusterID, kind, resourceT
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		Action:       action,
+	})
+}
+
+// maxEventErrorLength caps the size of the Error field on outbound
+// events to keep pathological Proxmox / pgx error messages (which can
+// contain multi-megabyte stack traces) from being fanned out verbatim
+// to every WS subscriber. Per security review Z4. Callers in the
+// codebase publish sanitized short codes today (see task_watcher.go),
+// so this is also belt-and-suspenders against future call sites that
+// might forget to sanitize first.
+const maxEventErrorLength = 512
+
+// ClusterEventWithError publishes a cluster-scoped event carrying a non-OK
+// completion reason in the Error field. Use this from task watchers / other
+// background completion observers when they detect a failure path that the
+// mutation handler could not anticipate (e.g. Proxmox task exit status is
+// not "OK"). Clients correlating tasks to their fire-and-forget dispatch
+// use the presence of Error to flip their local task state from pending
+// to failed instead of pending to success.
+//
+// `errMsg` should be a sanitized public code (see ErrTaskFailed etc. in
+// `internal/api/handlers/task_watcher.go`). The maxEventErrorLength cap
+// truncates anything longer to protect against accidentally publishing
+// raw pgx / Proxmox error text — both as a defensive measure and so the
+// Redis pub/sub fan-out doesn't OOM on a malformed input.
+func (p *Publisher) ClusterEventWithError(ctx context.Context, clusterID, kind, resourceType, resourceID, action, errMsg string) {
+	if p == nil {
+		return
+	}
+	if len(errMsg) > maxEventErrorLength {
+		errMsg = errMsg[:maxEventErrorLength] + "..."
+	}
+	p.Publish(ctx, Event{
+		Kind:         kind,
+		ClusterID:    clusterID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Error:        errMsg,
 	})
 }
 

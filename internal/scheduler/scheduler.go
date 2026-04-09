@@ -38,7 +38,7 @@ type Scheduler struct {
 
 // New creates a new Scheduler.
 func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
-	registry := newDispatcherRegistry()
+	registry := newDispatcherRegistry(queries)
 	return &Scheduler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
@@ -491,7 +491,12 @@ func (s *Scheduler) RollingOrchestrator() *rolling.Orchestrator {
 }
 
 // newDispatcherRegistry creates a registry with all notification dispatchers.
-func newDispatcherRegistry() *notifications.Registry {
+//
+// IMPORTANT: This function is duplicated in `internal/api/server.go`. When
+// adding a new dispatcher, register it in BOTH files. The duplication exists
+// because the API server and the scheduler both need to dispatch alerts and
+// we don't want a circular import between the two packages.
+func newDispatcherRegistry(queries *db.Queries) *notifications.Registry {
 	r := notifications.NewRegistry()
 	r.Register(&notifications.SMTPDispatcher{})
 	r.Register(&notifications.SlackDispatcher{})
@@ -500,6 +505,7 @@ func newDispatcherRegistry() *notifications.Registry {
 	r.Register(&notifications.TelegramDispatcher{})
 	r.Register(&notifications.WebhookDispatcher{})
 	r.Register(&notifications.PagerDutyDispatcher{})
+	r.Register(notifications.NewExpoPushDispatcher(queries))
 	return r
 }
 

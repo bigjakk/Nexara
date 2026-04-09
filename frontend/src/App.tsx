@@ -7,6 +7,9 @@ import { LoginPage } from "@/features/auth/pages/LoginPage";
 import { RegisterPage } from "@/features/auth/pages/RegisterPage";
 import { DashboardPage } from "@/features/dashboard/pages/DashboardPage";
 import { OIDCCallbackPage } from "@/features/auth/pages/OIDCCallbackPage";
+const MobileConsolePage = lazy(
+  () => import("@/features/console/pages/MobileConsolePage"),
+);
 
 // Lazy-loaded route pages — keeps initial bundle small.
 const ClustersListPage = lazy(() =>
@@ -141,6 +144,19 @@ const router = createBrowserRouter([
   {
     path: "/oidc-callback",
     element: <OIDCCallbackPage />,
+  },
+  {
+    // Public route used by the Nexara mobile app's WebView console.
+    // The /api/v1/auth/console-token endpoint mints a short-lived
+    // scope-locked JWT that's passed in the URL search params; the WS
+    // upgrade re-validates the scope, so this route does not need to be
+    // behind ProtectedRoute / require localStorage auth state.
+    path: "/mobile-console",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <MobileConsolePage />
+      </Suspense>
+    ),
   },
   {
     element: <ProtectedRoute />,

@@ -19,9 +19,21 @@ var (
 // Claims represents the JWT claims for access tokens.
 type Claims struct {
 	jwt.RegisteredClaims
-	UserID uuid.UUID `json:"uid"`
-	Email  string    `json:"email"`
-	Role   string    `json:"role"`
+	UserID       uuid.UUID     `json:"uid"`
+	Email        string        `json:"email"`
+	Role         string        `json:"role"`
+	ConsoleScope *ConsoleScope `json:"console_scope,omitempty"`
+}
+
+// ConsoleScope restricts a JWT to a single console WebSocket upgrade.
+// A token carrying a ConsoleScope is issued by POST /api/v1/auth/console-token
+// with a short TTL (5 minutes) and can ONLY be used to open a console matching
+// the exact cluster/node/vmid/type combination. Any other use is rejected.
+type ConsoleScope struct {
+	ClusterID string `json:"cluster_id"`
+	Node      string `json:"node"`
+	VMID      int    `json:"vmid,omitempty"`
+	Type      string `json:"type"` // node_shell | vm_serial | ct_attach | vm_vnc | ct_vnc
 }
 
 // TokenPair holds an access token and a refresh token.
@@ -68,6 +80,33 @@ func (j *JWTService) GenerateAccessToken(userID uuid.UUID, email, role string) (
 	signed, err := token.SignedString(j.secret)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("signing access token: %w", err)
+	}
+	return signed, expiresAt, nil
+}
+
+// GenerateConsoleToken creates a short-lived JWT whose only valid use is opening
+// the specific console described by scope. ttl should be small (≤ 5 minutes).
+func (j *JWTService) GenerateConsoleToken(userID uuid.UUID, email, role string, scope ConsoleScope, ttl time.Duration) (string, time.Time, error) {
+	now := time.Now()
+	expiresAt := now.Add(ttl)
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.New().String(),
+			Subject:   userID.String(),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			IssuedAt:  jwt.NewNumericDate(now),
+			Issuer:    "nexara",
+		},
+		UserID:       userID,
+		Email:        email,
+		Role:         role,
+		ConsoleScope: &scope,
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString(j.secret)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("signing console token: %w", err)
 	}
 	return signed, expiresAt, nil
 }

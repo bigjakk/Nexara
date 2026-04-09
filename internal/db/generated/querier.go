@@ -31,6 +31,8 @@ type Querier interface {
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAdvancedParams) (int64, error)
 	CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (CountCompletedNodesRow, error)
+	// Used to enforce a per-user device cap (security review H3).
+	CountMobileDevicesByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -57,6 +59,9 @@ type Querier interface {
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
 	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
 	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
+	DeleteMobileDevice(ctx context.Context, id uuid.UUID) error
+	DeleteMobileDeviceByExpoToken(ctx context.Context, expoPushToken string) error
+	DeleteMobileDeviceForUser(ctx context.Context, arg DeleteMobileDeviceForUserParams) error
 	DeleteNotificationChannel(ctx context.Context, id uuid.UUID) error
 	DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
@@ -115,6 +120,10 @@ type Querier interface {
 	GetLatestPBSDatastoreMetrics(ctx context.Context, pbsServerID uuid.UUID) ([]PbsDatastoreMetric, error)
 	GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (MaintenanceWindow, error)
 	GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJob, error)
+	GetMobileDevice(ctx context.Context, id uuid.UUID) (MobileDevice, error)
+	// Used for conflict detection when RegisterMobileDevice's WHERE clause
+	// blocks an UPSERT.
+	GetMobileDeviceByExpoToken(ctx context.Context, expoPushToken string) (MobileDevice, error)
 	GetNextPendingNode(ctx context.Context, jobID uuid.UUID) (RollingUpdateNode, error)
 	GetNode(ctx context.Context, id uuid.UUID) (Node, error)
 	GetNodeAddressByName(ctx context.Context, arg GetNodeAddressByNameParams) (string, error)
@@ -228,6 +237,7 @@ type Querier interface {
 	ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error)
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
+	ListMobileDevicesByUser(ctx context.Context, userID uuid.UUID) ([]MobileDevice, error)
 	ListNodeAddresses(ctx context.Context, clusterID uuid.UUID) ([]ListNodeAddressesRow, error)
 	ListNodeDisksByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeDisk, error)
 	ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeNetworkInterface, error)
@@ -274,6 +284,14 @@ type Querier interface {
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	// Upserts a device by expo_push_token. The UPDATE branch only fires when the
+	// existing row's device_id matches the request — i.e. the same physical
+	// install is re-registering. If the device_id differs, the WHERE clause
+	// blocks the update and the query returns no rows, so the handler can
+	// detect the conflict and return 409 instead of silently reassigning the
+	// token to a different account (security review H2: cross-account device
+	// hijack).
+	RegisterMobileDevice(ctx context.Context, arg RegisterMobileDeviceParams) (MobileDevice, error)
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	ResolveAlert(ctx context.Context, arg ResolveAlertParams) error
 	ResumeRollingUpdateJob(ctx context.Context, id uuid.UUID) error
@@ -307,6 +325,7 @@ type Querier interface {
 	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) error
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	TouchMobileDevice(ctx context.Context, id uuid.UUID) error
 	TouchRollingUpdateNode(ctx context.Context, id uuid.UUID) error
 	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error
 	UpdateAPIKeyLastUsed(ctx context.Context, arg UpdateAPIKeyLastUsedParams) error

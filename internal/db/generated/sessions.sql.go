@@ -10,20 +10,24 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at
+INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at, device_name, device_type, device_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id
 `
 
 type CreateSessionParams struct {
-	UserID    uuid.UUID `json:"user_id"`
-	TokenHash string    `json:"token_hash"`
-	UserAgent string    `json:"user_agent"`
-	IpAddress string    `json:"ip_address"`
-	ExpiresAt time.Time `json:"expires_at"`
+	UserID     uuid.UUID   `json:"user_id"`
+	TokenHash  string      `json:"token_hash"`
+	UserAgent  string      `json:"user_agent"`
+	IpAddress  string      `json:"ip_address"`
+	ExpiresAt  time.Time   `json:"expires_at"`
+	DeviceName pgtype.Text `json:"device_name"`
+	DeviceType pgtype.Text `json:"device_type"`
+	DeviceID   pgtype.Text `json:"device_id"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
@@ -33,6 +37,9 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.UserAgent,
 		arg.IpAddress,
 		arg.ExpiresAt,
+		arg.DeviceName,
+		arg.DeviceType,
+		arg.DeviceID,
 	)
 	var i Session
 	err := row.Scan(
@@ -45,6 +52,9 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.LastUsedAt,
+		&i.DeviceName,
+		&i.DeviceType,
+		&i.DeviceID,
 	)
 	return i, err
 }
@@ -59,7 +69,7 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at FROM sessions WHERE id = $1
+SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id FROM sessions WHERE id = $1
 `
 
 func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error) {
@@ -75,12 +85,15 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, er
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.LastUsedAt,
+		&i.DeviceName,
+		&i.DeviceType,
+		&i.DeviceID,
 	)
 	return i, err
 }
 
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
-SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at FROM sessions WHERE token_hash = $1 AND is_revoked = false
+SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id FROM sessions WHERE token_hash = $1 AND is_revoked = false
 `
 
 func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error) {
@@ -96,12 +109,15 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.LastUsedAt,
+		&i.DeviceName,
+		&i.DeviceType,
+		&i.DeviceID,
 	)
 	return i, err
 }
 
 const listUserSessions = `-- name: ListUserSessions :many
-SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at FROM sessions WHERE user_id = $1 AND is_revoked = false AND expires_at > now()
+SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id FROM sessions WHERE user_id = $1 AND is_revoked = false AND expires_at > now()
 ORDER BY created_at DESC
 `
 
@@ -124,6 +140,9 @@ func (q *Queries) ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Ses
 			&i.CreatedAt,
 			&i.ExpiresAt,
 			&i.LastUsedAt,
+			&i.DeviceName,
+			&i.DeviceType,
+			&i.DeviceID,
 		); err != nil {
 			return nil, err
 		}

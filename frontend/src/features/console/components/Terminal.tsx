@@ -9,6 +9,13 @@ import { useConsoleStore } from "@/stores/console-store";
 interface TerminalProps {
   tab: ConsoleTab;
   visible: boolean;
+  /**
+   * Optional override for the access token used in the WS URL. When
+   * provided, the component uses this token instead of reading
+   * `localStorage.access_token`. Used by the /mobile-console route to pass
+   * a short-lived scope-locked JWT minted via /api/v1/auth/console-token.
+   */
+  accessToken?: string;
 }
 
 function buildConsoleWsUrl(
@@ -16,8 +23,9 @@ function buildConsoleWsUrl(
   node: string,
   type: string,
   vmid?: number,
+  overrideToken?: string,
 ): string {
-  const token = localStorage.getItem("access_token");
+  const token = overrideToken ?? localStorage.getItem("access_token");
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
   const params = new URLSearchParams({
@@ -34,7 +42,7 @@ function buildConsoleWsUrl(
 
 const MAX_AUTO_RETRIES = 3;
 
-export function Terminal({ tab, visible }: TerminalProps) {
+export function Terminal({ tab, visible, accessToken }: TerminalProps) {
   const { id: tabId, clusterID, node, type, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerminal | null>(null);
@@ -94,7 +102,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
 
     // Connect WebSocket.
     intentionalCloseRef.current = false;
-    const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid);
+    const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid, accessToken);
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
@@ -198,7 +206,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
       wsRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [tabId, clusterID, node, type, vmid, reconnectKey, updateTabStatus, resolveAndReconnect]);
+  }, [tabId, clusterID, node, type, vmid, reconnectKey, accessToken, updateTabStatus, resolveAndReconnect]);
 
   // Re-fit when visibility changes.
   useEffect(() => {

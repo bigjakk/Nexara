@@ -16,6 +16,26 @@ func (s *Server) setupRoutes() {
 		authGroup.Post("/refresh", s.authHandler.Refresh)
 		authGroup.Post("/logout", s.authRequired(), s.authHandler.Logout)
 		authGroup.Post("/logout-all", s.authRequired(), s.authHandler.LogoutAll)
+		authGroup.Post("/console-token", s.authRequired(), s.authHandler.ConsoleToken)
+
+		// Mobile push device registration (lives under /me).
+		//
+		// Abuse protection: the general 600/min/IP rate limiter applies
+		// here (only /api/v1/auth/* and /ws are exempted in
+		// middleware.go). Combined with the per-user device cap of
+		// `maxDevicesPerUser` enforced in `MobileDeviceHandler.Register`,
+		// the practical worst case for a compromised JWT is filling that
+		// one user's row budget — the table cannot grow without bound.
+		if s.mobileDeviceHandler != nil {
+			meDevices := v1.Group("/me/devices", s.authRequired())
+			meDevices.Post("/", s.mobileDeviceHandler.Register)
+			meDevices.Get("/", s.mobileDeviceHandler.List)
+			meDevices.Delete("/:id", s.mobileDeviceHandler.Delete)
+
+			adminDevices := v1.Group("/admin", s.authRequired())
+			adminDevices.Get("/users/:id/devices", s.mobileDeviceHandler.AdminListByUser)
+			adminDevices.Delete("/devices/:id", s.mobileDeviceHandler.AdminDelete)
+		}
 		authGroup.Get("/me", s.authRequired(), s.authHandler.GetMe)
 		authGroup.Put("/profile", s.authRequired(), s.authHandler.UpdateProfile)
 		authGroup.Post("/change-password", s.authRequired(), s.authHandler.ChangePassword)
