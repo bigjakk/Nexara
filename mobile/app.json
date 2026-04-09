@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Nexara",
+    "slug": "nexara-mobile",
+    "version": "0.1.0",
+    "orientation": "default",
+    "scheme": "nexara",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "assetBundlePatterns": ["**/*"],
+    "backgroundColor": "#0a0a0a",
+    "primaryColor": "#22c55e",
+    "icon": "./assets/icon.png",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nexara.mobile",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Unlock Nexara with Face ID",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.nexara.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0a0a"
+      },
+      "permissions": [
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-local-authentication",
+      [
+        "expo-notifications",
+        {
+          "color": "#22c55e"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0a0a0a"
+        }
+      ],
+      "./plugins/with-nexara-android-network"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
