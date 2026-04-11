@@ -7,7 +7,9 @@
     "scheme": "nexara",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "backgroundColor": "#0a0a0a",
     "primaryColor": "#22c55e",
     "icon": "./assets/icon.png",
@@ -28,7 +30,9 @@
       "permissions": [
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "web": {
@@ -56,6 +60,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "837fb165-a362-4b3f-8c59-bd842afb7776"
+      }
+    },
+    "owner": "bigjakk"
   }
 }

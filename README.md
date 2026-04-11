@@ -4,11 +4,17 @@
     <strong>Centralized management for Proxmox VE & PBS — like vCenter, but open-source.</strong>
   </p>
   <p align="center">
+    <a href="https://github.com/bigjakk/Nexara/stargazers"><img src="https://img.shields.io/github/stars/bigjakk/Nexara?style=flat&logo=github" alt="GitHub Stars"></a>
+    <a href="https://github.com/bigjakk/Nexara/releases"><img src="https://img.shields.io/github/downloads/bigjakk/Nexara/total?logo=github&label=Downloads" alt="Downloads"></a>
+    <a href="https://github.com/bigjakk/Nexara/releases"><img src="https://img.shields.io/github/v/release/bigjakk/Nexara?include_prereleases&label=Release" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-blue.svg" alt="License: AGPL v3"></a>
+    <a href="https://ghcr.io/bigjakk/nexara"><img src="https://img.shields.io/badge/Container-ghcr.io-2496ED.svg?logo=docker&logoColor=white" alt="Container Image"></a>
+    <br>
     <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.24-00ADD8.svg?logo=go&logoColor=white" alt="Go 1.24"></a>
     <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5-3178C6.svg?logo=typescript&logoColor=white" alt="TypeScript 5"></a>
-    <a href="docker-compose.yml"><img src="https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white" alt="Docker Ready"></a>
-    <a href="https://github.com/bigjakk/Nexara/releases"><img src="https://img.shields.io/github/v/release/bigjakk/Nexara?include_prereleases&label=Release" alt="Release"></a>
+    <a href="https://reactnative.dev"><img src="https://img.shields.io/badge/Mobile-React%20Native-61DAFB.svg?logo=react&logoColor=white" alt="React Native"></a>
+    <a href="https://github.com/bigjakk/Nexara/issues"><img src="https://img.shields.io/github/issues/bigjakk/Nexara" alt="Open Issues"></a>
+    <a href="https://github.com/bigjakk/Nexara/commits/master"><img src="https://img.shields.io/github/last-commit/bigjakk/Nexara" alt="Last Commit"></a>
   </p>
 </p>
 
