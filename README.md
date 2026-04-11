@@ -5,7 +5,6 @@
   </p>
   <p align="center">
     <a href="https://github.com/bigjakk/Nexara/stargazers"><img src="https://img.shields.io/github/stars/bigjakk/Nexara?style=flat&logo=github" alt="GitHub Stars"></a>
-    <a href="https://github.com/bigjakk/Nexara/releases"><img src="https://img.shields.io/github/downloads/bigjakk/Nexara/total?logo=github&label=Downloads" alt="Downloads"></a>
     <a href="https://github.com/bigjakk/Nexara/releases"><img src="https://img.shields.io/github/v/release/bigjakk/Nexara?include_prereleases&label=Release" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-blue.svg" alt="License: AGPL v3"></a>
     <a href="https://ghcr.io/bigjakk/nexara"><img src="https://img.shields.io/badge/Container-ghcr.io-2496ED.svg?logo=docker&logoColor=white" alt="Container Image"></a>
