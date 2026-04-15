@@ -63,10 +63,7 @@ section_title() {
   esac
 }
 
-# Build output
-echo "# Nexara ${TAG}"
-echo ""
-
+# Build output (no top-level heading — the GitHub release title already shows the name)
 for prefix in feat fix refactor perf docs test chore; do
   if [ -s "${TMPDIR_NOTES}/${prefix}" ]; then
     echo "## $(section_title "$prefix")"
