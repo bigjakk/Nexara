@@ -116,7 +116,7 @@ function ActiveTaskPoller({
   onStatus,
 }: {
   entry: AuditLogEntry;
-  onStatus: (upid: string, status: string, exitStatus: string) => void;
+  onStatus: (upid: string, status: string, exitStatus: string, progress?: number) => void;
 }) {
   const details = parseDetails(entry.details);
   const clusterId = getClusterIdFromEntry(entry);
@@ -130,10 +130,10 @@ function ActiveTaskPoller({
   const prevRef = useRef<string | null>(null);
   useEffect(() => {
     if (task && upid) {
-      const key = `${task.status}:${task.exit_status}`;
+      const key = `${task.status}:${task.exit_status}:${String(task.progress ?? "")}`;
       if (prevRef.current !== key) {
         prevRef.current = key;
-        onStatus(upid, task.status, task.exit_status);
+        onStatus(upid, task.status, task.exit_status, task.progress);
       }
     }
   }, [task, upid, onStatus]);
@@ -152,7 +152,7 @@ function ActivityRow({
   expanded: boolean;
   onToggle: () => void;
   onFocus: () => void;
-  taskStatus: { status: string; exitStatus: string } | undefined;
+  taskStatus: { status: string; exitStatus: string; progress?: number } | undefined;
 }) {
   const { t } = useTranslation("common");
   const details = parseDetails(entry.details);
@@ -242,7 +242,20 @@ function ActivityRow({
                 — {resourceLabel}
               </span>
             )}
-            {isRunning && (
+            {isRunning && taskStatus.progress != null && (
+              <div className="flex items-center gap-1.5">
+                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-500"
+                    style={{ width: `${String(Math.round(taskStatus.progress * 100))}%` }}
+                  />
+                </div>
+                <span className="text-[10px] tabular-nums text-blue-500">
+                  {Math.round(taskStatus.progress * 100)}%
+                </span>
+              </div>
+            )}
+            {isRunning && (taskStatus.progress == null) && (
               <span className="text-xs text-blue-500">{t("running").toLowerCase()}</span>
             )}
           </div>
@@ -355,20 +368,24 @@ export function TaskLogPanel() {
 
   // Track live task statuses from pollers
   const [taskStatuses, setTaskStatuses] = useState<
-    Record<string, { status: string; exitStatus: string }>
+    Record<string, { status: string; exitStatus: string; progress?: number }>
   >({});
 
   const handleTaskStatus = useCallback(
-    (upid: string, status: string, exitStatus: string) => {
+    (upid: string, status: string, exitStatus: string, progress?: number) => {
       setTaskStatuses((prev) => {
         const existing = prev[upid];
         if (
           existing?.status === status &&
-          existing.exitStatus === exitStatus
+          existing.exitStatus === exitStatus &&
+          existing.progress === progress
         ) {
           return prev;
         }
-        return { ...prev, [upid]: { status, exitStatus } };
+        const entry = progress != null
+          ? { status, exitStatus, progress }
+          : { status, exitStatus };
+        return { ...prev, [upid]: entry };
       });
     },
     [],

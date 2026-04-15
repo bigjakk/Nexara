@@ -1,8 +1,10 @@
 import { useEffect, useMemo } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Key, LogOut, LogOutIcon, ShieldCheck, User } from "lucide-react";
+import { apiClient } from "@/lib/api-client";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -59,6 +61,21 @@ export function AppShell() {
       loadBranding(brandingQuery.data);
     }
   }, [brandingQuery.data, loadBranding]);
+
+  // For dev builds, append "-Dev" to the browser tab title
+  const { data: versionInfo } = useQuery({
+    queryKey: ["version"],
+    queryFn: () => apiClient.get<{ version: string }>("/api/v1/version"),
+    staleTime: Infinity,
+  });
+  useEffect(() => {
+    if (versionInfo?.version === "dev") {
+      const base = useBrandingStore.getState().appTitle;
+      if (!base.includes("Dev")) {
+        document.title = `${base}-Dev`;
+      }
+    }
+  }, [versionInfo, brandingQuery.data]);
 
   const clusterIds = useMemo(
     () => (clusters ?? []).map((c) => c.id),

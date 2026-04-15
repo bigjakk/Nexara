@@ -44,7 +44,6 @@ import type {
   CheckSeverity,
 } from "@/features/migrations/types/migration";
 import type { ResourceKind } from "../types/vm";
-import { useTaskLogStore } from "@/stores/task-log-store";
 import {
   ArrowLeftRight,
   CheckCircle2,
@@ -135,8 +134,6 @@ export function MigrateJobDialog({
   );
 
   const queryClient = useQueryClient();
-  const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
-
   // Mutation hooks
   const createMutation = useCreateMigration();
   const checkMutation = useRunPreFlightCheck();
@@ -177,15 +174,6 @@ export function MigrateJobDialog({
   }
 
   function handleClose() {
-    // If migration is still running, open the global progress dialog
-    // so the user can re-check from the task bar.
-    if (step === "progress" && job && job.upid && (job.status === "pending" || job.status === "migrating")) {
-      setFocusedTask({
-        clusterId,
-        upid: job.upid,
-        description: `Migrate ${vmName} (VMID ${String(vmid)})`,
-      });
-    }
     resetForm();
     createMutation.reset();
     checkMutation.reset();

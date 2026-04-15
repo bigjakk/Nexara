@@ -552,9 +552,11 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 	}
 
 	// For running tasks, fetch the log to extract progress (e.g. clone operations).
-	// Proxmox emits progress in two formats:
-	//   1. "progress 0.50"                                  (generic tasks)
-	//   2. "transferred 1.0 GiB of 100.0 GiB (1.00%)"     (clone/move disk)
+	// Proxmox emits progress in several formats:
+	//   1. "progress 0.50"                                                                  (generic tasks)
+	//   2. "drive-ide0: transferred 1.0 GiB of 32.0 GiB (1.00%) in 5s"                    (move disk)
+	//   3. "transferred 1.0 GiB of 100.0 GiB (1.00%)"                                     (clone)
+	//   4. "migration active, transferred 5.2 GiB of 16.0 GiB VM-state, 833.4 MiB/s"      (live migration)
 	if status.Status == "running" {
 		if logEntries, logErr := pxClient.GetTaskLog(c.Context(), nodeName, upid, 0); logErr == nil {
 			for i := len(logEntries) - 1; i >= 0; i-- {
@@ -565,13 +567,20 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 					}
 					break
 				}
-				// Parse "transferred X of Y (Z%)" lines from clone operations.
-				if pctIdx := strings.LastIndex(line, "("); pctIdx != -1 && strings.HasSuffix(line, "%)") {
-					pctStr := line[pctIdx+1 : len(line)-2] // extract "1.00"
-					if pct, parseErr := strconv.ParseFloat(pctStr, 64); parseErr == nil {
-						p := pct / 100.0
-						resp.Progress = &p
+				// Parse "(Z%)" anywhere in the line — covers disk move/clone formats.
+				if pctEnd := strings.Index(line, "%)"); pctEnd != -1 {
+					if pctStart := strings.LastIndex(line[:pctEnd], "("); pctStart != -1 {
+						pctStr := line[pctStart+1 : pctEnd]
+						if pct, parseErr := strconv.ParseFloat(pctStr, 64); parseErr == nil {
+							p := pct / 100.0
+							resp.Progress = &p
+						}
+						break
 					}
+				}
+				// Parse "transferred X <unit> of Y <unit>" without percentage — live migrations.
+				if p := parseTransferredProgress(line); p != nil {
+					resp.Progress = p
 					break
 				}
 			}
@@ -925,6 +934,77 @@ func splitUPID(upid string) []string {
 		parts = append(parts, upid[start:])
 	}
 	return parts
+}
+
+// parseTransferredProgress extracts progress from Proxmox log lines like:
+//
+//	"migration active, transferred 5.2 GiB of 16.0 GiB VM-state, 833.4 MiB/s"
+//
+// These lines don't include a percentage — we compute transferred/total.
+func parseTransferredProgress(line string) *float64 {
+	idx := strings.Index(line, "transferred ")
+	if idx == -1 {
+		return nil
+	}
+	rest := line[idx+len("transferred "):]
+
+	ofIdx := strings.Index(rest, " of ")
+	if ofIdx == -1 {
+		return nil
+	}
+
+	xferStr := rest[:ofIdx]
+	afterOf := rest[ofIdx+len(" of "):]
+
+	xfer := parseSizeToBytes(xferStr)
+	total := parseSizeToBytes(afterOf)
+	if xfer < 0 || total <= 0 {
+		return nil
+	}
+	p := xfer / total
+	if p > 1.0 {
+		p = 1.0
+	}
+	return &p
+}
+
+// parseSizeToBytes parses a Proxmox size string like "5.2 GiB" or "736.3 MiB"
+// into a byte count as float64. Returns -1 on failure.
+func parseSizeToBytes(s string) float64 {
+	s = strings.TrimSpace(s)
+	// Split at first space or non-numeric/dot character to get "5.2" and "GiB ..."
+	numEnd := 0
+	for numEnd < len(s) && (s[numEnd] == '.' || (s[numEnd] >= '0' && s[numEnd] <= '9')) {
+		numEnd++
+	}
+	if numEnd == 0 {
+		return -1
+	}
+	val, err := strconv.ParseFloat(s[:numEnd], 64)
+	if err != nil {
+		return -1
+	}
+
+	unit := strings.TrimSpace(s[numEnd:])
+	// Stop at first space or comma after the unit (e.g. "GiB VM-state," → "GiB")
+	if spIdx := strings.IndexAny(unit, " ,"); spIdx != -1 {
+		unit = unit[:spIdx]
+	}
+
+	switch strings.ToLower(unit) {
+	case "b":
+		return val
+	case "kib":
+		return val * 1024
+	case "mib":
+		return val * 1024 * 1024
+	case "gib":
+		return val * 1024 * 1024 * 1024
+	case "tib":
+		return val * 1024 * 1024 * 1024 * 1024
+	default:
+		return -1
+	}
 }
 
 // auditLog writes an audit log entry and publishes an audit_entry event.
@@ -1968,6 +2048,7 @@ func (h *VMHandler) SetVMPool(c *fiber.Ctx) error {
 
 	details, _ := json.Marshal(map[string]string{"old_pool": oldPool, "new_pool": newPool})
 	h.auditLog(c, clusterID, vmID.String(), "set_pool", details)
+	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindVMStateChange, "vm", vmID.String(), "set_pool")
 
 	return c.JSON(fiber.Map{"pool": newPool})
 }

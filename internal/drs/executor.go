@@ -142,6 +142,9 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 		e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindTaskCreated, "task", upid, "drs_migrate")
 		e.eventPub.ClusterEvent(ctx, clusterID.String(), events.KindDRSAction, "drs", vmDBID, "migrate_started")
 
+		// Audit log with UPID so the activity pane can show a progress bar.
+		e.auditLogWithUPID(ctx, clusterID, vmDBID, "drs_migrate_running", rec, upid)
+
 		// Poll task status until completion.
 		status, exitStatus := e.waitForTask(ctx, client, rec.SourceNode, upid)
 		_ = e.queries.UpdateDRSHistoryStatus(ctx, db.UpdateDRSHistoryStatusParams{
@@ -240,6 +243,35 @@ func (e *Executor) resolveVMDBID(ctx context.Context, clusterID uuid.UUID, vmid 
 }
 
 // auditLog inserts an audit log entry for a DRS action.
+func (e *Executor) auditLogWithUPID(ctx context.Context, clusterID uuid.UUID, resourceID, action string, rec Recommendation, upid string) {
+	details, _ := json.Marshal(map[string]interface{}{
+		"vmid":        rec.VMID,
+		"vm_type":     rec.VMType,
+		"source_node": rec.SourceNode,
+		"target_node": rec.TargetNode,
+		"reason":      rec.Reason,
+		"improvement": fmt.Sprintf("%.1f%%", rec.ExpectedImprovement*100),
+		"upid":        upid,
+		"node":        rec.SourceNode,
+	})
+
+	if resourceID == "" {
+		resourceID = fmt.Sprintf("vmid:%d", rec.VMID)
+	}
+
+	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
+		UserID:       SystemUserID,
+		ResourceType: "vm",
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      details,
+	})
+	if err != nil {
+		e.logger.Warn("failed to insert DRS audit log", "action", action, "error", err)
+	}
+}
+
 func (e *Executor) auditLog(ctx context.Context, clusterID uuid.UUID, resourceID, action string, rec Recommendation) {
 	details, _ := json.Marshal(map[string]interface{}{
 		"vmid":        rec.VMID,

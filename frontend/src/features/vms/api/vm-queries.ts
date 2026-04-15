@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { VMResponse } from "@/types/api";
 import type {
@@ -14,6 +14,17 @@ import type {
   CreateCTRequest,
   VMConfig,
 } from "../types/vm";
+
+// --- Shared invalidation helper ---
+// Every mutation that changes VM/CT inventory (create, clone, destroy, migrate,
+// convert-to-template, rename, pool assignment, etc.) should call this so we
+// stop playing whack-a-mole with individual query keys.
+
+function invalidateResourceLists(qc: QueryClient, clusterId: string): void {
+  void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "vms"] });
+  void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "containers"] });
+  void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "vmids"] });
+}
 
 // --- All VMIDs in a cluster (for next-available-ID calculation) ---
 
@@ -111,12 +122,7 @@ export function useCloneVM() {
       return apiClient.post<VMActionResponse>(base, body);
     },
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vmids"],
-      });
+      invalidateResourceLists(queryClient, variables.clusterId);
     },
   });
 }
@@ -142,15 +148,7 @@ export function useCloneToTemplate() {
       return apiClient.post<VMActionResponse>(base, body);
     },
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "containers"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vmids"],
-      });
+      invalidateResourceLists(queryClient, variables.clusterId);
     },
   });
 }
@@ -175,12 +173,7 @@ export function useConvertToTemplate() {
       return apiClient.post<VMActionResponse>(base, {});
     },
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "containers"],
-      });
+      invalidateResourceLists(queryClient, variables.clusterId);
     },
   });
 }
@@ -203,12 +196,7 @@ export function useMigrateContainer() {
         body,
       ),
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "containers"],
-      });
+      invalidateResourceLists(queryClient, variables.clusterId);
     },
   });
 }
@@ -229,9 +217,7 @@ export function useMigrateVM() {
         body,
       ),
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
+      invalidateResourceLists(queryClient, variables.clusterId);
     },
   });
 }
@@ -256,15 +242,7 @@ export function useDestroyVM() {
       return apiClient.delete<VMActionResponse>(base);
     },
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "containers"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vmids"],
-      });
+      invalidateResourceLists(queryClient, variables.clusterId);
     },
   });
 }
@@ -282,7 +260,7 @@ export function useTaskStatus(clusterId: string, upid: string | null) {
     refetchInterval: (query) => {
       const data = query.state.data;
       if (data && data.status === "stopped") return false;
-      return 10_000; // WS events trigger immediate invalidation; polling is fallback
+      return 3_000; // fast polling for smooth progress bars; WS events also trigger invalidation
     },
   });
 }
@@ -476,12 +454,7 @@ export function useCreateVM() {
         body,
       ),
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vmids"],
-      });
+      invalidateResourceLists(queryClient, variables.clusterId);
     },
   });
 }
@@ -503,12 +476,7 @@ export function useCreateContainer() {
         body,
       ),
     onSuccess: (_data, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "containers"],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vmids"],
-      });
+      invalidateResourceLists(queryClient, variables.clusterId);
     },
   });
 }
@@ -618,7 +586,8 @@ export function useSetResourceConfig() {
       return apiClient.put<{ status: string }>(path, { fields });
     },
     onSuccess: (_data, variables) => {
-      const qk = ["clusters", variables.clusterId, variables.kind === "ct" ? "containers" : "vms", variables.resourceId];
+      const coll = variables.kind === "ct" ? "containers" : "vms";
+      const qk = ["clusters", variables.clusterId, coll, variables.resourceId];
       // Optimistically patch the cached VM/CT with new name if present
       const nameField = variables.kind === "ct" ? variables.fields["hostname"] : variables.fields["name"];
       if (nameField) {
@@ -627,6 +596,7 @@ export function useSetResourceConfig() {
         );
       }
       void queryClient.invalidateQueries({ queryKey: qk });
+      invalidateResourceLists(queryClient, variables.clusterId);
     },
   });
 }
@@ -792,9 +762,7 @@ export function useMoveDisk() {
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "vms", variables.vmId, "config"],
       });
-      void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms"],
-      });
+      invalidateResourceLists(queryClient, variables.clusterId);
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "storage"],
       });
@@ -825,6 +793,7 @@ export function useMoveContainerVolume() {
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "containers", variables.ctId, "config"],
       });
+      invalidateResourceLists(queryClient, variables.clusterId);
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "storage"],
       });
@@ -1048,7 +1017,8 @@ export function useSetVMPool(clusterId: string, vmId: string) {
         { pool },
       ),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["vm", clusterId, vmId] });
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "vms", vmId] });
+      invalidateResourceLists(qc, clusterId);
     },
   });
 }
