@@ -7,9 +7,27 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const deleteStaleStoragePools = `-- name: DeleteStaleStoragePools :execrows
+DELETE FROM storage_pools WHERE cluster_id = $1 AND last_seen_at < $2
+`
+
+type DeleteStaleStoragePoolsParams struct {
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
+func (q *Queries) DeleteStaleStoragePools(ctx context.Context, arg DeleteStaleStoragePoolsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteStaleStoragePools, arg.ClusterID, arg.LastSeenAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
 
 const deleteStoragePool = `-- name: DeleteStoragePool :exec
 DELETE FROM storage_pools WHERE id = $1
@@ -154,7 +172,7 @@ ON CONFLICT (cluster_id, node_id, storage) DO UPDATE SET
     used = EXCLUDED.used,
     avail = EXCLUDED.avail,
     last_seen_at = now()
-RETURNING id, cluster_id, node_id, storage, type, content, active, enabled, shared, total, used, avail, last_seen_at, created_at, updated_at
+RETURNING id, cluster_id, node_id, storage, type, content, active, enabled, shared, total, used, avail, last_seen_at, created_at, updated_at, (xmax = 0) AS inserted
 `
 
 type UpsertStoragePoolParams struct {
@@ -171,7 +189,26 @@ type UpsertStoragePoolParams struct {
 	Avail     int64     `json:"avail"`
 }
 
-func (q *Queries) UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (StoragePool, error) {
+type UpsertStoragePoolRow struct {
+	ID         uuid.UUID `json:"id"`
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	NodeID     uuid.UUID `json:"node_id"`
+	Storage    string    `json:"storage"`
+	Type       string    `json:"type"`
+	Content    string    `json:"content"`
+	Active     bool      `json:"active"`
+	Enabled    bool      `json:"enabled"`
+	Shared     bool      `json:"shared"`
+	Total      int64     `json:"total"`
+	Used       int64     `json:"used"`
+	Avail      int64     `json:"avail"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	Inserted   bool      `json:"inserted"`
+}
+
+func (q *Queries) UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (UpsertStoragePoolRow, error) {
 	row := q.db.QueryRow(ctx, upsertStoragePool,
 		arg.ClusterID,
 		arg.NodeID,
@@ -185,7 +222,7 @@ func (q *Queries) UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolPa
 		arg.Used,
 		arg.Avail,
 	)
-	var i StoragePool
+	var i UpsertStoragePoolRow
 	err := row.Scan(
 		&i.ID,
 		&i.ClusterID,
@@ -202,6 +239,7 @@ func (q *Queries) UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolPa
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Inserted,
 	)
 	return i, err
 }

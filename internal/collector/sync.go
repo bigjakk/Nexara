@@ -38,7 +38,8 @@ type SyncQueries interface {
 	ListActiveClusters(ctx context.Context) ([]db.Cluster, error)
 	UpsertNode(ctx context.Context, arg db.UpsertNodeParams) (db.Node, error)
 	UpsertVM(ctx context.Context, arg db.UpsertVMParams) (db.Vm, error)
-	UpsertStoragePool(ctx context.Context, arg db.UpsertStoragePoolParams) (db.StoragePool, error)
+	UpsertStoragePool(ctx context.Context, arg db.UpsertStoragePoolParams) (db.UpsertStoragePoolRow, error)
+	DeleteStaleStoragePools(ctx context.Context, arg db.DeleteStaleStoragePoolsParams) (int64, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
 	DeleteStaleVMs(ctx context.Context, arg db.DeleteStaleVMsParams) error
@@ -228,6 +229,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		CollectedAt: now,
 	}
 
+	storageAdded := false
 	for _, node := range nodes {
 		nr, err := s.syncNode(ctx, client, cluster.ID, node, vmExtra)
 		if err != nil {
@@ -254,6 +256,9 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 
 		result.NodeMetrics = append(result.NodeMetrics, nr.NodeMetric)
 		result.VMMetrics = append(result.VMMetrics, nr.VMMetrics...)
+		if nr.StorageAdded {
+			storageAdded = true
+		}
 	}
 
 	// Update node addresses from corosync cluster status.
@@ -270,7 +275,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	}
 
 	// Check for VM changes (status, node assignment, additions/removals).
-	inventoryChanged := false
+	inventoryChanged := storageAdded
 	if s.eventPub != nil && oldVMs != nil {
 		if newRows, err := s.queries.ListVMStatusesByCluster(ctx, cluster.ID); err == nil {
 			for _, r := range newRows {
@@ -317,6 +322,21 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 			"cluster_id", cluster.ID,
 			"error", err,
 		)
+	}
+
+	// Prune storage pools that no longer exist on Proxmox (e.g. an NFS
+	// share removed at the datacenter level). Flag inventory change when
+	// rows are actually deleted so the frontend refreshes the UI.
+	if removed, err := s.queries.DeleteStaleStoragePools(ctx, db.DeleteStaleStoragePoolsParams{
+		ClusterID:  cluster.ID,
+		LastSeenAt: now,
+	}); err != nil {
+		s.logger.Warn("failed to prune stale storage pools",
+			"cluster_id", cluster.ID,
+			"error", err,
+		)
+	} else if removed > 0 {
+		inventoryChanged = true
 	}
 
 	// Ingest completed Proxmox tasks into the audit log (deduplicating
@@ -473,7 +493,8 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	}
 
 	// Sync storage pools (no metrics collected).
-	if err := s.syncStorage(ctx, client, clusterID, dbNode.ID, node.Node); err != nil {
+	storageAdded, err := s.syncStorage(ctx, client, clusterID, dbNode.ID, node.Node)
+	if err != nil {
 		s.logger.Warn("failed to sync storage",
 			"node", node.Node,
 			"error", err,
@@ -581,7 +602,8 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 			NetIn:     nodeNetIn,
 			NetOut:    nodeNetOut,
 		},
-		VMMetrics: allVMSnapshots,
+		VMMetrics:    allVMSnapshots,
+		StorageAdded: storageAdded,
 	}, nil
 }
 
@@ -673,14 +695,17 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 	return snapshots, nil
 }
 
-func (s *Syncer) syncStorage(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string) error {
+// syncStorage upserts the node's storage pools. Returns true if any pool
+// was newly inserted (i.e. created on Proxmox since the last sync).
+func (s *Syncer) syncStorage(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string) (bool, error) {
 	pools, err := client.GetStoragePools(ctx, nodeName)
 	if err != nil {
-		return fmt.Errorf("get storage pools on %s: %w", nodeName, err)
+		return false, fmt.Errorf("get storage pools on %s: %w", nodeName, err)
 	}
 
+	added := false
 	for _, pool := range pools {
-		_, err := s.queries.UpsertStoragePool(ctx, db.UpsertStoragePoolParams{
+		row, err := s.queries.UpsertStoragePool(ctx, db.UpsertStoragePoolParams{
 			ClusterID: clusterID,
 			NodeID:    nodeID,
 			Storage:   pool.Storage,
@@ -694,11 +719,14 @@ func (s *Syncer) syncStorage(ctx context.Context, client ProxmoxClient, clusterI
 			Avail:     pool.Avail,
 		})
 		if err != nil {
-			return fmt.Errorf("upsert storage pool %s on %s: %w", pool.Storage, nodeName, err)
+			return added, fmt.Errorf("upsert storage pool %s on %s: %w", pool.Storage, nodeName, err)
+		}
+		if row.Inserted {
+			added = true
 		}
 	}
 
-	return nil
+	return added, nil
 }
 
 // cephCollectionResult holds Ceph metric data from a sync cycle.

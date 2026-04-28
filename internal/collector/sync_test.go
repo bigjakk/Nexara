@@ -82,16 +82,16 @@ func (m *mockQueries) UpsertVM(_ context.Context, arg db.UpsertVMParams) (db.Vm,
 	return vm, nil
 }
 
-func (m *mockQueries) UpsertStoragePool(_ context.Context, arg db.UpsertStoragePoolParams) (db.StoragePool, error) {
+func (m *mockQueries) UpsertStoragePool(_ context.Context, arg db.UpsertStoragePoolParams) (db.UpsertStoragePoolRow, error) {
 	m.upsertStorageCalls = append(m.upsertStorageCalls, arg)
-	pool := db.StoragePool{
+	row := db.UpsertStoragePoolRow{
 		ID:        uuid.New(),
 		ClusterID: arg.ClusterID,
 		NodeID:    arg.NodeID,
 		Storage:   arg.Storage,
 		Type:      arg.Type,
 	}
-	return pool, nil
+	return row, nil
 }
 
 func (m *mockQueries) GetNodeByClusterAndName(_ context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error) {
@@ -109,6 +109,10 @@ func (m *mockQueries) ListVMStatusesByCluster(_ context.Context, _ uuid.UUID) ([
 
 func (m *mockQueries) DeleteStaleVMs(_ context.Context, _ db.DeleteStaleVMsParams) error {
 	return nil
+}
+
+func (m *mockQueries) DeleteStaleStoragePools(_ context.Context, _ db.DeleteStaleStoragePoolsParams) (int64, error) {
+	return 0, nil
 }
 
 func (m *mockQueries) UpdateNodeAddress(_ context.Context, _ db.UpdateNodeAddressParams) error {

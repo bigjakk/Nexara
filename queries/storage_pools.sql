@@ -11,7 +11,7 @@ ON CONFLICT (cluster_id, node_id, storage) DO UPDATE SET
     used = EXCLUDED.used,
     avail = EXCLUDED.avail,
     last_seen_at = now()
-RETURNING *;
+RETURNING *, (xmax = 0) AS inserted;
 
 -- name: GetStoragePool :one
 SELECT * FROM storage_pools WHERE id = $1;
@@ -27,3 +27,6 @@ DELETE FROM storage_pools WHERE id = $1;
 
 -- name: DeleteStoragePoolsByName :exec
 DELETE FROM storage_pools WHERE cluster_id = $1 AND storage = $2;
+
+-- name: DeleteStaleStoragePools :execrows
+DELETE FROM storage_pools WHERE cluster_id = $1 AND last_seen_at < $2;

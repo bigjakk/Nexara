@@ -78,6 +78,7 @@ type Querier interface {
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
+	DeleteStaleStoragePools(ctx context.Context, arg DeleteStaleStoragePoolsParams) (int64, error)
 	DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) error
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
@@ -381,7 +382,7 @@ type Querier interface {
 	UpsertPBSSyncJob(ctx context.Context, arg UpsertPBSSyncJobParams) (PbsSyncJob, error)
 	UpsertPBSVerifyJob(ctx context.Context, arg UpsertPBSVerifyJobParams) (PbsVerifyJob, error)
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error)
-	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (StoragePool, error)
+	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (UpsertStoragePoolRow, error)
 	UpsertTaskSyncState(ctx context.Context, arg UpsertTaskSyncStateParams) error
 	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
 }

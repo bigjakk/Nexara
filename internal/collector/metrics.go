@@ -34,9 +34,10 @@ type vmMetricSnapshot struct {
 
 // nodeCollectionResult holds all data collected from syncing a single node.
 type nodeCollectionResult struct {
-	Node       uuid.UUID
-	NodeMetric nodeMetricSnapshot
-	VMMetrics  []vmMetricSnapshot
+	Node         uuid.UUID
+	NodeMetric   nodeMetricSnapshot
+	VMMetrics    []vmMetricSnapshot
+	StorageAdded bool
 }
 
 // cephClusterMetricSnapshot holds cluster-wide Ceph metrics.
