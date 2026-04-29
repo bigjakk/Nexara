@@ -360,3 +360,113 @@ func TestCheckViolations(t *testing.T) {
 		t.Errorf("expected no anti-affinity violations, got %v", violations2)
 	}
 }
+
+func TestExtractLRMState(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+		want   string
+	}{
+		{
+			name:   "active with watchdog",
+			status: "pve2 (active, watchdog active, Wed Apr 29 07:55:26 2026)",
+			want:   "active",
+		},
+		{
+			name:   "idle",
+			status: "pve1 (idle, Wed Apr 29 07:55:26 2026)",
+			want:   "idle",
+		},
+		{
+			name:   "maintenance",
+			status: "pve3 (maintenance, watchdog active, Wed Apr 29 07:55:26 2026)",
+			want:   "maintenance",
+		},
+		{
+			name:   "maintenance mode collapses to maintenance",
+			status: "pve3 (maintenance mode, Wed Apr 29 07:55:26 2026)",
+			want:   "maintenance",
+		},
+		{
+			name:   "wait_for_agent_lock",
+			status: "pve3 (wait_for_agent_lock, Wed Apr 29 07:55:26 2026)",
+			want:   "wait_for_agent_lock",
+		},
+		{
+			name:   "no parens — unparseable",
+			status: "pve3 active",
+			want:   "",
+		},
+		{
+			name:   "empty",
+			status: "",
+			want:   "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractLRMState(tc.status)
+			if got != tc.want {
+				t.Errorf("extractLRMState(%q) = %q, want %q", tc.status, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnhealthyHANodes(t *testing.T) {
+	// Build a fake Proxmox client backed by a test HTTP server returning
+	// a real-shape /cluster/ha/status/current payload with one node in
+	// maintenance.
+	tests := []struct {
+		name    string
+		entries []proxmox.HAStatusEntry
+		want    map[string]struct{}
+	}{
+		{
+			name: "all active",
+			entries: []proxmox.HAStatusEntry{
+				{ID: "lrm:pve1", Type: "lrm", Node: "pve1", Status: "pve1 (active, watchdog active, Wed Apr 29 07:55:26 2026)"},
+				{ID: "lrm:pve2", Type: "lrm", Node: "pve2", Status: "pve2 (active, watchdog active, Wed Apr 29 07:55:26 2026)"},
+			},
+			want: map[string]struct{}{},
+		},
+		{
+			name: "maintenance node skipped",
+			entries: []proxmox.HAStatusEntry{
+				{ID: "lrm:pve1", Type: "lrm", Node: "pve1", Status: "pve1 (active, watchdog active, ...)"},
+				{ID: "lrm:pve2", Type: "lrm", Node: "pve2", Status: "pve2 (maintenance, watchdog active, ...)"},
+				{ID: "service:vm:100", Type: "service", Node: "pve2", Status: "vm:100 (pve2, started)"},
+			},
+			want: map[string]struct{}{"pve2": {}},
+		},
+		{
+			name: "node-type entries are ignored (no LRM info there)",
+			entries: []proxmox.HAStatusEntry{
+				{ID: "node/pve1", Type: "node", Node: "pve1", Status: "online"},
+				{ID: "node/pve2", Type: "node", Node: "pve2", Status: "online"},
+			},
+			want: map[string]struct{}{},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyHAEntries(tc.entries)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %d skipped, want %d (got=%v want=%v)", len(got), len(tc.want), keys(got), keys(tc.want))
+			}
+			for k := range tc.want {
+				if _, ok := got[k]; !ok {
+					t.Errorf("expected %q to be marked unhealthy", k)
+				}
+			}
+		})
+	}
+}
+
+func keys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

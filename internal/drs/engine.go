@@ -349,8 +349,13 @@ func CalculateImbalance(scores map[string]NodeScore) float64 {
 // lost_agent_lock, dead, gone. We treat anything other than active/idle as
 // not-eligible-for-DRS. If HA is not configured the call returns nothing
 // and DRS proceeds normally.
+//
+// The relevant info lives on lrm:<node> entries (type "lrm"), not the
+// node/<node> entries (which only carry online/offline/fence — already
+// covered by the standard node status check). The lrm status is a
+// human-readable string of the form "<nodename> (<state>, <flags...>,
+// <timestamp>)", so we parse the state out of the parenthesized portion.
 func unhealthyHANodes(ctx context.Context, client *proxmox.Client, logger *slog.Logger, clusterID uuid.UUID) map[string]struct{} {
-	skip := make(map[string]struct{})
 	entries, err := client.GetHAStatus(ctx)
 	if err != nil {
 		// HA not configured or the endpoint failed — log at debug and
@@ -360,21 +365,61 @@ func unhealthyHANodes(ctx context.Context, client *proxmox.Client, logger *slog.
 			"cluster_id", clusterID,
 			"error", err,
 		)
-		return skip
+		return map[string]struct{}{}
 	}
+	skip := classifyHAEntries(entries)
+	for node := range skip {
+		logger.Info("DRS marking node unhealthy from HA LRM state",
+			"cluster_id", clusterID,
+			"node", node,
+		)
+	}
+	return skip
+}
+
+// classifyHAEntries returns the set of nodes whose LRM state is anything
+// other than active/idle. Pure function so it can be unit-tested without
+// a live Proxmox endpoint.
+func classifyHAEntries(entries []proxmox.HAStatusEntry) map[string]struct{} {
+	skip := make(map[string]struct{})
 	for _, entry := range entries {
-		if entry.Type != "node" || entry.Node == "" {
+		if entry.Type != "lrm" || entry.Node == "" {
 			continue
 		}
-		state := strings.ToLower(strings.TrimSpace(entry.Status))
+		state := extractLRMState(entry.Status)
 		switch state {
-		case "active", "idle", "online":
-			// healthy — DRS may consider this node
+		case "active", "idle", "":
+			// healthy, or unparseable — fail open so a format
+			// change doesn't strand DRS.
 		default:
 			skip[entry.Node] = struct{}{}
 		}
 	}
 	return skip
+}
+
+// extractLRMState pulls the state token out of a Proxmox HA LRM status
+// string. Proxmox emits these as "<nodename> (<state>, <flags...>,
+// <timestamp>)" — e.g. "pve2 (active, watchdog active, Wed Apr 29 ...)"
+// or "pve2 (maintenance mode, ...)". Returns the lowercased first token
+// inside the parens, or empty if the format is unrecognised.
+func extractLRMState(status string) string {
+	open := strings.Index(status, "(")
+	if open < 0 {
+		return ""
+	}
+	rest := status[open+1:]
+	end := strings.IndexAny(rest, ",)")
+	if end < 0 {
+		end = len(rest)
+	}
+	token := strings.ToLower(strings.TrimSpace(rest[:end]))
+	// "maintenance mode" -> "maintenance" so callers can match on a
+	// single canonical token.
+	if strings.HasPrefix(token, "maintenance") {
+		return "maintenance"
+	}
+	return token
 }
 
 func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
