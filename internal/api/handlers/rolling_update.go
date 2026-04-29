@@ -81,7 +81,7 @@ type rollingUpdateNodeResponse struct {
 
 func toJobResponse(j db.RollingUpdateJob) rollingUpdateJobResponse {
 	haWarnings := j.HaWarnings
-	if haWarnings == nil {
+	if len(haWarnings) == 0 || string(haWarnings) == "null" {
 		haWarnings = json.RawMessage(`[]`)
 	}
 	r := rollingUpdateJobResponse{
