@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -9,10 +10,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -195,67 +199,142 @@ func runHealthcheck() {
 	fmt.Println("ok")
 }
 
-// Advisory lock IDs for leader election. Only one instance across the cluster
-// will run the collector or scheduler at any given time; all instances serve API traffic.
+// Heartbeat-based leader election. Only one instance across the cluster
+// runs the collector or scheduler at any given time; all instances serve
+// API traffic. We replaced session-scoped pg_try_advisory_lock with a
+// heartbeat row because a hard-killed leader's TCP session can survive on
+// the Postgres side until kernel keepalives expire (~2h default), leaving
+// followers unable to take over for hours. With a heartbeat row, takeover
+// happens within leaderTakeoverAfter regardless of TCP state.
 const (
-	lockIDCollector int64 = 0x4E585241_00000001 // "NXRA" + 1
-	lockIDScheduler int64 = 0x4E585241_00000002 // "NXRA" + 2
+	leaderHeartbeatInterval = 5 * time.Second
+	leaderTakeoverAfter     = 30 * time.Second
+	leaderRetryInterval     = 10 * time.Second
+	leaderHeartbeatGrace    = 3 // consecutive heartbeat failures before stepping down
 )
 
-// acquireLeaderLock tries to become the leader for a given role by acquiring
-// a session-level advisory lock on a dedicated connection. The lock is held
-// for the lifetime of the returned connection — when the connection is released
-// (or the process dies), PostgreSQL automatically releases the lock and another
-// instance can become leader.
-//
-// Returns the held connection (caller must defer conn.Release()) and true if
-// leadership was acquired. Returns nil, false if another instance is leader.
-func acquireLeaderLock(ctx context.Context, pool *pgxpool.Pool, lockID int64) (*pgxpool.Conn, bool) {
-	conn, err := pool.Acquire(ctx)
+// tryBecomeLeader attempts to insert (or steal a stale row) the
+// leader_election row for the given role. Returns true iff our holder_id
+// is the current owner after the upsert. The takeover branch only fires
+// when the existing row is older than leaderTakeoverAfter, so a healthy
+// leader can't be displaced.
+func tryBecomeLeader(ctx context.Context, pool *pgxpool.Pool, role string, holderID uuid.UUID) (bool, error) {
+	var owner uuid.UUID
+	err := pool.QueryRow(ctx,
+		`INSERT INTO leader_election (role, holder_id, last_heartbeat)
+         VALUES ($1, $2, now())
+         ON CONFLICT (role) DO UPDATE
+            SET holder_id = $2, last_heartbeat = now()
+            WHERE leader_election.holder_id = $2
+               OR leader_election.last_heartbeat < now() - make_interval(secs => $3)
+         RETURNING holder_id`,
+		role, holderID, int(leaderTakeoverAfter.Seconds()),
+	).Scan(&owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Existing leader is fresh — we don't own it.
+		return false, nil
+	}
 	if err != nil {
-		return nil, false
+		return false, err
 	}
-
-	var ok bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", lockID).Scan(&ok); err != nil {
-		conn.Release()
-		return nil, false
-	}
-	if !ok {
-		conn.Release()
-		return nil, false
-	}
-
-	return conn, true
+	return owner == holderID, nil
 }
 
-// runWithLeaderRetry continuously attempts to become leader for a role. Once
-// leadership is acquired, it calls run (which should block until ctx is done).
-// If leadership is lost (connection drops), it retries after a delay.
-func runWithLeaderRetry(ctx context.Context, pool *pgxpool.Pool, lockID int64, role string, logger *slog.Logger, run func(ctx context.Context)) {
+// heartbeatLeader keeps the leader_election row fresh for as long as we
+// hold the role. Returns when ctx is cancelled, when a heartbeat reports
+// 0 rows (we were stolen), or after leaderHeartbeatGrace consecutive
+// transient failures.
+func heartbeatLeader(ctx context.Context, pool *pgxpool.Pool, role string, holderID uuid.UUID, logger *slog.Logger) {
+	ticker := time.NewTicker(leaderHeartbeatInterval)
+	defer ticker.Stop()
+	consecutiveFailures := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-ticker.C:
+			tag, err := pool.Exec(ctx,
+				`UPDATE leader_election SET last_heartbeat = now()
+                 WHERE role = $1 AND holder_id = $2`,
+				role, holderID,
+			)
+			if err != nil {
+				consecutiveFailures++
+				logger.Warn("leader heartbeat failed", "role", role, "consecutive_failures", consecutiveFailures, "error", err)
+				if consecutiveFailures >= leaderHeartbeatGrace {
+					logger.Warn("leader stepping down after repeated heartbeat failures", "role", role)
+					return
+				}
+				continue
+			}
+			consecutiveFailures = 0
+			if tag.RowsAffected() == 0 {
+				logger.Warn("leader role lost (taken over by another instance)", "role", role)
+				return
+			}
 		}
+	}
+}
 
-		conn, ok := acquireLeaderLock(ctx, pool, lockID)
-		if !ok {
-			// Another instance is leader. Retry periodically.
+// releaseLeader removes our leader row so another instance can take over
+// immediately on graceful shutdown, instead of waiting leaderTakeoverAfter.
+func releaseLeader(ctx context.Context, pool *pgxpool.Pool, role string, holderID uuid.UUID, logger *slog.Logger) {
+	if _, err := pool.Exec(ctx,
+		`DELETE FROM leader_election WHERE role = $1 AND holder_id = $2`,
+		role, holderID,
+	); err != nil {
+		logger.Warn("leader release failed", "role", role, "error", err)
+	}
+}
+
+// runWithLeaderRetry continuously attempts to become leader for a role.
+// Once acquired, it runs `run` and a heartbeat goroutine concurrently;
+// when either exits, both exit and the function loops back to retry.
+func runWithLeaderRetry(ctx context.Context, pool *pgxpool.Pool, role string, logger *slog.Logger, run func(ctx context.Context)) {
+	holderID := uuid.New()
+	logger = logger.With("holder_id", holderID.String())
+
+	for ctx.Err() == nil {
+		acquired, err := tryBecomeLeader(ctx, pool, role, holderID)
+		if err != nil {
+			logger.Warn("leader acquire query failed", "role", role, "error", err)
+		}
+		if !acquired {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(10 * time.Second):
+			case <-time.After(leaderRetryInterval):
 				continue
 			}
 		}
 
-		logger.Info("acquired leader lock", "role", role)
-		run(ctx)
-		// run returned — either ctx cancelled or an unexpected exit.
-		conn.Release()
-		logger.Info("released leader lock", "role", role)
+		logger.Info("acquired leader role", "role", role)
+
+		runCtx, cancel := context.WithCancel(ctx)
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			defer cancel()
+			run(runCtx)
+		}()
+
+		go func() {
+			defer wg.Done()
+			defer cancel()
+			heartbeatLeader(runCtx, pool, role, holderID, logger)
+		}()
+
+		wg.Wait()
+
+		// Release with a fresh context so a cancelled parent ctx
+		// doesn't stop us from clearing the row on shutdown.
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		releaseLeader(releaseCtx, pool, role, holderID, logger)
+		releaseCancel()
+
+		logger.Info("released leader role", "role", role)
 	}
 }
 
@@ -282,7 +361,7 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 
 	mc := collector.NewMetricCollector(pool, publisher, logger)
 
-	runWithLeaderRetry(ctx, pool, lockIDCollector, "collector", logger, func(ctx context.Context) {
+	runWithLeaderRetry(ctx, pool, "collector", logger, func(ctx context.Context) {
 		logger.Info("collector started", "metrics_interval", cfg.MetricsCollectInterval)
 
 		ticker := cfg.NewMetricsTicker()
@@ -326,7 +405,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 
 	sched := scheduler.New(queries, cfg.EncryptionKey, logger, eventPub)
 
-	runWithLeaderRetry(ctx, pool, lockIDScheduler, "scheduler", logger, func(ctx context.Context) {
+	runWithLeaderRetry(ctx, pool, "scheduler", logger, func(ctx context.Context) {
 		logger.Info("scheduler started",
 			"task_interval", "60s",
 			"drs_interval", "60s",
