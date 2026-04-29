@@ -632,7 +632,7 @@ export interface RollingUpdateJob {
   auto_restore_guests: boolean;
   package_excludes: string[];
   ha_policy: "strict" | "warn";
-  ha_warnings: HAConflict[];
+  ha_warnings: HAConflict[] | null;
   auto_upgrade: boolean;
   failure_reason: string;
   notify_channel_id?: string;
