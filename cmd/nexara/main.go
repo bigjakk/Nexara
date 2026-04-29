@@ -69,16 +69,29 @@ func main() {
 		logger.Error("integrity repair failed", "error", err)
 	}
 
-	// Connect to Redis with retry.
+	// Construct the Redis client without blocking on connectivity. We probe
+	// the connection in a background goroutine so the HTTP listener (and
+	// `/healthz`, which only depends on the DB) can come up immediately.
+	//
+	// This makes Nexara tolerate transient orchestrator-side DNS gaps —
+	// notably the Docker Swarm libnetwork resolver desync that can occur
+	// during rolling updates — instead of failing healthchecks while
+	// stuck inside Redis's own retry budget. go-redis v9 dials lazily on
+	// the first command, so handlers and the WS subscriber will start
+	// working as soon as the Redis name resolves.
 	var rdb *redis.Client
 	if cfg.RedisURL != "" {
-		rdb, err = redisutil.ConnectWithRetry(ctx, cfg.RedisURL, logger)
-		if err != nil {
-			logger.Warn("Redis unavailable, continuing without it", "error", err)
-			rdb = nil
+		client, parseErr := redisutil.NewClientLazy(cfg.RedisURL)
+		if parseErr != nil {
+			logger.Warn("invalid Redis URL, continuing without Redis", "error", parseErr)
 		} else {
-			logger.Info("connected to Redis")
+			rdb = client
 			defer rdb.Close()
+			go func() {
+				if err := redisutil.WaitUntilReady(ctx, rdb, logger); err != nil {
+					logger.Warn("Redis not reachable; events and pub/sub will resume when it returns", "error", err)
+				}
+			}()
 		}
 	}
 

@@ -10,37 +10,58 @@ import (
 )
 
 // ConnectWithRetry attempts to connect to Redis, retrying with exponential
-// backoff. This is necessary for orchestrators like Docker Swarm and Kubernetes
-// where service startup order is not guaranteed.
+// backoff. Blocks until Redis is reachable or maxAttempts is exhausted.
+//
+// Most callers in long-running services should prefer NewClientLazy + a
+// background WaitUntilReady probe, so the rest of the process can come up
+// (and serve healthchecks) while transient orchestrator DNS gaps resolve.
 func ConnectWithRetry(ctx context.Context, redisURL string, logger *slog.Logger) (*redis.Client, error) {
+	client, err := NewClientLazy(redisURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := WaitUntilReady(ctx, client, logger); err != nil {
+		client.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
+// NewClientLazy parses the URL and constructs a *redis.Client without
+// dialing. The first command on the returned client will dial; until then
+// no network I/O happens.
+func NewClientLazy(redisURL string) (*redis.Client, error) {
 	opts, err := redis.ParseURL(redisURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse Redis URL: %w", err)
 	}
+	return redis.NewClient(opts), nil
+}
 
+// WaitUntilReady pings the client with exponential backoff until Redis
+// responds or the attempt budget is exhausted. Safe to call from a
+// background goroutine — the caller doesn't need to block on it.
+func WaitUntilReady(ctx context.Context, client *redis.Client, logger *slog.Logger) error {
 	const maxAttempts = 30
 	backoff := time.Second
-	client := redis.NewClient(opts)
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if pingErr := client.Ping(ctx).Err(); pingErr == nil {
 			if attempt > 1 {
 				logger.Info("connected to Redis", "attempt", attempt)
 			}
-			return client, nil
+			return nil
 		}
 
 		if attempt == maxAttempts {
-			client.Close()
-			return nil, fmt.Errorf("redis not reachable after %d attempts", maxAttempts)
+			return fmt.Errorf("redis not reachable after %d attempts", maxAttempts)
 		}
 
 		logger.Warn("Redis not ready, retrying...", "attempt", attempt, "backoff", backoff)
 
 		select {
 		case <-ctx.Done():
-			client.Close()
-			return nil, fmt.Errorf("context cancelled waiting for Redis: %w", ctx.Err())
+			return fmt.Errorf("context cancelled waiting for Redis: %w", ctx.Err())
 		case <-time.After(backoff):
 		}
 
@@ -52,5 +73,5 @@ func ConnectWithRetry(ctx context.Context, redisURL string, logger *slog.Logger)
 		}
 	}
 
-	return nil, fmt.Errorf("redis not reachable after %d attempts", maxAttempts)
+	return fmt.Errorf("redis not reachable after %d attempts", maxAttempts)
 }
