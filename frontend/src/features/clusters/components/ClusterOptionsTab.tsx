@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -16,7 +17,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, Check, Copy, Info, Save } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Copy, Info, Save } from "lucide-react";
+import { ApiClientError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useClusterOptions, useUpdateClusterOptions,
@@ -25,6 +27,33 @@ import {
   useClusterJoinInfo, useCorosyncNodes,
 } from "../api/cluster-options-queries";
 import type { ClusterOptions } from "../api/cluster-options-queries";
+import {
+  parsePropString,
+  propStringsEqual,
+  serializePropString,
+} from "../lib/prop-string";
+import { useNetworkInterfaces } from "@/features/networks/api/network-queries";
+
+/** Compute the network address of an IPv4 CIDR, e.g.
+ *  "10.10.10.5/24" → "10.10.10.0/24". Returns null on invalid input or
+ *  IPv6 (which we don't currently bucket). */
+function ipv4Network(cidr: string): string | null {
+  const slash = cidr.indexOf("/");
+  if (slash < 0) return null;
+  const ip = cidr.slice(0, slash);
+  const prefix = Number.parseInt(cidr.slice(slash + 1), 10);
+  if (!Number.isFinite(prefix) || prefix < 0 || prefix > 32) return null;
+  const octets = ip.split(".");
+  if (octets.length !== 4) return null;
+  const nums = octets.map((o) => Number.parseInt(o, 10));
+  if (nums.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return null;
+  const [a, b, c, d] = nums;
+  if (a === undefined || b === undefined || c === undefined || d === undefined) return null;
+  const ipNum = ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+  const net = (ipNum & mask) >>> 0;
+  return `${String((net >>> 24) & 0xff)}.${String((net >>> 16) & 0xff)}.${String((net >>> 8) & 0xff)}.${String(net & 0xff)}/${String(prefix)}`;
+}
 
 interface OptionsFormData {
   console: string;
@@ -33,19 +62,37 @@ interface OptionsFormData {
   email_from: string;
   http_proxy: string;
   mac_prefix: string;
-  migration_type: string;
-  bwlimit: string;
-  nextId: string;
-  ha: string;
   fencing: string;
-  crs: string;
   max_workers: number;
+  // migration property string subfields (PVE 8+ replaces standalone `migration_type`)
+  migration_type: string;
+  migration_network: string;
+  // HA property string subfields
+  ha_shutdown_policy: string;
+  // CRS property string subfields
+  crs_ha: string;
+  crs_rebalance_on_start: boolean;
+  // bwlimit property string subfields (KiB/s, "" = unset, "0" = unlimited)
+  bwlimit_clone: string;
+  bwlimit_migration: string;
+  bwlimit_move: string;
+  bwlimit_restore: string;
+  bwlimit_default: string;
+  // next-id property string subfields
+  next_id_lower: string;
+  next_id_upper: string;
 }
 
 const EMPTY_FORM: OptionsFormData = {
   console: "", keyboard: "", language: "", email_from: "",
-  http_proxy: "", mac_prefix: "", migration_type: "", bwlimit: "",
-  nextId: "", ha: "", fencing: "", crs: "", max_workers: 0,
+  http_proxy: "", mac_prefix: "", fencing: "",
+  max_workers: 0,
+  migration_type: "", migration_network: "",
+  ha_shutdown_policy: "",
+  crs_ha: "", crs_rebalance_on_start: false,
+  bwlimit_clone: "", bwlimit_migration: "", bwlimit_move: "",
+  bwlimit_restore: "", bwlimit_default: "",
+  next_id_lower: "", next_id_upper: "",
 };
 
 /** Convert a value that may be a string or object to a display string. */
@@ -62,6 +109,12 @@ function toStr(v: unknown): string {
 }
 
 function optsToForm(d: ClusterOptions): OptionsFormData {
+  const migration = parsePropString(toStr(d["migration"]));
+  const ha = parsePropString(toStr(d["ha"]));
+  const crs = parsePropString(toStr(d["crs"]));
+  const bw = parsePropString(toStr(d["bwlimit"]));
+  const nextId = parsePropString(toStr(d["next-id"]));
+
   return {
     console: toStr(d["console"]),
     keyboard: toStr(d["keyboard"]),
@@ -69,13 +122,60 @@ function optsToForm(d: ClusterOptions): OptionsFormData {
     email_from: toStr(d["email_from"]),
     http_proxy: toStr(d["http_proxy"]),
     mac_prefix: toStr(d["mac_prefix"]),
-    migration_type: toStr(d["migration_type"]),
-    bwlimit: toStr(d["bwlimit"]),
-    nextId: toStr(d["next-id"]),
-    ha: toStr(d["ha"]),
     fencing: toStr(d["fencing"]),
-    crs: toStr(d["crs"]),
     max_workers: typeof d["max_workers"] === "number" ? d["max_workers"] : 0,
+
+    // PVE 8+ stores migration type inside the `migration` property string;
+    // older clusters may still have a top-level `migration_type` field.
+    migration_type: migration["type"] ?? toStr(d["migration_type"]),
+    migration_network: migration["network"] ?? "",
+
+    ha_shutdown_policy: ha["shutdown_policy"] ?? "",
+
+    crs_ha: crs["ha"] ?? "",
+    crs_rebalance_on_start: crs["ha-rebalance-on-start"] === "1",
+
+    bwlimit_clone: bw["clone"] ?? "",
+    bwlimit_migration: bw["migration"] ?? "",
+    bwlimit_move: bw["move"] ?? "",
+    bwlimit_restore: bw["restore"] ?? "",
+    bwlimit_default: bw["default"] ?? "",
+
+    next_id_lower: nextId["lower"] ?? "",
+    next_id_upper: nextId["upper"] ?? "",
+  };
+}
+
+/** Build the property-string values from the form (used for both
+ *  diffing against the original and for sending the PUT body). */
+function buildPropStrings(form: OptionsFormData): {
+  migration: string;
+  ha: string;
+  crs: string;
+  bwlimit: string;
+  nextId: string;
+} {
+  return {
+    migration: serializePropString({
+      type: form.migration_type,
+      network: form.migration_network,
+    }),
+    ha: serializePropString({ shutdown_policy: form.ha_shutdown_policy }),
+    crs: serializePropString({
+      ha: form.crs_ha,
+      "ha-rebalance-on-start": form.crs_rebalance_on_start ? "1" : "",
+    }),
+    bwlimit: serializePropString({
+      clone: form.bwlimit_clone,
+      migration: form.bwlimit_migration,
+      move: form.bwlimit_move,
+      restore: form.bwlimit_restore,
+      default: form.bwlimit_default,
+    }),
+    nextId: serializePropString({
+      lower: form.next_id_lower,
+      upper: form.next_id_upper,
+    }),
   };
 }
 
@@ -123,7 +223,12 @@ export function ClusterOptionsTab({ clusterId }: ClusterOptionsTabProps) {
       </TabsContent>
 
       <TabsContent value="general" className="mt-4">
-        <GeneralSection optionsQuery={optionsQuery} updateOpts={updateOpts} canEdit={canManage("cluster")} />
+        <GeneralSection
+          optionsQuery={optionsQuery}
+          updateOpts={updateOpts}
+          canEdit={canManage("cluster")}
+          clusterId={clusterId}
+        />
       </TabsContent>
 
       <TabsContent value="tags" className="mt-4">
@@ -188,14 +293,33 @@ function NotesSection({
 // --- General Options Section (Editable) ---
 
 function GeneralSection({
-  optionsQuery, updateOpts, canEdit,
+  optionsQuery, updateOpts, canEdit, clusterId,
 }: {
   optionsQuery: ReturnType<typeof useClusterOptions>;
   updateOpts: ReturnType<typeof useUpdateClusterOptions>;
   canEdit: boolean;
+  clusterId: string;
 }) {
   const [form, setForm] = useState<OptionsFormData>({ ...EMPTY_FORM });
   const [dirty, setDirty] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const networksQuery = useNetworkInterfaces(clusterId);
+
+  // Unique IPv4 network CIDRs across all node interfaces, used as
+  // autocomplete suggestions for the Migration Network field — mirrors
+  // Proxmox's own Datacenter → Options → Migration Settings dropdown.
+  const networkSuggestions = (() => {
+    const seen = new Set<string>();
+    for (const node of networksQuery.data ?? []) {
+      for (const iface of node.interfaces) {
+        if (iface.cidr) {
+          const net = ipv4Network(iface.cidr);
+          if (net) seen.add(net);
+        }
+      }
+    }
+    return Array.from(seen).sort();
+  })();
 
   useEffect(() => {
     if (optionsQuery.data && !dirty) {
@@ -209,30 +333,70 @@ function GeneralSection({
   }, []);
 
   const handleSave = () => {
-    const orig = optionsQuery.data ? optsToForm(optionsQuery.data) : EMPTY_FORM;
+    setFeedback(null);
+    const origData = optionsQuery.data;
+    const orig = origData ? optsToForm(origData) : EMPTY_FORM;
     const params: Record<string, unknown> = {};
+    const toDelete: string[] = [];
 
-    if (form.console !== orig.console) params["console"] = form.console;
-    if (form.keyboard !== orig.keyboard) params["keyboard"] = form.keyboard;
-    if (form.language !== orig.language) params["language"] = form.language;
-    if (form.email_from !== orig.email_from) params["email_from"] = form.email_from;
-    if (form.http_proxy !== orig.http_proxy) params["http_proxy"] = form.http_proxy;
-    if (form.mac_prefix !== orig.mac_prefix) params["mac_prefix"] = form.mac_prefix;
-    if (form.migration_type !== orig.migration_type) params["migration_type"] = form.migration_type;
-    if (form.bwlimit !== orig.bwlimit) params["bwlimit"] = form.bwlimit;
-    if (form.nextId !== orig.nextId) params["next-id"] = form.nextId;
-    if (form.ha !== orig.ha) params["ha"] = form.ha;
-    if (form.fencing !== orig.fencing) params["fencing"] = form.fencing;
-    if (form.crs !== orig.crs) params["crs"] = form.crs;
+    // Diff a simple string field. Empty value means "clear" — Proxmox
+    // requires this to be sent via the `delete` parameter, not as an
+    // empty form value (which it 500s on).
+    const diffStr = (cur: string, prev: string, key: string) => {
+      if (cur === prev) return;
+      if (cur === "") toDelete.push(key);
+      else params[key] = cur;
+    };
+    const diffProp = (cur: string, prev: string, key: string) => {
+      if (propStringsEqual(cur, prev)) return;
+      if (cur === "") toDelete.push(key);
+      else params[key] = cur;
+    };
+
+    diffStr(form.console, orig.console, "console");
+    diffStr(form.keyboard, orig.keyboard, "keyboard");
+    diffStr(form.language, orig.language, "language");
+    diffStr(form.email_from, orig.email_from, "email_from");
+    diffStr(form.http_proxy, orig.http_proxy, "http_proxy");
+    diffStr(form.mac_prefix, orig.mac_prefix, "mac_prefix");
+    diffStr(form.fencing, orig.fencing, "fencing");
     if (form.max_workers !== orig.max_workers) params["max_workers"] = form.max_workers;
+
+    // Property-string fields: rebuild from subfields, compare to original
+    // raw value (whitespace + key-order tolerant) so we only PUT when the
+    // user actually changed something.
+    const next = buildPropStrings(form);
+    const origRaw = {
+      migration: toStr(origData?.["migration"]),
+      ha: toStr(origData?.["ha"]),
+      crs: toStr(origData?.["crs"]),
+      bwlimit: toStr(origData?.["bwlimit"]),
+      nextId: toStr(origData?.["next-id"]),
+    };
+    diffProp(next.migration, origRaw.migration, "migration");
+    diffProp(next.ha, origRaw.ha, "ha");
+    diffProp(next.crs, origRaw.crs, "crs");
+    diffProp(next.bwlimit, origRaw.bwlimit, "bwlimit");
+    diffProp(next.nextId, origRaw.nextId, "next-id");
+
+    if (toDelete.length > 0) params["delete"] = toDelete.join(",");
 
     if (Object.keys(params).length === 0) {
       setDirty(false);
+      setFeedback({ kind: "success", message: "No changes to save." });
       return;
     }
 
     updateOpts.mutate(params as Partial<ClusterOptions>, {
-      onSuccess: () => { setDirty(false); },
+      onSuccess: () => {
+        setDirty(false);
+        setFeedback({ kind: "success", message: "Datacenter options saved." });
+      },
+      onError: (err) => {
+        const msg = err instanceof ApiClientError ? err.body.message
+          : err instanceof Error ? err.message : "Save failed";
+        setFeedback({ kind: "error", message: msg });
+      },
     });
   };
 
@@ -272,6 +436,20 @@ function GeneralSection({
         </div>
       </CardHeader>
       <CardContent>
+        {feedback && (
+          <div
+            className={
+              feedback.kind === "success"
+                ? "mb-4 flex items-start gap-2 rounded-md border border-green-300 bg-green-50 p-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200"
+                : "mb-4 flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+            }
+          >
+            {feedback.kind === "success"
+              ? <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              : <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />}
+            <span>{feedback.message}</span>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="space-y-2">
             <Label className="text-sm font-medium">Console</Label>
@@ -348,9 +526,37 @@ function GeneralSection({
             </Select>
           </div>
 
-          <InputField label="Bandwidth Limit (KB/s)" value={form.bwlimit} onChange={(v) => { updateField("bwlimit", v); }} disabled={!canEdit} placeholder="clone=0,migration=0,move=0,restore=0" />
-          <InputField label="Next VMID Range" value={form.nextId} onChange={(v) => { updateField("nextId", v); }} disabled={!canEdit} placeholder="lower=100,upper=1000000" />
-          <InputField label="HA Shutdown Policy" value={form.ha} onChange={(v) => { updateField("ha", v); }} disabled={!canEdit} placeholder="shutdown_policy=conditional" />
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Migration Network (CIDR)</Label>
+            <Input
+              value={form.migration_network}
+              onChange={(e) => { updateField("migration_network", e.target.value); }}
+              disabled={!canEdit}
+              placeholder={networkSuggestions[0] ?? "10.10.10.0/24"}
+              list="cluster-migration-networks"
+            />
+            <datalist id="cluster-migration-networks">
+              {networkSuggestions.map((cidr) => (
+                <option key={cidr} value={cidr} />
+              ))}
+            </datalist>
+            {networkSuggestions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="text-muted-foreground">From cluster:</span>
+                {networkSuggestions.map((cidr) => (
+                  <button
+                    key={cidr}
+                    type="button"
+                    disabled={!canEdit}
+                    onClick={() => { updateField("migration_network", cidr); }}
+                    className="rounded-md border bg-muted px-2 py-0.5 font-mono text-xs hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {cidr}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div className="space-y-2">
             <Label className="text-sm font-medium">Fencing</Label>
@@ -361,18 +567,6 @@ function GeneralSection({
                 <SelectItem value="watchdog">Watchdog</SelectItem>
                 <SelectItem value="hardware">Hardware</SelectItem>
                 <SelectItem value="both">Both</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">Cluster Resource Scheduling</Label>
-            <Select value={form.crs || "__default__"} onValueChange={(v) => { updateField("crs", v === "__default__" ? "" : v); }} disabled={!canEdit}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__default__">Default (static)</SelectItem>
-                <SelectItem value="ha=static">Static</SelectItem>
-                <SelectItem value="ha=basic">Basic</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -390,8 +584,118 @@ function GeneralSection({
             <p className="text-xs text-muted-foreground">Max parallel worker processes (0 = auto)</p>
           </div>
         </div>
+
+        {/* High Availability */}
+        <Section title="High Availability">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Shutdown Policy</Label>
+              <Select
+                value={form.ha_shutdown_policy || "__default__"}
+                onValueChange={(v) => { updateField("ha_shutdown_policy", v === "__default__" ? "" : v); }}
+                disabled={!canEdit}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">Default (conditional)</SelectItem>
+                  <SelectItem value="freeze">Freeze — pause services on shutdown</SelectItem>
+                  <SelectItem value="failover">Failover — stop and let HA recover</SelectItem>
+                  <SelectItem value="migrate">Migrate — evacuate HA services first</SelectItem>
+                  <SelectItem value="conditional">Conditional — depends on action</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                What HA does when a node shuts down or reboots. Set to <code>migrate</code> if you want HA-managed VMs evacuated automatically.
+              </p>
+            </div>
+          </div>
+        </Section>
+
+        {/* Cluster Resource Scheduling */}
+        <Section title="Cluster Resource Scheduling (CRS)">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Scheduler</Label>
+              <Select
+                value={form.crs_ha || "__default__"}
+                onValueChange={(v) => { updateField("crs_ha", v === "__default__" ? "" : v); }}
+                disabled={!canEdit}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__default__">Default (basic)</SelectItem>
+                  <SelectItem value="basic">Basic — round-robin failover</SelectItem>
+                  <SelectItem value="static">Static — assignment-based</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <Label className="text-sm font-medium">Rebalance on Start</Label>
+                <p className="text-xs text-muted-foreground">Re-evaluate placement when the cluster comes online.</p>
+              </div>
+              <Switch
+                checked={form.crs_rebalance_on_start}
+                onCheckedChange={(v) => { updateField("crs_rebalance_on_start", v); }}
+                disabled={!canEdit}
+              />
+            </div>
+          </div>
+        </Section>
+
+        {/* Bandwidth Limits */}
+        <Section title="Bandwidth Limits (KiB/s)">
+          <p className="text-xs text-muted-foreground mb-3">Per-operation rate limits. Leave blank to use Proxmox defaults; <code>0</code> means unlimited.</p>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <NumField label="Default" value={form.bwlimit_default} onChange={(v) => { updateField("bwlimit_default", v); }} disabled={!canEdit} />
+            <NumField label="Clone" value={form.bwlimit_clone} onChange={(v) => { updateField("bwlimit_clone", v); }} disabled={!canEdit} />
+            <NumField label="Migration" value={form.bwlimit_migration} onChange={(v) => { updateField("bwlimit_migration", v); }} disabled={!canEdit} />
+            <NumField label="Move" value={form.bwlimit_move} onChange={(v) => { updateField("bwlimit_move", v); }} disabled={!canEdit} />
+            <NumField label="Restore" value={form.bwlimit_restore} onChange={(v) => { updateField("bwlimit_restore", v); }} disabled={!canEdit} />
+          </div>
+        </Section>
+
+        {/* Next VMID Range */}
+        <Section title="Next VMID Range">
+          <p className="text-xs text-muted-foreground mb-3">Inclusive lower / upper bounds used by Proxmox when assigning a new VMID automatically.</p>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <NumField label="Lower" value={form.next_id_lower} onChange={(v) => { updateField("next_id_lower", v); }} disabled={!canEdit} placeholder="100" />
+            <NumField label="Upper" value={form.next_id_upper} onChange={(v) => { updateField("next_id_upper", v); }} disabled={!canEdit} placeholder="1000000" />
+          </div>
+        </Section>
       </CardContent>
     </Card>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-6 border-t pt-4">
+      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function NumField({ label, value, onChange, disabled, placeholder }: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+  placeholder?: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs font-medium">{label}</Label>
+      <Input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(e) => { onChange(e.target.value); }}
+        disabled={disabled}
+        placeholder={placeholder}
+      />
+    </div>
   );
 }
 
