@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -1129,6 +1130,109 @@ func TestMigrateCT_MissingTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing target")
 	}
+}
+
+// --- HA Rule update / Manager status ---
+
+func TestUpdateHARule_SendsTypeAndDisable(t *testing.T) {
+	var (
+		gotMethod string
+		gotPath   string
+		gotForm   url.Values
+	)
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/cluster/ha/rules/myrule": func(w http.ResponseWriter, r *http.Request) {
+			gotMethod = r.Method
+			gotPath = r.URL.Path
+			_ = r.ParseForm()
+			gotForm = r.PostForm
+			jsonResponse(w, map[string]string{})
+		},
+	})
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	disable := 1
+	strict := 1
+	resources := "vm:100,vm:101"
+	err := c.UpdateHARule(context.Background(), "myrule", "node-affinity", UpdateHARuleParams{
+		Disable:   &disable,
+		Strict:    &strict,
+		Resources: &resources,
+	})
+	if err != nil {
+		t.Fatalf("UpdateHARule: %v", err)
+	}
+	if gotMethod != http.MethodPut {
+		t.Errorf("method: want PUT, got %s", gotMethod)
+	}
+	if gotPath != "/api2/json/cluster/ha/rules/myrule" {
+		t.Errorf("path: %s", gotPath)
+	}
+	if gotForm.Get("type") != "node-affinity" {
+		t.Errorf("type form param: %q", gotForm.Get("type"))
+	}
+	if gotForm.Get("disable") != "1" {
+		t.Errorf("disable form param: %q", gotForm.Get("disable"))
+	}
+	if gotForm.Get("strict") != "1" {
+		t.Errorf("strict form param: %q", gotForm.Get("strict"))
+	}
+	if gotForm.Get("resources") != "vm:100,vm:101" {
+		t.Errorf("resources form param: %q", gotForm.Get("resources"))
+	}
+}
+
+func TestSetHARuleDisabled_DelegatesToUpdate(t *testing.T) {
+	var gotForm url.Values
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/cluster/ha/rules/r1": func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			gotForm = r.PostForm
+			jsonResponse(w, map[string]string{})
+		},
+	})
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	if err := c.SetHARuleDisabled(context.Background(), "r1", "resource-affinity", true); err != nil {
+		t.Fatalf("SetHARuleDisabled: %v", err)
+	}
+	if gotForm.Get("type") != "resource-affinity" {
+		t.Errorf("type: %q", gotForm.Get("type"))
+	}
+	if gotForm.Get("disable") != "1" {
+		t.Errorf("disable: %q", gotForm.Get("disable"))
+	}
+}
+
+func TestGetHAManagerStatus(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/cluster/ha/status/manager_status": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, map[string]any{
+				"node_status": map[string]string{"node1": "online"},
+				"timestamp":   123456,
+			})
+		},
+	})
+	defer srv.Close()
+	c := newTestClient(t, srv.URL)
+
+	status, err := c.GetHAManagerStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetHAManagerStatus: %v", err)
+	}
+	if _, ok := status["node_status"]; !ok {
+		t.Errorf("expected node_status key in response, got keys %v", keysOf(status))
+	}
+}
+
+func keysOf(m map[string]json.RawMessage) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 // --- validateVMID ---

@@ -995,22 +995,50 @@ func (c *Client) CreateHARule(ctx context.Context, ruleType string, params Creat
 	return nil
 }
 
-// SetHARuleDisabled enables or disables an HA rule via PUT /cluster/ha/rules/{rule}.
-// SetHARuleDisabled enables or disables an HA rule via PUT /cluster/ha/rules/{rule}.
-// The ruleType ("node-affinity" or "resource-affinity") is required by the Proxmox API.
-func (c *Client) SetHARuleDisabled(ctx context.Context, ruleID string, ruleType string, disabled bool) error {
+// UpdateHARule updates an HA rule via PUT /cluster/ha/rules/{rule}.
+// The ruleType ("node-affinity" or "resource-affinity") is required by Proxmox
+// and is sent as the "type" form parameter regardless of which other fields
+// change. Pass only the fields you want to change as non-nil pointers.
+func (c *Client) UpdateHARule(ctx context.Context, ruleID string, ruleType string, params UpdateHARuleParams) error {
 	path := "/cluster/ha/rules/" + url.PathEscape(ruleID)
 	form := url.Values{}
 	form.Set("type", ruleType)
-	if disabled {
-		form.Set("disable", "1")
-	} else {
-		form.Set("disable", "0")
+	if params.Resources != nil {
+		form.Set("resources", *params.Resources)
+	}
+	if params.Nodes != nil {
+		form.Set("nodes", *params.Nodes)
+	}
+	if params.Strict != nil {
+		form.Set("strict", strconv.Itoa(*params.Strict))
+	}
+	if params.Affinity != nil {
+		form.Set("affinity", *params.Affinity)
+	}
+	if params.Comment != nil {
+		form.Set("comment", *params.Comment)
+	}
+	if params.Disable != nil {
+		form.Set("disable", strconv.Itoa(*params.Disable))
+	}
+	if params.Digest != "" {
+		form.Set("digest", params.Digest)
 	}
 	if err := c.doPut(ctx, path, form, nil); err != nil {
-		return fmt.Errorf("set HA rule %s disabled=%v: %w", ruleID, disabled, err)
+		return fmt.Errorf("update HA rule %s: %w", ruleID, err)
 	}
 	return nil
+}
+
+// SetHARuleDisabled enables or disables an HA rule via PUT /cluster/ha/rules/{rule}.
+// Thin wrapper over UpdateHARule kept for the rolling-update orchestrator's
+// existing call sites.
+func (c *Client) SetHARuleDisabled(ctx context.Context, ruleID string, ruleType string, disabled bool) error {
+	disable := 0
+	if disabled {
+		disable = 1
+	}
+	return c.UpdateHARule(ctx, ruleID, ruleType, UpdateHARuleParams{Disable: &disable})
 }
 
 // DeleteHARule deletes an HA rule via DELETE /cluster/ha/rules/{ruleID}.
@@ -3418,6 +3446,9 @@ func (c *Client) CreateHAResource(ctx context.Context, params CreateHAResourcePa
 	if params.Comment != "" {
 		form.Set("comment", params.Comment)
 	}
+	if params.Failback != nil {
+		form.Set("failback", strconv.Itoa(*params.Failback))
+	}
 	// Replace %3A back to literal colon — Proxmox validates SID before URL-decoding.
 	body := strings.ReplaceAll(form.Encode(), "%3A", ":")
 	if err := c.doPostRaw(ctx, "/cluster/ha/resources", body, nil); err != nil {
@@ -3454,6 +3485,9 @@ func (c *Client) UpdateHAResource(ctx context.Context, sid string, params Update
 	}
 	if params.Comment != nil {
 		form.Set("comment", *params.Comment)
+	}
+	if params.Failback != nil {
+		form.Set("failback", strconv.Itoa(*params.Failback))
 	}
 	if params.Digest != "" {
 		form.Set("digest", params.Digest)
@@ -3547,6 +3581,17 @@ func (c *Client) GetHAStatus(ctx context.Context) ([]HAStatusEntry, error) {
 		return nil, fmt.Errorf("get HA status: %w", err)
 	}
 	return entries, nil
+}
+
+// GetHAManagerStatus returns the raw CRM manager state file via
+// GET /cluster/ha/status/manager_status. Proxmox returns an arbitrary JSON
+// blob — we surface it untyped so the UI can render it as-is.
+func (c *Client) GetHAManagerStatus(ctx context.Context) (map[string]json.RawMessage, error) {
+	var status map[string]json.RawMessage
+	if err := c.do(ctx, "/cluster/ha/status/manager_status", &status); err != nil {
+		return nil, fmt.Errorf("get HA manager status: %w", err)
+	}
+	return status, nil
 }
 
 // GetFirewallAliases returns all firewall aliases via GET /cluster/firewall/aliases.

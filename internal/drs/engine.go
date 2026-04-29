@@ -121,6 +121,12 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 		return nil, fmt.Errorf("get nodes: %w", err)
 	}
 
+	// Detect nodes in HA maintenance / shutdown / unhealthy state. These
+	// must be excluded as both source and target — Proxmox is already
+	// evacuating them for reboot, and DRS counter-migrating would create a
+	// ping-pong with the HA manager.
+	unhealthy := unhealthyHANodes(ctx, client, e.logger, clusterID)
+
 	// Collect workloads per node.
 	// When include_containers is false, containers still count toward node load
 	// scoring (so DRS has accurate scores) but are marked as pinned so they
@@ -131,6 +137,13 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 	nodeEntries := make(map[string]proxmox.NodeListEntry)
 	for _, n := range nodes {
 		if n.Status != "online" {
+			continue
+		}
+		if _, skip := unhealthy[n.Node]; skip {
+			e.logger.Info("DRS skipping node in HA maintenance/shutdown",
+				"cluster_id", clusterID,
+				"node", n.Node,
+			)
 			continue
 		}
 		nodeEntries[n.Node] = n
@@ -326,6 +339,42 @@ func CalculateImbalance(scores map[string]NodeScore) float64 {
 	stddev := math.Sqrt(varianceSum / float64(len(scores)))
 
 	return stddev / mean
+}
+
+// unhealthyHANodes returns the set of node names that are in a Proxmox HA
+// state indicating maintenance, shutdown, or fence — DRS must skip these as
+// both source and target so it doesn't fight HA's own evacuation.
+//
+// Proxmox HA LRM states: active, idle, maintenance, wait_for_agent_lock,
+// lost_agent_lock, dead, gone. We treat anything other than active/idle as
+// not-eligible-for-DRS. If HA is not configured the call returns nothing
+// and DRS proceeds normally.
+func unhealthyHANodes(ctx context.Context, client *proxmox.Client, logger *slog.Logger, clusterID uuid.UUID) map[string]struct{} {
+	skip := make(map[string]struct{})
+	entries, err := client.GetHAStatus(ctx)
+	if err != nil {
+		// HA not configured or the endpoint failed — log at debug and
+		// fall through. DRS will continue with just the standard
+		// online/offline status check.
+		logger.Debug("DRS HA status unavailable, skipping HA node filter",
+			"cluster_id", clusterID,
+			"error", err,
+		)
+		return skip
+	}
+	for _, entry := range entries {
+		if entry.Type != "node" || entry.Node == "" {
+			continue
+		}
+		state := strings.ToLower(strings.TrimSpace(entry.Status))
+		switch state {
+		case "active", "idle", "online":
+			// healthy — DRS may consider this node
+		default:
+			skip[entry.Node] = struct{}{}
+		}
+	}
+	return skip
 }
 
 func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {

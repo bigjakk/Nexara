@@ -343,6 +343,42 @@ func (h *HAHandler) CreateRule(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
+// UpdateRule handles PUT /clusters/:cluster_id/ha/rules/:rule.
+func (h *HAHandler) UpdateRule(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "ha"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	rule := c.Params("rule")
+	if rule == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Rule name is required")
+	}
+	var req struct {
+		Type string `json:"type"`
+		proxmox.UpdateHARuleParams
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Type == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Rule type is required")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.UpdateHARule(c.Context(), rule, req.Type, req.UpdateHARuleParams); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]string{"rule": rule, "type": req.Type})
+	h.auditLog(c, clusterID, "ha_rule", rule, "updated", details)
+	h.publishHA(c, clusterID, rule, "rule_updated")
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
 // DeleteRule handles DELETE /clusters/:cluster_id/ha/rules/:rule.
 func (h *HAHandler) DeleteRule(c *fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "ha"); err != nil {
@@ -385,6 +421,26 @@ func (h *HAHandler) GetStatus(c *fiber.Ctx) error {
 		return err
 	}
 	status, err := pxClient.GetHAStatus(c.Context())
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	return c.JSON(status)
+}
+
+// GetManagerStatus handles GET /clusters/:cluster_id/ha/manager-status.
+func (h *HAHandler) GetManagerStatus(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "ha"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	status, err := pxClient.GetHAManagerStatus(c.Context())
 	if err != nil {
 		return mapProxmoxError(err)
 	}

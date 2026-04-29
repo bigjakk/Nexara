@@ -14,19 +14,23 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Checkbox } from "@/components/ui/checkbox";
-import { AlertTriangle, CheckCircle2, CircleDot, Plus, ShieldCheck, Trash2, XCircle } from "lucide-react";
+import {
+  AlertTriangle, CheckCircle2, CircleDot, Pencil, Plus, ShieldCheck, Trash2, XCircle,
+} from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  useHAResources, useHAGroups, useHAStatus, useHARules,
-  useCreateHAResource, useDeleteHAResource,
-  useCreateHAGroup, useDeleteHAGroup,
-  useCreateHARule, useDeleteHARule,
+  useHAResources, useHAGroups, useHAStatus, useHARules, useHAManagerStatus,
+  useUpdateHAResource, useDeleteHAResource,
+  useCreateHAGroup, useUpdateHAGroup, useDeleteHAGroup,
+  useUpdateHARule, useDeleteHARule,
+  type HAStatusEntry, type HAResource, type HAGroup, type HARuleEntry,
 } from "@/features/ha/api/ha-queries";
-import type { HAStatusEntry } from "@/features/ha/api/ha-queries";
-import { useClusterVMs } from "../api/cluster-queries";
-import { useClusterNodes } from "../api/cluster-queries";
+import { HAResourceForm } from "@/features/ha/components/HAResourceForm";
+import { HARuleForm } from "@/features/ha/components/HARuleForm";
+import { useClusterVMs, useClusterNodes } from "../api/cluster-queries";
 import type { VMResponse } from "@/types/api";
 
 interface ClusterHATabProps {
@@ -88,7 +92,6 @@ function categorizeStatus(entries: HAStatusEntry[]) {
         services.push(e);
         break;
       default:
-        // Unknown type — treat as service if it has a sid, otherwise ignore
         if (e.sid) services.push(e);
         break;
     }
@@ -97,9 +100,8 @@ function categorizeStatus(entries: HAStatusEntry[]) {
   return { manager, quorum, nodes, services };
 }
 
-const HA_STATES = ["started", "stopped", "ignored", "disabled"] as const;
+const HA_STATES = ["started", "stopped", "disabled", "ignored"] as const;
 
-/** Build a SID string from VM type + VMID */
 function vmToSID(vm: VMResponse): string {
   return `${vm.type === "lxc" ? "ct" : "vm"}:${String(vm.vmid)}`;
 }
@@ -110,40 +112,38 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
   const groupsQuery = useHAGroups(clusterId);
   const rulesQuery = useHARules(clusterId);
   const statusQuery = useHAStatus(clusterId);
+  const managerStatusQuery = useHAManagerStatus(clusterId);
   const vmsQuery = useClusterVMs(clusterId);
   const nodesQuery = useClusterNodes(clusterId);
-  const createResource = useCreateHAResource(clusterId);
+
+  const updateResource = useUpdateHAResource(clusterId);
   const deleteResource = useDeleteHAResource(clusterId);
   const createGroup = useCreateHAGroup(clusterId);
+  const updateGroup = useUpdateHAGroup(clusterId);
   const deleteGroup = useDeleteHAGroup(clusterId);
-  const createRule = useCreateHARule(clusterId);
+  const updateRule = useUpdateHARule(clusterId);
   const deleteRule = useDeleteHARule(clusterId);
 
   const [mutationError, setMutationError] = useState<string | null>(null);
 
-  // --- Add Resource state ---
-  const [resOpen, setResOpen] = useState(false);
-  const [resSID, setResSID] = useState("");
-  const [resState, setResState] = useState("started");
+  // --- Resource dialog state ---
+  const [resCreateOpen, setResCreateOpen] = useState(false);
+  const [resEditing, setResEditing] = useState<HAResource | null>(null);
 
-  // --- Add Group state ---
-  const [grpOpen, setGrpOpen] = useState(false);
+  // --- Group dialog state ---
+  const [grpCreateOpen, setGrpCreateOpen] = useState(false);
   const [grpName, setGrpName] = useState("");
   const [grpNodes, setGrpNodes] = useState("");
+  const [grpComment, setGrpComment] = useState("");
+  const [grpEditing, setGrpEditing] = useState<HAGroup | null>(null);
 
-  // --- Add Rule state ---
-  const [ruleOpen, setRuleOpen] = useState(false);
-  const [ruleName, setRuleName] = useState("");
-  const [ruleType, setRuleType] = useState("node-affinity");
-  const [ruleSelectedVMs, setRuleSelectedVMs] = useState<Set<string>>(new Set());
-  const [ruleSelectedNodes, setRuleSelectedNodes] = useState<Set<string>>(new Set());
+  // --- Rule dialog state ---
+  const [ruleCreateOpen, setRuleCreateOpen] = useState(false);
+  const [ruleEditing, setRuleEditing] = useState<HARuleEntry | null>(null);
 
-  // Available VMs not already in HA
   const existingHASIDs = useMemo(() => {
     const sids = new Set<string>();
-    for (const r of resourcesQuery.data ?? []) {
-      sids.add(r.sid);
-    }
+    for (const r of resourcesQuery.data ?? []) sids.add(r.sid);
     return sids;
   }, [resourcesQuery.data]);
 
@@ -156,12 +156,9 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
   }, [vmsQuery.data]);
   const allNodes = nodesQuery.data ?? [];
 
-  // Lookup: SID → VM name for human-readable display in tables
   const vmNameBySID = useMemo(() => {
     const map = new Map<string, string>();
-    for (const vm of vmsQuery.data ?? []) {
-      map.set(vmToSID(vm), vm.name);
-    }
+    for (const vm of vmsQuery.data ?? []) map.set(vmToSID(vm), vm.name);
     return map;
   }, [vmsQuery.data]);
 
@@ -171,35 +168,57 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
     setTimeout(() => { setMutationError(null); }, 5000);
   };
 
-  const handleCreateResource = (e: React.SyntheticEvent) => {
-    e.preventDefault();
-    createResource.mutate({ sid: resSID, state: resState }, {
-      onSuccess: () => { setResOpen(false); setResSID(""); setResState("started"); },
-      onError: handleMutationError,
-    });
-  };
-
   const handleCreateGroup = (e: React.SyntheticEvent) => {
     e.preventDefault();
-    createGroup.mutate({ group: grpName, nodes: grpNodes }, {
-      onSuccess: () => { setGrpOpen(false); setGrpName(""); setGrpNodes(""); },
-      onError: handleMutationError,
-    });
+    createGroup.mutate(
+      {
+        group: grpName,
+        nodes: grpNodes,
+        ...(grpComment ? { comment: grpComment } : {}),
+      },
+      {
+        onSuccess: () => {
+          setGrpCreateOpen(false);
+          setGrpName("");
+          setGrpNodes("");
+          setGrpComment("");
+        },
+        onError: handleMutationError,
+      },
+    );
   };
 
-  const handleCreateRule = (e: React.SyntheticEvent) => {
+  const handleUpdateGroup = (e: React.SyntheticEvent) => {
     e.preventDefault();
-    const resources = Array.from(ruleSelectedVMs).join(",");
-    const nodes = Array.from(ruleSelectedNodes).join(",");
-    createRule.mutate({
-      rule: ruleName,
-      type: ruleType,
-      resources,
-      ...(nodes ? { nodes } : {}),
-    }, {
-      onSuccess: () => { setRuleOpen(false); setRuleName(""); setRuleSelectedVMs(new Set()); setRuleSelectedNodes(new Set()); },
-      onError: handleMutationError,
-    });
+    if (!grpEditing) return;
+    updateGroup.mutate(
+      {
+        group: grpEditing.group,
+        nodes: grpNodes,
+        comment: grpComment,
+      },
+      {
+        onSuccess: () => { setGrpEditing(null); },
+        onError: handleMutationError,
+      },
+    );
+  };
+
+  const startEditGroup = (g: HAGroup) => {
+    setGrpEditing(g);
+    setGrpNodes(g.nodes);
+    setGrpComment(g.comment ?? "");
+  };
+
+  const handleQuickStateChange = (sid: string, state: string) => {
+    updateResource.mutate({ sid, state }, { onError: handleMutationError });
+  };
+
+  const handleQuickRuleDisable = (rule: HARuleEntry, disabled: boolean) => {
+    updateRule.mutate(
+      { rule: rule.rule, type: rule.type, disable: disabled ? 1 : 0 },
+      { onError: handleMutationError },
+    );
   };
 
   const handleDeleteResource = (sid: string) => {
@@ -214,12 +233,11 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
     deleteRule.mutate(rule, { onError: handleMutationError });
   };
 
-  // Categorize status entries by id pattern
   const { manager, quorum, nodes: nodeEntries, services: serviceEntries } = categorizeStatus(statusQuery.data ?? []);
   const statusEntries = statusQuery.data ?? [];
 
-  // Determine if this cluster uses rules (PVE 8.3+) or groups
   const hasRules = (rulesQuery.data ?? []).length > 0;
+  const rulesSupported = rulesQuery.isSuccess; // PVE 8.3+
   const hasGroups = (groupsQuery.data ?? []).length > 0;
 
   return (
@@ -246,14 +264,12 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
         {statusQuery.isError && <ErrorBanner error={statusQuery.error} />}
         {!statusQuery.isLoading && !statusQuery.isError && (
           <>
-            {/* Manager & Quorum summary */}
             <div className="grid gap-4 md:grid-cols-3">
               <ManagerCard entry={manager} />
               <QuorumCard entry={quorum} />
               <ServiceSummaryCard services={serviceEntries} />
             </div>
 
-            {/* Node status */}
             {nodeEntries.length > 0 && (
               <Card>
                 <CardHeader><CardTitle className="text-base">Node Status</CardTitle></CardHeader>
@@ -284,7 +300,6 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
               </Card>
             )}
 
-            {/* Active services */}
             {serviceEntries.length > 0 && (
               <Card>
                 <CardHeader><CardTitle className="text-base">Active Services</CardTitle></CardHeader>
@@ -318,6 +333,17 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
               </Card>
             )}
 
+            {managerStatusQuery.data && (
+              <Card>
+                <CardHeader><CardTitle className="text-base">Manager Details</CardTitle></CardHeader>
+                <CardContent>
+                  <pre className="max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs font-mono">
+                    {JSON.stringify(managerStatusQuery.data, null, 2)}
+                  </pre>
+                </CardContent>
+              </Card>
+            )}
+
             {statusEntries.length === 0 && (
               <p className="py-8 text-center text-sm text-muted-foreground">No HA status available. HA may not be configured for this cluster.</p>
             )}
@@ -330,50 +356,18 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>HA Resources</CardTitle>
             {canManage("ha") && (
-              <Dialog open={resOpen} onOpenChange={setResOpen}>
+              <Dialog open={resCreateOpen} onOpenChange={setResCreateOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm"><Plus className="mr-2 h-4 w-4" />Add Resource</Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-sm">
+                <DialogContent className="max-w-md">
                   <DialogHeader><DialogTitle>Add HA Resource</DialogTitle></DialogHeader>
-                  <form onSubmit={handleCreateResource} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>VM / Container</Label>
-                      <Select value={resSID} onValueChange={setResSID}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a VM or container" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableVMs.map((vm) => (
-                            <SelectItem key={vm.id} value={vmToSID(vm)}>
-                              {vmToSID(vm)} — {vm.name}
-                            </SelectItem>
-                          ))}
-                          {availableVMs.length === 0 && (
-                            <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                              {vmsQuery.isLoading ? "Loading..." : "All VMs/CTs are already HA resources"}
-                            </div>
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Requested State</Label>
-                      <Select value={resState} onValueChange={setResState}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {HA_STATES.map((s) => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button type="submit" disabled={createResource.isPending || !resSID}>
-                      {createResource.isPending ? "Creating..." : "Create"}
-                    </Button>
-                  </form>
+                  <HAResourceForm
+                    mode="create"
+                    clusterId={clusterId}
+                    availableVMs={availableVMs}
+                    onSuccess={() => { setResCreateOpen(false); }}
+                  />
                 </DialogContent>
               </Dialog>
             )}
@@ -390,7 +384,9 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
                       <TableHead>State</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Group</TableHead>
-                      <TableHead>Max Relocate</TableHead>
+                      <TableHead>Restart / Relocate</TableHead>
+                      <TableHead>Failback</TableHead>
+                      <TableHead>Comment</TableHead>
                       {canManage("ha") && <TableHead className="text-right">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
@@ -403,12 +399,41 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
                             <span className="ml-2 text-muted-foreground">{vmNameBySID.get(res.sid)}</span>
                           )}
                         </TableCell>
-                        <TableCell>{statusBadge(res.state)}</TableCell>
+                        <TableCell>
+                          {canManage("ha") ? (
+                            <Select
+                              value={res.state}
+                              onValueChange={(v) => { handleQuickStateChange(res.sid, v); }}
+                            >
+                              <SelectTrigger className="h-7 w-28">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {HA_STATES.map((s) => (
+                                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            statusBadge(res.state)
+                          )}
+                        </TableCell>
                         <TableCell>{res.status ? statusBadge(res.status) : "—"}</TableCell>
                         <TableCell>{res.group || "—"}</TableCell>
-                        <TableCell>{res.max_relocate}</TableCell>
+                        <TableCell className="text-xs">
+                          {res.max_restart ?? 1} / {res.max_relocate}
+                        </TableCell>
+                        <TableCell>
+                          {res.failback === 0 ? <Badge variant="outline">Off</Badge> : <Badge variant="default">On</Badge>}
+                        </TableCell>
+                        <TableCell className="max-w-[12rem] truncate text-xs text-muted-foreground" title={res.comment ?? ""}>
+                          {res.comment || "—"}
+                        </TableCell>
                         {canManage("ha") && (
-                          <TableCell className="text-right">
+                          <TableCell className="text-right space-x-1">
+                            <Button variant="ghost" size="sm" onClick={() => { setResEditing(res); }}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="sm" disabled={deleteResource.isPending} onClick={() => { handleDeleteResource(res.sid); }}>
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
@@ -424,6 +449,21 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
             )}
           </CardContent>
         </Card>
+
+        {/* Edit-resource dialog */}
+        <Dialog open={resEditing != null} onOpenChange={(open) => { if (!open) setResEditing(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Edit HA Resource</DialogTitle></DialogHeader>
+            {resEditing && (
+              <HAResourceForm
+                mode="edit"
+                clusterId={clusterId}
+                resource={resEditing}
+                onSuccess={() => { setResEditing(null); }}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </TabsContent>
 
       <TabsContent value="groups" className="mt-4 space-y-4">
@@ -431,88 +471,20 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>HA Rules</CardTitle>
-            {canManage("ha") && (
-              <Dialog open={ruleOpen} onOpenChange={setRuleOpen}>
+            {canManage("ha") && rulesSupported && (
+              <Dialog open={ruleCreateOpen} onOpenChange={setRuleCreateOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm"><Plus className="mr-2 h-4 w-4" />Add Rule</Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-md">
+                <DialogContent className="max-w-lg">
                   <DialogHeader><DialogTitle>Create HA Rule</DialogTitle></DialogHeader>
-                  <form onSubmit={handleCreateRule} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Rule Name</Label>
-                      <Input value={ruleName} onChange={(e) => { setRuleName(e.target.value); }} required placeholder="my-rule" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Type</Label>
-                      <Select value={ruleType} onValueChange={setRuleType}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="node-affinity">Node Affinity</SelectItem>
-                          <SelectItem value="resource-affinity">Resource Affinity</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Resources</Label>
-                      <div className="max-h-40 overflow-y-auto rounded-md border p-2 space-y-1">
-                        {allVMs.length === 0 && (
-                          <p className="text-sm text-muted-foreground">{vmsQuery.isLoading ? "Loading..." : "No VMs/CTs found"}</p>
-                        )}
-                        {allVMs.map((vm) => {
-                          const sid = vmToSID(vm);
-                          return (
-                            <label key={vm.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
-                              <Checkbox
-                                checked={ruleSelectedVMs.has(sid)}
-                                onCheckedChange={(checked) => {
-                                  const next = new Set(ruleSelectedVMs);
-                                  if (checked) { next.add(sid); } else { next.delete(sid); }
-                                  setRuleSelectedVMs(next);
-                                }}
-                              />
-                              <span className="font-mono text-xs">{sid}</span>
-                              <span className="text-muted-foreground">{vm.name}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                      {ruleSelectedVMs.size > 0 && (
-                        <p className="text-xs text-muted-foreground">{ruleSelectedVMs.size} selected</p>
-                      )}
-                    </div>
-                    {ruleType === "node-affinity" && (
-                      <div className="space-y-2">
-                        <Label>Nodes</Label>
-                        <div className="max-h-40 overflow-y-auto rounded-md border p-2 space-y-1">
-                          {allNodes.length === 0 && (
-                            <p className="text-sm text-muted-foreground">{nodesQuery.isLoading ? "Loading..." : "No nodes found"}</p>
-                          )}
-                          {allNodes.map((node) => (
-                            <label key={node.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
-                              <Checkbox
-                                checked={ruleSelectedNodes.has(node.name)}
-                                onCheckedChange={(checked) => {
-                                  const next = new Set(ruleSelectedNodes);
-                                  if (checked) { next.add(node.name); } else { next.delete(node.name); }
-                                  setRuleSelectedNodes(next);
-                                }}
-                              />
-                              <span>{node.name}</span>
-                            </label>
-                          ))}
-                        </div>
-                        {ruleSelectedNodes.size > 0 && (
-                          <p className="text-xs text-muted-foreground">{ruleSelectedNodes.size} selected</p>
-                        )}
-                      </div>
-                    )}
-                    <Button type="submit" disabled={createRule.isPending || ruleSelectedVMs.size === 0}>
-                      {createRule.isPending ? "Creating..." : "Create"}
-                    </Button>
-                  </form>
+                  <HARuleForm
+                    mode="create"
+                    clusterId={clusterId}
+                    allVMs={allVMs}
+                    allNodes={allNodes}
+                    onSuccess={() => { setRuleCreateOpen(false); }}
+                  />
                 </DialogContent>
               </Dialog>
             )}
@@ -521,16 +493,17 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
             {rulesQuery.isLoading && <Skeleton className="h-20 w-full" />}
             {rulesQuery.isError && <ErrorBanner error={rulesQuery.error} />}
             {!rulesQuery.isLoading && !rulesQuery.isError && (
-              (rulesQuery.data ?? []).length > 0 ? (
+              hasRules ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Rule</TableHead>
                       <TableHead>Type</TableHead>
                       <TableHead>Resources</TableHead>
-                      <TableHead>Nodes</TableHead>
+                      <TableHead>Nodes / Affinity</TableHead>
                       <TableHead>Strict</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Comment</TableHead>
+                      <TableHead>Enabled</TableHead>
                       {canManage("ha") && <TableHead className="text-right">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
@@ -540,11 +513,32 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
                         <TableCell className="font-medium">{r.rule}</TableCell>
                         <TableCell><Badge variant="outline">{r.type}</Badge></TableCell>
                         <TableCell className="text-xs font-mono">{r.resources}</TableCell>
-                        <TableCell className="text-xs font-mono">{r.nodes ?? "—"}</TableCell>
-                        <TableCell>{r.strict ? <Badge variant="default">Yes</Badge> : <Badge variant="outline">No</Badge>}</TableCell>
-                        <TableCell>{r.disable ? <Badge variant="secondary">Disabled</Badge> : <Badge className="bg-green-600 text-white">Enabled</Badge>}</TableCell>
+                        <TableCell className="text-xs font-mono">
+                          {r.type === "resource-affinity" ? (r.affinity ?? "—") : (r.nodes ?? "—")}
+                        </TableCell>
+                        <TableCell>
+                          {r.type === "node-affinity"
+                            ? (r.strict ? <Badge variant="default">Yes</Badge> : <Badge variant="outline">No</Badge>)
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="max-w-[10rem] truncate text-xs text-muted-foreground" title={r.comment ?? ""}>
+                          {r.comment || "—"}
+                        </TableCell>
+                        <TableCell>
+                          {canManage("ha") ? (
+                            <Switch
+                              checked={r.disable !== 1}
+                              onCheckedChange={(checked) => { handleQuickRuleDisable(r, !checked); }}
+                            />
+                          ) : (
+                            r.disable === 1 ? <Badge variant="secondary">Disabled</Badge> : <Badge className="bg-green-600 text-white">Enabled</Badge>
+                          )}
+                        </TableCell>
                         {canManage("ha") && (
-                          <TableCell className="text-right">
+                          <TableCell className="text-right space-x-1">
+                            <Button variant="ghost" size="sm" onClick={() => { setRuleEditing(r); }}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="sm" disabled={deleteRule.isPending} onClick={() => { handleDeleteRule(r.rule); }}>
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
@@ -556,20 +550,41 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
                 </Table>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  {hasGroups ? "This cluster uses HA groups (legacy). Rules are available on PVE 8.3+." : "No HA rules configured."}
+                  {rulesSupported ? "No HA rules configured." : "HA rules require Proxmox VE 8.3 or newer."}
                 </p>
               )
             )}
           </CardContent>
         </Card>
 
-        {/* HA Groups section (legacy, pre-PVE 8.3) */}
-        {!hasRules && (
+        {/* Edit-rule dialog */}
+        <Dialog open={ruleEditing != null} onOpenChange={(open) => { if (!open) setRuleEditing(null); }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader><DialogTitle>Edit HA Rule</DialogTitle></DialogHeader>
+            {ruleEditing && (
+              <HARuleForm
+                mode="edit"
+                clusterId={clusterId}
+                rule={ruleEditing}
+                allVMs={allVMs}
+                allNodes={allNodes}
+                onSuccess={() => { setRuleEditing(null); }}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* HA Groups section. On PVE 9+ Proxmox auto-migrates groups to rules
+            so this list is normally empty. We still surface it for PVE 8 and
+            for any cluster where groups still exist. */}
+        {(hasGroups || !rulesSupported) && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>HA Groups (Legacy)</CardTitle>
+              <CardTitle>
+                HA Groups{rulesSupported && <span className="ml-2 text-xs text-muted-foreground font-normal">(Legacy — superseded by Rules in PVE 9)</span>}
+              </CardTitle>
               {canManage("ha") && (
-                <Dialog open={grpOpen} onOpenChange={setGrpOpen}>
+                <Dialog open={grpCreateOpen} onOpenChange={setGrpCreateOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm"><Plus className="mr-2 h-4 w-4" />Add Group</Button>
                   </DialogTrigger>
@@ -581,8 +596,13 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
                         <Input value={grpName} onChange={(e) => { setGrpName(e.target.value); }} required placeholder="mygroup" />
                       </div>
                       <div className="space-y-2">
-                        <Label>Nodes (e.g. node1:100,node2:50)</Label>
+                        <Label>Nodes</Label>
                         <Input value={grpNodes} onChange={(e) => { setGrpNodes(e.target.value); }} required placeholder="node1:100,node2:50" />
+                        <p className="text-xs text-muted-foreground">Comma-separated, optional <code>:priority</code> per node.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Comment</Label>
+                        <Textarea value={grpComment} rows={2} onChange={(e) => { setGrpComment(e.target.value); }} />
                       </div>
                       <Button type="submit" disabled={createGroup.isPending}>
                         {createGroup.isPending ? "Creating..." : "Create"}
@@ -593,10 +613,15 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
               )}
             </CardHeader>
             <CardContent>
+              {rulesSupported && hasGroups && (
+                <p className="mb-3 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
+                  Proxmox VE 9 migrated HA Groups to HA Rules. New deployments should use Rules; existing groups continue to work.
+                </p>
+              )}
               {groupsQuery.isLoading && <Skeleton className="h-20 w-full" />}
               {groupsQuery.isError && <ErrorBanner error={groupsQuery.error} />}
               {!groupsQuery.isLoading && !groupsQuery.isError && (
-                (groupsQuery.data ?? []).length > 0 ? (
+                hasGroups ? (
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -604,6 +629,7 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
                         <TableHead>Nodes</TableHead>
                         <TableHead>Restricted</TableHead>
                         <TableHead>No Failback</TableHead>
+                        <TableHead>Comment</TableHead>
                         {canManage("ha") && <TableHead className="text-right">Actions</TableHead>}
                       </TableRow>
                     </TableHeader>
@@ -614,8 +640,14 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
                           <TableCell className="text-xs font-mono">{g.nodes}</TableCell>
                           <TableCell>{g.restricted ? <Badge variant="default">Yes</Badge> : <Badge variant="outline">No</Badge>}</TableCell>
                           <TableCell>{g.nofailback ? <Badge variant="default">Yes</Badge> : <Badge variant="outline">No</Badge>}</TableCell>
+                          <TableCell className="max-w-[10rem] truncate text-xs text-muted-foreground" title={g.comment ?? ""}>
+                            {g.comment ?? "—"}
+                          </TableCell>
                           {canManage("ha") && (
-                            <TableCell className="text-right">
+                            <TableCell className="text-right space-x-1">
+                              <Button variant="ghost" size="sm" onClick={() => { startEditGroup(g); }}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
                               <Button variant="ghost" size="sm" disabled={deleteGroup.isPending} onClick={() => { handleDeleteGroup(g.group); }}>
                                 <Trash2 className="h-4 w-4 text-destructive" />
                               </Button>
@@ -632,6 +664,32 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
             </CardContent>
           </Card>
         )}
+
+        {/* Edit-group dialog */}
+        <Dialog open={grpEditing != null} onOpenChange={(open) => { if (!open) setGrpEditing(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle>Edit HA Group</DialogTitle></DialogHeader>
+            {grpEditing && (
+              <form onSubmit={handleUpdateGroup} className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Group</Label>
+                  <Input value={grpEditing.group} disabled />
+                </div>
+                <div className="space-y-2">
+                  <Label>Nodes</Label>
+                  <Input value={grpNodes} onChange={(e) => { setGrpNodes(e.target.value); }} placeholder="node1:100,node2:50" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Comment</Label>
+                  <Textarea value={grpComment} rows={2} onChange={(e) => { setGrpComment(e.target.value); }} />
+                </div>
+                <Button type="submit" disabled={updateGroup.isPending}>
+                  {updateGroup.isPending ? "Saving..." : "Save"}
+                </Button>
+              </form>
+            )}
+          </DialogContent>
+        </Dialog>
       </TabsContent>
     </Tabs>
   );

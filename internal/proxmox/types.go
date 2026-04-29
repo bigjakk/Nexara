@@ -719,6 +719,9 @@ type HAResource struct {
 	Group       string `json:"group"`        // HA group name (may be empty)
 	Status      string `json:"status"`
 	MaxRelocate int    `json:"max_relocate"`
+	MaxRestart  int    `json:"max_restart"`
+	Comment     string `json:"comment,omitempty"`
+	Failback    int    `json:"failback,omitempty"`
 }
 
 // HAGroup represents an HA group from GET /cluster/ha/groups.
@@ -1245,6 +1248,19 @@ type CreateHARuleParams struct {
 	Comment   string `json:"comment,omitempty"`
 }
 
+// UpdateHARuleParams holds parameters for updating an HA rule via
+// PUT /cluster/ha/rules/{rule}. All fields are optional; the rule's `type`
+// is required by Proxmox and supplied separately.
+type UpdateHARuleParams struct {
+	Resources *string `json:"resources,omitempty"`
+	Nodes     *string `json:"nodes,omitempty"`
+	Strict    *int    `json:"strict,omitempty"`
+	Affinity  *string `json:"affinity,omitempty"`
+	Comment   *string `json:"comment,omitempty"`
+	Disable   *int    `json:"disable,omitempty"`
+	Digest    string  `json:"digest,omitempty"`
+}
+
 // CreateNetworkInterfaceParams holds parameters for creating a network interface.
 type CreateNetworkInterfaceParams struct {
 	Iface       string `json:"iface"`
@@ -1462,6 +1478,7 @@ type CreateHAResourceParams struct {
 	MaxRestart  int    `json:"max_restart,omitempty"`
 	MaxRelocate int    `json:"max_relocate,omitempty"`
 	Comment     string `json:"comment,omitempty"`
+	Failback    *int   `json:"failback,omitempty"`
 }
 
 // UpdateHAResourceParams holds parameters for PUT /cluster/ha/resources/{sid}.
@@ -1471,6 +1488,7 @@ type UpdateHAResourceParams struct {
 	MaxRestart  *int    `json:"max_restart,omitempty"`
 	MaxRelocate *int    `json:"max_relocate,omitempty"`
 	Comment     *string `json:"comment,omitempty"`
+	Failback    *int    `json:"failback,omitempty"`
 	Digest      string  `json:"digest,omitempty"`
 }
 

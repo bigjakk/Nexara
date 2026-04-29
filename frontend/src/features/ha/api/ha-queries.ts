@@ -8,6 +8,9 @@ export interface HAResource {
   group: string;
   status: string;
   max_relocate: number;
+  max_restart?: number;
+  comment?: string;
+  failback?: number;
   [key: string]: unknown;
 }
 
@@ -16,6 +19,7 @@ export interface HAGroup {
   nodes: string;
   restricted: number;
   nofailback: number;
+  comment?: string;
   [key: string]: unknown;
 }
 
@@ -40,6 +44,7 @@ export interface CreateHAResourceRequest {
   max_restart?: number;
   max_relocate?: number;
   comment?: string;
+  failback?: number;
 }
 
 export interface UpdateHAResourceRequest {
@@ -48,6 +53,7 @@ export interface UpdateHAResourceRequest {
   max_restart?: number;
   max_relocate?: number;
   comment?: string;
+  failback?: number;
 }
 
 export interface CreateHAGroupRequest {
@@ -63,6 +69,16 @@ export interface UpdateHAGroupRequest {
   restricted?: number;
   nofailback?: number;
   comment?: string;
+}
+
+export interface UpdateHARuleRequest {
+  type: string;
+  resources?: string;
+  nodes?: string;
+  strict?: number;
+  affinity?: string;
+  comment?: string;
+  disable?: number;
 }
 
 export function useHAResources(clusterId: string) {
@@ -180,6 +196,24 @@ export function useDeleteHARule(clusterId: string) {
     mutationFn: (rule: string) =>
       apiClient.delete(`/api/v1/clusters/${clusterId}/ha/rules/${encodeURIComponent(rule)}`),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+  });
+}
+
+export function useUpdateHARule(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rule, ...data }: UpdateHARuleRequest & { rule: string }) =>
+      apiClient.put(`/api/v1/clusters/${clusterId}/ha/rules/${encodeURIComponent(rule)}`, data),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+  });
+}
+
+export function useHAManagerStatus(clusterId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "ha", "manager-status"],
+    queryFn: () => apiClient.get<Record<string, unknown>>(`/api/v1/clusters/${clusterId}/ha/manager-status`),
+    enabled: clusterId.length > 0,
+    refetchInterval: 30_000,
   });
 }
 
