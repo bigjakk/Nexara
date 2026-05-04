@@ -153,6 +153,7 @@ type securityPostureResponse struct {
 	HighCount     int32     `json:"high_count"`
 	MediumCount   int32     `json:"medium_count"`
 	LowCount      int32     `json:"low_count"`
+	UnknownCount  int32     `json:"unknown_count"`
 	TotalNodes    int32     `json:"total_nodes"`
 	ScannedNodes  int32     `json:"scanned_nodes"`
 	PostureScore  float32   `json:"posture_score"`
@@ -415,7 +416,14 @@ func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
 		})
 	}
 
-	score := computePostureScore(summary.CriticalCount, summary.HighCount, summary.MediumCount, summary.LowCount)
+	// unknown_count is derived: any vuln stored that didn't fall into a
+	// classified severity bucket (no schema column for it).
+	unknown := summary.TotalVulns - summary.CriticalCount - summary.HighCount - summary.MediumCount - summary.LowCount
+	if unknown < 0 {
+		unknown = 0
+	}
+
+	score := computePostureScore(summary.CriticalCount, summary.HighCount, summary.MediumCount, summary.LowCount, unknown)
 
 	resp := securityPostureResponse{
 		ScanID:        summary.ScanID,
@@ -425,6 +433,7 @@ func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
 		HighCount:     summary.HighCount,
 		MediumCount:   summary.MediumCount,
 		LowCount:      summary.LowCount,
+		UnknownCount:  unknown,
 		TotalNodes:    summary.TotalNodes,
 		ScannedNodes:  summary.ScannedNodes,
 		PostureScore:  score,
@@ -536,8 +545,8 @@ func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
 	})
 }
 
-func computePostureScore(critical, high, medium, low int32) float32 {
-	score := float32(100) - float32(critical*25+high*10+medium*3+low*1)
+func computePostureScore(critical, high, medium, low, unknown int32) float32 {
+	score := float32(100) - float32(critical*25+high*10+medium*3+low*1+unknown*1)
 	if score < 0 {
 		return 0
 	}

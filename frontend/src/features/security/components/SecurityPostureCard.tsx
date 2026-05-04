@@ -63,6 +63,9 @@ export function SecurityPostureCard({ posture }: SecurityPostureCardProps) {
           {posture.low_count > 0 && (
             <SeverityBadge severity="low" count={posture.low_count} />
           )}
+          {posture.unknown_count > 0 && (
+            <SeverityBadge severity="unknown" count={posture.unknown_count} />
+          )}
         </div>
       )}
 

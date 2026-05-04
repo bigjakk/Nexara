@@ -17,6 +17,11 @@ SET scanned_nodes = $2, total_vulns = $3,
     critical_count = $4, high_count = $5, medium_count = $6, low_count = $7
 WHERE id = $1;
 
+-- name: UpdateCVEScanTotalNodes :exec
+UPDATE cve_scans
+SET total_nodes = $2
+WHERE id = $1;
+
 -- name: ListCVEScans :many
 SELECT * FROM cve_scans
 WHERE cluster_id = $1

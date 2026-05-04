@@ -276,6 +276,7 @@ export interface SecurityPosture {
   high_count: number;
   medium_count: number;
   low_count: number;
+  unknown_count: number;
   total_nodes: number;
   scanned_nodes: number;
   posture_score: number;

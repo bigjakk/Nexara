@@ -336,6 +336,7 @@ type Querier interface {
 	UpdateCVEScanCounts(ctx context.Context, arg UpdateCVEScanCountsParams) error
 	UpdateCVEScanNode(ctx context.Context, arg UpdateCVEScanNodeParams) error
 	UpdateCVEScanStatus(ctx context.Context, arg UpdateCVEScanStatusParams) error
+	UpdateCVEScanTotalNodes(ctx context.Context, arg UpdateCVEScanTotalNodesParams) error
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
 	UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHistoryStatusParams) error
 	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error

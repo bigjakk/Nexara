@@ -39,11 +39,11 @@ type CVEClient struct {
 }
 
 // debianCVEEntry is the per-CVE entry inside a package's map.
-// e.g. {"CVE-2024-1234": {"releases": {"bookworm": {"status": "resolved", "fixed_version": "1.2.3"}}, "urgency": "high"}}
+// In the Debian Security Tracker JSON, status / fixed_version / urgency live per-release —
+// the CVE-level object only has description, scope, and the releases map.
 type debianCVEEntry struct {
 	Releases    map[string]debianRelease `json:"releases"`
 	Description string                   `json:"description"`
-	Urgency     string                   `json:"urgency"`
 }
 
 type debianRelease struct {
@@ -75,29 +75,27 @@ func (c *CVEClient) LookupPackageCVEs(ctx context.Context, packageNames []string
 			continue
 		}
 		for cveID, entry := range cves {
-			// Check if any supported release has an open (unfixed) vulnerability
-			for _, rel := range entry.Releases {
-				if rel.Status == "resolved" {
-					continue
-				}
-				severity := normalizeSeverity(entry.Urgency)
-				info := CVEInfo{
-					CVEID:       cveID,
-					Severity:    severity,
-					CVSSScore:   severityToScore(severity),
-					Description: truncate(entry.Description, 500),
-				}
-				result[pkg] = append(result[pkg], info)
-
-				// Cache in DB
-				_ = c.queries.UpsertCVECache(ctx, db.UpsertCVECacheParams{
-					CveID:       cveID,
-					Severity:    severity,
-					CvssScore:   pgtype.Float4{Float32: info.CVSSScore, Valid: true},
-					Description: info.Description,
-				})
-				break // one entry per CVE is enough
+			// Skip if every release has resolved status; otherwise pick the best
+			// non-resolved release's urgency (highest severity wins).
+			if !hasOpenRelease(entry.Releases) {
+				continue
 			}
+			severity := bestSeverity(entry.Releases)
+			info := CVEInfo{
+				CVEID:       cveID,
+				Severity:    severity,
+				CVSSScore:   severityToScore(severity),
+				Description: truncate(entry.Description, 500),
+			}
+			result[pkg] = append(result[pkg], info)
+
+			// Cache in DB
+			_ = c.queries.UpsertCVECache(ctx, db.UpsertCVECacheParams{
+				CveID:       cveID,
+				Severity:    severity,
+				CvssScore:   pgtype.Float4{Float32: info.CVSSScore, Valid: true},
+				Description: info.Description,
+			})
 		}
 	}
 
@@ -106,7 +104,10 @@ func (c *CVEClient) LookupPackageCVEs(ctx context.Context, packageNames []string
 
 // LookupPackageUpdates checks Proxmox apt update results for known CVEs.
 // Updates from Proxmox represent packages that have fixes available.
-func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdateInfo) ([]VulnResult, error) {
+// release is the Debian release codename (e.g. "bookworm") of the scanned node;
+// CVEs that don't apply to that release, or that the user has already patched
+// past, are filtered out. Pass "" to disable release-aware filtering.
+func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdateInfo, release string) ([]VulnResult, error) {
 	if err := c.ensureTrackerData(ctx); err != nil {
 		return nil, fmt.Errorf("fetch tracker data: %w", err)
 	}
@@ -141,17 +142,40 @@ func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdat
 			if seen[key] {
 				continue
 			}
-			seen[key] = true
 
-			severity := normalizeSeverity(entry.Urgency)
-			fixedVer := ""
-			for _, rel := range entry.Releases {
-				if rel.FixedVersion != "" {
-					fixedVer = rel.FixedVersion
-					break
+			rel, useRelease := pickRelease(entry.Releases, release)
+			if useRelease {
+				// Skip CVEs that don't apply to this release.
+				if rel.Status == "" {
+					continue
+				}
+				// Skip CVEs already fixed in the user's installed version.
+				if rel.Status == "resolved" && rel.FixedVersion != "" && rel.FixedVersion != "0" {
+					if cmp, ok := compareDebianVersion(upd.OldVersion, rel.FixedVersion); ok && cmp >= 0 {
+						continue
+					}
+				}
+			} else if !hasOpenRelease(entry.Releases) {
+				// No release info — fall back to "any release open" check.
+				continue
+			}
+
+			severity := normalizeSeverity(rel.Urgency)
+			if severity == "unknown" {
+				// Per-release urgency missing; pick the worst urgency across releases.
+				severity = bestSeverity(entry.Releases)
+			}
+
+			fixedVer := rel.FixedVersion
+			if fixedVer == "" || fixedVer == "0" {
+				for _, r := range entry.Releases {
+					if r.FixedVersion != "" && r.FixedVersion != "0" {
+						fixedVer = r.FixedVersion
+						break
+					}
 				}
 			}
-			if fixedVer == "" {
+			if fixedVer == "" || fixedVer == "0" {
 				fixedVer = upd.NewVersion
 			}
 
@@ -160,6 +184,7 @@ func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdat
 				desc = upd.Title
 			}
 
+			seen[key] = true
 			results = append(results, VulnResult{
 				CVEID:          cveID,
 				PackageName:    upd.Package,
@@ -238,6 +263,246 @@ type VulnResult struct {
 	Severity       string
 	CVSSScore      float32
 	Description    string
+}
+
+// hasOpenRelease reports whether any release entry is in a non-resolved state.
+func hasOpenRelease(releases map[string]debianRelease) bool {
+	for _, r := range releases {
+		if r.Status != "resolved" {
+			return true
+		}
+	}
+	return false
+}
+
+// bestSeverity returns the highest severity across all releases for a CVE,
+// preferring releases that are still open.
+func bestSeverity(releases map[string]debianRelease) string {
+	best := "unknown"
+	for _, r := range releases {
+		s := normalizeSeverity(r.Urgency)
+		if severityRank(s) > severityRank(best) {
+			best = s
+		}
+	}
+	return best
+}
+
+// pickRelease returns the release entry for the given codename and a flag
+// indicating whether release-aware lookup was attempted. When release is empty,
+// the second return value is false and callers should fall back to scanning
+// all releases.
+func pickRelease(releases map[string]debianRelease, release string) (debianRelease, bool) {
+	if release == "" {
+		return debianRelease{}, false
+	}
+	if r, ok := releases[release]; ok {
+		return r, true
+	}
+	return debianRelease{}, true
+}
+
+func severityRank(s string) int {
+	switch s {
+	case "critical":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// pveMajorToDebianRelease maps a Proxmox VE major version to the Debian
+// codename it ships on. Returns "" when unknown.
+func pveMajorToDebianRelease(major int) string {
+	switch major {
+	case 9:
+		return "trixie"
+	case 8:
+		return "bookworm"
+	case 7:
+		return "bullseye"
+	case 6:
+		return "buster"
+	default:
+		return ""
+	}
+}
+
+// DebianReleaseFromPVEVersion parses a PVEVersion string like
+// "pve-manager/8.2.4/abc123" or "8.2.4-1" and returns the Debian codename.
+func DebianReleaseFromPVEVersion(pveVersion string) string {
+	v := pveVersion
+	if i := strings.Index(v, "/"); i >= 0 {
+		// "pve-manager/8.2.4/..." → take segment after first slash
+		rest := v[i+1:]
+		if j := strings.Index(rest, "/"); j >= 0 {
+			rest = rest[:j]
+		}
+		v = rest
+	}
+	// Now v looks like "8.2.4" or "8.2.4-1"
+	if i := strings.IndexAny(v, ".-"); i > 0 {
+		v = v[:i]
+	}
+	major := 0
+	for _, ch := range v {
+		if ch < '0' || ch > '9' {
+			break
+		}
+		major = major*10 + int(ch-'0')
+	}
+	if major == 0 {
+		return ""
+	}
+	return pveMajorToDebianRelease(major)
+}
+
+// compareDebianVersion compares two Debian package version strings.
+// Returns -1, 0, or 1 (a < b, a == b, a > b) and ok=true on success;
+// ok=false if either string is malformed.
+//
+// Implements the algorithm from deb-version(7): compares
+// [epoch:]upstream-version[-debian-revision], where each segment is split into
+// alternating non-digit / digit runs. Within a non-digit run, '~' < (empty) <
+// any other char, with letters less than non-letters.
+func compareDebianVersion(a, b string) (int, bool) {
+	ea, ua, ra, okA := parseDebVersion(a)
+	eb, ub, rb, okB := parseDebVersion(b)
+	if !okA || !okB {
+		return 0, false
+	}
+	if ea != eb {
+		if ea < eb {
+			return -1, true
+		}
+		return 1, true
+	}
+	if c := compareDebPart(ua, ub); c != 0 {
+		return c, true
+	}
+	return compareDebPart(ra, rb), true
+}
+
+func parseDebVersion(v string) (epoch int, upstream, revision string, ok bool) {
+	if v == "" {
+		return 0, "", "", false
+	}
+	rest := v
+	if i := strings.Index(rest, ":"); i > 0 {
+		// Epoch must be all digits.
+		for _, ch := range rest[:i] {
+			if ch < '0' || ch > '9' {
+				return 0, "", "", false
+			}
+		}
+		for _, ch := range rest[:i] {
+			epoch = epoch*10 + int(ch-'0')
+		}
+		rest = rest[i+1:]
+	}
+	if i := strings.LastIndex(rest, "-"); i >= 0 {
+		upstream = rest[:i]
+		revision = rest[i+1:]
+	} else {
+		upstream = rest
+	}
+	return epoch, upstream, revision, true
+}
+
+func compareDebPart(a, b string) int {
+	for a != "" || b != "" {
+		// Non-digit prefix
+		i, j := 0, 0
+		for i < len(a) && (a[i] < '0' || a[i] > '9') {
+			i++
+		}
+		for j < len(b) && (b[j] < '0' || b[j] > '9') {
+			j++
+		}
+		if c := compareDebChars(a[:i], b[:j]); c != 0 {
+			return c
+		}
+		a, b = a[i:], b[j:]
+		// Digit prefix
+		i, j = 0, 0
+		for i < len(a) && a[i] >= '0' && a[i] <= '9' {
+			i++
+		}
+		for j < len(b) && b[j] >= '0' && b[j] <= '9' {
+			j++
+		}
+		na := trimLeadingZeros(a[:i])
+		nb := trimLeadingZeros(b[:j])
+		if len(na) != len(nb) {
+			if len(na) < len(nb) {
+				return -1
+			}
+			return 1
+		}
+		if na != nb {
+			if na < nb {
+				return -1
+			}
+			return 1
+		}
+		a, b = a[i:], b[j:]
+	}
+	return 0
+}
+
+func trimLeadingZeros(s string) string {
+	for len(s) > 1 && s[0] == '0' {
+		s = s[1:]
+	}
+	return s
+}
+
+// compareDebChars compares two non-digit segments per Debian version rules:
+// '~' sorts before everything (including empty); empty sorts before any
+// non-tilde char; letters sort before non-letters; otherwise ASCII order.
+func compareDebChars(a, b string) int {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var ca, cb byte
+		if i < len(a) {
+			ca = a[i]
+		}
+		if i < len(b) {
+			cb = b[i]
+		}
+		if ca == cb {
+			continue
+		}
+		oa := charOrder(ca, i < len(a))
+		ob := charOrder(cb, i < len(b))
+		if oa < ob {
+			return -1
+		}
+		if oa > ob {
+			return 1
+		}
+	}
+	return 0
+}
+
+func charOrder(c byte, present bool) int {
+	if !present {
+		// Empty (end of string) sorts before anything except '~'.
+		return 1
+	}
+	if c == '~' {
+		return 0
+	}
+	if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+		return 2 + int(c)
+	}
+	// Non-letter symbols sort after letters.
+	return 1000 + int(c)
 }
 
 func normalizeSeverity(urgency string) string {

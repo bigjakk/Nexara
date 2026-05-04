@@ -78,7 +78,13 @@ func (e *Engine) RunScanWithID(ctx context.Context, clusterID, scanID uuid.UUID)
 		return scanID, fmt.Errorf("list nodes: %w", err)
 	}
 
-	// Update total_nodes since the handler may not have known the exact count
+	// Backfill total_nodes — the handler creates the scan record before it
+	// knows how many nodes the cluster has.
+	_ = e.queries.UpdateCVEScanTotalNodes(ctx, db.UpdateCVEScanTotalNodesParams{
+		ID:         scanID,
+		TotalNodes: safeInt32(len(nodes)),
+	})
+
 	_ = e.queries.UpdateCVEScanCounts(ctx, db.UpdateCVEScanCountsParams{
 		ID:           scanID,
 		ScannedNodes: 0,
@@ -115,6 +121,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		highCount     int32
 		mediumCount   int32
 		lowCount      int32
+		unknownCount  int32
 		scannedNodes  int32
 	)
 
@@ -129,6 +136,15 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		if err != nil {
 			e.logger.Error("failed to create scan node record", "node", node.Name, "error", err)
 			continue
+		}
+
+		// Detect Debian release for release-aware CVE filtering.
+		release := ""
+		if status, err := client.GetNodeStatus(ctx, node.Name); err == nil {
+			release = DebianReleaseFromPVEVersion(status.PVEVersion)
+		} else {
+			e.logger.Warn("failed to get node status; release-aware CVE filtering disabled",
+				"node", node.Name, "error", err)
 		}
 
 		// Get pending updates from Proxmox
@@ -157,7 +173,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		}
 
 		// Match against Debian tracker CVEs
-		vulns, err := cveClient.LookupPackageUpdates(ctx, aptUpdates)
+		vulns, err := cveClient.LookupPackageUpdates(ctx, aptUpdates, release)
 		if err != nil {
 			e.logger.Warn("CVE lookup failed, using update data only", "node", node.Name, "error", err)
 			// Fall back to treating all security updates as vulns
@@ -165,7 +181,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		}
 
 		// Store vulnerabilities
-		var nodeCritical, nodeHigh, nodeMedium, nodeLow int32
+		var nodeCritical, nodeHigh, nodeMedium, nodeLow, nodeUnknown int32
 		for _, v := range vulns {
 			_, insertErr := e.queries.InsertCVEScanVuln(ctx, db.InsertCVEScanVulnParams{
 				ScanID:         scanID,
@@ -192,11 +208,13 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 				nodeMedium++
 			case "low":
 				nodeLow++
+			default:
+				nodeUnknown++
 			}
 		}
 
 		nodeVulns := safeInt32(len(vulns))
-		postureScore := computePostureScore(nodeCritical, nodeHigh, nodeMedium, nodeLow)
+		postureScore := computePostureScore(nodeCritical, nodeHigh, nodeMedium, nodeLow, nodeUnknown)
 
 		now := time.Now()
 		_ = e.queries.UpdateCVEScanNode(ctx, db.UpdateCVEScanNodeParams{
@@ -213,6 +231,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		highCount += nodeHigh
 		mediumCount += nodeMedium
 		lowCount += nodeLow
+		unknownCount += nodeUnknown
 		scannedNodes++
 
 		e.logger.Info("node scan complete",
@@ -248,6 +267,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		"high", highCount,
 		"medium", mediumCount,
 		"low", lowCount,
+		"unknown", unknownCount,
 	)
 
 	return scanID, nil
@@ -296,8 +316,12 @@ func (e *Engine) failScanNode(ctx context.Context, nodeID uuid.UUID, errMsg stri
 	})
 }
 
-func computePostureScore(critical, high, medium, low int32) float32 {
-	score := float32(100) - float32(critical*25+high*10+medium*3+low*1)
+// computePostureScore weights vulnerabilities by severity. Unknown-severity
+// CVEs (Debian tracker entries with no urgency assigned) are weighted as low —
+// we know there's an unfixed CVE applicable to the user's release, we just
+// don't have a triaged urgency for it.
+func computePostureScore(critical, high, medium, low, unknown int32) float32 {
+	score := float32(100) - float32(critical*25+high*10+medium*3+low*1+unknown*1)
 	if score < 0 {
 		return 0
 	}

@@ -624,6 +624,22 @@ func (q *Queries) UpdateCVEScanStatus(ctx context.Context, arg UpdateCVEScanStat
 	return err
 }
 
+const updateCVEScanTotalNodes = `-- name: UpdateCVEScanTotalNodes :exec
+UPDATE cve_scans
+SET total_nodes = $2
+WHERE id = $1
+`
+
+type UpdateCVEScanTotalNodesParams struct {
+	ID         uuid.UUID `json:"id"`
+	TotalNodes int32     `json:"total_nodes"`
+}
+
+func (q *Queries) UpdateCVEScanTotalNodes(ctx context.Context, arg UpdateCVEScanTotalNodesParams) error {
+	_, err := q.db.Exec(ctx, updateCVEScanTotalNodes, arg.ID, arg.TotalNodes)
+	return err
+}
+
 const upsertCVECache = `-- name: UpsertCVECache :exec
 INSERT INTO cve_cache (cve_id, severity, cvss_score, description, published_at, fetched_at)
 VALUES ($1, $2, $3, $4, $5, now())
