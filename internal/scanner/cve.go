@@ -214,7 +214,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		}
 
 		nodeVulns := safeInt32(len(vulns))
-		postureScore := computePostureScore(nodeCritical, nodeHigh, nodeMedium, nodeLow, nodeUnknown)
+		postureScore := ComputePostureScore(nodeCritical, nodeHigh, nodeMedium, nodeLow, nodeUnknown)
 
 		now := time.Now()
 		_ = e.queries.UpdateCVEScanNode(ctx, db.UpdateCVEScanNodeParams{
@@ -316,12 +316,49 @@ func (e *Engine) failScanNode(ctx context.Context, nodeID uuid.UUID, errMsg stri
 	})
 }
 
-// computePostureScore weights vulnerabilities by severity. Unknown-severity
-// CVEs (Debian tracker entries with no urgency assigned) are weighted as low —
-// we know there's an unfixed CVE applicable to the user's release, we just
-// don't have a triaged urgency for it.
-func computePostureScore(critical, high, medium, low, unknown int32) float32 {
-	score := float32(100) - float32(critical*25+high*10+medium*3+low*1+unknown*1)
+// Phase 1 severity weights — calibrated so that 1 critical hits clearly,
+// many lows accumulate into a visible but non-flooring deduction, and
+// unknown counts the same as low (we know there's a CVE, we just don't
+// have a triaged severity).
+//
+// Phase 2 will replace these constants with per-CVE risk scoring that
+// multiplies CVSS by EPSS-or-KEV likelihood; until then, severity buckets
+// are the only signal we have.
+const (
+	weightCritical = 25.0
+	weightHigh     = 12.0
+	weightMedium   = 5.0
+	weightLow      = 2.0
+	weightUnknown  = 2.0
+
+	// Per-bucket deduction caps for the lower-severity buckets — no matter
+	// how many CVEs accumulate, a single critical still hurts more.
+	// Borrows the SSVC invariant that "Track" (large pile of lows) should
+	// never escalate to "Act" (one exploited critical) by quantity alone.
+	mediumBucketCap  = 22.0
+	lowBucketCap     = 20.0
+	unknownBucketCap = 20.0
+)
+
+// ComputePostureScore aggregates severity buckets into a 0–100 health score
+// (higher = better). Within each bucket, count contributes logarithmically:
+// log2(count+1). This pattern — per-bucket weight × sub-linear count factor —
+// is adapted from Qualys TruRisk, which uses count^0.01 alongside per-CVE
+// risk scores. Without those per-CVE scores yet, log2 gives the bucket
+// weights enough room to drive the result while still letting count matter.
+//
+// Calibration anchors:
+//   - 1 critical CVE       → ~25 deduction (notable hit)
+//   - 100 low CVEs         → ~13 deduction (visible, not catastrophic)
+//   - 1 critical + 100 low → ~38 deduction (critical still dominates)
+//   - any volume of lows alone → never matches a single critical
+func ComputePostureScore(critical, high, medium, low, unknown int32) float32 {
+	deduction := bucketDeduction(weightCritical, critical, 0) +
+		bucketDeduction(weightHigh, high, 0) +
+		bucketDeduction(weightMedium, medium, mediumBucketCap) +
+		bucketDeduction(weightLow, low, lowBucketCap) +
+		bucketDeduction(weightUnknown, unknown, unknownBucketCap)
+	score := 100 - deduction
 	if score < 0 {
 		return 0
 	}
@@ -329,6 +366,20 @@ func computePostureScore(critical, high, medium, low, unknown int32) float32 {
 		return 100
 	}
 	return score
+}
+
+// bucketDeduction returns weight × log2(count+1), optionally capped.
+// maxDeduction=0 means uncapped (used for high-severity buckets where
+// stacking matters). Returns 0 for empty buckets.
+func bucketDeduction(weight float32, count int32, maxDeduction float32) float32 {
+	if count <= 0 {
+		return 0
+	}
+	d := weight * float32(math.Log2(float64(count)+1))
+	if maxDeduction > 0 && d > maxDeduction {
+		return maxDeduction
+	}
+	return d
 }
 
 func securityUpdatesToVulns(updates []AptUpdateInfo) []VulnResult {

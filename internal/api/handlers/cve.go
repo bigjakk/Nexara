@@ -423,7 +423,7 @@ func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
 		unknown = 0
 	}
 
-	score := computePostureScore(summary.CriticalCount, summary.HighCount, summary.MediumCount, summary.LowCount, unknown)
+	score := scanner.ComputePostureScore(summary.CriticalCount, summary.HighCount, summary.MediumCount, summary.LowCount, unknown)
 
 	resp := securityPostureResponse{
 		ScanID:        summary.ScanID,
@@ -545,10 +545,3 @@ func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
 	})
 }
 
-func computePostureScore(critical, high, medium, low, unknown int32) float32 {
-	score := float32(100) - float32(critical*25+high*10+medium*3+low*1+unknown*1)
-	if score < 0 {
-		return 0
-	}
-	return score
-}
