@@ -322,6 +322,12 @@ type LdapConfig struct {
 	UpdatedAt             time.Time          `json:"updated_at"`
 }
 
+type LeaderElection struct {
+	Role          string    `json:"role"`
+	HolderID      uuid.UUID `json:"holder_id"`
+	LastHeartbeat time.Time `json:"last_heartbeat"`
+}
+
 type MaintenanceWindow struct {
 	ID          uuid.UUID   `json:"id"`
 	ClusterID   uuid.UUID   `json:"cluster_id"`
