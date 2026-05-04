@@ -26,6 +26,9 @@ const resourceTypes = [
   { value: "auth", label: "Auth" },
   { value: "task", label: "Task" },
   { value: "drs", label: "DRS" },
+  { value: "ha_rule", label: "HA Rule" },
+  { value: "ha_group", label: "HA Group" },
+  { value: "ha_resource", label: "HA Resource" },
   { value: "firewall", label: "Firewall" },
   { value: "sdn", label: "SDN" },
   { value: "schedule", label: "Schedule" },
@@ -51,6 +54,9 @@ function resourceTypeLabel(type: string): string {
     case "auth": return "Auth";
     case "task": return "Task";
     case "drs": return "DRS";
+    case "ha_rule": return "HA Rule";
+    case "ha_group": return "HA Group";
+    case "ha_resource": return "HA Resource";
     case "firewall": return "Firewall";
     case "sdn": return "SDN";
     case "schedule": return "Schedule";
@@ -60,6 +66,26 @@ function resourceTypeLabel(type: string): string {
     case "network": return "Network";
     default: return type;
   }
+}
+
+/** Render a comma-separated SID list with friendly names appended where known.
+ *  Input "vm:100,ct:101" with names {vm:100: "web", ct:101: "db"} →
+ *  "vm:100 (web), ct:101 (db)". */
+function formatResourcesWithNames(resources: string, namesRaw: unknown): string {
+  const names =
+    namesRaw && typeof namesRaw === "object"
+      ? (namesRaw as Record<string, unknown>)
+      : null;
+  return resources
+    .split(",")
+    .map((sid) => sid.trim())
+    .filter(Boolean)
+    .map((sid) => {
+      const v = names ? names[sid] : undefined;
+      const name = typeof v === "string" ? v : null;
+      return name ? `${sid} (${name})` : sid;
+    })
+    .join(", ");
 }
 
 /** Parse the details JSON and render key human-readable summary parts. */
@@ -83,6 +109,23 @@ function formatDetailsSummary(entry: AuditLogEntry): string | null {
     if (d["online"] === true) {
       parts.push("live");
     }
+
+    // HA rule/group/resource summary fields
+    if (entry.resource_type === "ha_rule") {
+      if (typeof d["type"] === "string") parts.push(d["type"]);
+      if (typeof d["affinity"] === "string") parts.push(d["affinity"]);
+      if (typeof d["resources"] === "string") {
+        parts.push(formatResourcesWithNames(d["resources"], d["resource_names"]));
+      }
+      if (typeof d["nodes"] === "string") parts.push(`nodes: ${d["nodes"]}`);
+    } else if (entry.resource_type === "ha_group") {
+      if (typeof d["nodes"] === "string") parts.push(`nodes: ${d["nodes"]}`);
+    } else if (entry.resource_type === "ha_resource") {
+      if (typeof d["resource_type"] === "string") parts.push(d["resource_type"]);
+      if (typeof d["state"] === "string") parts.push(d["state"]);
+      if (typeof d["group"] === "string") parts.push(`group: ${d["group"]}`);
+    }
+
     if (typeof d["error"] === "string") {
       parts.push(`Error: ${d["error"]}`);
     }
@@ -114,14 +157,46 @@ function detailKeyLabel(key: string): string {
     case "pool": return "Pool";
     case "name": return "Name";
     case "size": return "Size";
+    case "rule": return "Rule";
+    case "group": return "Group";
+    case "sid": return "SID";
+    case "resources": return "Resources";
+    case "nodes": return "Nodes";
+    case "affinity": return "Affinity";
+    case "strict": return "Strict";
+    case "disable": return "Disabled";
+    case "comment": return "Comment";
+    case "state": return "State";
+    case "max_restart": return "Max Restart";
+    case "max_relocate": return "Max Relocate";
+    case "failback": return "Failback";
+    case "restricted": return "Restricted";
+    case "nofailback": return "No Failback";
+    case "resource_type": return "Resource Type";
+    case "type": return "Type";
     default: return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
 }
 
+/** Keys whose 0/1 integer values represent boolean flags from Proxmox. */
+const booleanFlagKeys = new Set([
+  "strict",
+  "disable",
+  "restricted",
+  "nofailback",
+  "failback",
+  "online",
+]);
+
 /** Format detail values for display. */
-function detailValue(_key: string, val: unknown): string {
+function detailValue(key: string, val: unknown): string {
   if (typeof val === "boolean") return val ? "Yes" : "No";
-  if (typeof val === "number") return String(val);
+  if (typeof val === "number") {
+    if (booleanFlagKeys.has(key) && (val === 0 || val === 1)) {
+      return val === 1 ? "Yes" : "No";
+    }
+    return String(val);
+  }
   if (typeof val === "string") return val;
   if (val === null || val === undefined) return "-";
   return JSON.stringify(val);
@@ -134,8 +209,15 @@ function parseDetails(entry: AuditLogEntry): Array<[string, string]> | null {
   }
   try {
     const d = JSON.parse(entry.details) as Record<string, unknown>;
+    const resourceNames = d["resource_names"];
     const pairs: Array<[string, string]> = [];
     for (const [k, v] of Object.entries(d)) {
+      // Skip resource_names — its content is folded into the Resources row.
+      if (k === "resource_names") continue;
+      if (k === "resources" && typeof v === "string") {
+        pairs.push([detailKeyLabel(k), formatResourcesWithNames(v, resourceNames)]);
+        continue;
+      }
       pairs.push([detailKeyLabel(k), detailValue(k, v)]);
     }
     return pairs.length > 0 ? pairs : null;
@@ -173,6 +255,24 @@ function sourceBadge(entry: AuditLogEntry) {
 function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
   try {
     const d = JSON.parse(entry.details) as Record<string, unknown>;
+
+    // HA entries: show the human-meaningful identifier from the details JSON.
+    if (entry.resource_type === "ha_rule" && typeof d["rule"] === "string") {
+      return <span className="ml-2 text-xs">{d["rule"]}</span>;
+    }
+    if (entry.resource_type === "ha_group" && typeof d["group"] === "string") {
+      return <span className="ml-2 text-xs">{d["group"]}</span>;
+    }
+    if (entry.resource_type === "ha_resource" && typeof d["sid"] === "string") {
+      const name = typeof d["name"] === "string" ? d["name"] : null;
+      return (
+        <span className="ml-2 text-xs">
+          {d["sid"]}
+          {name && <span className="text-muted-foreground"> ({name})</span>}
+        </span>
+      );
+    }
+
     const resName = typeof d["resource_name"] === "string" ? d["resource_name"] : null;
     const resId = typeof d["resource_id"] === "string" ? d["resource_id"] : null;
     if (resName) {
