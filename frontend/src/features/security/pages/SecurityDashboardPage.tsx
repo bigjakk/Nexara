@@ -13,6 +13,7 @@ import {
 import { SecurityPostureCard } from "../components/SecurityPostureCard";
 import { SSVCHistogram } from "../components/SSVCHistogram";
 import { CVENotifyCard } from "../components/CVENotifyCard";
+import { KEVDetailDialog } from "../components/KEVDetailDialog";
 import { ScanScheduleCard } from "../components/ScanScheduleCard";
 import { ScanHistoryTable } from "../components/ScanHistoryTable";
 import { VulnerabilityTable } from "../components/VulnerabilityTable";
@@ -38,7 +39,7 @@ export function SecurityDashboardPage() {
   const { data: clusters, isLoading: clustersLoading } = useClusters();
   const [selectedClusterId, setSelectedClusterId] = useState<string>("");
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
-  const [vulnInitialKEV, setVulnInitialKEV] = useState<boolean>(false);
+  const [kevDialogScanId, setKEVDialogScanId] = useState<string | null>(null);
 
   // Persist selected job ID in URL search params so page refresh preserves the view.
   const selectedJobId = searchParams.get("job");
@@ -194,10 +195,7 @@ export function SecurityDashboardPage() {
             <>
               <SecurityPostureCard
                 posture={posture}
-                onShowKEV={(scanId) => {
-                  setSelectedScanId(scanId);
-                  setVulnInitialKEV(true);
-                }}
+                onShowKEV={(scanId) => { setKEVDialogScanId(scanId); }}
               />
               <SSVCHistogram
                 actCount={posture.act_count}
@@ -215,11 +213,7 @@ export function SecurityDashboardPage() {
             <VulnerabilityTable
               clusterId={activeClusterId}
               scanId={selectedScanId}
-              initialKEV={vulnInitialKEV}
-              onBack={() => {
-                setSelectedScanId(null);
-                setVulnInitialKEV(false);
-              }}
+              onBack={() => { setSelectedScanId(null); }}
             />
           ) : (
             <div className="space-y-3">
@@ -230,10 +224,7 @@ export function SecurityDashboardPage() {
                 <ScanHistoryTable
                   scans={scans ?? []}
                   clusterId={activeClusterId}
-                  onSelectScan={(id) => {
-                    setSelectedScanId(id);
-                    setVulnInitialKEV(false);
-                  }}
+                  onSelectScan={setSelectedScanId}
                 />
               )}
             </div>
@@ -279,6 +270,15 @@ export function SecurityDashboardPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <KEVDetailDialog
+        clusterId={activeClusterId}
+        scanId={kevDialogScanId}
+        open={kevDialogScanId !== null}
+        onOpenChange={(open) => {
+          if (!open) setKEVDialogScanId(null);
+        }}
+      />
     </div>
   );
 }
