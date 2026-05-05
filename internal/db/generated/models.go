@@ -212,6 +212,8 @@ type CveScan struct {
 	StartedAt     time.Time          `json:"started_at"`
 	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
 	CreatedAt     time.Time          `json:"created_at"`
+	KevCount      int32              `json:"kev_count"`
+	UnknownCount  int32              `json:"unknown_count"`
 }
 
 type CveScanNode struct {
@@ -247,6 +249,11 @@ type CveScanVuln struct {
 	Severity       string        `json:"severity"`
 	CvssScore      pgtype.Float4 `json:"cvss_score"`
 	Description    string        `json:"description"`
+	RiskScore      float32       `json:"risk_score"`
+	Epss           pgtype.Float4 `json:"epss"`
+	EpssPercentile pgtype.Float4 `json:"epss_percentile"`
+	Kev            bool          `json:"kev"`
+	RiskSeverity   string        `json:"risk_severity"`
 }
 
 type DrsConfig struct {
@@ -288,6 +295,13 @@ type DrsRule struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+type EpssCache struct {
+	CveID      string    `json:"cve_id"`
+	Score      float32   `json:"score"`
+	Percentile float32   `json:"percentile"`
+	FetchedAt  time.Time `json:"fetched_at"`
+}
+
 type FirewallTemplate struct {
 	ID          uuid.UUID       `json:"id"`
 	Name        string          `json:"name"`
@@ -295,6 +309,19 @@ type FirewallTemplate struct {
 	Rules       json.RawMessage `json:"rules"`
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type KevCache struct {
+	CveID             string      `json:"cve_id"`
+	DateAdded         pgtype.Date `json:"date_added"`
+	VendorProject     string      `json:"vendor_project"`
+	Product           string      `json:"product"`
+	VulnerabilityName string      `json:"vulnerability_name"`
+	ShortDescription  string      `json:"short_description"`
+	RequiredAction    string      `json:"required_action"`
+	DueDate           pgtype.Date `json:"due_date"`
+	RansomwareUse     bool        `json:"ransomware_use"`
+	FetchedAt         time.Time   `json:"fetched_at"`
 }
 
 type LdapConfig struct {

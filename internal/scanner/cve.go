@@ -112,8 +112,10 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		return scanID, nil
 	}
 
-	// Initialize CVE data client
+	// CVE data + risk enrichment clients.
 	cveClient := NewCVEClient(e.queries, e.logger.With("component", "cve-client"))
+	kevClient := NewKEVClient(e.queries, e.logger.With("component", "kev-client"))
+	epssClient := NewEPSSClient(e.queries, e.logger.With("component", "epss-client"))
 
 	var (
 		totalVulns    int32
@@ -122,6 +124,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		mediumCount   int32
 		lowCount      int32
 		unknownCount  int32
+		kevCount      int32
 		scannedNodes  int32
 	)
 
@@ -180,9 +183,33 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 			vulns = securityUpdatesToVulns(aptUpdates)
 		}
 
-		// Store vulnerabilities
-		var nodeCritical, nodeHigh, nodeMedium, nodeLow, nodeUnknown int32
+		// Enrich vulns with EPSS and KEV before bucketing. Both lookups
+		// are best-effort: a failure leaves the vuln with no enrichment
+		// rather than aborting the scan. KEV is cached locally (refreshed
+		// hourly by the scheduler); EPSS is cached per-CVE with a 24h TTL
+		// and lazy-fetched here for unknown CVEs.
+		cveIDs := make([]string, 0, len(vulns))
 		for _, v := range vulns {
+			cveIDs = append(cveIDs, v.CVEID)
+		}
+		epssData := epssClient.LookupBatch(ctx, cveIDs)
+
+		var nodeCritical, nodeHigh, nodeMedium, nodeLow, nodeUnknown, nodeKEV int32
+		for _, v := range vulns {
+			cvssBase := severityToCVSSProxy(v.Severity)
+			isKEV := kevClient.IsKEV(ctx, v.CVEID)
+			epssScore := float32(0)
+			epssPercentile := float32(0)
+			epssValid := false
+			if d, ok := epssData[v.CVEID]; ok && d.Found {
+				epssScore = d.Score
+				epssPercentile = d.Percentile
+				epssValid = true
+			}
+
+			risk := computeRiskScore(cvssBase, epssScore, isKEV)
+			riskSev := riskToSeverity(risk)
+
 			_, insertErr := e.queries.InsertCVEScanVuln(ctx, db.InsertCVEScanVulnParams{
 				ScanID:         scanID,
 				ScanNodeID:     scanNode.ID,
@@ -193,13 +220,18 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 				Severity:       v.Severity,
 				CvssScore:      pgtype.Float4{Float32: v.CVSSScore, Valid: true},
 				Description:    v.Description,
+				RiskScore:      risk,
+				RiskSeverity:   riskSev,
+				Epss:           pgtype.Float4{Float32: epssScore, Valid: epssValid},
+				EpssPercentile: pgtype.Float4{Float32: epssPercentile, Valid: epssValid},
+				Kev:            isKEV,
 			})
 			if insertErr != nil {
 				e.logger.Error("failed to insert vuln", "cve", v.CVEID, "error", insertErr)
 				continue
 			}
 
-			switch v.Severity {
+			switch riskSev {
 			case "critical":
 				nodeCritical++
 			case "high":
@@ -210,6 +242,9 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 				nodeLow++
 			default:
 				nodeUnknown++
+			}
+			if isKEV {
+				nodeKEV++
 			}
 		}
 
@@ -232,11 +267,13 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		mediumCount += nodeMedium
 		lowCount += nodeLow
 		unknownCount += nodeUnknown
+		kevCount += nodeKEV
 		scannedNodes++
 
 		e.logger.Info("node scan complete",
 			"node", node.Name,
 			"vulns", nodeVulns,
+			"kev", nodeKEV,
 			"posture_score", postureScore,
 		)
 	}
@@ -250,6 +287,8 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		HighCount:     highCount,
 		MediumCount:   mediumCount,
 		LowCount:      lowCount,
+		UnknownCount:  unknownCount,
+		KevCount:      kevCount,
 	})
 
 	now := time.Now()
@@ -268,6 +307,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		"medium", mediumCount,
 		"low", lowCount,
 		"unknown", unknownCount,
+		"kev", kevCount,
 	)
 
 	return scanID, nil

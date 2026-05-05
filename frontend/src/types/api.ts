@@ -259,7 +259,12 @@ export interface CVEScanVuln {
   current_version: string;
   fixed_version?: string;
   severity: "critical" | "high" | "medium" | "low" | "unknown";
+  risk_severity: "critical" | "high" | "medium" | "low" | "unknown";
+  risk_score: number;
   cvss_score: number;
+  epss?: number;
+  epss_percentile?: number;
+  kev: boolean;
   description: string;
 }
 
@@ -277,6 +282,7 @@ export interface SecurityPosture {
   medium_count: number;
   low_count: number;
   unknown_count: number;
+  kev_count: number;
   total_nodes: number;
   scanned_nodes: number;
   posture_score: number;

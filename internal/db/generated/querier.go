@@ -6,6 +6,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -108,9 +109,13 @@ type Querier interface {
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
 	GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
+	GetEPSSEntries(ctx context.Context, dollar_1 []string) ([]EpssCache, error)
+	GetEPSSEntry(ctx context.Context, cveID string) (EpssCache, error)
 	GetEnabledLDAPConfig(ctx context.Context) (LdapConfig, error)
 	GetEnabledOIDCConfig(ctx context.Context) (OidcConfig, error)
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
+	GetKEVCacheAge(ctx context.Context) (time.Time, error)
+	GetKEVEntry(ctx context.Context, cveID string) (KevCache, error)
 	GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, error)
 	GetLastDRSMigrationForVM(ctx context.Context, arg GetLastDRSMigrationForVMParams) (DrsHistory, error)
 	GetLatestAlertForRule(ctx context.Context, arg GetLatestAlertForRuleParams) (AlertHistory, error)
@@ -233,6 +238,7 @@ type Querier interface {
 	ListFirewallTemplates(ctx context.Context) ([]FirewallTemplate, error)
 	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
 	ListGlobalSettings(ctx context.Context) ([]Setting, error)
+	ListKEVCVEIDs(ctx context.Context) ([]string, error)
 	ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error)
 	ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
 	ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error)
@@ -375,6 +381,8 @@ type Querier interface {
 	UpsertCVEScanSchedule(ctx context.Context, arg UpsertCVEScanScheduleParams) (CveScanSchedule, error)
 	UpsertClusterSSHCredentials(ctx context.Context, arg UpsertClusterSSHCredentialsParams) (ClusterSshCredential, error)
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
+	UpsertEPSSEntry(ctx context.Context, arg UpsertEPSSEntryParams) error
+	UpsertKEVEntry(ctx context.Context, arg UpsertKEVEntryParams) error
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertNodeDisk(ctx context.Context, arg UpsertNodeDiskParams) (NodeDisk, error)
 	UpsertNodeNetworkInterface(ctx context.Context, arg UpsertNodeNetworkInterfaceParams) (NodeNetworkInterface, error)

@@ -1,4 +1,4 @@
-import { ShieldCheck, ShieldAlert, ShieldX, Shield } from "lucide-react";
+import { ShieldCheck, ShieldAlert, ShieldX, Shield, Flame } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SecurityPosture } from "@/types/api";
 import { SeverityBadge } from "./SeverityBadge";
@@ -66,6 +66,22 @@ export function SecurityPostureCard({ posture }: SecurityPostureCardProps) {
           {posture.unknown_count > 0 && (
             <SeverityBadge severity="unknown" count={posture.unknown_count} />
           )}
+        </div>
+      )}
+
+      {hasScans && posture.kev_count > 0 && (
+        <div className="mt-4 flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm">
+          <Flame className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+          <div>
+            <div className="font-semibold text-red-700 dark:text-red-400">
+              {posture.kev_count} actively exploited{" "}
+              {posture.kev_count === 1 ? "vulnerability" : "vulnerabilities"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Listed in CISA's Known Exploited Vulnerabilities catalog —
+              patch immediately.
+            </div>
+          </div>
         </div>
       )}
 

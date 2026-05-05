@@ -120,8 +120,13 @@ type cveScanVulnResponse struct {
 	PackageName    string    `json:"package_name"`
 	CurrentVersion string    `json:"current_version"`
 	FixedVersion   string    `json:"fixed_version,omitempty"`
-	Severity       string    `json:"severity"`
+	Severity       string    `json:"severity"`        // Debian tracker urgency
+	RiskSeverity   string    `json:"risk_severity"`   // bucket derived from risk_score
+	RiskScore      float32   `json:"risk_score"`      // 0–10, drives posture
 	CVSSScore      float32   `json:"cvss_score"`
+	EPSS           *float32  `json:"epss,omitempty"`
+	EPSSPercentile *float32  `json:"epss_percentile,omitempty"`
+	KEV            bool      `json:"kev"`
 	Description    string    `json:"description"`
 }
 
@@ -134,6 +139,9 @@ func toCVEScanVulnResponse(v db.CveScanVuln) cveScanVulnResponse {
 		PackageName:    v.PackageName,
 		CurrentVersion: v.CurrentVersion,
 		Severity:       v.Severity,
+		RiskSeverity:   v.RiskSeverity,
+		RiskScore:      v.RiskScore,
+		KEV:            v.Kev,
 		Description:    v.Description,
 	}
 	if v.FixedVersion.Valid {
@@ -141,6 +149,14 @@ func toCVEScanVulnResponse(v db.CveScanVuln) cveScanVulnResponse {
 	}
 	if v.CvssScore.Valid {
 		r.CVSSScore = v.CvssScore.Float32
+	}
+	if v.Epss.Valid {
+		s := v.Epss.Float32
+		r.EPSS = &s
+	}
+	if v.EpssPercentile.Valid {
+		p := v.EpssPercentile.Float32
+		r.EPSSPercentile = &p
 	}
 	return r
 }
@@ -154,6 +170,7 @@ type securityPostureResponse struct {
 	MediumCount   int32     `json:"medium_count"`
 	LowCount      int32     `json:"low_count"`
 	UnknownCount  int32     `json:"unknown_count"`
+	KEVCount      int32     `json:"kev_count"`
 	TotalNodes    int32     `json:"total_nodes"`
 	ScannedNodes  int32     `json:"scanned_nodes"`
 	PostureScore  float32   `json:"posture_score"`
@@ -416,11 +433,14 @@ func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
 		})
 	}
 
-	// unknown_count is derived: any vuln stored that didn't fall into a
-	// classified severity bucket (no schema column for it).
-	unknown := summary.TotalVulns - summary.CriticalCount - summary.HighCount - summary.MediumCount - summary.LowCount
-	if unknown < 0 {
-		unknown = 0
+	// Phase 2 stores unknown_count and kev_count directly. Older scans
+	// pre-Phase-2 have unknown_count=0 (default); fall back to derivation.
+	unknown := summary.UnknownCount
+	if unknown == 0 {
+		derived := summary.TotalVulns - summary.CriticalCount - summary.HighCount - summary.MediumCount - summary.LowCount
+		if derived > 0 {
+			unknown = derived
+		}
 	}
 
 	score := scanner.ComputePostureScore(summary.CriticalCount, summary.HighCount, summary.MediumCount, summary.LowCount, unknown)
@@ -433,6 +453,7 @@ func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
 		HighCount:     summary.HighCount,
 		MediumCount:   summary.MediumCount,
 		LowCount:      summary.LowCount,
+		KEVCount:      summary.KevCount,
 		UnknownCount:  unknown,
 		TotalNodes:    summary.TotalNodes,
 		ScannedNodes:  summary.ScannedNodes,

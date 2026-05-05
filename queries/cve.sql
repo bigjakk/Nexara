@@ -14,7 +14,8 @@ WHERE id = $1;
 -- name: UpdateCVEScanCounts :exec
 UPDATE cve_scans
 SET scanned_nodes = $2, total_vulns = $3,
-    critical_count = $4, high_count = $5, medium_count = $6, low_count = $7
+    critical_count = $4, high_count = $5, medium_count = $6, low_count = $7,
+    unknown_count = $8, kev_count = $9
 WHERE id = $1;
 
 -- name: UpdateCVEScanTotalNodes :exec
@@ -48,8 +49,11 @@ WHERE scan_id = $1
 ORDER BY node_name;
 
 -- name: InsertCVEScanVuln :one
-INSERT INTO cve_scan_vulns (scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO cve_scan_vulns (
+    scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version,
+    severity, cvss_score, description, risk_score, risk_severity, epss, epss_percentile, kev
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 RETURNING *;
 
 -- name: ListCVEScanVulns :many
@@ -129,6 +133,8 @@ SELECT
     s.high_count,
     s.medium_count,
     s.low_count,
+    s.unknown_count,
+    s.kev_count,
     s.total_nodes,
     s.scanned_nodes,
     s.started_at,
@@ -137,4 +143,44 @@ FROM cve_scans s
 WHERE s.cluster_id = $1 AND s.status = 'completed'
 ORDER BY s.created_at DESC
 LIMIT 1;
+
+-- name: UpsertKEVEntry :exec
+INSERT INTO kev_cache (
+    cve_id, date_added, vendor_project, product, vulnerability_name,
+    short_description, required_action, due_date, ransomware_use, fetched_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+ON CONFLICT (cve_id) DO UPDATE SET
+    date_added = EXCLUDED.date_added,
+    vendor_project = EXCLUDED.vendor_project,
+    product = EXCLUDED.product,
+    vulnerability_name = EXCLUDED.vulnerability_name,
+    short_description = EXCLUDED.short_description,
+    required_action = EXCLUDED.required_action,
+    due_date = EXCLUDED.due_date,
+    ransomware_use = EXCLUDED.ransomware_use,
+    fetched_at = now();
+
+-- name: GetKEVEntry :one
+SELECT * FROM kev_cache WHERE cve_id = $1;
+
+-- name: ListKEVCVEIDs :many
+SELECT cve_id FROM kev_cache;
+
+-- name: GetKEVCacheAge :one
+SELECT MAX(fetched_at)::timestamptz AS newest_fetch FROM kev_cache;
+
+-- name: UpsertEPSSEntry :exec
+INSERT INTO epss_cache (cve_id, score, percentile, fetched_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (cve_id) DO UPDATE SET
+    score = EXCLUDED.score,
+    percentile = EXCLUDED.percentile,
+    fetched_at = now();
+
+-- name: GetEPSSEntry :one
+SELECT * FROM epss_cache WHERE cve_id = $1;
+
+-- name: GetEPSSEntries :many
+SELECT * FROM epss_cache WHERE cve_id = ANY($1::text[]);
 

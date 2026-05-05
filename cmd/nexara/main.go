@@ -410,6 +410,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 			"task_interval", "60s",
 			"drs_interval", "60s",
 			"cve_interval", "6h",
+			"kev_interval", "1h",
 			"alert_interval", "60s",
 			"report_interval", "60s",
 			"rolling_update_interval", "15s",
@@ -423,6 +424,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		// Run initial checks immediately.
 		sched.Run(ctx)
 		sched.RunDRS(ctx)
+		sched.RunKEVRefresh(ctx)
 		sched.RunCVEScanning(ctx)
 		sched.RunAlertEvaluation(ctx)
 		sched.RunReportGeneration(ctx)
@@ -436,6 +438,9 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 
 		cveTicker := time.NewTicker(6 * time.Hour)
 		defer cveTicker.Stop()
+
+		kevTicker := time.NewTicker(1 * time.Hour)
+		defer kevTicker.Stop()
 
 		alertTicker := time.NewTicker(60 * time.Second)
 		defer alertTicker.Stop()
@@ -454,6 +459,8 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 				sched.RunDRS(ctx)
 			case <-cveTicker.C:
 				sched.RunCVEScanning(ctx)
+			case <-kevTicker.C:
+				sched.RunKEVRefresh(ctx)
 			case <-alertTicker.C:
 				sched.RunAlertEvaluation(ctx)
 			case <-reportTicker.C:

@@ -150,6 +150,26 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 	}
 }
 
+// RunKEVRefresh refreshes the local CISA KEV catalog cache. The feed is small
+// (~1500 entries) and updated multiple times per week — refreshing hourly is
+// cheap and keeps the "actively exploited" signal current. Best-effort:
+// failures are logged but don't impact scans (existing cache stays usable).
+func (s *Scheduler) RunKEVRefresh(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("KEV refresh panicked", "panic", r)
+		}
+	}()
+
+	kev := scanner.NewKEVClient(s.queries, s.logger.With("component", "kev-client"))
+	written, err := kev.Refresh(ctx)
+	if err != nil {
+		s.logger.Warn("KEV refresh failed", "error", err)
+		return
+	}
+	s.logger.Info("KEV refresh complete", "entries", written)
+}
+
 // RunCVEScanning runs CVE scans for clusters based on their schedule configuration.
 // Clusters with no schedule config default to enabled with a 24-hour interval.
 func (s *Scheduler) RunCVEScanning(ctx context.Context) {
