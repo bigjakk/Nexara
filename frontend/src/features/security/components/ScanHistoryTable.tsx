@@ -126,80 +126,78 @@ export function ScanHistoryTable({
             <th className="w-16 px-4 py-3" />
           </tr>
         </thead>
-        <tbody>
-          {scans.map((scan) => {
-            const isExpanded = expandedId === scan.id;
-            return (
-              <tbody key={scan.id}>
-                <tr
-                  className="cursor-pointer border-b transition-colors hover:bg-muted/50"
-                  onClick={() => { setExpandedId(isExpanded ? null : scan.id); }}
-                >
-                  <td className="px-4 py-3">
-                    {isExpanded ? (
-                      <ChevronDown className="h-4 w-4" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4" />
+        {scans.map((scan) => {
+          const isExpanded = expandedId === scan.id;
+          return (
+            <tbody key={scan.id}>
+              <tr
+                className="cursor-pointer border-b transition-colors hover:bg-muted/50"
+                onClick={() => { setExpandedId(isExpanded ? null : scan.id); }}
+              >
+                <td className="px-4 py-3">
+                  {isExpanded ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {new Date(scan.started_at).toLocaleString()}
+                </td>
+                <td className="px-4 py-3">
+                  <StatusBadge status={scan.status} />
+                </td>
+                <td className="px-4 py-3">
+                  {scan.scanned_nodes}/{scan.total_nodes}
+                </td>
+                <td className="px-4 py-3 font-medium">{scan.total_vulns}</td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-1">
+                    {scan.critical_count > 0 && (
+                      <SeverityBadge severity="critical" count={scan.critical_count} />
                     )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {new Date(scan.started_at).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={scan.status} />
-                  </td>
-                  <td className="px-4 py-3">
-                    {scan.scanned_nodes}/{scan.total_nodes}
-                  </td>
-                  <td className="px-4 py-3 font-medium">{scan.total_vulns}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-1">
-                      {scan.critical_count > 0 && (
-                        <SeverityBadge severity="critical" count={scan.critical_count} />
-                      )}
-                      {scan.high_count > 0 && (
-                        <SeverityBadge severity="high" count={scan.high_count} />
-                      )}
-                      {scan.medium_count > 0 && (
-                        <SeverityBadge severity="medium" count={scan.medium_count} />
-                      )}
-                      {scan.low_count > 0 && (
-                        <SeverityBadge severity="low" count={scan.low_count} />
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-1">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectScan(scan.id);
-                        }}
-                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                        title="View vulnerabilities"
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteScan.mutate({ clusterId, scanId: scan.id });
-                        }}
-                        className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                        title="Delete scan"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-                {isExpanded && (
-                  <ExpandedScanRow clusterId={clusterId} scanId={scan.id} />
-                )}
-              </tbody>
-            );
-          })}
-        </tbody>
+                    {scan.high_count > 0 && (
+                      <SeverityBadge severity="high" count={scan.high_count} />
+                    )}
+                    {scan.medium_count > 0 && (
+                      <SeverityBadge severity="medium" count={scan.medium_count} />
+                    )}
+                    {scan.low_count > 0 && (
+                      <SeverityBadge severity="low" count={scan.low_count} />
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectScan(scan.id);
+                      }}
+                      className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                      title="View vulnerabilities"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteScan.mutate({ clusterId, scanId: scan.id });
+                      }}
+                      className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      title="Delete scan"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              {isExpanded && (
+                <ExpandedScanRow clusterId={clusterId} scanId={scan.id} />
+              )}
+            </tbody>
+          );
+        })}
       </table>
     </div>
   );
