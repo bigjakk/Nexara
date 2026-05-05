@@ -793,25 +793,42 @@ func (o *Orchestrator) advanceRebooting(ctx context.Context, client *proxmox.Cli
 		return
 	}
 
-	// Try to get node status — if it's online, reboot is done.
-	status, err := client.GetNodeStatus(ctx, node.NodeName)
-	if err != nil {
-		// Connection errors are expected while node is rebooting.
+	// Don't even probe for the first 30s — a Proxmox node usually takes 10-30s
+	// to start its actual shutdown sequence after `RebootNode` returns success,
+	// and during that window the API still answers with the *old* uptime.
+	if node.RebootStartedAt.Valid && time.Since(node.RebootStartedAt.Time) < 30*time.Second {
 		return
 	}
 
-	if status.Uptime > 0 {
-		if err := o.queries.SetNodeRebootCompleted(ctx, node.ID); err != nil {
-			o.logger.Error("failed to set node reboot completed", "node_id", node.ID, "error", err)
-			return
-		}
-		if err := o.queries.SetNodeHealthCheckPassed(ctx, node.ID); err != nil {
-			o.logger.Error("failed to set node health check passed", "node_id", node.ID, "error", err)
-			return
-		}
-		o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
-		o.logger.Info("node back online after reboot", "node", node.NodeName)
+	// Try to get node status. Connection errors are expected (the node is down).
+	status, err := client.GetNodeStatus(ctx, node.NodeName)
+	if err != nil {
+		return
 	}
+
+	// The node only counts as "rebooted" when its uptime is shorter than the
+	// time elapsed since we issued the reboot. Otherwise we're seeing the
+	// pre-reboot process (the OS hasn't shut down yet) and must keep waiting.
+	// A small skew buffer guards against clock drift between Nexara and the node.
+	const clockSkewBuffer = 10 * time.Second
+	elapsed := time.Since(node.RebootStartedAt.Time)
+	if time.Duration(status.Uptime)*time.Second >= elapsed+clockSkewBuffer {
+		o.logger.Debug("node still reporting pre-reboot uptime, waiting",
+			"node", node.NodeName, "uptime_s", status.Uptime, "elapsed_s", int64(elapsed.Seconds()))
+		return
+	}
+
+	if err := o.queries.SetNodeRebootCompleted(ctx, node.ID); err != nil {
+		o.logger.Error("failed to set node reboot completed", "node_id", node.ID, "error", err)
+		return
+	}
+	if err := o.queries.SetNodeHealthCheckPassed(ctx, node.ID); err != nil {
+		o.logger.Error("failed to set node health check passed", "node_id", node.ID, "error", err)
+		return
+	}
+	o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
+	o.logger.Info("node back online after reboot",
+		"node", node.NodeName, "uptime_s", status.Uptime, "elapsed_s", int64(elapsed.Seconds()))
 }
 
 func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
