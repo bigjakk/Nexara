@@ -291,6 +291,8 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/security-posture", s.cveHandler.GetSecurityPosture)
 			clusters.Get("/:cluster_id/cve-scan-schedule", s.cveHandler.GetSchedule)
 			clusters.Put("/:cluster_id/cve-scan-schedule", s.cveHandler.UpdateSchedule)
+			clusters.Get("/:cluster_id/cve-notifications", s.cveHandler.GetCVENotificationConfig)
+			clusters.Put("/:cluster_id/cve-notifications", s.cveHandler.UpdateCVENotificationConfig)
 		}
 
 		// Cluster-scoped alert routes.

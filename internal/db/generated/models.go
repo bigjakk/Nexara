@@ -197,6 +197,19 @@ type CveCache struct {
 	FetchedAt   time.Time          `json:"fetched_at"`
 }
 
+type CveNotificationConfig struct {
+	ClusterID             uuid.UUID          `json:"cluster_id"`
+	Enabled               bool               `json:"enabled"`
+	NotifyOnAct           bool               `json:"notify_on_act"`
+	NotifyOnAttend        bool               `json:"notify_on_attend"`
+	ChannelIds            []uuid.UUID        `json:"channel_ids"`
+	CooldownMinutes       int32              `json:"cooldown_minutes"`
+	LastNotifiedAt        pgtype.Timestamptz `json:"last_notified_at"`
+	LastNotifiedSignature string             `json:"last_notified_signature"`
+	CreatedAt             time.Time          `json:"created_at"`
+	UpdatedAt             time.Time          `json:"updated_at"`
+}
+
 type CveScan struct {
 	ID             uuid.UUID          `json:"id"`
 	ClusterID      uuid.UUID          `json:"cluster_id"`

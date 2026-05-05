@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strconv"
 
@@ -11,6 +12,7 @@ import (
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/scanner"
 )
 
@@ -19,17 +21,24 @@ type CVEHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	registry      *notifications.Registry
 }
 
 // NewCVEHandler creates a new CVE handler.
-func NewCVEHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *CVEHandler {
+func NewCVEHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher, registry *notifications.Registry) *CVEHandler {
 	return &CVEHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
+		registry:      registry,
 	}
 }
 
+// auditLog wraps the package-level AuditLog. resourceType is parameterised
+// for symmetry with sibling handlers even though every current caller passes
+// "cve_scan".
+//
+//nolint:unparam // resourceType retained for handler consistency
 func (h *CVEHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }
@@ -254,7 +263,7 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 	}
 
 	// Create the scan engine with a proper logger
-	eng := scanner.NewEngine(h.queries, h.encryptionKey, slog.Default())
+	eng := scanner.NewEngine(h.queries, h.encryptionKey, slog.Default(), h.registry)
 
 	h.auditLog(c, clusterID, "cve_scan", scan.ID.String(), "cve_scan_triggered", nil)
 
@@ -574,5 +583,151 @@ func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
 		IntervalHours: schedule.IntervalHours,
 		UpdatedAt:     schedule.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	})
+}
+
+// --- CVE notification config ---
+
+type cveNotifyConfigResponse struct {
+	ClusterID        uuid.UUID   `json:"cluster_id"`
+	Enabled          bool        `json:"enabled"`
+	NotifyOnAct      bool        `json:"notify_on_act"`
+	NotifyOnAttend   bool        `json:"notify_on_attend"`
+	ChannelIDs       []uuid.UUID `json:"channel_ids"`
+	CooldownMinutes  int32       `json:"cooldown_minutes"`
+	LastNotifiedAt   string      `json:"last_notified_at,omitempty"`
+}
+
+type updateCVENotifyConfigRequest struct {
+	Enabled         *bool       `json:"enabled"`
+	NotifyOnAct     *bool       `json:"notify_on_act"`
+	NotifyOnAttend  *bool       `json:"notify_on_attend"`
+	ChannelIDs      []uuid.UUID `json:"channel_ids"`
+	CooldownMinutes *int32      `json:"cooldown_minutes"`
+}
+
+// GetCVENotificationConfig returns the per-cluster CVE notification config.
+// Falls back to disabled defaults when no config exists yet.
+func (h *CVEHandler) GetCVENotificationConfig(c *fiber.Ctx) error {
+	if err := requirePerm(c, "view", "cve_scan"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+
+	cfg, err := h.queries.GetCVENotificationConfig(c.Context(), clusterID)
+	if err != nil {
+		return c.JSON(cveNotifyConfigResponse{
+			ClusterID:       clusterID,
+			Enabled:         false,
+			NotifyOnAct:     true,
+			NotifyOnAttend:  false,
+			ChannelIDs:      []uuid.UUID{},
+			CooldownMinutes: 60,
+		})
+	}
+
+	resp := cveNotifyConfigResponse{
+		ClusterID:       cfg.ClusterID,
+		Enabled:         cfg.Enabled,
+		NotifyOnAct:     cfg.NotifyOnAct,
+		NotifyOnAttend:  cfg.NotifyOnAttend,
+		ChannelIDs:      cfg.ChannelIds,
+		CooldownMinutes: cfg.CooldownMinutes,
+	}
+	if cfg.LastNotifiedAt.Valid {
+		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format("2006-01-02T15:04:05Z")
+	}
+	return c.JSON(resp)
+}
+
+// UpdateCVENotificationConfig upserts the per-cluster CVE notification config.
+func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
+	if err := requirePerm(c, "manage", "cve_scan"); err != nil {
+		return err
+	}
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+
+	var req updateCVENotifyConfigRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	// Defaults / merge from existing.
+	enabled := false
+	notifyOnAct := true
+	notifyOnAttend := false
+	channelIDs := []uuid.UUID{}
+	cooldownMinutes := int32(60)
+	if existing, err := h.queries.GetCVENotificationConfig(c.Context(), clusterID); err == nil {
+		enabled = existing.Enabled
+		notifyOnAct = existing.NotifyOnAct
+		notifyOnAttend = existing.NotifyOnAttend
+		channelIDs = existing.ChannelIds
+		cooldownMinutes = existing.CooldownMinutes
+	}
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	if req.NotifyOnAct != nil {
+		notifyOnAct = *req.NotifyOnAct
+	}
+	if req.NotifyOnAttend != nil {
+		notifyOnAttend = *req.NotifyOnAttend
+	}
+	if req.ChannelIDs != nil {
+		channelIDs = req.ChannelIDs
+	}
+	if req.CooldownMinutes != nil {
+		cooldownMinutes = *req.CooldownMinutes
+	}
+
+	if cooldownMinutes < 0 || cooldownMinutes > 10080 {
+		return fiber.NewError(fiber.StatusBadRequest, "Cooldown must be 0–10080 minutes")
+	}
+	if enabled && len(channelIDs) == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "At least one channel is required when enabled")
+	}
+	if enabled && !notifyOnAct && !notifyOnAttend {
+		return fiber.NewError(fiber.StatusBadRequest, "At least one severity (Act or Attend) must be selected")
+	}
+
+	for _, cid := range channelIDs {
+		if _, err := h.queries.GetNotificationChannel(c.Context(), cid); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest,
+				fmt.Sprintf("Channel %s does not exist", cid))
+		}
+	}
+
+	cfg, err := h.queries.UpsertCVENotificationConfig(c.Context(), db.UpsertCVENotificationConfigParams{
+		ClusterID:       clusterID,
+		Enabled:         enabled,
+		NotifyOnAct:     notifyOnAct,
+		NotifyOnAttend:  notifyOnAttend,
+		ChannelIds:      channelIDs,
+		CooldownMinutes: cooldownMinutes,
+	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification config")
+	}
+
+	h.auditLog(c, clusterID, "cve_scan", clusterID.String(), "cve_notify_config_updated", nil)
+
+	resp := cveNotifyConfigResponse{
+		ClusterID:       cfg.ClusterID,
+		Enabled:         cfg.Enabled,
+		NotifyOnAct:     cfg.NotifyOnAct,
+		NotifyOnAttend:  cfg.NotifyOnAttend,
+		ChannelIDs:      cfg.ChannelIds,
+		CooldownMinutes: cfg.CooldownMinutes,
+	}
+	if cfg.LastNotifiedAt.Valid {
+		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format("2006-01-02T15:04:05Z")
+	}
+	return c.JSON(resp)
 }
 

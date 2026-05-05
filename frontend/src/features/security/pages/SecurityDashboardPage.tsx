@@ -12,6 +12,7 @@ import {
 } from "../api/cve-queries";
 import { SecurityPostureCard } from "../components/SecurityPostureCard";
 import { SSVCHistogram } from "../components/SSVCHistogram";
+import { CVENotifyCard } from "../components/CVENotifyCard";
 import { ScanScheduleCard } from "../components/ScanScheduleCard";
 import { ScanHistoryTable } from "../components/ScanHistoryTable";
 import { VulnerabilityTable } from "../components/VulnerabilityTable";
@@ -201,6 +202,7 @@ export function SecurityDashboardPage() {
           ) : null}
 
           <ScanScheduleCard clusterId={activeClusterId} />
+          <CVENotifyCard clusterId={activeClusterId} />
 
           {selectedScanId ? (
             <VulnerabilityTable

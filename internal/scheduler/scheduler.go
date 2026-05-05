@@ -45,7 +45,7 @@ func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPu
 		logger:        logger,
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
 		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor"), eventPub),
-		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner")),
+		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner"), registry),
 		alertEngine:   notifications.NewEngine(queries, logger.With("component", "alert-engine"), eventPub, registry, encryptionKey),
 		reportGen:     reports.NewGenerator(queries, logger.With("component", "report-gen")),
 		rollingOrch:   rolling.NewOrchestrator(queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry),

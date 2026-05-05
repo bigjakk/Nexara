@@ -304,6 +304,16 @@ export interface CVEScanSchedule {
   updated_at?: string;
 }
 
+export interface CVENotifyConfig {
+  cluster_id: string;
+  enabled: boolean;
+  notify_on_act: boolean;
+  notify_on_attend: boolean;
+  channel_ids: string[];
+  cooldown_minutes: number;
+  last_notified_at?: string;
+}
+
 // Alert types
 export interface AlertRule {
   id: string;

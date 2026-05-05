@@ -13,6 +13,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -32,18 +33,26 @@ type Engine struct {
 	queries       *db.Queries
 	encryptionKey string
 	logger        *slog.Logger
+	notifier      *Notifier // optional; if nil, post-scan notifications are skipped
 }
 
-// NewEngine creates a new CVE scanner engine.
-func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger) *Engine {
+// NewEngine creates a new CVE scanner engine. registry may be nil — when it
+// is, the post-scan notification step is a no-op (suitable for tests).
+func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, registry *notifications.Registry) *Engine {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Engine{
+	e := &Engine{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		logger:        logger,
 	}
+	if registry != nil {
+		n := NewNotifier(queries, registry, logger.With("component", "cve-notifier"))
+		n.SetEncryptionKey(encryptionKey)
+		e.notifier = n
+	}
+	return e
 }
 
 // ScanCluster performs a full CVE scan of all nodes in a cluster.
@@ -340,6 +349,10 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		"track_star", trackStarCount,
 		"track", trackCount,
 	)
+
+	if e.notifier != nil {
+		e.notifier.MaybeNotify(ctx, clusterID, scanID)
+	}
 
 	return scanID, nil
 }

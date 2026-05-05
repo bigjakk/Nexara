@@ -52,6 +52,28 @@ func (q *Queries) GetCVECacheByID(ctx context.Context, cveID string) (CveCache, 
 	return i, err
 }
 
+const getCVENotificationConfig = `-- name: GetCVENotificationConfig :one
+SELECT cluster_id, enabled, notify_on_act, notify_on_attend, channel_ids, cooldown_minutes, last_notified_at, last_notified_signature, created_at, updated_at FROM cve_notification_configs WHERE cluster_id = $1
+`
+
+func (q *Queries) GetCVENotificationConfig(ctx context.Context, clusterID uuid.UUID) (CveNotificationConfig, error) {
+	row := q.db.QueryRow(ctx, getCVENotificationConfig, clusterID)
+	var i CveNotificationConfig
+	err := row.Scan(
+		&i.ClusterID,
+		&i.Enabled,
+		&i.NotifyOnAct,
+		&i.NotifyOnAttend,
+		&i.ChannelIds,
+		&i.CooldownMinutes,
+		&i.LastNotifiedAt,
+		&i.LastNotifiedSignature,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCVEScan = `-- name: GetCVEScan :one
 SELECT id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count, act_count, attend_count, track_star_count, track_count FROM cve_scans WHERE id = $1
 `
@@ -724,6 +746,61 @@ func (q *Queries) ListKEVCVEIDs(ctx context.Context) ([]string, error) {
 	return items, nil
 }
 
+const listVulnsBySSVCInScan = `-- name: ListVulnsBySSVCInScan :many
+SELECT cve_id, package_name, risk_score
+FROM cve_scan_vulns
+WHERE scan_id = $1 AND ssvc_label = ANY($2::text[])
+ORDER BY risk_score DESC, cve_id
+`
+
+type ListVulnsBySSVCInScanParams struct {
+	ScanID  uuid.UUID `json:"scan_id"`
+	Column2 []string  `json:"column_2"`
+}
+
+type ListVulnsBySSVCInScanRow struct {
+	CveID       string  `json:"cve_id"`
+	PackageName string  `json:"package_name"`
+	RiskScore   float32 `json:"risk_score"`
+}
+
+func (q *Queries) ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVCInScanParams) ([]ListVulnsBySSVCInScanRow, error) {
+	rows, err := q.db.Query(ctx, listVulnsBySSVCInScan, arg.ScanID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVulnsBySSVCInScanRow{}
+	for rows.Next() {
+		var i ListVulnsBySSVCInScanRow
+		if err := rows.Scan(&i.CveID, &i.PackageName, &i.RiskScore); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateCVENotificationSent = `-- name: UpdateCVENotificationSent :exec
+UPDATE cve_notification_configs
+SET last_notified_at = now(),
+    last_notified_signature = $2
+WHERE cluster_id = $1
+`
+
+type UpdateCVENotificationSentParams struct {
+	ClusterID             uuid.UUID `json:"cluster_id"`
+	LastNotifiedSignature string    `json:"last_notified_signature"`
+}
+
+func (q *Queries) UpdateCVENotificationSent(ctx context.Context, arg UpdateCVENotificationSentParams) error {
+	_, err := q.db.Exec(ctx, updateCVENotificationSent, arg.ClusterID, arg.LastNotifiedSignature)
+	return err
+}
+
 const updateCVEScanCounts = `-- name: UpdateCVEScanCounts :exec
 UPDATE cve_scans
 SET scanned_nodes = $2, total_vulns = $3,
@@ -865,6 +942,56 @@ func (q *Queries) UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) 
 		arg.PublishedAt,
 	)
 	return err
+}
+
+const upsertCVENotificationConfig = `-- name: UpsertCVENotificationConfig :one
+INSERT INTO cve_notification_configs (
+    cluster_id, enabled, notify_on_act, notify_on_attend,
+    channel_ids, cooldown_minutes, updated_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, now())
+ON CONFLICT (cluster_id) DO UPDATE SET
+    enabled = EXCLUDED.enabled,
+    notify_on_act = EXCLUDED.notify_on_act,
+    notify_on_attend = EXCLUDED.notify_on_attend,
+    channel_ids = EXCLUDED.channel_ids,
+    cooldown_minutes = EXCLUDED.cooldown_minutes,
+    updated_at = now()
+RETURNING cluster_id, enabled, notify_on_act, notify_on_attend, channel_ids, cooldown_minutes, last_notified_at, last_notified_signature, created_at, updated_at
+`
+
+type UpsertCVENotificationConfigParams struct {
+	ClusterID       uuid.UUID   `json:"cluster_id"`
+	Enabled         bool        `json:"enabled"`
+	NotifyOnAct     bool        `json:"notify_on_act"`
+	NotifyOnAttend  bool        `json:"notify_on_attend"`
+	ChannelIds      []uuid.UUID `json:"channel_ids"`
+	CooldownMinutes int32       `json:"cooldown_minutes"`
+}
+
+func (q *Queries) UpsertCVENotificationConfig(ctx context.Context, arg UpsertCVENotificationConfigParams) (CveNotificationConfig, error) {
+	row := q.db.QueryRow(ctx, upsertCVENotificationConfig,
+		arg.ClusterID,
+		arg.Enabled,
+		arg.NotifyOnAct,
+		arg.NotifyOnAttend,
+		arg.ChannelIds,
+		arg.CooldownMinutes,
+	)
+	var i CveNotificationConfig
+	err := row.Scan(
+		&i.ClusterID,
+		&i.Enabled,
+		&i.NotifyOnAct,
+		&i.NotifyOnAttend,
+		&i.ChannelIds,
+		&i.CooldownMinutes,
+		&i.LastNotifiedAt,
+		&i.LastNotifiedSignature,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertCVEScanSchedule = `-- name: UpsertCVEScanSchedule :one

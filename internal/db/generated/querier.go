@@ -95,6 +95,7 @@ type Querier interface {
 	GetAlertSummary(ctx context.Context) (GetAlertSummaryRow, error)
 	GetCVECacheAge(ctx context.Context) (interface{}, error)
 	GetCVECacheByID(ctx context.Context, cveID string) (CveCache, error)
+	GetCVENotificationConfig(ctx context.Context, clusterID uuid.UUID) (CveNotificationConfig, error)
 	GetCVEScan(ctx context.Context, id uuid.UUID) (CveScan, error)
 	GetCVEScanSchedule(ctx context.Context, clusterID uuid.UUID) (CveScanSchedule, error)
 	GetCephClusterMetrics1h(ctx context.Context, arg GetCephClusterMetrics1hParams) ([]CephClusterMetrics1h, error)
@@ -287,6 +288,7 @@ type Querier interface {
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
+	ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVCInScanParams) ([]ListVulnsBySSVCInScanRow, error)
 	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
@@ -339,6 +341,7 @@ type Querier interface {
 	UpdateAlertEscalation(ctx context.Context, arg UpdateAlertEscalationParams) error
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)
 	UpdateAlertState(ctx context.Context, arg UpdateAlertStateParams) error
+	UpdateCVENotificationSent(ctx context.Context, arg UpdateCVENotificationSentParams) error
 	UpdateCVEScanCounts(ctx context.Context, arg UpdateCVEScanCountsParams) error
 	UpdateCVEScanNode(ctx context.Context, arg UpdateCVEScanNodeParams) error
 	UpdateCVEScanStatus(ctx context.Context, arg UpdateCVEScanStatusParams) error
@@ -378,6 +381,7 @@ type Querier interface {
 	UpdateVMPool(ctx context.Context, arg UpdateVMPoolParams) error
 	UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error
 	UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) error
+	UpsertCVENotificationConfig(ctx context.Context, arg UpsertCVENotificationConfigParams) (CveNotificationConfig, error)
 	UpsertCVEScanSchedule(ctx context.Context, arg UpsertCVEScanScheduleParams) (CveScanSchedule, error)
 	UpsertClusterSSHCredentials(ctx context.Context, arg UpsertClusterSSHCredentialsParams) (ClusterSshCredential, error)
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)

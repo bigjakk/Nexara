@@ -189,3 +189,33 @@ SELECT * FROM epss_cache WHERE cve_id = $1;
 -- name: GetEPSSEntries :many
 SELECT * FROM epss_cache WHERE cve_id = ANY($1::text[]);
 
+-- name: GetCVENotificationConfig :one
+SELECT * FROM cve_notification_configs WHERE cluster_id = $1;
+
+-- name: UpsertCVENotificationConfig :one
+INSERT INTO cve_notification_configs (
+    cluster_id, enabled, notify_on_act, notify_on_attend,
+    channel_ids, cooldown_minutes, updated_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, now())
+ON CONFLICT (cluster_id) DO UPDATE SET
+    enabled = EXCLUDED.enabled,
+    notify_on_act = EXCLUDED.notify_on_act,
+    notify_on_attend = EXCLUDED.notify_on_attend,
+    channel_ids = EXCLUDED.channel_ids,
+    cooldown_minutes = EXCLUDED.cooldown_minutes,
+    updated_at = now()
+RETURNING *;
+
+-- name: UpdateCVENotificationSent :exec
+UPDATE cve_notification_configs
+SET last_notified_at = now(),
+    last_notified_signature = $2
+WHERE cluster_id = $1;
+
+-- name: ListVulnsBySSVCInScan :many
+SELECT cve_id, package_name, risk_score
+FROM cve_scan_vulns
+WHERE scan_id = $1 AND ssvc_label = ANY($2::text[])
+ORDER BY risk_score DESC, cve_id;
+
