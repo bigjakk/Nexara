@@ -130,7 +130,7 @@ func (h *AuthHandler) authAuditLog(c *fiber.Ctx, userID uuid.UUID, action string
 	}
 	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{},
-		UserID:       userID,
+		UserID:       UserUUID(userID),
 		ResourceType: "auth",
 		ResourceID:   userID.String(),
 		Action:       action,

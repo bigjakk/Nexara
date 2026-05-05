@@ -75,7 +75,7 @@ VALUES ($1, $2, $3, $4, $5, $6)
 
 type InsertAuditLogParams struct {
 	ClusterID    pgtype.UUID     `json:"cluster_id"`
-	UserID       uuid.UUID       `json:"user_id"`
+	UserID       pgtype.UUID     `json:"user_id"`
 	ResourceType string          `json:"resource_type"`
 	ResourceID   string          `json:"resource_id"`
 	Action       string          `json:"action"`
@@ -101,7 +101,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 
 type InsertAuditLogWithSourceParams struct {
 	ClusterID    pgtype.UUID     `json:"cluster_id"`
-	UserID       uuid.UUID       `json:"user_id"`
+	UserID       pgtype.UUID     `json:"user_id"`
 	ResourceType string          `json:"resource_type"`
 	ResourceID   string          `json:"resource_id"`
 	Action       string          `json:"action"`
@@ -180,7 +180,7 @@ SELECT
   COALESCE(v.vmid, 0) AS resource_vmid,
   COALESCE(v.name, '') AS resource_name
 FROM audit_log a
-JOIN users u ON u.id = a.user_id
+LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
@@ -209,15 +209,15 @@ type ListAuditLogAdvancedParams struct {
 type ListAuditLogAdvancedRow struct {
 	ID              uuid.UUID       `json:"id"`
 	ClusterID       pgtype.UUID     `json:"cluster_id"`
-	UserID          uuid.UUID       `json:"user_id"`
+	UserID          pgtype.UUID     `json:"user_id"`
 	ResourceType    string          `json:"resource_type"`
 	ResourceID      string          `json:"resource_id"`
 	Action          string          `json:"action"`
 	Details         json.RawMessage `json:"details"`
 	CreatedAt       time.Time       `json:"created_at"`
 	Source          string          `json:"source"`
-	UserEmail       string          `json:"user_email"`
-	UserDisplayName string          `json:"user_display_name"`
+	UserEmail       pgtype.Text     `json:"user_email"`
+	UserDisplayName pgtype.Text     `json:"user_display_name"`
 	ClusterName     string          `json:"cluster_name"`
 	ResourceVmid    int32           `json:"resource_vmid"`
 	ResourceName    string          `json:"resource_name"`
@@ -324,7 +324,7 @@ SELECT
   COALESCE(v.vmid, 0) AS resource_vmid,
   COALESCE(v.name, '') AS resource_name
 FROM audit_log a
-JOIN users u ON u.id = a.user_id
+LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
@@ -343,15 +343,15 @@ type ListAuditLogEnrichedParams struct {
 type ListAuditLogEnrichedRow struct {
 	ID              uuid.UUID       `json:"id"`
 	ClusterID       pgtype.UUID     `json:"cluster_id"`
-	UserID          uuid.UUID       `json:"user_id"`
+	UserID          pgtype.UUID     `json:"user_id"`
 	ResourceType    string          `json:"resource_type"`
 	ResourceID      string          `json:"resource_id"`
 	Action          string          `json:"action"`
 	Details         json.RawMessage `json:"details"`
 	CreatedAt       time.Time       `json:"created_at"`
 	Source          string          `json:"source"`
-	UserEmail       string          `json:"user_email"`
-	UserDisplayName string          `json:"user_display_name"`
+	UserEmail       pgtype.Text     `json:"user_email"`
+	UserDisplayName pgtype.Text     `json:"user_display_name"`
 	ClusterName     string          `json:"cluster_name"`
 	ResourceVmid    int32           `json:"resource_vmid"`
 	ResourceName    string          `json:"resource_name"`
@@ -521,7 +521,7 @@ SELECT
   COALESCE(v.vmid, 0) AS resource_vmid,
   COALESCE(v.name, '') AS resource_name
 FROM audit_log a
-JOIN users u ON u.id = a.user_id
+LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 ORDER BY a.created_at DESC
@@ -531,15 +531,15 @@ LIMIT 50
 type ListRecentAuditLogEnrichedRow struct {
 	ID              uuid.UUID       `json:"id"`
 	ClusterID       pgtype.UUID     `json:"cluster_id"`
-	UserID          uuid.UUID       `json:"user_id"`
+	UserID          pgtype.UUID     `json:"user_id"`
 	ResourceType    string          `json:"resource_type"`
 	ResourceID      string          `json:"resource_id"`
 	Action          string          `json:"action"`
 	Details         json.RawMessage `json:"details"`
 	CreatedAt       time.Time       `json:"created_at"`
 	Source          string          `json:"source"`
-	UserEmail       string          `json:"user_email"`
-	UserDisplayName string          `json:"user_display_name"`
+	UserEmail       pgtype.Text     `json:"user_email"`
+	UserDisplayName pgtype.Text     `json:"user_display_name"`
 	ClusterName     string          `json:"cluster_name"`
 	ResourceVmid    int32           `json:"resource_vmid"`
 	ResourceName    string          `json:"resource_name"`

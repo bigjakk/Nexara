@@ -36,7 +36,7 @@ SELECT
   COALESCE(v.vmid, 0) AS resource_vmid,
   COALESCE(v.name, '') AS resource_name
 FROM audit_log a
-JOIN users u ON u.id = a.user_id
+LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluster_id'))
@@ -61,7 +61,7 @@ SELECT
   COALESCE(v.vmid, 0) AS resource_vmid,
   COALESCE(v.name, '') AS resource_name
 FROM audit_log a
-JOIN users u ON u.id = a.user_id
+LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 ORDER BY a.created_at DESC
@@ -89,7 +89,7 @@ SELECT
   COALESCE(v.vmid, 0) AS resource_vmid,
   COALESCE(v.name, '') AS resource_name
 FROM audit_log a
-JOIN users u ON u.id = a.user_id
+LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluster_id'))

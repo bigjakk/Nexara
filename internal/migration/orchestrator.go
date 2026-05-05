@@ -818,7 +818,7 @@ func (o *Orchestrator) auditLog(ctx context.Context, mc *migrationContext, actio
 	}
 	_ = o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: mc.job.SourceClusterID, Valid: true},
-		UserID:       mc.userID,
+		UserID:       pgtype.UUID{Bytes: mc.userID, Valid: true},
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		Action:       action,

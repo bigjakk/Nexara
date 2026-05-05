@@ -261,7 +261,7 @@ func (e *Executor) auditLogWithUPID(ctx context.Context, clusterID uuid.UUID, re
 
 	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       SystemUserID,
+		UserID:       pgtype.UUID{Bytes: SystemUserID, Valid: true},
 		ResourceType: "vm",
 		ResourceID:   resourceID,
 		Action:       action,
@@ -288,7 +288,7 @@ func (e *Executor) auditLog(ctx context.Context, clusterID uuid.UUID, resourceID
 
 	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       SystemUserID,
+		UserID:       pgtype.UUID{Bytes: SystemUserID, Valid: true},
 		ResourceType: "vm",
 		ResourceID:   resourceID,
 		Action:       action,

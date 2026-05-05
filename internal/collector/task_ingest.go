@@ -149,7 +149,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 
 	if err := s.queries.InsertAuditLogWithSource(ctx, db.InsertAuditLogWithSourceParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
-		UserID:       systemUserID,
+		UserID:       pgtype.UUID{Bytes: systemUserID, Valid: true},
 		ResourceType: mapping.ResourceType,
 		ResourceID:   resourceID,
 		Action:       mapping.Action,

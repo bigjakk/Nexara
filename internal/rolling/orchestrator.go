@@ -1379,7 +1379,7 @@ func (o *Orchestrator) auditLog(ctx context.Context, clusterID uuid.UUID, jobID 
 
 	err := o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       SystemUserID,
+		UserID:       pgtype.UUID{Bytes: SystemUserID, Valid: true},
 		ResourceType: "rolling_update",
 		ResourceID:   jobID.String(),
 		Action:       action,

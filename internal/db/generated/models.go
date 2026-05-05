@@ -75,7 +75,7 @@ type ApiKey struct {
 type AuditLog struct {
 	ID           uuid.UUID       `json:"id"`
 	ClusterID    pgtype.UUID     `json:"cluster_id"`
-	UserID       uuid.UUID       `json:"user_id"`
+	UserID       pgtype.UUID     `json:"user_id"`
 	ResourceType string          `json:"resource_type"`
 	ResourceID   string          `json:"resource_id"`
 	Action       string          `json:"action"`

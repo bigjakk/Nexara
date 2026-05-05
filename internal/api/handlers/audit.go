@@ -28,20 +28,20 @@ func NewAuditHandler(queries *db.Queries, eventPub *events.Publisher) *AuditHand
 }
 
 type auditLogResponse struct {
-	ID              uuid.UUID `json:"id"`
-	ClusterID       *string   `json:"cluster_id"`
-	UserID          uuid.UUID `json:"user_id"`
-	ResourceType    string    `json:"resource_type"`
-	ResourceID      string    `json:"resource_id"`
-	Action          string    `json:"action"`
-	Details         string    `json:"details"`
-	CreatedAt       string    `json:"created_at"`
-	Source          string    `json:"source"`
-	UserEmail       string    `json:"user_email"`
-	UserDisplayName string    `json:"user_display_name"`
-	ClusterName     string    `json:"cluster_name"`
-	ResourceVMID    int32     `json:"resource_vmid"`
-	ResourceName    string    `json:"resource_name"`
+	ID              uuid.UUID  `json:"id"`
+	ClusterID       *string    `json:"cluster_id"`
+	UserID          *uuid.UUID `json:"user_id"`
+	ResourceType    string     `json:"resource_type"`
+	ResourceID      string     `json:"resource_id"`
+	Action          string     `json:"action"`
+	Details         string     `json:"details"`
+	CreatedAt       string     `json:"created_at"`
+	Source          string     `json:"source"`
+	UserEmail       string     `json:"user_email"`
+	UserDisplayName string     `json:"user_display_name"`
+	ClusterName     string     `json:"cluster_name"`
+	ResourceVMID    int32      `json:"resource_vmid"`
+	ResourceName    string     `json:"resource_name"`
 }
 
 type auditListResponse struct {
@@ -52,18 +52,21 @@ type auditListResponse struct {
 func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow) auditLogResponse {
 	resp := auditLogResponse{
 		ID:              a.ID,
-		UserID:          a.UserID,
 		ResourceType:    a.ResourceType,
 		ResourceID:      a.ResourceID,
 		Action:          a.Action,
 		Details:         string(a.Details),
 		CreatedAt:       a.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		Source:          a.Source,
-		UserEmail:       a.UserEmail,
-		UserDisplayName: a.UserDisplayName,
+		UserEmail:       a.UserEmail.String,
+		UserDisplayName: a.UserDisplayName.String,
 		ClusterName:     a.ClusterName,
 		ResourceVMID:    a.ResourceVmid,
 		ResourceName:    a.ResourceName,
+	}
+	if a.UserID.Valid {
+		u := uuid.UUID(a.UserID.Bytes)
+		resp.UserID = &u
 	}
 	if a.ClusterID.Valid {
 		s := uuid.UUID(a.ClusterID.Bytes).String()
@@ -200,18 +203,21 @@ func (h *AuditHandler) ListRecent(c *fiber.Ctx) error {
 func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow) auditLogResponse {
 	resp := auditLogResponse{
 		ID:              a.ID,
-		UserID:          a.UserID,
 		ResourceType:    a.ResourceType,
 		ResourceID:      a.ResourceID,
 		Action:          a.Action,
 		Details:         string(a.Details),
 		CreatedAt:       a.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		Source:          a.Source,
-		UserEmail:       a.UserEmail,
-		UserDisplayName: a.UserDisplayName,
+		UserEmail:       a.UserEmail.String,
+		UserDisplayName: a.UserDisplayName.String,
 		ClusterName:     a.ClusterName,
 		ResourceVMID:    a.ResourceVmid,
 		ResourceName:    a.ResourceName,
+	}
+	if a.UserID.Valid {
+		u := uuid.UUID(a.UserID.Bytes)
+		resp.UserID = &u
 	}
 	if a.ClusterID.Valid {
 		s := uuid.UUID(a.ClusterID.Bytes).String()
@@ -364,15 +370,18 @@ func (h *AuditHandler) exportCSV(c *fiber.Ctx, items []db.ListAuditLogAdvancedRo
 		if a.ResourceVmid > 0 {
 			vmid = fmt.Sprintf("%d", a.ResourceVmid)
 		}
-		userName := a.UserDisplayName
+		userName := a.UserDisplayName.String
 		if userName == "" {
-			userName = a.UserEmail
+			userName = a.UserEmail.String
+		}
+		if userName == "" {
+			userName = "(deleted user)"
 		}
 		_ = w.Write([]string{
 			a.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			clusterName,
 			userName,
-			a.UserEmail,
+			a.UserEmail.String,
 			a.ResourceType,
 			a.ResourceID,
 			resourceName,
@@ -398,9 +407,12 @@ func (h *AuditHandler) exportSyslog(c *fiber.Ctx, items []db.ListAuditLogAdvance
 		severity := syslogSeverity(a.Action)
 		pri := 16*8 + severity // facility local0 = 16
 
-		userName := a.UserDisplayName
+		userName := a.UserDisplayName.String
 		if userName == "" {
-			userName = a.UserEmail
+			userName = a.UserEmail.String
+		}
+		if userName == "" {
+			userName = "(deleted user)"
 		}
 
 		clusterName := a.ClusterName

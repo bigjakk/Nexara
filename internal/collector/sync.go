@@ -1108,7 +1108,7 @@ func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncEr
 
 	_ = s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
-		UserID:       systemUserID,
+		UserID:       pgtype.UUID{Bytes: systemUserID, Valid: true},
 		ResourceType: "cluster",
 		ResourceID:   cluster.ID.String(),
 		Action:       action,

@@ -505,7 +505,7 @@ func (h *OIDCHandler) Callback(c *fiber.Ctx) error {
 	details, _ := json.Marshal(map[string]string{"email": userInfo.Email, "ip": c.IP()})
 	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{},
-		UserID:       user.ID,
+		UserID:       UserUUID(user.ID),
 		ResourceType: "auth",
 		ResourceID:   user.ID.String(),
 		Action:       "oidc_callback",
