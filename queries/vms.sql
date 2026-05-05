@@ -53,3 +53,12 @@ UPDATE vms SET pool = $2 WHERE id = $1;
 
 -- name: DeleteStaleVMs :exec
 DELETE FROM vms WHERE cluster_id = $1 AND last_seen_at < $2;
+
+-- name: DeleteStaleVMsForNodes :exec
+-- Prunes VMs only on nodes that synced successfully this cycle. Used by
+-- the collector so a transient per-node Proxmox API failure doesn't
+-- briefly wipe that node's inventory.
+DELETE FROM vms
+WHERE cluster_id = $1
+  AND last_seen_at < $2
+  AND node_id = ANY(@node_ids::uuid[]);

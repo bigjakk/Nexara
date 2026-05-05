@@ -42,7 +42,7 @@ type SyncQueries interface {
 	DeleteStaleStoragePools(ctx context.Context, arg db.DeleteStaleStoragePoolsParams) (int64, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
-	DeleteStaleVMs(ctx context.Context, arg db.DeleteStaleVMsParams) error
+	DeleteStaleVMsForNodes(ctx context.Context, arg db.DeleteStaleVMsForNodesParams) error
 	UpdateNodeAddress(ctx context.Context, arg db.UpdateNodeAddressParams) error
 	// Audit
 	InsertAuditLog(ctx context.Context, arg db.InsertAuditLogParams) error
@@ -230,6 +230,10 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	}
 
 	storageAdded := false
+	// Node IDs whose VM+container sync completed without error this cycle.
+	// Only these nodes are eligible for stale-VM pruning — see the
+	// DeleteStaleVMsForNodes call below.
+	syncedNodeIDs := make([]uuid.UUID, 0, len(nodes))
 	for _, node := range nodes {
 		nr, err := s.syncNode(ctx, client, cluster.ID, node, vmExtra)
 		if err != nil {
@@ -258,6 +262,9 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		result.VMMetrics = append(result.VMMetrics, nr.VMMetrics...)
 		if nr.StorageAdded {
 			storageAdded = true
+		}
+		if nr.SyncOK {
+			syncedNodeIDs = append(syncedNodeIDs, nr.Node)
 		}
 	}
 
@@ -311,17 +318,22 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		}
 	}
 
-	// Prune VMs/CTs that no longer exist on Proxmox. Any VM that wasn't
-	// upserted during this sync cycle will have a last_seen_at older than
-	// the timestamp captured at the start of the cycle.
-	if err := s.queries.DeleteStaleVMs(ctx, db.DeleteStaleVMsParams{
-		ClusterID:  cluster.ID,
-		LastSeenAt: now,
-	}); err != nil {
-		s.logger.Warn("failed to prune stale VMs",
-			"cluster_id", cluster.ID,
-			"error", err,
-		)
+	// Prune VMs/CTs that no longer exist on Proxmox. We restrict the
+	// delete to nodes whose VM+container fetch succeeded this cycle so a
+	// transient Proxmox API failure on one node doesn't briefly wipe its
+	// inventory. VMs on nodes that failed to sync are left intact and will
+	// be pruned the next time that node syncs cleanly.
+	if len(syncedNodeIDs) > 0 {
+		if err := s.queries.DeleteStaleVMsForNodes(ctx, db.DeleteStaleVMsForNodesParams{
+			ClusterID:  cluster.ID,
+			LastSeenAt: now,
+			NodeIds:    syncedNodeIDs,
+		}); err != nil {
+			s.logger.Warn("failed to prune stale VMs",
+				"cluster_id", cluster.ID,
+				"error", err,
+			)
+		}
 	}
 
 	// Prune storage pools that no longer exist on Proxmox (e.g. an NFS
@@ -475,20 +487,20 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	}
 
 	// Sync VMs and collect metric snapshots.
-	vmSnapshots, err := s.syncVMs(ctx, client, clusterID, dbNode.ID, node.Node, vmExtra)
-	if err != nil {
+	vmSnapshots, vmErr := s.syncVMs(ctx, client, clusterID, dbNode.ID, node.Node, vmExtra)
+	if vmErr != nil {
 		s.logger.Warn("failed to sync VMs",
 			"node", node.Node,
-			"error", err,
+			"error", vmErr,
 		)
 	}
 
 	// Sync containers and collect metric snapshots.
-	ctSnapshots, err := s.syncContainers(ctx, client, clusterID, dbNode.ID, node.Node, vmExtra)
-	if err != nil {
+	ctSnapshots, ctErr := s.syncContainers(ctx, client, clusterID, dbNode.ID, node.Node, vmExtra)
+	if ctErr != nil {
 		s.logger.Warn("failed to sync containers",
 			"node", node.Node,
-			"error", err,
+			"error", ctErr,
 		)
 	}
 
@@ -604,6 +616,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		},
 		VMMetrics:    allVMSnapshots,
 		StorageAdded: storageAdded,
+		SyncOK:       vmErr == nil && ctErr == nil,
 	}, nil
 }
 

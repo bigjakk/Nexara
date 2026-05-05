@@ -26,6 +26,27 @@ func (q *Queries) DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) 
 	return err
 }
 
+const deleteStaleVMsForNodes = `-- name: DeleteStaleVMsForNodes :exec
+DELETE FROM vms
+WHERE cluster_id = $1
+  AND last_seen_at < $2
+  AND node_id = ANY($3::uuid[])
+`
+
+type DeleteStaleVMsForNodesParams struct {
+	ClusterID  uuid.UUID   `json:"cluster_id"`
+	LastSeenAt time.Time   `json:"last_seen_at"`
+	NodeIds    []uuid.UUID `json:"node_ids"`
+}
+
+// Prunes VMs only on nodes that synced successfully this cycle. Used by
+// the collector so a transient per-node Proxmox API failure doesn't
+// briefly wipe that node's inventory.
+func (q *Queries) DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMsForNodesParams) error {
+	_, err := q.db.Exec(ctx, deleteStaleVMsForNodes, arg.ClusterID, arg.LastSeenAt, arg.NodeIds)
+	return err
+}
+
 const getContainer = `-- name: GetContainer :one
 SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE id = $1 AND type = 'lxc'
 `

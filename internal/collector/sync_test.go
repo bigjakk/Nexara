@@ -25,14 +25,15 @@ const testEncryptionKey = "0123456789abcdef0123456789abcdef0123456789abcdef01234
 // --- Mock DB ---
 
 type mockQueries struct {
-	nodes        map[string]db.Node    // keyed by "clusterID:name"
-	vms          map[string]db.Vm      // keyed by "clusterID:vmid"
+	nodes        map[string]db.Node // keyed by "clusterID:name"
+	vms          map[string]db.Vm   // keyed by "clusterID:vmid"
 	storagePools map[string]db.StoragePool
 	clusters     []db.Cluster
 
-	upsertNodeCalls    []db.UpsertNodeParams
-	upsertVMCalls      []db.UpsertVMParams
-	upsertStorageCalls []db.UpsertStoragePoolParams
+	upsertNodeCalls             []db.UpsertNodeParams
+	upsertVMCalls               []db.UpsertVMParams
+	upsertStorageCalls          []db.UpsertStoragePoolParams
+	deleteStaleVMsForNodesCalls []db.DeleteStaleVMsForNodesParams
 }
 
 func newMockQueries() *mockQueries {
@@ -108,6 +109,11 @@ func (m *mockQueries) ListVMStatusesByCluster(_ context.Context, _ uuid.UUID) ([
 }
 
 func (m *mockQueries) DeleteStaleVMs(_ context.Context, _ db.DeleteStaleVMsParams) error {
+	return nil
+}
+
+func (m *mockQueries) DeleteStaleVMsForNodes(_ context.Context, arg db.DeleteStaleVMsForNodesParams) error {
+	m.deleteStaleVMsForNodesCalls = append(m.deleteStaleVMsForNodesCalls, arg)
 	return nil
 }
 
@@ -644,6 +650,33 @@ func TestSyncCluster_PartialNodeFailure(t *testing.T) {
 	}
 	if len(result.NodeMetrics) != 2 {
 		t.Errorf("expected 2 node metrics, got %d", len(result.NodeMetrics))
+	}
+
+	// Stale-VM pruning must exclude pve2's node ID — its VM/CT fetch
+	// failed, so we cannot tell which of its VMs are gone vs which we
+	// just couldn't see. Pruning it would briefly wipe pve2's inventory
+	// in the UI on the next event-driven refetch. Pre-fix this delete
+	// ran cluster-wide and caused exactly that flicker on Docker Swarm.
+	if len(mq.deleteStaleVMsForNodesCalls) != 1 {
+		t.Fatalf("expected 1 stale-VM prune call, got %d", len(mq.deleteStaleVMsForNodesCalls))
+	}
+	prune := mq.deleteStaleVMsForNodesCalls[0]
+	pve1ID := mq.nodes[cluster.ID.String()+":pve1"].ID
+	pve2ID := mq.nodes[cluster.ID.String()+":pve2"].ID
+	var sawPve1, sawPve2 bool
+	for _, id := range prune.NodeIds {
+		if id == pve1ID {
+			sawPve1 = true
+		}
+		if id == pve2ID {
+			sawPve2 = true
+		}
+	}
+	if !sawPve1 {
+		t.Error("prune call should include pve1 (synced successfully)")
+	}
+	if sawPve2 {
+		t.Error("prune call must exclude pve2 (VM fetch failed) — including it would wipe pve2's inventory on the next sync's frontend refetch")
 	}
 }
 

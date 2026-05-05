@@ -38,6 +38,10 @@ type nodeCollectionResult struct {
 	NodeMetric   nodeMetricSnapshot
 	VMMetrics    []vmMetricSnapshot
 	StorageAdded bool
+	// SyncOK is true only when both the VM and container fetches succeeded
+	// for this node. Used to gate stale-VM pruning so a transient Proxmox
+	// API failure on one node doesn't briefly wipe its inventory.
+	SyncOK bool
 }
 
 // cephClusterMetricSnapshot holds cluster-wide Ceph metrics.

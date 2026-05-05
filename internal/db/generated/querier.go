@@ -81,6 +81,10 @@ type Querier interface {
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
 	DeleteStaleStoragePools(ctx context.Context, arg DeleteStaleStoragePoolsParams) (int64, error)
 	DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) error
+	// Prunes VMs only on nodes that synced successfully this cycle. Used by
+	// the collector so a transient per-node Proxmox API failure doesn't
+	// briefly wipe that node's inventory.
+	DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMsForNodesParams) error
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
