@@ -126,6 +126,13 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 	kevClient := NewKEVClient(e.queries, e.logger.With("component", "kev-client"))
 	epssClient := NewEPSSClient(e.queries, e.logger.With("component", "epss-client"))
 
+	// Per-scan changelog cache. Proxmox's apt/changelog endpoint covers
+	// Proxmox-built packages (e.g. proxmox-kernel-*) that the Debian
+	// Security Tracker doesn't index — we extract CVE refs directly from
+	// the package's own changelog. Cached across all nodes in the cluster
+	// since they all upgrade to the same versions.
+	changelogs := newChangelogFetcher(client, e.logger.With("component", "changelog-fetcher"))
+
 	var (
 		totalVulns     int32
 		criticalCount  int32
@@ -195,6 +202,15 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 			// Fall back to treating all security updates as vulns
 			vulns = securityUpdatesToVulns(aptUpdates)
 		}
+
+		// Augment with CVEs extracted from each pending package's own
+		// changelog. This catches CVEs that the Debian tracker doesn't
+		// index under the apt-package's name — most importantly
+		// proxmox-kernel-* and pve-kernel-* updates, where Debian tracks
+		// upstream as "linux" but Proxmox ships a differently-named
+		// package built from Ubuntu's kernel tree. Best-effort: a fetch
+		// failure for one package does not abort the scan.
+		vulns = augmentWithChangelogCVEs(ctx, vulns, aptUpdates, node.Name, changelogs, e.logger)
 
 		// Enrich vulns with EPSS and KEV before bucketing. Both lookups
 		// are best-effort: a failure leaves the vuln with no enrichment

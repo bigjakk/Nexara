@@ -3243,6 +3243,35 @@ func (c *Client) GetNodeAptUpdates(ctx context.Context, node string) ([]AptUpdat
 	return updates, nil
 }
 
+// GetNodeAptChangelog returns the package changelog for the given pkg+version
+// from GET /nodes/{node}/apt/changelog. The response is the raw output of
+// `apt-get changelog <pkg>=<version>` — Debian-format text whose entries
+// often include CVE-NNNN-NNNN references for security fixes. Empty version
+// requests the changelog for the candidate version.
+//
+// Note: this endpoint requires the API token to have the Sys.Modify
+// permission on /nodes/{node}, not just Sys.Audit. A read-only token
+// returns 403.
+func (c *Client) GetNodeAptChangelog(ctx context.Context, node, pkg, version string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if pkg == "" {
+		return "", fmt.Errorf("package name is required")
+	}
+	params := url.Values{}
+	params.Set("name", pkg)
+	if version != "" {
+		params.Set("version", version)
+	}
+	var changelog string
+	path := "/nodes/" + url.PathEscape(node) + "/apt/changelog?" + params.Encode()
+	if err := c.do(ctx, path, &changelog); err != nil {
+		return "", fmt.Errorf("get changelog for %s=%s on %s: %w", pkg, version, node, err)
+	}
+	return changelog, nil
+}
+
 // RefreshNodeAptIndex triggers an apt-get update on a node via POST /nodes/{node}/apt/update.
 // Returns the UPID of the background task.
 func (c *Client) RefreshNodeAptIndex(ctx context.Context, node string) (string, error) {
