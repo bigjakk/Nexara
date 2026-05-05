@@ -14,6 +14,7 @@ import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import { useVM, useSetResourceConfig, useGuestAgentInfo, useResourcePools, useSetVMPool } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
+import { VMConsolePreview } from "../components/VMConsolePreview";
 import { CloneDialog } from "../components/CloneDialog";
 import { CloneToTemplateDialog } from "../components/CloneToTemplateDialog";
 import { DeployTemplateDialog } from "../components/DeployTemplateDialog";
@@ -139,7 +140,18 @@ export function VMDetailPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="relative space-y-6 p-6">
+      {/* Floating live console preview — absolute so it doesn't stretch the header row */}
+      {kind === "vm" && normalizedStatus === "running" && nodeName !== "" && (
+        <div className="absolute right-6 top-6 z-10">
+          <VMConsolePreview
+            clusterId={clusterId}
+            node={nodeName}
+            vmid={vm.vmid}
+            onOpen={() => { openConsole("vnc"); }}
+          />
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
