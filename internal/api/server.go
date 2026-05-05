@@ -190,7 +190,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.apiKeyHandler = handlers.NewAPIKeyHandler(s.queries, s.eventPub)
 	}
 	if s.queries != nil {
-		s.mobileDeviceHandler = handlers.NewMobileDeviceHandler(s.queries)
+		s.mobileDeviceHandler = handlers.NewMobileDeviceHandler(s.queries, s.eventPub)
 	}
 	s.apiDocsHandler = handlers.NewAPIDocsHandler()
 

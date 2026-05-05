@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"unicode"
@@ -8,20 +9,36 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 )
 
 // MobileDeviceHandler handles registration and management of mobile push
 // devices. Each row represents a single phone/tablet that has installed the
 // Nexara mobile app and granted notification permission.
 type MobileDeviceHandler struct {
-	queries *db.Queries
+	queries  *db.Queries
+	eventPub *events.Publisher
 }
 
 // NewMobileDeviceHandler creates a new mobile device handler.
-func NewMobileDeviceHandler(queries *db.Queries) *MobileDeviceHandler {
-	return &MobileDeviceHandler{queries: queries}
+func NewMobileDeviceHandler(queries *db.Queries, eventPub *events.Publisher) *MobileDeviceHandler {
+	return &MobileDeviceHandler{queries: queries, eventPub: eventPub}
+}
+
+// auditDevice writes an audit_log entry for a device action. Device actions
+// are not cluster-scoped, so cluster_id is left null.
+func (h *MobileDeviceHandler) auditDevice(c *fiber.Ctx, deviceID, action string, details map[string]any) {
+	if h.eventPub == nil {
+		return
+	}
+	body, err := json.Marshal(details)
+	if err != nil {
+		body = json.RawMessage(`{}`)
+	}
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "mobile_device", deviceID, action, body)
 }
 
 // maxDevicesPerUser caps the number of mobile devices a single user can
@@ -161,6 +178,11 @@ func (h *MobileDeviceHandler) Register(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to register device")
 	}
 
+	h.auditDevice(c, device.ID.String(), "mobile_device_registered", map[string]any{
+		"device_name": device.DeviceName,
+		"platform":    device.Platform,
+	})
+
 	return c.Status(fiber.StatusCreated).JSON(toMobileDeviceResponse(device))
 }
 
@@ -209,6 +231,10 @@ func (h *MobileDeviceHandler) Delete(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete device")
 	}
 
+	h.auditDevice(c, id.String(), "mobile_device_deleted", map[string]any{
+		"self": true,
+	})
+
 	return c.JSON(fiber.Map{"message": "Device removed"})
 }
 
@@ -248,11 +274,23 @@ func (h *MobileDeviceHandler) AdminDelete(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid device ID")
 	}
 
+	// Snapshot owner BEFORE deletion so the audit row preserves which
+	// user's device was removed (compliance).
+	target, getErr := h.queries.GetMobileDevice(c.Context(), id)
 	if err := h.queries.DeleteMobileDevice(c.Context(), id); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusNotFound, "Device not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete device")
 	}
+
+	details := map[string]any{"self": false}
+	if getErr == nil {
+		details["target_user_id"] = target.UserID.String()
+		details["device_name"] = target.DeviceName
+		details["platform"] = target.Platform
+	}
+	h.auditDevice(c, id.String(), "mobile_device_admin_deleted", details)
+
 	return c.JSON(fiber.Map{"message": "Device removed"})
 }
