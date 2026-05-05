@@ -211,6 +211,7 @@ func (s *Server) authenticateAPIKey(c *fiber.Ctx, token string) error {
 	c.Locals("email", row.UserEmail)
 	c.Locals("role", row.UserRole)
 	c.Locals("auth_method", "api_key")
+	c.Locals("api_key_id", row.ID)
 
 	if s.rbacEngine != nil {
 		c.Locals("rbac_engine", s.rbacEngine)

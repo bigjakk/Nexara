@@ -21,6 +21,10 @@ import (
 // AuditLog writes an audit log entry and publishes an audit_entry WS event.
 // clusterID may be zero-value pgtype.UUID for actions without a cluster context.
 // details may be nil (defaults to {}).
+//
+// When the request was authenticated via API key, the key's id is injected
+// into the details JSON as `api_key_id` so an action can be correlated to a
+// specific key (not just the owning user).
 func AuditLog(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {
 	uid, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
@@ -29,9 +33,25 @@ func AuditLog(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clu
 	if details == nil {
 		details = json.RawMessage(`{}`)
 	}
+
+	// Inject api_key_id into details for API-key-authed requests so audit
+	// rows can be attributed to the specific key, not just the user.
+	if apiKeyID, ok := c.Locals("api_key_id").(uuid.UUID); ok {
+		var m map[string]any
+		if err := json.Unmarshal(details, &m); err == nil {
+			if m == nil {
+				m = map[string]any{}
+			}
+			m["api_key_id"] = apiKeyID.String()
+			if enriched, err := json.Marshal(m); err == nil {
+				details = enriched
+			}
+		}
+	}
+
 	_ = queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
 		ClusterID:    clusterID,
-		UserID:       uid,
+		UserID:       UserUUID(uid),
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		Action:       action,
@@ -62,6 +82,13 @@ func AuditLog(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clu
 
 // ClusterUUID is a convenience helper that converts a uuid.UUID to a valid pgtype.UUID.
 func ClusterUUID(id uuid.UUID) pgtype.UUID {
+	return pgtype.UUID{Bytes: id, Valid: true}
+}
+
+// UserUUID wraps a uuid.UUID into a non-null pgtype.UUID for audit_log.user_id.
+// The column is nullable (so audit rows can survive user deletion), but inserts
+// always carry the user who performed the action.
+func UserUUID(id uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: id, Valid: true}
 }
 
