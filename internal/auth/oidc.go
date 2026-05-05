@@ -13,6 +13,8 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/oauth2"
+
+	"github.com/bigjakk/nexara/internal/notifications"
 )
 
 var (
@@ -55,8 +57,16 @@ type OIDCProvider struct {
 }
 
 // NewOIDCProvider discovers OIDC metadata and creates a provider.
+//
+// go-oidc fetches the issuer's discovery document and signing keys via the
+// HTTP client attached to the context (or http.DefaultClient if none).
+// We bind notifications.SafeHTTPClient so each request goes through the
+// SSRF-safe DialContext and does not follow redirects — this prevents an
+// admin-supplied issuer URL from being used to probe the management LAN
+// even if validateOIDCIssuerURL's DNS check is bypassed by a redirect.
 func NewOIDCProvider(ctx context.Context, cfg OIDCConfig, rdb *redis.Client) (*OIDCProvider, error) {
-	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
+	safeCtx := oidc.ClientContext(ctx, notifications.SafeHTTPClient(15*time.Second))
+	provider, err := oidc.NewProvider(safeCtx, cfg.IssuerURL)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrOIDCProviderInit, err)
 	}
