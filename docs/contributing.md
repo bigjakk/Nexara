@@ -43,7 +43,7 @@ npm install
 npm run dev
 ```
 
-The frontend dev server runs at `http://localhost:5173` with hot reload.
+The frontend dev server runs at `http://localhost:3000` with hot reload (configured in `frontend/vite.config.ts`).
 
 ## Project Structure
 
