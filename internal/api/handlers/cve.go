@@ -123,6 +123,7 @@ type cveScanVulnResponse struct {
 	Severity       string    `json:"severity"`        // Debian tracker urgency
 	RiskSeverity   string    `json:"risk_severity"`   // bucket derived from risk_score
 	RiskScore      float32   `json:"risk_score"`      // 0–10, drives posture
+	SSVCLabel      string    `json:"ssvc_label"`      // act/attend/track_star/track
 	CVSSScore      float32   `json:"cvss_score"`
 	EPSS           *float32  `json:"epss,omitempty"`
 	EPSSPercentile *float32  `json:"epss_percentile,omitempty"`
@@ -141,6 +142,7 @@ func toCVEScanVulnResponse(v db.CveScanVuln) cveScanVulnResponse {
 		Severity:       v.Severity,
 		RiskSeverity:   v.RiskSeverity,
 		RiskScore:      v.RiskScore,
+		SSVCLabel:      v.SsvcLabel,
 		KEV:            v.Kev,
 		Description:    v.Description,
 	}
@@ -162,20 +164,24 @@ func toCVEScanVulnResponse(v db.CveScanVuln) cveScanVulnResponse {
 }
 
 type securityPostureResponse struct {
-	ScanID        uuid.UUID `json:"scan_id"`
-	Status        string    `json:"status"`
-	TotalVulns    int32     `json:"total_vulns"`
-	CriticalCount int32     `json:"critical_count"`
-	HighCount     int32     `json:"high_count"`
-	MediumCount   int32     `json:"medium_count"`
-	LowCount      int32     `json:"low_count"`
-	UnknownCount  int32     `json:"unknown_count"`
-	KEVCount      int32     `json:"kev_count"`
-	TotalNodes    int32     `json:"total_nodes"`
-	ScannedNodes  int32     `json:"scanned_nodes"`
-	PostureScore  float32   `json:"posture_score"`
-	StartedAt     string    `json:"started_at"`
-	CompletedAt   string    `json:"completed_at,omitempty"`
+	ScanID         uuid.UUID `json:"scan_id"`
+	Status         string    `json:"status"`
+	TotalVulns     int32     `json:"total_vulns"`
+	CriticalCount  int32     `json:"critical_count"`
+	HighCount      int32     `json:"high_count"`
+	MediumCount    int32     `json:"medium_count"`
+	LowCount       int32     `json:"low_count"`
+	UnknownCount   int32     `json:"unknown_count"`
+	KEVCount       int32     `json:"kev_count"`
+	ActCount       int32     `json:"act_count"`
+	AttendCount    int32     `json:"attend_count"`
+	TrackStarCount int32     `json:"track_star_count"`
+	TrackCount     int32     `json:"track_count"`
+	TotalNodes     int32     `json:"total_nodes"`
+	ScannedNodes   int32     `json:"scanned_nodes"`
+	PostureScore   float32   `json:"posture_score"`
+	StartedAt      string    `json:"started_at"`
+	CompletedAt    string    `json:"completed_at,omitempty"`
 }
 
 var validSeverities = map[string]bool{
@@ -446,19 +452,23 @@ func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
 	score := scanner.ComputePostureScore(summary.CriticalCount, summary.HighCount, summary.MediumCount, summary.LowCount, unknown)
 
 	resp := securityPostureResponse{
-		ScanID:        summary.ScanID,
-		Status:        summary.Status,
-		TotalVulns:    summary.TotalVulns,
-		CriticalCount: summary.CriticalCount,
-		HighCount:     summary.HighCount,
-		MediumCount:   summary.MediumCount,
-		LowCount:      summary.LowCount,
-		KEVCount:      summary.KevCount,
-		UnknownCount:  unknown,
-		TotalNodes:    summary.TotalNodes,
-		ScannedNodes:  summary.ScannedNodes,
-		PostureScore:  score,
-		StartedAt:     summary.StartedAt.Format("2006-01-02T15:04:05Z"),
+		ScanID:         summary.ScanID,
+		Status:         summary.Status,
+		TotalVulns:     summary.TotalVulns,
+		CriticalCount:  summary.CriticalCount,
+		HighCount:      summary.HighCount,
+		MediumCount:    summary.MediumCount,
+		LowCount:       summary.LowCount,
+		KEVCount:       summary.KevCount,
+		UnknownCount:   unknown,
+		ActCount:       summary.ActCount,
+		AttendCount:    summary.AttendCount,
+		TrackStarCount: summary.TrackStarCount,
+		TrackCount:     summary.TrackCount,
+		TotalNodes:     summary.TotalNodes,
+		ScannedNodes:   summary.ScannedNodes,
+		PostureScore:   score,
+		StartedAt:      summary.StartedAt.Format("2006-01-02T15:04:05Z"),
 	}
 	if summary.CompletedAt.Valid {
 		resp.CompletedAt = summary.CompletedAt.Time.Format("2006-01-02T15:04:05Z")

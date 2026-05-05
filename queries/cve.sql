@@ -15,7 +15,8 @@ WHERE id = $1;
 UPDATE cve_scans
 SET scanned_nodes = $2, total_vulns = $3,
     critical_count = $4, high_count = $5, medium_count = $6, low_count = $7,
-    unknown_count = $8, kev_count = $9
+    unknown_count = $8, kev_count = $9,
+    act_count = $10, attend_count = $11, track_star_count = $12, track_count = $13
 WHERE id = $1;
 
 -- name: UpdateCVEScanTotalNodes :exec
@@ -51,9 +52,9 @@ ORDER BY node_name;
 -- name: InsertCVEScanVuln :one
 INSERT INTO cve_scan_vulns (
     scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version,
-    severity, cvss_score, description, risk_score, risk_severity, epss, epss_percentile, kev
+    severity, cvss_score, description, risk_score, risk_severity, epss, epss_percentile, kev, ssvc_label
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 RETURNING *;
 
 -- name: ListCVEScanVulns :many
@@ -135,6 +136,10 @@ SELECT
     s.low_count,
     s.unknown_count,
     s.kev_count,
+    s.act_count,
+    s.attend_count,
+    s.track_star_count,
+    s.track_count,
     s.total_nodes,
     s.scanned_nodes,
     s.started_at,

@@ -11,6 +11,7 @@ import {
   useTriggerScan,
 } from "../api/cve-queries";
 import { SecurityPostureCard } from "../components/SecurityPostureCard";
+import { SSVCHistogram } from "../components/SSVCHistogram";
 import { ScanScheduleCard } from "../components/ScanScheduleCard";
 import { ScanHistoryTable } from "../components/ScanHistoryTable";
 import { VulnerabilityTable } from "../components/VulnerabilityTable";
@@ -188,7 +189,15 @@ export function SecurityDashboardPage() {
           {postureLoading ? (
             <div className="h-32 animate-pulse rounded-lg border bg-card" />
           ) : posture ? (
-            <SecurityPostureCard posture={posture} />
+            <>
+              <SecurityPostureCard posture={posture} />
+              <SSVCHistogram
+                actCount={posture.act_count}
+                attendCount={posture.attend_count}
+                trackStarCount={posture.track_star_count}
+                trackCount={posture.track_count}
+              />
+            </>
           ) : null}
 
           <ScanScheduleCard clusterId={activeClusterId} />

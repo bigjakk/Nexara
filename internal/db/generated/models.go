@@ -198,22 +198,26 @@ type CveCache struct {
 }
 
 type CveScan struct {
-	ID            uuid.UUID          `json:"id"`
-	ClusterID     uuid.UUID          `json:"cluster_id"`
-	Status        string             `json:"status"`
-	TotalNodes    int32              `json:"total_nodes"`
-	ScannedNodes  int32              `json:"scanned_nodes"`
-	TotalVulns    int32              `json:"total_vulns"`
-	CriticalCount int32              `json:"critical_count"`
-	HighCount     int32              `json:"high_count"`
-	MediumCount   int32              `json:"medium_count"`
-	LowCount      int32              `json:"low_count"`
-	ErrorMessage  pgtype.Text        `json:"error_message"`
-	StartedAt     time.Time          `json:"started_at"`
-	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
-	CreatedAt     time.Time          `json:"created_at"`
-	KevCount      int32              `json:"kev_count"`
-	UnknownCount  int32              `json:"unknown_count"`
+	ID             uuid.UUID          `json:"id"`
+	ClusterID      uuid.UUID          `json:"cluster_id"`
+	Status         string             `json:"status"`
+	TotalNodes     int32              `json:"total_nodes"`
+	ScannedNodes   int32              `json:"scanned_nodes"`
+	TotalVulns     int32              `json:"total_vulns"`
+	CriticalCount  int32              `json:"critical_count"`
+	HighCount      int32              `json:"high_count"`
+	MediumCount    int32              `json:"medium_count"`
+	LowCount       int32              `json:"low_count"`
+	ErrorMessage   pgtype.Text        `json:"error_message"`
+	StartedAt      time.Time          `json:"started_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt      time.Time          `json:"created_at"`
+	KevCount       int32              `json:"kev_count"`
+	UnknownCount   int32              `json:"unknown_count"`
+	ActCount       int32              `json:"act_count"`
+	AttendCount    int32              `json:"attend_count"`
+	TrackStarCount int32              `json:"track_star_count"`
+	TrackCount     int32              `json:"track_count"`
 }
 
 type CveScanNode struct {
@@ -254,6 +258,7 @@ type CveScanVuln struct {
 	EpssPercentile pgtype.Float4 `json:"epss_percentile"`
 	Kev            bool          `json:"kev"`
 	RiskSeverity   string        `json:"risk_severity"`
+	SsvcLabel      string        `json:"ssvc_label"`
 }
 
 type DrsConfig struct {

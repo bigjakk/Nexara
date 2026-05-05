@@ -53,7 +53,7 @@ func (q *Queries) GetCVECacheByID(ctx context.Context, cveID string) (CveCache, 
 }
 
 const getCVEScan = `-- name: GetCVEScan :one
-SELECT id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count FROM cve_scans WHERE id = $1
+SELECT id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count, act_count, attend_count, track_star_count, track_count FROM cve_scans WHERE id = $1
 `
 
 func (q *Queries) GetCVEScan(ctx context.Context, id uuid.UUID) (CveScan, error) {
@@ -76,6 +76,10 @@ func (q *Queries) GetCVEScan(ctx context.Context, id uuid.UUID) (CveScan, error)
 		&i.CreatedAt,
 		&i.KevCount,
 		&i.UnknownCount,
+		&i.ActCount,
+		&i.AttendCount,
+		&i.TrackStarCount,
+		&i.TrackCount,
 	)
 	return i, err
 }
@@ -109,6 +113,10 @@ SELECT
     s.low_count,
     s.unknown_count,
     s.kev_count,
+    s.act_count,
+    s.attend_count,
+    s.track_star_count,
+    s.track_count,
     s.total_nodes,
     s.scanned_nodes,
     s.started_at,
@@ -120,19 +128,23 @@ LIMIT 1
 `
 
 type GetClusterSecuritySummaryRow struct {
-	ScanID        uuid.UUID          `json:"scan_id"`
-	Status        string             `json:"status"`
-	TotalVulns    int32              `json:"total_vulns"`
-	CriticalCount int32              `json:"critical_count"`
-	HighCount     int32              `json:"high_count"`
-	MediumCount   int32              `json:"medium_count"`
-	LowCount      int32              `json:"low_count"`
-	UnknownCount  int32              `json:"unknown_count"`
-	KevCount      int32              `json:"kev_count"`
-	TotalNodes    int32              `json:"total_nodes"`
-	ScannedNodes  int32              `json:"scanned_nodes"`
-	StartedAt     time.Time          `json:"started_at"`
-	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+	ScanID         uuid.UUID          `json:"scan_id"`
+	Status         string             `json:"status"`
+	TotalVulns     int32              `json:"total_vulns"`
+	CriticalCount  int32              `json:"critical_count"`
+	HighCount      int32              `json:"high_count"`
+	MediumCount    int32              `json:"medium_count"`
+	LowCount       int32              `json:"low_count"`
+	UnknownCount   int32              `json:"unknown_count"`
+	KevCount       int32              `json:"kev_count"`
+	ActCount       int32              `json:"act_count"`
+	AttendCount    int32              `json:"attend_count"`
+	TrackStarCount int32              `json:"track_star_count"`
+	TrackCount     int32              `json:"track_count"`
+	TotalNodes     int32              `json:"total_nodes"`
+	ScannedNodes   int32              `json:"scanned_nodes"`
+	StartedAt      time.Time          `json:"started_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
 }
 
 func (q *Queries) GetClusterSecuritySummary(ctx context.Context, clusterID uuid.UUID) (GetClusterSecuritySummaryRow, error) {
@@ -148,6 +160,10 @@ func (q *Queries) GetClusterSecuritySummary(ctx context.Context, clusterID uuid.
 		&i.LowCount,
 		&i.UnknownCount,
 		&i.KevCount,
+		&i.ActCount,
+		&i.AttendCount,
+		&i.TrackStarCount,
+		&i.TrackCount,
 		&i.TotalNodes,
 		&i.ScannedNodes,
 		&i.StartedAt,
@@ -235,7 +251,7 @@ func (q *Queries) GetKEVEntry(ctx context.Context, cveID string) (KevCache, erro
 }
 
 const getLatestCVEScan = `-- name: GetLatestCVEScan :one
-SELECT id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count FROM cve_scans
+SELECT id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count, act_count, attend_count, track_star_count, track_count FROM cve_scans
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT 1
@@ -261,6 +277,10 @@ func (q *Queries) GetLatestCVEScan(ctx context.Context, clusterID uuid.UUID) (Cv
 		&i.CreatedAt,
 		&i.KevCount,
 		&i.UnknownCount,
+		&i.ActCount,
+		&i.AttendCount,
+		&i.TrackStarCount,
+		&i.TrackCount,
 	)
 	return i, err
 }
@@ -268,7 +288,7 @@ func (q *Queries) GetLatestCVEScan(ctx context.Context, clusterID uuid.UUID) (Cv
 const insertCVEScan = `-- name: InsertCVEScan :one
 INSERT INTO cve_scans (cluster_id, status, total_nodes)
 VALUES ($1, $2, $3)
-RETURNING id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count
+RETURNING id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count, act_count, attend_count, track_star_count, track_count
 `
 
 type InsertCVEScanParams struct {
@@ -297,6 +317,10 @@ func (q *Queries) InsertCVEScan(ctx context.Context, arg InsertCVEScanParams) (C
 		&i.CreatedAt,
 		&i.KevCount,
 		&i.UnknownCount,
+		&i.ActCount,
+		&i.AttendCount,
+		&i.TrackStarCount,
+		&i.TrackCount,
 	)
 	return i, err
 }
@@ -340,10 +364,10 @@ func (q *Queries) InsertCVEScanNode(ctx context.Context, arg InsertCVEScanNodePa
 const insertCVEScanVuln = `-- name: InsertCVEScanVuln :one
 INSERT INTO cve_scan_vulns (
     scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version,
-    severity, cvss_score, description, risk_score, risk_severity, epss, epss_percentile, kev
+    severity, cvss_score, description, risk_score, risk_severity, epss, epss_percentile, kev, ssvc_label
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-RETURNING id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+RETURNING id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity, ssvc_label
 `
 
 type InsertCVEScanVulnParams struct {
@@ -361,6 +385,7 @@ type InsertCVEScanVulnParams struct {
 	Epss           pgtype.Float4 `json:"epss"`
 	EpssPercentile pgtype.Float4 `json:"epss_percentile"`
 	Kev            bool          `json:"kev"`
+	SsvcLabel      string        `json:"ssvc_label"`
 }
 
 func (q *Queries) InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnParams) (CveScanVuln, error) {
@@ -379,6 +404,7 @@ func (q *Queries) InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnPa
 		arg.Epss,
 		arg.EpssPercentile,
 		arg.Kev,
+		arg.SsvcLabel,
 	)
 	var i CveScanVuln
 	err := row.Scan(
@@ -397,6 +423,7 @@ func (q *Queries) InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnPa
 		&i.EpssPercentile,
 		&i.Kev,
 		&i.RiskSeverity,
+		&i.SsvcLabel,
 	)
 	return i, err
 }
@@ -439,7 +466,7 @@ func (q *Queries) ListCVEScanNodes(ctx context.Context, scanID uuid.UUID) ([]Cve
 }
 
 const listCVEScanVulns = `-- name: ListCVEScanVulns :many
-SELECT id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity FROM cve_scan_vulns
+SELECT id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity, ssvc_label FROM cve_scan_vulns
 WHERE scan_id = $1
 ORDER BY
     CASE severity
@@ -477,6 +504,7 @@ func (q *Queries) ListCVEScanVulns(ctx context.Context, scanID uuid.UUID) ([]Cve
 			&i.EpssPercentile,
 			&i.Kev,
 			&i.RiskSeverity,
+			&i.SsvcLabel,
 		); err != nil {
 			return nil, err
 		}
@@ -489,7 +517,7 @@ func (q *Queries) ListCVEScanVulns(ctx context.Context, scanID uuid.UUID) ([]Cve
 }
 
 const listCVEScanVulnsByNode = `-- name: ListCVEScanVulnsByNode :many
-SELECT id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity FROM cve_scan_vulns
+SELECT id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity, ssvc_label FROM cve_scan_vulns
 WHERE scan_node_id = $1
 ORDER BY
     CASE severity
@@ -527,6 +555,7 @@ func (q *Queries) ListCVEScanVulnsByNode(ctx context.Context, scanNodeID uuid.UU
 			&i.EpssPercentile,
 			&i.Kev,
 			&i.RiskSeverity,
+			&i.SsvcLabel,
 		); err != nil {
 			return nil, err
 		}
@@ -539,7 +568,7 @@ func (q *Queries) ListCVEScanVulnsByNode(ctx context.Context, scanNodeID uuid.UU
 }
 
 const listCVEScanVulnsBySeverity = `-- name: ListCVEScanVulnsBySeverity :many
-SELECT id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity FROM cve_scan_vulns
+SELECT id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity, ssvc_label FROM cve_scan_vulns
 WHERE scan_id = $1 AND severity = $2
 ORDER BY package_name
 `
@@ -574,6 +603,7 @@ func (q *Queries) ListCVEScanVulnsBySeverity(ctx context.Context, arg ListCVESca
 			&i.EpssPercentile,
 			&i.Kev,
 			&i.RiskSeverity,
+			&i.SsvcLabel,
 		); err != nil {
 			return nil, err
 		}
@@ -586,7 +616,7 @@ func (q *Queries) ListCVEScanVulnsBySeverity(ctx context.Context, arg ListCVESca
 }
 
 const listCVEScans = `-- name: ListCVEScans :many
-SELECT id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count FROM cve_scans
+SELECT id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count, act_count, attend_count, track_star_count, track_count FROM cve_scans
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -624,6 +654,10 @@ func (q *Queries) ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]C
 			&i.CreatedAt,
 			&i.KevCount,
 			&i.UnknownCount,
+			&i.ActCount,
+			&i.AttendCount,
+			&i.TrackStarCount,
+			&i.TrackCount,
 		); err != nil {
 			return nil, err
 		}
@@ -694,20 +728,25 @@ const updateCVEScanCounts = `-- name: UpdateCVEScanCounts :exec
 UPDATE cve_scans
 SET scanned_nodes = $2, total_vulns = $3,
     critical_count = $4, high_count = $5, medium_count = $6, low_count = $7,
-    unknown_count = $8, kev_count = $9
+    unknown_count = $8, kev_count = $9,
+    act_count = $10, attend_count = $11, track_star_count = $12, track_count = $13
 WHERE id = $1
 `
 
 type UpdateCVEScanCountsParams struct {
-	ID            uuid.UUID `json:"id"`
-	ScannedNodes  int32     `json:"scanned_nodes"`
-	TotalVulns    int32     `json:"total_vulns"`
-	CriticalCount int32     `json:"critical_count"`
-	HighCount     int32     `json:"high_count"`
-	MediumCount   int32     `json:"medium_count"`
-	LowCount      int32     `json:"low_count"`
-	UnknownCount  int32     `json:"unknown_count"`
-	KevCount      int32     `json:"kev_count"`
+	ID             uuid.UUID `json:"id"`
+	ScannedNodes   int32     `json:"scanned_nodes"`
+	TotalVulns     int32     `json:"total_vulns"`
+	CriticalCount  int32     `json:"critical_count"`
+	HighCount      int32     `json:"high_count"`
+	MediumCount    int32     `json:"medium_count"`
+	LowCount       int32     `json:"low_count"`
+	UnknownCount   int32     `json:"unknown_count"`
+	KevCount       int32     `json:"kev_count"`
+	ActCount       int32     `json:"act_count"`
+	AttendCount    int32     `json:"attend_count"`
+	TrackStarCount int32     `json:"track_star_count"`
+	TrackCount     int32     `json:"track_count"`
 }
 
 func (q *Queries) UpdateCVEScanCounts(ctx context.Context, arg UpdateCVEScanCountsParams) error {
@@ -721,6 +760,10 @@ func (q *Queries) UpdateCVEScanCounts(ctx context.Context, arg UpdateCVEScanCoun
 		arg.LowCount,
 		arg.UnknownCount,
 		arg.KevCount,
+		arg.ActCount,
+		arg.AttendCount,
+		arg.TrackStarCount,
+		arg.TrackCount,
 	)
 	return err
 }

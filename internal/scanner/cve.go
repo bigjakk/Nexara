@@ -118,14 +118,18 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 	epssClient := NewEPSSClient(e.queries, e.logger.With("component", "epss-client"))
 
 	var (
-		totalVulns    int32
-		criticalCount int32
-		highCount     int32
-		mediumCount   int32
-		lowCount      int32
-		unknownCount  int32
-		kevCount      int32
-		scannedNodes  int32
+		totalVulns     int32
+		criticalCount  int32
+		highCount      int32
+		mediumCount    int32
+		lowCount       int32
+		unknownCount   int32
+		kevCount       int32
+		actCount       int32
+		attendCount    int32
+		trackStarCount int32
+		trackCount     int32
+		scannedNodes   int32
 	)
 
 	for _, node := range nodes {
@@ -195,6 +199,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		epssData := epssClient.LookupBatch(ctx, cveIDs)
 
 		var nodeCritical, nodeHigh, nodeMedium, nodeLow, nodeUnknown, nodeKEV int32
+		var nodeAct, nodeAttend, nodeTrackStar, nodeTrack int32
 		for _, v := range vulns {
 			cvssBase := severityToCVSSProxy(v.Severity)
 			isKEV := kevClient.IsKEV(ctx, v.CVEID)
@@ -209,6 +214,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 
 			risk := computeRiskScore(cvssBase, epssScore, isKEV)
 			riskSev := riskToSeverity(risk)
+			ssvc := classifySSVC(cvssBase, epssScore, isKEV)
 
 			_, insertErr := e.queries.InsertCVEScanVuln(ctx, db.InsertCVEScanVulnParams{
 				ScanID:         scanID,
@@ -225,6 +231,7 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 				Epss:           pgtype.Float4{Float32: epssScore, Valid: epssValid},
 				EpssPercentile: pgtype.Float4{Float32: epssPercentile, Valid: epssValid},
 				Kev:            isKEV,
+				SsvcLabel:      ssvc,
 			})
 			if insertErr != nil {
 				e.logger.Error("failed to insert vuln", "cve", v.CVEID, "error", insertErr)
@@ -242,6 +249,16 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 				nodeLow++
 			default:
 				nodeUnknown++
+			}
+			switch ssvc {
+			case SSVCAct:
+				nodeAct++
+			case SSVCAttend:
+				nodeAttend++
+			case SSVCTrackStar:
+				nodeTrackStar++
+			default:
+				nodeTrack++
 			}
 			if isKEV {
 				nodeKEV++
@@ -268,27 +285,37 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		lowCount += nodeLow
 		unknownCount += nodeUnknown
 		kevCount += nodeKEV
+		actCount += nodeAct
+		attendCount += nodeAttend
+		trackStarCount += nodeTrackStar
+		trackCount += nodeTrack
 		scannedNodes++
 
 		e.logger.Info("node scan complete",
 			"node", node.Name,
 			"vulns", nodeVulns,
 			"kev", nodeKEV,
+			"act", nodeAct,
+			"attend", nodeAttend,
 			"posture_score", postureScore,
 		)
 	}
 
 	// Update scan summary
 	_ = e.queries.UpdateCVEScanCounts(ctx, db.UpdateCVEScanCountsParams{
-		ID:            scanID,
-		ScannedNodes:  scannedNodes,
-		TotalVulns:    totalVulns,
-		CriticalCount: criticalCount,
-		HighCount:     highCount,
-		MediumCount:   mediumCount,
-		LowCount:      lowCount,
-		UnknownCount:  unknownCount,
-		KevCount:      kevCount,
+		ID:             scanID,
+		ScannedNodes:   scannedNodes,
+		TotalVulns:     totalVulns,
+		CriticalCount:  criticalCount,
+		HighCount:      highCount,
+		MediumCount:    mediumCount,
+		LowCount:       lowCount,
+		UnknownCount:   unknownCount,
+		KevCount:       kevCount,
+		ActCount:       actCount,
+		AttendCount:    attendCount,
+		TrackStarCount: trackStarCount,
+		TrackCount:     trackCount,
 	})
 
 	now := time.Now()
@@ -308,6 +335,10 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		"low", lowCount,
 		"unknown", unknownCount,
 		"kev", kevCount,
+		"act", actCount,
+		"attend", attendCount,
+		"track_star", trackStarCount,
+		"track", trackCount,
 	)
 
 	return scanID, nil

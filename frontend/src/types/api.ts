@@ -250,6 +250,8 @@ export interface CVEScanNode {
   scanned_at?: string;
 }
 
+export type SSVCLabel = "act" | "attend" | "track_star" | "track";
+
 export interface CVEScanVuln {
   id: string;
   scan_id: string;
@@ -261,6 +263,7 @@ export interface CVEScanVuln {
   severity: "critical" | "high" | "medium" | "low" | "unknown";
   risk_severity: "critical" | "high" | "medium" | "low" | "unknown";
   risk_score: number;
+  ssvc_label: SSVCLabel;
   cvss_score: number;
   epss?: number;
   epss_percentile?: number;
@@ -283,6 +286,10 @@ export interface SecurityPosture {
   low_count: number;
   unknown_count: number;
   kev_count: number;
+  act_count: number;
+  attend_count: number;
+  track_star_count: number;
+  track_count: number;
   total_nodes: number;
   scanned_nodes: number;
   posture_score: number;
