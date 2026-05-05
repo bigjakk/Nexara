@@ -4,6 +4,7 @@ package rolling
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -866,7 +867,12 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 	o.publishEvent(ctx, job.ClusterID, job.ID, "node_restoring")
 
 	// Find where guests currently are so we can migrate them back.
-	clusterNodes, err := client.GetNodes(ctx)
+	var clusterNodes []proxmox.NodeListEntry
+	err := o.callWithRetryFailover(ctx, job.ClusterID, client, func(c *proxmox.Client) error {
+		var ferr error
+		clusterNodes, ferr = c.GetNodes(ctx)
+		return ferr
+	})
 	if err != nil {
 		o.failNode(ctx, job, node, fmt.Sprintf("list nodes for restore: %v", err))
 		return
@@ -1378,6 +1384,84 @@ func (o *Orchestrator) createClient(ctx context.Context, clusterID uuid.UUID) (*
 		return client, nil
 	}
 	return nil, fmt.Errorf("create client: %w", err)
+}
+
+// buildFailoverClients returns clients pointing at all known cluster
+// endpoints other than the primary. Used by callWithRetryFailover when the
+// primary client's host has gone unreachable mid-tick.
+func (o *Orchestrator) buildFailoverClients(ctx context.Context, clusterID uuid.UUID) []*proxmox.Client {
+	cluster, err := o.queries.GetCluster(ctx, clusterID)
+	if err != nil {
+		return nil
+	}
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, o.encryptionKey)
+	if err != nil {
+		return nil
+	}
+	nodeAddrs, _ := o.queries.ListNodeAddresses(ctx, clusterID)
+	var clients []*proxmox.Client
+	for _, na := range nodeAddrs {
+		failoverURL := fmt.Sprintf("https://%s:8006", na.Address)
+		if failoverURL == cluster.ApiUrl {
+			continue
+		}
+		c, cerr := proxmox.NewClient(proxmox.ClientConfig{
+			BaseURL:        failoverURL,
+			TokenID:        cluster.TokenID,
+			TokenSecret:    tokenSecret,
+			TLSFingerprint: cluster.TlsFingerprint,
+			Timeout:        60 * time.Second,
+		})
+		if cerr != nil {
+			continue
+		}
+		clients = append(clients, c)
+	}
+	return clients
+}
+
+// callWithRetryFailover invokes fn against the primary client. On
+// proxmox.ErrConnectionFailed it retries with brief backoff, then iterates
+// fallback endpoints. Non-connection errors are returned immediately. This
+// covers two cases the per-tick createClient failover misses: transient
+// blips on the primary, and the primary going offline mid-tick.
+func (o *Orchestrator) callWithRetryFailover(
+	ctx context.Context,
+	clusterID uuid.UUID,
+	primary *proxmox.Client,
+	fn func(*proxmox.Client) error,
+) error {
+	backoffs := []time.Duration{0, 2 * time.Second, 5 * time.Second}
+	var err error
+	for _, delay := range backoffs {
+		if delay > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+		err = fn(primary)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, proxmox.ErrConnectionFailed) {
+			return err
+		}
+	}
+
+	for _, fb := range o.buildFailoverClients(ctx, clusterID) {
+		fbErr := fn(fb)
+		if fbErr == nil {
+			o.logger.Warn("primary endpoint failed mid-call, succeeded via failover",
+				"cluster_id", clusterID)
+			return nil
+		}
+		if !errors.Is(fbErr, proxmox.ErrConnectionFailed) {
+			return fbErr
+		}
+	}
+	return err
 }
 
 func (o *Orchestrator) publishEvent(ctx context.Context, clusterID uuid.UUID, jobID uuid.UUID, action string) {
