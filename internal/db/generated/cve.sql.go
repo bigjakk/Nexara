@@ -637,6 +637,49 @@ func (q *Queries) ListCVEScanVulnsBySeverity(ctx context.Context, arg ListCVESca
 	return items, nil
 }
 
+const listCVEScanVulnsKEV = `-- name: ListCVEScanVulnsKEV :many
+SELECT id, scan_id, scan_node_id, cve_id, package_name, current_version, fixed_version, severity, cvss_score, description, risk_score, epss, epss_percentile, kev, risk_severity, ssvc_label FROM cve_scan_vulns
+WHERE scan_id = $1 AND kev = true
+ORDER BY risk_score DESC, cve_id, package_name
+`
+
+func (q *Queries) ListCVEScanVulnsKEV(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error) {
+	rows, err := q.db.Query(ctx, listCVEScanVulnsKEV, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CveScanVuln{}
+	for rows.Next() {
+		var i CveScanVuln
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScanID,
+			&i.ScanNodeID,
+			&i.CveID,
+			&i.PackageName,
+			&i.CurrentVersion,
+			&i.FixedVersion,
+			&i.Severity,
+			&i.CvssScore,
+			&i.Description,
+			&i.RiskScore,
+			&i.Epss,
+			&i.EpssPercentile,
+			&i.Kev,
+			&i.RiskSeverity,
+			&i.SsvcLabel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCVEScans = `-- name: ListCVEScans :many
 SELECT id, cluster_id, status, total_nodes, scanned_nodes, total_vulns, critical_count, high_count, medium_count, low_count, error_message, started_at, completed_at, created_at, kev_count, unknown_count, act_count, attend_count, track_star_count, track_count FROM cve_scans
 WHERE cluster_id = $1

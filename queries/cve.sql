@@ -75,6 +75,11 @@ SELECT * FROM cve_scan_vulns
 WHERE scan_id = $1 AND severity = $2
 ORDER BY package_name;
 
+-- name: ListCVEScanVulnsKEV :many
+SELECT * FROM cve_scan_vulns
+WHERE scan_id = $1 AND kev = true
+ORDER BY risk_score DESC, cve_id, package_name;
+
 -- name: ListCVEScanVulnsByNode :many
 SELECT * FROM cve_scan_vulns
 WHERE scan_node_id = $1

@@ -224,6 +224,7 @@ type Querier interface {
 	ListCVEScanVulns(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScanVulnsByNode(ctx context.Context, scanNodeID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScanVulnsBySeverity(ctx context.Context, arg ListCVEScanVulnsBySeverityParams) ([]CveScanVuln, error)
+	ListCVEScanVulnsKEV(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]CveScan, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)

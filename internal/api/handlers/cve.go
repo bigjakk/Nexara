@@ -359,6 +359,7 @@ func (h *CVEHandler) ListVulnerabilities(c *fiber.Ctx) error {
 
 	severity := c.Query("severity")
 	nodeID := c.Query("node_id")
+	kevOnly := c.Query("kev") == "true"
 
 	// Validate severity if provided
 	if severity != "" && !validSeverities[severity] {
@@ -368,6 +369,11 @@ func (h *CVEHandler) ListVulnerabilities(c *fiber.Ctx) error {
 	var vulns []db.CveScanVuln
 
 	switch {
+	case kevOnly:
+		// "Actively exploited" filter — surfaces only KEV-listed rows.
+		// Applied independently of severity/nodeID since the dashboard
+		// callout deep-links straight here.
+		vulns, err = h.queries.ListCVEScanVulnsKEV(c.Context(), scanID)
 	case nodeID != "":
 		nid, parseErr := uuid.Parse(nodeID)
 		if parseErr != nil {

@@ -5,9 +5,12 @@ import { SeverityBadge } from "./SeverityBadge";
 
 interface SecurityPostureCardProps {
   posture: SecurityPosture;
+  /** Optional handler for clicking the "actively exploited" KEV callout.
+   *  Receives the scan_id to deep-link into the filtered vuln view. */
+  onShowKEV?: (scanId: string) => void;
 }
 
-export function SecurityPostureCard({ posture }: SecurityPostureCardProps) {
+export function SecurityPostureCard({ posture, onShowKEV }: SecurityPostureCardProps) {
   const score = posture.posture_score;
   const hasScans = posture.status !== "no_scans";
 
@@ -70,19 +73,42 @@ export function SecurityPostureCard({ posture }: SecurityPostureCardProps) {
       )}
 
       {hasScans && posture.kev_count > 0 && (
-        <div className="mt-4 flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm">
-          <Flame className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
-          <div>
-            <div className="font-semibold text-red-700 dark:text-red-400">
-              {posture.kev_count} actively exploited{" "}
-              {posture.kev_count === 1 ? "vulnerability" : "vulnerabilities"}
+        onShowKEV ? (
+          <button
+            type="button"
+            onClick={() => { onShowKEV(posture.scan_id); }}
+            className="mt-4 flex w-full items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-left text-sm transition-colors hover:bg-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+          >
+            <Flame className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+            <div className="flex-1">
+              <div className="font-semibold text-red-700 dark:text-red-400">
+                {posture.kev_count} actively exploited{" "}
+                {posture.kev_count === 1 ? "vulnerability" : "vulnerabilities"}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Listed in CISA's Known Exploited Vulnerabilities catalog —
+                click to review each one.
+              </div>
             </div>
-            <div className="text-xs text-muted-foreground">
-              Listed in CISA's Known Exploited Vulnerabilities catalog —
-              patch immediately.
+            <span className="self-center text-xs font-medium text-red-700 dark:text-red-400">
+              View →
+            </span>
+          </button>
+        ) : (
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm">
+            <Flame className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+            <div>
+              <div className="font-semibold text-red-700 dark:text-red-400">
+                {posture.kev_count} actively exploited{" "}
+                {posture.kev_count === 1 ? "vulnerability" : "vulnerabilities"}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Listed in CISA's Known Exploited Vulnerabilities catalog —
+                patch immediately.
+              </div>
             </div>
           </div>
-        </div>
+        )
       )}
 
       {!hasScans && (

@@ -38,6 +38,7 @@ export function SecurityDashboardPage() {
   const { data: clusters, isLoading: clustersLoading } = useClusters();
   const [selectedClusterId, setSelectedClusterId] = useState<string>("");
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
+  const [vulnInitialKEV, setVulnInitialKEV] = useState<boolean>(false);
 
   // Persist selected job ID in URL search params so page refresh preserves the view.
   const selectedJobId = searchParams.get("job");
@@ -191,7 +192,13 @@ export function SecurityDashboardPage() {
             <div className="h-32 animate-pulse rounded-lg border bg-card" />
           ) : posture ? (
             <>
-              <SecurityPostureCard posture={posture} />
+              <SecurityPostureCard
+                posture={posture}
+                onShowKEV={(scanId) => {
+                  setSelectedScanId(scanId);
+                  setVulnInitialKEV(true);
+                }}
+              />
               <SSVCHistogram
                 actCount={posture.act_count}
                 attendCount={posture.attend_count}
@@ -208,8 +215,10 @@ export function SecurityDashboardPage() {
             <VulnerabilityTable
               clusterId={activeClusterId}
               scanId={selectedScanId}
+              initialKEV={vulnInitialKEV}
               onBack={() => {
                 setSelectedScanId(null);
+                setVulnInitialKEV(false);
               }}
             />
           ) : (
@@ -221,7 +230,10 @@ export function SecurityDashboardPage() {
                 <ScanHistoryTable
                   scans={scans ?? []}
                   clusterId={activeClusterId}
-                  onSelectScan={setSelectedScanId}
+                  onSelectScan={(id) => {
+                    setSelectedScanId(id);
+                    setVulnInitialKEV(false);
+                  }}
                 />
               )}
             </div>
