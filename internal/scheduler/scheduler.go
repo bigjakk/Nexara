@@ -170,6 +170,23 @@ func (s *Scheduler) RunKEVRefresh(ctx context.Context) {
 	s.logger.Info("KEV refresh complete", "entries", written)
 }
 
+// RunReportRetention deletes scheduled-report runs older than 90 days. The
+// retention SQL was defined alongside the report generator but never invoked
+// — without this tick, scheduled-report rows accumulate forever. On-demand
+// runs (schedule_id IS NULL) are preserved unconditionally.
+func (s *Scheduler) RunReportRetention(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("report retention panicked", "panic", r)
+		}
+	}()
+	if err := s.queries.CleanupOldReportRuns(ctx); err != nil {
+		s.logger.Warn("report retention failed", "error", err)
+		return
+	}
+	s.logger.Debug("report retention complete")
+}
+
 // RunCVEScanning runs CVE scans for clusters based on their schedule configuration.
 // Clusters with no schedule config default to enabled with a 24-hour interval.
 func (s *Scheduler) RunCVEScanning(ctx context.Context) {

@@ -413,6 +413,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 			"kev_interval", "1h",
 			"alert_interval", "60s",
 			"report_interval", "60s",
+			"report_retention_interval", "24h",
 			"rolling_update_interval", "15s",
 		)
 
@@ -428,6 +429,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		sched.RunCVEScanning(ctx)
 		sched.RunAlertEvaluation(ctx)
 		sched.RunReportGeneration(ctx)
+		sched.RunReportRetention(ctx)
 		sched.RunRollingUpdates(ctx)
 
 		taskTicker := time.NewTicker(60 * time.Second)
@@ -448,6 +450,9 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		reportTicker := time.NewTicker(60 * time.Second)
 		defer reportTicker.Stop()
 
+		reportRetentionTicker := time.NewTicker(24 * time.Hour)
+		defer reportRetentionTicker.Stop()
+
 		rollingTicker := time.NewTicker(15 * time.Second)
 		defer rollingTicker.Stop()
 
@@ -465,6 +470,8 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 				sched.RunAlertEvaluation(ctx)
 			case <-reportTicker.C:
 				sched.RunReportGeneration(ctx)
+			case <-reportRetentionTicker.C:
+				sched.RunReportRetention(ctx)
 			case <-rollingTicker.C:
 				sched.RunRollingUpdates(ctx)
 			case <-ctx.Done():
