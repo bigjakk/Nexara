@@ -70,6 +70,8 @@ type Querier interface {
 	DeleteReportRun(ctx context.Context, id uuid.UUID) error
 	DeleteReportSchedule(ctx context.Context, id uuid.UUID) error
 	DeleteRole(ctx context.Context, id uuid.UUID) error
+	DeleteSSHKnownHost(ctx context.Context, arg DeleteSSHKnownHostParams) error
+	DeleteSSHKnownHostByID(ctx context.Context, arg DeleteSSHKnownHostByIDParams) error
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
 	DeleteSetting(ctx context.Context, arg DeleteSettingParams) error
 	DeleteSettingByID(ctx context.Context, id uuid.UUID) error
@@ -160,6 +162,7 @@ type Querier interface {
 	GetRoleByName(ctx context.Context, name string) (Role, error)
 	GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (RollingUpdateJob, error)
 	GetRollingUpdateNode(ctx context.Context, id uuid.UUID) (RollingUpdateNode, error)
+	GetSSHKnownHost(ctx context.Context, arg GetSSHKnownHostParams) (SshKnownHost, error)
 	GetScheduledTask(ctx context.Context, id uuid.UUID) (ScheduledTask, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
@@ -280,6 +283,7 @@ type Querier interface {
 	ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpdateJobsParams) ([]RollingUpdateJob, error)
 	ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) ([]RollingUpdateNode, error)
 	ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUpdateJob, error)
+	ListSSHKnownHosts(ctx context.Context, clusterID uuid.UUID) ([]SshKnownHost, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
 	ListSettingsByScope(ctx context.Context, arg ListSettingsByScopeParams) ([]Setting, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
@@ -400,6 +404,7 @@ type Querier interface {
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)
 	UpsertPBSSyncJob(ctx context.Context, arg UpsertPBSSyncJobParams) (PbsSyncJob, error)
 	UpsertPBSVerifyJob(ctx context.Context, arg UpsertPBSVerifyJobParams) (PbsVerifyJob, error)
+	UpsertSSHKnownHost(ctx context.Context, arg UpsertSSHKnownHostParams) (SshKnownHost, error)
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error)
 	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (UpsertStoragePoolRow, error)
 	UpsertTaskSyncState(ctx context.Context, arg UpsertTaskSyncStateParams) error

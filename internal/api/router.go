@@ -373,6 +373,11 @@ func (s *Server) setupRoutes() {
 			clusters.Put("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.UpsertSSHCredentials)
 			clusters.Delete("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.DeleteSSHCredentials)
 			clusters.Post("/:cluster_id/ssh-credentials/test", s.rollingUpdateHandler.TestSSHConnection)
+
+			// SSH known-host (pinned host key) management.
+			clusters.Get("/:cluster_id/ssh-known-hosts", s.rollingUpdateHandler.ListSSHKnownHosts)
+			clusters.Post("/:cluster_id/ssh-known-hosts", s.rollingUpdateHandler.PinSSHHostKey)
+			clusters.Delete("/:cluster_id/ssh-known-hosts/:id", s.rollingUpdateHandler.DeleteSSHKnownHost)
 		}
 
 		// Cluster options, tags, and config routes.

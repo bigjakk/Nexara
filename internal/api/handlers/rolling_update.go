@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -852,7 +853,16 @@ func (h *RollingUpdateHandler) DeleteSSHCredentials(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "deleted"})
 }
 
-// TestSSHConnection tests SSH connectivity to a specific node.
+// TestSSHConnection runs the TOFU host-key flow against a specific node.
+//
+// Three response shapes:
+//   - {success: true} — host key pinned, auth succeeded.
+//   - {success: false, host_key_pending: {...}} — host key not yet pinned;
+//     UI should show fingerprint and ask the user to confirm + pin.
+//   - {success: false, host_key_mismatch: {...}} — pinned key did NOT
+//     match the presented one; UI should warn and offer re-pin.
+//   - {success: false, message: "..."} — connection or auth failure for
+//     reasons unrelated to host-key trust.
 func (h *RollingUpdateHandler) TestSSHConnection(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
@@ -865,8 +875,11 @@ func (h *RollingUpdateHandler) TestSSHConnection(c *fiber.Ctx) error {
 	var req struct {
 		NodeName string `json:"node_name"`
 	}
-	if err := c.BodyParser(&req); err != nil || req.NodeName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if err := validateNodeName(req.NodeName); err != nil {
+		return err
 	}
 
 	creds, err := h.queries.GetClusterSSHCredentials(c.Context(), clusterID)
@@ -874,39 +887,78 @@ func (h *RollingUpdateHandler) TestSSHConnection(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "SSH credentials not configured for this cluster")
 	}
 
-	var password, privateKey string
-	if creds.EncryptedPassword != "" {
-		password, err = crypto.Decrypt(creds.EncryptedPassword, h.encryptionKey)
-		if err != nil {
-			return fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt credentials")
-		}
+	sshHost, hostErr := h.resolveNodeAddress(c, clusterID, req.NodeName)
+	if hostErr != nil {
+		return hostErr
 	}
-	if creds.EncryptedPrivateKey != "" {
-		privateKey, err = crypto.Decrypt(creds.EncryptedPrivateKey, h.encryptionKey)
-		if err != nil {
-			return fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt credentials")
+	sshPort := int(creds.Port)
+
+	// Look up the pinned host key, if any.
+	pinned, pinErr := h.queries.GetSSHKnownHost(c.Context(), db.GetSSHKnownHostParams{
+		ClusterID: clusterID,
+		Host:      sshHost,
+		Port:      creds.Port,
+	})
+	pinnedFound := pinErr == nil
+
+	// Path 1: no pinned key yet — scan and return fingerprint for the
+	// user to confirm, do NOT attempt auth.
+	if !pinnedFound {
+		key, scanErr := sshpkg.ScanHostKey(c.Context(), sshHost, sshPort)
+		if scanErr != nil {
+			return c.JSON(fiber.Map{
+				"success": false,
+				"message": scanErr.Error(),
+			})
 		}
+		return c.JSON(fiber.Map{
+			"success": false,
+			"message": "Host key not yet trusted. Confirm the fingerprint matches the node, then pin it.",
+			"host_key_pending": fiber.Map{
+				"host":        sshHost,
+				"port":        sshPort,
+				"fingerprint": sshpkg.FingerprintSHA256(key),
+				"public_key":  sshpkg.MarshalAuthorizedKey(key),
+			},
+		})
 	}
 
-	// Resolve node name to IP from stored address.
-	sshHost := req.NodeName
-	nodeAddr, addrErr := h.queries.GetNodeAddressByName(c.Context(), db.GetNodeAddressByNameParams{
-		ClusterID: clusterID,
-		Name:      req.NodeName,
-	})
-	if addrErr == nil && nodeAddr != "" {
-		sshHost = nodeAddr
+	// Path 2: pinned — attempt the connection and surface a typed
+	// mismatch error if the remote key has changed.
+	knownKey, parseErr := sshpkg.ParseAuthorizedKey(pinned.PublicKey)
+	if parseErr != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Stored host key is corrupt — delete and re-pin")
+	}
+
+	password, privateKey, decErr := h.decryptSSHCredentials(creds)
+	if decErr != nil {
+		return decErr
 	}
 
 	sshCfg := sshpkg.Config{
-		Host:       sshHost,
-		Port:       int(creds.Port),
-		Username:   creds.Username,
-		Password:   password,
-		PrivateKey: privateKey,
+		Host:         sshHost,
+		Port:         sshPort,
+		Username:     creds.Username,
+		Password:     password,
+		PrivateKey:   privateKey,
+		KnownHostKey: knownKey,
 	}
 
 	if err := sshpkg.TestConnection(c.Context(), sshCfg); err != nil {
+		var mismatch *sshpkg.HostKeyMismatchError
+		if errors.As(err, &mismatch) {
+			return c.JSON(fiber.Map{
+				"success": false,
+				"message": "Host key has changed since it was pinned. Investigate before re-pinning.",
+				"host_key_mismatch": fiber.Map{
+					"host":                  sshHost,
+					"port":                  sshPort,
+					"expected_fingerprint":  mismatch.ExpectedFingerprint,
+					"presented_fingerprint": mismatch.PresentedFingerprint,
+					"presented_public_key":  mismatch.PresentedPublicKey,
+				},
+			})
+		}
 		return c.JSON(fiber.Map{
 			"success": false,
 			"message": err.Error(),
@@ -914,7 +966,234 @@ func (h *RollingUpdateHandler) TestSSHConnection(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"success": true,
-		"message": "SSH connection successful",
+		"success":     true,
+		"message":     "SSH connection successful",
+		"fingerprint": pinned.Fingerprint,
 	})
+}
+
+// --- SSH Known-Host Management ---
+
+type sshKnownHostResponse struct {
+	ID          string `json:"id"`
+	ClusterID   string `json:"cluster_id"`
+	Host        string `json:"host"`
+	Port        int32  `json:"port"`
+	Fingerprint string `json:"fingerprint"`
+	PinnedBy    string `json:"pinned_by,omitempty"`
+	PinnedAt    string `json:"pinned_at"`
+}
+
+// ListSSHKnownHosts returns the pinned host keys for a cluster.
+func (h *RollingUpdateHandler) ListSSHKnownHosts(c *fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
+		return err
+	}
+
+	rows, err := h.queries.ListSSHKnownHosts(c.Context(), clusterID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list pinned host keys")
+	}
+
+	out := make([]sshKnownHostResponse, 0, len(rows))
+	for _, r := range rows {
+		resp := sshKnownHostResponse{
+			ID:          r.ID.String(),
+			ClusterID:   r.ClusterID.String(),
+			Host:        r.Host,
+			Port:        r.Port,
+			Fingerprint: r.Fingerprint,
+			PinnedAt:    r.PinnedAt.Format(time.RFC3339),
+		}
+		if r.PinnedBy.Valid {
+			resp.PinnedBy = uuid.UUID(r.PinnedBy.Bytes).String()
+		}
+		out = append(out, resp)
+	}
+	return c.JSON(out)
+}
+
+type pinSSHHostKeyRequest struct {
+	NodeName            string `json:"node_name"`
+	ExpectedFingerprint string `json:"expected_fingerprint"`
+}
+
+// PinSSHHostKey runs a fresh host-key scan and stores the result, but only
+// after verifying the freshly-scanned fingerprint matches the one the user
+// confirmed in the UI. This closes the TOCTOU window between the test
+// response and the pin call.
+func (h *RollingUpdateHandler) PinSSHHostKey(c *fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
+		return err
+	}
+
+	var req pinSSHHostKeyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if err := validateNodeName(req.NodeName); err != nil {
+		return err
+	}
+	if req.ExpectedFingerprint == "" || len(req.ExpectedFingerprint) > 128 {
+		return fiber.NewError(fiber.StatusBadRequest, "expected_fingerprint is required (and must be ≤ 128 chars)")
+	}
+
+	creds, err := h.queries.GetClusterSSHCredentials(c.Context(), clusterID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "SSH credentials not configured for this cluster")
+	}
+
+	sshHost, hostErr := h.resolveNodeAddress(c, clusterID, req.NodeName)
+	if hostErr != nil {
+		return hostErr
+	}
+
+	key, scanErr := sshpkg.ScanHostKey(c.Context(), sshHost, int(creds.Port))
+	if scanErr != nil {
+		return fiber.NewError(fiber.StatusBadGateway, "Failed to scan host key: "+scanErr.Error())
+	}
+	scannedFP := sshpkg.FingerprintSHA256(key)
+	if scannedFP != req.ExpectedFingerprint {
+		return fiber.NewError(fiber.StatusConflict,
+			"Host key changed between confirmation and pin (expected "+req.ExpectedFingerprint+
+				", scanned "+scannedFP+"). Re-test the connection and confirm the new fingerprint.")
+	}
+
+	pinnedBy := pgtype.UUID{}
+	if uid, ok := c.Locals("user_id").(uuid.UUID); ok {
+		pinnedBy = pgtype.UUID{Bytes: uid, Valid: true}
+	}
+
+	row, err := h.queries.UpsertSSHKnownHost(c.Context(), db.UpsertSSHKnownHostParams{
+		ClusterID:   clusterID,
+		Host:        sshHost,
+		Port:        creds.Port,
+		PublicKey:   sshpkg.MarshalAuthorizedKey(key),
+		Fingerprint: scannedFP,
+		PinnedBy:    pinnedBy,
+	})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to pin host key")
+	}
+
+	details, _ := json.Marshal(fiber.Map{
+		"host":        sshHost,
+		"fingerprint": scannedFP,
+		"node_name":   req.NodeName,
+	})
+	h.auditLog(c, clusterID, row.ID.String(), "ssh_host_key_pinned", details)
+
+	resp := sshKnownHostResponse{
+		ID:          row.ID.String(),
+		ClusterID:   row.ClusterID.String(),
+		Host:        row.Host,
+		Port:        row.Port,
+		Fingerprint: row.Fingerprint,
+		PinnedAt:    row.PinnedAt.Format(time.RFC3339),
+	}
+	if row.PinnedBy.Valid {
+		resp.PinnedBy = uuid.UUID(row.PinnedBy.Bytes).String()
+	}
+	return c.JSON(resp)
+}
+
+// DeleteSSHKnownHost removes a pinned host key entry. The next connection
+// to that host will fail closed until re-pinned.
+func (h *RollingUpdateHandler) DeleteSSHKnownHost(c *fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
+		return err
+	}
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid id")
+	}
+
+	if err := h.queries.DeleteSSHKnownHostByID(c.Context(), db.DeleteSSHKnownHostByIDParams{
+		ID:        id,
+		ClusterID: clusterID,
+	}); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete pinned host key")
+	}
+
+	h.auditLog(c, clusterID, id.String(), "ssh_host_key_unpinned", nil)
+	return c.JSON(fiber.Map{"status": "deleted"})
+}
+
+// --- helpers ---
+
+// validateNodeName accepts only the character set Proxmox itself uses for
+// node names: ASCII letters, digits, and hyphens, up to 64 chars. This
+// prevents control characters from leaking into audit logs or admin UI.
+func validateNodeName(s string) error {
+	if s == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node_name is required")
+	}
+	if len(s) > 64 {
+		return fiber.NewError(fiber.StatusBadRequest, "node_name too long (max 64)")
+	}
+	for _, r := range s {
+		ok := (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '-' || r == '_' || r == '.'
+		if !ok {
+			return fiber.NewError(fiber.StatusBadRequest, "node_name contains unsupported characters")
+		}
+	}
+	return nil
+}
+
+// resolveNodeAddress returns the IP address for a Proxmox node in a cluster,
+// or a 400 error if the address is not yet known. The previous silent
+// fallback to using the node name as a hostname is removed; an unknown
+// address now fails loudly so the user can fix the underlying state.
+func (h *RollingUpdateHandler) resolveNodeAddress(c *fiber.Ctx, clusterID uuid.UUID, nodeName string) (string, error) {
+	addr, err := h.queries.GetNodeAddressByName(c.Context(), db.GetNodeAddressByNameParams{
+		ClusterID: clusterID,
+		Name:      nodeName,
+	})
+	if err != nil || addr == "" {
+		return "", fiber.NewError(fiber.StatusBadRequest,
+			"No IP address known for node "+nodeName+" — wait for the collector to report it, then retry.")
+	}
+	// Defence-in-depth against collector data corruption: reject control
+	// characters so a poisoned address can't smuggle CR/LF into log lines.
+	for _, r := range addr {
+		if r < 0x20 || r == 0x7f {
+			return "", fiber.NewError(fiber.StatusInternalServerError, "Stored node address contains control characters")
+		}
+	}
+	return addr, nil
+}
+
+// decryptSSHCredentials decrypts the password and private key, returning a
+// fiber-friendly error if either fails.
+func (h *RollingUpdateHandler) decryptSSHCredentials(creds db.ClusterSshCredential) (password, privateKey string, err error) {
+	if creds.EncryptedPassword != "" {
+		p, decErr := crypto.Decrypt(creds.EncryptedPassword, h.encryptionKey)
+		if decErr != nil {
+			return "", "", fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt credentials")
+		}
+		password = p
+	}
+	if creds.EncryptedPrivateKey != "" {
+		k, decErr := crypto.Decrypt(creds.EncryptedPrivateKey, h.encryptionKey)
+		if decErr != nil {
+			return "", "", fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt credentials")
+		}
+		privateKey = k
+	}
+	return password, privateKey, nil
 }

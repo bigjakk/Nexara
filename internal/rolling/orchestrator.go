@@ -619,21 +619,41 @@ func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Cli
 	}
 
 	// Look up the node's IP address from the DB (populated by collector from corosync).
-	sshHost := node.NodeName
-	nodeAddr, addrErr := o.queries.GetNodeAddressByName(ctx, db.GetNodeAddressByNameParams{
+	// Fail loudly if missing — the previous fallback to using node name as
+	// hostname could end up at any DNS-resolved address.
+	sshHost, addrErr := o.queries.GetNodeAddressByName(ctx, db.GetNodeAddressByNameParams{
 		ClusterID: job.ClusterID,
 		Name:      node.NodeName,
 	})
-	if addrErr == nil && nodeAddr != "" {
-		sshHost = nodeAddr
+	if addrErr != nil || sshHost == "" {
+		o.failNode(ctx, job, node, fmt.Sprintf("no IP address known for node %q (collector hasn't reported it). Wait for the collector to tick, then retry.", node.NodeName))
+		return
+	}
+
+	// Require a pinned host key. The previous InsecureIgnoreHostKey policy
+	// is gone; an unpinned host now fails closed.
+	pinned, pinErr := o.queries.GetSSHKnownHost(ctx, db.GetSSHKnownHostParams{
+		ClusterID: job.ClusterID,
+		Host:      sshHost,
+		Port:      sshCreds.Port,
+	})
+	if pinErr != nil {
+		o.failNode(ctx, job, node, fmt.Sprintf("SSH host key not pinned for %s. Visit Settings → SSH Credentials, run Test Connection, and confirm the fingerprint to pin it.", sshHost))
+		return
+	}
+	knownKey, parseErr := sshpkg.ParseAuthorizedKey(pinned.PublicKey)
+	if parseErr != nil {
+		o.failNode(ctx, job, node, fmt.Sprintf("stored SSH host key for %s is corrupt: %v — delete and re-pin", sshHost, parseErr))
+		return
 	}
 
 	sshCfg := sshpkg.Config{
-		Host:       sshHost,
-		Port:       int(sshCreds.Port),
-		Username:   sshCreds.Username,
-		Password:   password,
-		PrivateKey: privateKey,
+		Host:         sshHost,
+		Port:         int(sshCreds.Port),
+		Username:     sshCreds.Username,
+		Password:     password,
+		PrivateKey:   privateKey,
+		KnownHostKey: knownKey,
 	}
 
 	_ = o.queries.SetNodeUpgradeStarted(ctx, node.ID)

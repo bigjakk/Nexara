@@ -816,6 +816,17 @@ type Setting struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+type SshKnownHost struct {
+	ID          uuid.UUID   `json:"id"`
+	ClusterID   uuid.UUID   `json:"cluster_id"`
+	Host        string      `json:"host"`
+	Port        int32       `json:"port"`
+	PublicKey   string      `json:"public_key"`
+	Fingerprint string      `json:"fingerprint"`
+	PinnedBy    pgtype.UUID `json:"pinned_by"`
+	PinnedAt    time.Time   `json:"pinned_at"`
+}
+
 type StoragePool struct {
 	ID         uuid.UUID `json:"id"`
 	ClusterID  uuid.UUID `json:"cluster_id"`

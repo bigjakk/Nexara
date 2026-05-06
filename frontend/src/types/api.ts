@@ -743,9 +743,37 @@ export interface SSHCredential {
   updated_at: string;
 }
 
+export interface SSHHostKeyPending {
+  host: string;
+  port: number;
+  fingerprint: string;
+  public_key: string;
+}
+
+export interface SSHHostKeyMismatch {
+  host: string;
+  port: number;
+  expected_fingerprint: string;
+  presented_fingerprint: string;
+  presented_public_key: string;
+}
+
 export interface SSHTestResponse {
   success: boolean;
   message: string;
+  fingerprint?: string;
+  host_key_pending?: SSHHostKeyPending;
+  host_key_mismatch?: SSHHostKeyMismatch;
+}
+
+export interface SSHKnownHost {
+  id: string;
+  cluster_id: string;
+  host: string;
+  port: number;
+  fingerprint: string;
+  pinned_by?: string;
+  pinned_at: string;
 }
 
 export interface HAConflict {
