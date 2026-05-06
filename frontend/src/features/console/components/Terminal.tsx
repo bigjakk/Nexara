@@ -5,15 +5,22 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import type { ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
+import {
+  mintConsoleToken,
+  type ConsoleScopeType,
+} from "../api/console-queries";
 
 interface TerminalProps {
   tab: ConsoleTab;
   visible: boolean;
   /**
-   * Optional override for the access token used in the WS URL. When
-   * provided, the component uses this token instead of reading
-   * `localStorage.access_token`. Used by the /mobile-console route to pass
-   * a short-lived scope-locked JWT minted via /api/v1/auth/console-token.
+   * Optional override for the WS upgrade token. When provided, the component
+   * uses this token directly. When omitted, a short-lived scope-locked JWT
+   * is minted via POST /api/v1/auth/console-token before opening the WS.
+   *
+   * The /ws/console endpoint rejects regular access tokens (security review
+   * fix #1: per-cluster RBAC enforcement); desktop usage MUST mint, mobile
+   * passes the pre-minted token via URL params.
    */
   accessToken?: string;
 }
@@ -22,14 +29,13 @@ function buildConsoleWsUrl(
   clusterID: string,
   node: string,
   type: string,
-  vmid?: number,
-  overrideToken?: string,
+  vmid: number | undefined,
+  token: string,
 ): string {
-  const token = overrideToken ?? localStorage.getItem("access_token");
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
   const params = new URLSearchParams({
-    token: token ?? "",
+    token,
     cluster_id: clusterID,
     node,
     type,
@@ -100,107 +106,151 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
       }
     });
 
-    // Connect WebSocket.
+    // Resources captured by the cleanup function. Populated asynchronously
+    // by connect() once the scoped token has been minted; cleanup tolerates
+    // them still being null if unmount races the mint.
     intentionalCloseRef.current = false;
-    const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid, accessToken);
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = "arraybuffer";
-    wsRef.current = ws;
+    let ws: WebSocket | null = null;
+    let dataDisposable: { dispose: () => void } | null = null;
+    let resizeDisposable: { dispose: () => void } | null = null;
+    let observer: ResizeObserver | null = null;
 
-    ws.onopen = () => {
-      // Wait for the "connected" message from server before updating status.
-    };
-
-    ws.onmessage = (event: MessageEvent) => {
-      if (typeof event.data === "string") {
-        // JSON control message.
-        try {
-          const msg = JSON.parse(event.data) as { type: string; message?: string };
-          if (msg.type === "connected") {
-            retryCountRef.current = 0;
-            updateTabStatus(tabId, "connected");
-            // Send initial resize.
-            ws.send(
-              JSON.stringify({
-                type: "resize",
-                cols: term.cols,
-                rows: term.rows,
-              }),
-            );
-            return;
-          }
-          if (msg.type === "error") {
-            term.writeln(`\r\nError: ${msg.message ?? "unknown error"}`);
-            updateTabStatus(tabId, "error");
-            return;
-          }
-        } catch {
-          // Not JSON, write as text.
-          term.write(event.data);
+    const connect = async () => {
+      // Acquire the WS upgrade token. Desktop callers omit accessToken and
+      // mint a short-lived scoped JWT; mobile passes its pre-minted token
+      // through the prop.
+      let token: string;
+      try {
+        if (accessToken) {
+          token = accessToken;
+        } else {
+          const minted = await mintConsoleToken({
+            clusterId: clusterID,
+            node,
+            type: type as ConsoleScopeType,
+            ...(vmid !== undefined ? { vmid } : {}),
+          });
+          token = minted.token;
         }
-      } else if (event.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(event.data));
+      } catch (err) {
+        if (intentionalCloseRef.current) return;
+        const msg = err instanceof Error ? err.message : "unknown error";
+        term.writeln(`\r\nFailed to authorize console session: ${msg}`);
+        updateTabStatus(tabId, "error");
+        return;
       }
-    };
 
-    ws.onclose = () => {
+      // Component may have unmounted while we awaited the mint.
       if (intentionalCloseRef.current) return;
 
-      if (retryCountRef.current < MAX_AUTO_RETRIES) {
-        const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
-        retryCountRef.current++;
-        updateTabStatus(tabId, "reconnecting");
-        term.writeln(`\r\n[Connection lost \u2014 reconnecting in ${String(delay / 1000)}s...]`);
-        retryTimerRef.current = setTimeout(() => {
-          void resolveAndReconnect(tabId);
-        }, delay);
-      } else {
-        updateTabStatus(tabId, "disconnected");
-        term.writeln("\r\n\r\n[Connection closed]");
-      }
-    };
+      const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid, token);
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
+      wsRef.current = ws;
 
-    ws.onerror = () => {
-      if (!intentionalCloseRef.current) {
-        updateTabStatus(tabId, "error");
-      }
-    };
+      ws.onopen = () => {
+        // Wait for the "connected" message from server before updating status.
+      };
 
-    // Wire terminal input to WebSocket.
-    const dataDisposable = term.onData((data: string) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        // Send as binary.
-        const encoder = new TextEncoder();
-        ws.send(encoder.encode(data));
-      }
-    });
+      ws.onmessage = (event: MessageEvent) => {
+        if (typeof event.data === "string") {
+          // JSON control message.
+          try {
+            const parsed = JSON.parse(event.data) as {
+              type: string;
+              message?: string;
+            };
+            if (parsed.type === "connected") {
+              retryCountRef.current = 0;
+              updateTabStatus(tabId, "connected");
+              // Send initial resize.
+              ws?.send(
+                JSON.stringify({
+                  type: "resize",
+                  cols: term.cols,
+                  rows: term.rows,
+                }),
+              );
+              return;
+            }
+            if (parsed.type === "error") {
+              term.writeln(`\r\nError: ${parsed.message ?? "unknown error"}`);
+              updateTabStatus(tabId, "error");
+              return;
+            }
+          } catch {
+            // Not JSON, write as text.
+            term.write(event.data);
+          }
+        } else if (event.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(event.data));
+        }
+      };
 
-    // Wire terminal resize to WebSocket.
-    const resizeDisposable = term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "resize", cols, rows }));
-      }
-    });
+      ws.onclose = () => {
+        if (intentionalCloseRef.current) return;
 
-    // ResizeObserver for auto-fit.
-    const observer = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        try {
-          fitAddon.fit();
-        } catch {
-          // Ignore
+        if (retryCountRef.current < MAX_AUTO_RETRIES) {
+          const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
+          retryCountRef.current++;
+          updateTabStatus(tabId, "reconnecting");
+          term.writeln(
+            `\r\n[Connection lost \u2014 reconnecting in ${String(delay / 1000)}s...]`,
+          );
+          retryTimerRef.current = setTimeout(() => {
+            void resolveAndReconnect(tabId);
+          }, delay);
+        } else {
+          updateTabStatus(tabId, "disconnected");
+          term.writeln("\r\n\r\n[Connection closed]");
+        }
+      };
+
+      ws.onerror = () => {
+        if (!intentionalCloseRef.current) {
+          updateTabStatus(tabId, "error");
+        }
+      };
+
+      // Wire terminal input to WebSocket.
+      dataDisposable = term.onData((data: string) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const encoder = new TextEncoder();
+          ws.send(encoder.encode(data));
         }
       });
-    });
-    observer.observe(containerRef.current);
+
+      // Wire terminal resize to WebSocket.
+      resizeDisposable = term.onResize(({ cols, rows }) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+      });
+
+      // ResizeObserver for auto-fit.
+      observer = new ResizeObserver(() => {
+        requestAnimationFrame(() => {
+          try {
+            fitAddon.fit();
+          } catch {
+            // Ignore
+          }
+        });
+      });
+      if (containerRef.current) {
+        observer.observe(containerRef.current);
+      }
+    };
+
+    void connect();
 
     return () => {
       intentionalCloseRef.current = true;
       clearTimeout(retryTimerRef.current);
-      observer.disconnect();
-      dataDisposable.dispose();
-      resizeDisposable.dispose();
-      ws.close();
+      observer?.disconnect();
+      dataDisposable?.dispose();
+      resizeDisposable?.dispose();
+      ws?.close();
       term.dispose();
       termRef.current = null;
       wsRef.current = null;

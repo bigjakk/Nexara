@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import RFB from "@novnc/novnc/lib/rfb";
 import { Keyboard, Maximize, Minimize, ClipboardPaste, Move, RectangleHorizontal, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { mintConsoleToken } from "@/features/console/api/console-queries";
 
 interface InlineVNCViewerProps {
   clusterId: string;
@@ -12,12 +13,17 @@ interface InlineVNCViewerProps {
 
 type VNCStatus = "connecting" | "connected" | "disconnected" | "error";
 
-function buildVncWsUrl(clusterID: string, node: string, vmid: number, guestType?: string): string {
-  const token = localStorage.getItem("access_token");
+function buildVncWsUrl(
+  clusterID: string,
+  node: string,
+  vmid: number,
+  guestType: string | undefined,
+  token: string,
+): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
   const params = new URLSearchParams({
-    token: token ?? "",
+    token,
     cluster_id: clusterID,
     node,
     vmid: String(vmid),
@@ -38,63 +44,91 @@ export function InlineVNCViewer({ clusterId, node, vmid, guestType }: InlineVNCV
   const [scaleMode, setScaleMode] = useState<"scale" | "resize">("scale");
 
   useEffect(() => {
-    const wsUrl = buildVncWsUrl(clusterId, node, vmid, guestType);
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = "arraybuffer";
     setStatus("connecting");
+    let ws: WebSocket | null = null;
+    let cancelled = false;
 
-    ws.onmessage = (event: MessageEvent) => {
-      if (typeof event.data === "string") {
-        try {
-          const msg = JSON.parse(event.data) as {
-            type: string;
-            password?: string;
-          };
-          if (msg.type === "connected") {
-            if (!containerRef.current) return;
-            const options: Record<string, unknown> = {};
-            if (msg.password) {
-              options["credentials"] = { password: msg.password };
-            }
-            const rfbInstance = new RFB(containerRef.current, ws, options);
-            rfbInstance.scaleViewport = true;
-            rfbInstance.resizeSession = false;
-            rfbInstance.focusOnClick = true;
-
-            rfbInstance.addEventListener("connect", () => { setStatus("connected"); });
-            rfbInstance.addEventListener("disconnect", () => {
-              setStatus("disconnected");
-              rfbRef.current = null;
-              setRfb(null);
-            });
-            rfbInstance.addEventListener("securityfailure", () => { setStatus("error"); });
-
-            rfbRef.current = rfbInstance;
-            setRfb(rfbInstance);
-            return;
-          }
-          if (msg.type === "error") {
-            setStatus("error");
-            return;
-          }
-        } catch {
-          // not JSON
-        }
+    const connect = async () => {
+      // /ws/vnc requires a scoped console token (security review fix #1).
+      // The mint endpoint enforces per-cluster RBAC.
+      let token: string;
+      try {
+        const minted = await mintConsoleToken({
+          clusterId,
+          node,
+          type: guestType === "lxc" ? "ct_vnc" : "vm_vnc",
+          vmid,
+        });
+        token = minted.token;
+      } catch {
+        if (!cancelled) setStatus("error");
+        return;
       }
+
+      if (cancelled) return;
+
+      const wsUrl = buildVncWsUrl(clusterId, node, vmid, guestType, token);
+      ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
+
+      const localWs = ws;
+
+      localWs.onmessage = (event: MessageEvent) => {
+        if (typeof event.data === "string") {
+          try {
+            const msg = JSON.parse(event.data) as {
+              type: string;
+              password?: string;
+            };
+            if (msg.type === "connected") {
+              if (!containerRef.current) return;
+              const options: Record<string, unknown> = {};
+              if (msg.password) {
+                options["credentials"] = { password: msg.password };
+              }
+              const rfbInstance = new RFB(containerRef.current, localWs, options);
+              rfbInstance.scaleViewport = true;
+              rfbInstance.resizeSession = false;
+              rfbInstance.focusOnClick = true;
+
+              rfbInstance.addEventListener("connect", () => { setStatus("connected"); });
+              rfbInstance.addEventListener("disconnect", () => {
+                setStatus("disconnected");
+                rfbRef.current = null;
+                setRfb(null);
+              });
+              rfbInstance.addEventListener("securityfailure", () => { setStatus("error"); });
+
+              rfbRef.current = rfbInstance;
+              setRfb(rfbInstance);
+              return;
+            }
+            if (msg.type === "error") {
+              setStatus("error");
+              return;
+            }
+          } catch {
+            // not JSON
+          }
+        }
+      };
+
+      localWs.onclose = () => {
+        if (!rfbRef.current) setStatus("disconnected");
+      };
+      localWs.onerror = () => { setStatus("error"); };
     };
 
-    ws.onclose = () => {
-      if (!rfbRef.current) setStatus("disconnected");
-    };
-    ws.onerror = () => { setStatus("error"); };
+    void connect();
 
     return () => {
+      cancelled = true;
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;
         setRfb(null);
       } else {
-        ws.close();
+        ws?.close();
       }
     };
   }, [clusterId, node, vmid, guestType, reconnectKey]);

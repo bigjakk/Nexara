@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/contrib/websocket"
@@ -130,10 +131,17 @@ func (s *Server) healthz(c *fiber.Ctx) error {
 }
 
 // authMiddleware validates the JWT token from the query parameter before WebSocket upgrade.
-// It supports two kinds of JWTs:
-//   - Regular access tokens — accepted on any WS path.
-//   - Scoped console tokens (ConsoleScope != nil) — accepted ONLY on /ws/console
-//     or /ws/vnc, and only if the upgrade query params exactly match the scope.
+//
+// Two kinds of JWTs are accepted:
+//   - Regular access tokens — accepted on the generic /ws path only. Per-channel
+//     authorization is enforced later in client.go::canSubscribe.
+//   - Scoped console tokens (ConsoleScope != nil) — required on /ws/console and
+//     /ws/vnc. The scope must exactly match the upgrade's query parameters.
+//
+// A regular access token presented on /ws/console or /ws/vnc is rejected with
+// 403. The console-token mint endpoint (/api/v1/auth/console-token) checks
+// per-cluster RBAC before issuing the scoped JWT, so this requirement makes
+// the mint endpoint the single chokepoint for console authorization.
 func (s *Server) authMiddleware(c *fiber.Ctx) error {
 	if !websocket.IsWebSocketUpgrade(c) {
 		return fiber.ErrUpgradeRequired
@@ -159,11 +167,33 @@ func (s *Server) authMiddleware(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid token"})
 	}
 
-	// If this is a scoped console token, enforce the scope exactly.
-	if claims.ConsoleScope != nil {
+	// Compare case-insensitively because Fiber routes case-insensitively by
+	// default (CaseSensitive=false). A request to /WS/Console still hits
+	// the /ws/console handler; a strict equality on c.Path() would let it
+	// fall into the "scope not required" branch and accept a regular
+	// access token. Use EqualFold so the gate matches whatever Fiber's
+	// router matched.
+	path := c.Path()
+	requiresScope := strings.EqualFold(path, "/ws/console") || strings.EqualFold(path, "/ws/vnc")
+
+	if requiresScope {
+		if claims.ConsoleScope == nil {
+			s.logger.Warn("ws auth: scoped token required on console path",
+				"path", path,
+				"user_id", claims.UserID,
+			)
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "scoped console token required",
+			})
+		}
 		if err := validateConsoleScope(c, claims.ConsoleScope); err != nil {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 		}
+	} else if claims.ConsoleScope != nil {
+		// A scoped console token must not be used to subscribe to the generic /ws hub.
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "console-scoped token cannot be used on this path",
+		})
 	}
 
 	// Store claims in locals for the WebSocket handler.

@@ -1,7 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { Terminal } from "./Terminal";
 import type { ConsoleTab } from "../types/console";
+
+// Mock the console-token mint endpoint. The Terminal now mints a scoped JWT
+// before opening the WS (security review fix #1) — desktop callers never
+// pass accessToken; mobile passes its pre-minted token directly.
+vi.mock("../api/console-queries", () => ({
+  mintConsoleToken: vi.fn(() =>
+    Promise.resolve({ token: "scoped-test-token", expires_in: 300 }),
+  ),
+}));
 
 // Mock xterm.js with class implementations
 vi.mock("@xterm/xterm", () => {
@@ -88,11 +97,32 @@ describe("Terminal", () => {
     expect(container.querySelector("div")).toBeTruthy();
   });
 
-  it("creates a WebSocket connection with correct URL", () => {
+  it("creates a WebSocket connection after minting a scoped token", async () => {
     render(<Terminal tab={testTab} visible={true} />);
-    expect(MockWebSocket.instances).toHaveLength(1);
+    // Mint resolves on the microtask queue; wait for the WS to be created.
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
     const ws = MockWebSocket.instances[0];
     expect(ws).toBeDefined();
+    expect(ws?.url).toContain("token=scoped-test-token");
+    expect(ws?.url).toContain("cluster_id=cluster-1");
+    expect(ws?.url).toContain("type=node_shell");
+  });
+
+  it("uses the override accessToken instead of minting when provided (mobile path)", async () => {
+    render(
+      <Terminal
+        tab={testTab}
+        visible={true}
+        accessToken="mobile-prebaked-token"
+      />,
+    );
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    const ws = MockWebSocket.instances[0];
+    expect(ws?.url).toContain("token=mobile-prebaked-token");
   });
 
   it("hides terminal when not visible", () => {
