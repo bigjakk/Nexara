@@ -34,6 +34,7 @@ function makeNode(overrides: Partial<NodeResponse> = {}): NodeResponse {
     id: "n1",
     cluster_id: "c1",
     name: "pve-node-1",
+    address: "",
     status: "online",
     cpu_count: 16,
     cpu_model: "Intel Xeon E5-2680 v4",

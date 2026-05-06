@@ -519,6 +519,7 @@ export interface NodeResponse {
   id: string;
   cluster_id: string;
   name: string;
+  address: string;
   status: string;
   cpu_count: number;
   cpu_model: string;

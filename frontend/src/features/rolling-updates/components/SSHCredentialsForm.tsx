@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +25,7 @@ import type {
   SSHHostKeyPending,
   SSHHostKeyMismatch,
 } from "@/types/api";
+import { BulkPinDialog } from "./BulkPinDialog";
 
 interface SSHCredentialsFormProps {
   clusterId: string;
@@ -63,6 +64,27 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
   const [privateKey, setPrivateKey] = useState("");
   const [testNode, setTestNode] = useState("");
   const [testState, setTestState] = useState<TestUiState>({ kind: "idle" });
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  // Compute pinned-vs-unpinned status by matching each cluster node's
+  // address against the pinned-hosts list. Nodes without a stored address
+  // (collector hasn't reported yet) are counted as unpinned.
+  const pinSummary = useMemo(() => {
+    const pinnedAddresses = new Set((knownHosts ?? []).map((kh) => kh.host));
+    const total = nodes?.length ?? 0;
+    let pinned = 0;
+    for (const n of nodes ?? []) {
+      if (n.address && pinnedAddresses.has(n.address)) pinned += 1;
+    }
+    return { pinned, total };
+  }, [nodes, knownHosts]);
+
+  const unpinnedNodes = useMemo(() => {
+    const pinnedAddresses = new Set((knownHosts ?? []).map((kh) => kh.host));
+    return (nodes ?? []).filter(
+      (n) => !n.address || !pinnedAddresses.has(n.address),
+    );
+  }, [nodes, knownHosts]);
 
   const startEditing = () => {
     if (creds) {
@@ -227,6 +249,41 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           </div>
         </div>
 
+        {pinSummary.total > 0 && (
+          <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-xs">
+            <div className="flex items-center gap-2">
+              {pinSummary.pinned === pinSummary.total ? (
+                <ShieldCheck className="h-4 w-4 text-green-500" />
+              ) : (
+                <ShieldAlert className="h-4 w-4 text-amber-500" />
+              )}
+              <span>
+                Host keys:{" "}
+                <span className="font-medium">
+                  {pinSummary.pinned}/{pinSummary.total}
+                </span>{" "}
+                pinned
+                {pinSummary.pinned < pinSummary.total && (
+                  <span className="ml-1 text-muted-foreground">
+                    — rolling updates require all nodes pinned
+                  </span>
+                )}
+              </span>
+            </div>
+            {unpinnedNodes.length > 0 && (
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => {
+                  setBulkOpen(true);
+                }}
+              >
+                Pin all node host keys
+              </Button>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
           <select
             className="h-9 rounded-md border bg-background px-3 text-sm"
@@ -257,6 +314,16 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
             Test Connection
           </Button>
         </div>
+
+        <BulkPinDialog
+          open={bulkOpen}
+          onOpenChange={setBulkOpen}
+          clusterId={clusterId}
+          nodes={(nodes ?? []).map((n) => ({
+            name: n.name,
+            address: n.address,
+          }))}
+        />
 
         {testState.kind === "success" && (
           <div className="flex items-center gap-2 rounded-md border border-green-500/50 bg-green-500/10 p-2 text-xs text-green-600 dark:text-green-400">
