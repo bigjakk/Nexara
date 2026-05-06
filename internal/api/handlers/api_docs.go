@@ -187,6 +187,7 @@ var apiEndpoints = []APIEndpoint{
 	{Method: "GET", Path: "/api/v1/settings", Description: "Get application settings", Permission: "", Group: "Settings"},
 	{Method: "PUT", Path: "/api/v1/settings", Description: "Update settings", Permission: "manage:user", Group: "Settings"},
 	{Method: "GET", Path: "/api/v1/version", Description: "Get API version", Permission: "", Group: "Settings"},
+	{Method: "GET", Path: "/api/v1/changelog", Description: "Get release notes parsed from GitHub Releases", Permission: "", Group: "Settings"},
 	{Method: "GET", Path: "/api/v1/search", Description: "Search across all resources", Permission: "", Group: "Settings"},
 
 	// ── Metrics ─────────────────────────────────────────────────────────

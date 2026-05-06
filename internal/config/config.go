@@ -32,6 +32,7 @@ type Config struct {
 	WSMaxConnections       int           `envconfig:"WS_MAX_CONNECTIONS" default:"1000"`
 	PprofEnabled           bool          `envconfig:"PPROF_ENABLED" default:"false"`
 	PprofPort              string        `envconfig:"PPROF_PORT" default:"6060"`
+	ChangelogRepo          string        `envconfig:"CHANGELOG_REPO" default:"bigjakk/Nexara"`
 }
 
 // NewMetricsTicker creates a time.Ticker using the configured metrics collection interval.

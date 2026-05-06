@@ -11,6 +11,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
 	"github.com/bigjakk/nexara/internal/auth"
+	"github.com/bigjakk/nexara/internal/changelog"
 	"github.com/bigjakk/nexara/internal/config"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -64,6 +65,7 @@ type Server struct {
 	searchHandler        *handlers.SearchHandler
 	apiKeyHandler        *handlers.APIKeyHandler
 	apiDocsHandler       *handlers.APIDocsHandler
+	changelogHandler     *handlers.ChangelogHandler
 	mobileDeviceHandler *handlers.MobileDeviceHandler
 	rbacEngine          *auth.RBACEngine
 	eventPub            *events.Publisher
@@ -193,6 +195,12 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.mobileDeviceHandler = handlers.NewMobileDeviceHandler(s.queries, s.eventPub)
 	}
 	s.apiDocsHandler = handlers.NewAPIDocsHandler()
+
+	// Changelog service: fetches release notes from GitHub. Repo can be
+	// overridden by CHANGELOG_REPO env var; defaults to upstream Nexara.
+	s.changelogHandler = handlers.NewChangelogHandler(
+		changelog.New(cfg.ChangelogRepo, slog.Default().With("component", "changelog")),
+	)
 
 	// Wire LDAP handler into auth handler for LDAP-aware login
 	if s.authHandler != nil && s.ldapHandler != nil {

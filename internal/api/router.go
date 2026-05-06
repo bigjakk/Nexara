@@ -8,6 +8,11 @@ func (s *Server) setupRoutes() {
 	v1 := s.app.Group("/api/v1")
 	v1.Get("/version", s.handleVersion)
 
+	// Changelog (release notes from GitHub) — public, same as version.
+	if s.changelogHandler != nil {
+		v1.Get("/changelog", s.changelogHandler.Get)
+	}
+
 	// Auth routes.
 	if s.authHandler != nil {
 		authGroup := v1.Group("/auth")
