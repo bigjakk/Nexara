@@ -100,13 +100,12 @@ var validScheduleActions = map[string]bool{
 
 // Create handles POST /api/v1/clusters/:cluster_id/schedules.
 func (h *ScheduleHandler) Create(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "schedule"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "schedule", clusterID); err != nil {
+		return err
 	}
 
 	var req createScheduleRequest
@@ -162,13 +161,12 @@ func (h *ScheduleHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/clusters/:cluster_id/schedules.
 func (h *ScheduleHandler) List(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "schedule"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "schedule", clusterID); err != nil {
+		return err
 	}
 
 	tasks, err := h.queries.ListScheduledTasksByCluster(c.Context(), clusterID)
@@ -186,7 +184,11 @@ func (h *ScheduleHandler) List(c *fiber.Ctx) error {
 
 // Update handles PUT /api/v1/clusters/:cluster_id/schedules/:id.
 func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "schedule"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "schedule", clusterID); err != nil {
 		return err
 	}
 
@@ -208,11 +210,6 @@ func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
 		req.Params = json.RawMessage(`{}`)
 	}
 
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
-	}
-
 	if err := h.queries.UpdateScheduledTask(c.Context(), db.UpdateScheduledTaskParams{
 		ID:       taskID,
 		Schedule: req.Schedule,
@@ -232,13 +229,12 @@ func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/clusters/:cluster_id/schedules/:id.
 func (h *ScheduleHandler) Delete(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "schedule"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "schedule", clusterID); err != nil {
+		return err
 	}
 
 	taskID, err := uuid.Parse(c.Params("id"))

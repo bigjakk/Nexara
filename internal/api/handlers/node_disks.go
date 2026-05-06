@@ -25,11 +25,11 @@ type liveDiskResponse struct {
 // ListLiveDisks handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/list.
 // Returns fresh disk data directly from Proxmox (includes "used" field).
 func (h *NodeHandler) ListLiveDisks(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -61,11 +61,11 @@ func (h *NodeHandler) ListLiveDisks(c *fiber.Ctx) error {
 
 // GetDiskSMART handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/smart?disk=...
 func (h *NodeHandler) GetDiskSMART(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	disk := c.Query("disk")
@@ -87,11 +87,11 @@ func (h *NodeHandler) GetDiskSMART(c *fiber.Ctx) error {
 
 // ListZFSPools handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs.
 func (h *NodeHandler) ListZFSPools(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -115,11 +115,11 @@ type createZFSPoolRequest struct {
 
 // CreateZFSPool handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs.
 func (h *NodeHandler) CreateZFSPool(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	var req createZFSPoolRequest
@@ -150,11 +150,11 @@ func (h *NodeHandler) CreateZFSPool(c *fiber.Ctx) error {
 
 // DeleteZFSPool handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs/:pool_name.
 func (h *NodeHandler) DeleteZFSPool(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	poolName := c.Params("pool_name")
@@ -180,11 +180,11 @@ func (h *NodeHandler) DeleteZFSPool(c *fiber.Ctx) error {
 
 // ListLVM handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm.
 func (h *NodeHandler) ListLVM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -206,11 +206,11 @@ type createLVMRequest struct {
 
 // CreateLVM handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm.
 func (h *NodeHandler) CreateLVM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	var req createLVMRequest
@@ -239,11 +239,11 @@ func (h *NodeHandler) CreateLVM(c *fiber.Ctx) error {
 
 // DeleteLVM handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm/:vg_name.
 func (h *NodeHandler) DeleteLVM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	vgName := c.Params("vg_name")
@@ -269,11 +269,11 @@ func (h *NodeHandler) DeleteLVM(c *fiber.Ctx) error {
 
 // ListLVMThin handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin.
 func (h *NodeHandler) ListLVMThin(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -295,11 +295,11 @@ type createLVMThinRequest struct {
 
 // CreateLVMThin handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin.
 func (h *NodeHandler) CreateLVMThin(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	var req createLVMThinRequest
@@ -328,11 +328,11 @@ func (h *NodeHandler) CreateLVMThin(c *fiber.Ctx) error {
 
 // DeleteLVMThin handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin/:pool_name.
 func (h *NodeHandler) DeleteLVMThin(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	poolName := c.Params("pool_name")
@@ -362,11 +362,11 @@ func (h *NodeHandler) DeleteLVMThin(c *fiber.Ctx) error {
 
 // ListDirectories handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/directory.
 func (h *NodeHandler) ListDirectories(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -389,11 +389,11 @@ type createDirectoryRequest struct {
 
 // CreateDirectory handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/directory.
 func (h *NodeHandler) CreateDirectory(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	var req createDirectoryRequest
@@ -429,11 +429,11 @@ type diskActionRequest struct {
 
 // InitializeGPT handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/initgpt.
 func (h *NodeHandler) InitializeGPT(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	var req diskActionRequest
@@ -458,11 +458,11 @@ func (h *NodeHandler) InitializeGPT(c *fiber.Ctx) error {
 
 // WipeDisk handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/disks/wipe.
 func (h *NodeHandler) WipeDisk(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	var req diskActionRequest

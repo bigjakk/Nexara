@@ -165,6 +165,7 @@ type Querier interface {
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	GetSetting(ctx context.Context, arg GetSettingParams) (Setting, error)
 	GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error)
+	GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, error)
 	GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (int64, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error)

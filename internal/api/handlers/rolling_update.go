@@ -155,12 +155,11 @@ func (h *RollingUpdateHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resou
 
 // ListJobs returns rolling update jobs for a cluster.
 func (h *RollingUpdateHandler) ListJobs(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -203,12 +202,11 @@ type createRollingUpdateRequest struct {
 
 // CreateJob creates a new rolling update job.
 func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -374,7 +372,11 @@ func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
 
 // GetJob returns a single rolling update job with node counts.
 func (h *RollingUpdateHandler) GetJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "rolling_update"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -393,12 +395,11 @@ func (h *RollingUpdateHandler) GetJob(c *fiber.Ctx) error {
 
 // StartJob starts a pending rolling update job.
 func (h *RollingUpdateHandler) StartJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -431,12 +432,11 @@ func (h *RollingUpdateHandler) StartJob(c *fiber.Ctx) error {
 
 // CancelJob cancels a rolling update job.
 func (h *RollingUpdateHandler) CancelJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -474,12 +474,11 @@ func (h *RollingUpdateHandler) CancelJob(c *fiber.Ctx) error {
 
 // PauseJob pauses a running rolling update job.
 func (h *RollingUpdateHandler) PauseJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -503,12 +502,11 @@ func (h *RollingUpdateHandler) PauseJob(c *fiber.Ctx) error {
 
 // ResumeJob resumes a paused rolling update job.
 func (h *RollingUpdateHandler) ResumeJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -532,7 +530,11 @@ func (h *RollingUpdateHandler) ResumeJob(c *fiber.Ctx) error {
 
 // ListNodes returns nodes for a rolling update job.
 func (h *RollingUpdateHandler) ListNodes(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "rolling_update"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -556,12 +558,11 @@ func (h *RollingUpdateHandler) ListNodes(c *fiber.Ctx) error {
 
 // ConfirmUpgrade confirms that manual upgrade is done on a node.
 func (h *RollingUpdateHandler) ConfirmUpgrade(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -601,12 +602,11 @@ func (h *RollingUpdateHandler) ConfirmUpgrade(c *fiber.Ctx) error {
 
 // SkipNode skips a pending node in a rolling update job.
 func (h *RollingUpdateHandler) SkipNode(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -644,12 +644,11 @@ func (h *RollingUpdateHandler) SkipNode(c *fiber.Ctx) error {
 
 // PreviewPackages returns pending apt packages for a specific node.
 func (h *RollingUpdateHandler) PreviewPackages(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -673,12 +672,11 @@ func (h *RollingUpdateHandler) PreviewPackages(c *fiber.Ctx) error {
 
 // PreflightHA analyzes HA/DRS constraints and capacity feasibility for a proposed set of nodes.
 func (h *RollingUpdateHandler) PreflightHA(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "rolling_update"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "rolling_update", clusterID); err != nil {
 		return err
 	}
 
@@ -730,12 +728,11 @@ type sshCredentialResponse struct {
 
 // GetSSHCredentials returns SSH credential metadata (never returns the secret).
 func (h *RollingUpdateHandler) GetSSHCredentials(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ssh_credentials"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
 		return err
 	}
 
@@ -765,12 +762,11 @@ type upsertSSHCredentialRequest struct {
 
 // UpsertSSHCredentials creates or updates SSH credentials for a cluster.
 func (h *RollingUpdateHandler) UpsertSSHCredentials(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ssh_credentials"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
 		return err
 	}
 
@@ -839,12 +835,11 @@ func (h *RollingUpdateHandler) UpsertSSHCredentials(c *fiber.Ctx) error {
 
 // DeleteSSHCredentials removes SSH credentials for a cluster.
 func (h *RollingUpdateHandler) DeleteSSHCredentials(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ssh_credentials"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
 		return err
 	}
 
@@ -859,12 +854,11 @@ func (h *RollingUpdateHandler) DeleteSSHCredentials(c *fiber.Ctx) error {
 
 // TestSSHConnection tests SSH connectivity to a specific node.
 func (h *RollingUpdateHandler) TestSSHConnection(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ssh_credentials"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ssh_credentials", clusterID); err != nil {
 		return err
 	}
 

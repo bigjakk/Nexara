@@ -139,10 +139,6 @@ var validMigrationModes = map[string]bool{
 
 // Create handles POST /api/v1/migrations.
 func (h *MigrationHandler) Create(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "migration"); err != nil {
-		return err
-	}
-
 	var req createMigrationRequest
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
@@ -187,6 +183,16 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 	tgtClusterID, err := uuid.Parse(req.TargetClusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid target_cluster_id")
+	}
+
+	// Caller needs manage:migration on BOTH source and target clusters.
+	if err := requireClusterPerm(c, "manage", "migration", srcClusterID); err != nil {
+		return err
+	}
+	if srcClusterID != tgtClusterID {
+		if err := requireClusterPerm(c, "manage", "migration", tgtClusterID); err != nil {
+			return err
+		}
 	}
 
 	// For intra-cluster, source and target must be the same cluster.
@@ -267,7 +273,8 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/migrations.
 func (h *MigrationHandler) List(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "migration"); err != nil {
+	access, err := accessibleClusters(c, "view", "migration")
+	if err != nil {
 		return err
 	}
 
@@ -285,9 +292,14 @@ func (h *MigrationHandler) List(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list migration jobs")
 	}
 
-	resp := make([]migrationJobResponse, len(jobs))
-	for i, j := range jobs {
-		resp[i] = toMigrationJobResponse(j)
+	resp := make([]migrationJobResponse, 0, len(jobs))
+	for _, j := range jobs {
+		// A migration straddles two clusters; require visibility on at least
+		// one to know it exists, the same as the cluster-detail pages.
+		if !access.PermitsCluster(j.SourceClusterID) && !access.PermitsCluster(j.TargetClusterID) {
+			continue
+		}
+		resp = append(resp, toMigrationJobResponse(j))
 	}
 
 	return c.JSON(resp)
@@ -295,10 +307,6 @@ func (h *MigrationHandler) List(c *fiber.Ctx) error {
 
 // Get handles GET /api/v1/migrations/:id.
 func (h *MigrationHandler) Get(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "migration"); err != nil {
-		return err
-	}
-
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -309,18 +317,34 @@ func (h *MigrationHandler) Get(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
 	}
 
+	if err := requireClusterPerm(c, "view", "migration", job.SourceClusterID); err != nil {
+		// Allow target-cluster operators to see the job too.
+		if errTgt := requireClusterPerm(c, "view", "migration", job.TargetClusterID); errTgt != nil {
+			return err
+		}
+	}
+
 	return c.JSON(toMigrationJobResponse(job))
 }
 
 // RunCheck handles POST /api/v1/migrations/:id/check.
 func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "migration"); err != nil {
-		return err
-	}
-
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
+	}
+
+	job, err := h.queries.GetMigrationJob(c.Context(), jobID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
+	}
+	if err := requireClusterPerm(c, "manage", "migration", job.SourceClusterID); err != nil {
+		return err
+	}
+	if job.TargetClusterID != job.SourceClusterID {
+		if err := requireClusterPerm(c, "manage", "migration", job.TargetClusterID); err != nil {
+			return err
+		}
 	}
 
 	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
@@ -334,10 +358,6 @@ func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
 
 // Execute handles POST /api/v1/migrations/:id/execute.
 func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "migration"); err != nil {
-		return err
-	}
-
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -346,6 +366,15 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 	job, err := h.queries.GetMigrationJob(c.Context(), jobID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
+	}
+
+	if err := requireClusterPerm(c, "manage", "migration", job.SourceClusterID); err != nil {
+		return err
+	}
+	if job.TargetClusterID != job.SourceClusterID {
+		if err := requireClusterPerm(c, "manage", "migration", job.TargetClusterID); err != nil {
+			return err
+		}
 	}
 
 	if job.Status != migration.StatusPending && job.Status != migration.StatusChecking {
@@ -384,10 +413,6 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 
 // Cancel handles POST /api/v1/migrations/:id/cancel.
 func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "migration"); err != nil {
-		return err
-	}
-
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -396,6 +421,15 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 	job, err := h.queries.GetMigrationJob(c.Context(), jobID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
+	}
+
+	if err := requireClusterPerm(c, "manage", "migration", job.SourceClusterID); err != nil {
+		return err
+	}
+	if job.TargetClusterID != job.SourceClusterID {
+		if err := requireClusterPerm(c, "manage", "migration", job.TargetClusterID); err != nil {
+			return err
+		}
 	}
 
 	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
@@ -417,13 +451,12 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/migrations.
 func (h *MigrationHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "migration"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "migration", clusterID); err != nil {
+		return err
 	}
 
 	limit := safeInt32(50)

@@ -330,7 +330,8 @@ type createMaintenanceWindowRequest struct {
 
 // ListRules lists all alert rules.
 func (h *AlertHandler) ListRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "alert"); err != nil {
+	access, err := accessibleClusters(c, "view", "alert")
+	if err != nil {
 		return err
 	}
 
@@ -343,11 +344,14 @@ func (h *AlertHandler) ListRules(c *fiber.Ctx) error {
 		offset = 0
 	}
 
-	clusterID := c.Query("cluster_id")
-	if clusterID != "" {
-		cid, err := uuid.Parse(clusterID)
+	clusterIDQ := c.Query("cluster_id")
+	if clusterIDQ != "" {
+		cid, err := uuid.Parse(clusterIDQ)
 		if err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+		}
+		if !access.PermitsCluster(cid) {
+			return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
 		}
 		rules, err := h.queries.ListAlertRulesByCluster(c.Context(), db.ListAlertRulesByClusterParams{
 			ClusterID: pgtype.UUID{Bytes: cid, Valid: true},
@@ -372,23 +376,32 @@ func (h *AlertHandler) ListRules(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list alert rules")
 	}
 
-	result := make([]alertRuleResponse, len(rules))
-	for i, r := range rules {
-		result[i] = toAlertRuleResponse(r)
+	result := make([]alertRuleResponse, 0, len(rules))
+	for _, r := range rules {
+		// Cluster-scoped rules visible only to users with view:alert on the cluster.
+		// Global rules (no cluster_id) require global view:alert.
+		if r.ClusterID.Valid {
+			if !access.PermitsCluster(uuid.UUID(r.ClusterID.Bytes)) {
+				continue
+			}
+		} else if !access.HasGlobal {
+			continue
+		}
+		result = append(result, toAlertRuleResponse(r))
 	}
 	return c.JSON(result)
 }
 
 // CreateRule creates a new alert rule.
 func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "alert"); err != nil {
-		return err
-	}
-
 	var req createAlertRuleRequest
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
+
+	// Permission check defers until we know the rule's cluster (or lack thereof,
+	// for a global rule). Validation that doesn't depend on RBAC runs first below;
+	// the actual auth gate is right before we parse cluster_id from the request.
 
 	if req.Name == "" || len(req.Name) > maxNameLen {
 		return fiber.NewError(fiber.StatusBadRequest, "Name is required and must be <= 255 characters")
@@ -454,6 +467,14 @@ func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
 		}
 		clusterID = pgtype.UUID{Bytes: cid, Valid: true}
+		if err := requireClusterPerm(c, "manage", "alert", cid); err != nil {
+			return err
+		}
+	} else {
+		// Global rule — require global manage:alert.
+		if err := requirePerm(c, "manage", "alert"); err != nil {
+			return err
+		}
 	}
 	if req.NodeID != "" {
 		nid, err := uuid.Parse(req.NodeID)
@@ -506,10 +527,6 @@ func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
 
 // GetRule returns a single alert rule.
 func (h *AlertHandler) GetRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "alert"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule ID")
@@ -520,15 +537,19 @@ func (h *AlertHandler) GetRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Rule not found")
 	}
 
+	if rule.ClusterID.Valid {
+		if err := requireClusterPerm(c, "view", "alert", uuid.UUID(rule.ClusterID.Bytes)); err != nil {
+			return err
+		}
+	} else if err := requirePerm(c, "view", "alert"); err != nil {
+		return err
+	}
+
 	return c.JSON(toAlertRuleResponse(rule))
 }
 
 // UpdateRule updates an existing alert rule.
 func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "alert"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule ID")
@@ -539,9 +560,28 @@ func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Rule not found")
 	}
 
+	if existing.ClusterID.Valid {
+		if err := requireClusterPerm(c, "manage", "alert", uuid.UUID(existing.ClusterID.Bytes)); err != nil {
+			return err
+		}
+	} else if err := requirePerm(c, "manage", "alert"); err != nil {
+		return err
+	}
+
 	var req createAlertRuleRequest
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	// If the user is reassigning the rule to a different cluster, also check
+	// manage:alert on the target cluster.
+	if req.ClusterID != "" {
+		cid, perr := uuid.Parse(req.ClusterID)
+		if perr == nil && (!existing.ClusterID.Valid || uuid.UUID(existing.ClusterID.Bytes) != cid) {
+			if err := requireClusterPerm(c, "manage", "alert", cid); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Apply defaults from existing.
@@ -678,17 +718,22 @@ func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
 
 // DeleteRule deletes an alert rule.
 func (h *AlertHandler) DeleteRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "alert"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule ID")
 	}
 
-	if _, err := h.queries.GetAlertRule(c.Context(), id); err != nil {
+	existing, err := h.queries.GetAlertRule(c.Context(), id)
+	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Rule not found")
+	}
+
+	if existing.ClusterID.Valid {
+		if err := requireClusterPerm(c, "manage", "alert", uuid.UUID(existing.ClusterID.Bytes)); err != nil {
+			return err
+		}
+	} else if err := requirePerm(c, "manage", "alert"); err != nil {
+		return err
 	}
 
 	if err := h.queries.DeleteAlertRule(c.Context(), id); err != nil {
@@ -704,7 +749,8 @@ func (h *AlertHandler) DeleteRule(c *fiber.Ctx) error {
 
 // ListAlerts lists alert history with optional filters.
 func (h *AlertHandler) ListAlerts(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "alert"); err != nil {
+	access, err := accessibleClusters(c, "view", "alert")
+	if err != nil {
 		return err
 	}
 
@@ -737,6 +783,9 @@ func (h *AlertHandler) ListAlerts(c *fiber.Ctx) error {
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
 		}
+		if !access.PermitsCluster(clusterID) {
+			return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
+		}
 	}
 
 	alerts, err := h.queries.ListAlertHistoryFiltered(c.Context(), db.ListAlertHistoryFilteredParams{
@@ -750,19 +799,24 @@ func (h *AlertHandler) ListAlerts(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list alerts")
 	}
 
-	result := make([]alertHistoryResponse, len(alerts))
-	for i, a := range alerts {
-		result[i] = toAlertHistoryResponse(a)
+	result := make([]alertHistoryResponse, 0, len(alerts))
+	for _, a := range alerts {
+		// Each alert is tied to a cluster — only surface it if the user
+		// has view:alert on that cluster (or globally).
+		if a.ClusterID.Valid {
+			if !access.PermitsCluster(uuid.UUID(a.ClusterID.Bytes)) {
+				continue
+			}
+		} else if !access.HasGlobal {
+			continue
+		}
+		result = append(result, toAlertHistoryResponse(a))
 	}
 	return c.JSON(result)
 }
 
 // GetAlert returns a single alert.
 func (h *AlertHandler) GetAlert(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "alert"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid alert ID")
@@ -771,6 +825,14 @@ func (h *AlertHandler) GetAlert(c *fiber.Ctx) error {
 	alert, err := h.queries.GetAlertHistory(c.Context(), id)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Alert not found")
+	}
+
+	if alert.ClusterID.Valid {
+		if err := requireClusterPerm(c, "view", "alert", uuid.UUID(alert.ClusterID.Bytes)); err != nil {
+			return err
+		}
+	} else if err := requirePerm(c, "view", "alert"); err != nil {
+		return err
 	}
 
 	return c.JSON(toAlertHistoryResponse(alert))
@@ -799,10 +861,6 @@ func (h *AlertHandler) GetAlertSummary(c *fiber.Ctx) error {
 
 // AcknowledgeAlert acknowledges a firing alert.
 func (h *AlertHandler) AcknowledgeAlert(c *fiber.Ctx) error {
-	if err := requirePerm(c, "acknowledge", "alert"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid alert ID")
@@ -812,6 +870,15 @@ func (h *AlertHandler) AcknowledgeAlert(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Alert not found")
 	}
+
+	if alert.ClusterID.Valid {
+		if err := requireClusterPerm(c, "acknowledge", "alert", uuid.UUID(alert.ClusterID.Bytes)); err != nil {
+			return err
+		}
+	} else if err := requirePerm(c, "acknowledge", "alert"); err != nil {
+		return err
+	}
+
 	if alert.State != "firing" {
 		return fiber.NewError(fiber.StatusConflict, "Alert is not in firing state")
 	}
@@ -840,10 +907,6 @@ func (h *AlertHandler) AcknowledgeAlert(c *fiber.Ctx) error {
 
 // ResolveAlert resolves a firing or acknowledged alert.
 func (h *AlertHandler) ResolveAlert(c *fiber.Ctx) error {
-	if err := requirePerm(c, "acknowledge", "alert"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid alert ID")
@@ -853,6 +916,15 @@ func (h *AlertHandler) ResolveAlert(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Alert not found")
 	}
+
+	if alert.ClusterID.Valid {
+		if err := requireClusterPerm(c, "acknowledge", "alert", uuid.UUID(alert.ClusterID.Bytes)); err != nil {
+			return err
+		}
+	} else if err := requirePerm(c, "acknowledge", "alert"); err != nil {
+		return err
+	}
+
 	if alert.State != "firing" && alert.State != "acknowledged" {
 		return fiber.NewError(fiber.StatusConflict, "Alert cannot be resolved from current state")
 	}
@@ -881,12 +953,11 @@ func (h *AlertHandler) ResolveAlert(c *fiber.Ctx) error {
 
 // ListAlertsByCluster lists alerts for a specific cluster.
 func (h *AlertHandler) ListAlertsByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "alert"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "alert", clusterID); err != nil {
 		return err
 	}
 
@@ -917,12 +988,11 @@ func (h *AlertHandler) ListAlertsByCluster(c *fiber.Ctx) error {
 
 // CountActiveAlertsByCluster returns active alert counts for a cluster.
 func (h *AlertHandler) CountActiveAlertsByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "alert"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "alert", clusterID); err != nil {
 		return err
 	}
 
@@ -1182,12 +1252,11 @@ func (h *AlertHandler) TestChannel(c *fiber.Ctx) error {
 
 // ListMaintenanceWindows lists maintenance windows for a cluster.
 func (h *AlertHandler) ListMaintenanceWindows(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "maintenance_window"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "maintenance_window", clusterID); err != nil {
 		return err
 	}
 
@@ -1218,12 +1287,11 @@ func (h *AlertHandler) ListMaintenanceWindows(c *fiber.Ctx) error {
 
 // CreateMaintenanceWindow creates a new maintenance window.
 func (h *AlertHandler) CreateMaintenanceWindow(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "maintenance_window"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "maintenance_window", clusterID); err != nil {
 		return err
 	}
 
@@ -1278,12 +1346,11 @@ func (h *AlertHandler) CreateMaintenanceWindow(c *fiber.Ctx) error {
 
 // UpdateMaintenanceWindow updates a maintenance window.
 func (h *AlertHandler) UpdateMaintenanceWindow(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "maintenance_window"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "maintenance_window", clusterID); err != nil {
 		return err
 	}
 
@@ -1360,12 +1427,11 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c *fiber.Ctx) error {
 
 // DeleteMaintenanceWindow deletes a maintenance window.
 func (h *AlertHandler) DeleteMaintenanceWindow(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "maintenance_window"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "maintenance_window", clusterID); err != nil {
 		return err
 	}
 

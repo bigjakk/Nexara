@@ -162,12 +162,16 @@ func TestClusterGet_InvalidUUID(t *testing.T) {
 func TestCluster_NoAuth(t *testing.T) {
 	app := newClusterTestApp(t)
 
+	// GET /clusters now returns an empty filtered list rather than 403 — the
+	// per-row scope check in handlers/clusters.go::List drops every cluster
+	// when the caller has no scope. The other write/read-by-id paths still
+	// 403 because requireClusterPerm rejects non-admins in the legacy
+	// fallback path used by these tests (no RBAC engine wired).
 	endpoints := []struct {
 		method string
 		path   string
 	}{
 		{http.MethodPost, "/clusters"},
-		{http.MethodGet, "/clusters"},
 		{http.MethodGet, "/clusters/" + uuid.New().String()},
 		{http.MethodPut, "/clusters/" + uuid.New().String()},
 		{http.MethodDelete, "/clusters/" + uuid.New().String()},
@@ -196,10 +200,15 @@ func TestCluster_NoAuth(t *testing.T) {
 	}
 }
 
-func TestCluster_NonAdmin(t *testing.T) {
+func TestCluster_NonAdminWriteForbidden(t *testing.T) {
+	// Non-admin writes still 403 via the legacy fallback path (no RBAC
+	// engine wired in tests). GET /clusters now returns [] for non-admins
+	// rather than 403 — that behavior is covered by the per-row filter
+	// logic in clusterAccess (see permission_test.go).
 	app := newClusterTestApp(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/clusters", nil)
+	req := httptest.NewRequest(http.MethodPost, "/clusters", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Test-Role", "user")
 	resp, err := app.Test(req)
 	if err != nil {

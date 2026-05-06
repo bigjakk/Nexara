@@ -459,7 +459,8 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 	if req.ClusterID == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "cluster_id is required")
 	}
-	if _, err := uuid.Parse(req.ClusterID); err != nil {
+	clusterUUID, err := uuid.Parse(req.ClusterID)
+	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "cluster_id must be a UUID")
 	}
 	if req.Node == "" {
@@ -491,7 +492,10 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid console type")
 	}
 
-	if err := requirePerm(c, "view", resource); err != nil {
+	// Console tokens scope to a specific cluster — gate on per-cluster perm so
+	// a user with view:vm only on cluster X cannot mint a console token for
+	// cluster Y.
+	if err := requireClusterPerm(c, "view", resource, clusterUUID); err != nil {
 		return err
 	}
 

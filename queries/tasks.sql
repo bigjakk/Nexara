@@ -26,6 +26,11 @@ WHERE cluster_id = $1
 ORDER BY started_at DESC
 LIMIT $2;
 
+-- name: GetTaskByUpid :one
+SELECT * FROM task_history
+WHERE upid = $1
+LIMIT 1;
+
 -- name: DeleteCompletedTasks :exec
 DELETE FROM task_history
 WHERE status != 'running' OR started_at < NOW() - INTERVAL '1 hour';

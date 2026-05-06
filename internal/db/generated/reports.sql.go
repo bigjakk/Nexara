@@ -69,34 +69,36 @@ func (q *Queries) GetReportRun(ctx context.Context, id uuid.UUID) (ReportRun, er
 }
 
 const getReportRunCSV = `-- name: GetReportRunCSV :one
-SELECT id, report_csv FROM report_runs WHERE id = $1
+SELECT id, cluster_id, report_csv FROM report_runs WHERE id = $1
 `
 
 type GetReportRunCSVRow struct {
 	ID        uuid.UUID   `json:"id"`
+	ClusterID uuid.UUID   `json:"cluster_id"`
 	ReportCsv pgtype.Text `json:"report_csv"`
 }
 
 func (q *Queries) GetReportRunCSV(ctx context.Context, id uuid.UUID) (GetReportRunCSVRow, error) {
 	row := q.db.QueryRow(ctx, getReportRunCSV, id)
 	var i GetReportRunCSVRow
-	err := row.Scan(&i.ID, &i.ReportCsv)
+	err := row.Scan(&i.ID, &i.ClusterID, &i.ReportCsv)
 	return i, err
 }
 
 const getReportRunHTML = `-- name: GetReportRunHTML :one
-SELECT id, report_html FROM report_runs WHERE id = $1
+SELECT id, cluster_id, report_html FROM report_runs WHERE id = $1
 `
 
 type GetReportRunHTMLRow struct {
 	ID         uuid.UUID   `json:"id"`
+	ClusterID  uuid.UUID   `json:"cluster_id"`
 	ReportHtml pgtype.Text `json:"report_html"`
 }
 
 func (q *Queries) GetReportRunHTML(ctx context.Context, id uuid.UUID) (GetReportRunHTMLRow, error) {
 	row := q.db.QueryRow(ctx, getReportRunHTML, id)
 	var i GetReportRunHTMLRow
-	err := row.Scan(&i.ID, &i.ReportHtml)
+	err := row.Scan(&i.ID, &i.ClusterID, &i.ReportHtml)
 	return i, err
 }
 

@@ -36,11 +36,11 @@ func (h *AptRepositoryHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resou
 
 // ListRepositories handles GET /clusters/:cluster_id/nodes/:node/apt/repositories.
 func (h *AptRepositoryHandler) ListRepositories(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "apt_repository"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "apt_repository", clusterID); err != nil {
 		return err
 	}
 	nodeName := c.Params("node")
@@ -67,11 +67,11 @@ type toggleRepoRequest struct {
 
 // ToggleRepository handles PUT /clusters/:cluster_id/nodes/:node/apt/repositories.
 func (h *AptRepositoryHandler) ToggleRepository(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "apt_repository"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "apt_repository", clusterID); err != nil {
 		return err
 	}
 	nodeName := c.Params("node")
@@ -120,11 +120,11 @@ type addStandardRepoRequest struct {
 
 // AddStandardRepository handles POST /clusters/:cluster_id/nodes/:node/apt/repositories.
 func (h *AptRepositoryHandler) AddStandardRepository(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "apt_repository"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "apt_repository", clusterID); err != nil {
 		return err
 	}
 	nodeName := c.Params("node")

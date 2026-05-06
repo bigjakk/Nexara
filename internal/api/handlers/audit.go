@@ -151,13 +151,19 @@ func (h *AuditHandler) parseAuditFilters(c *fiber.Ctx) (db.ListAuditLogAdvancedP
 
 // List handles GET /api/v1/audit-log.
 func (h *AuditHandler) List(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "audit"); err != nil {
+	access, err := accessibleClusters(c, "view", "audit")
+	if err != nil {
 		return err
 	}
 
 	listP, countP, err := h.parseAuditFilters(c)
 	if err != nil {
 		return err
+	}
+
+	// If a cluster filter was supplied, the user must have access to it.
+	if listP.ClusterID.Valid && !access.PermitsCluster(uuid.UUID(listP.ClusterID.Bytes)) {
+		return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
 	}
 
 	items, err := h.queries.ListAuditLogAdvanced(c.Context(), listP)
@@ -171,11 +177,20 @@ func (h *AuditHandler) List(c *fiber.Ctx) error {
 	}
 
 	resp := auditListResponse{
-		Items: make([]auditLogResponse, len(items)),
+		Items: make([]auditLogResponse, 0, len(items)),
 		Total: total,
 	}
-	for i, a := range items {
-		resp.Items[i] = toAdvancedAuditResponse(a)
+	for _, a := range items {
+		// Per-row filter: cluster-scoped audit entries require cluster access;
+		// global entries (no cluster_id) require global view:audit.
+		if a.ClusterID.Valid {
+			if !access.PermitsCluster(uuid.UUID(a.ClusterID.Bytes)) {
+				continue
+			}
+		} else if !access.HasGlobal {
+			continue
+		}
+		resp.Items = append(resp.Items, toAdvancedAuditResponse(a))
 	}
 
 	return c.JSON(resp)
@@ -183,7 +198,8 @@ func (h *AuditHandler) List(c *fiber.Ctx) error {
 
 // ListRecent handles GET /api/v1/audit-log/recent — returns the 50 most recent entries.
 func (h *AuditHandler) ListRecent(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "audit"); err != nil {
+	access, err := accessibleClusters(c, "view", "audit")
+	if err != nil {
 		return err
 	}
 
@@ -192,9 +208,16 @@ func (h *AuditHandler) ListRecent(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list recent activity")
 	}
 
-	resp := make([]auditLogResponse, len(items))
-	for i, a := range items {
-		resp[i] = toRecentAuditResponse(a)
+	resp := make([]auditLogResponse, 0, len(items))
+	for _, a := range items {
+		if a.ClusterID.Valid {
+			if !access.PermitsCluster(uuid.UUID(a.ClusterID.Bytes)) {
+				continue
+			}
+		} else if !access.HasGlobal {
+			continue
+		}
+		resp = append(resp, toRecentAuditResponse(a))
 	}
 
 	return c.JSON(resp)
@@ -228,13 +251,12 @@ func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow) auditLogResponse 
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/audit-log.
 func (h *AuditHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "audit"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "audit", clusterID); err != nil {
+		return err
 	}
 
 	limit := c.QueryInt("limit", 50)
@@ -301,7 +323,8 @@ func (h *AuditHandler) ListUsers(c *fiber.Ctx) error {
 
 // Export handles GET /api/v1/audit-log/export — exports audit log in CSV, JSON, or syslog format.
 func (h *AuditHandler) Export(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "audit"); err != nil {
+	access, err := accessibleClusters(c, "view", "audit")
+	if err != nil {
 		return err
 	}
 
@@ -318,9 +341,25 @@ func (h *AuditHandler) Export(c *fiber.Ctx) error {
 	listP.Limit = 10000
 	listP.Offset = 0
 
-	items, err := h.queries.ListAuditLogAdvanced(c.Context(), listP)
+	if listP.ClusterID.Valid && !access.PermitsCluster(uuid.UUID(listP.ClusterID.Bytes)) {
+		return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
+	}
+
+	rawItems, err := h.queries.ListAuditLogAdvanced(c.Context(), listP)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log for export")
+	}
+
+	items := make([]db.ListAuditLogAdvancedRow, 0, len(rawItems))
+	for _, a := range rawItems {
+		if a.ClusterID.Valid {
+			if !access.PermitsCluster(uuid.UUID(a.ClusterID.Bytes)) {
+				continue
+			}
+		} else if !access.HasGlobal {
+			continue
+		}
+		items = append(items, a)
 	}
 
 	timestamp := time.Now().Format("20060102-150405")

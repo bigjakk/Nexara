@@ -114,11 +114,11 @@ func (h *HAHandler) publishHA(c *fiber.Ctx, clusterID uuid.UUID, resourceID, act
 
 // ListResources handles GET /clusters/:cluster_id/ha/resources.
 func (h *HAHandler) ListResources(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -134,11 +134,11 @@ func (h *HAHandler) ListResources(c *fiber.Ctx) error {
 
 // CreateResource handles POST /clusters/:cluster_id/ha/resources.
 func (h *HAHandler) CreateResource(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	var req proxmox.CreateHAResourceParams
@@ -185,11 +185,11 @@ func (h *HAHandler) CreateResource(c *fiber.Ctx) error {
 
 // GetResource handles GET /clusters/:cluster_id/ha/resources/:sid.
 func (h *HAHandler) GetResource(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	sid := decodePathParam(c, "sid")
@@ -209,11 +209,11 @@ func (h *HAHandler) GetResource(c *fiber.Ctx) error {
 
 // UpdateResource handles PUT /clusters/:cluster_id/ha/resources/:sid.
 func (h *HAHandler) UpdateResource(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	sid := decodePathParam(c, "sid")
@@ -261,11 +261,11 @@ func (h *HAHandler) UpdateResource(c *fiber.Ctx) error {
 
 // DeleteResource handles DELETE /clusters/:cluster_id/ha/resources/:sid.
 func (h *HAHandler) DeleteResource(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	sid := decodePathParam(c, "sid")
@@ -317,11 +317,11 @@ func (h *HAHandler) DeleteResource(c *fiber.Ctx) error {
 // ListGroups handles GET /clusters/:cluster_id/ha/groups.
 // On PVE 8.3+ where groups have been migrated to rules, returns an empty array.
 func (h *HAHandler) ListGroups(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -341,11 +341,11 @@ func (h *HAHandler) ListGroups(c *fiber.Ctx) error {
 
 // CreateGroup handles POST /clusters/:cluster_id/ha/groups.
 func (h *HAHandler) CreateGroup(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	var req proxmox.CreateHAGroupParams
@@ -383,11 +383,11 @@ func (h *HAHandler) CreateGroup(c *fiber.Ctx) error {
 
 // UpdateGroup handles PUT /clusters/:cluster_id/ha/groups/:group.
 func (h *HAHandler) UpdateGroup(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	group := decodePathParam(c, "group")
@@ -426,11 +426,11 @@ func (h *HAHandler) UpdateGroup(c *fiber.Ctx) error {
 
 // DeleteGroup handles DELETE /clusters/:cluster_id/ha/groups/:group.
 func (h *HAHandler) DeleteGroup(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	group := decodePathParam(c, "group")
@@ -468,11 +468,11 @@ func (h *HAHandler) DeleteGroup(c *fiber.Ctx) error {
 
 // ListRules handles GET /clusters/:cluster_id/ha/rules.
 func (h *HAHandler) ListRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -492,11 +492,11 @@ func (h *HAHandler) ListRules(c *fiber.Ctx) error {
 
 // CreateRule handles POST /clusters/:cluster_id/ha/rules.
 func (h *HAHandler) CreateRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	var req struct {
@@ -546,11 +546,11 @@ func (h *HAHandler) CreateRule(c *fiber.Ctx) error {
 
 // UpdateRule handles PUT /clusters/:cluster_id/ha/rules/:rule.
 func (h *HAHandler) UpdateRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	rule := decodePathParam(c, "rule")
@@ -604,11 +604,11 @@ func (h *HAHandler) UpdateRule(c *fiber.Ctx) error {
 
 // DeleteRule handles DELETE /clusters/:cluster_id/ha/rules/:rule.
 func (h *HAHandler) DeleteRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
 		return err
 	}
 	rule := decodePathParam(c, "rule")
@@ -659,11 +659,11 @@ func (h *HAHandler) DeleteRule(c *fiber.Ctx) error {
 
 // GetStatus handles GET /clusters/:cluster_id/ha/status.
 func (h *HAHandler) GetStatus(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -679,11 +679,11 @@ func (h *HAHandler) GetStatus(c *fiber.Ctx) error {
 
 // GetManagerStatus handles GET /clusters/:cluster_id/ha/manager-status.
 func (h *HAHandler) GetManagerStatus(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ha"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ha", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)

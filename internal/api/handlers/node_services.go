@@ -13,11 +13,11 @@ import (
 
 // ListNodeServices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/services.
 func (h *NodeHandler) ListNodeServices(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -33,11 +33,11 @@ func (h *NodeHandler) ListNodeServices(c *fiber.Ctx) error {
 
 // ServiceAction handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/services/:service/:action.
 func (h *NodeHandler) ServiceAction(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	service := c.Params("service")
@@ -68,11 +68,11 @@ func (h *NodeHandler) ServiceAction(c *fiber.Ctx) error {
 
 // GetNodeSyslog handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/syslog.
 func (h *NodeHandler) GetNodeSyslog(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	// Default start to -1 (fetch newest entries) unless explicitly provided.

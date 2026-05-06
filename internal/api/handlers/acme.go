@@ -35,11 +35,11 @@ func (h *ACMEHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, 
 
 // ListAccounts handles GET /clusters/:cluster_id/acme/accounts.
 func (h *ACMEHandler) ListAccounts(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -55,11 +55,11 @@ func (h *ACMEHandler) ListAccounts(c *fiber.Ctx) error {
 
 // CreateAccount handles POST /clusters/:cluster_id/acme/accounts.
 func (h *ACMEHandler) CreateAccount(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	var req proxmox.CreateACMEAccountParams
@@ -85,11 +85,11 @@ func (h *ACMEHandler) CreateAccount(c *fiber.Ctx) error {
 
 // GetAccount handles GET /clusters/:cluster_id/acme/accounts/:name.
 func (h *ACMEHandler) GetAccount(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	name := c.Params("name")
@@ -106,11 +106,11 @@ func (h *ACMEHandler) GetAccount(c *fiber.Ctx) error {
 
 // UpdateAccount handles PUT /clusters/:cluster_id/acme/accounts/:name.
 func (h *ACMEHandler) UpdateAccount(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	name := c.Params("name")
@@ -133,11 +133,11 @@ func (h *ACMEHandler) UpdateAccount(c *fiber.Ctx) error {
 
 // DeleteAccount handles DELETE /clusters/:cluster_id/acme/accounts/:name.
 func (h *ACMEHandler) DeleteAccount(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	name := c.Params("name")
@@ -158,11 +158,11 @@ func (h *ACMEHandler) DeleteAccount(c *fiber.Ctx) error {
 
 // ListPlugins handles GET /clusters/:cluster_id/acme/plugins.
 func (h *ACMEHandler) ListPlugins(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -178,11 +178,11 @@ func (h *ACMEHandler) ListPlugins(c *fiber.Ctx) error {
 
 // CreatePlugin handles POST /clusters/:cluster_id/acme/plugins.
 func (h *ACMEHandler) CreatePlugin(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	var req proxmox.CreateACMEPluginParams
@@ -207,11 +207,11 @@ func (h *ACMEHandler) CreatePlugin(c *fiber.Ctx) error {
 
 // UpdatePlugin handles PUT /clusters/:cluster_id/acme/plugins/:plugin_id.
 func (h *ACMEHandler) UpdatePlugin(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	pluginID := c.Params("plugin_id")
@@ -234,11 +234,11 @@ func (h *ACMEHandler) UpdatePlugin(c *fiber.Ctx) error {
 
 // DeletePlugin handles DELETE /clusters/:cluster_id/acme/plugins/:plugin_id.
 func (h *ACMEHandler) DeletePlugin(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	pluginID := c.Params("plugin_id")
@@ -259,11 +259,11 @@ func (h *ACMEHandler) DeletePlugin(c *fiber.Ctx) error {
 
 // ListChallengeSchema handles GET /clusters/:cluster_id/acme/challenge-schema.
 func (h *ACMEHandler) ListChallengeSchema(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -280,11 +280,11 @@ func (h *ACMEHandler) ListChallengeSchema(c *fiber.Ctx) error {
 
 // ListDirectories handles GET /clusters/:cluster_id/acme/directories.
 func (h *ACMEHandler) ListDirectories(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -300,11 +300,11 @@ func (h *ACMEHandler) ListDirectories(c *fiber.Ctx) error {
 
 // GetTOS handles GET /clusters/:cluster_id/acme/tos.
 func (h *ACMEHandler) GetTOS(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -322,11 +322,11 @@ func (h *ACMEHandler) GetTOS(c *fiber.Ctx) error {
 
 // GetNodeACMEConfig handles GET /clusters/:cluster_id/nodes/:node/acme-config.
 func (h *ACMEHandler) GetNodeACMEConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	node := c.Params("node")
@@ -346,11 +346,11 @@ func (h *ACMEHandler) GetNodeACMEConfig(c *fiber.Ctx) error {
 
 // SetNodeACMEConfig handles PUT /clusters/:cluster_id/nodes/:node/acme-config.
 func (h *ACMEHandler) SetNodeACMEConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	node := c.Params("node")
@@ -377,11 +377,11 @@ func (h *ACMEHandler) SetNodeACMEConfig(c *fiber.Ctx) error {
 
 // ListNodeCertificates handles GET /clusters/:cluster_id/nodes/:node/certificates.
 func (h *ACMEHandler) ListNodeCertificates(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "certificate", clusterID); err != nil {
 		return err
 	}
 	node := c.Params("node")
@@ -401,11 +401,11 @@ func (h *ACMEHandler) ListNodeCertificates(c *fiber.Ctx) error {
 
 // OrderNodeCertificate handles POST /clusters/:cluster_id/nodes/:node/certificates/order.
 func (h *ACMEHandler) OrderNodeCertificate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	node := c.Params("node")
@@ -429,11 +429,11 @@ func (h *ACMEHandler) OrderNodeCertificate(c *fiber.Ctx) error {
 
 // RenewNodeCertificate handles PUT /clusters/:cluster_id/nodes/:node/certificates/renew.
 func (h *ACMEHandler) RenewNodeCertificate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	node := c.Params("node")
@@ -457,11 +457,11 @@ func (h *ACMEHandler) RenewNodeCertificate(c *fiber.Ctx) error {
 
 // RevokeNodeCertificate handles DELETE /clusters/:cluster_id/nodes/:node/certificates/revoke.
 func (h *ACMEHandler) RevokeNodeCertificate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "certificate"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "certificate", clusterID); err != nil {
 		return err
 	}
 	node := c.Params("node")

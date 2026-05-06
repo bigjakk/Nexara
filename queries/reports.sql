@@ -90,7 +90,7 @@ WHERE created_at < now() - interval '90 days'
   AND schedule_id IS NOT NULL;
 
 -- name: GetReportRunHTML :one
-SELECT id, report_html FROM report_runs WHERE id = $1;
+SELECT id, cluster_id, report_html FROM report_runs WHERE id = $1;
 
 -- name: GetReportRunCSV :one
-SELECT id, report_csv FROM report_runs WHERE id = $1;
+SELECT id, cluster_id, report_csv FROM report_runs WHERE id = $1;

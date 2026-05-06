@@ -148,7 +148,8 @@ func toRunResponse(r db.ReportRun) reportRunResponse {
 
 // ListSchedules handles GET /api/v1/reports/schedules
 func (h *ReportHandler) ListSchedules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "report"); err != nil {
+	access, err := accessibleClusters(c, "view", "report")
+	if err != nil {
 		return err
 	}
 
@@ -160,19 +161,18 @@ func (h *ReportHandler) ListSchedules(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list schedules")
 	}
 
-	out := make([]reportScheduleResponse, len(schedules))
-	for i, s := range schedules {
-		out[i] = toReportScheduleResponse(s)
+	out := make([]reportScheduleResponse, 0, len(schedules))
+	for _, s := range schedules {
+		if !access.PermitsCluster(s.ClusterID) {
+			continue
+		}
+		out = append(out, toReportScheduleResponse(s))
 	}
 	return c.JSON(out)
 }
 
 // CreateSchedule handles POST /api/v1/reports/schedules
 func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "report"); err != nil {
-		return err
-	}
-
 	var req struct {
 		Name            string          `json:"name"`
 		ReportType      string          `json:"report_type"`
@@ -195,6 +195,9 @@ func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
 	}
 
 	clusterID, _ := uuid.Parse(req.ClusterID)
+	if err := requireClusterPerm(c, "manage", "report", clusterID); err != nil {
+		return err
+	}
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	enabled := true
@@ -256,10 +259,6 @@ func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
 
 // GetSchedule handles GET /api/v1/reports/schedules/:id
 func (h *ReportHandler) GetSchedule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "report"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
@@ -270,15 +269,15 @@ func (h *ReportHandler) GetSchedule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Schedule not found")
 	}
 
+	if err := requireClusterPerm(c, "view", "report", schedule.ClusterID); err != nil {
+		return err
+	}
+
 	return c.JSON(toReportScheduleResponse(schedule))
 }
 
 // UpdateSchedule handles PUT /api/v1/reports/schedules/:id
 func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "report"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
@@ -287,6 +286,11 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 	existing, err := h.queries.GetReportSchedule(c.Context(), id)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Schedule not found")
+	}
+
+	// Caller must hold manage:report on the schedule's current cluster.
+	if err := requireClusterPerm(c, "manage", "report", existing.ClusterID); err != nil {
+		return err
 	}
 
 	var req struct {
@@ -316,6 +320,13 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 		cid, err := uuid.Parse(*req.ClusterID)
 		if err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+		}
+		// If the user is moving the schedule to a different cluster, gate on
+		// manage:report on the target cluster too.
+		if cid != existing.ClusterID {
+			if err := requireClusterPerm(c, "manage", "report", cid); err != nil {
+				return err
+			}
 		}
 		clusterID = cid
 	}
@@ -384,17 +395,18 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 
 // DeleteSchedule handles DELETE /api/v1/reports/schedules/:id
 func (h *ReportHandler) DeleteSchedule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "report"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
 	}
 
-	if _, err := h.queries.GetReportSchedule(c.Context(), id); err != nil {
+	existing, err := h.queries.GetReportSchedule(c.Context(), id)
+	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Schedule not found")
+	}
+
+	if err := requireClusterPerm(c, "manage", "report", existing.ClusterID); err != nil {
+		return err
 	}
 
 	if err := h.queries.DeleteReportSchedule(c.Context(), id); err != nil {
@@ -409,10 +421,6 @@ func (h *ReportHandler) DeleteSchedule(c *fiber.Ctx) error {
 
 // GenerateReport handles POST /api/v1/reports/generate
 func (h *ReportHandler) GenerateReport(c *fiber.Ctx) error {
-	if err := requirePerm(c, "generate", "report"); err != nil {
-		return err
-	}
-
 	var req struct {
 		ReportType     string `json:"report_type"`
 		ClusterID      string `json:"cluster_id"`
@@ -429,6 +437,9 @@ func (h *ReportHandler) GenerateReport(c *fiber.Ctx) error {
 	clusterID, err := uuid.Parse(req.ClusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+	}
+	if err := requireClusterPerm(c, "generate", "report", clusterID); err != nil {
+		return err
 	}
 	if req.TimeRangeHours <= 0 {
 		req.TimeRangeHours = 168
@@ -523,7 +534,8 @@ func (h *ReportHandler) GenerateReport(c *fiber.Ctx) error {
 
 // ListRuns handles GET /api/v1/reports/runs
 func (h *ReportHandler) ListRuns(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "report"); err != nil {
+	access, err := accessibleClusters(c, "view", "report")
+	if err != nil {
 		return err
 	}
 
@@ -535,19 +547,18 @@ func (h *ReportHandler) ListRuns(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list runs")
 	}
 
-	out := make([]reportRunResponse, len(runs))
-	for i, r := range runs {
-		out[i] = toRunResponse(r)
+	out := make([]reportRunResponse, 0, len(runs))
+	for _, r := range runs {
+		if !access.PermitsCluster(r.ClusterID) {
+			continue
+		}
+		out = append(out, toRunResponse(r))
 	}
 	return c.JSON(out)
 }
 
 // GetRun handles GET /api/v1/reports/runs/:id
 func (h *ReportHandler) GetRun(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "report"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
@@ -558,15 +569,15 @@ func (h *ReportHandler) GetRun(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Run not found")
 	}
 
+	if err := requireClusterPerm(c, "view", "report", run.ClusterID); err != nil {
+		return err
+	}
+
 	return c.JSON(toRunResponse(run))
 }
 
 // GetRunHTML handles GET /api/v1/reports/runs/:id/html
 func (h *ReportHandler) GetRunHTML(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "report"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
@@ -575,6 +586,10 @@ func (h *ReportHandler) GetRunHTML(c *fiber.Ctx) error {
 	row, err := h.queries.GetReportRunHTML(c.Context(), id)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Run not found")
+	}
+
+	if err := requireClusterPerm(c, "view", "report", row.ClusterID); err != nil {
+		return err
 	}
 
 	if !row.ReportHtml.Valid || row.ReportHtml.String == "" {
@@ -589,10 +604,6 @@ func (h *ReportHandler) GetRunHTML(c *fiber.Ctx) error {
 
 // GetRunCSV handles GET /api/v1/reports/runs/:id/csv
 func (h *ReportHandler) GetRunCSV(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "report"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
@@ -601,6 +612,10 @@ func (h *ReportHandler) GetRunCSV(c *fiber.Ctx) error {
 	row, err := h.queries.GetReportRunCSV(c.Context(), id)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Run not found")
+	}
+
+	if err := requireClusterPerm(c, "view", "report", row.ClusterID); err != nil {
+		return err
 	}
 
 	if !row.ReportCsv.Valid || row.ReportCsv.String == "" {

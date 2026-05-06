@@ -165,13 +165,12 @@ var validRuleTypes = map[string]bool{
 
 // GetConfig handles GET /api/v1/clusters/:cluster_id/drs/config.
 func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
+		return err
 	}
 
 	cfg, err := h.queries.GetDRSConfig(c.Context(), clusterID)
@@ -193,13 +192,12 @@ func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
 
 // UpdateConfig handles PUT /api/v1/clusters/:cluster_id/drs/config.
 func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	var req drsConfigRequest
@@ -244,13 +242,12 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 
 // ListRules handles GET /api/v1/clusters/:cluster_id/drs/rules.
 func (h *DRSHandler) ListRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
+		return err
 	}
 
 	rules, err := h.queries.ListDRSRules(c.Context(), clusterID)
@@ -268,13 +265,12 @@ func (h *DRSHandler) ListRules(c *fiber.Ctx) error {
 
 // CreateRule handles POST /api/v1/clusters/:cluster_id/drs/rules.
 func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	var req drsRuleRequest
@@ -312,11 +308,13 @@ func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
 
 // DeleteRule handles DELETE /api/v1/clusters/:cluster_id/drs/rules/:rule_id.
 func (h *DRSHandler) DeleteRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, _ := uuid.Parse(c.Params("cluster_id"))
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
+	}
 
 	ruleID, err := uuid.Parse(c.Params("rule_id"))
 	if err != nil {
@@ -334,13 +332,12 @@ func (h *DRSHandler) DeleteRule(c *fiber.Ctx) error {
 
 // TriggerEvaluate handles POST /api/v1/clusters/:cluster_id/drs/evaluate.
 func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	engine := drs.NewEngine(h.queries, h.encryptionKey, slog.Default())
@@ -456,13 +453,12 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 
 // ListHistory handles GET /api/v1/clusters/:cluster_id/drs/history.
 func (h *DRSHandler) ListHistory(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
+		return err
 	}
 
 	limit := int32(50)
@@ -551,13 +547,12 @@ func haRuleToResponse(clusterID uuid.UUID, entry proxmox.HARuleEntry) drsRuleRes
 
 // ListHARules handles GET /api/v1/clusters/:cluster_id/drs/ha-rules.
 func (h *DRSHandler) ListHARules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
+		return err
 	}
 
 	client, err := h.createProxmoxClient(c, clusterID)
@@ -580,13 +575,12 @@ func (h *DRSHandler) ListHARules(c *fiber.Ctx) error {
 
 // CreateHARule handles POST /api/v1/clusters/:cluster_id/drs/ha-rules.
 func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	var req struct {
@@ -654,13 +648,12 @@ func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
 
 // DeleteHARule handles DELETE /api/v1/clusters/:cluster_id/drs/ha-rules/:rule_name.
 func (h *DRSHandler) DeleteHARule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	ruleName := c.Params("rule_name")

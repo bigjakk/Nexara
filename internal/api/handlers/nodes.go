@@ -104,13 +104,12 @@ func toNodeResponse(n db.Node) nodeResponse {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/nodes.
 func (h *NodeHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
+		return err
 	}
 
 	nodes, err := h.queries.ListNodesByCluster(c.Context(), clusterID)
@@ -173,7 +172,11 @@ type nodePCIDeviceResponse struct {
 
 // ListNodeDisks handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/disks.
 func (h *NodeHandler) ListNodeDisks(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	nodeID, err := uuid.Parse(c.Params("node_id"))
@@ -197,7 +200,11 @@ func (h *NodeHandler) ListNodeDisks(c *fiber.Ctx) error {
 
 // ListNodeNetworkInterfaces handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/network-interfaces.
 func (h *NodeHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	nodeID, err := uuid.Parse(c.Params("node_id"))
@@ -223,7 +230,11 @@ func (h *NodeHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
 
 // ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/pci-devices.
 func (h *NodeHandler) ListNodePCIDevices(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	nodeID, err := uuid.Parse(c.Params("node_id"))
@@ -264,11 +275,11 @@ func (h *NodeHandler) resolveNodeName(c *fiber.Ctx) (uuid.UUID, string, error) {
 
 // GetNodeDNS handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/dns.
 func (h *NodeHandler) GetNodeDNS(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -291,11 +302,11 @@ type setNodeDNSRequest struct {
 
 // SetNodeDNS handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/dns.
 func (h *NodeHandler) SetNodeDNS(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	var req setNodeDNSRequest
@@ -319,11 +330,11 @@ func (h *NodeHandler) SetNodeDNS(c *fiber.Ctx) error {
 
 // GetNodeTime handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/time.
 func (h *NodeHandler) GetNodeTime(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -343,11 +354,11 @@ type setNodeTimezoneRequest struct {
 
 // SetNodeTimezone handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/time.
 func (h *NodeHandler) SetNodeTimezone(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	var req setNodeTimezoneRequest
@@ -371,11 +382,11 @@ func (h *NodeHandler) SetNodeTimezone(c *fiber.Ctx) error {
 
 // ShutdownNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/shutdown.
 func (h *NodeHandler) ShutdownNode(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -391,11 +402,11 @@ func (h *NodeHandler) ShutdownNode(c *fiber.Ctx) error {
 
 // RebootNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/reboot.
 func (h *NodeHandler) RebootNode(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -425,11 +436,11 @@ type evacuateMigration struct {
 // EvacuateNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/evacuate.
 // Distributes guests across available nodes using DRS-aware target selection.
 func (h *NodeHandler) EvacuateNode(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "node"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
 		return err
 	}
 	var req evacuateRequest

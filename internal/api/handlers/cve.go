@@ -201,12 +201,11 @@ var validSeverities = map[string]bool{
 
 // ListScans lists CVE scans for a cluster.
 func (h *CVEHandler) ListScans(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -237,12 +236,11 @@ func (h *CVEHandler) ListScans(c *fiber.Ctx) error {
 
 // TriggerScan starts a new CVE scan for a cluster.
 func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -292,12 +290,11 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 
 // GetScan returns a single CVE scan with its node results.
 func (h *CVEHandler) GetScan(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -334,12 +331,11 @@ func (h *CVEHandler) GetScan(c *fiber.Ctx) error {
 
 // ListVulnerabilities returns vulnerabilities for a scan.
 func (h *CVEHandler) ListVulnerabilities(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -402,12 +398,11 @@ func (h *CVEHandler) ListVulnerabilities(c *fiber.Ctx) error {
 
 // DeleteScan deletes a CVE scan and its results.
 func (h *CVEHandler) DeleteScan(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -436,12 +431,11 @@ func (h *CVEHandler) DeleteScan(c *fiber.Ctx) error {
 
 // GetSecurityPosture returns the security posture summary for a cluster.
 func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -508,12 +502,11 @@ type updateCVEScheduleRequest struct {
 
 // GetSchedule returns the CVE scan schedule for a cluster.
 func (h *CVEHandler) GetSchedule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -537,12 +530,11 @@ func (h *CVEHandler) GetSchedule(c *fiber.Ctx) error {
 
 // UpdateSchedule updates the CVE scan schedule for a cluster.
 func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -614,11 +606,11 @@ type updateCVENotifyConfigRequest struct {
 // GetCVENotificationConfig returns the per-cluster CVE notification config.
 // Falls back to disabled defaults when no config exists yet.
 func (h *CVEHandler) GetCVENotificationConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -650,11 +642,11 @@ func (h *CVEHandler) GetCVENotificationConfig(c *fiber.Ctx) error {
 
 // UpdateCVENotificationConfig upserts the per-cluster CVE notification config.
 func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cve_scan"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 

@@ -33,11 +33,11 @@ func (h *MetricServerHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resour
 
 // ListServers handles GET /clusters/:cluster_id/metric-servers.
 func (h *MetricServerHandler) ListServers(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -53,11 +53,11 @@ func (h *MetricServerHandler) ListServers(c *fiber.Ctx) error {
 
 // CreateServer handles POST /clusters/:cluster_id/metric-servers.
 func (h *MetricServerHandler) CreateServer(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cluster", clusterID); err != nil {
 		return err
 	}
 	var req proxmox.CreateMetricServerParams
@@ -81,11 +81,11 @@ func (h *MetricServerHandler) CreateServer(c *fiber.Ctx) error {
 
 // GetServer handles GET /clusters/:cluster_id/metric-servers/:server_id.
 func (h *MetricServerHandler) GetServer(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	serverID := c.Params("server_id")
@@ -102,11 +102,11 @@ func (h *MetricServerHandler) GetServer(c *fiber.Ctx) error {
 
 // UpdateServer handles PUT /clusters/:cluster_id/metric-servers/:server_id.
 func (h *MetricServerHandler) UpdateServer(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cluster", clusterID); err != nil {
 		return err
 	}
 	serverID := c.Params("server_id")
@@ -128,11 +128,11 @@ func (h *MetricServerHandler) UpdateServer(c *fiber.Ctx) error {
 
 // DeleteServer handles DELETE /clusters/:cluster_id/metric-servers/:server_id.
 func (h *MetricServerHandler) DeleteServer(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cluster", clusterID); err != nil {
 		return err
 	}
 	serverID := c.Params("server_id")

@@ -22,6 +22,34 @@ func (q *Queries) DeleteCompletedTasks(ctx context.Context) error {
 	return err
 }
 
+const getTaskByUpid = `-- name: GetTaskByUpid :one
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+WHERE upid = $1
+LIMIT 1
+`
+
+func (q *Queries) GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, error) {
+	row := q.db.QueryRow(ctx, getTaskByUpid, upid)
+	var i TaskHistory
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.UserID,
+		&i.Upid,
+		&i.Description,
+		&i.Status,
+		&i.ExitStatus,
+		&i.Node,
+		&i.TaskType,
+		&i.Progress,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertTaskHistory = `-- name: InsertTaskHistory :one
 INSERT INTO task_history (cluster_id, user_id, upid, description, status, node, task_type)
 VALUES ($1, $2, $3, $4, $5, $6, $7)

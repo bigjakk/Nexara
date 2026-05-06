@@ -117,13 +117,12 @@ type taskStatusResponse struct {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/vms.
 func (h *VMHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vms, err := h.queries.ListVMsByCluster(c.Context(), clusterID)
@@ -141,7 +140,11 @@ func (h *VMHandler) ListByCluster(c *fiber.Ctx) error {
 
 // GetVM handles GET /api/v1/clusters/:cluster_id/vms/:vm_id.
 func (h *VMHandler) GetVM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
 		return err
 	}
 
@@ -163,13 +166,12 @@ func (h *VMHandler) GetVM(c *fiber.Ctx) error {
 
 // PerformAction handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/status.
 func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -228,13 +230,12 @@ func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
 
 // CloneVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone.
 func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -280,13 +281,12 @@ func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
 // ConvertToTemplate handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/convert-to-template.
 // This converts a stopped VM to a template. The operation is irreversible in Proxmox.
 func (h *VMHandler) ConvertToTemplate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -330,13 +330,12 @@ func (h *VMHandler) ConvertToTemplate(c *fiber.Ctx) error {
 // CloneToTemplate handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template.
 // This clones a VM/CT and then automatically converts the clone to a template.
 func (h *VMHandler) CloneToTemplate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -468,13 +467,12 @@ func (h *VMHandler) convertCloneToTemplate(pxClient *proxmox.Client, node string
 
 // DestroyVM handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id.
 func (h *VMHandler) DestroyVM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -504,13 +502,12 @@ func (h *VMHandler) DestroyVM(c *fiber.Ctx) error {
 
 // GetTaskStatus handles GET /api/v1/clusters/:cluster_id/tasks/:upid.
 func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "task"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "task", clusterID); err != nil {
+		return err
 	}
 
 	rawUPID := c.Params("upid")
@@ -592,13 +589,12 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 
 // GetTaskLog returns the log lines for a Proxmox task.
 func (h *VMHandler) GetTaskLog(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "task"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "task", clusterID); err != nil {
+		return err
 	}
 
 	rawUPID := c.Params("upid")
@@ -650,13 +646,12 @@ type diskMoveRequest struct {
 
 // ResizeDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize.
 func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -696,13 +691,12 @@ func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
 
 // MoveDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/move.
 func (h *VMHandler) MoveDisk(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -759,13 +753,12 @@ type diskDetachRequest struct {
 
 // AttachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach.
 func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -813,13 +806,12 @@ func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
 
 // DetachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/detach.
 func (h *VMHandler) DetachDisk(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1030,13 +1022,12 @@ type snapshotResponse struct {
 
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
 func (h *VMHandler) ListSnapshots(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1073,13 +1064,12 @@ func (h *VMHandler) ListSnapshots(c *fiber.Ctx) error {
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
 func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1121,13 +1111,12 @@ func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
 
 // DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name.
 func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1162,13 +1151,12 @@ func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
 
 // RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback.
 func (h *VMHandler) RollbackSnapshot(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1260,13 +1248,12 @@ type createVMRequest struct {
 
 // CreateVM handles POST /api/v1/clusters/:cluster_id/vms.
 func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+		return err
 	}
 
 	var req createVMRequest
@@ -1349,13 +1336,12 @@ func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
 
 // GetVMConfig handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/config.
 func (h *VMHandler) GetVMConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1382,13 +1368,12 @@ type setVMConfigRequest struct {
 
 // SetVMConfig handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/config.
 func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1429,13 +1414,12 @@ type machineTypeResponse struct {
 
 // ListMachineTypes handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/machine-types.
 func (h *VMHandler) ListMachineTypes(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -1474,13 +1458,12 @@ type cpuModelResponse struct {
 
 // ListCPUModels handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-models.
 func (h *VMHandler) ListCPUModels(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -1526,13 +1509,12 @@ type resourcePoolResponse struct {
 
 // ListResourcePools handles GET /api/v1/clusters/:cluster_id/pools.
 func (h *VMHandler) ListResourcePools(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
+		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1567,13 +1549,12 @@ type networkBridgeResponse struct {
 
 // ListBridges handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/bridges.
 func (h *VMHandler) ListBridges(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -1616,13 +1597,12 @@ type guestAgentResponse struct {
 
 // GetGuestAgentInfo handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/agent.
 func (h *VMHandler) GetGuestAgentInfo(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1702,13 +1682,12 @@ type isoResponse struct {
 
 // ListNodeISOs aggregates ISO images from all ISO-capable storage pools on a node.
 func (h *VMHandler) ListNodeISOs(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -1769,13 +1748,12 @@ type changeMediaRequest struct {
 // It detects the existing CD-ROM device from the VM config and uses POST for
 // immediate hotplug (no reboot required).
 func (h *VMHandler) ChangeMedia(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1860,13 +1838,12 @@ type vmMigrateRequest struct {
 
 // MigrateVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/migrate.
 func (h *VMHandler) MigrateVM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "vm"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "vm", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))
@@ -1921,13 +1898,12 @@ func (h *VMHandler) MigrateVM(c *fiber.Ctx) error {
 
 // ListNodeUSBDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/usb.
 func (h *VMHandler) ListNodeUSBDevices(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -1950,13 +1926,12 @@ func (h *VMHandler) ListNodeUSBDevices(c *fiber.Ctx) error {
 
 // ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/pci.
 func (h *VMHandler) ListNodePCIDevices(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "node"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -1980,13 +1955,12 @@ func (h *VMHandler) ListNodePCIDevices(c *fiber.Ctx) error {
 // SetVMPool handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/pool.
 // Moves a VM/CT into a pool (or removes from current pool if pool is empty).
 func (h *VMHandler) SetVMPool(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "pool"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "pool", clusterID); err != nil {
+		return err
 	}
 
 	vmID, err := uuid.Parse(c.Params("vm_id"))

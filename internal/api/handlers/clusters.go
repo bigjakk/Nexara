@@ -217,7 +217,8 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/clusters.
 func (h *ClusterHandler) List(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
+	access, err := accessibleClusters(c, "view", "cluster")
+	if err != nil {
 		return err
 	}
 
@@ -234,9 +235,12 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 		}
 	}
 
-	resp := make([]clusterResponse, len(clusters))
-	for i, cl := range clusters {
-		resp[i] = toClusterResponse(cl, nsiMap[cl.ID])
+	resp := make([]clusterResponse, 0, len(clusters))
+	for _, cl := range clusters {
+		if !access.PermitsCluster(cl.ID) {
+			continue
+		}
+		resp = append(resp, toClusterResponse(cl, nsiMap[cl.ID]))
 	}
 
 	return c.JSON(resp)
@@ -244,13 +248,12 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 
 // Get handles GET /api/v1/clusters/:id.
 func (h *ClusterHandler) Get(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	if err := requireClusterPerm(c, "view", "cluster", id); err != nil {
+		return err
 	}
 
 	cluster, err := h.queries.GetCluster(c.Context(), id)
@@ -276,13 +279,12 @@ func (h *ClusterHandler) Get(c *fiber.Ctx) error {
 
 // Update handles PUT /api/v1/clusters/:id.
 func (h *ClusterHandler) Update(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	if err := requireClusterPerm(c, "manage", "cluster", id); err != nil {
+		return err
 	}
 
 	var req updateClusterRequest
@@ -381,13 +383,12 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/clusters/:id.
 func (h *ClusterHandler) Delete(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "cluster"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	if err := requireClusterPerm(c, "delete", "cluster", id); err != nil {
+		return err
 	}
 
 	// Verify the cluster exists.

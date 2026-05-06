@@ -33,11 +33,11 @@ func (h *ClusterOptionsHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, reso
 
 // GetOptions handles GET /clusters/:cluster_id/options.
 func (h *ClusterOptionsHandler) GetOptions(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -53,11 +53,11 @@ func (h *ClusterOptionsHandler) GetOptions(c *fiber.Ctx) error {
 
 // UpdateOptions handles PUT /clusters/:cluster_id/options.
 func (h *ClusterOptionsHandler) UpdateOptions(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cluster", clusterID); err != nil {
 		return err
 	}
 	var req proxmox.UpdateClusterOptionsParams
@@ -78,11 +78,11 @@ func (h *ClusterOptionsHandler) UpdateOptions(c *fiber.Ctx) error {
 
 // GetDescription handles GET /clusters/:cluster_id/description.
 func (h *ClusterOptionsHandler) GetDescription(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -98,11 +98,11 @@ func (h *ClusterOptionsHandler) GetDescription(c *fiber.Ctx) error {
 
 // UpdateDescription handles PUT /clusters/:cluster_id/description.
 func (h *ClusterOptionsHandler) UpdateDescription(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cluster", clusterID); err != nil {
 		return err
 	}
 	var req struct {
@@ -127,11 +127,11 @@ func (h *ClusterOptionsHandler) UpdateDescription(c *fiber.Ctx) error {
 
 // GetTags handles GET /clusters/:cluster_id/tags.
 func (h *ClusterOptionsHandler) GetTags(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -151,11 +151,11 @@ func (h *ClusterOptionsHandler) GetTags(c *fiber.Ctx) error {
 
 // UpdateTags handles PUT /clusters/:cluster_id/tags.
 func (h *ClusterOptionsHandler) UpdateTags(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cluster", clusterID); err != nil {
 		return err
 	}
 	var req struct {
@@ -184,11 +184,11 @@ func (h *ClusterOptionsHandler) UpdateTags(c *fiber.Ctx) error {
 
 // GetClusterConfig handles GET /clusters/:cluster_id/config.
 func (h *ClusterOptionsHandler) GetClusterConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -204,11 +204,11 @@ func (h *ClusterOptionsHandler) GetClusterConfig(c *fiber.Ctx) error {
 
 // GetJoinInfo handles GET /clusters/:cluster_id/config/join.
 func (h *ClusterOptionsHandler) GetJoinInfo(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -224,11 +224,11 @@ func (h *ClusterOptionsHandler) GetJoinInfo(c *fiber.Ctx) error {
 
 // ListCorosyncNodes handles GET /clusters/:cluster_id/config/nodes.
 func (h *ClusterOptionsHandler) ListCorosyncNodes(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
