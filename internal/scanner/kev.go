@@ -18,7 +18,6 @@ import (
 
 const (
 	kevFeedURL     = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-	kevSignatureURL = "" // CISA does not currently publish a detached signature; leave blank.
 	kevMaxBytes    = 50 * 1024 * 1024
 	kevHTTPTimeout = 60 * time.Second
 )
@@ -31,21 +30,21 @@ const (
 // Integrity (Finding A23):
 //   - Transport security: HTTPS only (`https://www.cisa.gov/...`), with the
 //     stdlib's default TLS verification + the scanner-shared dial guard.
-//   - Detached signature: kevSignatureURL is queried via fetchDetachedSignature
-//     when set. CISA does not currently publish one, so the constant is left
-//     empty and the verification step logs "no signature available; relying
-//     on TLS" — wired so a future operator can flip it on without a refactor.
 //   - Plausibility: kevPlausibilityChecks runs after JSON unmarshal, blocking
-//     obvious tampering (count mismatch, missing version, future dateReleased).
+//     obvious tampering or upstream truncation (count mismatch, missing
+//     version, future dateReleased).
 //   - Storage integrity: the kev_cache rows are upserted on every refresh; a
 //     prior bad row is replaced rather than retained.
+//
+// CISA does not currently publish a detached signature alongside the feed,
+// so cryptographic verification is not part of the integrity story today.
+// If they start publishing one, this is the natural place to wire it.
 type KEVClient struct {
 	httpClient *http.Client
 	queries    *db.Queries
 	logger     *slog.Logger
 
-	feedURL      string // overridable for tests
-	signatureURL string // overridable for tests
+	feedURL string // overridable for tests
 }
 
 // NewKEVClient creates a new KEV client. Pass the scanner-shared httpClient
@@ -59,11 +58,10 @@ func NewKEVClient(queries *db.Queries, httpClient *http.Client, logger *slog.Log
 		httpClient = newScannerHTTPClient(kevHTTPTimeout)
 	}
 	return &KEVClient{
-		httpClient:   httpClient,
-		queries:      queries,
-		logger:       logger,
-		feedURL:      kevFeedURL,
-		signatureURL: kevSignatureURL,
+		httpClient: httpClient,
+		queries:    queries,
+		logger:     logger,
+		feedURL:    kevFeedURL,
 	}
 }
 
@@ -89,6 +87,66 @@ type kevEntry struct {
 	Notes                      string `json:"notes"`
 }
 
+// errKEVPlausibility is returned when a KEV feed body parses but fails
+// sanity checks (count mismatch, missing version, future-dated release).
+// Without a published detached signature, plausibility is the strongest
+// integrity signal we have on top of TLS.
+var errKEVPlausibility = errors.New("scanner: KEV feed failed plausibility check")
+
+// kevPlausibilityChecks runs structural sanity checks on a freshly-parsed
+// KEV feed. Each check guards against obvious upstream truncation or
+// tampering:
+//
+//   - title must be present (CISA always sets it)
+//   - catalogVersion must be non-empty
+//   - dateReleased, when set, must not be more than 24h in the future
+//     (clock skew tolerance)
+//   - count, when set, must match len(vulnerabilities) within ±2 (CISA has
+//     historically been off-by-one when the catalog is mid-publish)
+func kevPlausibilityChecks(feed *kevFeed, now time.Time) error {
+	if feed == nil {
+		return fmt.Errorf("%w: nil feed", errKEVPlausibility)
+	}
+	if feed.Title == "" {
+		return fmt.Errorf("%w: missing title", errKEVPlausibility)
+	}
+	if feed.CatalogVersion == "" {
+		return fmt.Errorf("%w: missing catalogVersion", errKEVPlausibility)
+	}
+	if feed.DateReleased != "" {
+		// CISA uses RFC3339-ish dates with timezone (e.g. 2026-04-30T12:00:00.000Z).
+		// Try a few common shapes; if none parse, skip the future-date check
+		// — the feed has shipped with two different formats over time.
+		var parsed time.Time
+		var err error
+		layouts := []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02T15:04:05.000Z",
+			"2006-01-02",
+		}
+		for _, l := range layouts {
+			parsed, err = time.Parse(l, feed.DateReleased)
+			if err == nil {
+				break
+			}
+		}
+		if err == nil && parsed.After(now.Add(24*time.Hour)) {
+			return fmt.Errorf("%w: dateReleased %q is in the future", errKEVPlausibility, feed.DateReleased)
+		}
+	}
+	if feed.Count > 0 {
+		diff := feed.Count - len(feed.Vulnerabilities)
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 2 {
+			return fmt.Errorf("%w: count=%d but %d vulnerabilities present", errKEVPlausibility, feed.Count, len(feed.Vulnerabilities))
+		}
+	}
+	return nil
+}
+
 // Refresh downloads the KEV catalog and upserts it into the local cache.
 // Returns the number of entries written.
 func (c *KEVClient) Refresh(ctx context.Context) (int, error) {
@@ -97,29 +155,6 @@ func (c *KEVClient) Refresh(ctx context.Context) (int, error) {
 	body, err := c.fetchFeed(ctx)
 	if err != nil {
 		return 0, err
-	}
-
-	// Detached signature verification is wired but currently inactive — see
-	// the integrity comment on KEVClient. When CISA publishes a signature
-	// endpoint, set kevSignatureURL and add a verifier here.
-	if sig, ok, sigErr := fetchDetachedSignature(ctx, c.httpClient, c.signatureURL); sigErr != nil {
-		c.logger.Warn("KEV signature fetch failed; relying on TLS for integrity", "error", sigErr)
-	} else if !ok {
-		// Either signatureURL is empty (current default) or the endpoint
-		// returned 404. Logged at Debug rather than Info so we don't spam
-		// the operator's logs every refresh tick.
-		c.logger.Debug("KEV detached signature not available; relying on TLS")
-	} else {
-		// SECURITY (security-reviewer H3 fix): if a signature endpoint is
-		// configured AND returns bytes, we have no verifier wired yet — so
-		// we cannot accept the feed. Failing closed makes the contract
-		// "if you set the URL, ALSO wire the verifier" enforceable rather
-		// than advisory; otherwise an operator who flips the URL on sees
-		// "signature retrieved" log lines and is misled into believing
-		// integrity is enforced.
-		return 0, fmt.Errorf(
-			"KEV signature endpoint returned %d bytes but no verifier is wired; refusing to import unverified feed",
-			len(sig))
 	}
 
 	var feed kevFeed

@@ -74,7 +74,6 @@ type Querier interface {
 	DeleteCompletedTasks(ctx context.Context) error
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
-	DeleteExternalFeedCache(ctx context.Context, source string) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
 	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
 	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error

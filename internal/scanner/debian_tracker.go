@@ -267,7 +267,7 @@ func (c *CVEClient) snapshot(ctx context.Context) (map[string]map[string]debianC
 	}
 
 	// Fetch fresh from upstream.
-	body, etag, err := c.fetchTracker(ctx)
+	body, err := c.fetchTracker(ctx)
 	if err != nil {
 		// Network failure: only fall back to the in-memory copy when it's
 		// recent enough that callers couldn't have noticed the difference
@@ -296,7 +296,7 @@ func (c *CVEClient) snapshot(ctx context.Context) (map[string]map[string]debianC
 	// Persist to DB so the next scheduler restart hits cache instead of the
 	// network. Best-effort: store errors are logged but don't fail the load.
 	if c.queries != nil {
-		if err := storeFeedCache(ctx, c.queries, feedSourceDebianTracker, body, etag); err != nil {
+		if err := storeFeedCache(ctx, c.queries, feedSourceDebianTracker, body); err != nil {
 			c.logger.Warn("failed to persist debian tracker cache to DB", "error", err)
 		}
 	}
@@ -307,35 +307,35 @@ func (c *CVEClient) snapshot(ctx context.Context) (map[string]map[string]debianC
 	return c.trackerData, nil
 }
 
-func (c *CVEClient) fetchTracker(ctx context.Context) (body []byte, etag string, err error) {
+func (c *CVEClient) fetchTracker(ctx context.Context) ([]byte, error) {
 	c.logger.Info("fetching Debian security tracker data", "url", c.feedURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.feedURL, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("User-Agent", "Nexara/1.0 CVE-scanner")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("http get: %w", err)
+		return nil, fmt.Errorf("http get: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if err := checkUpstreamStatus(resp); err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	body, err = io.ReadAll(io.LimitReader(resp.Body, maxTrackerSize+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTrackerSize+1))
 	if err != nil {
-		return nil, "", fmt.Errorf("read body: %w", err)
+		return nil, fmt.Errorf("read body: %w", err)
 	}
 	if int64(len(body)) > maxTrackerSize {
-		return nil, "", fmt.Errorf("tracker body exceeds %d bytes", maxTrackerSize)
+		return nil, fmt.Errorf("tracker body exceeds %d bytes", maxTrackerSize)
 	}
 
-	return body, resp.Header.Get("ETag"), nil
+	return body, nil
 }
 
 func parseTracker(body []byte) (map[string]map[string]debianCVEEntry, error) {

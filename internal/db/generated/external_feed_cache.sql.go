@@ -7,21 +7,10 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteExternalFeedCache = `-- name: DeleteExternalFeedCache :exec
-DELETE FROM external_feed_cache WHERE source = $1
-`
-
-func (q *Queries) DeleteExternalFeedCache(ctx context.Context, source string) error {
-	_, err := q.db.Exec(ctx, deleteExternalFeedCache, source)
-	return err
-}
-
 const getExternalFeedCache = `-- name: GetExternalFeedCache :one
-SELECT source, body, content_hash, etag, fetched_at
+SELECT source, body, content_hash, fetched_at
 FROM external_feed_cache
 WHERE source = $1
 `
@@ -33,35 +22,27 @@ func (q *Queries) GetExternalFeedCache(ctx context.Context, source string) (Exte
 		&i.Source,
 		&i.Body,
 		&i.ContentHash,
-		&i.Etag,
 		&i.FetchedAt,
 	)
 	return i, err
 }
 
 const upsertExternalFeedCache = `-- name: UpsertExternalFeedCache :exec
-INSERT INTO external_feed_cache (source, body, content_hash, etag, fetched_at)
-VALUES ($1, $2, $3, $4, now())
+INSERT INTO external_feed_cache (source, body, content_hash, fetched_at)
+VALUES ($1, $2, $3, now())
 ON CONFLICT (source) DO UPDATE SET
     body = EXCLUDED.body,
     content_hash = EXCLUDED.content_hash,
-    etag = EXCLUDED.etag,
     fetched_at = now()
 `
 
 type UpsertExternalFeedCacheParams struct {
-	Source      string      `json:"source"`
-	Body        []byte      `json:"body"`
-	ContentHash string      `json:"content_hash"`
-	Etag        pgtype.Text `json:"etag"`
+	Source      string `json:"source"`
+	Body        []byte `json:"body"`
+	ContentHash string `json:"content_hash"`
 }
 
 func (q *Queries) UpsertExternalFeedCache(ctx context.Context, arg UpsertExternalFeedCacheParams) error {
-	_, err := q.db.Exec(ctx, upsertExternalFeedCache,
-		arg.Source,
-		arg.Body,
-		arg.ContentHash,
-		arg.Etag,
-	)
+	_, err := q.db.Exec(ctx, upsertExternalFeedCache, arg.Source, arg.Body, arg.ContentHash)
 	return err
 }

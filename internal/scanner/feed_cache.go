@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -68,7 +67,7 @@ func loadFeedCache(ctx context.Context, q feedCacheStore, source externalFeedSou
 // so a DB write failure only costs us the next-restart cache hit.
 //
 //nolint:unparam // generic over feed sources by design; only Debian tracker is wired today
-func storeFeedCache(ctx context.Context, q feedCacheStore, source externalFeedSource, body []byte, etag string) error {
+func storeFeedCache(ctx context.Context, q feedCacheStore, source externalFeedSource, body []byte) error {
 	gz, err := gzipBytes(body)
 	if err != nil {
 		return fmt.Errorf("gzip %s feed: %w", source, err)
@@ -77,7 +76,6 @@ func storeFeedCache(ctx context.Context, q feedCacheStore, source externalFeedSo
 		Source:      string(source),
 		Body:        gz,
 		ContentHash: sha256Hex(body),
-		Etag:        pgtype.Text{String: etag, Valid: etag != ""},
 	})
 }
 

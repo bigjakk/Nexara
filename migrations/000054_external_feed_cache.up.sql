@@ -21,10 +21,6 @@
 --                    integrity sanity check against silent in-DB
 --                    corruption and to short-circuit identical-body
 --                    upserts at the application layer.
---   * etag         — HTTP ETag from the upstream response (NULL if the
---                    server didn't send one). Optional; today we don't
---                    do conditional GETs but the column lets us add
---                    If-None-Match later without another migration.
 --   * fetched_at   — wall-clock time of the last successful fetch. The
 --                    24h TTL is enforced in application code; the DB
 --                    only stores the timestamp.
@@ -32,7 +28,6 @@ CREATE TABLE IF NOT EXISTS external_feed_cache (
     source       TEXT PRIMARY KEY,
     body         BYTEA NOT NULL,
     content_hash TEXT NOT NULL,
-    etag         TEXT,
     fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

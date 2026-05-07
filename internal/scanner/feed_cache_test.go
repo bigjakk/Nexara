@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -44,15 +43,10 @@ func (f *fakeFeedStore) GetExternalFeedCache(_ context.Context, source string) (
 func (f *fakeFeedStore) UpsertExternalFeedCache(_ context.Context, arg db.UpsertExternalFeedCacheParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	etag := ""
-	if arg.Etag.Valid {
-		etag = arg.Etag.String
-	}
 	f.rows[arg.Source] = db.ExternalFeedCache{
 		Source:      arg.Source,
 		Body:        arg.Body,
 		ContentHash: arg.ContentHash,
-		Etag:        pgtype.Text{String: etag, Valid: etag != ""},
 		FetchedAt:   time.Now(),
 	}
 	return nil
@@ -73,7 +67,7 @@ func TestStoreAndLoadFeedCache_RoundTrip(t *testing.T) {
 	body := []byte(`{"hello":"world","numbers":[1,2,3,4,5]}`)
 	store := newFakeFeedStore()
 
-	if err := storeFeedCache(context.Background(), store, feedSourceDebianTracker, body, "etag-abc"); err != nil {
+	if err := storeFeedCache(context.Background(), store, feedSourceDebianTracker, body); err != nil {
 		t.Fatalf("storeFeedCache: %v", err)
 	}
 
@@ -96,7 +90,7 @@ func TestLoadFeedCache_StaleReturnsMiss(t *testing.T) {
 	t.Parallel()
 	store := newFakeFeedStore()
 	body := []byte("hello world")
-	if err := storeFeedCache(context.Background(), store, feedSourceDebianTracker, body, ""); err != nil {
+	if err := storeFeedCache(context.Background(), store, feedSourceDebianTracker, body); err != nil {
 		t.Fatalf("storeFeedCache: %v", err)
 	}
 	store.setFetchedAt(string(feedSourceDebianTracker), time.Now().Add(-48*time.Hour))
@@ -139,7 +133,7 @@ func TestLoadFeedCache_ContentHashMismatchTreatsAsMiss(t *testing.T) {
 	t.Parallel()
 	store := newFakeFeedStore()
 	body := []byte("legit-body")
-	if err := storeFeedCache(context.Background(), store, feedSourceDebianTracker, body, ""); err != nil {
+	if err := storeFeedCache(context.Background(), store, feedSourceDebianTracker, body); err != nil {
 		t.Fatalf("storeFeedCache: %v", err)
 	}
 	// Tamper with the stored content_hash to simulate silent corruption.

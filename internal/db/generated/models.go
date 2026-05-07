@@ -321,11 +321,10 @@ type EpssCache struct {
 }
 
 type ExternalFeedCache struct {
-	Source      string      `json:"source"`
-	Body        []byte      `json:"body"`
-	ContentHash string      `json:"content_hash"`
-	Etag        pgtype.Text `json:"etag"`
-	FetchedAt   time.Time   `json:"fetched_at"`
+	Source      string    `json:"source"`
+	Body        []byte    `json:"body"`
+	ContentHash string    `json:"content_hash"`
+	FetchedAt   time.Time `json:"fetched_at"`
 }
 
 type FirewallTemplate struct {
