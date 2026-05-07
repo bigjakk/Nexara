@@ -9,12 +9,12 @@
 -- Reference: https://www.cisa.gov/sites/default/files/publications/cisa-ssvc-guide%20508c.pdf
 
 ALTER TABLE cve_scan_vulns
-    ADD COLUMN ssvc_label TEXT NOT NULL DEFAULT 'track';
+    ADD COLUMN IF NOT EXISTS ssvc_label TEXT NOT NULL DEFAULT 'track';
 
-CREATE INDEX idx_cve_scan_vulns_ssvc ON cve_scan_vulns(ssvc_label);
+CREATE INDEX IF NOT EXISTS idx_cve_scan_vulns_ssvc ON cve_scan_vulns(ssvc_label);
 
 ALTER TABLE cve_scans
-    ADD COLUMN act_count        INT NOT NULL DEFAULT 0,
-    ADD COLUMN attend_count     INT NOT NULL DEFAULT 0,
-    ADD COLUMN track_star_count INT NOT NULL DEFAULT 0,
-    ADD COLUMN track_count      INT NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS act_count        INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS attend_count     INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS track_star_count INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS track_count      INT NOT NULL DEFAULT 0;

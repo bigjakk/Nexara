@@ -63,7 +63,7 @@ func main() {
 	logger.Info("connected to database")
 
 	// Run embedded schema migrations.
-	if err := db.EnsureSchema(ctx, pool); err != nil {
+	if err := db.EnsureSchema(ctx, pool, cfg.DatabaseURL, logger); err != nil {
 		log.Fatalf("failed to ensure database schema: %v", err)
 	}
 

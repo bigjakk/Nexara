@@ -1,1 +1,0 @@
-ALTER TABLE drs_configs ADD COLUMN IF NOT EXISTS include_containers BOOLEAN NOT NULL DEFAULT false;

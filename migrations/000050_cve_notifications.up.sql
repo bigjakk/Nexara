@@ -7,7 +7,7 @@
 -- configured severity has changed since last notification, OR when
 -- cooldown has elapsed and the set is still nonempty.
 
-CREATE TABLE cve_notification_configs (
+CREATE TABLE IF NOT EXISTS cve_notification_configs (
     cluster_id              UUID PRIMARY KEY REFERENCES clusters(id) ON DELETE CASCADE,
     enabled                 BOOLEAN NOT NULL DEFAULT FALSE,
     notify_on_act           BOOLEAN NOT NULL DEFAULT TRUE,
