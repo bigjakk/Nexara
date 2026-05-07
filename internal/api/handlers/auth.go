@@ -771,8 +771,27 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired refresh token")
 	}
 
-	user, err := h.queries.GetUserByID(c.Context(), session.UserID)
+	// User load, role-rotation guard, permission load, and refresh-token
+	// rotation share one transaction so an admin demoting the user mid-
+	// refresh cannot race past the role check (Finding A11). Redis cache
+	// update happens after commit; ValidateRefreshToken hits Postgres so a
+	// stale Redis row is non-load-bearing.
+	tx, err := h.pool.Begin(c.Context())
 	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to start transaction")
+	}
+	defer func() {
+		rbCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer rbCancel()
+		if rbErr := tx.Rollback(rbCtx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			slog.Warn("refresh: transaction rollback failed", "error", rbErr)
+		}
+	}()
+	qx := h.queries.WithTx(tx)
+
+	user, err := qx.GetUserByID(c.Context(), session.UserID)
+	if err != nil {
+		_ = h.sessionManager.RevokeSession(c.Context(), session.ID)
 		clearRefreshCookie(c)
 		return fiber.NewError(fiber.StatusUnauthorized, "User not found")
 	}
@@ -781,6 +800,21 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		_ = h.sessionManager.RevokeSession(c.Context(), session.ID)
 		clearRefreshCookie(c)
 		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
+	}
+
+	// Role rotation guard: if the legacy users.role at session creation is
+	// non-empty and has since changed, force re-login. Empty user_role
+	// means a pre-migration session — accept it once so the upgrade path
+	// does not log out every existing user; it gets populated below.
+	if session.UserRole != "" && session.UserRole != user.Role {
+		_ = h.sessionManager.RevokeSession(c.Context(), session.ID)
+		clearRefreshCookie(c)
+		details, _ := json.Marshal(map[string]string{
+			"session_role": session.UserRole,
+			"current_role": user.Role,
+		})
+		h.authAuditLog(c, user.ID, "refresh_denied_role_changed", details)
+		return fiber.NewError(fiber.StatusUnauthorized, "Role changed; please log in again")
 	}
 
 	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
@@ -793,8 +827,27 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate refresh token")
 	}
 
-	if err := h.sessionManager.RotateRefreshToken(c.Context(), session.ID, newRefreshToken, user.Role, h.jwtService.RefreshTokenTTL()); err != nil {
+	newHash := auth.HashToken(newRefreshToken)
+	if err := qx.UpdateSessionTokenHash(c.Context(), db.UpdateSessionTokenHashParams{
+		ID:        session.ID,
+		TokenHash: newHash,
+		UserRole:  user.Role,
+	}); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to rotate refresh token")
+	}
+
+	if err := tx.Commit(c.Context()); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to commit refresh")
+	}
+
+	// Detached context: post-commit Redis cache write should converge even
+	// if the HTTP client disconnects between commit and response. Redis is
+	// a cache (ValidateRefreshToken reads Postgres), so a transient
+	// failure here is non-fatal — log and continue.
+	redisCtx, redisCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer redisCancel()
+	if err := h.sessionManager.WriteSessionRedis(redisCtx, session.ID, user.ID, newHash, user.Role, h.jwtService.RefreshTokenTTL()); err != nil {
+		slog.Warn("refresh: redis cache update failed", "session_id", session.ID, "error", err)
 	}
 
 	perms := h.loadPerms(c, user.ID)

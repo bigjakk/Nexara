@@ -31,10 +31,21 @@ let accessTokenExpiresAt = 0;
 purgeLegacyTokenKeys();
 
 let onAuthFailure: (() => void) | null = null;
+let onAuthRefresh: ((res: AuthResponse) => void) | null = null;
 let refreshPromise: Promise<AuthResponse> | null = null;
 
 export function setAuthFailureCallback(cb: () => void) {
   onAuthFailure = cb;
+}
+
+/**
+ * Registers a callback invoked on every successful background refresh
+ * (Finding A11). The auth-store uses this to re-hydrate user + permissions
+ * from the refresh response so a permission rotation propagates to the SPA
+ * within one access-token lifetime, without forcing a logout.
+ */
+export function setAuthRefreshCallback(cb: (res: AuthResponse) => void) {
+  onAuthRefresh = cb;
 }
 
 export function getAccessToken(): string | null {
@@ -94,6 +105,7 @@ async function refreshTokens(): Promise<AuthResponse> {
 
   const data = (await res.json()) as AuthResponse;
   storeTokens(data);
+  onAuthRefresh?.(data);
   return data;
 }
 

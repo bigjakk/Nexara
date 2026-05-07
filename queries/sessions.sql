@@ -1,6 +1,6 @@
 -- name: CreateSession :one
-INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at, device_name, device_type, device_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at, device_name, device_type, device_id, user_role)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: GetSessionByID :one
@@ -16,7 +16,7 @@ UPDATE sessions SET is_revoked = true WHERE id = $1;
 UPDATE sessions SET is_revoked = true WHERE user_id = $1;
 
 -- name: UpdateSessionTokenHash :exec
-UPDATE sessions SET token_hash = $2, last_used_at = now() WHERE id = $1;
+UPDATE sessions SET token_hash = $2, user_role = $3, last_used_at = now() WHERE id = $1;
 
 -- name: DeleteExpiredSessions :exec
 DELETE FROM sessions WHERE expires_at < now();

@@ -64,6 +64,10 @@ func redisKey(sessionID string) string {
 }
 
 // CreateSession stores a new session in both PostgreSQL and Redis.
+//
+// role is the user's legacy role at the time the session was issued. It is
+// persisted to sessions.user_role so the Refresh handler can detect a role
+// rotation (e.g. admin demoting the user) and force re-login.
 func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, refreshToken, role, userAgent, ipAddress string, ttl time.Duration, device DeviceInfo) (db.Session, error) {
 	tokenHash := HashToken(refreshToken)
 	expiresAt := time.Now().Add(ttl)
@@ -77,6 +81,7 @@ func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, r
 		DeviceName: nullText(device.Name),
 		DeviceType: nullText(device.Type),
 		DeviceID:   nullText(device.ID),
+		UserRole:   role,
 	})
 	if err != nil {
 		return db.Session{}, fmt.Errorf("creating session in db: %w", err)
@@ -121,38 +126,26 @@ func (sm *SessionManager) ValidateRefreshToken(ctx context.Context, refreshToken
 	return session, nil
 }
 
-// RotateRefreshToken replaces the token hash for a session (single-use rotation).
-func (sm *SessionManager) RotateRefreshToken(ctx context.Context, sessionID uuid.UUID, newRefreshToken, role string, ttl time.Duration) error {
-	newHash := HashToken(newRefreshToken)
-
-	if err := sm.queries.UpdateSessionTokenHash(ctx, db.UpdateSessionTokenHashParams{
-		ID:        sessionID,
-		TokenHash: newHash,
-	}); err != nil {
-		return fmt.Errorf("rotating token in db: %w", err)
-	}
-
-	// Update Redis
-	session, err := sm.queries.GetSessionByID(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("fetching session after rotation: %w", err)
-	}
-
+// WriteSessionRedis writes (or overwrites) the Redis cache row for a
+// session. The Refresh handler runs the DB rotation inside a transaction
+// (so user-load, role-rotation check, and token rotation share one
+// snapshot) and then calls this helper post-commit. Redis is a cache;
+// GetSessionByTokenHash on validation hits Postgres anyway, so a stale or
+// failed Redis update is not load-bearing.
+func (sm *SessionManager) WriteSessionRedis(ctx context.Context, sessionID, userID uuid.UUID, tokenHash, role string, ttl time.Duration) error {
 	rs := redisSession{
 		SessionID: sessionID.String(),
-		UserID:    session.UserID.String(),
-		TokenHash: newHash,
+		UserID:    userID.String(),
+		TokenHash: tokenHash,
 		Role:      role,
 	}
 	data, err := json.Marshal(rs)
 	if err != nil {
 		return fmt.Errorf("marshaling redis session: %w", err)
 	}
-
 	if err := sm.redis.Set(ctx, redisKey(sessionID.String()), data, ttl).Err(); err != nil {
 		return fmt.Errorf("updating session in redis: %w", err)
 	}
-
 	return nil
 }
 

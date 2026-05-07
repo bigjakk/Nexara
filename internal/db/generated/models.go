@@ -828,6 +828,7 @@ type Session struct {
 	DeviceName pgtype.Text `json:"device_name"`
 	DeviceType pgtype.Text `json:"device_type"`
 	DeviceID   pgtype.Text `json:"device_id"`
+	UserRole   string      `json:"user_role"`
 }
 
 type Setting struct {
