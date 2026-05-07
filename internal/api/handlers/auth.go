@@ -258,7 +258,26 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 }
 
 // Login handles user authentication.
-// If LDAP is enabled, tries LDAP authentication first, then falls back to local auth.
+//
+// Lookup-first ordering: a local user's password is NEVER shipped to the
+// LDAP server (closes the data leak from Finding #12 where every login
+// attempt's plaintext password was sent to LDAP regardless of auth_source).
+//
+// Constant-time failure paths: every rejection runs a dummy bcrypt so a
+// stopwatch on /auth/login cannot distinguish "real local user, bad
+// password" from "no such user", "OIDC user trying password login", or
+// "disabled account" (closes Finding #11 username-enumeration timing
+// oracle).
+//
+// Residual oracle (LDAP-enabled deployments only): when LDAP is enabled
+// AND the email is unknown locally, the request takes one LDAP roundtrip
+// PLUS the dummy bcrypt; when LDAP is disabled it takes only the dummy
+// bcrypt. The wall-clock differential leaks "this email is/isn't in your
+// directory" — a strictly weaker oracle than #11 (it's about directory
+// membership, not local-account existence) and unavoidable without
+// disabling JIT-provisioning of new LDAP users on first login. Operators
+// who accept this trade can leave it; tighter postures should disable JIT
+// and pre-provision LDAP users.
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -271,26 +290,43 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 
 	invalidCredentials := fiber.NewError(fiber.StatusUnauthorized, "Invalid email or password")
 
-	// Try LDAP authentication first if enabled
-	if user, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
-		return h.issueOrTOTP(c, user, "ldap_login")
-	}
-
-	// Fall back to local authentication
 	user, err := h.queries.GetUserByEmail(c.Context(), req.Email)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return invalidCredentials
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up user")
 		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up user")
-	}
-
-	// LDAP/OIDC-sourced users cannot log in with local passwords
-	if user.AuthSource == "ldap" || user.AuthSource == "oidc" {
+		// No local user with this email. If LDAP is enabled, try it —
+		// the LDAP path handles JIT-provisioning of new directory users.
+		// Otherwise fall through to a dummy bcrypt so timing matches the
+		// "real user, bad password" path.
+		if ldapUser, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
+			return h.issueOrTOTP(c, ldapUser, "ldap_login")
+		}
+		auth.RunDummyBcrypt(req.Password)
 		return invalidCredentials
 	}
 
+	switch user.AuthSource {
+	case "ldap":
+		if ldapUser, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
+			return h.issueOrTOTP(c, ldapUser, "ldap_login")
+		}
+		// Pad failure to keep timing roughly aligned with the local-bcrypt
+		// path. LDAP roundtrip dominates wall-clock anyway, so this is a
+		// best-effort defence-in-depth, not a strict equaliser.
+		auth.RunDummyBcrypt(req.Password)
+		return invalidCredentials
+	case "oidc":
+		// OIDC-sourced users cannot log in via password. Burn equivalent
+		// CPU so the response time is indistinguishable from a real
+		// local user with a wrong password.
+		auth.RunDummyBcrypt(req.Password)
+		return invalidCredentials
+	}
+
+	// auth_source == "local" from here.
 	if !user.IsActive {
+		auth.RunDummyBcrypt(req.Password)
 		return invalidCredentials
 	}
 
@@ -302,6 +338,17 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 }
 
 // tryLDAPLogin attempts LDAP authentication. Returns the DB user and true on success.
+//
+// Failure modes are logged at WARN with the email but never the password,
+// so an admin investigating "why is LDAP login broken" gets a signal without
+// the silent-failure mode the original implementation suffered from.
+//
+// Residual race (acknowledged): if a local user with the same email is
+// being created concurrently with a JIT-provisioning LDAP login, the LDAP
+// path still ships the password to the LDAP server before the duplicate-key
+// path discovers the conflict. Vanishingly narrow window in practice and
+// no different from the LDAP-bound attempt the user was about to make
+// anyway, but worth documenting.
 func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.User, bool) {
 	if h.ldapHandler == nil {
 		return db.User{}, false
@@ -309,17 +356,28 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 
 	ldapCfg, err := h.queries.GetEnabledLDAPConfig(c.Context())
 	if err != nil {
+		// pgx.ErrNoRows here is the common case — LDAP just isn't enabled.
+		// Don't log that. Other DB errors are operationally interesting.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("ldap login: failed to load config", "error", err)
+		}
 		return db.User{}, false
 	}
 
 	authCfg, err := h.ldapHandler.BuildLDAPConfigFromDB(ldapCfg)
 	if err != nil {
+		slog.Warn("ldap login: invalid stored config", "email", email, "error", err)
 		return db.User{}, false
 	}
 
 	client := auth.NewLDAPClient(authCfg)
 	ldapUser, err := client.Authenticate(email, password)
 	if err != nil {
+		// LDAP rejection / connection failure / search failure — typed
+		// errors carry the class. Log so admins can distinguish "wrong
+		// password" from "directory unreachable" without us leaking which
+		// to the client.
+		slog.Warn("ldap login: authentication failed", "email", email, "error", err)
 		return db.User{}, false
 	}
 
@@ -336,6 +394,7 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 	})
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("ldap login: failed to look up user", "email", userEmail, "error", err)
 			return db.User{}, false
 		}
 
@@ -356,9 +415,11 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 					AuthSource: "ldap",
 				})
 				if err != nil {
+					slog.Warn("ldap login: post-race lookup failed", "email", userEmail, "error", err)
 					return db.User{}, false
 				}
 			} else {
+				slog.Warn("ldap login: JIT provisioning failed", "email", userEmail, "error", err)
 				return db.User{}, false
 			}
 		}
@@ -373,6 +434,7 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 	}
 
 	if !user.IsActive {
+		slog.Warn("ldap login: account disabled", "email", userEmail, "user_id", user.ID)
 		return db.User{}, false
 	}
 
