@@ -20,6 +20,17 @@ type Querier interface {
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
 	CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	CheckUserPermission(ctx context.Context, arg CheckUserPermissionParams) (bool, error)
+	// Atomically claims due tasks so concurrent schedulers (e.g. during leader
+	// takeover) don't double-run the same row. SKIP LOCKED makes each
+	// competing transaction return a disjoint set without blocking. Inside the
+	// claim we mark last_status='running' and bump next_run_at past the
+	// guard window so even after the transaction commits the row won't
+	// re-match the due predicate until either (a) the run finishes and the
+	// caller writes the real next_run_at via UpdateTaskLastRun or (b) the
+	// claim goes stale (caller crashed) and the stale-recovery branch picks
+	// it up again. stale_seconds = reclaim threshold for crashed claimants;
+	// guard_seconds = how far to bump next_run_at upfront.
+	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
 	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
@@ -241,7 +252,6 @@ type Querier interface {
 	ListDistinctAuditActions(ctx context.Context) ([]string, error)
 	ListDistinctAuditUsers(ctx context.Context) ([]ListDistinctAuditUsersRow, error)
 	ListDueReportSchedules(ctx context.Context) ([]ReportSchedule, error)
-	ListDueTasks(ctx context.Context) ([]ScheduledTask, error)
 	ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error)
 	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)

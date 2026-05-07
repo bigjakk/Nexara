@@ -60,11 +60,56 @@ func New(shutdownCtx context.Context, queries *db.Queries, encryptionKey string,
 	}
 }
 
-// Run finds all due tasks and executes them.
+// taskClaimGuardSeconds is how far we push next_run_at into the future
+// when claiming a task. This prevents a re-pickup by a subsequent tick
+// (or another scheduler instance during a leader-takeover overlap) while
+// the run is in flight; the completion path overwrites next_run_at with
+// the real cron-computed value via UpdateTaskLastRun.
+//
+// taskClaimStaleSeconds is how long after the claim we allow the row to
+// be reclaimed by another scheduler. Crash recovery: a process that
+// takes the claim and dies stops heartbeating last_run_at; once the
+// claim ages out, the row becomes eligible again so the task isn't
+// stuck in 'running' forever. Set wider than typical task duration but
+// narrow enough that a crashed leader's tasks resume on the new leader.
+const (
+	taskClaimGuardSeconds = 600 // 10 minutes
+	taskClaimStaleSeconds = 600 // 10 minutes
+)
+
+// dueTaskClaimer is the subset of db.Querier used by claimDueTasks.
+// Carved out so the param wiring (guard/stale) and error pass-through
+// can be unit-tested with a small fake without touching the rest of
+// the scheduler graph.
+type dueTaskClaimer interface {
+	ClaimDueTasks(ctx context.Context, arg db.ClaimDueTasksParams) ([]db.ScheduledTask, error)
+}
+
+// claimDueTasks invokes ClaimDueTasks with the standard guard/stale
+// constants. Extracted from Run() so tests can verify the params
+// without spinning up a live Postgres.
+func claimDueTasks(ctx context.Context, claimer dueTaskClaimer) ([]db.ScheduledTask, error) {
+	return claimer.ClaimDueTasks(ctx, db.ClaimDueTasksParams{
+		GuardSeconds: taskClaimGuardSeconds,
+		StaleSeconds: taskClaimStaleSeconds,
+	})
+}
+
+// Run finds all due tasks and executes them. Uses an atomic claim
+// (SELECT ... FOR UPDATE SKIP LOCKED + status=running + bumped
+// next_run_at) so that the same task can't be picked up twice by
+// concurrent ticks or by overlapping scheduler instances during a
+// leader-takeover window.
 func (s *Scheduler) Run(ctx context.Context) {
-	tasks, err := s.queries.ListDueTasks(ctx)
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("scheduler Run panicked", "panic", r)
+		}
+	}()
+
+	tasks, err := claimDueTasks(ctx, s.queries)
 	if err != nil {
-		s.logger.Error("failed to list due tasks", "error", err)
+		s.logger.Error("failed to claim due tasks", "error", err)
 		return
 	}
 
