@@ -40,6 +40,14 @@ func main() {
 		return
 	}
 
+	// Maintenance CLI: full integrity repair including hypertable REINDEX.
+	// Long-running and AccessExclusiveLock-blocking — never invoked from the
+	// normal startup path.
+	if len(os.Args) > 1 && os.Args[1] == "repair-integrity" {
+		runRepairIntegrity()
+		return
+	}
+
 	// Load configuration first so we can apply LOG_LEVEL to the logger.
 	cfg, err := config.Load()
 	if err != nil {
@@ -67,9 +75,11 @@ func main() {
 		log.Fatalf("failed to ensure database schema: %v", err)
 	}
 
-	// Detect and fix data integrity issues (duplicate rows from index corruption
-	// or concurrent instances). Safe to run on every startup.
-	if err := db.RepairIntegrity(ctx, pool, logger); err != nil {
+	// Detect and remove duplicate inventory rows (cheap, no-op in normal
+	// operation). The hypertable REINDEX is intentionally NOT run here —
+	// it holds AccessExclusiveLock and can take hours. Operators must invoke
+	// `nexara repair-integrity` explicitly to run that path.
+	if err := db.RepairIntegrity(ctx, pool, logger, db.RepairOptions{}); err != nil {
 		logger.Error("integrity repair failed", "error", err)
 	}
 
@@ -197,6 +207,55 @@ func runHealthcheck() {
 		os.Exit(1)
 	}
 	fmt.Println("ok")
+}
+
+// runRepairIntegrity executes the full integrity repair, including the
+// hypertable REINDEX that the normal startup path skips. Intended for
+// operator-triggered maintenance windows: invoke via
+// `docker exec <nexara-container> /nexara repair-integrity`.
+//
+// The hypertable REINDEX holds AccessExclusiveLock for the duration and
+// blocks all writes to node_metrics / vm_metrics — collector ingest will
+// stall until it completes.
+func runRepairIntegrity() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repair-integrity: failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: cfg.SlogLevel(),
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Surface SIGINT/SIGTERM so an operator can abort a long-running REINDEX.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig, ok := <-quit
+		if !ok {
+			return
+		}
+		logger.Warn("repair-integrity received signal, cancelling", "signal", sig)
+		cancel()
+	}()
+
+	pool, err := db.ConnectWithRetry(ctx, cfg.DatabaseURL, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repair-integrity: failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	logger.Info("starting full integrity repair (hypertable REINDEX will block writes)")
+	if err := db.RepairIntegrity(ctx, pool, logger, db.RepairOptions{ReindexHypertables: true}); err != nil {
+		logger.Error("integrity repair failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("integrity repair completed")
 }
 
 // Heartbeat-based leader election. Only one instance across the cluster
