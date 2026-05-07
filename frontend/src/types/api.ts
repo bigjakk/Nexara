@@ -485,6 +485,7 @@ export interface CreateClusterRequest {
   token_secret: string;
   tls_fingerprint?: string;
   sync_interval_seconds?: number;
+  allow_private_address?: boolean;
 }
 
 export interface ConnectivityResult {

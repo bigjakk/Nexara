@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/bigjakk/nexara/internal/netguard"
 )
 
 // maxResponseSize caps how much data we read from a Proxmox API response (50 MB).
@@ -78,6 +80,9 @@ func newAPIClient(cfg ClientConfig, authPrefix string) (*apiClient, error) {
 		DialContext: (&net.Dialer{
 			Timeout:   cfg.Timeout,
 			KeepAlive: 30 * time.Second,
+			// Block dialing to cloud metadata, multicast, broadcast, Class E,
+			// or unspecified IPs even if DNS resolves to one (rebinding defence).
+			Control: netguard.DialControlSSRFGuard,
 		}).DialContext,
 		MaxIdleConnsPerHost: 10,
 		IdleConnTimeout:     90 * time.Second,

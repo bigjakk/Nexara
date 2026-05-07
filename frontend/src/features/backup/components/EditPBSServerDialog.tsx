@@ -12,6 +12,11 @@ import {
 } from "@/components/ui/dialog";
 import { useUpdatePBSServer } from "../api/backup-queries";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import {
+  privateAddressWarningFromError,
+  type PrivateAddressWarning as PrivateAddressDetails,
+} from "@/lib/private-address";
+import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import type { PBSServer } from "../types/backup";
 
 interface EditPBSServerDialogProps {
@@ -34,6 +39,10 @@ export function EditPBSServerDialog({
   );
   const [clusterId, setClusterId] = useState(server.cluster_id ?? "");
 
+  const [privateWarning, setPrivateWarning] =
+    useState<PrivateAddressDetails | null>(null);
+  const [allowPrivate, setAllowPrivate] = useState(false);
+
   const updatePBS = useUpdatePBSServer();
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
@@ -46,14 +55,14 @@ export function EditPBSServerDialog({
       setTokenSecret("");
       setTlsFingerprint(server.tls_fingerprint);
       setClusterId(server.cluster_id ?? "");
+      setPrivateWarning(null);
+      setAllowPrivate(false);
       updatePBS.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, server]);
 
-  function handleSubmit(e: React.SyntheticEvent) {
-    e.preventDefault();
-
+  function submit(allow: boolean) {
     const body: {
       id: string;
       name?: string;
@@ -62,6 +71,7 @@ export function EditPBSServerDialog({
       token_secret?: string;
       tls_fingerprint?: string;
       cluster_id?: string;
+      allow_private_address?: boolean;
     } = { id: server.id };
     if (name !== server.name) body.name = name;
     if (apiUrl !== server.api_url) body.api_url = apiUrl;
@@ -71,12 +81,31 @@ export function EditPBSServerDialog({
       body.tls_fingerprint = tlsFingerprint;
     if ((clusterId || null) !== (server.cluster_id || null))
       body.cluster_id = clusterId || "";
+    if (allow) body.allow_private_address = true;
+
+    setPrivateWarning(null);
 
     updatePBS.mutate(body, {
       onSuccess: () => {
         onOpenChange(false);
       },
+      onError: (err) => {
+        const warn = privateAddressWarningFromError(err);
+        if (warn != null) {
+          setPrivateWarning(warn);
+        }
+      },
     });
+  }
+
+  function handleSubmit(e: React.SyntheticEvent) {
+    e.preventDefault();
+    submit(allowPrivate);
+  }
+
+  function handleConfirmPrivate() {
+    setAllowPrivate(true);
+    submit(true);
   }
 
   return (
@@ -176,7 +205,17 @@ export function EditPBSServerDialog({
             </select>
           </div>
 
-          {updatePBS.isError && (
+          {privateWarning != null && (
+            <PrivateAddressWarning
+              ip={privateWarning.ip}
+              url={apiUrl}
+              onConfirm={handleConfirmPrivate}
+              onCancel={() => { setPrivateWarning(null); }}
+              pending={updatePBS.isPending}
+            />
+          )}
+
+          {privateWarning == null && updatePBS.isError && (
             <p className="text-sm text-destructive">
               {updatePBS.error instanceof Error
                 ? updatePBS.error.message

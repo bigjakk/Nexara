@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/bigjakk/nexara/internal/netguard"
 )
 
 // ExecResult contains the output and exit status of a remote command.
@@ -103,7 +105,7 @@ func ScanHostKey(ctx context.Context, host string, port int) (ssh.PublicKey, err
 	}
 
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
-	var dialer net.Dialer
+	dialer := net.Dialer{Control: netguard.DialControlSSRFGuard}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
@@ -161,8 +163,10 @@ func Execute(ctx context.Context, cfg Config, command string) (*ExecResult, erro
 
 	addr := net.JoinHostPort(cfg.Host, fmt.Sprintf("%d", cfg.Port))
 
-	// Dial with context-aware timeout.
-	var dialer net.Dialer
+	// Dial with context-aware timeout. Control hook hard-blocks cloud
+	// metadata, multicast, broadcast, Class E, and unspecified IPs so a
+	// rebinding-style DNS poisoning cannot redirect us mid-connect.
+	dialer := net.Dialer{Control: netguard.DialControlSSRFGuard}
 	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)

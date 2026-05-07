@@ -21,6 +21,7 @@ import (
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/netguard"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -51,6 +52,10 @@ type createClusterRequest struct {
 	TokenSecret         string `json:"token_secret"`
 	TLSFingerprint      string `json:"tls_fingerprint"`
 	SyncIntervalSeconds *int32 `json:"sync_interval_seconds"`
+	// AllowPrivateAddress, when true, lets the URL resolve to a private/
+	// loopback/link-local IP (typical homelab setup). Cloud metadata,
+	// unspecified, and multicast addresses are still rejected.
+	AllowPrivateAddress bool `json:"allow_private_address,omitempty"`
 }
 
 type updateClusterRequest struct {
@@ -61,6 +66,7 @@ type updateClusterRequest struct {
 	TLSFingerprint      *string `json:"tls_fingerprint"`
 	SyncIntervalSeconds *int32  `json:"sync_interval_seconds"`
 	IsActive            *bool   `json:"is_active"`
+	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
 }
 
 type clusterResponse struct {
@@ -147,8 +153,11 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
 	}
 
-	if err := validateURL(req.APIURL); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	if err := validateURLFormat(req.APIURL); err != nil {
+		return err
+	}
+	if err := enforceURLAddressPolicy(c.Context(), req.APIURL, req.AllowPrivateAddress); err != nil {
+		return renderAddressPolicyError(c, err)
 	}
 
 	syncInterval := int32(30)
@@ -319,8 +328,11 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 		params.Name = *req.Name
 	}
 	if req.APIURL != nil {
-		if err := validateURL(*req.APIURL); err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		if err := validateURLFormat(*req.APIURL); err != nil {
+			return err
+		}
+		if err := enforceURLAddressPolicy(c.Context(), *req.APIURL, req.AllowPrivateAddress); err != nil {
+			return renderAddressPolicyError(c, err)
 		}
 		params.ApiUrl = *req.APIURL
 	}
@@ -461,7 +473,8 @@ func requireAdmin(c *fiber.Ctx) error {
 }
 
 type fetchFingerprintRequest struct {
-	APIURL string `json:"api_url"`
+	APIURL              string `json:"api_url"`
+	AllowPrivateAddress bool   `json:"allow_private_address,omitempty"`
 }
 
 type fetchFingerprintResponse struct {
@@ -483,8 +496,11 @@ func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
 	if req.APIURL == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "api_url is required")
 	}
-	if err := validateURL(req.APIURL); err != nil {
+	if err := validateURLFormat(req.APIURL); err != nil {
 		return err
+	}
+	if err := enforceURLAddressPolicy(c.Context(), req.APIURL, req.AllowPrivateAddress); err != nil {
+		return renderAddressPolicyError(c, err)
 	}
 
 	u, _ := url.Parse(req.APIURL)
@@ -494,7 +510,13 @@ func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
 	}
 
 	// Connect with InsecureSkipVerify to get the certificate regardless of CA trust.
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	// The Control hook re-checks the resolved IP against the always-block set
+	// so a hostile DNS authority can't redirect us to cloud metadata between
+	// validation and dial.
+	dialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+		Control: netguard.DialControlSSRFGuard,
+	}
 	conn, err := tls.DialWithDialer(dialer, "tcp", host, &tls.Config{
 		InsecureSkipVerify: true, //nolint:gosec // Intentional: we're fetching the fingerprint for user verification
 		MinVersion:         tls.VersionTLS12,
@@ -535,20 +557,3 @@ func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
 	})
 }
 
-// validateURL checks that a string is a valid HTTPS URL with scheme and host.
-func validateURL(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid URL format")
-	}
-	if u.Scheme == "" || u.Host == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "URL must include scheme and host")
-	}
-	if u.Scheme != "https" {
-		return fiber.NewError(fiber.StatusBadRequest, "URL must use HTTPS scheme")
-	}
-	if u.User != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "URL must not contain credentials")
-	}
-	return nil
-}

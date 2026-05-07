@@ -32,21 +32,23 @@ func NewPBSHandler(queries *db.Queries, encryptionKey string, eventPub *events.P
 }
 
 type createPBSRequest struct {
-	Name           string  `json:"name"`
-	APIURL         string  `json:"api_url"`
-	TokenID        string  `json:"token_id"`
-	TokenSecret    string  `json:"token_secret"`
-	TLSFingerprint string  `json:"tls_fingerprint"`
-	ClusterID      *string `json:"cluster_id"`
+	Name                string  `json:"name"`
+	APIURL              string  `json:"api_url"`
+	TokenID             string  `json:"token_id"`
+	TokenSecret         string  `json:"token_secret"`
+	TLSFingerprint      string  `json:"tls_fingerprint"`
+	ClusterID           *string `json:"cluster_id"`
+	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
 }
 
 type updatePBSRequest struct {
-	Name           *string `json:"name"`
-	APIURL         *string `json:"api_url"`
-	TokenID        *string `json:"token_id"`
-	TokenSecret    *string `json:"token_secret"`
-	TLSFingerprint *string `json:"tls_fingerprint"`
-	ClusterID      *string `json:"cluster_id"`
+	Name                *string `json:"name"`
+	APIURL              *string `json:"api_url"`
+	TokenID             *string `json:"token_id"`
+	TokenSecret         *string `json:"token_secret"`
+	TLSFingerprint      *string `json:"tls_fingerprint"`
+	ClusterID           *string `json:"cluster_id"`
+	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
 }
 
 type pbsResponse struct {
@@ -116,8 +118,11 @@ func (h *PBSHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
 	}
 
-	if err := validateURL(req.APIURL); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	if err := validateURLFormat(req.APIURL); err != nil {
+		return err
+	}
+	if err := enforceURLAddressPolicy(c.Context(), req.APIURL, req.AllowPrivateAddress); err != nil {
+		return renderAddressPolicyError(c, err)
 	}
 
 	var clusterID pgtype.UUID
@@ -282,8 +287,11 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 		params.Name = *req.Name
 	}
 	if req.APIURL != nil {
-		if err := validateURL(*req.APIURL); err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		if err := validateURLFormat(*req.APIURL); err != nil {
+			return err
+		}
+		if err := enforceURLAddressPolicy(c.Context(), *req.APIURL, req.AllowPrivateAddress); err != nil {
+			return renderAddressPolicyError(c, err)
 		}
 		params.ApiUrl = *req.APIURL
 	}

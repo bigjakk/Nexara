@@ -269,6 +269,7 @@ interface CreatePBSServerRequest {
   token_secret: string;
   tls_fingerprint: string;
   cluster_id: string | null;
+  allow_private_address?: boolean;
 }
 
 export function useCreatePBSServer() {
@@ -302,6 +303,7 @@ interface UpdatePBSServerRequest {
   token_secret?: string;
   tls_fingerprint?: string;
   cluster_id?: string;
+  allow_private_address?: boolean;
 }
 
 export function useUpdatePBSServer() {

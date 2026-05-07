@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -891,6 +892,9 @@ func (h *RollingUpdateHandler) TestSSHConnection(c *fiber.Ctx) error {
 	if hostErr != nil {
 		return hostErr
 	}
+	if err := guardSSHHost(c.Context(), sshHost); err != nil {
+		return err
+	}
 	sshPort := int(creds.Port)
 
 	// Look up the pinned host key, if any.
@@ -1055,6 +1059,9 @@ func (h *RollingUpdateHandler) PinSSHHostKey(c *fiber.Ctx) error {
 	if hostErr != nil {
 		return hostErr
 	}
+	if err := guardSSHHost(c.Context(), sshHost); err != nil {
+		return err
+	}
 
 	key, scanErr := sshpkg.ScanHostKey(c.Context(), sshHost, int(creds.Port))
 	if scanErr != nil {
@@ -1151,6 +1158,23 @@ func validateNodeName(s string) error {
 		if !ok {
 			return fiber.NewError(fiber.StatusBadRequest, "node_name contains unsupported characters")
 		}
+	}
+	return nil
+}
+
+// guardSSHHost rejects SSH targets that have no legitimate use case: the
+// cloud metadata IP (169.254.169.254), unspecified addresses, and multicast.
+// Private/RFC1918/link-local addresses are EXPECTED here — Proxmox nodes are
+// almost always reachable on internal networks — so unlike the cluster API
+// URL flow we don't apply the warn-and-confirm gate.
+func guardSSHHost(ctx context.Context, host string) error {
+	err := enforceHostAddressPolicy(ctx, host, true)
+	if err == nil {
+		return nil
+	}
+	var pErr *addressPolicyError
+	if errors.As(err, &pErr) && pErr.HardReject {
+		return fiber.NewError(fiber.StatusBadRequest, pErr.Reason)
 	}
 	return nil
 }

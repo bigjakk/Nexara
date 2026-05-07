@@ -159,6 +159,7 @@ export interface UpdateClusterRequest {
   token_id?: string;
   token_secret?: string;
   tls_fingerprint?: string;
+  allow_private_address?: boolean;
 }
 
 export function useUpdateCluster() {
