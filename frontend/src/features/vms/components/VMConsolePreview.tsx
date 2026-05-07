@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import RFB from "@novnc/novnc/lib/rfb";
 import { Maximize2 } from "lucide-react";
-import { mintConsoleToken } from "@/features/console/api/console-queries";
+import {
+  mintConsoleToken,
+  wsAuthProtocols,
+} from "@/features/console/api/console-queries";
 
 interface VMConsolePreviewProps {
   clusterId: string;
@@ -16,12 +19,11 @@ function buildVncWsUrl(
   clusterID: string,
   node: string,
   vmid: number,
-  token: string,
 ): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
+  // Token rides in Sec-WebSocket-Protocol; URL has only scope params.
   const params = new URLSearchParams({
-    token,
     cluster_id: clusterID,
     node,
     vmid: String(vmid),
@@ -83,7 +85,10 @@ export function VMConsolePreview({ clusterId, node, vmid, onOpen }: VMConsolePre
 
       if (cancelled) return;
 
-      ws = new WebSocket(buildVncWsUrl(clusterId, node, vmid, token));
+      ws = new WebSocket(
+        buildVncWsUrl(clusterId, node, vmid),
+        wsAuthProtocols(token),
+      );
       ws.binaryType = "arraybuffer";
 
       const localWs = ws;

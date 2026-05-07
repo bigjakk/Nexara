@@ -522,7 +522,12 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
 	}
 
-	const consoleTokenTTL = 5 * time.Minute
+	// Console tokens are bound to a single immediate WS upgrade — the SPA
+	// (or mobile shell) mints and connects within ~50ms. 60 seconds is
+	// generous but tight enough that a leaked URL or proxy access log
+	// entry is unusable by the time it surfaces. Reduced from 5 minutes
+	// per remediation 2.7 (≤60s scope for all WS-bound JWTs).
+	const consoleTokenTTL = 60 * time.Second
 	token, _, err := h.jwtService.GenerateConsoleToken(
 		user.ID, user.Email, user.Role,
 		auth.ConsoleScope{
@@ -548,6 +553,50 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 	return c.JSON(consoleTokenResponse{
 		Token:     token,
 		ExpiresIn: int(consoleTokenTTL.Seconds()),
+	})
+}
+
+type wsTokenResponse struct {
+	Token     string `json:"token"`
+	ExpiresIn int    `json:"expires_in"`
+}
+
+// WSToken mints a short-lived (60s) JWT whose only valid use is upgrading the
+// generic /ws hub. It carries the same UserID/Role as the access token but
+// is restricted by Claims.WSScope == "hub" — the WS auth middleware refuses
+// it on console paths, and refuses regular access tokens on the hub.
+//
+// The point is to keep the long-lived access token out of the WebSocket
+// upgrade entirely. The hub token can be carried in `?token=` or in the
+// `Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>` subprotocol
+// header (preferred — keeps the JWT out of proxy access logs and Referer).
+func (h *AuthHandler) WSToken(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
+	}
+
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "User not found")
+	}
+	if !user.IsActive {
+		// Audit the deny — a disabled user trying to open a WS is a
+		// signal worth surfacing in the log. (Successful mints aren't
+		// audited; every reconnect mints, so it'd be log noise.)
+		h.authAuditLog(c, userID, "ws_token_denied_inactive", nil)
+		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
+	}
+
+	const wsHubTokenTTL = 60 * time.Second
+	token, _, err := h.jwtService.GenerateWSHubToken(user.ID, user.Email, user.Role, wsHubTokenTTL)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to mint ws token")
+	}
+
+	return c.JSON(wsTokenResponse{
+		Token:     token,
+		ExpiresIn: int(wsHubTokenTTL.Seconds()),
 	})
 }
 

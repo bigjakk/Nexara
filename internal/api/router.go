@@ -29,6 +29,7 @@ func (s *Server) setupRoutes() {
 		authGroup.Post("/logout", s.authOptional(), s.authHandler.Logout)
 		authGroup.Post("/logout-all", s.authRequired(), s.authHandler.LogoutAll)
 		authGroup.Post("/console-token", s.authRequired(), s.authHandler.ConsoleToken)
+		authGroup.Post("/ws-token", s.authRequired(), s.authHandler.WSToken)
 
 		// Mobile push device registration (lives under /me).
 		//

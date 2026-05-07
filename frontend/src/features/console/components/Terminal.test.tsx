@@ -8,8 +8,12 @@ import type { ConsoleTab } from "../types/console";
 // pass accessToken; mobile passes its pre-minted token directly.
 vi.mock("../api/console-queries", () => ({
   mintConsoleToken: vi.fn(() =>
-    Promise.resolve({ token: "scoped-test-token", expires_in: 300 }),
+    Promise.resolve({ token: "scoped-test-token", expires_in: 60 }),
   ),
+  wsAuthProtocols: (token: string) => [
+    "nexara.token",
+    "nexara.token." + token,
+  ],
 }));
 
 // Mock xterm.js with class implementations
@@ -66,8 +70,10 @@ class MockWebSocket {
   onerror: (() => void) | null = null;
 
   url: string;
-  constructor(url: string) {
+  protocols: string | string[] | undefined;
+  constructor(url: string, protocols?: string | string[]) {
     this.url = url;
+    this.protocols = protocols;
     MockWebSocket.instances.push(this);
   }
   send = vi.fn();
@@ -105,9 +111,14 @@ describe("Terminal", () => {
     });
     const ws = MockWebSocket.instances[0];
     expect(ws).toBeDefined();
-    expect(ws?.url).toContain("token=scoped-test-token");
+    // Token rides in Sec-WebSocket-Protocol, NOT in the URL (remediation 2.7).
+    expect(ws?.url).not.toContain("token=");
     expect(ws?.url).toContain("cluster_id=cluster-1");
     expect(ws?.url).toContain("type=node_shell");
+    expect(ws?.protocols).toEqual([
+      "nexara.token",
+      "nexara.token.scoped-test-token",
+    ]);
   });
 
   it("uses the override accessToken instead of minting when provided (mobile path)", async () => {
@@ -122,7 +133,11 @@ describe("Terminal", () => {
       expect(MockWebSocket.instances).toHaveLength(1);
     });
     const ws = MockWebSocket.instances[0];
-    expect(ws?.url).toContain("token=mobile-prebaked-token");
+    expect(ws?.url).not.toContain("token=");
+    expect(ws?.protocols).toEqual([
+      "nexara.token",
+      "nexara.token.mobile-prebaked-token",
+    ]);
   });
 
   it("hides terminal when not visible", () => {

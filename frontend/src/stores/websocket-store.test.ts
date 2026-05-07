@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import * as apiClient from "@/lib/api-client";
+import * as consoleQueries from "@/features/console/api/console-queries";
 import { useWebSocketStore } from "./websocket-store";
 
 // Mock WebSocket
@@ -17,7 +17,7 @@ class MockWebSocket {
   onerror: (() => void) | null = null;
   sentMessages: string[] = [];
 
-  constructor(public url: string) {
+  constructor(public url: string, public protocols?: string | string[]) {
     MockWebSocket.instances.push(this);
   }
 
@@ -51,16 +51,27 @@ function getLastInstance(): MockWebSocket {
   return ws;
 }
 
+// flushPromises drains any pending microtasks. Needed because connect()
+// awaits the mintWSHubToken promise before opening the WebSocket — tests
+// must let the resolved mock-mint promise settle before asserting on the
+// MockWebSocket instances array.
+async function flushPromises(): Promise<void> {
+  // Two ticks: one to resolve the mint, one to chain the .finally cleanup.
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe("websocket-store", () => {
-  let getAccessTokenSpy: import("vitest").MockInstance<() => string | null>;
+  let mintSpy: import("vitest").MockInstance<typeof consoleQueries.mintWSHubToken>;
 
   beforeEach(() => {
     vi.useFakeTimers();
     MockWebSocket.instances = [];
     vi.stubGlobal("WebSocket", MockWebSocket);
-    getAccessTokenSpy = vi
-      .spyOn(apiClient, "getAccessToken")
-      .mockReturnValue("test-jwt-token");
+    mintSpy = vi.spyOn(consoleQueries, "mintWSHubToken").mockResolvedValue({
+      token: "test-jwt-token",
+      expires_in: 60,
+    });
 
     // Reset store state
     const store = useWebSocketStore.getState();
@@ -72,30 +83,46 @@ describe("websocket-store", () => {
       reconnectAttempts: 0,
       reconnectTimer: null,
       pingTimer: null,
+      pendingConnect: null,
     });
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    getAccessTokenSpy.mockRestore();
+    mintSpy.mockRestore();
   });
 
   it("starts in disconnected state", () => {
     expect(useWebSocketStore.getState().status).toBe("disconnected");
   });
 
-  it("transitions to connecting then connected", () => {
+  it("transitions to connecting then connected", async () => {
     useWebSocketStore.getState().connect();
     expect(useWebSocketStore.getState().status).toBe("connecting");
 
+    await flushPromises();
     const ws = getLastInstance();
     ws.simulateOpen();
     expect(useWebSocketStore.getState().status).toBe("connected");
   });
 
-  it("transitions to disconnected on disconnect()", () => {
+  it("opens with subprotocol auth and never embeds token in URL", async () => {
     useWebSocketStore.getState().connect();
+    await flushPromises();
+
+    const ws = getLastInstance();
+    expect(ws.url).toContain("/ws");
+    expect(ws.url).not.toContain("token=");
+    expect(ws.protocols).toEqual([
+      "nexara.token",
+      "nexara.token.test-jwt-token",
+    ]);
+  });
+
+  it("transitions to disconnected on disconnect()", async () => {
+    useWebSocketStore.getState().connect();
+    await flushPromises();
     const ws = getLastInstance();
     ws.simulateOpen();
 
@@ -103,14 +130,18 @@ describe("websocket-store", () => {
     expect(useWebSocketStore.getState().status).toBe("disconnected");
   });
 
-  it("does not connect without a token", () => {
-    getAccessTokenSpy.mockReturnValue(null);
+  it("does not connect when token mint fails", async () => {
+    mintSpy.mockRejectedValueOnce(new Error("mint failed"));
     useWebSocketStore.getState().connect();
+    await flushPromises();
     expect(MockWebSocket.instances).toHaveLength(0);
+    // Failure path schedules a reconnect via the backoff timer.
+    expect(useWebSocketStore.getState().status).toBe("reconnecting");
   });
 
-  it("subscribe adds listener and sends subscribe message when connected", () => {
+  it("subscribe adds listener and sends subscribe message when connected", async () => {
     useWebSocketStore.getState().connect();
+    await flushPromises();
     const ws = getLastInstance();
     ws.simulateOpen();
 
@@ -121,8 +152,9 @@ describe("websocket-store", () => {
     expect(ws.sentMessages.some((m) => m.includes('"subscribe"'))).toBe(true);
   });
 
-  it("unsubscribe removes listener and sends unsubscribe when last listener removed", () => {
+  it("unsubscribe removes listener and sends unsubscribe when last listener removed", async () => {
     useWebSocketStore.getState().connect();
+    await flushPromises();
     const ws = getLastInstance();
     ws.simulateOpen();
 
@@ -134,8 +166,9 @@ describe("websocket-store", () => {
     expect(ws.sentMessages.some((m) => m.includes('"unsubscribe"'))).toBe(true);
   });
 
-  it("dispatches data messages to registered listeners", () => {
+  it("dispatches data messages to registered listeners", async () => {
     useWebSocketStore.getState().connect();
+    await flushPromises();
     const ws = getLastInstance();
     ws.simulateOpen();
 
@@ -151,8 +184,9 @@ describe("websocket-store", () => {
     expect(listener).toHaveBeenCalledWith({ test: true });
   });
 
-  it("does not dispatch to unrelated channel listeners", () => {
+  it("does not dispatch to unrelated channel listeners", async () => {
     useWebSocketStore.getState().connect();
+    await flushPromises();
     const ws = getLastInstance();
     ws.simulateOpen();
 
@@ -168,8 +202,9 @@ describe("websocket-store", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it("re-subscribes all channels on welcome message", () => {
+  it("re-subscribes all channels on welcome message", async () => {
     useWebSocketStore.getState().connect();
+    await flushPromises();
     const ws = getLastInstance();
     ws.simulateOpen();
 
@@ -183,8 +218,9 @@ describe("websocket-store", () => {
     expect(ws.sentMessages.some((m) => m.includes("cluster:abc:metrics"))).toBe(true);
   });
 
-  it("attempts reconnect with backoff on close", () => {
+  it("attempts reconnect with backoff on close", async () => {
     useWebSocketStore.getState().connect();
+    await flushPromises();
     const ws = getLastInstance();
     ws.simulateOpen();
 
@@ -192,21 +228,33 @@ describe("websocket-store", () => {
     expect(useWebSocketStore.getState().status).toBe("reconnecting");
     expect(useWebSocketStore.getState().reconnectAttempts).toBe(1);
 
-    // After backoff timer fires, it should attempt reconnect
-    vi.advanceTimersByTime(1000);
+    // After backoff timer fires, it should attempt reconnect (mint a new
+    // hub token + open another WS).
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
     expect(MockWebSocket.instances).toHaveLength(2);
   });
 
-  it("does not reconnect after explicit disconnect", () => {
+  it("does not reconnect after explicit disconnect", async () => {
     useWebSocketStore.getState().connect();
+    await flushPromises();
     const ws = getLastInstance();
     ws.simulateOpen();
 
     useWebSocketStore.getState().disconnect();
     expect(useWebSocketStore.getState().status).toBe("disconnected");
 
-    vi.advanceTimersByTime(5000);
+    await vi.advanceTimersByTimeAsync(5000);
     // Should not have created a new WebSocket
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it("guards against double-connect while a mint is in flight", async () => {
+    useWebSocketStore.getState().connect();
+    // Second connect() before the mint resolves must be a no-op.
+    useWebSocketStore.getState().connect();
+    await flushPromises();
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(mintSpy).toHaveBeenCalledTimes(1);
   });
 });

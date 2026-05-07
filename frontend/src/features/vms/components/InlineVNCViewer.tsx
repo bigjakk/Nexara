@@ -2,7 +2,10 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import RFB from "@novnc/novnc/lib/rfb";
 import { Keyboard, Maximize, Minimize, ClipboardPaste, Move, RectangleHorizontal, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { mintConsoleToken } from "@/features/console/api/console-queries";
+import {
+  mintConsoleToken,
+  wsAuthProtocols,
+} from "@/features/console/api/console-queries";
 
 interface InlineVNCViewerProps {
   clusterId: string;
@@ -18,12 +21,11 @@ function buildVncWsUrl(
   node: string,
   vmid: number,
   guestType: string | undefined,
-  token: string,
 ): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
+  // Token rides in Sec-WebSocket-Protocol; URL has only scope params.
   const params = new URLSearchParams({
-    token,
     cluster_id: clusterID,
     node,
     vmid: String(vmid),
@@ -67,8 +69,8 @@ export function InlineVNCViewer({ clusterId, node, vmid, guestType }: InlineVNCV
 
       if (cancelled) return;
 
-      const wsUrl = buildVncWsUrl(clusterId, node, vmid, guestType, token);
-      ws = new WebSocket(wsUrl);
+      const wsUrl = buildVncWsUrl(clusterId, node, vmid, guestType);
+      ws = new WebSocket(wsUrl, wsAuthProtocols(token));
       ws.binaryType = "arraybuffer";
 
       const localWs = ws;

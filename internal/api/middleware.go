@@ -97,6 +97,22 @@ func (s *Server) setupMiddleware() {
 		},
 	}))
 
+	// WS-token mint limiter — 60/min/IP. Each /ws connection mints one
+	// token; legitimate reconnect/backoff is well under 1/sec. The
+	// limiter sits inside the auth-bypassed group, so without this an
+	// authenticated user could fire mints in a tight loop. Per-IP
+	// (vs per-user) because limiter middleware runs before authRequired.
+	s.app.Use(limiter.New(limiter.Config{
+		Max:        60,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP() + ":ws-token"
+		},
+		Next: func(c *fiber.Ctx) bool {
+			return c.Path() != "/api/v1/auth/ws-token"
+		},
+	}))
+
 	// General rate limiting (in-memory storage).
 	// Skip auth endpoints so token refresh is never blocked — a 429 on
 	// /auth/refresh causes the frontend to interpret it as an auth failure
@@ -142,6 +158,11 @@ func (s *Server) authRequired() fiber.Handler {
 		if claims.ConsoleScope != nil {
 			return fiber.NewError(fiber.StatusUnauthorized, "Console-scoped token cannot be used for API requests")
 		}
+		// Same logic for WS-hub-scoped tokens — they only authorize the
+		// /ws upgrade, never an API request.
+		if claims.WSScope != "" {
+			return fiber.NewError(fiber.StatusUnauthorized, "WS-scoped token cannot be used for API requests")
+		}
 
 		c.Locals("user_id", claims.UserID)
 		c.Locals("email", claims.Email)
@@ -181,8 +202,8 @@ func (s *Server) authOptional() fiber.Handler {
 			return c.Next()
 		}
 
-		// Scoped console tokens must not be treated as general-purpose auth.
-		if claims.ConsoleScope != nil {
+		// Scoped console / WS-hub tokens must not be treated as general-purpose auth.
+		if claims.ConsoleScope != nil || claims.WSScope != "" {
 			return c.Next()
 		}
 

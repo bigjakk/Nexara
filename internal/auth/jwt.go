@@ -17,24 +17,47 @@ var (
 )
 
 // Claims represents the JWT claims for access tokens.
+//
+// Three token kinds share this struct, distinguished by which optional
+// scope marker is set (zero or one — never both):
+//
+//   - Regular access token: ConsoleScope == nil && WSScope == "". Used in
+//     Authorization: Bearer headers for API calls. NEVER accepted on any
+//     WebSocket upgrade path.
+//   - Console-scoped token: ConsoleScope != nil. Issued by POST
+//     /api/v1/auth/console-token. Only valid on /ws/console or /ws/vnc and
+//     only for the exact cluster/node/vmid/type tuple in the scope.
+//   - WebSocket hub token: WSScope == "hub". Issued by POST
+//     /api/v1/auth/ws-token. Only valid on the generic /ws hub upgrade.
+//
+// Splitting access vs WS-upgrade auth lets us carry the WS token in the
+// URL or `Sec-WebSocket-Protocol` header without exposing the long-lived
+// access token to proxy access logs, browser history, or referrer leakage.
 type Claims struct {
 	jwt.RegisteredClaims
 	UserID       uuid.UUID     `json:"uid"`
 	Email        string        `json:"email"`
 	Role         string        `json:"role"`
 	ConsoleScope *ConsoleScope `json:"console_scope,omitempty"`
+	// WSScope marks a token whose only valid use is upgrading a WebSocket
+	// connection. Currently the only value is "hub" (the generic /ws hub).
+	WSScope string `json:"ws_scope,omitempty"`
 }
 
 // ConsoleScope restricts a JWT to a single console WebSocket upgrade.
 // A token carrying a ConsoleScope is issued by POST /api/v1/auth/console-token
-// with a short TTL (5 minutes) and can ONLY be used to open a console matching
-// the exact cluster/node/vmid/type combination. Any other use is rejected.
+// with a short TTL (≤ 60 seconds) and can ONLY be used to open a console
+// matching the exact cluster/node/vmid/type combination. Any other use is
+// rejected.
 type ConsoleScope struct {
 	ClusterID string `json:"cluster_id"`
 	Node      string `json:"node"`
 	VMID      int    `json:"vmid,omitempty"`
 	Type      string `json:"type"` // node_shell | vm_serial | ct_attach | vm_vnc | ct_vnc
 }
+
+// WSScopeHub is the only value currently accepted in Claims.WSScope.
+const WSScopeHub = "hub"
 
 // TokenPair holds an access token and a refresh token.
 type TokenPair struct {
@@ -85,7 +108,7 @@ func (j *JWTService) GenerateAccessToken(userID uuid.UUID, email, role string) (
 }
 
 // GenerateConsoleToken creates a short-lived JWT whose only valid use is opening
-// the specific console described by scope. ttl should be small (≤ 5 minutes).
+// the specific console described by scope. ttl should be small (≤ 60 seconds).
 func (j *JWTService) GenerateConsoleToken(userID uuid.UUID, email, role string, scope ConsoleScope, ttl time.Duration) (string, time.Time, error) {
 	now := time.Now()
 	expiresAt := now.Add(ttl)
@@ -107,6 +130,34 @@ func (j *JWTService) GenerateConsoleToken(userID uuid.UUID, email, role string, 
 	signed, err := token.SignedString(j.secret)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("signing console token: %w", err)
+	}
+	return signed, expiresAt, nil
+}
+
+// GenerateWSHubToken creates a short-lived JWT (ttl should be ≤ 60 seconds)
+// whose only valid use is upgrading the generic /ws hub. Per-channel
+// authorization happens later in the hub at subscribe time using UserID.
+func (j *JWTService) GenerateWSHubToken(userID uuid.UUID, email, role string, ttl time.Duration) (string, time.Time, error) {
+	now := time.Now()
+	expiresAt := now.Add(ttl)
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.New().String(),
+			Subject:   userID.String(),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			IssuedAt:  jwt.NewNumericDate(now),
+			Issuer:    "nexara",
+		},
+		UserID:  userID,
+		Email:   email,
+		Role:    role,
+		WSScope: WSScopeHub,
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString(j.secret)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("signing ws hub token: %w", err)
 	}
 	return signed, expiresAt, nil
 }

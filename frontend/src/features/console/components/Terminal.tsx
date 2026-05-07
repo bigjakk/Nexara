@@ -7,6 +7,7 @@ import type { ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import {
   mintConsoleToken,
+  wsAuthProtocols,
   type ConsoleScopeType,
 } from "../api/console-queries";
 
@@ -14,13 +15,15 @@ interface TerminalProps {
   tab: ConsoleTab;
   visible: boolean;
   /**
-   * Optional override for the WS upgrade token. When provided, the component
-   * uses this token directly. When omitted, a short-lived scope-locked JWT
-   * is minted via POST /api/v1/auth/console-token before opening the WS.
+   * Optional pre-minted scoped console token. When provided, the component
+   * skips the inline mint and uses this token directly (mobile passes a
+   * token minted upstream by its native shell). When omitted, the desktop
+   * flow mints via POST /api/v1/auth/console-token before opening the WS.
    *
-   * The /ws/console endpoint rejects regular access tokens (security review
-   * fix #1: per-cluster RBAC enforcement); desktop usage MUST mint, mobile
-   * passes the pre-minted token via URL params.
+   * Either way the token rides in `Sec-WebSocket-Protocol` (per remediation
+   * 2.7) — never in the URL — so it's not exposed in proxy access logs or
+   * Referer headers. The /ws/console endpoint rejects regular access tokens
+   * (per-cluster RBAC enforcement, security fix #1).
    */
   accessToken?: string;
 }
@@ -30,12 +33,13 @@ function buildConsoleWsUrl(
   node: string,
   type: string,
   vmid: number | undefined,
-  token: string,
 ): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
+  // Token is delivered via Sec-WebSocket-Protocol (subprotocol); the URL
+  // only carries scope-validation params for the backend's exact-match
+  // check against the JWT's ConsoleScope.
   const params = new URLSearchParams({
-    token,
     cluster_id: clusterID,
     node,
     type,
@@ -143,8 +147,8 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
       // Component may have unmounted while we awaited the mint.
       if (intentionalCloseRef.current) return;
 
-      const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid, token);
-      ws = new WebSocket(wsUrl);
+      const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid);
+      ws = new WebSocket(wsUrl, wsAuthProtocols(token));
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;
 
