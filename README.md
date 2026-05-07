@@ -205,6 +205,8 @@ All settings are environment variables in `.env`. Secrets are auto-generated on 
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `PUID` / `PGID` | `1000` | Container user/group ID |
 | `DATA_DIR` | Docker volume | Custom data path (e.g. NFS mount) |
+| `TRUSTED_PROXIES` | empty | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is trusted. **Set this when behind a reverse proxy** so rate limiters key on the real client IP. |
+| `PROXY_HEADER` | `X-Forwarded-For` | Header consulted for the client IP when the remote is on `TRUSTED_PROXIES`. |
 
 See [`.env.example`](.env.example) for the full reference.
 
@@ -266,6 +268,8 @@ nexara.example.com {
 </details>
 
 > **Tips:** Set proxy max body size to at least 15 GB for ISO uploads. Ensure WebSocket `Upgrade` headers are forwarded. Use long read timeouts for persistent WebSocket connections.
+
+> **Set `TRUSTED_PROXIES`** to your reverse proxy's IP/CIDR (e.g. `127.0.0.1` or `10.0.0.0/8`). Without it, every request appears to come from the proxy and the per-IP auth/refresh/general rate limiters protect the *cluster*, not the *attacker*. If the proxy uses a non-standard header, also set `PROXY_HEADER`.
 
 ---
 

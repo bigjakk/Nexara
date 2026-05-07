@@ -85,6 +85,8 @@ All configuration is via environment variables in `.env`:
 | `PUID` | No | `1000` | User ID for the container process and data directory |
 | `PGID` | No | `1000` | Group ID for the container process and data directory |
 | `DATA_DIR` | No | Docker volume | Custom data path for secrets, branding, uploads (e.g. NFS mount) |
+| `TRUSTED_PROXIES` | **Yes for production behind a reverse proxy** | empty | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is honored. Without it the rate limiters can't tell clients apart behind nginx/Traefik/Caddy. Examples: `127.0.0.1`, `10.0.0.0/8,172.16.0.0/12`. Leave empty when Nexara is exposed directly. |
+| `PROXY_HEADER` | No | `X-Forwarded-For` | Header consulted for the client IP when the remote is on `TRUSTED_PROXIES`. Override only for non-standard upstreams. |
 
 ## First-Time Setup
 

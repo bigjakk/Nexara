@@ -22,53 +22,53 @@ import (
 
 // Server is the API server that holds all dependencies.
 type Server struct {
-	app            *fiber.App
-	config         *config.Config
-	db             *pgxpool.Pool
-	queries        *db.Queries
-	redis          *redis.Client
-	jwtService     *auth.JWTService
-	sessionManager *auth.SessionManager
-	authHandler    *handlers.AuthHandler
-	clusterHandler *handlers.ClusterHandler
-	pbsHandler     *handlers.PBSHandler
-	nodeHandler    *handlers.NodeHandler
-	vmHandler        *handlers.VMHandler
-	containerHandler *handlers.ContainerHandler
-	storageHandler   *handlers.StorageHandler
-	metricsHandler *handlers.MetricsHandler
-	cephHandler    *handlers.CephHandler
-	backupHandler   *handlers.BackupHandler
-	taskHandler     *handlers.TaskHandler
-	scheduleHandler *handlers.ScheduleHandler
-	auditHandler    *handlers.AuditHandler
-	drsHandler       *handlers.DRSHandler
-	migrationHandler *handlers.MigrationHandler
-	networkHandler   *handlers.NetworkHandler
-	rbacHandler      *handlers.RBACHandler
-	userHandler      *handlers.UserHandler
-	ldapHandler      *handlers.LDAPHandler
-	oidcHandler      *handlers.OIDCHandler
-	totpHandler      *handlers.TOTPHandler
-	cveHandler       *handlers.CVEHandler
-	alertHandler        *handlers.AlertHandler
-	reportHandler       *handlers.ReportHandler
-	rollingUpdateHandler *handlers.RollingUpdateHandler
-	settingsHandler      *handlers.SettingsHandler
+	app                   *fiber.App
+	config                *config.Config
+	db                    *pgxpool.Pool
+	queries               *db.Queries
+	redis                 *redis.Client
+	jwtService            *auth.JWTService
+	sessionManager        *auth.SessionManager
+	authHandler           *handlers.AuthHandler
+	clusterHandler        *handlers.ClusterHandler
+	pbsHandler            *handlers.PBSHandler
+	nodeHandler           *handlers.NodeHandler
+	vmHandler             *handlers.VMHandler
+	containerHandler      *handlers.ContainerHandler
+	storageHandler        *handlers.StorageHandler
+	metricsHandler        *handlers.MetricsHandler
+	cephHandler           *handlers.CephHandler
+	backupHandler         *handlers.BackupHandler
+	taskHandler           *handlers.TaskHandler
+	scheduleHandler       *handlers.ScheduleHandler
+	auditHandler          *handlers.AuditHandler
+	drsHandler            *handlers.DRSHandler
+	migrationHandler      *handlers.MigrationHandler
+	networkHandler        *handlers.NetworkHandler
+	rbacHandler           *handlers.RBACHandler
+	userHandler           *handlers.UserHandler
+	ldapHandler           *handlers.LDAPHandler
+	oidcHandler           *handlers.OIDCHandler
+	totpHandler           *handlers.TOTPHandler
+	cveHandler            *handlers.CVEHandler
+	alertHandler          *handlers.AlertHandler
+	reportHandler         *handlers.ReportHandler
+	rollingUpdateHandler  *handlers.RollingUpdateHandler
+	settingsHandler       *handlers.SettingsHandler
 	clusterOptionsHandler *handlers.ClusterOptionsHandler
-	haHandler            *handlers.HAHandler
-	poolHandler          *handlers.PoolHandler
-	replicationHandler   *handlers.ReplicationHandler
-	acmeHandler          *handlers.ACMEHandler
-	aptRepositoryHandler *handlers.AptRepositoryHandler
-	metricServerHandler  *handlers.MetricServerHandler
-	searchHandler        *handlers.SearchHandler
-	apiKeyHandler        *handlers.APIKeyHandler
-	apiDocsHandler       *handlers.APIDocsHandler
-	changelogHandler     *handlers.ChangelogHandler
-	mobileDeviceHandler *handlers.MobileDeviceHandler
-	rbacEngine          *auth.RBACEngine
-	eventPub            *events.Publisher
+	haHandler             *handlers.HAHandler
+	poolHandler           *handlers.PoolHandler
+	replicationHandler    *handlers.ReplicationHandler
+	acmeHandler           *handlers.ACMEHandler
+	aptRepositoryHandler  *handlers.AptRepositoryHandler
+	metricServerHandler   *handlers.MetricServerHandler
+	searchHandler         *handlers.SearchHandler
+	apiKeyHandler         *handlers.APIKeyHandler
+	apiDocsHandler        *handlers.APIDocsHandler
+	changelogHandler      *handlers.ChangelogHandler
+	mobileDeviceHandler   *handlers.MobileDeviceHandler
+	rbacEngine            *auth.RBACEngine
+	eventPub              *events.Publisher
 }
 
 // New creates a new API server with the given dependencies.
@@ -218,12 +218,26 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.totpHandler.SetIssueTokensFn(s.authHandler.IssueTokens)
 	}
 
+	// Trust the operator-supplied proxy list for ProxyHeader handling.
+	// EnableTrustedProxyCheck=true with empty TrustedProxies means Fiber
+	// IGNORES the header for everyone — the safe default for direct-to-
+	// internet deployments. When TRUSTED_PROXIES names the reverse proxy
+	// (e.g. "127.0.0.1,10.0.0.0/8"), c.IP() returns the real client IP
+	// from X-Forwarded-For, which is what the auth/general/refresh/
+	// ws-token rate limiters key on (Finding #13). EnableIPValidation
+	// returns just the first valid IP from the header rather than the raw
+	// comma-separated list, so a malicious downstream can't craft a header
+	// that lands in an oddly-keyed bucket.
 	s.app = fiber.New(fiber.Config{
 		ErrorHandler:                 errorHandler,
 		DisableStartupMessage:        true,
 		BodyLimit:                    32 * 1024 * 1024, // 32MB — bodies above this are streamed, not buffered
 		StreamRequestBody:            true,             // Enable streaming for large uploads (ISO/vztmpl)
 		DisablePreParseMultipartForm: true,             // Don't buffer multipart bodies; upload handler parses the stream itself
+		ProxyHeader:                  cfg.ProxyHeader,
+		EnableTrustedProxyCheck:      true,
+		TrustedProxies:               cfg.TrustedProxies,
+		EnableIPValidation:           true,
 	})
 
 	s.setupMiddleware()

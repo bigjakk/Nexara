@@ -12,16 +12,28 @@ import (
 
 // Config holds all configuration for the application.
 type Config struct {
-	APIPort                int           `envconfig:"API_PORT" default:"8080"`
-	LogLevel               string        `envconfig:"LOG_LEVEL" default:"info"`
-	DatabaseURL            string        `envconfig:"DATABASE_URL" required:"true"`
-	RedisURL               string        `envconfig:"REDIS_URL" default:"redis://localhost:6379"`
-	JWTSecret              string        `envconfig:"JWT_SECRET"`
-	EncryptionKey          string        `envconfig:"ENCRYPTION_KEY"`
-	AccessTokenTTL         time.Duration `envconfig:"ACCESS_TOKEN_TTL" default:"15m"`
-	RefreshTokenTTL        time.Duration `envconfig:"REFRESH_TOKEN_TTL" default:"168h"`
-	RateLimitMax           int           `envconfig:"RATE_LIMIT_MAX" default:"600"`
-	RateLimitExpiration    time.Duration `envconfig:"RATE_LIMIT_EXPIRATION" default:"1m"`
+	APIPort             int           `envconfig:"API_PORT" default:"8080"`
+	LogLevel            string        `envconfig:"LOG_LEVEL" default:"info"`
+	DatabaseURL         string        `envconfig:"DATABASE_URL" required:"true"`
+	RedisURL            string        `envconfig:"REDIS_URL" default:"redis://localhost:6379"`
+	JWTSecret           string        `envconfig:"JWT_SECRET"`
+	EncryptionKey       string        `envconfig:"ENCRYPTION_KEY"`
+	AccessTokenTTL      time.Duration `envconfig:"ACCESS_TOKEN_TTL" default:"15m"`
+	RefreshTokenTTL     time.Duration `envconfig:"REFRESH_TOKEN_TTL" default:"168h"`
+	RateLimitMax        int           `envconfig:"RATE_LIMIT_MAX" default:"600"`
+	RateLimitExpiration time.Duration `envconfig:"RATE_LIMIT_EXPIRATION" default:"1m"`
+	// TrustedProxies is a comma-separated list of IPs/CIDRs whose
+	// X-Forwarded-For header may be trusted. Leave empty in deployments
+	// where Nexara is exposed directly; set to the reverse-proxy network
+	// (e.g. "127.0.0.1,10.0.0.0/8") when fronted by nginx/Traefik so the
+	// auth/general rate limiters key on the real client IP rather than the
+	// proxy. Untrusted sources have their XFF header ignored — a spoofed
+	// header will not pivot the limiter to a different bucket.
+	TrustedProxies []string `envconfig:"TRUSTED_PROXIES"`
+	// ProxyHeader is the request header consulted for the client IP when
+	// the remote address is on the TrustedProxies list. Override only if
+	// the upstream proxy uses a non-standard header.
+	ProxyHeader            string        `envconfig:"PROXY_HEADER" default:"X-Forwarded-For"`
 	CORSAllowOrigins       string        `envconfig:"CORS_ALLOW_ORIGINS" default:"http://localhost:3001"`
 	MetricsCollectInterval time.Duration `envconfig:"METRICS_COLLECT_INTERVAL" default:"30s"`
 	WSPort                 int           `envconfig:"WS_PORT" default:"8081"`
