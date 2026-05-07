@@ -93,6 +93,64 @@ func TestRegister_WeakPassword(t *testing.T) {
 	}
 }
 
+// TestRegister_StrongPassword_WithNilDB_BypassesHash locks down Finding
+// #17: Register must NOT call bcrypt before the count/admin gate. We hit
+// the handler with a request that's structurally valid (good email, strong
+// password) but that will fail at the DB step because the test handler has
+// pool == nil. The new code returns 500 "registration unavailable" right
+// after password-complexity validation, well before HashPassword. If a
+// future refactor moves HashPassword back above the pool nil check, the
+// wall-clock will jump to >>1× a bcrypt cost-12 call (~80–100 ms on
+// commodity hardware) and the calibrated assertion below will catch it.
+func TestRegister_StrongPassword_WithNilDB_BypassesHash(t *testing.T) {
+	app := newTestApp(t)
+
+	// Calibrate against the runtime — bcrypt cost varies with CPU/CI load,
+	// so absolute thresholds are flaky. A real bcrypt comparison is the
+	// most relevant baseline.
+	calStart := time.Now()
+	auth.RunDummyBcrypt("Str0ng!Pass")
+	bcryptDuration := time.Since(calStart)
+
+	body := `{"email":"test@example.com","password":"Str0ng!Pass"}`
+	req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	start := time.Now()
+	resp, err := app.Test(req)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusInternalServerError, body)
+	}
+
+	// Register on the no-DB short-circuit path should be at least 5× faster
+	// than a real bcrypt call. If someone reverts the order, this margin
+	// disappears immediately.
+	maxAllowed := bcryptDuration / 5
+	if elapsed > maxAllowed {
+		t.Errorf("Register took %v vs single bcrypt %v — hash-after-auth-check appears to be reverted (Finding #17)", elapsed, bcryptDuration)
+	}
+}
+
+// TestRegister_FirstUserAdvisoryLockKeyIsStable locks down the constant so
+// a future edit can't silently swap it for a value that collides with
+// another advisory lock holder elsewhere in the codebase, or zero it out.
+func TestRegister_FirstUserAdvisoryLockKeyIsStable(t *testing.T) {
+	if firstUserAdvisoryLockKey == 0 {
+		t.Fatal("firstUserAdvisoryLockKey is 0 — a value of 0 risks colliding with default-initialised holders")
+	}
+	const want int64 = 0x4E455841524131
+	if firstUserAdvisoryLockKey != want {
+		t.Errorf("firstUserAdvisoryLockKey = %#x, want %#x — changing this means concurrent Register calls in old/new versions of the binary won't serialise against each other during a rolling restart", firstUserAdvisoryLockKey, want)
+	}
+}
+
 func TestLogin_MissingFields(t *testing.T) {
 	app := newTestApp(t)
 
@@ -234,6 +292,7 @@ func newTestApp(t *testing.T) *fiber.App {
 
 	jwtSvc := auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour)
 	handler := &AuthHandler{
+		pool:       nil,
 		queries:    nil,
 		jwtService: jwtSvc,
 	}

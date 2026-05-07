@@ -13,9 +13,14 @@ import (
 )
 
 const countUsers = `-- name: CountUsers :one
-SELECT count(*) FROM users WHERE is_active = true
+SELECT count(*) FROM users
 `
 
+// Counts every row in users, including deactivated accounts. Used by the
+// /auth/register bootstrap gate and /auth/setup-status to decide whether
+// this is a fresh install. Filtering by is_active here would let an admin
+// deactivate every user and inadvertently re-open the anonymous-admin path
+// on the next /auth/register call.
 func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countUsers)
 	var count int64

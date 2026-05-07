@@ -26,7 +26,12 @@ RETURNING *;
 UPDATE users SET password_hash = $2 WHERE id = $1;
 
 -- name: CountUsers :one
-SELECT count(*) FROM users WHERE is_active = true;
+-- Counts every row in users, including deactivated accounts. Used by the
+-- /auth/register bootstrap gate and /auth/setup-status to decide whether
+-- this is a fresh install. Filtering by is_active here would let an admin
+-- deactivate every user and inadvertently re-open the anonymous-admin path
+-- on the next /auth/register call.
+SELECT count(*) FROM users;
 
 -- name: UpdateUserDisplayName :one
 UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING *;

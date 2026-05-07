@@ -108,7 +108,7 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 	}
 
 	if s.queries != nil && s.jwtService != nil && s.sessionManager != nil {
-		s.authHandler = handlers.NewAuthHandler(s.queries, s.jwtService, s.sessionManager, s.rbacEngine)
+		s.authHandler = handlers.NewAuthHandler(pool, s.queries, s.jwtService, s.sessionManager, s.rbacEngine)
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {

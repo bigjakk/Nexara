@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -12,13 +13,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
+// firstUserAdvisoryLockKey is the constant passed to pg_advisory_xact_lock so
+// concurrent /auth/register calls serialise during the count-then-create
+// window. Anything fits — the value just has to be stable across processes
+// (it is the lock identity in pg_locks). The lock auto-releases on COMMIT or
+// ROLLBACK, so there is no caller responsibility to drop it.
+const firstUserAdvisoryLockKey int64 = 0x4E455841524131 // ASCII "NEXARA1"
+
 // AuthHandler handles authentication endpoints.
 type AuthHandler struct {
+	pool           *pgxpool.Pool
 	queries        *db.Queries
 	jwtService     *auth.JWTService
 	sessionManager *auth.SessionManager
@@ -33,9 +43,12 @@ type totpRequiredResponse struct {
 	TOTPPendingToken string `json:"totp_pending_token"`
 }
 
-// NewAuthHandler creates a new auth handler.
-func NewAuthHandler(queries *db.Queries, jwtSvc *auth.JWTService, sessMgr *auth.SessionManager, rbac *auth.RBACEngine) *AuthHandler {
+// NewAuthHandler creates a new auth handler. pool is required for the
+// register-time advisory-lock transaction; passing nil is supported only
+// for unit tests that exercise validation paths above the DB layer.
+func NewAuthHandler(pool *pgxpool.Pool, queries *db.Queries, jwtSvc *auth.JWTService, sessMgr *auth.SessionManager, rbac *auth.RBACEngine) *AuthHandler {
 	return &AuthHandler{
+		pool:           pool,
 		queries:        queries,
 		jwtService:     jwtSvc,
 		sessionManager: sessMgr,
@@ -139,8 +152,24 @@ func (h *AuthHandler) authAuditLog(c *fiber.Ctx, userID uuid.UUID, action string
 }
 
 // Register handles user registration.
-// First user is auto-promoted to admin and requires no auth.
-// Subsequent users require admin auth (checked via authOptional middleware + handler check).
+//
+// First user is auto-promoted to admin and requires no auth. Subsequent
+// users require admin auth (checked via authOptional middleware + handler
+// check).
+//
+// Order of operations (Findings #17, #18):
+//   - Cheap validation (body shape, email format, password complexity) runs
+//     first, before any DB or bcrypt work — bcrypt at cost 12 burns ~80–100ms
+//     per call, so an unauthenticated attacker spamming /auth/register would
+//     otherwise force every request through an expensive hash even though
+//     the admin gate would reject all of them.
+//   - The count-then-create pair runs inside a transaction guarded by
+//     pg_advisory_xact_lock so two simultaneous registrations on a fresh
+//     install can't both observe count == 0 and both promote themselves to
+//     admin. The lock is released automatically when the transaction commits
+//     or rolls back.
+//   - HashPassword runs only after the admin gate passes. Failed gates burn
+//     no bcrypt CPU.
 func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	var req registerRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -155,16 +184,45 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid email address")
 	}
 
-	// Validate password strength before hitting the database.
-	hashedPassword, err := auth.HashPassword(req.Password)
-	if err != nil {
-		if errors.Is(err, auth.ErrPasswordTooShort) || errors.Is(err, auth.ErrPasswordTooLong) || errors.Is(err, auth.ErrPasswordWeak) {
-			return fiber.NewError(fiber.StatusBadRequest, err.Error())
-		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process password")
+	// Validate password complexity before any DB or bcrypt work — this is a
+	// pure-string check that costs microseconds, while bcrypt costs ~80–100ms.
+	if err := auth.ValidatePasswordStrength(req.Password); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	count, err := h.queries.CountUsers(c.Context())
+	if h.pool == nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "registration unavailable")
+	}
+
+	tx, err := h.pool.Begin(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to start transaction")
+	}
+	// Rollback runs after request context is already cancelled on a happy
+	// commit (no-op since the tx is closed) or after an early return on
+	// failure (the request context may also be cancelled). Bound the
+	// rollback context so a hung Postgres can't pin the connection — and
+	// log non-ErrTxClosed failures so a leaked transaction is observable.
+	defer func() {
+		rbCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer rbCancel()
+		if rbErr := tx.Rollback(rbCtx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			slog.Warn("register: transaction rollback failed", "error", rbErr)
+		}
+	}()
+
+	// Serialise concurrent first-user registrations. The transaction-scoped
+	// advisory lock forces any other Register call to block here until we
+	// commit or roll back, so the count we read on the next line is the
+	// authoritative answer for this candidate registration. Lock auto-
+	// releases on COMMIT/ROLLBACK.
+	if _, err := tx.Exec(c.Context(), "SELECT pg_advisory_xact_lock($1)", firstUserAdvisoryLockKey); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to acquire registration lock")
+	}
+
+	q := h.queries.WithTx(tx)
+
+	count, err := q.CountUsers(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check user count")
 	}
@@ -175,8 +233,27 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	} else {
 		callerRole, _ := c.Locals("role").(string)
 		if callerRole != "admin" {
+			// Reject before bcrypt — this is the entire point of #17.
 			return fiber.NewError(fiber.StatusForbidden, "Only admins can register new users")
 		}
+	}
+
+	// Admin gate passed (or this is the first user). Hash the password now.
+	// Note: bcrypt runs while we still hold the advisory lock and a pool
+	// connection. That's deliberate — non-admin attempts were already
+	// rejected above with no bcrypt work, so an unauthenticated attacker
+	// cannot pin pool slots through this path. The remaining path
+	// (authenticated admin or first-user) is bounded by the auth limiter
+	// (15 req/min/IP) and is intentionally serialised so concurrent
+	// first-user registrations cannot both observe count == 0.
+	hashedPassword, err := auth.HashPassword(req.Password)
+	if err != nil {
+		// ValidatePasswordStrength already ran above, so password-class errors
+		// here would be a logic bug. Any other error path is a server fault.
+		if errors.Is(err, auth.ErrPasswordTooShort) || errors.Is(err, auth.ErrPasswordTooLong) || errors.Is(err, auth.ErrPasswordWeak) {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process password")
 	}
 
 	displayName := req.DisplayName
@@ -184,7 +261,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		displayName = req.Email
 	}
 
-	user, err := h.queries.CreateUser(c.Context(), db.CreateUserParams{
+	user, err := q.CreateUser(c.Context(), db.CreateUserParams{
 		Email:        req.Email,
 		PasswordHash: hashedPassword,
 		DisplayName:  displayName,
@@ -196,6 +273,10 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusConflict, "Email already registered")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create user")
+	}
+
+	if err := tx.Commit(c.Context()); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to commit registration")
 	}
 
 	// Assign RBAC role: admin -> Admin, user -> Viewer

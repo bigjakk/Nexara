@@ -47,6 +47,11 @@ type Querier interface {
 	CountMobileDevicesByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
+	// Counts every row in users, including deactivated accounts. Used by the
+	// /auth/register bootstrap gate and /auth/setup-status to decide whether
+	// this is a fresh install. Filtering by is_active here would let an admin
+	// deactivate every user and inadvertently re-open the anonymous-admin path
+	// on the next /auth/register call.
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)

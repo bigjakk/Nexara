@@ -34,7 +34,17 @@ type Config struct {
 	// the remote address is on the TrustedProxies list. Override only if
 	// the upstream proxy uses a non-standard header.
 	ProxyHeader            string        `envconfig:"PROXY_HEADER" default:"X-Forwarded-For"`
-	CORSAllowOrigins       string        `envconfig:"CORS_ALLOW_ORIGINS" default:"http://localhost:3001"`
+	// CORSAllowOrigins is the comma-separated list of `Origin:` values the
+	// browser API will accept (and echo back in Access-Control-Allow-Origin).
+	// Empty default — cross-origin browsers (mobile apps, separately-served
+	// SPAs, Docker deployments where the SPA lives on a different host)
+	// MUST set CORS_ALLOW_ORIGINS explicitly to the public origin
+	// (e.g. "https://nexara.example.com"). The Vite dev server at
+	// http://localhost:3000 proxies /api and /ws to the backend, so dev
+	// frontends are same-origin and do NOT require CORS to be set. A
+	// literal "*" allows any origin; a startup warning fires for both
+	// empty and "*" so the operator can see what posture they're running.
+	CORSAllowOrigins       string        `envconfig:"CORS_ALLOW_ORIGINS"`
 	MetricsCollectInterval time.Duration `envconfig:"METRICS_COLLECT_INTERVAL" default:"30s"`
 	WSPort                 int           `envconfig:"WS_PORT" default:"8081"`
 	WSPingInterval         time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
@@ -99,7 +109,10 @@ func (c *Config) validate() error {
 	if len(c.JWTSecret) < 16 {
 		return fmt.Errorf("JWT_SECRET must be at least 16 characters")
 	}
-	if c.CORSAllowOrigins == "*" {
+	switch c.CORSAllowOrigins {
+	case "":
+		slog.Warn("CORS_ALLOW_ORIGINS is empty — browser fetches from cross-origin SPAs will fail preflight. Set this to your SPA's public origin in production.")
+	case "*":
 		slog.Warn("CORS_ALLOW_ORIGINS is set to wildcard '*' — this is insecure for production deployments")
 	}
 	if c.EncryptionKey == "" {
