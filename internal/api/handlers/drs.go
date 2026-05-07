@@ -24,14 +24,23 @@ type DRSHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	// shutdownCtx is the parent for the manual-trigger goroutine so a
+	// long-running ad-hoc DRS pass aborts cleanly on SIGTERM rather than
+	// orphaning. Falls back to context.Background() if nil for tests.
+	shutdownCtx context.Context
 }
 
-// NewDRSHandler creates a new DRS handler.
-func NewDRSHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *DRSHandler {
+// NewDRSHandler creates a new DRS handler. shutdownCtx should be the
+// per-server shutdown context; nil falls back to context.Background().
+func NewDRSHandler(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *DRSHandler {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	return &DRSHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
+		shutdownCtx:   shutdownCtx,
 	}
 }
 
@@ -360,18 +369,18 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 		if clientErr != nil {
 			slog.Default().Error("DRS manual trigger: failed to create client", "error", clientErr)
 		} else {
-			executor := drs.NewExecutor(h.queries, slog.Default(), h.eventPub)
+			executor := drs.NewExecutor(h.shutdownCtx, h.queries, slog.Default(), h.eventPub)
 			// Execute in a goroutine so the API response is not blocked by
-			// potentially long-running migrations. Use a detached context
-			// so the work continues after the HTTP response is sent.
+			// potentially long-running migrations. Detach from the request
+			// scope but stay rooted in shutdownCtx so SIGTERM cancels the
+			// migration cleanly instead of orphaning it.
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
 						slog.Default().Error("DRS manual execution panicked", "panic", r)
 					}
 				}()
-				execCtx := context.Background()
-				if execErr := executor.Execute(execCtx, client, clusterID, cfg.Mode, recommendations); execErr != nil {
+				if execErr := executor.Execute(h.shutdownCtx, client, clusterID, cfg.Mode, recommendations); execErr != nil {
 					slog.Default().Error("DRS manual trigger execution failed", "error", execErr)
 				}
 			}()

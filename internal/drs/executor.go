@@ -38,14 +38,25 @@ type Executor struct {
 	queries  *db.Queries
 	logger   *slog.Logger
 	eventPub *events.Publisher
+	// shutdownCtx is the parent for any context that must outlive a
+	// scheduler tick but should still be cancelled on graceful shutdown
+	// (SIGTERM). nil falls back to context.Background() so a partially
+	// constructed Executor (tests) still works.
+	shutdownCtx context.Context
 }
 
-// NewExecutor creates a new DRS executor.
-func NewExecutor(queries *db.Queries, logger *slog.Logger, eventPub *events.Publisher) *Executor {
+// NewExecutor creates a new DRS executor. shutdownCtx should be the
+// per-server context that's cancelled on SIGTERM; pass context.Background()
+// from contexts that don't have one (e.g. tests).
+func NewExecutor(shutdownCtx context.Context, queries *db.Queries, logger *slog.Logger, eventPub *events.Publisher) *Executor {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	return &Executor{
-		queries:  queries,
-		logger:   logger,
-		eventPub: eventPub,
+		queries:     queries,
+		logger:      logger,
+		eventPub:    eventPub,
+		shutdownCtx: shutdownCtx,
 	}
 }
 
@@ -190,10 +201,12 @@ func taskSucceeded(exitStatus string) bool {
 }
 
 func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) (status string, detail string) {
-	// Use a dedicated timeout context so that scheduler shutdown doesn't
-	// prematurely mark in-flight migrations as cancelled. Live migrations
-	// can take 15+ minutes for large VMs.
-	pollCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// Use a dedicated timeout context derived from the per-server shutdown
+	// context. Live migrations can take 15+ minutes for large VMs, so we
+	// don't tie this to the scheduler tick context. We DO honor SIGTERM via
+	// shutdownCtx so a `docker compose stop` cancels the poll loop instead
+	// of orphaning it.
+	pollCtx, cancel := context.WithTimeout(e.shutdownCtx, 30*time.Minute)
 	defer cancel()
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -203,7 +216,9 @@ func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node s
 		select {
 		case <-pollCtx.Done():
 			// Do one final check — the migration may have finished while we
-			// were waiting. Use a short independent context for the API call.
+			// were waiting. Use a short independent context (NOT derived from
+			// shutdownCtx) so we still record the outcome during graceful
+			// shutdown rather than orphan a tracked task.
 			finalCtx, finalCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			ts, err := client.GetTaskStatus(finalCtx, node, upid)
 			finalCancel()

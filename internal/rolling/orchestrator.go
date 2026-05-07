@@ -40,16 +40,26 @@ type Orchestrator struct {
 	logger         *slog.Logger
 	eventPub       *events.Publisher
 	notifyRegistry *notifications.Registry
+	// shutdownCtx is the parent for goroutines that must outlive a
+	// scheduler tick (SSH upgrade, task polling, notification dispatch)
+	// but should still be cancelled on graceful shutdown (SIGTERM).
+	shutdownCtx context.Context
 }
 
-// NewOrchestrator creates a new rolling update orchestrator.
-func NewOrchestrator(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher, notifyRegistry *notifications.Registry) *Orchestrator {
+// NewOrchestrator creates a new rolling update orchestrator. shutdownCtx
+// should be the per-server context that's cancelled on SIGTERM; nil falls
+// back to context.Background() for tests / partial construction.
+func NewOrchestrator(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher, notifyRegistry *notifications.Registry) *Orchestrator {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	return &Orchestrator{
 		queries:        queries,
 		encryptionKey:  encryptionKey,
 		logger:         logger,
 		eventPub:       eventPub,
 		notifyRegistry: notifyRegistry,
+		shutdownCtx:    shutdownCtx,
 	}
 }
 
@@ -661,8 +671,10 @@ func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Cli
 	o.logger.Info("starting automated apt dist-upgrade via SSH", "node", node.NodeName)
 
 	// Run apt dist-upgrade in a goroutine so we don't block the tick.
-	// Use a detached context with a 25-minute timeout since this outlives the scheduler tick.
-	upgradeCtx, upgradeCancel := context.WithTimeout(context.Background(), 25*time.Minute) //nolint:gosec // intentionally detached from request scope
+	// Detach from the tick scope so a tick rollover doesn't cancel a
+	// 25-minute SSH session, but stay rooted in shutdownCtx so a graceful
+	// SIGTERM aborts the SSH call cleanly instead of orphaning the goroutine.
+	upgradeCtx, upgradeCancel := context.WithTimeout(o.shutdownCtx, 25*time.Minute)
 	go o.runSSHUpgrade(upgradeCtx, upgradeCancel, job, node, client, sshCfg)
 }
 
@@ -1253,7 +1265,9 @@ func (o *Orchestrator) sendJobNotification(ctx context.Context, job db.RollingUp
 	}
 
 	go func() {
-		sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Derive from shutdownCtx so SIGTERM aborts the dispatch quickly;
+		// detach from the tick context so a tick rollover doesn't kill it.
+		sendCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Second)
 		defer cancel()
 
 		if err := dispatcher.Send(sendCtx, json.RawMessage(configJSON), payload); err != nil {
@@ -1283,29 +1297,51 @@ func (o *Orchestrator) restoreHAStates(ctx context.Context, client *proxmox.Clie
 
 func (o *Orchestrator) failNode(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode, reason string) {
 	o.logger.Error("rolling update node failed", "node", node.NodeName, "reason", reason)
-	_ = o.queries.FailRollingUpdateNode(ctx, db.FailRollingUpdateNodeParams{
+	dbCtx, cancel := cleanupCtxFor(ctx)
+	defer cancel()
+	_ = o.queries.FailRollingUpdateNode(dbCtx, db.FailRollingUpdateNodeParams{
 		ID:            node.ID,
 		FailureReason: reason,
 	})
-	o.publishEvent(ctx, job.ClusterID, job.ID, "node_failed")
-	o.failJob(ctx, job, fmt.Sprintf("node %s failed: %s", node.NodeName, reason))
+	o.publishEvent(dbCtx, job.ClusterID, job.ID, "node_failed")
+	o.failJob(dbCtx, job, fmt.Sprintf("node %s failed: %s", node.NodeName, reason))
 }
 
 func (o *Orchestrator) failJob(ctx context.Context, job db.RollingUpdateJob, reason string) {
 	o.logger.Error("rolling update job failed", "job_id", job.ID, "reason", reason)
-	_ = o.queries.FailRollingUpdateJob(ctx, db.FailRollingUpdateJobParams{
+	dbCtx, cancel := cleanupCtxFor(ctx)
+	defer cancel()
+	_ = o.queries.FailRollingUpdateJob(dbCtx, db.FailRollingUpdateJobParams{
 		ID:            job.ID,
 		FailureReason: reason,
 	})
-	o.publishEvent(ctx, job.ClusterID, job.ID, "failed")
-	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_failed", map[string]string{"reason": reason})
-	o.sendJobNotification(ctx, job, "failed", fmt.Sprintf("Rolling update failed: %s", reason))
+	o.publishEvent(dbCtx, job.ClusterID, job.ID, "failed")
+	o.auditLog(dbCtx, job.ClusterID, job.ID, "rolling_update_failed", map[string]string{"reason": reason})
+	o.sendJobNotification(dbCtx, job, "failed", fmt.Sprintf("Rolling update failed: %s", reason))
 	// Re-enable DRS if we disabled it at the start.
-	o.restoreDRS(ctx, job)
+	o.restoreDRS(dbCtx, job)
+}
+
+// cleanupCtxFor returns (ctx, no-op cancel) when ctx is still alive, or a
+// fresh 5-second timeout context derived from Background when the parent
+// is already cancelled. Use it for the DB / event writes that record a
+// failure outcome — without it, a SIGTERM cancellation would leave the
+// row in 'running' / 'migrating' status forever because the DB write
+// silently no-ops on a cancelled context.
+func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.Background(), 5*time.Second)
 }
 
 func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) string {
-	pollCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// Detach from the scheduler tick so a tick rollover doesn't abandon
+	// in-flight Proxmox tasks, but root in shutdownCtx so SIGTERM cancels
+	// the poll loop. The final-check block below uses context.Background()
+	// on purpose so the outcome can still be recorded during graceful
+	// shutdown instead of orphaning the task.
+	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Minute)
 	defer cancel()
 
 	ticker := time.NewTicker(5 * time.Second)

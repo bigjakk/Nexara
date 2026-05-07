@@ -115,7 +115,11 @@ func main() {
 	}
 
 	// ---- API server (registers /api/v1/* and /healthz) ----
-	srv := api.New(cfg, pool, rdb)
+	// ctx is the per-server shutdown context; the API server threads it
+	// into handlers and orchestrators that spawn detached goroutines
+	// (migration, DRS, rolling update) so a graceful SIGTERM cancels
+	// in-flight Proxmox/SSH calls instead of orphaning them.
+	srv := api.New(ctx, cfg, pool, rdb)
 
 	// ---- WebSocket server (registers /ws/* on the API's Fiber app) ----
 	queries := dbgen.New(pool)
@@ -462,7 +466,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		eventPub = events.NewPublisher(rdb, logger.With("component", "events"))
 	}
 
-	sched := scheduler.New(queries, cfg.EncryptionKey, logger, eventPub)
+	sched := scheduler.New(ctx, queries, cfg.EncryptionKey, logger, eventPub)
 
 	runWithLeaderRetry(ctx, pool, "scheduler", logger, func(ctx context.Context) {
 		logger.Info("scheduler started",

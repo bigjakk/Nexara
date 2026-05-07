@@ -71,8 +71,15 @@ type Server struct {
 	eventPub              *events.Publisher
 }
 
-// New creates a new API server with the given dependencies.
-func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
+// New creates a new API server with the given dependencies. shutdownCtx is
+// the per-server context cancelled on SIGTERM; it's passed to handlers and
+// orchestrators that need to launch detached goroutines (migrations, DRS,
+// rolling updates) so those goroutines abort cleanly on graceful shutdown
+// instead of orphaning their work past the lifetime of the process.
+func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	s := &Server{
 		config: cfg,
 		db:     pool,
@@ -145,8 +152,8 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
-		s.drsHandler = handlers.NewDRSHandler(s.queries, cfg.EncryptionKey, s.eventPub)
-		s.migrationHandler = handlers.NewMigrationHandler(s.queries, cfg.EncryptionKey, s.eventPub)
+		s.drsHandler = handlers.NewDRSHandler(shutdownCtx, s.queries, cfg.EncryptionKey, s.eventPub)
+		s.migrationHandler = handlers.NewMigrationHandler(shutdownCtx, s.queries, cfg.EncryptionKey, s.eventPub)
 		s.networkHandler = handlers.NewNetworkHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 	}
 
@@ -176,7 +183,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
 		s.cveHandler = handlers.NewCVEHandler(s.queries, cfg.EncryptionKey, s.eventPub, registry)
 		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub, registry)
 		s.reportHandler = handlers.NewReportHandler(s.queries, cfg.EncryptionKey, s.eventPub)
-		rollingOrch := rolling.NewOrchestrator(s.queries, cfg.EncryptionKey, slog.Default().With("component", "rolling-update"), s.eventPub, nil)
+		rollingOrch := rolling.NewOrchestrator(shutdownCtx, s.queries, cfg.EncryptionKey, slog.Default().With("component", "rolling-update"), s.eventPub, nil)
 		s.rollingUpdateHandler = handlers.NewRollingUpdateHandler(s.queries, cfg.EncryptionKey, s.eventPub, rollingOrch)
 		s.clusterOptionsHandler = handlers.NewClusterOptionsHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		s.haHandler = handlers.NewHAHandler(s.queries, cfg.EncryptionKey, s.eventPub)

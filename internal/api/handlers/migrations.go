@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -14,19 +15,40 @@ import (
 	"github.com/bigjakk/nexara/internal/migration"
 )
 
+// MigrationConcurrencyLimit caps the number of in-flight user-initiated
+// migrations the API server will run as detached goroutines. Excess
+// requests are rejected with 429 Too Many Requests so the operator gets
+// immediate feedback rather than queuing forever in memory.
+const MigrationConcurrencyLimit = 4
+
 // MigrationHandler handles migration job endpoints.
 type MigrationHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	// shutdownCtx is the parent for the detached migration goroutine so a
+	// graceful SIGTERM aborts in-flight Proxmox calls instead of orphaning
+	// the goroutine. Falls back to context.Background() if nil for tests.
+	shutdownCtx context.Context
+	// slots is a buffered-channel semaphore that caps the number of
+	// concurrent in-flight migration goroutines. A non-blocking send on
+	// Execute reserves a slot; the goroutine releases on exit.
+	slots chan struct{}
 }
 
-// NewMigrationHandler creates a new MigrationHandler.
-func NewMigrationHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *MigrationHandler {
+// NewMigrationHandler creates a new MigrationHandler. shutdownCtx should be
+// the per-server context cancelled on SIGTERM; nil falls back to
+// context.Background().
+func NewMigrationHandler(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *MigrationHandler {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	return &MigrationHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
+		shutdownCtx:   shutdownCtx,
+		slots:         make(chan struct{}, MigrationConcurrencyLimit),
 	}
 }
 
@@ -387,10 +409,24 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 		userID = uid
 	}
 
+	// Reserve a concurrency slot up-front. Non-blocking — if the cap is
+	// already saturated we reject with 429 rather than queue indefinitely.
+	select {
+	case h.slots <- struct{}{}:
+	default:
+		return fiber.NewError(fiber.StatusTooManyRequests,
+			"too many migrations in flight (max "+strconv.Itoa(MigrationConcurrencyLimit)+"); wait for one to finish before starting another")
+	}
+
 	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
 
-	// Launch execution in background goroutine.
-	go orch.Execute(context.Background(), jobID, userID) //nolint:gosec // G118: intentionally detached; Fiber recycles request context
+	// Launch execution in a background goroutine rooted in shutdownCtx so a
+	// graceful shutdown aborts the migration cleanly. Slot is released on
+	// exit, including on panic.
+	go func() {
+		defer func() { <-h.slots }()
+		orch.Execute(h.shutdownCtx, jobID, userID)
+	}()
 
 	h.eventPub.ClusterEvent(c.Context(), job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "started")
 

@@ -36,19 +36,25 @@ type Scheduler struct {
 	drsLastEval   map[uuid.UUID]time.Time
 }
 
-// New creates a new Scheduler.
-func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
+// New creates a new Scheduler. shutdownCtx should be the per-server context
+// cancelled on SIGTERM; it's threaded into the DRS executor and rolling
+// orchestrator so detached goroutines they spawn (poll loops, SSH upgrades)
+// abort cleanly on graceful shutdown instead of orphaning past the process.
+func New(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	registry := newDispatcherRegistry(queries)
 	return &Scheduler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		logger:        logger,
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
-		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor"), eventPub),
+		drsExecutor:   drs.NewExecutor(shutdownCtx, queries, logger.With("component", "drs-executor"), eventPub),
 		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner"), registry),
 		alertEngine:   notifications.NewEngine(queries, logger.With("component", "alert-engine"), eventPub, registry, encryptionKey),
 		reportGen:     reports.NewGenerator(queries, logger.With("component", "report-gen")),
-		rollingOrch:   rolling.NewOrchestrator(queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry),
+		rollingOrch:   rolling.NewOrchestrator(shutdownCtx, queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry),
 		eventPub:      eventPub,
 		drsLastEval:   make(map[uuid.UUID]time.Time),
 	}
