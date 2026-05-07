@@ -49,3 +49,14 @@ func (r *Registry) Get(channelType string) (Dispatcher, bool) {
 	d, ok := r.dispatchers[channelType]
 	return d, ok
 }
+
+// Types returns the registered channel types in no particular order.
+// Used by the DLQ replay handler to validate that a stored channel_type is
+// still serviceable before attempting a replay.
+func (r *Registry) Types() []string {
+	out := make([]string, 0, len(r.dispatchers))
+	for t := range r.dispatchers {
+		out = append(out, t)
+	}
+	return out
+}

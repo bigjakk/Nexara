@@ -567,6 +567,23 @@ type NotificationChannel struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+type NotificationDlq struct {
+	ID           uuid.UUID       `json:"id"`
+	ChannelID    pgtype.UUID     `json:"channel_id"`
+	ChannelType  string          `json:"channel_type"`
+	ChannelName  string          `json:"channel_name"`
+	AlertID      pgtype.UUID     `json:"alert_id"`
+	RuleID       pgtype.UUID     `json:"rule_id"`
+	ClusterID    pgtype.UUID     `json:"cluster_id"`
+	Payload      json.RawMessage `json:"payload"`
+	LastError    string          `json:"last_error"`
+	AttemptCount int32           `json:"attempt_count"`
+	State        string          `json:"state"`
+	FailureKind  string          `json:"failure_kind"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
 type OidcConfig struct {
 	ID                    uuid.UUID       `json:"id"`
 	Name                  string          `json:"name"`

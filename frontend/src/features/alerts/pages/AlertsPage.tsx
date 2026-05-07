@@ -1,11 +1,14 @@
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { AlertSummaryCard } from "../components/AlertSummaryCard";
 import { AlertsTable } from "../components/AlertsTable";
 import { AlertRulesTable } from "../components/AlertRulesTable";
 import { AlertRuleForm } from "../components/AlertRuleForm";
 import { ChannelsTable } from "../components/ChannelsTable";
 import { ChannelForm } from "../components/ChannelForm";
+import { NotificationDLQTable } from "../components/NotificationDLQTable";
+import { useNotificationDLQSummary } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
 
 export function AlertsPage() {
@@ -13,6 +16,10 @@ export function AlertsPage() {
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "alert");
   const canManageChannels = hasPermission("manage", "notification_channel");
+  const canViewDLQ = hasPermission("view", "notification_dlq");
+  const { data: dlqSummary } = useNotificationDLQSummary();
+  const dlqOpenCount =
+    (dlqSummary?.pending ?? 0) + (dlqSummary?.rate_limited ?? 0);
 
   return (
     <div className="space-y-6 p-6">
@@ -31,6 +38,14 @@ export function AlertsPage() {
           <TabsTrigger value="alerts">{t("alertHistory")}</TabsTrigger>
           <TabsTrigger value="rules">{t("alertRules")}</TabsTrigger>
           <TabsTrigger value="channels">{t("channels")}</TabsTrigger>
+          {canViewDLQ && (
+            <TabsTrigger value="dlq" className="gap-2">
+              Dead-letter queue
+              {dlqOpenCount > 0 && (
+                <Badge variant="destructive">{dlqOpenCount}</Badge>
+              )}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="alerts" className="mt-4">
@@ -44,6 +59,12 @@ export function AlertsPage() {
         <TabsContent value="channels" className="mt-4">
           <ChannelsTable />
         </TabsContent>
+
+        {canViewDLQ && (
+          <TabsContent value="dlq" className="mt-4">
+            <NotificationDLQTable />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

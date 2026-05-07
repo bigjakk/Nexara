@@ -400,6 +400,39 @@ export interface TestChannelResponse {
   message: string;
 }
 
+export type DLQState =
+  | "pending"
+  | "rate_limited"
+  | "retrying"
+  | "resolved"
+  | "dismissed";
+
+export type DLQFailureKind = "send_failed" | "rate_limited" | "config_error";
+
+export interface NotificationDLQEntry {
+  id: string;
+  channel_id?: string;
+  channel_type: string;
+  channel_name: string;
+  alert_id?: string;
+  rule_id?: string;
+  payload: Record<string, unknown>;
+  last_error: string;
+  attempt_count: number;
+  state: DLQState;
+  failure_kind: DLQFailureKind;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationDLQSummary {
+  pending: number;
+  rate_limited: number;
+  retrying: number;
+  resolved: number;
+  dismissed: number;
+}
+
 export interface MaintenanceWindow {
   id: string;
   cluster_id: string;

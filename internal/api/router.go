@@ -525,6 +525,16 @@ func (s *Server) setupRoutes() {
 		notifChannels.Post("/:id/test", s.alertHandler.TestChannel)
 	}
 
+	// Notification dead-letter queue.
+	if s.notificationDLQHandler != nil {
+		dlq := v1.Group("/notification-dlq", s.authRequired())
+		dlq.Get("/", s.notificationDLQHandler.List)
+		dlq.Get("/summary", s.notificationDLQHandler.Summary)
+		dlq.Post("/:id/retry", s.notificationDLQHandler.Retry)
+		dlq.Post("/:id/dismiss", s.notificationDLQHandler.Dismiss)
+		dlq.Delete("/:id", s.notificationDLQHandler.Delete)
+	}
+
 	// Report routes.
 	if s.reportHandler != nil {
 		rpts := v1.Group("/reports", s.authRequired())

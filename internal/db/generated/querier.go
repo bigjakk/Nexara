@@ -46,6 +46,7 @@ type Querier interface {
 	// Used to enforce a per-user device cap (security review H3).
 	CountMobileDevicesByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
+	CountNotificationDLQByState(ctx context.Context) (CountNotificationDLQByStateRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	// Counts every row in users, including deactivated accounts. Used by the
 	// /auth/register bootstrap gate and /auth/setup-status to decide whether
@@ -80,6 +81,7 @@ type Querier interface {
 	DeleteMobileDeviceByExpoToken(ctx context.Context, expoPushToken string) error
 	DeleteMobileDeviceForUser(ctx context.Context, arg DeleteMobileDeviceForUserParams) error
 	DeleteNotificationChannel(ctx context.Context, id uuid.UUID) error
+	DeleteNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
 	DeleteRecoveryCode(ctx context.Context, id uuid.UUID) error
@@ -106,6 +108,7 @@ type Querier interface {
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	ExistsAuditLogByUPID(ctx context.Context, upid string) (bool, error)
 	ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error)
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error
@@ -165,6 +168,7 @@ type Querier interface {
 	GetNodeRecentMetrics(ctx context.Context, arg GetNodeRecentMetricsParams) ([]GetNodeRecentMetricsRow, error)
 	GetNotificationChannel(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
 	GetNotificationChannelEnabled(ctx context.Context, id uuid.UUID) (NotificationChannel, error)
+	GetNotificationDLQ(ctx context.Context, id uuid.UUID) (NotificationDlq, error)
 	GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, error)
 	GetPBSDatastoreMetricsHistory(ctx context.Context, arg GetPBSDatastoreMetricsHistoryParams) ([]PbsDatastoreMetric, error)
 	GetPBSServer(ctx context.Context, id uuid.UUID) (PbsServer, error)
@@ -216,6 +220,8 @@ type Querier interface {
 	InsertMaintenanceWindow(ctx context.Context, arg InsertMaintenanceWindowParams) (MaintenanceWindow, error)
 	// Notification Channels
 	InsertNotificationChannel(ctx context.Context, arg InsertNotificationChannelParams) (NotificationChannel, error)
+	// Notification Dead-Letter Queue
+	InsertNotificationDLQ(ctx context.Context, arg InsertNotificationDLQParams) (NotificationDlq, error)
 	InsertRecoveryCode(ctx context.Context, arg InsertRecoveryCodeParams) error
 	// Report Runs
 	InsertReportRun(ctx context.Context, arg InsertReportRunParams) (ReportRun, error)
@@ -276,6 +282,9 @@ type Querier interface {
 	ListNodePCIDevicesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodePciDevice, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
 	ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error)
+	// channel_id is optional. Pass NULL via sqlc.narg to match all channels;
+	// otherwise filter to the given channel.
+	ListNotificationDLQ(ctx context.Context, arg ListNotificationDLQParams) ([]NotificationDlq, error)
 	ListOIDCConfigs(ctx context.Context) ([]OidcConfig, error)
 	ListOIDCUsers(ctx context.Context) ([]ListOIDCUsersRow, error)
 	ListPBSServers(ctx context.Context) ([]PbsServer, error)
@@ -317,7 +326,9 @@ type Querier interface {
 	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
+	MarkNotificationDLQResolved(ctx context.Context, id uuid.UUID) error
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	PurgeOldNotificationDLQ(ctx context.Context) error
 	// Upserts a device by expo_push_token. The UPDATE branch only fires when the
 	// existing row's device_id matches the request — i.e. the same physical
 	// install is re-registering. If the device_id differs, the WHERE clause
@@ -384,6 +395,7 @@ type Querier interface {
 	UpdateMigrationJobStatus(ctx context.Context, arg UpdateMigrationJobStatusParams) error
 	UpdateNodeAddress(ctx context.Context, arg UpdateNodeAddressParams) error
 	UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (NotificationChannel, error)
+	UpdateNotificationDLQState(ctx context.Context, arg UpdateNotificationDLQStateParams) error
 	UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error)
 	UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserProfileParams) (User, error)
 	UpdatePBSServer(ctx context.Context, arg UpdatePBSServerParams) (PbsServer, error)

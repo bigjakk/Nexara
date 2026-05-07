@@ -8,6 +8,8 @@ import type {
   NotificationChannel,
   MaintenanceWindow,
   TestChannelResponse,
+  NotificationDLQEntry,
+  NotificationDLQSummary,
 } from "@/types/api";
 
 // --- Alert Rules ---
@@ -238,6 +240,72 @@ export function useDeleteMaintenanceWindow() {
       void qc.invalidateQueries({
         queryKey: ["maintenance-windows", vars.clusterId],
       });
+    },
+  });
+}
+
+// --- Notification Dead-Letter Queue ---
+
+export function useNotificationDLQ(state?: string) {
+  const params = new URLSearchParams();
+  if (state) params.set("state", state);
+  const qs = params.toString();
+
+  return useQuery({
+    queryKey: ["notification-dlq", state ?? "all"],
+    queryFn: () =>
+      apiClient.get<NotificationDLQEntry[]>(
+        `/api/v1/notification-dlq${qs ? `?${qs}` : ""}`,
+      ),
+    refetchInterval: 30000,
+  });
+}
+
+export function useNotificationDLQSummary() {
+  return useQuery({
+    queryKey: ["notification-dlq-summary"],
+    queryFn: () =>
+      apiClient.get<NotificationDLQSummary>("/api/v1/notification-dlq/summary"),
+    refetchInterval: 30000,
+  });
+}
+
+export function useRetryNotificationDLQ() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient.post<{ success: boolean; message: string }>(
+        `/api/v1/notification-dlq/${id}/retry`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["notification-dlq"] });
+      void qc.invalidateQueries({ queryKey: ["notification-dlq-summary"] });
+    },
+  });
+}
+
+export function useDismissNotificationDLQ() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient.post<{ success: boolean }>(
+        `/api/v1/notification-dlq/${id}/dismiss`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["notification-dlq"] });
+      void qc.invalidateQueries({ queryKey: ["notification-dlq-summary"] });
+    },
+  });
+}
+
+export function useDeleteNotificationDLQ() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient.delete(`/api/v1/notification-dlq/${id}`),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["notification-dlq"] });
+      void qc.invalidateQueries({ queryKey: ["notification-dlq-summary"] });
     },
   });
 }

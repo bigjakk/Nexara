@@ -52,6 +52,7 @@ type Server struct {
 	totpHandler           *handlers.TOTPHandler
 	cveHandler            *handlers.CVEHandler
 	alertHandler          *handlers.AlertHandler
+	notificationDLQHandler *handlers.NotificationDLQHandler
 	reportHandler         *handlers.ReportHandler
 	rollingUpdateHandler  *handlers.RollingUpdateHandler
 	settingsHandler       *handlers.SettingsHandler
@@ -182,6 +183,12 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 		registry := newDispatcherRegistry(s.queries)
 		s.cveHandler = handlers.NewCVEHandler(s.queries, cfg.EncryptionKey, s.eventPub, registry)
 		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub, registry)
+		// The DLQ handler shares an alert engine instance with the
+		// scheduler's evaluator. The replay path delegates back to that
+		// engine so the same retry schedule applies whether the
+		// notification was triggered automatically or by an operator.
+		alertEngine := notifications.NewEngine(shutdownCtx, s.queries, slog.Default().With("component", "alert-engine-replay"), s.eventPub, registry, cfg.EncryptionKey)
+		s.notificationDLQHandler = handlers.NewNotificationDLQHandler(s.queries, alertEngine, s.eventPub)
 		s.reportHandler = handlers.NewReportHandler(s.queries, cfg.EncryptionKey, s.eventPub)
 		rollingOrch := rolling.NewOrchestrator(shutdownCtx, s.queries, cfg.EncryptionKey, slog.Default().With("component", "rolling-update"), s.eventPub, nil)
 		s.rollingUpdateHandler = handlers.NewRollingUpdateHandler(s.queries, cfg.EncryptionKey, s.eventPub, rollingOrch)
