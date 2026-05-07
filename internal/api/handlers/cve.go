@@ -22,6 +22,13 @@ type CVEHandler struct {
 	encryptionKey string
 	eventPub      *events.Publisher
 	registry      *notifications.Registry
+
+	// engine is the long-lived scanner used by every API-triggered CVE scan
+	// in this process. Building it once here (rather than per request) is
+	// what makes the in-memory tracker cache effective — without this the
+	// CVEClient.trackerData map would be empty on every scan and we'd hit
+	// the DB cache on every API trigger even within the cacheTTL.
+	engine *scanner.Engine
 }
 
 // NewCVEHandler creates a new CVE handler.
@@ -31,6 +38,7 @@ func NewCVEHandler(queries *db.Queries, encryptionKey string, eventPub *events.P
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
 		registry:      registry,
+		engine:        scanner.NewEngine(queries, encryptionKey, slog.Default().With("component", "cve-engine"), registry),
 	}
 }
 
@@ -260,8 +268,9 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create scan record")
 	}
 
-	// Create the scan engine with a proper logger
-	eng := scanner.NewEngine(h.queries, h.encryptionKey, slog.Default(), h.registry)
+	// Reuse the handler's long-lived scanner Engine so the in-memory
+	// Debian-tracker cache survives across API-triggered scans.
+	eng := h.engine
 
 	h.auditLog(c, clusterID, "cve_scan", scan.ID.String(), "cve_scan_triggered", nil)
 

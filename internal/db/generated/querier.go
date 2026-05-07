@@ -74,6 +74,7 @@ type Querier interface {
 	DeleteCompletedTasks(ctx context.Context) error
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
+	DeleteExternalFeedCache(ctx context.Context, source string) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
 	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
 	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
@@ -139,6 +140,7 @@ type Querier interface {
 	GetEPSSEntry(ctx context.Context, cveID string) (EpssCache, error)
 	GetEnabledLDAPConfig(ctx context.Context) (LdapConfig, error)
 	GetEnabledOIDCConfig(ctx context.Context) (OidcConfig, error)
+	GetExternalFeedCache(ctx context.Context, source string) (ExternalFeedCache, error)
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
 	GetKEVCacheAge(ctx context.Context) (time.Time, error)
 	GetKEVEntry(ctx context.Context, cveID string) (KevCache, error)
@@ -423,6 +425,7 @@ type Querier interface {
 	UpsertClusterSSHCredentials(ctx context.Context, arg UpsertClusterSSHCredentialsParams) (ClusterSshCredential, error)
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
 	UpsertEPSSEntry(ctx context.Context, arg UpsertEPSSEntryParams) error
+	UpsertExternalFeedCache(ctx context.Context, arg UpsertExternalFeedCacheParams) error
 	UpsertKEVEntry(ctx context.Context, arg UpsertKEVEntryParams) error
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertNodeDisk(ctx context.Context, arg UpsertNodeDiskParams) (NodeDisk, error)

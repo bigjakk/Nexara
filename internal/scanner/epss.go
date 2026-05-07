@@ -15,30 +15,44 @@ import (
 )
 
 const (
-	epssAPIBase    = "https://api.first.org/data/v1/epss"
-	epssBatchSize  = 100 // CVEs per request — keeps URLs under 4 KB
-	epssCacheTTL   = 24 * time.Hour
-	epssMaxBytes   = 5 * 1024 * 1024
+	epssAPIBase     = "https://api.first.org/data/v1/epss"
+	epssBatchSize   = 100 // CVEs per request — keeps URLs under 4 KB
+	epssCacheTTL    = 24 * time.Hour
+	epssMaxBytes    = 5 * 1024 * 1024
 	epssHTTPTimeout = 30 * time.Second
 )
 
 // EPSSClient looks up FIRST EPSS scores (probability of exploitation in the
 // next 30 days) for CVEs, caching results in the DB.
+//
+// Integrity (Finding A23): FIRST does not publish a detached signature for
+// the EPSS API. We rely on:
+//   - HTTPS to api.first.org with stdlib TLS verification
+//   - The shared scanner HTTP client's no-redirect policy + dial guard
+//   - Per-CVE cache in epss_cache; entries within epssCacheTTL are served
+//     from the DB without re-contacting FIRST.
 type EPSSClient struct {
 	httpClient *http.Client
 	queries    *db.Queries
 	logger     *slog.Logger
+
+	apiBase string // overridable for tests
 }
 
-// NewEPSSClient creates a new EPSS client.
-func NewEPSSClient(queries *db.Queries, logger *slog.Logger) *EPSSClient {
+// NewEPSSClient creates a new EPSS client. Pass the scanner-shared httpClient
+// for consistent redirect/dial-guard behaviour. Pass nil for tests.
+func NewEPSSClient(queries *db.Queries, httpClient *http.Client, logger *slog.Logger) *EPSSClient {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if httpClient == nil {
+		httpClient = newScannerHTTPClient(epssHTTPTimeout)
+	}
 	return &EPSSClient{
-		httpClient: &http.Client{Timeout: epssHTTPTimeout},
+		httpClient: httpClient,
 		queries:    queries,
 		logger:     logger,
+		apiBase:    epssAPIBase,
 	}
 }
 
@@ -51,15 +65,15 @@ type EPSSData struct {
 
 // epssAPIResponse is the FIRST API JSON shape.
 type epssAPIResponse struct {
-	Status     string         `json:"status"`
-	Total      int            `json:"total"`
-	Data       []epssAPIEntry `json:"data"`
+	Status string         `json:"status"`
+	Total  int            `json:"total"`
+	Data   []epssAPIEntry `json:"data"`
 }
 
 type epssAPIEntry struct {
 	CVE        string `json:"cve"`
-	EPSS       string `json:"epss"`        // string-encoded float
-	Percentile string `json:"percentile"`  // string-encoded float
+	EPSS       string `json:"epss"`       // string-encoded float
+	Percentile string `json:"percentile"` // string-encoded float
 	Date       string `json:"date"`
 }
 
@@ -103,6 +117,15 @@ func (c *EPSSClient) LookupBatch(ctx context.Context, cveIDs []string) map[strin
 		"cve_count", len(toFetch), "cached", len(result))
 
 	for i := 0; i < len(toFetch); i += epssBatchSize {
+		// SECURITY (security-reviewer M3): once the parent ctx is cancelled
+		// we stop iterating immediately — without this, every subsequent
+		// batch fires off another request that the dialer cancels and we
+		// burn a Warn log line per batch instead of bailing out cleanly.
+		if err := ctx.Err(); err != nil {
+			c.logger.Warn("EPSS lookup cancelled mid-batch", "error", err,
+				"completed_batches", i/epssBatchSize, "remaining", len(toFetch)-i)
+			break
+		}
 		end := i + epssBatchSize
 		if end > len(toFetch) {
 			end = len(toFetch)
@@ -126,13 +149,14 @@ func (c *EPSSClient) fetchAndCacheBatch(ctx context.Context, cveIDs []string, ou
 	q.Set("cve", strings.Join(cveIDs, ","))
 	q.Set("envelope", "true")
 
-	reqURL := epssAPIBase + "?" + q.Encode()
+	reqURL := c.apiBase + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		c.logger.Warn("EPSS request build failed", "error", err)
 		return
 	}
 	req.Header.Set("User-Agent", "Nexara/1.0 CVE-scanner")
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -141,8 +165,8 @@ func (c *EPSSClient) fetchAndCacheBatch(ctx context.Context, cveIDs []string, ou
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		c.logger.Warn("EPSS returned non-200", "status", resp.StatusCode)
+	if err := checkUpstreamStatus(resp); err != nil {
+		c.logger.Warn("EPSS unexpected response", "error", err)
 		return
 	}
 
@@ -179,4 +203,3 @@ func (c *EPSSClient) fetchAndCacheBatch(ctx context.Context, cveIDs []string, ou
 		})
 	}
 }
-

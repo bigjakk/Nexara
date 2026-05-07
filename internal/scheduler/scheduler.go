@@ -205,6 +205,10 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 // (~1500 entries) and updated multiple times per week — refreshing hourly is
 // cheap and keeps the "actively exploited" signal current. Best-effort:
 // failures are logged but don't impact scans (existing cache stays usable).
+//
+// Reuses the scanner Engine's shared KEV client (and its underlying HTTP
+// client) so the hourly refresh and the per-cluster scan share a connection
+// pool, redirect policy, and SSRF dial guard.
 func (s *Scheduler) RunKEVRefresh(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -212,7 +216,7 @@ func (s *Scheduler) RunKEVRefresh(ctx context.Context) {
 		}
 	}()
 
-	kev := scanner.NewKEVClient(s.queries, s.logger.With("component", "kev-client"))
+	kev := s.cveScanner.KEVClient()
 	written, err := kev.Refresh(ctx)
 	if err != nil {
 		s.logger.Warn("KEV refresh failed", "error", err)

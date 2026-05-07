@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/http"
 	"strings"
 	"time"
 
@@ -29,11 +30,24 @@ func safeInt32(v int) int32 {
 }
 
 // Engine performs CVE scanning on Proxmox clusters.
+//
+// Per Finding A4 + A23 (Phase 3.8): the per-feed clients (Debian tracker, KEV,
+// EPSS) are constructed *once* here and reused across every cluster scan.
+// Before this refactor each `runScan` built a fresh CVEClient with an empty
+// trackerData map, forcing a new ~80 MB Debian tracker download per cluster.
+// Now the in-memory map is held under CVEClient.mu and revalidated against
+// cacheTTL on each scan; a stale or empty map falls back to the persisted
+// external_feed_cache row before reaching out to the network.
 type Engine struct {
 	queries       *db.Queries
 	encryptionKey string
 	logger        *slog.Logger
 	notifier      *Notifier // optional; if nil, post-scan notifications are skipped
+
+	httpClient *http.Client
+	cveClient  *CVEClient
+	kevClient  *KEVClient
+	epssClient *EPSSClient
 }
 
 // NewEngine creates a new CVE scanner engine. registry may be nil — when it
@@ -42,10 +56,16 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, r
 	if logger == nil {
 		logger = slog.Default()
 	}
+
+	httpClient := newScannerHTTPClient(120 * time.Second)
 	e := &Engine{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		logger:        logger,
+		httpClient:    httpClient,
+		cveClient:     NewCVEClient(queries, httpClient, logger.With("component", "cve-client")),
+		kevClient:     NewKEVClient(queries, httpClient, logger.With("component", "kev-client")),
+		epssClient:    NewEPSSClient(queries, httpClient, logger.With("component", "epss-client")),
 	}
 	if registry != nil {
 		n := NewNotifier(queries, registry, logger.With("component", "cve-notifier"))
@@ -54,6 +74,11 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, r
 	}
 	return e
 }
+
+// KEVClient exposes the engine's shared KEV client so the scheduler's hourly
+// refresh tick reuses the same connection pool / dial guard / signature hook
+// rather than spinning up a fresh client on every tick.
+func (e *Engine) KEVClient() *KEVClient { return e.kevClient }
 
 // ScanCluster performs a full CVE scan of all nodes in a cluster.
 // It creates its own scan record and returns the scan ID.
@@ -121,10 +146,12 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		return scanID, nil
 	}
 
-	// CVE data + risk enrichment clients.
-	cveClient := NewCVEClient(e.queries, e.logger.With("component", "cve-client"))
-	kevClient := NewKEVClient(e.queries, e.logger.With("component", "kev-client"))
-	epssClient := NewEPSSClient(e.queries, e.logger.With("component", "epss-client"))
+	// CVE data + risk enrichment clients are held on the Engine and reused
+	// across every cluster scan; their backing caches (tracker JSON in
+	// memory, KEV in kev_cache, EPSS in epss_cache) survive the call.
+	cveClient := e.cveClient
+	kevClient := e.kevClient
+	epssClient := e.epssClient
 
 	// Per-scan changelog cache. Proxmox's apt/changelog endpoint covers
 	// Proxmox-built packages (e.g. proxmox-kernel-*) that the Debian
