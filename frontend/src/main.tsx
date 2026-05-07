@@ -17,7 +17,9 @@ const queryClient = new QueryClient({
   },
 });
 
-// Initialize auth state from localStorage before render
+// Initialize auth state — calls /auth/refresh against the HttpOnly cookie
+// (or, on mobile, the body refresh_token) to validate the session before
+// rendering anything that depends on auth.
 void useAuthStore.getState().initialize();
 
 const rootEl = document.getElementById("root");

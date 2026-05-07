@@ -1,13 +1,34 @@
 import type {
   ApiError,
   AuthResponse,
-  RefreshRequest,
 } from "@/types/api";
 
-const TOKEN_KEY = "access_token";
-const REFRESH_KEY = "refresh_token";
-const EXPIRES_KEY = "expires_at";
-const USER_KEY = "user";
+// Cached user metadata for instant render after a hard refresh. Not security
+// sensitive — the JWT is the actual auth gate; this is just so the SPA can
+// show "Welcome, alice" before /auth/refresh resolves.
+const USER_KEY = "nexara_user";
+
+// Legacy localStorage keys used by builds before the cookie migration. We
+// purge any value at these keys on storeTokens / clearTokens so existing
+// users do not carry their pre-upgrade access/refresh tokens around in
+// JS-reachable storage indefinitely.
+const LEGACY_TOKEN_KEYS = ["access_token", "refresh_token", "expires_at", "user"] as const;
+
+function purgeLegacyTokenKeys() {
+  for (const key of LEGACY_TOKEN_KEYS) {
+    localStorage.removeItem(key);
+  }
+}
+
+// Access token lives in this module's closure only — never written to
+// localStorage or any DOM-reachable storage. The HttpOnly refresh cookie set
+// by the server is the persistent auth artefact across reloads.
+let accessTokenInMemory: string | null = null;
+let accessTokenExpiresAt = 0;
+
+// One-shot legacy cleanup on module load — covers the SPA boot path before
+// any login/refresh runs.
+purgeLegacyTokenKeys();
 
 let onAuthFailure: (() => void) | null = null;
 let refreshPromise: Promise<AuthResponse> | null = null;
@@ -16,31 +37,32 @@ export function setAuthFailureCallback(cb: () => void) {
   onAuthFailure = cb;
 }
 
-function getStoredToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+export function getAccessToken(): string | null {
+  return accessTokenInMemory;
 }
 
-function getStoredRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_KEY);
-}
-
-function getStoredExpiresAt(): number {
-  const v = localStorage.getItem(EXPIRES_KEY);
-  return v ? Number(v) : 0;
+/**
+ * Returns a non-stale access token, triggering a cookie-backed refresh if the
+ * current one is missing or about to expire. Use this for fetch/XHR calls that
+ * bypass `apiClient` (downloads, uploads, WebSocket URLs) so they participate
+ * in the same refresh dedupe logic.
+ */
+export async function getValidAccessToken(): Promise<string | null> {
+  return ensureValidToken();
 }
 
 export function storeTokens(res: AuthResponse) {
-  localStorage.setItem(TOKEN_KEY, res.access_token);
-  localStorage.setItem(REFRESH_KEY, res.refresh_token);
-  localStorage.setItem(EXPIRES_KEY, String(res.expires_at));
+  accessTokenInMemory = res.access_token;
+  accessTokenExpiresAt = res.expires_at;
   localStorage.setItem(USER_KEY, JSON.stringify(res.user));
+  purgeLegacyTokenKeys();
 }
 
 export function clearTokens() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(REFRESH_KEY);
-  localStorage.removeItem(EXPIRES_KEY);
+  accessTokenInMemory = null;
+  accessTokenExpiresAt = 0;
   localStorage.removeItem(USER_KEY);
+  purgeLegacyTokenKeys();
 }
 
 export function getStoredUser() {
@@ -54,16 +76,14 @@ export function getStoredUser() {
 }
 
 async function refreshTokens(): Promise<AuthResponse> {
-  const refreshToken = getStoredRefreshToken();
-  if (!refreshToken) {
-    throw new Error("No refresh token");
-  }
-
-  const body: RefreshRequest = { refresh_token: refreshToken };
+  // Body is empty — the HttpOnly cookie carries the refresh token. The mobile
+  // shell sends `X-Nexara-Device-Type: mobile` and a body refresh_token; web
+  // clients rely on the cookie alone.
   const res = await fetch("/api/v1/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    credentials: "same-origin",
+    body: "{}",
   });
 
   if (!res.ok) {
@@ -77,30 +97,38 @@ async function refreshTokens(): Promise<AuthResponse> {
   return data;
 }
 
+function refreshOnce(): Promise<AuthResponse> {
+  if (!refreshPromise) {
+    refreshPromise = refreshTokens().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
 async function ensureValidToken(): Promise<string | null> {
-  const token = getStoredToken();
-  if (!token) return null;
-
-  const expiresAt = getStoredExpiresAt();
-  const now = Math.floor(Date.now() / 1000);
-
-  // Proactively refresh if token expires within 60 seconds
-  if (expiresAt > 0 && expiresAt - now < 60) {
+  // First call after page load — try a cookie-based refresh to populate memory.
+  if (!accessTokenInMemory) {
     try {
-      // Deduplicate concurrent refresh calls
-      if (!refreshPromise) {
-        refreshPromise = refreshTokens().finally(() => {
-          refreshPromise = null;
-        });
-      }
-      const result = await refreshPromise;
-      return result.access_token;
+      const r = await refreshOnce();
+      return r.access_token;
     } catch {
       return null;
     }
   }
 
-  return token;
+  // Proactively refresh if the token expires within 60 seconds.
+  const now = Math.floor(Date.now() / 1000);
+  if (accessTokenExpiresAt > 0 && accessTokenExpiresAt - now < 60) {
+    try {
+      const r = await refreshOnce();
+      return r.access_token;
+    } catch {
+      return null;
+    }
+  }
+
+  return accessTokenInMemory;
 }
 
 class ApiClientError extends Error {
@@ -136,22 +164,19 @@ async function request<T>(
     method,
     headers,
     body: serializedBody,
+    credentials: "same-origin",
   });
 
   // 401 retry with refresh (single attempt)
   if (res.status === 401 && !skipAuth) {
     try {
-      if (!refreshPromise) {
-        refreshPromise = refreshTokens().finally(() => {
-          refreshPromise = null;
-        });
-      }
-      const refreshResult = await refreshPromise;
+      const refreshResult = await refreshOnce();
       headers["Authorization"] = `Bearer ${refreshResult.access_token}`;
       res = await fetch(path, {
         method,
         headers,
         body: serializedBody,
+        credentials: "same-origin",
       });
     } catch {
       clearTokens();

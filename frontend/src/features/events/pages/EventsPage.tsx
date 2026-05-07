@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getValidAccessToken } from "@/lib/api-client";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useEvents,
@@ -368,19 +369,18 @@ function EventRow({
   );
 }
 
-function triggerDownload(url: string, filename: string) {
-  const token = localStorage.getItem("access_token") ?? "";
-  void fetch(url, {
+async function triggerDownload(url: string, filename: string) {
+  const token = (await getValidAccessToken()) ?? "";
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
-  })
-    .then((res) => res.blob())
-    .then((blob) => {
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = filename;
-      link.click();
-      URL.revokeObjectURL(link.href);
-    });
+    credentials: "same-origin",
+  });
+  const blob = await res.blob();
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 
 export function EventsPage() {
@@ -438,7 +438,7 @@ export function EventsPage() {
       };
       const url = buildExportUrl(format, filters);
       const ext = format === "syslog" ? "log" : format;
-      triggerDownload(url, `audit-log.${ext}`);
+      void triggerDownload(url, `audit-log.${ext}`);
     },
     [clusterFilter, resourceFilter, userFilter, actionFilter, startTime, endTime],
   );

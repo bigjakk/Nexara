@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, getValidAccessToken } from "@/lib/api-client";
 
 export interface SettingResponse {
   id: string;
@@ -91,11 +91,12 @@ export function useUploadLogo() {
     mutationFn: async (file: File) => {
       const formData = new FormData();
       formData.append("logo", file);
-      const token = localStorage.getItem("access_token");
+      const token = await getValidAccessToken();
       const res = await fetch("/api/v1/settings/branding/logo", {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
+        credentials: "same-origin",
       });
       if (!res.ok) throw new Error("Upload failed");
       return (await res.json()) as { logo_url: string; filename: string };
@@ -112,11 +113,12 @@ export function useUploadFavicon() {
     mutationFn: async (file: File) => {
       const formData = new FormData();
       formData.append("favicon", file);
-      const token = localStorage.getItem("access_token");
+      const token = await getValidAccessToken();
       const res = await fetch("/api/v1/settings/branding/favicon", {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
+        credentials: "same-origin",
       });
       if (!res.ok) throw new Error("Upload failed");
       return (await res.json()) as { favicon_url: string; filename: string };

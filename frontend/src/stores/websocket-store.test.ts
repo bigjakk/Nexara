@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import * as apiClient from "@/lib/api-client";
 import { useWebSocketStore } from "./websocket-store";
 
 // Mock WebSocket
@@ -51,11 +52,15 @@ function getLastInstance(): MockWebSocket {
 }
 
 describe("websocket-store", () => {
+  let getAccessTokenSpy: import("vitest").MockInstance<() => string | null>;
+
   beforeEach(() => {
     vi.useFakeTimers();
     MockWebSocket.instances = [];
     vi.stubGlobal("WebSocket", MockWebSocket);
-    localStorage.setItem("access_token", "test-jwt-token");
+    getAccessTokenSpy = vi
+      .spyOn(apiClient, "getAccessToken")
+      .mockReturnValue("test-jwt-token");
 
     // Reset store state
     const store = useWebSocketStore.getState();
@@ -73,7 +78,7 @@ describe("websocket-store", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
-    localStorage.clear();
+    getAccessTokenSpy.mockRestore();
   });
 
   it("starts in disconnected state", () => {
@@ -99,7 +104,7 @@ describe("websocket-store", () => {
   });
 
   it("does not connect without a token", () => {
-    localStorage.removeItem("access_token");
+    getAccessTokenSpy.mockReturnValue(null);
     useWebSocketStore.getState().connect();
     expect(MockWebSocket.instances).toHaveLength(0);
   });

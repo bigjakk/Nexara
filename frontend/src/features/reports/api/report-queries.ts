@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, getValidAccessToken } from "@/lib/api-client";
 import type { ReportSchedule, ReportRun } from "@/types/api";
 
 // --- Report Schedules ---
@@ -109,10 +109,10 @@ export function useReportRunHTML(id: string) {
   return useQuery({
     queryKey: ["report-runs", id, "html"],
     queryFn: async () => {
+      const token = (await getValidAccessToken()) ?? "";
       const res = await fetch(`/api/v1/reports/runs/${id}/html`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("access_token") ?? ""}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
+        credentials: "same-origin",
       });
       if (!res.ok) throw new Error("Failed to fetch report HTML");
       return res.text();

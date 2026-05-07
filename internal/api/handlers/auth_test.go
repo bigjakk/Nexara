@@ -157,8 +157,10 @@ func TestRefresh_MissingToken(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	// Missing refresh token (no body, no cookie) is an auth state, not a
+	// bad request — see L1 in the security review for task 2.6.
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
 	}
 }
 

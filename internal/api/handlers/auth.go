@@ -236,6 +236,13 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 
 	perms := h.loadPerms(c, user.ID)
 
+	setRefreshCookie(c, refreshToken, h.jwtService.RefreshTokenTTL())
+
+	bodyRefreshToken := ""
+	if isMobileClient(c) {
+		bodyRefreshToken = refreshToken
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(authResponse{
 		User: authUserResponse{
 			ID:          user.ID,
@@ -244,7 +251,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 			Role:        user.Role,
 		},
 		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		RefreshToken: bodyRefreshToken,
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
@@ -406,6 +413,13 @@ func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string
 
 	perms := h.loadPerms(c, user.ID)
 
+	setRefreshCookie(c, refreshToken, h.jwtService.RefreshTokenTTL())
+
+	bodyRefreshToken := ""
+	if isMobileClient(c) {
+		bodyRefreshToken = refreshToken
+	}
+
 	return c.JSON(authResponse{
 		User: authUserResponse{
 			ID:          user.ID,
@@ -414,7 +428,7 @@ func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string
 			Role:        user.Role,
 		},
 		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		RefreshToken: bodyRefreshToken,
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
@@ -537,29 +551,43 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 	})
 }
 
-// Refresh exchanges a valid refresh token for a new token pair.
+// Refresh exchanges a valid refresh token for a new token pair. The refresh
+// token is read from the JSON body when present (mobile path) and otherwise
+// from the HttpOnly cookie set on prior auth responses (web path).
 func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 	var req refreshRequest
-	if err := c.BodyParser(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	// Body is optional — web clients post `{}` and rely on the cookie.
+	_ = c.BodyParser(&req)
+
+	if req.RefreshToken == "" {
+		req.RefreshToken = readRefreshTokenFromCookie(c)
 	}
 
 	if req.RefreshToken == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Refresh token is required")
+		// Auth state, not a malformed request — return 401 so the SPA's
+		// refresh-failure path treats it consistently with stale-cookie
+		// rejections, and so an attacker scanning for /auth/refresh cannot
+		// distinguish "no cookie" from "stale cookie" via the status code.
+		clearRefreshCookie(c)
+		return fiber.NewError(fiber.StatusUnauthorized, "Refresh token is required")
 	}
 
 	session, err := h.sessionManager.ValidateRefreshToken(c.Context(), req.RefreshToken)
 	if err != nil {
+		// Stale cookie → clear it so the browser stops sending it.
+		clearRefreshCookie(c)
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired refresh token")
 	}
 
 	user, err := h.queries.GetUserByID(c.Context(), session.UserID)
 	if err != nil {
+		clearRefreshCookie(c)
 		return fiber.NewError(fiber.StatusUnauthorized, "User not found")
 	}
 
 	if !user.IsActive {
 		_ = h.sessionManager.RevokeSession(c.Context(), session.ID)
+		clearRefreshCookie(c)
 		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
 	}
 
@@ -579,6 +607,13 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 
 	perms := h.loadPerms(c, user.ID)
 
+	setRefreshCookie(c, newRefreshToken, h.jwtService.RefreshTokenTTL())
+
+	bodyRefreshToken := ""
+	if isMobileClient(c) {
+		bodyRefreshToken = newRefreshToken
+	}
+
 	return c.JSON(authResponse{
 		User: authUserResponse{
 			ID:          user.ID,
@@ -587,21 +622,31 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 			Role:        user.Role,
 		},
 		AccessToken:  accessToken,
-		RefreshToken: newRefreshToken,
+		RefreshToken: bodyRefreshToken,
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
 }
 
-// Logout revokes the session identified by the refresh token in the request body.
+// Logout revokes the session identified by the refresh token (cookie for
+// browser clients, body for mobile clients) and clears the browser cookie.
+// The cookie is cleared unconditionally so a stale cookie does not linger
+// after logout even if the token is already invalid.
 func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 	var req logoutRequest
-	if err := c.BodyParser(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	// Body is optional for browser clients (cookie carries the token).
+	_ = c.BodyParser(&req)
 
 	if req.RefreshToken == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Refresh token is required")
+		req.RefreshToken = readRefreshTokenFromCookie(c)
+	}
+
+	// Always clear the cookie regardless of whether we found a token.
+	clearRefreshCookie(c)
+
+	if req.RefreshToken == "" {
+		// Nothing to revoke — treat as idempotent success.
+		return c.JSON(fiber.Map{"message": "Logged out successfully"})
 	}
 
 	session, err := h.sessionManager.ValidateRefreshToken(c.Context(), req.RefreshToken)
@@ -610,22 +655,27 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"message": "Logged out successfully"})
 	}
 
-	// Verify the session belongs to the authenticated user
-	userID, _ := c.Locals("user_id").(uuid.UUID)
-	if session.UserID != userID {
-		return fiber.NewError(fiber.StatusForbidden, "Session does not belong to authenticated user")
+	// Defence-in-depth: when an access token IS present, verify the session
+	// owner matches. With authOptional Logout supports an expired access
+	// token + valid cookie; we only enforce the cross-check when a caller
+	// happens to also send an Authorization header.
+	if userID, ok := c.Locals("user_id").(uuid.UUID); ok {
+		if session.UserID != userID {
+			return fiber.NewError(fiber.StatusForbidden, "Session does not belong to authenticated user")
+		}
 	}
 
 	if err := h.sessionManager.RevokeSession(c.Context(), session.ID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revoke session")
 	}
 
-	h.authAuditLog(c, userID, "logout", nil)
+	h.authAuditLog(c, session.UserID, "logout", nil)
 
 	return c.JSON(fiber.Map{"message": "Logged out successfully"})
 }
 
-// LogoutAll revokes all sessions for the current user.
+// LogoutAll revokes all sessions for the current user and clears the browser
+// refresh cookie.
 func (h *AuthHandler) LogoutAll(c *fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
@@ -635,6 +685,8 @@ func (h *AuthHandler) LogoutAll(c *fiber.Ctx) error {
 	if err := h.sessionManager.RevokeAllUserSessions(c.Context(), userID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revoke sessions")
 	}
+
+	clearRefreshCookie(c)
 
 	h.authAuditLog(c, userID, "logout_all", nil)
 

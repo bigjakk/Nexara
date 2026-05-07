@@ -2,7 +2,6 @@ import { create } from "zustand";
 import type {
   AuthResponse,
   LoginRequest,
-  LogoutRequest,
   RegisterRequest,
   TOTPRequiredResponse,
   TOTPVerifyLoginRequest,
@@ -55,6 +54,14 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   totpPendingToken: null,
 
   initialize: async () => {
+    // Register callback for forced logout on auth failure first so any
+    // refresh failure inside this method also routes through it.
+    setAuthFailureCallback(() => {
+      get().clearAuth();
+    });
+
+    // Cached user metadata only seeds optimistic UI; the cookie-backed
+    // /auth/refresh below is the actual authentication gate.
     const storedUser = getStoredUser();
     if (!storedUser) {
       set({ isInitialized: true });
@@ -64,12 +71,10 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     set({ isLoading: true });
 
     try {
-      // Try refreshing to validate the session
+      // Empty body — the HttpOnly refresh cookie carries the token.
       const res = await apiClient.postPublic<AuthResponse>(
         "/api/v1/auth/refresh",
-        {
-          refresh_token: localStorage.getItem("refresh_token"),
-        },
+        {},
       );
       storeTokens(res);
       set({
@@ -89,11 +94,6 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
         isInitialized: true,
       });
     }
-
-    // Register callback for forced logout on auth failure
-    setAuthFailureCallback(() => {
-      get().clearAuth();
-    });
   },
 
   login: async (req: LoginRequest) => {
@@ -210,14 +210,12 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   },
 
   logout: async () => {
-    const refreshToken = localStorage.getItem("refresh_token");
-    if (refreshToken) {
-      try {
-        const body: LogoutRequest = { refresh_token: refreshToken };
-        await apiClient.post("/api/v1/auth/logout", body);
-      } catch {
-        // Proceed with local cleanup even if server logout fails
-      }
+    // Empty body — the HttpOnly cookie carries the refresh token. Always hit
+    // /auth/logout so the server can revoke the session and clear the cookie.
+    try {
+      await apiClient.post("/api/v1/auth/logout", {});
+    } catch {
+      // Proceed with local cleanup even if server logout fails
     }
     clearTokens();
     set({

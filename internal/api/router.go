@@ -19,7 +19,14 @@ func (s *Server) setupRoutes() {
 		authGroup.Post("/register", s.authOptional(), s.authHandler.Register)
 		authGroup.Post("/login", s.authHandler.Login)
 		authGroup.Post("/refresh", s.authHandler.Refresh)
-		authGroup.Post("/logout", s.authRequired(), s.authHandler.Logout)
+		// Logout intentionally uses authOptional so a user with an expired
+		// access token (but a valid refresh cookie) can still revoke the
+		// server-side session. The cookie itself is the auth artefact for
+		// this endpoint; the user_id check below only fires when an access
+		// token IS present, defending against an attacker with a stolen
+		// cookie attempting to log out an unrelated user (covered by
+		// SameSite=Strict + same-origin SPA already, but defence-in-depth).
+		authGroup.Post("/logout", s.authOptional(), s.authHandler.Logout)
 		authGroup.Post("/logout-all", s.authRequired(), s.authHandler.LogoutAll)
 		authGroup.Post("/console-token", s.authRequired(), s.authHandler.ConsoleToken)
 

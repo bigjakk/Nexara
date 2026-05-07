@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getAccessToken } from "@/lib/api-client";
 import type {
   WsConnectionState,
   WsIncomingMessage,
@@ -31,11 +32,10 @@ function getReconnectDelay(attempt: number): number {
   return Math.min(1000 * Math.pow(2, attempt), MAX_RECONNECT_DELAY_MS);
 }
 
-function buildWsUrl(): string {
-  const token = localStorage.getItem("access_token");
+function buildWsUrl(token: string): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
-  return `${protocol}//${host}/ws?token=${encodeURIComponent(token ?? "")}`;
+  return `${protocol}//${host}/ws?token=${encodeURIComponent(token)}`;
 }
 
 export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
@@ -51,12 +51,12 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
       const state = get();
       if (state.socket) return;
 
-      const token = localStorage.getItem("access_token");
+      const token = getAccessToken();
       if (!token) return;
 
       set({ status: "connecting" });
 
-      const ws = new WebSocket(buildWsUrl());
+      const ws = new WebSocket(buildWsUrl(token));
 
       ws.onopen = () => {
         set({ status: "connected", reconnectAttempts: 0 });

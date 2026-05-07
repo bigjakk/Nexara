@@ -81,6 +81,22 @@ func (s *Server) setupMiddleware() {
 		},
 	}))
 
+	// Refresh-specific rate limiter — 30/min/IP. Tighter than the general
+	// limiter because /auth/refresh is below the general bypass; comfortably
+	// above any legitimate pattern (proactive refresh fires once every ~14
+	// minutes per session). Caps cookie-replay grinding without breaking
+	// normal browser sessions.
+	s.app.Use(limiter.New(limiter.Config{
+		Max:        30,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP() + ":refresh"
+		},
+		Next: func(c *fiber.Ctx) bool {
+			return c.Path() != "/api/v1/auth/refresh"
+		},
+	}))
+
 	// General rate limiting (in-memory storage).
 	// Skip auth endpoints so token refresh is never blocked — a 429 on
 	// /auth/refresh causes the frontend to interpret it as an auth failure
