@@ -18,7 +18,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus } from "lucide-react";
+import { Plus, ShieldAlert } from "lucide-react";
 import {
   useCreateNotificationChannel,
   useUpdateNotificationChannel,
@@ -503,9 +503,26 @@ function EmailFields({
           required
         />
       </div>
-      <div className="flex items-center gap-2">
-        <Switch checked={tls} onCheckedChange={setTls} />
-        <Label>Use TLS</Label>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Switch checked={tls} onCheckedChange={setTls} />
+          <Label>Use STARTTLS</Label>
+        </div>
+        {!tls && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+            <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <div className="space-y-1">
+              <p className="font-medium">Cleartext SMTP — local development only</p>
+              <p>
+                With STARTTLS off, credentials and message bodies are sent
+                unencrypted. The server will refuse cleartext sends to any
+                host that does not resolve to a loopback address (e.g.{" "}
+                <code>127.0.0.1</code>, <code>localhost</code>). Leave this
+                on for any production relay.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
       <div className="space-y-1">
         <Label>Subject Template (optional)</Label>

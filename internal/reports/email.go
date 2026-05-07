@@ -5,15 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/smtp"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/notifications"
 )
 
 type smtpConfig struct {
@@ -23,6 +21,14 @@ type smtpConfig struct {
 	Password string   `json:"password"`
 	From     string   `json:"from"`
 	To       []string `json:"to"`
+	TLS      *bool    `json:"tls,omitempty"`
+}
+
+func (c smtpConfig) useSTARTTLS() bool {
+	if c.TLS == nil {
+		return true
+	}
+	return *c.TLS
 }
 
 // SendReportEmail sends a generated report via an existing SMTP notification channel.
@@ -68,54 +74,25 @@ func SendReportEmail(ctx context.Context, queries *db.Queries, encryptionKey str
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=\"UTF-8\"\r\n\r\n%s",
 		safeFrom, safeTo, safeSubject, htmlBody)
 
-	// Resolve DNS and verify host does not point to a private address (SSRF protection).
-	ips, err := net.DefaultResolver.LookupHost(ctx, cfg.Host)
-	if err != nil || len(ips) == 0 {
-		return fmt.Errorf("cannot resolve SMTP host: %w", err)
-	}
-	for _, ipStr := range ips {
-		ip := net.ParseIP(ipStr)
-		if ip != nil && isPrivateOrReserved(ip) {
-			return fmt.Errorf("SMTP host resolves to a private/loopback address")
-		}
+	if err := notifications.SendSMTPMessage(ctx, notifications.SMTPSendOptions{
+		Host:        cfg.Host,
+		Port:        cfg.Port,
+		Username:    cfg.Username,
+		Password:    cfg.Password,
+		From:        cfg.From,
+		To:          toAddrs,
+		Message:     []byte(msg),
+		UseSTARTTLS: cfg.useSTARTTLS(),
+	}); err != nil {
+		return fmt.Errorf("smtp send: %w", err)
 	}
 
-	resolvedAddr := fmt.Sprintf("%s:%d", ips[0], cfg.Port)
-
-	errCh := make(chan error, 1)
-	go func() {
-		var auth smtp.Auth
-		if cfg.Username != "" {
-			auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
-		}
-		errCh <- smtp.SendMail(resolvedAddr, auth, cfg.From, toAddrs, []byte(msg))
-	}()
-
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return fmt.Errorf("smtp send: %w", err)
-		}
-		logger.Info("report email sent", "channel_id", channelID, "recipients", len(toAddrs))
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(30 * time.Second):
-		return fmt.Errorf("smtp send timed out")
-	}
+	logger.Info("report email sent", "channel_id", channelID, "recipients", len(toAddrs))
+	return nil
 }
 
 func sanitizeHeader(s string) string {
 	s = strings.ReplaceAll(s, "\r", "")
 	s = strings.ReplaceAll(s, "\n", "")
 	return s
-}
-
-func isPrivateOrReserved(ip net.IP) bool {
-	// Normalize IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
-	if v4 := ip.To4(); v4 != nil {
-		ip = v4
-	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
 }
