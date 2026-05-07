@@ -25,8 +25,8 @@ import (
 	"github.com/bigjakk/nexara/internal/collector"
 	"github.com/bigjakk/nexara/internal/config"
 	"github.com/bigjakk/nexara/internal/db"
-	"github.com/bigjakk/nexara/internal/debug"
 	dbgen "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/debug"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/scheduler"
 	"github.com/bigjakk/nexara/internal/ws"
@@ -145,6 +145,11 @@ func main() {
 		// review H1). If srv.RBACEngine() is nil here, the WS server
 		// will warn at startup and fall open on cluster channels.
 		RBACEngine: srv.RBACEngine(),
+		// Origin allow-list for /ws, /ws/console, /ws/vnc upgrades.
+		// Empty/wildcard preserves the legacy "accept any origin"
+		// behaviour and triggers a startup warning; explicit values
+		// enforce CSRF defence-in-depth at the upgrade boundary.
+		AllowedOrigins: ws.ParseAllowedOrigins(cfg.WSAllowedOrigins),
 	})
 	wsServer.RegisterRoutes(srv.App())
 

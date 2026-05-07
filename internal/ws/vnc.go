@@ -42,6 +42,9 @@ func NewVNCHandler(queries *db.Queries, encryptionKey string, jwt *auth.JWTServi
 // The flow matches ProxCenter's approach: connect to vncwebsocket with the ticket
 // in the URL query params, then bidirectionally forward all WebSocket messages.
 func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
+	// Cap any single browser→backend frame; see MaxBrowserConsoleMessageBytes.
+	conn.SetReadLimit(MaxBrowserConsoleMessageBytes)
+
 	clusterIDStr := conn.Query("cluster_id")
 	node := conn.Query("node")
 	vmidStr := conn.Query("vmid")

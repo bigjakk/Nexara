@@ -46,6 +46,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       PROXY_HEADER: ${PROXY_HEADER:-X-Forwarded-For}
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
     volumes:
       - ${DATA_DIR:-nexara-data}${DATA_DIR:+/data}:/data/nexara
     healthcheck:

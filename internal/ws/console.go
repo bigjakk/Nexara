@@ -22,6 +22,23 @@ import (
 	"github.com/google/uuid"
 )
 
+// MaxBrowserConsoleMessageBytes caps the size of a single WebSocket message
+// we'll accept from the browser side of a console / VNC proxy.
+//
+// This is the per-frame limit applied via fasthttp/websocket's SetReadLimit.
+// Hitting it sends a close frame to the peer and returns ErrReadLimit on the
+// next read — i.e. a single oversized frame cleanly tears down the
+// connection rather than letting the read loop allocate unbounded memory.
+//
+// Sized for the actual workload:
+//   - terminal keystrokes / resize JSON: tens of bytes
+//   - clipboard paste into a terminal: occasional KBs, not MBs
+//   - noVNC RFB client→server messages: <100 bytes (key/mouse events),
+//     ClientCutText for clipboard could exceed this on large pastes — at
+//     which point noVNC chunks or the user retries. 64 KiB is the standard
+//     industry cap and matches gorilla/websocket's recommended default.
+const MaxBrowserConsoleMessageBytes int64 = 64 * 1024
+
 // ConsoleHandler manages terminal proxy connections.
 type ConsoleHandler struct {
 	queries       *db.Queries
@@ -49,6 +66,10 @@ type consoleResizeMsg struct {
 
 // HandleConsole proxies a browser terminal session to Proxmox vncwebsocket.
 func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
+	// Cap any single browser→backend frame so a malicious tab cannot push a
+	// multi-megabyte payload at us. Applied before any ReadMessage call.
+	conn.SetReadLimit(MaxBrowserConsoleMessageBytes)
+
 	clusterIDStr := conn.Query("cluster_id")
 	node := conn.Query("node")
 	consoleType := conn.Query("type")

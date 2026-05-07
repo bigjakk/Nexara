@@ -39,12 +39,21 @@ type Config struct {
 	WSPort                 int           `envconfig:"WS_PORT" default:"8081"`
 	WSPingInterval         time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
 	WSPongTimeout          time.Duration `envconfig:"WS_PONG_TIMEOUT" default:"30s"`
-	DataDir                string        `envconfig:"DATA_DIR" default:"/data/nexara"`
-	MaxUploadSize          int64         `envconfig:"MAX_UPLOAD_SIZE" default:"16106127360"`
-	WSMaxConnections       int           `envconfig:"WS_MAX_CONNECTIONS" default:"1000"`
-	PprofEnabled           bool          `envconfig:"PPROF_ENABLED" default:"false"`
-	PprofPort              string        `envconfig:"PPROF_PORT" default:"6060"`
-	ChangelogRepo          string        `envconfig:"CHANGELOG_REPO" default:"bigjakk/Nexara"`
+	// WSAllowedOrigins is a comma-separated list of origins (scheme +
+	// host + optional port, e.g. "https://nexara.example.com") that the
+	// /ws, /ws/console, and /ws/vnc upgrade endpoints accept the
+	// `Origin:` request header from. A literal `*` or an empty value
+	// accepts all origins — appropriate for self-hosted dev/lab installs
+	// but logged at startup so production operators see the gap. Match
+	// is exact (no wildcard subdomain support) per
+	// gofiber/contrib/websocket's Origins field.
+	WSAllowedOrigins string `envconfig:"WS_ALLOWED_ORIGINS"`
+	DataDir          string `envconfig:"DATA_DIR" default:"/data/nexara"`
+	MaxUploadSize    int64  `envconfig:"MAX_UPLOAD_SIZE" default:"16106127360"`
+	WSMaxConnections int    `envconfig:"WS_MAX_CONNECTIONS" default:"1000"`
+	PprofEnabled     bool   `envconfig:"PPROF_ENABLED" default:"false"`
+	PprofPort        string `envconfig:"PPROF_PORT" default:"6060"`
+	ChangelogRepo    string `envconfig:"CHANGELOG_REPO" default:"bigjakk/Nexara"`
 }
 
 // NewMetricsTicker creates a time.Ticker using the configured metrics collection interval.

@@ -28,6 +28,12 @@ type Server struct {
 	// when nil, cluster channels fall open with a server-side warning
 	// log to support test fixtures.
 	rbacEngine *auth.RBACEngine
+	// allowedOrigins is the WebSocket upgrade Origin allow-list. nil or
+	// empty preserves the gofiber/contrib/websocket default of allowing
+	// all origins (the historical behaviour, suitable for dev/lab
+	// homelabs); a non-empty list enforces an exact-match check at
+	// upgrade time, rejecting cross-origin upgrades with HTTP 403.
+	allowedOrigins []string
 
 	pingInterval time.Duration
 	pongTimeout  time.Duration
@@ -41,6 +47,14 @@ type ServerConfig struct {
 	// permission check on cluster channels. If nil, the WS server logs
 	// a warning at startup and falls open on cluster subscriptions.
 	RBACEngine *auth.RBACEngine
+	// AllowedOrigins, when non-empty, enables strict Origin checking on
+	// the /ws, /ws/console, and /ws/vnc upgrade endpoints. Each entry is
+	// matched against the request's Origin header byte-for-byte (so the
+	// scheme + host + port must match exactly, e.g.
+	// `https://nexara.example.com`). A nil/empty value preserves the
+	// permissive default — appropriate for dev/lab installs but logged
+	// as a warning at startup so production deploys catch the gap.
+	AllowedOrigins []string
 }
 
 // NewServer creates a new WebSocket server.
@@ -57,6 +71,7 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		s.consoleHandler = opts[0].ConsoleHandler
 		s.vncHandler = opts[0].VNCHandler
 		s.rbacEngine = opts[0].RBACEngine
+		s.allowedOrigins = opts[0].AllowedOrigins
 	}
 
 	if s.rbacEngine == nil {
@@ -65,6 +80,13 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		// (security review H1 fix). Log loudly so misconfiguration
 		// is caught at startup rather than discovered post-deploy.
 		s.logger.Warn("ws server: no RBAC engine configured — cluster channel subscriptions will not be authorization-checked")
+	}
+
+	if len(s.allowedOrigins) == 0 {
+		// Permissive default — fine for self-hosted dev / lab installs,
+		// but log loudly so production operators see the gap and set
+		// WS_ALLOWED_ORIGINS to the SPA's public origin.
+		s.logger.Warn("ws server: WS_ALLOWED_ORIGINS not set — accepting WebSocket upgrades from any origin (set this in production for CSRF defence-in-depth)")
 	}
 
 	app := fiber.New(fiber.Config{
@@ -76,16 +98,16 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 	// Register console and VNC routes before generic /ws so they match first.
 	if s.consoleHandler != nil {
 		app.Use("/ws/console", s.authMiddleware)
-		app.Get("/ws/console", websocket.New(s.consoleHandler.HandleConsole, wsConfigWithSubprotocol()))
+		app.Get("/ws/console", websocket.New(s.consoleHandler.HandleConsole, wsConfigWithSubprotocol(s.allowedOrigins)))
 	}
 
 	if s.vncHandler != nil {
 		app.Use("/ws/vnc", s.authMiddleware)
-		app.Get("/ws/vnc", websocket.New(s.vncHandler.HandleVNC, wsConfigWithSubprotocol()))
+		app.Get("/ws/vnc", websocket.New(s.vncHandler.HandleVNC, wsConfigWithSubprotocol(s.allowedOrigins)))
 	}
 
 	app.Use("/ws", s.authMiddleware)
-	app.Get("/ws", websocket.New(s.handleWS, wsConfigWithSubprotocol()))
+	app.Get("/ws", websocket.New(s.handleWS, wsConfigWithSubprotocol(s.allowedOrigins)))
 
 	s.app = app
 	return s
@@ -113,16 +135,16 @@ func (s *Server) App() *fiber.App {
 func (s *Server) RegisterRoutes(app *fiber.App) {
 	if s.consoleHandler != nil {
 		app.Use("/ws/console", s.authMiddleware)
-		app.Get("/ws/console", websocket.New(s.consoleHandler.HandleConsole, wsConfigWithSubprotocol()))
+		app.Get("/ws/console", websocket.New(s.consoleHandler.HandleConsole, wsConfigWithSubprotocol(s.allowedOrigins)))
 	}
 
 	if s.vncHandler != nil {
 		app.Use("/ws/vnc", s.authMiddleware)
-		app.Get("/ws/vnc", websocket.New(s.vncHandler.HandleVNC, wsConfigWithSubprotocol()))
+		app.Get("/ws/vnc", websocket.New(s.vncHandler.HandleVNC, wsConfigWithSubprotocol(s.allowedOrigins)))
 	}
 
 	app.Use("/ws", s.authMiddleware)
-	app.Get("/ws", websocket.New(s.handleWS, wsConfigWithSubprotocol()))
+	app.Get("/ws", websocket.New(s.handleWS, wsConfigWithSubprotocol(s.allowedOrigins)))
 }
 
 // subprotocolNegotiationName is the static `Sec-WebSocket-Protocol` value the
@@ -143,10 +165,47 @@ const subprotocolTokenPrefix = "nexara.token."
 // `nexara.token` subprotocol so the upgrader echoes it back when the client
 // requests it. Without this, browsers would close the connection with code
 // 1006 because the server didn't acknowledge the requested subprotocol.
-func wsConfigWithSubprotocol() websocket.Config {
-	return websocket.Config{
+//
+// allowedOrigins, when non-empty, populates Config.Origins so the gofiber
+// CheckOrigin runs an exact-match check against the request's `Origin`
+// header (CSRF defence-in-depth on the upgrade path). nil/empty preserves
+// the package's permissive default of allowing all origins — see the
+// startup warning emitted from NewServer when this is the case.
+func wsConfigWithSubprotocol(allowedOrigins []string) websocket.Config {
+	cfg := websocket.Config{
 		Subprotocols: []string{subprotocolNegotiationName},
 	}
+	if len(allowedOrigins) > 0 {
+		// Copy so callers can't mutate the slice we hand to the upgrader.
+		cfg.Origins = append([]string(nil), allowedOrigins...)
+	}
+	return cfg
+}
+
+// ParseAllowedOrigins splits a comma-separated origin string (typically
+// the WS_ALLOWED_ORIGINS env var) into a list of origin entries. Whitespace
+// is trimmed around each entry, empty entries are dropped, and a literal
+// `*` short-circuits to nil — the gofiber/contrib/websocket convention for
+// "allow all origins" — so operators can keep their dev configs explicit
+// without needing a separate "no allow-list" toggle.
+//
+// Returns nil for an empty input or any input containing a `*` entry.
+func ParseAllowedOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var origins []string
+	for _, e := range strings.Split(raw, ",") {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		if e == "*" {
+			return nil
+		}
+		origins = append(origins, e)
+	}
+	return origins
 }
 
 // healthz returns a 200 OK for health checks.
