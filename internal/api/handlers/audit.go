@@ -13,6 +13,7 @@ import (
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/reports"
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
@@ -393,7 +394,7 @@ func (h *AuditHandler) exportCSV(c *fiber.Ctx, items []db.ListAuditLogAdvancedRo
 	w := csv.NewWriter(&buf)
 
 	// Header row.
-	_ = w.Write([]string{
+	_ = reports.WriteSafeCSVRow(w, []string{
 		"Timestamp", "Cluster", "User", "User Email",
 		"Resource Type", "Resource ID", "Resource Name", "Resource VMID",
 		"Action", "Details",
@@ -416,7 +417,7 @@ func (h *AuditHandler) exportCSV(c *fiber.Ctx, items []db.ListAuditLogAdvancedRo
 		if userName == "" {
 			userName = "(deleted user)"
 		}
-		_ = w.Write([]string{
+		_ = reports.WriteSafeCSVRow(w, []string{
 			a.CreatedAt.Format("2006-01-02T15:04:05Z"),
 			clusterName,
 			userName,

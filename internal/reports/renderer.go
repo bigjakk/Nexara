@@ -110,6 +110,33 @@ const htmlShell = `<!DOCTYPE html>
 </body>
 </html>`
 
+// EscapeCSVCell prefixes cells whose first byte would cause a spreadsheet
+// app to evaluate them as a formula with a single quote, neutralising the
+// CSV formula-injection class (CWE-1236).
+//
+// Triggers: '=', '+', '-', '@', '\t', '\r'. The check is on the first byte
+// because every trigger is ASCII (UTF-8 continuation bytes are >=0x80).
+// See https://owasp.org/www-community/attacks/CSV_Injection.
+func EscapeCSVCell(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
+}
+
+// WriteSafeCSVRow writes a row through EscapeCSVCell on every cell.
+func WriteSafeCSVRow(w *csv.Writer, row []string) error {
+	safe := make([]string, len(row))
+	for i, c := range row {
+		safe[i] = EscapeCSVCell(c)
+	}
+	return w.Write(safe)
+}
+
 // RenderCSV renders the report data as CSV text.
 // Each section becomes a block separated by an empty line.
 func RenderCSV(data *ReportData) (string, error) {
@@ -117,26 +144,26 @@ func RenderCSV(data *ReportData) (string, error) {
 	w := csv.NewWriter(&buf)
 
 	// Header row with report metadata
-	_ = w.Write([]string{"Report", data.Title})
-	_ = w.Write([]string{"Cluster", data.ClusterName})
-	_ = w.Write([]string{"Generated", data.GeneratedAt})
-	_ = w.Write([]string{"Period", data.TimeRange.StartTime + " to " + data.TimeRange.EndTime})
+	_ = WriteSafeCSVRow(w, []string{"Report", data.Title})
+	_ = WriteSafeCSVRow(w, []string{"Cluster", data.ClusterName})
+	_ = WriteSafeCSVRow(w, []string{"Generated", data.GeneratedAt})
+	_ = WriteSafeCSVRow(w, []string{"Period", data.TimeRange.StartTime + " to " + data.TimeRange.EndTime})
 	_ = w.Write([]string{}) // blank line
 
 	for i, s := range data.Sections {
 		if i > 0 {
 			_ = w.Write([]string{}) // section separator
 		}
-		_ = w.Write([]string{"# " + s.Title})
+		_ = WriteSafeCSVRow(w, []string{"# " + s.Title})
 		if len(s.Headers) > 0 {
-			_ = w.Write(s.Headers)
+			_ = WriteSafeCSVRow(w, s.Headers)
 		}
 		for _, row := range s.Rows {
 			vals := make([]string, len(s.Headers))
 			for j, h := range s.Headers {
 				vals[j] = row[h]
 			}
-			_ = w.Write(vals)
+			_ = WriteSafeCSVRow(w, vals)
 		}
 	}
 
