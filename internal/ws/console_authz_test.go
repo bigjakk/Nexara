@@ -91,6 +91,29 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 		t.Fatalf("generate vm vnc console token: %v", err)
 	}
 
+	// Expired tokens — minted with a negative TTL so `exp` is already in the
+	// past at validation time. Closes the A5 coverage gap: until 3.10, no
+	// test exercised the validator's expiry branch on the WS upgrade path,
+	// which is exactly the path Finding #1 lived in.
+	expiredConsoleToken, _, err := jwtSvc.GenerateConsoleToken(
+		userID, "user@example.com", "admin", consoleScope, -1*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("generate expired console token: %v", err)
+	}
+	expiredVMVNCToken, _, err := jwtSvc.GenerateConsoleToken(
+		userID, "user@example.com", "admin", vmVNCScope, -1*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("generate expired vm vnc console token: %v", err)
+	}
+	expiredHubToken, _, err := jwtSvc.GenerateWSHubToken(
+		userID, "user@example.com", "admin", -1*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("generate expired hub token: %v", err)
+	}
+
 	tests := []struct {
 		name       string
 		path       string
@@ -198,6 +221,51 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 			token:      consoleToken,
 			extra:      "&cluster_id=" + otherCluster + "&node=pve1&type=node_shell",
 			wantStatus: fiber.StatusForbidden,
+			wantReach:  false,
+		},
+		{
+			name:       "scoped console token with node mismatch rejected",
+			path:       "/ws/console",
+			token:      consoleToken,
+			extra:      "&cluster_id=" + targetCluster + "&node=pve2&type=node_shell",
+			wantStatus: fiber.StatusForbidden,
+			wantReach:  false,
+		},
+		{
+			name:       "scoped vm_vnc token with vmid mismatch rejected",
+			path:       "/ws/vnc",
+			token:      vmVNCToken,
+			extra:      "&cluster_id=" + targetCluster + "&node=pve1&vmid=999",
+			wantStatus: fiber.StatusForbidden,
+			wantReach:  false,
+		},
+		// Expired-token cases: ValidateAccessToken returns
+		// jwt.ErrTokenExpired, the middleware maps that to 401 + "invalid
+		// token" (same shape as a malformed-signature reject). All three
+		// scoped paths exercise this so a future jwt-lib upgrade or claim-
+		// validation refactor can't quietly drop the exp check on one path.
+		{
+			name:       "expired scoped console token rejected on /ws/console",
+			path:       "/ws/console",
+			token:      expiredConsoleToken,
+			extra:      "&cluster_id=" + targetCluster + "&node=pve1&type=node_shell",
+			wantStatus: fiber.StatusUnauthorized,
+			wantReach:  false,
+		},
+		{
+			name:       "expired scoped vnc token rejected on /ws/vnc",
+			path:       "/ws/vnc",
+			token:      expiredVMVNCToken,
+			extra:      "&cluster_id=" + targetCluster + "&node=pve1&vmid=100",
+			wantStatus: fiber.StatusUnauthorized,
+			wantReach:  false,
+		},
+		{
+			name:       "expired hub token rejected on /ws",
+			path:       "/ws",
+			token:      expiredHubToken,
+			extra:      "",
+			wantStatus: fiber.StatusUnauthorized,
 			wantReach:  false,
 		},
 		{
