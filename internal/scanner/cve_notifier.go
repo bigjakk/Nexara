@@ -71,7 +71,21 @@ func (n *Notifier) MaybeNotify(ctx context.Context, clusterID uuid.UUID, scanID 
 		// No config = feature disabled for this cluster.
 		return
 	}
-	if !cfg.Enabled || len(cfg.ChannelIds) == 0 {
+	if !cfg.Enabled {
+		return
+	}
+
+	// Read channels from the join table (4.8b read-flip). The legacy
+	// cfg.ChannelIds array is still dual-written by the handler but is no
+	// longer authoritative — when a notification_channel is deleted the FK
+	// cascade clears the join row but leaves the array referencing the
+	// stale UUID. Reading from the join table gives us the live set.
+	channelIDs, err := n.queries.ListCVENotificationConfigChannels(ctx, clusterID)
+	if err != nil {
+		n.logger.Warn("failed to list cve notification channels", "cluster_id", clusterID, "error", err)
+		return
+	}
+	if len(channelIDs) == 0 {
 		return
 	}
 
@@ -128,7 +142,7 @@ func (n *Notifier) MaybeNotify(ctx context.Context, clusterID uuid.UUID, scanID 
 	}
 
 	dispatched := 0
-	for _, channelID := range cfg.ChannelIds {
+	for _, channelID := range channelIDs {
 		if n.dispatch(ctx, channelID, payload) {
 			dispatched++
 		}

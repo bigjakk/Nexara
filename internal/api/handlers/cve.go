@@ -646,12 +646,23 @@ func (h *CVEHandler) GetCVENotificationConfig(c *fiber.Ctx) error {
 		})
 	}
 
+	// 4.8b read-flip: channel list comes from the join table, not the
+	// dual-written array. The array can hold stale UUIDs if a channel was
+	// deleted (FK on the join cleans up; array has none).
+	channelIDs, err := h.queries.ListCVENotificationConfigChannels(c.Context(), clusterID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to load notification channels")
+	}
+	if channelIDs == nil {
+		channelIDs = []uuid.UUID{}
+	}
+
 	resp := cveNotifyConfigResponse{
 		ClusterID:       cfg.ClusterID,
 		Enabled:         cfg.Enabled,
 		NotifyOnAct:     cfg.NotifyOnAct,
 		NotifyOnAttend:  cfg.NotifyOnAttend,
-		ChannelIDs:      cfg.ChannelIds,
+		ChannelIDs:      channelIDs,
 		CooldownMinutes: cfg.CooldownMinutes,
 	}
 	if cfg.LastNotifiedAt.Valid {
@@ -685,8 +696,18 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 		enabled = existing.Enabled
 		notifyOnAct = existing.NotifyOnAct
 		notifyOnAttend = existing.NotifyOnAttend
-		channelIDs = existing.ChannelIds
 		cooldownMinutes = existing.CooldownMinutes
+		// 4.8b read-flip: prefer the join table for the existing channel
+		// set. Falls back to the dual-written array on read error so a
+		// transient hiccup degrades gracefully rather than nuking the
+		// caller's saved channels with an empty default.
+		if existingChannels, lerr := h.queries.ListCVENotificationConfigChannels(c.Context(), clusterID); lerr == nil {
+			channelIDs = existingChannels
+		} else {
+			slog.Warn("update cve notification: join-table read failed, falling back to legacy array",
+				"cluster_id", clusterID, "error", lerr)
+			channelIDs = existing.ChannelIds
+		}
 	}
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -797,7 +818,10 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 		Enabled:         cfg.Enabled,
 		NotifyOnAct:     cfg.NotifyOnAct,
 		NotifyOnAttend:  cfg.NotifyOnAttend,
-		ChannelIDs:      cfg.ChannelIds,
+		// 4.8b read-flip: return the in-flight slice we just dual-wrote.
+		// The transaction has committed, so this matches the join table
+		// exactly and avoids a redundant SELECT.
+		ChannelIDs:      channelIDs,
 		CooldownMinutes: cfg.CooldownMinutes,
 	}
 	if cfg.LastNotifiedAt.Valid {
