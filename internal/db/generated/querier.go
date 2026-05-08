@@ -68,6 +68,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAlertRule(ctx context.Context, id uuid.UUID) error
 	DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) error
+	DeleteCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) error
 	DeleteCVEScan(ctx context.Context, id uuid.UUID) error
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
 	DeleteClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) error
@@ -212,6 +213,7 @@ type Querier interface {
 	InsertAlertRule(ctx context.Context, arg InsertAlertRuleParams) (AlertRule, error)
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertAuditLogWithSource(ctx context.Context, arg InsertAuditLogWithSourceParams) error
+	InsertCVENotificationConfigChannel(ctx context.Context, arg InsertCVENotificationConfigChannelParams) error
 	InsertCVEScan(ctx context.Context, arg InsertCVEScanParams) (CveScan, error)
 	InsertCVEScanNode(ctx context.Context, arg InsertCVEScanNodeParams) (CveScanNode, error)
 	InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnParams) (CveScanVuln, error)
@@ -251,6 +253,7 @@ type Querier interface {
 	ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error)
 	ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnrichedParams) ([]ListAuditLogEnrichedRow, error)
 	ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilteredParams) ([]AuditLog, error)
+	ListCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) ([]uuid.UUID, error)
 	ListCVEScanNodes(ctx context.Context, scanID uuid.UUID) ([]CveScanNode, error)
 	ListCVEScanVulns(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScanVulnsByNode(ctx context.Context, scanNodeID uuid.UUID) ([]CveScanVuln, error)

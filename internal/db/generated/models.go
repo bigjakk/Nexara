@@ -210,6 +210,11 @@ type CveNotificationConfig struct {
 	UpdatedAt             time.Time          `json:"updated_at"`
 }
 
+type CveNotificationConfigChannel struct {
+	ConfigID  uuid.UUID `json:"config_id"`
+	ChannelID uuid.UUID `json:"channel_id"`
+}
+
 type CveScan struct {
 	ID             uuid.UUID          `json:"id"`
 	ClusterID      uuid.UUID          `json:"cluster_id"`

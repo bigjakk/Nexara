@@ -194,7 +194,7 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
 		registry := notifications.BuildRegistry(s.queries)
-		s.cveHandler = handlers.NewCVEHandler(s.queries, cfg.EncryptionKey, s.eventPub, registry)
+		s.cveHandler = handlers.NewCVEHandler(s.db, s.queries, cfg.EncryptionKey, s.eventPub, registry)
 		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub, registry)
 		// The DLQ handler shares an alert engine instance with the
 		// scheduler's evaluator. The replay path delegates back to that

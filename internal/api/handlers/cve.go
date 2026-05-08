@@ -3,12 +3,18 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -18,6 +24,7 @@ import (
 
 // CVEHandler handles CVE scanning endpoints.
 type CVEHandler struct {
+	pool          *pgxpool.Pool
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
@@ -31,9 +38,13 @@ type CVEHandler struct {
 	engine *scanner.Engine
 }
 
-// NewCVEHandler creates a new CVE handler.
-func NewCVEHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher, registry *notifications.Registry) *CVEHandler {
+// NewCVEHandler creates a new CVE handler. pool is required for the dual-write
+// transaction that keeps cve_notification_configs.channel_ids and the new
+// cve_notification_config_channels join table in lockstep; passing nil is
+// supported for unit tests that exercise paths above the DB layer.
+func NewCVEHandler(pool *pgxpool.Pool, queries *db.Queries, encryptionKey string, eventPub *events.Publisher, registry *notifications.Registry) *CVEHandler {
 	return &CVEHandler{
+		pool:          pool,
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
@@ -710,16 +721,73 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 		}
 	}
 
-	cfg, err := h.queries.UpsertCVENotificationConfig(c.Context(), db.UpsertCVENotificationConfigParams{
-		ClusterID:       clusterID,
-		Enabled:         enabled,
-		NotifyOnAct:     notifyOnAct,
-		NotifyOnAttend:  notifyOnAttend,
-		ChannelIds:      channelIDs,
-		CooldownMinutes: cooldownMinutes,
-	})
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification config")
+	// Dual-write: array column AND the new join table land in a single
+	// transaction so the two representations can never disagree. Reads still
+	// come from the array in this release (4.8a); 4.8b flips reads to the
+	// join table; 4.8c drops the array. If the pool isn't wired (unit-test
+	// path) fall back to the legacy single-statement upsert.
+	var cfg db.CveNotificationConfig
+	if h.pool != nil {
+		tx, err := h.pool.Begin(c.Context())
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to start transaction")
+		}
+		defer func() {
+			rbCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer rbCancel()
+			if rbErr := tx.Rollback(rbCtx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+				slog.Warn("update cve notification config: rollback failed", "error", rbErr)
+			}
+		}()
+
+		qx := h.queries.WithTx(tx)
+		cfg, err = qx.UpsertCVENotificationConfig(c.Context(), db.UpsertCVENotificationConfigParams{
+			ClusterID:       clusterID,
+			Enabled:         enabled,
+			NotifyOnAct:     notifyOnAct,
+			NotifyOnAttend:  notifyOnAttend,
+			ChannelIds:      channelIDs,
+			CooldownMinutes: cooldownMinutes,
+		})
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification config")
+		}
+		if err := qx.DeleteCVENotificationConfigChannels(c.Context(), clusterID); err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification channels")
+		}
+		for _, chID := range channelIDs {
+			if err := qx.InsertCVENotificationConfigChannel(c.Context(), db.InsertCVENotificationConfigChannelParams{
+				ConfigID:  clusterID,
+				ChannelID: chID,
+			}); err != nil {
+				// Pre-flight GetNotificationChannel runs outside the tx; a
+				// concurrent channel delete between then and now races the
+				// FK insert. Surface as 409 with an actionable message
+				// instead of an opaque 500.
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
+					return fiber.NewError(fiber.StatusConflict,
+						"One or more channels were deleted while saving; refresh and retry")
+				}
+				return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification channels")
+			}
+		}
+		if err := tx.Commit(c.Context()); err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to commit notification config update")
+		}
+	} else {
+		var err error
+		cfg, err = h.queries.UpsertCVENotificationConfig(c.Context(), db.UpsertCVENotificationConfigParams{
+			ClusterID:       clusterID,
+			Enabled:         enabled,
+			NotifyOnAct:     notifyOnAct,
+			NotifyOnAttend:  notifyOnAttend,
+			ChannelIds:      channelIDs,
+			CooldownMinutes: cooldownMinutes,
+		})
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification config")
+		}
 	}
 
 	h.auditLog(c, clusterID, "cve_scan", clusterID.String(), "cve_notify_config_updated", nil)

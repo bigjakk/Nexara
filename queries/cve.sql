@@ -218,6 +218,20 @@ SET last_notified_at = now(),
     last_notified_signature = $2
 WHERE cluster_id = $1;
 
+-- name: DeleteCVENotificationConfigChannels :exec
+DELETE FROM cve_notification_config_channels WHERE config_id = $1;
+
+-- name: InsertCVENotificationConfigChannel :exec
+INSERT INTO cve_notification_config_channels (config_id, channel_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING;
+
+-- name: ListCVENotificationConfigChannels :many
+SELECT channel_id
+FROM cve_notification_config_channels
+WHERE config_id = $1
+ORDER BY channel_id;
+
 -- name: ListVulnsBySSVCInScan :many
 SELECT cve_id, package_name, risk_score
 FROM cve_scan_vulns

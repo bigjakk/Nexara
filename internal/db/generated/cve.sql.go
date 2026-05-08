@@ -13,6 +13,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteCVENotificationConfigChannels = `-- name: DeleteCVENotificationConfigChannels :exec
+DELETE FROM cve_notification_config_channels WHERE config_id = $1
+`
+
+func (q *Queries) DeleteCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteCVENotificationConfigChannels, configID)
+	return err
+}
+
 const deleteCVEScan = `-- name: DeleteCVEScan :exec
 DELETE FROM cve_scans WHERE id = $1
 `
@@ -307,6 +316,22 @@ func (q *Queries) GetLatestCVEScan(ctx context.Context, clusterID uuid.UUID) (Cv
 	return i, err
 }
 
+const insertCVENotificationConfigChannel = `-- name: InsertCVENotificationConfigChannel :exec
+INSERT INTO cve_notification_config_channels (config_id, channel_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type InsertCVENotificationConfigChannelParams struct {
+	ConfigID  uuid.UUID `json:"config_id"`
+	ChannelID uuid.UUID `json:"channel_id"`
+}
+
+func (q *Queries) InsertCVENotificationConfigChannel(ctx context.Context, arg InsertCVENotificationConfigChannelParams) error {
+	_, err := q.db.Exec(ctx, insertCVENotificationConfigChannel, arg.ConfigID, arg.ChannelID)
+	return err
+}
+
 const insertCVEScan = `-- name: InsertCVEScan :one
 INSERT INTO cve_scans (cluster_id, status, total_nodes)
 VALUES ($1, $2, $3)
@@ -448,6 +473,33 @@ func (q *Queries) InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnPa
 		&i.SsvcLabel,
 	)
 	return i, err
+}
+
+const listCVENotificationConfigChannels = `-- name: ListCVENotificationConfigChannels :many
+SELECT channel_id
+FROM cve_notification_config_channels
+WHERE config_id = $1
+ORDER BY channel_id
+`
+
+func (q *Queries) ListCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listCVENotificationConfigChannels, configID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var channel_id uuid.UUID
+		if err := rows.Scan(&channel_id); err != nil {
+			return nil, err
+		}
+		items = append(items, channel_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCVEScanNodes = `-- name: ListCVEScanNodes :many
