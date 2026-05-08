@@ -422,6 +422,10 @@ type Querier interface {
 	UpdateVMPool(ctx context.Context, arg UpdateVMPoolParams) error
 	UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error
 	UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) error
+	// 4.8c: channel_ids array dropped; the join table
+	// cve_notification_config_channels is now the single source of truth.
+	// The handler dual-writes the join table inside the same transaction
+	// as this upsert.
 	UpsertCVENotificationConfig(ctx context.Context, arg UpsertCVENotificationConfigParams) (CveNotificationConfig, error)
 	UpsertCVEScanSchedule(ctx context.Context, arg UpsertCVEScanScheduleParams) (CveScanSchedule, error)
 	UpsertClusterSSHCredentials(ctx context.Context, arg UpsertClusterSSHCredentialsParams) (ClusterSshCredential, error)

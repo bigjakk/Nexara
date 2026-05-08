@@ -75,11 +75,8 @@ func (n *Notifier) MaybeNotify(ctx context.Context, clusterID uuid.UUID, scanID 
 		return
 	}
 
-	// Read channels from the join table (4.8b read-flip). The legacy
-	// cfg.ChannelIds array is still dual-written by the handler but is no
-	// longer authoritative — when a notification_channel is deleted the FK
-	// cascade clears the join row but leaves the array referencing the
-	// stale UUID. Reading from the join table gives us the live set.
+	// Read channels from the join table — the single source of truth.
+	// The legacy cfg.ChannelIds array column was dropped in 4.8c (mig 058).
 	channelIDs, err := n.queries.ListCVENotificationConfigChannels(ctx, clusterID)
 	if err != nil {
 		n.logger.Warn("failed to list cve notification channels", "cluster_id", clusterID, "error", err)

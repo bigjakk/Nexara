@@ -202,7 +202,6 @@ type CveNotificationConfig struct {
 	Enabled               bool               `json:"enabled"`
 	NotifyOnAct           bool               `json:"notify_on_act"`
 	NotifyOnAttend        bool               `json:"notify_on_attend"`
-	ChannelIds            []uuid.UUID        `json:"channel_ids"`
 	CooldownMinutes       int32              `json:"cooldown_minutes"`
 	LastNotifiedAt        pgtype.Timestamptz `json:"last_notified_at"`
 	LastNotifiedSignature string             `json:"last_notified_signature"`

@@ -697,17 +697,17 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 		notifyOnAct = existing.NotifyOnAct
 		notifyOnAttend = existing.NotifyOnAttend
 		cooldownMinutes = existing.CooldownMinutes
-		// 4.8b read-flip: prefer the join table for the existing channel
-		// set. Falls back to the dual-written array on read error so a
-		// transient hiccup degrades gracefully rather than nuking the
-		// caller's saved channels with an empty default.
-		if existingChannels, lerr := h.queries.ListCVENotificationConfigChannels(c.Context(), clusterID); lerr == nil {
-			channelIDs = existingChannels
-		} else {
-			slog.Warn("update cve notification: join-table read failed, falling back to legacy array",
-				"cluster_id", clusterID, "error", lerr)
-			channelIDs = existing.ChannelIds
+		// 4.8c: the legacy array column is gone; the join table is the
+		// single source of truth for the existing channel set. A read
+		// error here surfaces as a 500 because there's no other
+		// representation to fall back to — losing the existing channels
+		// silently and rewriting the row with an empty default is worse
+		// than a transient failure that the user can retry.
+		existingChannels, lerr := h.queries.ListCVENotificationConfigChannels(c.Context(), clusterID)
+		if lerr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to load existing notification channels")
 		}
+		channelIDs = existingChannels
 	}
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -742,11 +742,11 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 		}
 	}
 
-	// Dual-write: array column AND the new join table land in a single
-	// transaction so the two representations can never disagree. Reads still
-	// come from the array in this release (4.8a); 4.8b flips reads to the
-	// join table; 4.8c drops the array. If the pool isn't wired (unit-test
-	// path) fall back to the legacy single-statement upsert.
+	// 4.8c: array column dropped; the join table is the single source of
+	// truth. The upsert + clear children + per-row insert still all run in
+	// one transaction so the config row and its channels commit together.
+	// If the pool isn't wired (unit-test path) fall back to the legacy
+	// single-statement upsert without a join-table write.
 	var cfg db.CveNotificationConfig
 	if h.pool != nil {
 		tx, err := h.pool.Begin(c.Context())
@@ -767,7 +767,6 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 			Enabled:         enabled,
 			NotifyOnAct:     notifyOnAct,
 			NotifyOnAttend:  notifyOnAttend,
-			ChannelIds:      channelIDs,
 			CooldownMinutes: cooldownMinutes,
 		})
 		if err != nil {
@@ -803,7 +802,6 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 			Enabled:         enabled,
 			NotifyOnAct:     notifyOnAct,
 			NotifyOnAttend:  notifyOnAttend,
-			ChannelIds:      channelIDs,
 			CooldownMinutes: cooldownMinutes,
 		})
 		if err != nil {

@@ -13,33 +13,36 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	gendb "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/migrations"
 )
 
-// TestMigration058_JoinTableIsAuthoritativeAfterArrayStales is the
-// data-preservation regression lock for Phase 4.8b — the read-flip release.
+// TestMigration058_DropArrayRoundTripsViaJoinTable is the data-preservation
+// regression lock for Phase 4.8c — the data-loss release that drops
+// cve_notification_configs.channel_ids.
 //
-// Scenario: 4.8a's UAC exposed the pre-existing array-staleness bug — when
-// a notification_channel is deleted, the FK on the join table cascades the
-// row out, but the cve_notification_configs.channel_ids array (which has
-// no FK) still references the deleted UUID. Reads from the array would
-// dispatch (or attempt to dispatch) to the deleted channel.
+// Per the stricter rollback bar set 2026-05-08, every migration that
+// moves user data ships a Go test that round-trips real seed rows. The
+// 4.8c down migration rebuilds the dropped column via array_agg over the
+// join table; if the join table held the same channels at the moment
+// 4.8c was applied (which the dual-write of 4.8a guarantees, and which
+// 4.8b's read-flip locks in), the rebuild on rollback is exact. This
+// test exercises that round-trip end-to-end.
 //
-// 4.8b's read-flip closes that window. This test simulates the staleness
-// scenario at the SQL level (no need to involve the dispatcher itself):
-//   - seed an array with [u1, u2] AND a join table with only [u2] (the
-//     state the system enters when channel u1 is deleted via the API)
-//   - assert the join-table SELECT returns exactly {u2}, not {u1, u2}
+// Sequence:
 //
-// Without the read-flip the dispatch path would see both UUIDs and try to
-// dispatch to the dead one. This test is the regression lock — if a
-// future commit reverts a read site to cfg.ChannelIds, the dispatcher
-// behaviour diverges from what this test implies and the bug returns.
+//   1. migrate up to 57 (the 4.8a state — both representations exist)
+//   2. seed config + 2 channels + populate BOTH the array and the join
+//      table with [u1, u2] (mimics what 4.8a's transactional dual-write
+//      would have produced)
+//   3. migrate up to 58 (the 4.8c state — array column dropped, join
+//      table is the only source of truth). Assert the column is gone
+//      and the join table still holds [u1, u2].
+//   4. migrate down to 57 (the rollback path). Assert the column is
+//      back AND its contents match [u1, u2] — rebuilt by the .down.sql
+//      via array_agg over the join table.
 //
-// Skipped unless NEXARA_TEST_DB_URL is set (same gating as
-// TestMigration057_RoundTripPreservesChannelIds).
-func TestMigration058_JoinTableIsAuthoritativeAfterArrayStales(t *testing.T) {
+// Skipped unless NEXARA_TEST_DB_URL is set.
+func TestMigration058_DropArrayRoundTripsViaJoinTable(t *testing.T) {
 	dbURL := os.Getenv("NEXARA_TEST_DB_URL")
 	if dbURL == "" {
 		t.Skip("NEXARA_TEST_DB_URL not set; skipping migration round-trip test")
@@ -66,28 +69,28 @@ func TestMigration058_JoinTableIsAuthoritativeAfterArrayStales(t *testing.T) {
 	}
 	defer m.Close()
 
-	// Walk all the way forward — 4.8b is code-only, no migration of its
-	// own, so the schema state we run against is the post-57 join table.
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
-	}
-
-	// Different UUIDs from the 057 test so a parallel run doesn't conflict.
-	userID := uuid.MustParse("55555555-5555-4555-8555-555555555555")
-	clusterID := uuid.MustParse("66666666-6666-4666-8666-666666666666")
-	liveChannel := uuid.MustParse("77777777-7777-4777-8777-777777777777")
-	staleChannel := uuid.MustParse("88888888-8888-4888-8888-888888888888")
+	// Seed UUIDs that don't collide with the 057 test's fixtures.
+	userID := uuid.MustParse("99999999-9999-4999-8999-999999999999")
+	clusterID := uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	channelA := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+	channelB := uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
 
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM cve_notification_config_channels WHERE config_id = $1`, clusterID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM cve_notification_configs WHERE cluster_id = $1`, clusterID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM notification_channels WHERE id = $1`, liveChannel)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM notification_channels WHERE id IN ($1, $2)`, channelA, channelB)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM clusters WHERE id = $1`, clusterID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, userID)
 	})
 
+	// Step 1: migrate up to 57 (post-4.8a, pre-4.8c).
+	if err := m.Migrate(57); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate up to 57: %v", err)
+	}
+
+	// Step 2: seed parents and the dual-written state (array AND join).
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO users (id, email, password_hash) VALUES ($1, $2, '')
 		ON CONFLICT (id) DO NOTHING`,
@@ -101,59 +104,101 @@ func TestMigration058_JoinTableIsAuthoritativeAfterArrayStales(t *testing.T) {
 		clusterID); err != nil {
 		t.Fatalf("seed cluster: %v", err)
 	}
-	// Only the LIVE channel exists in notification_channels. The stale
-	// UUID never had (or has had and lost) a real channel — that's the
-	// key staleness condition: the array references a UUID that the join
-	// table can't legally reference.
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO notification_channels (id, name, channel_type, config_encrypted, created_by)
-		VALUES ($1, 'mig58-live', 'webhook', '', $2)
+		VALUES ($1, 'mig58-A', 'webhook', '', $3),
+		       ($2, 'mig58-B', 'webhook', '', $3)
 		ON CONFLICT (id) DO NOTHING`,
-		liveChannel, userID); err != nil {
-		t.Fatalf("seed channel: %v", err)
+		channelA, channelB, userID); err != nil {
+		t.Fatalf("seed channels: %v", err)
 	}
 
-	// Seed the divergent state: array holds BOTH UUIDs, join table holds
-	// only the live one. This is exactly the post-cascade-delete state.
+	// Dual-write seed: the row's array column AND the join table both
+	// have the same two UUIDs — exactly what a 4.8a or 4.8b binary
+	// would have produced via the handler's transactional upsert.
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO cve_notification_configs (cluster_id, enabled, channel_ids)
 		VALUES ($1, TRUE, ARRAY[$2, $3]::UUID[])`,
-		clusterID, liveChannel, staleChannel); err != nil {
+		clusterID, channelA, channelB); err != nil {
 		t.Fatalf("seed cve_notification_configs row: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO cve_notification_config_channels (config_id, channel_id) VALUES ($1, $2)`,
-		clusterID, liveChannel); err != nil {
-		t.Fatalf("seed join row: %v", err)
+		INSERT INTO cve_notification_config_channels (config_id, channel_id)
+		VALUES ($1, $2), ($1, $3)`,
+		clusterID, channelA, channelB); err != nil {
+		t.Fatalf("seed join rows: %v", err)
 	}
 
-	// 4.8b's load-bearing check: ListCVENotificationConfigChannels (the
-	// query the dispatch path now uses) returns ONLY the live channel.
-	// Pre-4.8b code would have read cfg.ChannelIds and dispatched to both,
-	// landing on the stale UUID's missing-channel error path on every scan.
-	queries := gendb.New(pool)
-	got, err := queries.ListCVENotificationConfigChannels(ctx, clusterID)
+	// Step 3: migrate up to 58. The column should be gone and the join
+	// table should still hold both channels.
+	if err := m.Migrate(58); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate up to 58: %v", err)
+	}
+
+	var hasChannelIDsColumn bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'cve_notification_configs'
+			  AND column_name = 'channel_ids'
+		)`).Scan(&hasChannelIDsColumn); err != nil {
+		t.Fatalf("probe channel_ids column post-up: %v", err)
+	}
+	if hasChannelIDsColumn {
+		t.Fatalf("channel_ids column still exists after migrate up to 58")
+	}
+
+	wantSorted := sortedUUIDs([]uuid.UUID{channelA, channelB})
+	var joinChannels []uuid.UUID
+	rows, err := pool.Query(ctx, `
+		SELECT channel_id FROM cve_notification_config_channels
+		WHERE config_id = $1 ORDER BY channel_id`, clusterID)
 	if err != nil {
-		t.Fatalf("ListCVENotificationConfigChannels: %v", err)
+		t.Fatalf("query join table post-up: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("got %d channels from join table, want 1 (live only). got=%v", len(got), got)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			t.Fatalf("scan join row: %v", err)
+		}
+		joinChannels = append(joinChannels, id)
 	}
-	if got[0] != liveChannel {
-		t.Fatalf("got channel %v, want liveChannel %v", got[0], liveChannel)
+	rows.Close()
+	if !uuidSlicesEqual(sortedUUIDs(joinChannels), wantSorted) {
+		t.Fatalf("join table after migrate up to 58: got %v, want %v",
+			sortedUUIDs(joinChannels), wantSorted)
 	}
 
-	// Sanity check: the array column is unchanged (still holds both UUIDs).
-	// 4.8b is dual-write/single-read; the array stays around as a fallback
-	// until 4.8c drops it. If this assertion ever flips, the dual-write
-	// invariant has been silently violated.
-	var arrayChannels []uuid.UUID
+	// Step 4: migrate back down to 57. The column should be back AND
+	// its contents must match — rebuilt via array_agg over the join
+	// table. This is the load-bearing rollback assertion: if the down
+	// migration's array_agg shape ever drifts, real installations
+	// rolling back from 4.8c lose data.
+	if err := m.Migrate(57); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate down to 57: %v", err)
+	}
+
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'cve_notification_configs'
+			  AND column_name = 'channel_ids'
+		)`).Scan(&hasChannelIDsColumn); err != nil {
+		t.Fatalf("probe channel_ids column post-down: %v", err)
+	}
+	if !hasChannelIDsColumn {
+		t.Fatalf("channel_ids column not restored after migrate down to 57")
+	}
+
+	var rebuiltArray []uuid.UUID
 	if err := pool.QueryRow(ctx,
 		`SELECT channel_ids FROM cve_notification_configs WHERE cluster_id = $1`,
-		clusterID).Scan(&arrayChannels); err != nil {
-		t.Fatalf("read array: %v", err)
+		clusterID).Scan(&rebuiltArray); err != nil {
+		t.Fatalf("read rebuilt array post-down: %v", err)
 	}
-	if len(arrayChannels) != 2 {
-		t.Fatalf("array column lost data: got %v, want 2 entries", arrayChannels)
+	if !uuidSlicesEqual(sortedUUIDs(rebuiltArray), wantSorted) {
+		t.Fatalf("rebuilt channel_ids after migrate down: got %v, want %v (data lost on rollback!)",
+			sortedUUIDs(rebuiltArray), wantSorted)
 	}
 }

@@ -198,16 +198,19 @@ SELECT * FROM epss_cache WHERE cve_id = ANY($1::text[]);
 SELECT * FROM cve_notification_configs WHERE cluster_id = $1;
 
 -- name: UpsertCVENotificationConfig :one
+-- 4.8c: channel_ids array dropped; the join table
+-- cve_notification_config_channels is now the single source of truth.
+-- The handler dual-writes the join table inside the same transaction
+-- as this upsert.
 INSERT INTO cve_notification_configs (
     cluster_id, enabled, notify_on_act, notify_on_attend,
-    channel_ids, cooldown_minutes, updated_at
+    cooldown_minutes, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, now())
+VALUES ($1, $2, $3, $4, $5, now())
 ON CONFLICT (cluster_id) DO UPDATE SET
     enabled = EXCLUDED.enabled,
     notify_on_act = EXCLUDED.notify_on_act,
     notify_on_attend = EXCLUDED.notify_on_attend,
-    channel_ids = EXCLUDED.channel_ids,
     cooldown_minutes = EXCLUDED.cooldown_minutes,
     updated_at = now()
 RETURNING *;
