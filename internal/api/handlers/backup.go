@@ -37,8 +37,22 @@ func (h *BackupHandler) auditLog(c *fiber.Ctx, resourceID, action string, detail
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", resourceID, action, details)
 }
 
-// createPBSClient creates a PBS client for the given server ID.
+// createPBSClient creates a PBS client for the given server ID. Routes
+// through the per-server Proxmox client cache when one is available
+// (set on the request via api/middleware), falling back to per-call
+// construction otherwise.
 func (h *BackupHandler) createPBSClient(c *fiber.Ctx, pbsServerID uuid.UUID) (*proxmox.PBSClient, error) {
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		client, err := cache.GetPBS(c.Context(), pbsServerID)
+		if err == nil {
+			return client, nil
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fiber.NewError(fiber.StatusNotFound, "PBS server not found")
+		}
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create PBS client")
+	}
+
 	server, err := h.queries.GetPBSServer(c.Context(), pbsServerID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -763,32 +777,10 @@ func (h *BackupHandler) ListSnapshotsByBackupID(c *fiber.Ctx) error {
 
 // --- Backup Job endpoints (PVE vzdump) ---
 
-// createPVEClient creates a PVE client for the given cluster ID.
+// createPVEClient creates a PVE client for the given cluster ID. Routes
+// through the per-server Proxmox client cache when one is available.
 func (h *BackupHandler) createPVEClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "Cluster not found")
-		}
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	client, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        60 * time.Second,
-	})
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
-	}
-	return client, nil
+	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 60*time.Second)
 }
 
 type triggerBackupRequest struct {
@@ -1110,9 +1102,9 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get PBS server")
 	}
 
-	// Create PVE client for the target cluster.
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
+	// Verify the target cluster exists. The actual *Client is fetched
+	// from the cache below via CreateProxmoxClient.
+	if _, err := h.queries.GetCluster(c.Context(), clusterID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusNotFound, "Cluster not found")
 		}
@@ -1139,20 +1131,9 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 	backupTime := time.Unix(req.BackupTime, 0).UTC()
 	archive := pveStorageName + ":backup/" + req.BackupType + "/" + req.BackupID + "/" + backupTime.Format("2006-01-02T15:04:05Z")
 
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
+	pveClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 60*time.Second)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	pveClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        60 * time.Second,
-	})
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
+		return err
 	}
 
 	// When overwriting an existing VM, PVE requires the VM to be on the same

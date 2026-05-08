@@ -131,3 +131,71 @@ func TestDecryptTooShort(t *testing.T) {
 		t.Errorf("Decrypt() with short data: got %v, want %v", err, ErrDecryptionFailed)
 	}
 }
+
+// TestAEADCache_ReusesAEADAcrossCalls ensures repeated encrypt/decrypt with
+// the same hex key reuses one cipher.AEAD instance. The cache is the load-
+// bearing perf optimisation behind the Phase 4.1 Proxmox client cache —
+// regression here would re-introduce the per-call AES key schedule cost.
+func TestAEADCache_ReusesAEADAcrossCalls(t *testing.T) {
+	// Use a fresh key so the test doesn't see entries planted by other tests
+	// (the cache is package-scoped). 64-hex-char distinct from validKey.
+	cacheTestKey := "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+
+	first, err := aeadFor(cacheTestKey)
+	if err != nil {
+		t.Fatalf("aeadFor() error = %v", err)
+	}
+	second, err := aeadFor(cacheTestKey)
+	if err != nil {
+		t.Fatalf("aeadFor() error = %v", err)
+	}
+	if first != second {
+		t.Errorf("aeadFor returned a fresh AEAD on the second call; cache is not active")
+	}
+
+	// Round-trip Encrypt/Decrypt also has to keep working through the cache.
+	encrypted, err := Encrypt("payload", cacheTestKey)
+	if err != nil {
+		t.Fatalf("Encrypt() error = %v", err)
+	}
+	decrypted, err := Decrypt(encrypted, cacheTestKey)
+	if err != nil {
+		t.Fatalf("Decrypt() error = %v", err)
+	}
+	if decrypted != "payload" {
+		t.Errorf("round-trip mismatch through cache: got %q, want %q", decrypted, "payload")
+	}
+}
+
+// TestAEADCache_DifferentKeysGetDifferentAEADs locks down per-key isolation:
+// a stale entry under one key must not be returned for a different key
+// (would silently decrypt with the wrong AEAD or panic if we ever colliding-
+// hashed).
+func TestAEADCache_DifferentKeysGetDifferentAEADs(t *testing.T) {
+	keyA := "1111111111111111111111111111111111111111111111111111111111111111"
+	keyB := "2222222222222222222222222222222222222222222222222222222222222222"
+	a, err := aeadFor(keyA)
+	if err != nil {
+		t.Fatalf("aeadFor(A) error = %v", err)
+	}
+	b, err := aeadFor(keyB)
+	if err != nil {
+		t.Fatalf("aeadFor(B) error = %v", err)
+	}
+	if a == b {
+		t.Errorf("aeadFor returned the same AEAD for two distinct keys")
+	}
+}
+
+// TestAEADCache_RejectsInvalidKeyWithoutCaching ensures a malformed hex key
+// errors out and is not poisoning the cache with a nil entry that a later
+// (correctly-formed) call against the same string could surface.
+func TestAEADCache_RejectsInvalidKeyWithoutCaching(t *testing.T) {
+	bad := "not-hex"
+	if _, err := aeadFor(bad); err != ErrInvalidKey {
+		t.Errorf("aeadFor(bad) = %v, want %v", err, ErrInvalidKey)
+	}
+	if _, ok := aeadCache.Load(bad); ok {
+		t.Errorf("aeadCache stored an entry for an invalid key; should fail open of cache")
+	}
+}

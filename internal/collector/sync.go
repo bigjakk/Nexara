@@ -146,6 +146,7 @@ type Syncer struct {
 	encryptionKey    string
 	clientFactory    ClientFactory
 	pbsClientFactory PBSClientFactory
+	cache            *proxmox.ClientCache // nil-safe; tests may leave unset
 	healthMonitor    *HealthMonitor
 	eventPub         *events.Publisher
 	logger           *slog.Logger
@@ -168,6 +169,59 @@ func (s *Syncer) SetEventPublisher(pub *events.Publisher) {
 	s.eventPub = pub
 }
 
+// SetProxmoxCache attaches the per-server cache so SyncCluster can reuse
+// cached *Client instances across ticks. Nil-safe: when unset, the
+// Syncer falls back to clientFactory + per-call construction.
+func (s *Syncer) SetProxmoxCache(cache *proxmox.ClientCache) {
+	s.cache = cache
+}
+
+// proxmoxClient returns a ProxmoxClient for the given cluster, preferring
+// the shared cache when available so collector ticks reuse the same
+// *http.Transport idle-conn pool. Falls through to the legacy
+// clientFactory path when the cache is nil (test scaffolding).
+func (s *Syncer) proxmoxClient(ctx context.Context, cluster db.Cluster) (ProxmoxClient, error) {
+	if s.cache != nil {
+		client, err := s.cache.Get(ctx, cluster.ID)
+		if err == nil {
+			return client, nil
+		}
+		s.logger.Warn("collector: proxmox cache get failed, building per-call",
+			"cluster_id", cluster.ID, "error", err)
+	}
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, s.encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt token: %w", err)
+	}
+	client, err := s.clientFactory(cluster.ApiUrl, cluster.TokenID, tokenSecret, cluster.TlsFingerprint)
+	if err != nil {
+		return nil, fmt.Errorf("create client: %w", err)
+	}
+	return client, nil
+}
+
+// pbsProxmoxClient returns a PBSProxmoxClient for the given PBS server,
+// preferring the cache. Mirrors proxmoxClient's logic.
+func (s *Syncer) pbsProxmoxClient(ctx context.Context, server db.PbsServer) (PBSProxmoxClient, error) {
+	if s.cache != nil {
+		client, err := s.cache.GetPBS(ctx, server.ID)
+		if err == nil {
+			return client, nil
+		}
+		s.logger.Warn("collector: pbs cache get failed, building per-call",
+			"pbs_id", server.ID, "error", err)
+	}
+	tokenSecret, err := crypto.Decrypt(server.TokenSecretEncrypted, s.encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt token: %w", err)
+	}
+	client, err := s.pbsClientFactory(server.ApiUrl, server.TokenID, tokenSecret, server.TlsFingerprint)
+	if err != nil {
+		return nil, fmt.Errorf("create pbs client: %w", err)
+	}
+	return client, nil
+}
+
 // SetHealthMonitor attaches a health monitor to the syncer.
 func (s *Syncer) SetHealthMonitor(h *HealthMonitor) {
 	s.healthMonitor = h
@@ -176,14 +230,9 @@ func (s *Syncer) SetHealthMonitor(h *HealthMonitor) {
 // SyncCluster discovers nodes, VMs, containers, and storage from a Proxmox cluster,
 // upserts them into the database, and returns collected metric snapshots.
 func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterMetricResult, error) {
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, s.encryptionKey)
+	client, err := s.proxmoxClient(ctx, cluster)
 	if err != nil {
-		return nil, fmt.Errorf("sync cluster %s: decrypt token: %w", cluster.ID, err)
-	}
-
-	client, err := s.clientFactory(cluster.ApiUrl, cluster.TokenID, tokenSecret, cluster.TlsFingerprint)
-	if err != nil {
-		return nil, fmt.Errorf("sync cluster %s: create client: %w", cluster.ID, err)
+		return nil, fmt.Errorf("sync cluster %s: %w", cluster.ID, err)
 	}
 
 	nodes, err := client.GetNodes(ctx)
@@ -880,14 +929,9 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 
 // syncPBSServer syncs a single PBS server: datastores, snapshots, sync jobs, verify jobs.
 func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMetricResult, error) {
-	tokenSecret, err := crypto.Decrypt(server.TokenSecretEncrypted, s.encryptionKey)
+	client, err := s.pbsProxmoxClient(ctx, server)
 	if err != nil {
-		return nil, fmt.Errorf("sync PBS %s: decrypt token: %w", server.ID, err)
-	}
-
-	client, err := s.pbsClientFactory(server.ApiUrl, server.TokenID, tokenSecret, server.TlsFingerprint)
-	if err != nil {
-		return nil, fmt.Errorf("sync PBS %s: create client: %w", server.ID, err)
+		return nil, fmt.Errorf("sync PBS %s: %w", server.ID, err)
 	}
 
 	now := time.Now()

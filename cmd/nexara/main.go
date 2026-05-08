@@ -28,6 +28,7 @@ import (
 	dbgen "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/debug"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/scheduler"
 	"github.com/bigjakk/nexara/internal/ws"
 	"github.com/bigjakk/nexara/pkg/redisutil"
@@ -120,6 +121,13 @@ func main() {
 	// (migration, DRS, rolling update) so a graceful SIGTERM cancels
 	// in-flight Proxmox/SSH calls instead of orphaning them.
 	srv := api.New(ctx, cfg, pool, rdb)
+	// Tear down the Proxmox client cache's pub/sub goroutine on
+	// shutdown. Belt-and-braces: ctx cancellation already exits the
+	// runSubscriber loop, but Close also handles paths where ctx
+	// might be reused.
+	if cache := srv.ProxmoxCache(); cache != nil {
+		defer cache.Close()
+	}
 
 	// ---- WebSocket server (registers /ws/* on the API's Fiber app) ----
 	queries := dbgen.New(pool)
@@ -133,6 +141,14 @@ func main() {
 	if cfg.EncryptionKey != "" {
 		consoleHandler = ws.NewConsoleHandler(queries, cfg.EncryptionKey, jwtSvc, logger.With("component", "console"))
 		vncHandler = ws.NewVNCHandler(queries, cfg.EncryptionKey, jwtSvc, logger.With("component", "vnc"))
+		// Share the API server's Proxmox client cache so WS console/VNC
+		// connections reuse the same cached *Client instance that the
+		// HTTP handlers do — avoids a fresh TLS handshake every time a
+		// user opens a node shell or VM console.
+		if cache := srv.ProxmoxCache(); cache != nil {
+			consoleHandler.SetProxmoxCache(cache)
+			vncHandler.SetProxmoxCache(cache)
+		}
 	}
 
 	wsServer := ws.NewServer(hub, jwtSvc, logger.With("component", "ws"), cfg.WSPingInterval, cfg.WSPongTimeout, ws.ServerConfig{
@@ -171,10 +187,10 @@ func main() {
 	}))
 
 	// ---- Collector goroutine ----
-	go runCollector(ctx, cfg, pool, rdb, logger.With("component", "collector"))
+	go runCollector(ctx, cfg, pool, rdb, srv.ProxmoxCache(), logger.With("component", "collector"))
 
 	// ---- Scheduler goroutine ----
-	go runScheduler(ctx, cfg, pool, rdb, logger.With("component", "scheduler"))
+	go runScheduler(ctx, cfg, pool, rdb, srv.ProxmoxCache(), logger.With("component", "scheduler"))
 
 	// ---- Start server ----
 	addr := fmt.Sprintf(":%d", cfg.APIPort)
@@ -408,7 +424,7 @@ func runWithLeaderRetry(ctx context.Context, pool *pgxpool.Pool, role string, lo
 
 // runCollector runs the metric collection loop. Uses leader election so only
 // one instance across the Swarm cluster runs the collector at any time.
-func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, logger *slog.Logger) {
+func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, cache *proxmox.ClientCache, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("collector panic", "error", r)
@@ -417,6 +433,7 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 
 	queries := dbgen.New(pool)
 	syncer := collector.NewSyncer(queries, cfg.EncryptionKey, logger)
+	syncer.SetProxmoxCache(cache)
 
 	if rdb != nil {
 		eventPub := events.NewPublisher(rdb, logger)
@@ -457,7 +474,7 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 }
 
 // runScheduler runs all scheduler tickers (mirrors cmd/scheduler logic).
-func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, logger *slog.Logger) {
+func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, cache *proxmox.ClientCache, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("scheduler panic", "error", r)
@@ -472,6 +489,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 	}
 
 	sched := scheduler.New(ctx, queries, cfg.EncryptionKey, logger, eventPub)
+	sched.SetProxmoxCache(cache)
 
 	runWithLeaderRetry(ctx, pool, "scheduler", logger, func(ctx context.Context) {
 		logger.Info("scheduler started",

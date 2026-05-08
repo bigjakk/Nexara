@@ -16,6 +16,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/notifications"
+	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/rolling"
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
@@ -70,6 +71,7 @@ type Server struct {
 	mobileDeviceHandler   *handlers.MobileDeviceHandler
 	rbacEngine            *auth.RBACEngine
 	eventPub              *events.Publisher
+	proxmoxCache          *proxmox.ClientCache
 }
 
 // New creates a new API server with the given dependencies. shutdownCtx is
@@ -93,6 +95,17 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 
 	if rdb != nil {
 		s.eventPub = events.NewPublisher(rdb, slog.Default())
+	}
+
+	// Proxmox client cache: per-cluster *Client / *PBSClient memoised so
+	// the per-tick collector/scheduler/scanner/rolling/drs flows reuse
+	// the http.Transport idle-conn pool instead of paying TLS handshake
+	// + AES key schedule on every call. Subscriber starts immediately
+	// so Redis pub/sub invalidations from peer replicas land while the
+	// process is alive; ctx cancellation tears it down on SIGTERM.
+	if s.queries != nil && cfg.EncryptionKey != "" {
+		s.proxmoxCache = proxmox.NewClientCache(s.queries, cfg.EncryptionKey, rdb, slog.Default().With("component", "proxmox-cache"))
+		s.proxmoxCache.StartSubscriber(shutdownCtx)
 	}
 
 	// Initialize auth services when dependencies are available.
@@ -307,4 +320,12 @@ func (s *Server) App() *fiber.App {
 // metric / event / alert data.
 func (s *Server) RBACEngine() *auth.RBACEngine {
 	return s.rbacEngine
+}
+
+// ProxmoxCache returns the per-server Proxmox client cache. May be nil
+// when the API server was constructed without an encryption key. The WS
+// console/VNC handlers and the background collectors/orchestrators read
+// this so a single cache instance is shared across every call site.
+func (s *Server) ProxmoxCache() *proxmox.ClientCache {
+	return s.proxmoxCache
 }

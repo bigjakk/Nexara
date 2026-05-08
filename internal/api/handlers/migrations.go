@@ -52,6 +52,18 @@ func NewMigrationHandler(shutdownCtx context.Context, queries *db.Queries, encry
 	}
 }
 
+// newOrchestrator builds a migration.Orchestrator wired with the per-server
+// Proxmox client cache stashed in fiber Locals by the API middleware.
+// Falls back to a cache-less orchestrator if the middleware didn't run
+// (e.g. partial-construction tests).
+func (h *MigrationHandler) newOrchestrator(c *fiber.Ctx) *migration.Orchestrator {
+	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		orch.SetProxmoxCache(cache)
+	}
+	return orch
+}
+
 // --- Request / Response types ---
 
 type createMigrationRequest struct {
@@ -369,7 +381,7 @@ func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
 		}
 	}
 
-	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
+	orch := h.newOrchestrator(c)
 	report, err := orch.RunPreFlight(c.Context(), jobID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
@@ -418,7 +430,7 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 			"too many migrations in flight (max "+strconv.Itoa(MigrationConcurrencyLimit)+"); wait for one to finish before starting another")
 	}
 
-	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
+	orch := h.newOrchestrator(c)
 
 	// Launch execution in a background goroutine rooted in shutdownCtx so a
 	// graceful shutdown aborts the migration cleanly. Slot is released on
@@ -468,7 +480,7 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 		}
 	}
 
-	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
+	orch := h.newOrchestrator(c)
 	if err := orch.Cancel(c.Context(), jobID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to cancel migration job")
 	}

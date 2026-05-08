@@ -35,6 +35,7 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 type Orchestrator struct {
 	queries       *db.Queries
 	encryptionKey string
+	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	logger        *slog.Logger
 	eventPub      *events.Publisher
 }
@@ -52,6 +53,11 @@ func NewOrchestrator(queries *db.Queries, encryptionKey string, logger *slog.Log
 	}
 }
 
+// SetProxmoxCache attaches the shared per-server cache. Nil-safe.
+func (o *Orchestrator) SetProxmoxCache(cache *proxmox.ClientCache) {
+	o.cache = cache
+}
+
 // migrationContext holds resolved metadata used for task tracking and audit logging.
 type migrationContext struct {
 	job       db.MigrationJob
@@ -62,10 +68,22 @@ type migrationContext struct {
 }
 
 // clientForCluster creates a Proxmox client from stored cluster credentials.
+// Prefers the shared cache when available; falls back to per-call construction
+// otherwise. The cluster row is also returned so callers can read auxiliary
+// fields (Name, ApiUrl) without an extra DB roundtrip on the cache-hit path.
 func (o *Orchestrator) clientForCluster(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, db.Cluster, error) {
 	cluster, err := o.queries.GetCluster(ctx, clusterID)
 	if err != nil {
 		return nil, cluster, fmt.Errorf("get cluster %s: %w", clusterID, err)
+	}
+
+	if o.cache != nil {
+		if client, err := o.cache.Get(ctx, clusterID); err == nil {
+			return client, cluster, nil
+		} else {
+			o.logger.Warn("migration: proxmox cache get failed, building per-call",
+				"cluster_id", clusterID, "error", err)
+		}
 	}
 
 	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, o.encryptionKey)

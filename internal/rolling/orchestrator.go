@@ -37,6 +37,7 @@ func isValidDebianPkgName(name string) bool {
 type Orchestrator struct {
 	queries        *db.Queries
 	encryptionKey  string
+	cache          *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	logger         *slog.Logger
 	eventPub       *events.Publisher
 	notifyRegistry *notifications.Registry
@@ -44,6 +45,11 @@ type Orchestrator struct {
 	// scheduler tick (SSH upgrade, task polling, notification dispatch)
 	// but should still be cancelled on graceful shutdown (SIGTERM).
 	shutdownCtx context.Context
+}
+
+// SetProxmoxCache attaches the shared per-server cache. Nil-safe.
+func (o *Orchestrator) SetProxmoxCache(cache *proxmox.ClientCache) {
+	o.cache = cache
 }
 
 // NewOrchestrator creates a new rolling update orchestrator. shutdownCtx
@@ -1381,6 +1387,25 @@ func taskSucceeded(exitStatus string) bool {
 }
 
 func (o *Orchestrator) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
+	// The cache covers the primary-URL happy path. If it returns
+	// successfully and a quick connectivity probe succeeds, we keep the
+	// cached instance; otherwise we fall through to the failover-URL
+	// loop below, which builds throwaway clients pointed at alternate
+	// node addresses (those clients are not cached because they're
+	// keyed by node-address, not cluster).
+	if o.cache != nil {
+		if client, err := o.cache.Get(ctx, clusterID); err == nil {
+			if _, testErr := client.GetNodes(ctx); testErr == nil {
+				return client, nil
+			}
+			o.logger.Warn("rolling: cached primary URL unreachable, trying failover nodes",
+				"cluster_id", clusterID)
+		} else {
+			o.logger.Warn("rolling: proxmox cache get failed, building per-call",
+				"cluster_id", clusterID, "error", err)
+		}
+	}
+
 	cluster, err := o.queries.GetCluster(ctx, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)

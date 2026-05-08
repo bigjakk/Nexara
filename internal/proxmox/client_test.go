@@ -1254,3 +1254,78 @@ func TestValidateVMID(t *testing.T) {
 		}
 	}
 }
+
+// --- CheckRedirect guard ---
+
+// TestRefuseRedirect_SameHostStops asserts that a Proxmox-API redirect to a
+// same-host different-path endpoint is refused: this is the case where Go's
+// stdlib WOULD have copied the Authorization bearer through to the new
+// destination. We surface it as a caller error instead.
+func TestRefuseRedirect_SameHostStops(t *testing.T) {
+	target := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes/x/internal-only-endpoint": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []map[string]string{{"name": "secret-shouldnt-reach-here"}})
+		},
+		"/api2/json/nodes": func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/api2/json/nodes/x/internal-only-endpoint", http.StatusFound)
+		},
+	})
+	t.Cleanup(target.Close)
+
+	c := newTestClient(t, target.URL)
+	_, err := c.GetNodes(context.Background())
+	if err == nil {
+		t.Fatal("expected redirect to be refused, got nil error")
+	}
+	if !strings.Contains(err.Error(), "refusing redirect") {
+		t.Errorf("expected refused-redirect error, got %v", err)
+	}
+}
+
+// TestRefuseRedirect_CrossHostStops covers the cross-host redirect path, the
+// classic credential-leak class. Even though net/http strips Authorization
+// here automatically, surfacing the redirect as an error is still the
+// correct posture: the Proxmox client is misconfigured if a host redirect
+// is being attempted at all.
+func TestRefuseRedirect_CrossHostStops(t *testing.T) {
+	upstream := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
+			t.Error("upstream (redirect target) should not have been called")
+			w.WriteHeader(http.StatusOK)
+		},
+	})
+	t.Cleanup(upstream.Close)
+
+	src := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
+			http.Redirect(w, &http.Request{Method: http.MethodGet}, upstream.URL+"/api2/json/nodes", http.StatusFound)
+		},
+	})
+	t.Cleanup(src.Close)
+
+	c := newTestClient(t, src.URL)
+	_, err := c.GetNodes(context.Background())
+	if err == nil {
+		t.Fatal("expected redirect to be refused, got nil error")
+	}
+}
+
+// TestRefuseRedirect_NoRedirectStillWorks is a sanity check: a normal 200
+// response is unaffected by the refuseRedirect guard.
+func TestRefuseRedirect_NoRedirectStillWorks(t *testing.T) {
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []map[string]any{{"node": "pve1", "status": "online"}})
+		},
+	})
+	t.Cleanup(srv.Close)
+
+	c := newTestClient(t, srv.URL)
+	nodes, err := c.GetNodes(context.Background())
+	if err != nil {
+		t.Fatalf("GetNodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Node != "pve1" {
+		t.Errorf("got %+v, want one node named pve1", nodes)
+	}
+}

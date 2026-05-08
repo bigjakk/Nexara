@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/handlers"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -31,6 +32,17 @@ func (s *Server) setupMiddleware() {
 		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		return c.Next()
 	})
+
+	// Expose the shared Proxmox client cache to every request so
+	// handlers.CreateProxmoxClient routes through it. Nil-safe: when
+	// proxmoxCache is unset (no encryption key, test scaffolding) the
+	// helper falls through to per-call construction.
+	if s.proxmoxCache != nil {
+		s.app.Use(func(c *fiber.Ctx) error {
+			handlers.SetProxmoxCacheLocal(c, s.proxmoxCache)
+			return c.Next()
+		})
+	}
 
 	// Add unique request ID.
 	s.app.Use(requestid.New())

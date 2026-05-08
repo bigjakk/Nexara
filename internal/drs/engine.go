@@ -81,6 +81,7 @@ type EvalResult struct {
 type Engine struct {
 	queries       *db.Queries
 	encryptionKey string
+	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	logger        *slog.Logger
 }
 
@@ -91,6 +92,11 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger) *
 		encryptionKey: encryptionKey,
 		logger:        logger,
 	}
+}
+
+// SetProxmoxCache attaches the per-server cache. Nil-safe.
+func (e *Engine) SetProxmoxCache(cache *proxmox.ClientCache) {
+	e.cache = cache
 }
 
 // Evaluate runs DRS evaluation for a single cluster and returns recommendations.
@@ -423,6 +429,15 @@ func extractLRMState(status string) string {
 }
 
 func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
+	if e.cache != nil {
+		client, err := e.cache.Get(ctx, clusterID)
+		if err == nil {
+			return client, nil
+		}
+		e.logger.Warn("drs: proxmox cache get failed, building per-call",
+			"cluster_id", clusterID, "error", err)
+	}
+
 	cluster, err := e.queries.GetCluster(ctx, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)

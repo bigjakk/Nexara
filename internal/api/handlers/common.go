@@ -92,9 +92,55 @@ func UserUUID(id uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: id, Valid: true}
 }
 
-// CreateProxmoxClient creates a Proxmox API client for the given cluster.
-// An optional timeout overrides the default 30s (e.g. 30*time.Minute for ISO uploads).
+// proxmoxCacheLocalsKey is the fiber Locals key under which the per-server
+// *proxmox.ClientCache is exposed to handlers. server.go installs a
+// middleware that sets this on every request; CreateProxmoxClient picks
+// it up to route through the cache instead of constructing per-call.
+const proxmoxCacheLocalsKey = "proxmoxCache"
+
+// SetProxmoxCacheLocal stores the cache pointer on a fiber.Ctx Locals slot.
+// Tests and the production middleware both call this to wire the cache in.
+func SetProxmoxCacheLocal(c *fiber.Ctx, cache *proxmox.ClientCache) {
+	c.Locals(proxmoxCacheLocalsKey, cache)
+}
+
+// proxmoxCacheFromCtx retrieves the cache from Locals; returns nil if
+// nothing was wired.
+func proxmoxCacheFromCtx(c *fiber.Ctx) *proxmox.ClientCache {
+	v := c.Locals(proxmoxCacheLocalsKey)
+	if v == nil {
+		return nil
+	}
+	cache, _ := v.(*proxmox.ClientCache)
+	return cache
+}
+
+// CreateProxmoxClient returns a Proxmox API client for the given cluster.
+// When a *proxmox.ClientCache has been wired into fiber Locals (via the
+// server's middleware), it's used so repeated requests for the same
+// cluster reuse the http.Transport's idle connection pool. Falls back
+// to a per-call NewClient construction otherwise (tests / unwired paths).
+//
+// The optional timeout argument overrides the default on the fallback
+// path; cached clients always use the cache's internal timeout. ISO
+// upload callers (which want a 30-minute floor) hit the multipart
+// escape hatch inside the apiClient that already runs without an
+// http.Client.Timeout.
 func CreateProxmoxClient(c *fiber.Ctx, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, timeout ...time.Duration) (*proxmox.Client, error) {
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		client, err := cache.Get(c.Context(), clusterID)
+		if err == nil {
+			return client, nil
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fiber.NewError(fiber.StatusNotFound, "Cluster not found")
+		}
+		// Decrypt / construction failures surface as 500. The cache
+		// already drops failed entries, so retrying after fixing the
+		// root cause works without further intervention.
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
+	}
+
 	cluster, err := queries.GetCluster(c.Context(), clusterID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

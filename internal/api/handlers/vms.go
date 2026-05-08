@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -877,20 +876,9 @@ func (h *VMHandler) resolveVM(c *fiber.Ctx, clusterID, vmID uuid.UUID) (db.Vm, d
 		return zeroVM, zeroNode, zeroCluster, nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
 	}
 
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
+	pxClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 	if err != nil {
-		return zeroVM, zeroNode, zeroCluster, nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Second,
-	})
-	if err != nil {
-		return zeroVM, zeroNode, zeroCluster, nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
+		return zeroVM, zeroNode, zeroCluster, nil, err
 	}
 
 	return vm, node, cluster, pxClient, nil

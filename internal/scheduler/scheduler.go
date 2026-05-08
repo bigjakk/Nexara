@@ -33,6 +33,7 @@ type Scheduler struct {
 	reportGen     *reports.Generator
 	rollingOrch   *rolling.Orchestrator
 	eventPub      *events.Publisher
+	cache         *proxmox.ClientCache // nil-safe; passed through to sub-engines
 	drsLastEval   map[uuid.UUID]time.Time
 }
 
@@ -403,7 +404,37 @@ func (s *Scheduler) executeReboot(ctx context.Context, client *proxmox.Client, t
 	}
 }
 
+// SetProxmoxCache attaches the per-server cache so createClient can
+// reuse cached *Client instances. Also propagates the cache to the DRS,
+// CVE, and rolling-update sub-engines that build Proxmox clients of
+// their own. drsExecutor is intentionally NOT included: it takes a
+// *Client as a parameter (built by Engine.createClient) rather than
+// constructing one itself. The notifications alertEngine never talks
+// to the Proxmox API (alerts evaluate against DB metrics), so it is
+// also excluded. Nil-safe.
+func (s *Scheduler) SetProxmoxCache(cache *proxmox.ClientCache) {
+	s.cache = cache
+	if s.drsEngine != nil {
+		s.drsEngine.SetProxmoxCache(cache)
+	}
+	if s.cveScanner != nil {
+		s.cveScanner.SetProxmoxCache(cache)
+	}
+	if s.rollingOrch != nil {
+		s.rollingOrch.SetProxmoxCache(cache)
+	}
+}
+
 func (s *Scheduler) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
+	if s.cache != nil {
+		client, err := s.cache.Get(ctx, clusterID)
+		if err == nil {
+			return client, nil
+		}
+		s.logger.Warn("scheduler: proxmox cache get failed, building per-call",
+			"cluster_id", clusterID, "error", err)
+	}
+
 	cluster, err := s.queries.GetCluster(ctx, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)

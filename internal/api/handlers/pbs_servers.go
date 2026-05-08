@@ -13,6 +13,7 @@ import (
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // PBSHandler handles PBS server CRUD endpoints.
@@ -321,6 +322,10 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update PBS server")
 	}
 
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPBS, pbs.ID)
+	}
+
 	h.auditLog(c, "pbs_server", pbs.ID.String(), "pbs_updated",
 		json.RawMessage(`{"name":"`+pbs.Name+`"}`), pbs.ClusterID)
 
@@ -355,6 +360,10 @@ func (h *PBSHandler) Delete(c *fiber.Ctx) error {
 
 	if err := h.queries.DeletePBSServer(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete PBS server")
+	}
+
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPBS, id)
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)

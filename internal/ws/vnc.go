@@ -24,6 +24,7 @@ import (
 type VNCHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	jwt           *auth.JWTService
 	logger        *slog.Logger
 }
@@ -36,6 +37,12 @@ func NewVNCHandler(queries *db.Queries, encryptionKey string, jwt *auth.JWTServi
 		jwt:           jwt,
 		logger:        logger,
 	}
+}
+
+// SetProxmoxCache wires a shared cache into the handler. Called from
+// cmd/nexara/main.go after construction.
+func (h *VNCHandler) SetProxmoxCache(cache *proxmox.ClientCache) {
+	h.cache = cache
 }
 
 // HandleVNC proxies a browser noVNC session to Proxmox via the vncwebsocket endpoint.
@@ -85,21 +92,9 @@ func (h *VNCHandler) HandleVNC(conn *fiberWs.Conn) {
 		return
 	}
 
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
+	pxClient, err := h.proxmoxClientFor(ctx, clusterID, cluster)
 	if err != nil {
-		h.writeError(conn, "failed to decrypt cluster credentials")
-		return
-	}
-
-	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Second,
-	})
-	if err != nil {
-		h.writeError(conn, "failed to create Proxmox client")
+		h.writeError(conn, err.Error())
 		return
 	}
 
@@ -186,4 +181,33 @@ func (h *VNCHandler) writeError(conn *fiberWs.Conn, msg string) {
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(errMsg))
 	_ = conn.WriteMessage(fiberWs.CloseMessage,
 		fiberWs.FormatCloseMessage(fiberWs.CloseInternalServerErr, msg))
+}
+
+// proxmoxClientFor returns a Proxmox client backed by the shared cache when
+// available; falls back to per-call construction otherwise.
+func (h *VNCHandler) proxmoxClientFor(ctx context.Context, clusterID uuid.UUID, cluster db.Cluster) (*proxmox.Client, error) {
+	if h.cache != nil {
+		client, err := h.cache.Get(ctx, clusterID)
+		if err == nil {
+			return client, nil
+		}
+		h.logger.Warn("vnc: proxmox cache get failed, building per-call",
+			"cluster_id", clusterID, "error", err)
+	}
+
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
+	if err != nil {
+		return nil, errors.New("failed to decrypt cluster credentials")
+	}
+	client, err := proxmox.NewClient(proxmox.ClientConfig{
+		BaseURL:        cluster.ApiUrl,
+		TokenID:        cluster.TokenID,
+		TokenSecret:    tokenSecret,
+		TLSFingerprint: cluster.TlsFingerprint,
+		Timeout:        30 * time.Second,
+	})
+	if err != nil {
+		return nil, errors.New("failed to create Proxmox client")
+	}
+	return client, nil
 }

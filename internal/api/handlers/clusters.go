@@ -364,6 +364,14 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update cluster")
 	}
 
+	// Drop any cached *proxmox.Client built from the prior credentials so
+	// the next API call rebuilds against the new BaseURL/TokenID/TokenSecret/
+	// fingerprint. Same channel fans out to peer replicas so a multi-replica
+	// deployment converges without waiting for cacheTTL.
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPVE, cluster.ID)
+	}
+
 	updateDetails, _ := json.Marshal(map[string]string{"name": cluster.Name})
 	h.auditLog(c, cluster.ID, "cluster", cluster.ID.String(), "cluster_updated", updateDetails)
 
@@ -416,6 +424,10 @@ func (h *ClusterHandler) Delete(c *fiber.Ctx) error {
 
 	if err := h.queries.DeleteCluster(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete cluster")
+	}
+
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPVE, id)
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)

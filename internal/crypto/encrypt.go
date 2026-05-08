@@ -1,3 +1,4 @@
+// Package crypto provides authenticated symmetric encryption helpers.
 package crypto
 
 import (
@@ -8,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
 )
 
 var (
@@ -17,22 +19,41 @@ var (
 	ErrDecryptionFailed = errors.New("decryption failed")
 )
 
+// aeadCache memoises the AEAD per encryption key. The AES key schedule and
+// GCM derivation cost shows up in CPU profiles for token-heavy workloads
+// (every per-cluster sync, alert evaluation, rolling-update tick, etc.
+// decrypts the cluster's API token before each Proxmox call). The hex key
+// is constant per-process today, so this is essentially a single-entry
+// cache; the sync.Map keeps the door open for future key-rotation flows.
+var aeadCache sync.Map // map[string]cipher.AEAD
+
+func aeadFor(hexKey string) (cipher.AEAD, error) {
+	if v, ok := aeadCache.Load(hexKey); ok {
+		return v.(cipher.AEAD), nil
+	}
+
+	key, err := parseKey(hexKey)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("create cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("create GCM: %w", err)
+	}
+	actual, _ := aeadCache.LoadOrStore(hexKey, gcm)
+	return actual.(cipher.AEAD), nil
+}
+
 // Encrypt encrypts plaintext using AES-256-GCM with the given hex-encoded key.
 // Returns base64-encoded nonce+ciphertext.
 func Encrypt(plaintext, hexKey string) (string, error) {
-	key, err := parseKey(hexKey)
+	gcm, err := aeadFor(hexKey)
 	if err != nil {
 		return "", err
-	}
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", fmt.Errorf("create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("create GCM: %w", err)
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
@@ -46,7 +67,7 @@ func Encrypt(plaintext, hexKey string) (string, error) {
 
 // Decrypt decrypts a base64-encoded nonce+ciphertext using AES-256-GCM.
 func Decrypt(encoded, hexKey string) (string, error) {
-	key, err := parseKey(hexKey)
+	gcm, err := aeadFor(hexKey)
 	if err != nil {
 		return "", err
 	}
@@ -54,16 +75,6 @@ func Decrypt(encoded, hexKey string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", ErrDecryptionFailed
-	}
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", fmt.Errorf("create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("create GCM: %w", err)
 	}
 
 	nonceSize := gcm.NonceSize()
