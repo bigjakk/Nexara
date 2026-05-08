@@ -65,8 +65,12 @@ func (s *Server) setupMiddleware() {
 		return c.Next()
 	})
 
-	// Strict rate limiter for login/register — 15 attempts per minute per IP.
-	// Applied before the general limiter so auth brute-force is caught early.
+	// Strict rate limiter for login/register and TOTP code-validating paths
+	// — 15 attempts per minute per IP. Applied before the general limiter so
+	// auth brute-force is caught early. Includes Disable and
+	// RegenerateRecoveryCodes because both validate a TOTP code; without this,
+	// an attacker holding a stolen access token would have no per-IP cap and
+	// only the per-user lockout (5 fails / 5 min cooldown) — see Phase 4.4.
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        15,
 		Expiration: 1 * time.Minute,
@@ -74,10 +78,16 @@ func (s *Server) setupMiddleware() {
 			return c.IP() + ":auth"
 		},
 		Next: func(c *fiber.Ctx) bool {
-			p := c.Path()
-			return p != "/api/v1/auth/login" &&
-				p != "/api/v1/auth/register" &&
-				p != "/api/v1/auth/totp/verify-login"
+			switch c.Path() {
+			case "/api/v1/auth/login",
+				"/api/v1/auth/register",
+				"/api/v1/auth/totp/verify-login",
+				"/api/v1/auth/totp",
+				"/api/v1/auth/totp/",
+				"/api/v1/auth/totp/recovery-codes/regenerate":
+				return false
+			}
+			return true
 		},
 	}))
 
