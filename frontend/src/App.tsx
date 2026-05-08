@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { RequirePermission } from "@/components/auth/RequirePermission";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageLoader } from "@/components/PageLoader";
 import { LoginPage } from "@/features/auth/pages/LoginPage";
@@ -206,19 +207,35 @@ const router = createBrowserRouter([
           },
           {
             path: "admin/users",
-            element: <LazyPage><UsersPage /></LazyPage>,
+            element: (
+              <RequirePermission action="manage" resource="user">
+                <LazyPage><UsersPage /></LazyPage>
+              </RequirePermission>
+            ),
           },
           {
             path: "admin/roles",
-            element: <LazyPage><RolesPage /></LazyPage>,
+            element: (
+              <RequirePermission action="manage" resource="role">
+                <LazyPage><RolesPage /></LazyPage>
+              </RequirePermission>
+            ),
           },
           {
             path: "admin/ldap",
-            element: <LazyPage><LDAPPage /></LazyPage>,
+            element: (
+              <RequirePermission action="manage" resource="user">
+                <LazyPage><LDAPPage /></LazyPage>
+              </RequirePermission>
+            ),
           },
           {
             path: "admin/oidc",
-            element: <LazyPage><OIDCPage /></LazyPage>,
+            element: (
+              <RequirePermission action="manage" resource="user">
+                <LazyPage><OIDCPage /></LazyPage>
+              </RequirePermission>
+            ),
           },
           {
             path: "admin/branding",
@@ -226,7 +243,11 @@ const router = createBrowserRouter([
           },
           {
             path: "alerts",
-            element: <LazyPage><AlertsPage /></LazyPage>,
+            element: (
+              <RequirePermission action="view" resource="alert">
+                <LazyPage><AlertsPage /></LazyPage>
+              </RequirePermission>
+            ),
           },
           {
             path: "reports",
@@ -238,7 +259,11 @@ const router = createBrowserRouter([
           },
           {
             path: "security",
-            element: <LazyPage><SecurityDashboardPage /></LazyPage>,
+            element: (
+              <RequirePermission action="view" resource="cve_scan">
+                <LazyPage><SecurityDashboardPage /></LazyPage>
+              </RequirePermission>
+            ),
           },
           {
             path: "settings/profile",
