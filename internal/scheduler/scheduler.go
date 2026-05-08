@@ -44,7 +44,7 @@ func New(shutdownCtx context.Context, queries *db.Queries, encryptionKey string,
 	if shutdownCtx == nil {
 		shutdownCtx = context.Background()
 	}
-	registry := newDispatcherRegistry(queries)
+	registry := notifications.BuildRegistry(queries)
 	return &Scheduler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
@@ -580,25 +580,6 @@ func (s *Scheduler) RunRollingUpdates(ctx context.Context) {
 // RollingOrchestrator returns the rolling update orchestrator for use by API handlers.
 func (s *Scheduler) RollingOrchestrator() *rolling.Orchestrator {
 	return s.rollingOrch
-}
-
-// newDispatcherRegistry creates a registry with all notification dispatchers.
-//
-// IMPORTANT: This function is duplicated in `internal/api/server.go`. When
-// adding a new dispatcher, register it in BOTH files. The duplication exists
-// because the API server and the scheduler both need to dispatch alerts and
-// we don't want a circular import between the two packages.
-func newDispatcherRegistry(queries *db.Queries) *notifications.Registry {
-	r := notifications.NewRegistry()
-	r.Register(&notifications.SMTPDispatcher{})
-	r.Register(&notifications.SlackDispatcher{})
-	r.Register(&notifications.DiscordDispatcher{})
-	r.Register(&notifications.TeamsDispatcher{})
-	r.Register(&notifications.TelegramDispatcher{})
-	r.Register(&notifications.WebhookDispatcher{})
-	r.Register(&notifications.PagerDutyDispatcher{})
-	r.Register(notifications.NewExpoPushDispatcher(queries))
-	return r
 }
 
 // mustAtoi converts a string to int, returning 0 on failure.

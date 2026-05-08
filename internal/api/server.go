@@ -180,7 +180,7 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 	}
 
 	if s.queries != nil && cfg.EncryptionKey != "" {
-		registry := newDispatcherRegistry(s.queries)
+		registry := notifications.BuildRegistry(s.queries)
 		s.cveHandler = handlers.NewCVEHandler(s.queries, cfg.EncryptionKey, s.eventPub, registry)
 		s.alertHandler = handlers.NewAlertHandler(s.queries, cfg.EncryptionKey, s.eventPub, registry)
 		// The DLQ handler shares an alert engine instance with the
@@ -258,25 +258,6 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 	s.setupRoutes()
 
 	return s
-}
-
-// newDispatcherRegistry creates a registry with all notification dispatchers.
-//
-// IMPORTANT: This function is duplicated in `internal/scheduler/scheduler.go`.
-// When adding a new dispatcher, register it in BOTH files. The duplication
-// exists because the API server and the scheduler both need to dispatch
-// alerts and we don't want a circular import between the two packages.
-func newDispatcherRegistry(queries *db.Queries) *notifications.Registry {
-	r := notifications.NewRegistry()
-	r.Register(&notifications.SMTPDispatcher{})
-	r.Register(&notifications.SlackDispatcher{})
-	r.Register(&notifications.DiscordDispatcher{})
-	r.Register(&notifications.TeamsDispatcher{})
-	r.Register(&notifications.TelegramDispatcher{})
-	r.Register(&notifications.WebhookDispatcher{})
-	r.Register(&notifications.PagerDutyDispatcher{})
-	r.Register(notifications.NewExpoPushDispatcher(queries))
-	return r
 }
 
 // loadSyslogConfig reads syslog forwarding config from settings and configures the forwarder.

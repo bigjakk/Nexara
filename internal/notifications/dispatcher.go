@@ -3,6 +3,8 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // AlertPayload contains all template variables for notification rendering.
@@ -59,4 +61,20 @@ func (r *Registry) Types() []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+// BuildRegistry constructs a Registry pre-populated with every dispatcher
+// shipped by Nexara. Both the API server and the scheduler call this so that
+// adding a new dispatcher is a single-site change.
+func BuildRegistry(queries *db.Queries) *Registry {
+	r := NewRegistry()
+	r.Register(&SMTPDispatcher{})
+	r.Register(&SlackDispatcher{})
+	r.Register(&DiscordDispatcher{})
+	r.Register(&TeamsDispatcher{})
+	r.Register(&TelegramDispatcher{})
+	r.Register(&WebhookDispatcher{})
+	r.Register(&PagerDutyDispatcher{})
+	r.Register(NewExpoPushDispatcher(queries))
+	return r
 }
