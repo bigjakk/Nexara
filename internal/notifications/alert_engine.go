@@ -465,7 +465,7 @@ func (e *Engine) dispatchToChannel(ctx context.Context, rule db.AlertRule, alert
 		CurrentValue:    value,
 		ResourceName:    resourceName,
 		NodeName:        resourceName,
-		FiredAt:         time.Now().UTC().Format(time.RFC3339),
+		FiredAt:         time.Now().UTC().Format(time.RFC3339Nano),
 		EscalationLevel: escalationLevel,
 	}
 	if rule.ClusterID.Valid {
@@ -687,7 +687,7 @@ func (e *Engine) ReplayDLQ(ctx context.Context, dlqID uuid.UUID) error {
 	// Always refresh fired_at to the actual replay time so the downstream
 	// service sees a current timestamp rather than the original failure's
 	// stale one.
-	payload.FiredAt = time.Now().UTC().Format(time.RFC3339)
+	payload.FiredAt = time.Now().UTC().Format(time.RFC3339Nano)
 
 	attempts, sendErr := retryableSend(ctx, func(c context.Context) error {
 		return dispatcher.Send(c, json.RawMessage(configJSON), payload)

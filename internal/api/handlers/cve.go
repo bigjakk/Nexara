@@ -94,14 +94,14 @@ func toCVEScanResponse(s db.CveScan) cveScanResponse {
 		HighCount:     s.HighCount,
 		MediumCount:   s.MediumCount,
 		LowCount:      s.LowCount,
-		StartedAt:     s.StartedAt.Format("2006-01-02T15:04:05Z"),
-		CreatedAt:     s.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		StartedAt:     s.StartedAt.Format(time.RFC3339Nano),
+		CreatedAt:     s.CreatedAt.Format(time.RFC3339Nano),
 	}
 	if s.ErrorMessage.Valid {
 		r.ErrorMessage = s.ErrorMessage.String
 	}
 	if s.CompletedAt.Valid {
-		r.CompletedAt = s.CompletedAt.Time.Format("2006-01-02T15:04:05Z")
+		r.CompletedAt = s.CompletedAt.Time.Format(time.RFC3339Nano)
 	}
 	return r
 }
@@ -136,7 +136,7 @@ func toCVEScanNodeResponse(n db.CveScanNode) cveScanNodeResponse {
 		r.ErrorMessage = n.ErrorMessage.String
 	}
 	if n.ScannedAt.Valid {
-		r.ScannedAt = n.ScannedAt.Time.Format("2006-01-02T15:04:05Z")
+		r.ScannedAt = n.ScannedAt.Time.Format(time.RFC3339Nano)
 	}
 	return r
 }
@@ -498,10 +498,10 @@ func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
 		TotalNodes:     summary.TotalNodes,
 		ScannedNodes:   summary.ScannedNodes,
 		PostureScore:   score,
-		StartedAt:      summary.StartedAt.Format("2006-01-02T15:04:05Z"),
+		StartedAt:      summary.StartedAt.Format(time.RFC3339Nano),
 	}
 	if summary.CompletedAt.Valid {
-		resp.CompletedAt = summary.CompletedAt.Time.Format("2006-01-02T15:04:05Z")
+		resp.CompletedAt = summary.CompletedAt.Time.Format(time.RFC3339Nano)
 	}
 
 	return c.JSON(resp)
@@ -545,7 +545,7 @@ func (h *CVEHandler) GetSchedule(c *fiber.Ctx) error {
 		ClusterID:     schedule.ClusterID,
 		Enabled:       schedule.Enabled,
 		IntervalHours: schedule.IntervalHours,
-		UpdatedAt:     schedule.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     schedule.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -600,7 +600,7 @@ func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
 		ClusterID:     schedule.ClusterID,
 		Enabled:       schedule.Enabled,
 		IntervalHours: schedule.IntervalHours,
-		UpdatedAt:     schedule.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     schedule.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -667,7 +667,7 @@ func (h *CVEHandler) GetCVENotificationConfig(c *fiber.Ctx) error {
 		CooldownMinutes: cfg.CooldownMinutes,
 	}
 	if cfg.LastNotifiedAt.Valid {
-		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format("2006-01-02T15:04:05Z")
+		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format(time.RFC3339Nano)
 	}
 	return c.JSON(resp)
 }
@@ -824,7 +824,7 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 		CooldownMinutes: cfg.CooldownMinutes,
 	}
 	if cfg.LastNotifiedAt.Valid {
-		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format("2006-01-02T15:04:05Z")
+		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format(time.RFC3339Nano)
 	}
 	return c.JSON(resp)
 }

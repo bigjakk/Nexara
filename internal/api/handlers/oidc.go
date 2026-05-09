@@ -57,7 +57,7 @@ type oidcConfigRequest struct {
 	EmailClaim       string            `json:"email_claim"`
 	DisplayNameClaim string            `json:"display_name_claim"`
 	GroupsClaim      string            `json:"groups_claim"`
-	GroupRoleMapping  map[string]string `json:"group_role_mapping"`
+	GroupRoleMapping map[string]string `json:"group_role_mapping"`
 	DefaultRoleID    *string           `json:"default_role_id"`
 	AutoProvision    bool              `json:"auto_provision"`
 	AllowedDomains   []string          `json:"allowed_domains"`
@@ -75,7 +75,7 @@ type oidcConfigResponse struct {
 	EmailClaim       string            `json:"email_claim"`
 	DisplayNameClaim string            `json:"display_name_claim"`
 	GroupsClaim      string            `json:"groups_claim"`
-	GroupRoleMapping  map[string]string `json:"group_role_mapping"`
+	GroupRoleMapping map[string]string `json:"group_role_mapping"`
 	DefaultRoleID    *string           `json:"default_role_id"`
 	AutoProvision    bool              `json:"auto_provision"`
 	AllowedDomains   []string          `json:"allowed_domains"`
@@ -98,8 +98,8 @@ func toOIDCConfigResponse(cfg db.OidcConfig) oidcConfigResponse {
 		GroupsClaim:      cfg.GroupsClaim,
 		AutoProvision:    cfg.AutoProvision,
 		AllowedDomains:   cfg.AllowedDomains,
-		CreatedAt:        cfg.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:        cfg.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:        cfg.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:        cfg.UpdatedAt.Format(time.RFC3339Nano),
 	}
 
 	mapping := make(map[string]string)

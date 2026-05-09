@@ -98,19 +98,19 @@ func toReportScheduleResponse(s db.ReportSchedule) reportScheduleResponse {
 		Parameters:      s.Parameters,
 		Enabled:         s.Enabled,
 		CreatedBy:       s.CreatedBy,
-		CreatedAt:       s.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:       s.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:       s.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:       s.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if s.EmailChannelID.Valid {
 		id, _ := uuid.FromBytes(s.EmailChannelID.Bytes[:])
 		r.EmailChannelID = &id
 	}
 	if s.LastRunAt.Valid {
-		t := s.LastRunAt.Time.Format(time.RFC3339)
+		t := s.LastRunAt.Time.Format(time.RFC3339Nano)
 		r.LastRunAt = &t
 	}
 	if s.NextRunAt.Valid {
-		t := s.NextRunAt.Time.Format(time.RFC3339)
+		t := s.NextRunAt.Time.Format(time.RFC3339Nano)
 		r.NextRunAt = &t
 	}
 	if r.EmailRecipients == nil {
@@ -128,18 +128,18 @@ func toRunResponse(r db.ReportRun) reportRunResponse {
 		TimeRangeHours: r.TimeRangeHours,
 		ErrorMessage:   r.ErrorMessage,
 		CreatedBy:      r.CreatedBy,
-		CreatedAt:      r.CreatedAt.Format(time.RFC3339),
+		CreatedAt:      r.CreatedAt.Format(time.RFC3339Nano),
 	}
 	if r.ScheduleID.Valid {
 		id, _ := uuid.FromBytes(r.ScheduleID.Bytes[:])
 		resp.ScheduleID = &id
 	}
 	if r.StartedAt.Valid {
-		t := r.StartedAt.Time.Format(time.RFC3339)
+		t := r.StartedAt.Time.Format(time.RFC3339Nano)
 		resp.StartedAt = &t
 	}
 	if r.CompletedAt.Valid {
-		t := r.CompletedAt.Time.Format(time.RFC3339)
+		t := r.CompletedAt.Time.Format(time.RFC3339Nano)
 		resp.CompletedAt = &t
 	}
 	return resp

@@ -84,8 +84,8 @@ func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 		ImbalanceThreshold:  c.ImbalanceThreshold,
 		EvalIntervalSeconds: c.EvalIntervalSeconds,
 		IncludeContainers:   c.IncludeContainers,
-		CreatedAt:           c.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:           c.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:           c.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:           c.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -118,8 +118,8 @@ func toDRSRuleResponse(r db.DrsRule) drsRuleResponse {
 		NodeNames: r.NodeNames,
 		Enabled:   r.Enabled,
 		Source:    "manual",
-		CreatedAt: r.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt: r.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt: r.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt: r.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -150,10 +150,10 @@ func toDRSHistoryResponse(h db.DrsHistory) drsHistoryResponse {
 		ScoreBefore: h.ScoreBefore,
 		ScoreAfter:  h.ScoreAfter,
 		Status:      h.Status,
-		CreatedAt:   h.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   h.CreatedAt.Format(time.RFC3339Nano),
 	}
 	if h.ExecutedAt.Valid {
-		s := h.ExecutedAt.Time.Format("2006-01-02T15:04:05Z")
+		s := h.ExecutedAt.Time.Format(time.RFC3339Nano)
 		r.ExecutedAt = &s
 	}
 	return r

@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
-	"strings"
 	"errors"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -82,8 +83,8 @@ func (h *UserHandler) List(c *fiber.Ctx) error {
 			IsActive:    u.IsActive,
 			AuthSource:  u.AuthSource,
 			TotpEnabled: u.TotpEnabled,
-			CreatedAt:   u.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			UpdatedAt:   u.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			CreatedAt:   u.CreatedAt.Format(time.RFC3339Nano),
+			UpdatedAt:   u.UpdatedAt.Format(time.RFC3339Nano),
 		}
 	}
 
@@ -117,8 +118,8 @@ func (h *UserHandler) Get(c *fiber.Ctx) error {
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
 		TotpEnabled: user.TotpSecret.Valid,
-		CreatedAt:   user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:   user.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -205,8 +206,8 @@ func (h *UserHandler) Update(c *fiber.Ctx) error {
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
 		TotpEnabled: user.TotpSecret.Valid,
-		CreatedAt:   user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:   user.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 

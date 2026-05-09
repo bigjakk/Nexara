@@ -65,8 +65,8 @@ func toNotificationDLQResponse(row db.NotificationDlq) notificationDLQResponse {
 		AttemptCount: row.AttemptCount,
 		State:        row.State,
 		FailureKind:  row.FailureKind,
-		CreatedAt:    row.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:    row.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:    row.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:    row.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if row.ChannelID.Valid {
 		id, _ := uuid.FromBytes(row.ChannelID.Bytes[:])

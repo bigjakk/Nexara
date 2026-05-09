@@ -136,15 +136,15 @@ func toMigrationJobResponse(j db.MigrationJob) migrationJobResponse {
 		Progress:        j.Progress,
 		CheckResults:    j.CheckResults,
 		ErrorMessage:    j.ErrorMessage,
-		CreatedAt:       j.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:       j.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:       j.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:       j.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if j.StartedAt.Valid {
-		s := j.StartedAt.Time.Format(time.RFC3339)
+		s := j.StartedAt.Time.Format(time.RFC3339Nano)
 		r.StartedAt = &s
 	}
 	if j.CompletedAt.Valid {
-		s := j.CompletedAt.Time.Format(time.RFC3339)
+		s := j.CompletedAt.Time.Format(time.RFC3339Nano)
 		r.CompletedAt = &s
 	}
 	return r

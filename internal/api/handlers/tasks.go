@@ -69,13 +69,13 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 		ExitStatus:  t.ExitStatus,
 		Node:        t.Node,
 		TaskType:    t.TaskType,
-		StartedAt:   t.StartedAt.Format(time.RFC3339),
+		StartedAt:   t.StartedAt.Format(time.RFC3339Nano),
 	}
 	if t.Progress.Valid {
 		resp.Progress = &t.Progress.Float64
 	}
 	if t.FinishedAt.Valid {
-		s := t.FinishedAt.Time.Format(time.RFC3339)
+		s := t.FinishedAt.Time.Format(time.RFC3339Nano)
 		resp.FinishedAt = &s
 	}
 	return resp

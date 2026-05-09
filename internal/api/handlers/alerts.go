@@ -83,8 +83,8 @@ func toAlertRuleResponse(r db.AlertRule) alertRuleResponse {
 		EscalationChain: r.EscalationChain,
 		MessageTemplate: r.MessageTemplate,
 		CreatedBy:       r.CreatedBy,
-		CreatedAt:       r.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:       r.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:       r.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:       r.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if r.ClusterID.Valid {
 		id, _ := uuid.FromBytes(r.ClusterID.Bytes[:])
@@ -137,8 +137,8 @@ func toAlertHistoryResponse(a db.AlertHistory) alertHistoryResponse {
 		Threshold:       a.Threshold,
 		Message:         a.Message,
 		EscalationLevel: a.EscalationLevel,
-		PendingAt:       a.PendingAt.Format(time.RFC3339),
-		CreatedAt:       a.CreatedAt.Format(time.RFC3339),
+		PendingAt:       a.PendingAt.Format(time.RFC3339Nano),
+		CreatedAt:       a.CreatedAt.Format(time.RFC3339Nano),
 	}
 	if a.ClusterID.Valid {
 		id, _ := uuid.FromBytes(a.ClusterID.Bytes[:])
@@ -157,17 +157,17 @@ func toAlertHistoryResponse(a db.AlertHistory) alertHistoryResponse {
 		resp.ChannelID = id.String()
 	}
 	if a.FiredAt.Valid {
-		resp.FiredAt = a.FiredAt.Time.Format(time.RFC3339)
+		resp.FiredAt = a.FiredAt.Time.Format(time.RFC3339Nano)
 	}
 	if a.AcknowledgedAt.Valid {
-		resp.AcknowledgedAt = a.AcknowledgedAt.Time.Format(time.RFC3339)
+		resp.AcknowledgedAt = a.AcknowledgedAt.Time.Format(time.RFC3339Nano)
 	}
 	if a.AcknowledgedBy.Valid {
 		id, _ := uuid.FromBytes(a.AcknowledgedBy.Bytes[:])
 		resp.AcknowledgedBy = id.String()
 	}
 	if a.ResolvedAt.Valid {
-		resp.ResolvedAt = a.ResolvedAt.Time.Format(time.RFC3339)
+		resp.ResolvedAt = a.ResolvedAt.Time.Format(time.RFC3339Nano)
 	}
 	if a.ResolvedBy.Valid {
 		id, _ := uuid.FromBytes(a.ResolvedBy.Bytes[:])
@@ -202,8 +202,8 @@ func toNotificationChannelResponse(ch db.NotificationChannel) notificationChanne
 		ChannelType: ch.ChannelType,
 		Enabled:     ch.Enabled,
 		CreatedBy:   ch.CreatedBy,
-		CreatedAt:   ch.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:   ch.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:   ch.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   ch.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -224,11 +224,11 @@ func toMaintenanceWindowResponse(w db.MaintenanceWindow) maintenanceWindowRespon
 		ID:          w.ID,
 		ClusterID:   w.ClusterID,
 		Description: w.Description,
-		StartsAt:    w.StartsAt.Format(time.RFC3339),
-		EndsAt:      w.EndsAt.Format(time.RFC3339),
+		StartsAt:    w.StartsAt.Format(time.RFC3339Nano),
+		EndsAt:      w.EndsAt.Format(time.RFC3339Nano),
 		CreatedBy:   w.CreatedBy,
-		CreatedAt:   w.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:   w.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:   w.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   w.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if w.NodeID.Valid {
 		id, _ := uuid.FromBytes(w.NodeID.Bytes[:])
@@ -1228,7 +1228,7 @@ func (h *AlertHandler) TestChannel(c *fiber.Ctx) error {
 		NodeName:        "test-node-01",
 		ClusterID:       "test-cluster",
 		Message:         "This is a test notification from Nexara.",
-		FiredAt:         time.Now().UTC().Format(time.RFC3339),
+		FiredAt:         time.Now().UTC().Format(time.RFC3339Nano),
 		EscalationLevel: 0,
 	}
 

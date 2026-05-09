@@ -39,14 +39,14 @@ type createAPIKeyRequest struct {
 }
 
 type apiKeyResponse struct {
-	ID         uuid.UUID  `json:"id"`
-	Name       string     `json:"name"`
-	KeyPrefix  string     `json:"key_prefix"`
-	ExpiresAt  *string    `json:"expires_at"`
-	LastUsedAt *string    `json:"last_used_at"`
-	LastUsedIP *string    `json:"last_used_ip"`
-	IsRevoked  bool       `json:"is_revoked"`
-	CreatedAt  string     `json:"created_at"`
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	KeyPrefix  string    `json:"key_prefix"`
+	ExpiresAt  *string   `json:"expires_at"`
+	LastUsedAt *string   `json:"last_used_at"`
+	LastUsedIP *string   `json:"last_used_ip"`
+	IsRevoked  bool      `json:"is_revoked"`
+	CreatedAt  string    `json:"created_at"`
 }
 
 type createAPIKeyResponse struct {
@@ -79,7 +79,7 @@ func tsPtr(ts pgtype.Timestamptz) *string {
 	if !ts.Valid {
 		return nil
 	}
-	s := ts.Time.Format(time.RFC3339)
+	s := ts.Time.Format(time.RFC3339Nano)
 	return &s
 }
 
@@ -173,7 +173,7 @@ func (h *APIKeyHandler) Create(c *fiber.Ctx) error {
 		Key:       fullKey,
 		KeyPrefix: apiKey.KeyPrefix,
 		ExpiresAt: tsPtr(apiKey.ExpiresAt),
-		CreatedAt: apiKey.CreatedAt.Format(time.RFC3339),
+		CreatedAt: apiKey.CreatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -203,7 +203,7 @@ func (h *APIKeyHandler) List(c *fiber.Ctx) error {
 			LastUsedAt: tsPtr(k.LastUsedAt),
 			LastUsedIP: textPtr(k.LastUsedIp),
 			IsRevoked:  k.IsRevoked,
-			CreatedAt:  k.CreatedAt.Format(time.RFC3339),
+			CreatedAt:  k.CreatedAt.Format(time.RFC3339Nano),
 		}
 	}
 
@@ -289,7 +289,7 @@ func (h *APIKeyHandler) AdminList(c *fiber.Ctx) error {
 			LastUsedAt:      tsPtr(k.LastUsedAt),
 			LastUsedIP:      textPtr(k.LastUsedIp),
 			IsRevoked:       k.IsRevoked,
-			CreatedAt:       k.CreatedAt.Format(time.RFC3339),
+			CreatedAt:       k.CreatedAt.Format(time.RFC3339Nano),
 			UserEmail:       k.UserEmail,
 			UserDisplayName: k.UserDisplayName,
 		}

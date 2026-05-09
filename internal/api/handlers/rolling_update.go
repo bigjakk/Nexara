@@ -100,14 +100,14 @@ func toJobResponse(j db.RollingUpdateJob) rollingUpdateJobResponse {
 		AutoUpgrade:       j.AutoUpgrade,
 		FailureReason:     j.FailureReason,
 		CreatedBy:         j.CreatedBy.String(),
-		CreatedAt:         j.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:         j.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:         j.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:         j.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if j.StartedAt.Valid {
-		r.StartedAt = j.StartedAt.Time.Format(time.RFC3339)
+		r.StartedAt = j.StartedAt.Time.Format(time.RFC3339Nano)
 	}
 	if j.CompletedAt.Valid {
-		r.CompletedAt = j.CompletedAt.Time.Format(time.RFC3339)
+		r.CompletedAt = j.CompletedAt.Time.Format(time.RFC3339Nano)
 	}
 	if r.PackageExcludes == nil {
 		r.PackageExcludes = []string{}
@@ -120,7 +120,7 @@ func toJobResponse(j db.RollingUpdateJob) rollingUpdateJobResponse {
 
 func formatTimestamptz(t pgtype.Timestamptz) string {
 	if t.Valid {
-		return t.Time.Format(time.RFC3339)
+		return t.Time.Format(time.RFC3339Nano)
 	}
 	return ""
 }
@@ -147,8 +147,8 @@ func toRollingNodeResponse(n db.RollingUpdateNode) rollingUpdateNodeResponse {
 		UpgradeStartedAt:   formatTimestamptz(n.UpgradeStartedAt),
 		UpgradeCompletedAt: formatTimestamptz(n.UpgradeCompletedAt),
 		UpgradeOutput:      n.UpgradeOutput,
-		CreatedAt:          n.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:          n.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:          n.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:          n.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -750,8 +750,8 @@ func (h *RollingUpdateHandler) GetSSHCredentials(c *fiber.Ctx) error {
 		Port:      creds.Port,
 		AuthType:  creds.AuthType,
 		HasKey:    creds.EncryptedPrivateKey != "",
-		CreatedAt: creds.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: creds.UpdatedAt.Format(time.RFC3339),
+		CreatedAt: creds.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt: creds.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -831,8 +831,8 @@ func (h *RollingUpdateHandler) UpsertSSHCredentials(c *fiber.Ctx) error {
 		Port:      creds.Port,
 		AuthType:  creds.AuthType,
 		HasKey:    creds.EncryptedPrivateKey != "",
-		CreatedAt: creds.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: creds.UpdatedAt.Format(time.RFC3339),
+		CreatedAt: creds.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt: creds.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -1012,7 +1012,7 @@ func (h *RollingUpdateHandler) ListSSHKnownHosts(c *fiber.Ctx) error {
 			Host:        r.Host,
 			Port:        r.Port,
 			Fingerprint: r.Fingerprint,
-			PinnedAt:    r.PinnedAt.Format(time.RFC3339),
+			PinnedAt:    r.PinnedAt.Format(time.RFC3339Nano),
 		}
 		if r.PinnedBy.Valid {
 			resp.PinnedBy = uuid.UUID(r.PinnedBy.Bytes).String()
@@ -1105,7 +1105,7 @@ func (h *RollingUpdateHandler) PinSSHHostKey(c *fiber.Ctx) error {
 		Host:        row.Host,
 		Port:        row.Port,
 		Fingerprint: row.Fingerprint,
-		PinnedAt:    row.PinnedAt.Format(time.RFC3339),
+		PinnedAt:    row.PinnedAt.Format(time.RFC3339Nano),
 	}
 	if row.PinnedBy.Valid {
 		resp.PinnedBy = uuid.UUID(row.PinnedBy.Bytes).String()

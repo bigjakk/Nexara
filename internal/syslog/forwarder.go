@@ -127,7 +127,7 @@ func (f *Forwarder) Test(cfg Config) error {
 
 	msg := fmt.Sprintf("<%d>1 %s nexara audit - - - Nexara syslog forwarding test message\n",
 		pri,
-		time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		time.Now().UTC().Format(time.RFC3339Nano),
 	)
 
 	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -199,7 +199,7 @@ func (f *Forwarder) formatRFC5424(msg Message) []byte {
 	severity := actionSeverity(msg.Action)
 	pri := facility*8 + severity
 
-	ts := msg.Timestamp.UTC().Format("2006-01-02T15:04:05Z")
+	ts := msg.Timestamp.UTC().Format(time.RFC3339Nano)
 
 	clusterID := msg.ClusterID
 	if clusterID == "" {

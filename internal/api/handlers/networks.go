@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -1380,8 +1381,8 @@ func toTemplateResponse(t db.FirewallTemplate) templateResponse {
 		Name:        t.Name,
 		Description: t.Description,
 		Rules:       t.Rules,
-		CreatedAt:   t.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:   t.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   t.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   t.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 

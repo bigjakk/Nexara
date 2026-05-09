@@ -69,15 +69,15 @@ func toScheduleResponse(t db.ScheduledTask) scheduleResponse {
 		Schedule:     t.Schedule,
 		Params:       t.Params,
 		Enabled:      t.Enabled,
-		CreatedAt:    t.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:    t.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:    t.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:    t.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if t.LastRunAt.Valid {
-		s := t.LastRunAt.Time.Format("2006-01-02T15:04:05Z")
+		s := t.LastRunAt.Time.Format(time.RFC3339Nano)
 		r.LastRunAt = &s
 	}
 	if t.NextRunAt.Valid {
-		s := t.NextRunAt.Time.Format("2006-01-02T15:04:05Z")
+		s := t.NextRunAt.Time.Format(time.RFC3339Nano)
 		r.NextRunAt = &s
 	}
 	if t.LastStatus.Valid {

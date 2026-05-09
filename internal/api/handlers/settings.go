@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -17,8 +18,8 @@ import (
 
 // SettingsHandler handles application settings endpoints.
 type SettingsHandler struct {
-	queries  *db.Queries
-	dataDir  string // directory to store uploaded files (logos, favicons)
+	queries *db.Queries
+	dataDir string // directory to store uploaded files (logos, favicons)
 }
 
 // NewSettingsHandler creates a new settings handler.
@@ -42,8 +43,8 @@ func toSettingResponse(s db.Setting) settingResponse {
 		Key:       s.Key,
 		Value:     s.Value,
 		Scope:     s.Scope,
-		CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt: s.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt: s.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if s.ScopeID.Valid {
 		id := s.ScopeID.Bytes

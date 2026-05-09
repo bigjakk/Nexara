@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -46,7 +47,7 @@ type nodeOfflineAlert struct {
 func (p *Publisher) PublishClusterMetrics(ctx context.Context, result *ClusterMetricResult) {
 	summary := clusterMetricSummary{
 		ClusterID:   result.ClusterID,
-		CollectedAt: result.CollectedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		CollectedAt: result.CollectedAt.UTC().Format(time.RFC3339Nano),
 		NodeCount:   len(result.NodeMetrics),
 		VMCount:     len(result.VMMetrics),
 		Nodes:       result.NodeMetrics,

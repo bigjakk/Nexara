@@ -135,7 +135,7 @@ func (n *Notifier) MaybeNotify(ctx context.Context, clusterID uuid.UUID, scanID 
 		ResourceName: clusterName,
 		ClusterID:    clusterID.String(),
 		Message:      message,
-		FiredAt:      time.Now().UTC().Format(time.RFC3339),
+		FiredAt:      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	dispatched := 0

@@ -1130,7 +1130,7 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 
 	// Build the archive path: <pve-storage>:backup/<type>/<id>/<ISO-timestamp>
 	backupTime := time.Unix(req.BackupTime, 0).UTC()
-	archive := pveStorageName + ":backup/" + req.BackupType + "/" + req.BackupID + "/" + backupTime.Format("2006-01-02T15:04:05Z")
+	archive := pveStorageName + ":backup/" + req.BackupType + "/" + req.BackupID + "/" + backupTime.Format(time.RFC3339Nano)
 
 	pveClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 60*time.Second)
 	if err != nil {

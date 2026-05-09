@@ -49,7 +49,7 @@ func (d *DiscordDispatcher) Send(ctx context.Context, config json.RawMessage, pa
 					{"name": "Threshold", "value": fmt.Sprintf("%s %.2f", payload.Operator, payload.Threshold), "inline": true},
 					{"name": "State", "value": payload.State, "inline": true},
 				},
-				"timestamp": time.Now().UTC().Format(time.RFC3339),
+				"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 			},
 		},
 	}

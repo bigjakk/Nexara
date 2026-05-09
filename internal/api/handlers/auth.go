@@ -1070,7 +1070,7 @@ func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
 		Role:        user.Role,
 		AuthSource:  user.AuthSource,
 		TOTPEnabled: user.TotpSecret.Valid,
-		CreatedAt:   user.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -1126,7 +1126,7 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 		Role:        updated.Role,
 		AuthSource:  updated.AuthSource,
 		TOTPEnabled: updated.TotpSecret.Valid,
-		CreatedAt:   updated.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   updated.CreatedAt.Format(time.RFC3339Nano),
 	})
 }
 

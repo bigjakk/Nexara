@@ -58,7 +58,7 @@ func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow) auditLogResponse {
 		ResourceID:      a.ResourceID,
 		Action:          a.Action,
 		Details:         string(a.Details),
-		CreatedAt:       a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:       a.CreatedAt.Format(time.RFC3339Nano),
 		Source:          a.Source,
 		UserEmail:       a.UserEmail.String,
 		UserDisplayName: a.UserDisplayName.String,
@@ -232,7 +232,7 @@ func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow) auditLogResponse 
 		ResourceID:      a.ResourceID,
 		Action:          a.Action,
 		Details:         string(a.Details),
-		CreatedAt:       a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:       a.CreatedAt.Format(time.RFC3339Nano),
 		Source:          a.Source,
 		UserEmail:       a.UserEmail.String,
 		UserDisplayName: a.UserDisplayName.String,
@@ -419,7 +419,7 @@ func (h *AuditHandler) exportCSV(c *fiber.Ctx, items []db.ListAuditLogAdvancedRo
 			userName = "(deleted user)"
 		}
 		_ = reports.WriteSafeCSVRow(w, []string{
-			a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			a.CreatedAt.Format(time.RFC3339Nano),
 			clusterName,
 			userName,
 			a.UserEmail.String,
@@ -472,7 +472,7 @@ func (h *AuditHandler) exportSyslog(c *fiber.Ctx, items []db.ListAuditLogAdvance
 
 		line := fmt.Sprintf("<%d>1 %s nexara audit - - - %s\n",
 			pri,
-			a.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			a.CreatedAt.Format(time.RFC3339Nano),
 			msg,
 		)
 		buf.WriteString(line)

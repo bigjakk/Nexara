@@ -37,10 +37,10 @@ func (g *Generator) Generate(ctx context.Context, reportType string, clusterID u
 		ClusterName: cluster.Name,
 		ClusterID:   clusterID.String(),
 		ReportType:  reportType,
-		GeneratedAt: now.Format(time.RFC3339),
+		GeneratedAt: now.Format(time.RFC3339Nano),
 		TimeRange: TimeRange{
-			StartTime: since.Format(time.RFC3339),
-			EndTime:   now.Format(time.RFC3339),
+			StartTime: since.Format(time.RFC3339Nano),
+			EndTime:   now.Format(time.RFC3339Nano),
 			Hours:     timeRangeHours,
 		},
 	}

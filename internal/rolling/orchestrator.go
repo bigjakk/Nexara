@@ -1267,7 +1267,7 @@ func (o *Orchestrator) sendJobNotification(ctx context.Context, job db.RollingUp
 		ResourceName: clusterName,
 		ClusterID:    clusterName,
 		Message:      message,
-		FiredAt:      time.Now().UTC().Format(time.RFC3339),
+		FiredAt:      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	go func() {
