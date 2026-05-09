@@ -14,6 +14,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/reports"
+	"github.com/bigjakk/nexara/internal/safeconv"
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
@@ -86,8 +87,8 @@ func (h *AuditHandler) parseAuditFilters(c *fiber.Ctx) (db.ListAuditLogAdvancedP
 
 	var listP db.ListAuditLogAdvancedParams
 	var countP db.CountAuditLogAdvancedParams
-	listP.Limit = safeInt32(limit)
-	listP.Offset = safeInt32(offset)
+	listP.Limit = safeconv.Int32(limit)
+	listP.Offset = safeconv.Int32(offset)
 
 	if cid := c.Query("cluster_id"); cid != "" {
 		parsed, err := uuid.Parse(cid)

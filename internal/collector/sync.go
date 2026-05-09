@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"strings"
 	"time"
 
@@ -17,20 +16,8 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
-
-// safeInt32 converts an int to int32 with bounds clamping.
-// Values from the Proxmox API (VMID, CPU count, etc.) always fit in int32,
-// but this satisfies gosec G115.
-func safeInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v) //nolint:gosec // bounds checked above
-}
 
 // SyncQueries defines the database operations needed by the Syncer.
 // This interface enables testing with mock implementations.
@@ -246,7 +233,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	if resources, resErr := client.GetClusterResources(ctx, ""); resErr == nil {
 		for _, r := range resources {
 			if (r.Type == "qemu" || r.Type == "lxc") && r.VMID > 0 {
-				vmExtra[safeInt32(r.VMID)] = vmExtraFields{HAState: r.HAState, Pool: r.Pool}
+				vmExtra[safeconv.Int32(r.VMID)] = vmExtraFields{HAState: r.HAState, Pool: r.Pool}
 			}
 		}
 	} else {
@@ -441,22 +428,22 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 			"node", node.Node,
 			"error", err,
 		)
-		cpuCount = safeInt32(node.MaxCPU)
+		cpuCount = safeconv.Int32(node.MaxCPU)
 		memTotal = node.MaxMem
 		diskTotal = node.MaxDisk
 		cpuUsage = node.CPU
 		memUsed = node.Mem
 	} else {
 		pveVersion = status.PVEVersion
-		cpuCount = safeInt32(status.CPUInfo.CPUs)
+		cpuCount = safeconv.Int32(status.CPUInfo.CPUs)
 		memTotal = status.Memory.Total
 		diskTotal = status.RootFS.Total
 		cpuUsage = status.CPU
 		memUsed = status.Memory.Used
 		cpuModel = status.CPUInfo.Model
-		cpuCores = safeInt32(status.CPUInfo.Cores)
-		cpuSockets = safeInt32(status.CPUInfo.Sockets)
-		cpuThreads = safeInt32(status.CPUInfo.Threads)
+		cpuCores = safeconv.Int32(status.CPUInfo.Cores)
+		cpuSockets = safeconv.Int32(status.CPUInfo.Sockets)
+		cpuThreads = safeconv.Int32(status.CPUInfo.Threads)
 		cpuMhz = status.CPUInfo.MHz
 		kernelVersion = status.Kversion
 		swapTotal = status.Swap.Total
@@ -578,7 +565,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				DiskType:  d.Type,
 				Health:    d.Health,
 				Wearout:   d.Wearout.String(),
-				Rpm:       safeInt32(d.RPM),
+				Rpm:       safeconv.Int32(d.RPM),
 				Vendor:    d.Vendor,
 				Wwn:       d.WWN,
 			}); err != nil {
@@ -629,7 +616,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				VendorName:      d.VendorName,
 				Device:          d.Device,
 				Vendor:          d.Vendor,
-				IommuGroup:      safeInt32(d.IOMMUGroup),
+				IommuGroup:      safeconv.Int32(d.IOMMUGroup),
 				SubsystemDevice: d.SubsystemDevice,
 				SubsystemVendor: d.SubsystemVendor,
 			}); err != nil {
@@ -677,15 +664,15 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 
 	snapshots := make([]vmMetricSnapshot, 0, len(vms))
 	for _, vm := range vms {
-		extra := vmExtra[safeInt32(vm.VMID)]
+		extra := vmExtra[safeconv.Int32(vm.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{
 			ClusterID: clusterID,
 			NodeID:    nodeID,
-			Vmid:      safeInt32(vm.VMID),
+			Vmid:      safeconv.Int32(vm.VMID),
 			Name:      vm.Name,
 			Type:      "qemu",
 			Status:    vm.EffectiveStatus(),
-			CpuCount:  safeInt32(vm.CPUs),
+			CpuCount:  safeconv.Int32(vm.CPUs),
 			MemTotal:  vm.MaxMem,
 			DiskTotal: vm.MaxDisk,
 			Uptime:    vm.Uptime,
@@ -721,15 +708,15 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 
 	snapshots := make([]vmMetricSnapshot, 0, len(cts))
 	for _, ct := range cts {
-		extra := vmExtra[safeInt32(ct.VMID)]
+		extra := vmExtra[safeconv.Int32(ct.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{
 			ClusterID: clusterID,
 			NodeID:    nodeID,
-			Vmid:      safeInt32(ct.VMID),
+			Vmid:      safeconv.Int32(ct.VMID),
 			Name:      ct.Name,
 			Type:      "lxc",
 			Status:    ct.Status,
-			CpuCount:  safeInt32(ct.CPUs),
+			CpuCount:  safeconv.Int32(ct.CPUs),
 			MemTotal:  ct.MaxMem,
 			DiskTotal: ct.MaxDisk,
 			Uptime:    ct.Uptime,

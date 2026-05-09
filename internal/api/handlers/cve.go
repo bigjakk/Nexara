@@ -19,6 +19,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/notifications"
+	"github.com/bigjakk/nexara/internal/safeconv"
 	"github.com/bigjakk/nexara/internal/scanner"
 )
 
@@ -148,10 +149,10 @@ type cveScanVulnResponse struct {
 	PackageName    string    `json:"package_name"`
 	CurrentVersion string    `json:"current_version"`
 	FixedVersion   string    `json:"fixed_version,omitempty"`
-	Severity       string    `json:"severity"`        // Debian tracker urgency
-	RiskSeverity   string    `json:"risk_severity"`   // bucket derived from risk_score
-	RiskScore      float32   `json:"risk_score"`      // 0–10, drives posture
-	SSVCLabel      string    `json:"ssvc_label"`      // act/attend/track_star/track
+	Severity       string    `json:"severity"`      // Debian tracker urgency
+	RiskSeverity   string    `json:"risk_severity"` // bucket derived from risk_score
+	RiskScore      float32   `json:"risk_score"`    // 0–10, drives posture
+	SSVCLabel      string    `json:"ssvc_label"`    // act/attend/track_star/track
 	CVSSScore      float32   `json:"cvss_score"`
 	EPSS           *float32  `json:"epss,omitempty"`
 	EPSSPercentile *float32  `json:"epss_percentile,omitempty"`
@@ -239,8 +240,8 @@ func (h *CVEHandler) ListScans(c *fiber.Ctx) error {
 
 	scans, err := h.queries.ListCVEScans(c.Context(), db.ListCVEScansParams{
 		ClusterID: clusterID,
-		Limit:     safeInt32(limit),
-		Offset:    safeInt32(offset),
+		Limit:     safeconv.Int32(limit),
+		Offset:    safeconv.Int32(offset),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list scans")
@@ -606,13 +607,13 @@ func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
 // --- CVE notification config ---
 
 type cveNotifyConfigResponse struct {
-	ClusterID        uuid.UUID   `json:"cluster_id"`
-	Enabled          bool        `json:"enabled"`
-	NotifyOnAct      bool        `json:"notify_on_act"`
-	NotifyOnAttend   bool        `json:"notify_on_attend"`
-	ChannelIDs       []uuid.UUID `json:"channel_ids"`
-	CooldownMinutes  int32       `json:"cooldown_minutes"`
-	LastNotifiedAt   string      `json:"last_notified_at,omitempty"`
+	ClusterID       uuid.UUID   `json:"cluster_id"`
+	Enabled         bool        `json:"enabled"`
+	NotifyOnAct     bool        `json:"notify_on_act"`
+	NotifyOnAttend  bool        `json:"notify_on_attend"`
+	ChannelIDs      []uuid.UUID `json:"channel_ids"`
+	CooldownMinutes int32       `json:"cooldown_minutes"`
+	LastNotifiedAt  string      `json:"last_notified_at,omitempty"`
 }
 
 type updateCVENotifyConfigRequest struct {
@@ -812,10 +813,10 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 	h.auditLog(c, clusterID, "cve_scan", clusterID.String(), "cve_notify_config_updated", nil)
 
 	resp := cveNotifyConfigResponse{
-		ClusterID:       cfg.ClusterID,
-		Enabled:         cfg.Enabled,
-		NotifyOnAct:     cfg.NotifyOnAct,
-		NotifyOnAttend:  cfg.NotifyOnAttend,
+		ClusterID:      cfg.ClusterID,
+		Enabled:        cfg.Enabled,
+		NotifyOnAct:    cfg.NotifyOnAct,
+		NotifyOnAttend: cfg.NotifyOnAttend,
 		// 4.8b read-flip: return the in-flight slice we just dual-wrote.
 		// The transaction has committed, so this matches the join table
 		// exactly and avoids a redundant SELECT.
@@ -827,4 +828,3 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 	}
 	return c.JSON(resp)
 }
-

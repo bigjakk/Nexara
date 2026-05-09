@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"time"
 	"unicode/utf8"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // validMetrics defines the supported metric names for alert rules.
@@ -352,7 +352,7 @@ func (e *Engine) checkEscalations(ctx context.Context) {
 
 		channelID := pgtype.UUID{Bytes: step.ChannelID, Valid: true}
 		// nextLevel is an escalation chain index (always small), but guard for gosec G115.
-		escalationLevel := safeInt32(nextLevel)
+		escalationLevel := safeconv.Int32(nextLevel)
 		if err := e.queries.UpdateAlertEscalation(ctx, db.UpdateAlertEscalationParams{
 			ID:              alert.ID,
 			EscalationLevel: escalationLevel,
@@ -586,7 +586,7 @@ func (e *Engine) writeDLQ(
 		ClusterID:    clusterIDPg,
 		Payload:      payloadJSON,
 		LastError:    truncateError(lastErr),
-		AttemptCount: safeInt32(attempts),
+		AttemptCount: safeconv.Int32(attempts),
 		State:        state,
 		FailureKind:  failureKind,
 	}); err != nil {
@@ -693,7 +693,7 @@ func (e *Engine) ReplayDLQ(ctx context.Context, dlqID uuid.UUID) error {
 		return dispatcher.Send(c, json.RawMessage(configJSON), payload)
 	}, RetrySchedule)
 
-	totalAttempts := safeInt32(int(row.AttemptCount) + attempts)
+	totalAttempts := safeconv.Int32(int(row.AttemptCount) + attempts)
 	if sendErr != nil {
 		_ = e.queries.UpdateNotificationDLQState(ctx, db.UpdateNotificationDLQStateParams{
 			ID:           dlqID,
@@ -801,17 +801,6 @@ func extractVMMetric(m db.GetVMRecentMetricsRow, metric string) float64 {
 	default:
 		return 0
 	}
-}
-
-// safeInt32 converts an int to int32 with bounds clamping (gosec G115).
-func safeInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v) //nolint:gosec // bounds checked above
 }
 
 func uuidFromPgtype(p pgtype.UUID) uuid.UUID {

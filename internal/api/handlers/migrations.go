@@ -13,6 +13,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/migration"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // MigrationConcurrencyLimit caps the number of in-flight user-initiated
@@ -312,11 +313,11 @@ func (h *MigrationHandler) List(c *fiber.Ctx) error {
 		return err
 	}
 
-	limit := safeInt32(50)
+	limit := safeconv.Int32(50)
 	if l := c.QueryInt("limit", 50); l > 0 && l <= 500 {
-		limit = safeInt32(l)
+		limit = safeconv.Int32(l)
 	}
-	offset := safeInt32(c.QueryInt("offset", 0))
+	offset := safeconv.Int32(c.QueryInt("offset", 0))
 
 	jobs, err := h.queries.ListMigrationJobs(c.Context(), db.ListMigrationJobsParams{
 		Limit:  limit,
@@ -507,11 +508,11 @@ func (h *MigrationHandler) ListByCluster(c *fiber.Ctx) error {
 		return err
 	}
 
-	limit := safeInt32(50)
+	limit := safeconv.Int32(50)
 	if l := c.QueryInt("limit", 50); l > 0 && l <= 500 {
-		limit = safeInt32(l)
+		limit = safeconv.Int32(l)
 	}
-	offset := safeInt32(c.QueryInt("offset", 0))
+	offset := safeconv.Int32(c.QueryInt("offset", 0))
 
 	jobs, err := h.queries.ListMigrationJobsByCluster(c.Context(), db.ListMigrationJobsByClusterParams{
 		SourceClusterID: clusterID,

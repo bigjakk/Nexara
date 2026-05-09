@@ -17,6 +17,7 @@ import (
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // DRSHandler handles DRS configuration and evaluation endpoints.
@@ -392,7 +393,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 				ClusterID:   clusterID,
 				SourceNode:  rec.SourceNode,
 				TargetNode:  rec.TargetNode,
-				VmID:        safeInt32(rec.VMID),
+				VmID:        safeconv.Int32(rec.VMID),
 				VmType:      rec.VMType,
 				Reason:      rec.Reason,
 				ScoreBefore: rec.ScoreBefore,
@@ -413,10 +414,10 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 	}
 
 	type nodeScoreResponse struct {
-		Node       string  `json:"node"`
-		Score      float64 `json:"score"`
-		CPULoad    float64 `json:"cpu_load"`
-		MemLoad    float64 `json:"mem_load"`
+		Node    string  `json:"node"`
+		Score   float64 `json:"score"`
+		CPULoad float64 `json:"cpu_load"`
+		MemLoad float64 `json:"mem_load"`
 	}
 
 	resp := make([]evalRecommendation, len(recommendations))

@@ -14,6 +14,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/reports"
+	"github.com/bigjakk/nexara/internal/safeconv"
 	"github.com/bigjakk/nexara/internal/scheduler"
 )
 
@@ -238,7 +239,7 @@ func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
 		Name:            req.Name,
 		ReportType:      req.ReportType,
 		ClusterID:       clusterID,
-		TimeRangeHours:  safeInt32(req.TimeRangeHours),
+		TimeRangeHours:  safeconv.Int32(req.TimeRangeHours),
 		Schedule:        req.Schedule,
 		Format:          req.Format,
 		EmailEnabled:    req.EmailEnabled,
@@ -294,17 +295,17 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		Name            *string          `json:"name"`
-		ReportType      *string          `json:"report_type"`
-		ClusterID       *string          `json:"cluster_id"`
-		TimeRangeHours  *int             `json:"time_range_hours"`
-		Schedule        *string          `json:"schedule"`
-		Format          *string          `json:"format"`
-		EmailEnabled    *bool            `json:"email_enabled"`
-		EmailChannelID  *string          `json:"email_channel_id"`
-		EmailRecipients []string         `json:"email_recipients"`
-		Parameters      json.RawMessage  `json:"parameters"`
-		Enabled         *bool            `json:"enabled"`
+		Name            *string         `json:"name"`
+		ReportType      *string         `json:"report_type"`
+		ClusterID       *string         `json:"cluster_id"`
+		TimeRangeHours  *int            `json:"time_range_hours"`
+		Schedule        *string         `json:"schedule"`
+		Format          *string         `json:"format"`
+		EmailEnabled    *bool           `json:"email_enabled"`
+		EmailChannelID  *string         `json:"email_channel_id"`
+		EmailRecipients []string        `json:"email_recipients"`
+		Parameters      json.RawMessage `json:"parameters"`
+		Enabled         *bool           `json:"enabled"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
@@ -312,9 +313,13 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 
 	// Apply defaults from existing record.
 	name := existing.Name
-	if req.Name != nil { name = *req.Name }
+	if req.Name != nil {
+		name = *req.Name
+	}
 	reportType := existing.ReportType
-	if req.ReportType != nil { reportType = *req.ReportType }
+	if req.ReportType != nil {
+		reportType = *req.ReportType
+	}
 	clusterID := existing.ClusterID
 	if req.ClusterID != nil {
 		cid, err := uuid.Parse(*req.ClusterID)
@@ -331,19 +336,33 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 		clusterID = cid
 	}
 	timeRangeHours := int(existing.TimeRangeHours)
-	if req.TimeRangeHours != nil { timeRangeHours = *req.TimeRangeHours }
+	if req.TimeRangeHours != nil {
+		timeRangeHours = *req.TimeRangeHours
+	}
 	scheduleStr := existing.Schedule
-	if req.Schedule != nil { scheduleStr = *req.Schedule }
+	if req.Schedule != nil {
+		scheduleStr = *req.Schedule
+	}
 	format := existing.Format
-	if req.Format != nil { format = *req.Format }
+	if req.Format != nil {
+		format = *req.Format
+	}
 	emailEnabled := existing.EmailEnabled
-	if req.EmailEnabled != nil { emailEnabled = *req.EmailEnabled }
+	if req.EmailEnabled != nil {
+		emailEnabled = *req.EmailEnabled
+	}
 	emailRecipients := existing.EmailRecipients
-	if req.EmailRecipients != nil { emailRecipients = req.EmailRecipients }
+	if req.EmailRecipients != nil {
+		emailRecipients = req.EmailRecipients
+	}
 	parameters := existing.Parameters
-	if req.Parameters != nil { parameters = req.Parameters }
+	if req.Parameters != nil {
+		parameters = req.Parameters
+	}
 	enabled := existing.Enabled
-	if req.Enabled != nil { enabled = *req.Enabled }
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
 
 	emailChannelID := existing.EmailChannelID
 	if req.EmailChannelID != nil {
@@ -375,7 +394,7 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 		Name:            name,
 		ReportType:      reportType,
 		ClusterID:       clusterID,
-		TimeRangeHours:  safeInt32(timeRangeHours),
+		TimeRangeHours:  safeconv.Int32(timeRangeHours),
 		Schedule:        scheduleStr,
 		Format:          format,
 		EmailEnabled:    emailEnabled,
@@ -468,7 +487,7 @@ func (h *ReportHandler) GenerateReport(c *fiber.Ctx) error {
 		ReportType:     req.ReportType,
 		ClusterID:      clusterID,
 		Status:         "running",
-		TimeRangeHours: safeInt32(req.TimeRangeHours),
+		TimeRangeHours: safeconv.Int32(req.TimeRangeHours),
 		CreatedBy:      userID,
 	})
 	if err != nil {

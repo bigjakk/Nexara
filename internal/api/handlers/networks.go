@@ -13,6 +13,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // NetworkHandler handles network, firewall, and SDN endpoints.
@@ -439,7 +440,7 @@ func (h *NetworkHandler) ListVMFirewallRules(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
 	}
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeInt32(vmid))
+	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -481,7 +482,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "action and type are required")
 	}
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeInt32(vmid))
+	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -526,7 +527,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeInt32(vmid))
+	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -566,7 +567,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule position")
 	}
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeInt32(vmid))
+	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}

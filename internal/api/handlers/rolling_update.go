@@ -15,6 +15,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/rolling"
+	"github.com/bigjakk/nexara/internal/safeconv"
 	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 )
 
@@ -176,8 +177,8 @@ func (h *RollingUpdateHandler) ListJobs(c *fiber.Ctx) error {
 
 	jobs, err := h.queries.ListRollingUpdateJobs(c.Context(), db.ListRollingUpdateJobsParams{
 		ClusterID: clusterID,
-		Limit:     safeInt32(limit),
-		Offset:    safeInt32(offset),
+		Limit:     safeconv.Int32(limit),
+		Offset:    safeconv.Int32(offset),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list rolling update jobs")
@@ -226,8 +227,8 @@ func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
 	if req.Parallelism <= 0 {
 		req.Parallelism = 1
 	}
-	if req.Parallelism > safeInt32(len(req.Nodes)) {
-		req.Parallelism = safeInt32(len(req.Nodes))
+	if req.Parallelism > safeconv.Int32(len(req.Nodes)) {
+		req.Parallelism = safeconv.Int32(len(req.Nodes))
 	}
 
 	// Validate node names.
@@ -359,7 +360,7 @@ func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
 		_, err := h.queries.InsertRollingUpdateNode(c.Context(), db.InsertRollingUpdateNodeParams{
 			JobID:        job.ID,
 			NodeName:     nodeName,
-			NodeOrder:    safeInt32(i),
+			NodeOrder:    safeconv.Int32(i),
 			PackagesJson: packagesJSON,
 		})
 		if err != nil {
@@ -367,7 +368,7 @@ func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
 		}
 	}
 
-	h.auditLog(c, clusterID,job.ID.String(), "rolling_update_created", nil)
+	h.auditLog(c, clusterID, job.ID.String(), "rolling_update_created", nil)
 
 	return c.Status(fiber.StatusCreated).JSON(toJobResponse(job))
 }
@@ -422,7 +423,7 @@ func (h *RollingUpdateHandler) StartJob(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to start job")
 	}
 
-	h.auditLog(c, clusterID,jobID.String(), "rolling_update_started", nil)
+	h.auditLog(c, clusterID, jobID.String(), "rolling_update_started", nil)
 
 	if h.eventPub != nil {
 		h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindRollingUpdate, "rolling_update", jobID.String(), "started")
@@ -465,7 +466,7 @@ func (h *RollingUpdateHandler) CancelJob(c *fiber.Ctx) error {
 		})
 	}
 
-	h.auditLog(c, clusterID,jobID.String(), "rolling_update_cancelled", nil)
+	h.auditLog(c, clusterID, jobID.String(), "rolling_update_cancelled", nil)
 
 	if h.eventPub != nil {
 		h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindRollingUpdate, "rolling_update", jobID.String(), "cancelled")
@@ -493,7 +494,7 @@ func (h *RollingUpdateHandler) PauseJob(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to pause job")
 	}
 
-	h.auditLog(c, clusterID,jobID.String(), "rolling_update_paused", nil)
+	h.auditLog(c, clusterID, jobID.String(), "rolling_update_paused", nil)
 
 	if h.eventPub != nil {
 		h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindRollingUpdate, "rolling_update", jobID.String(), "paused")
@@ -521,7 +522,7 @@ func (h *RollingUpdateHandler) ResumeJob(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to resume job")
 	}
 
-	h.auditLog(c, clusterID,jobID.String(), "rolling_update_resumed", nil)
+	h.auditLog(c, clusterID, jobID.String(), "rolling_update_resumed", nil)
 
 	if h.eventPub != nil {
 		h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindRollingUpdate, "rolling_update", jobID.String(), "resumed")
@@ -597,7 +598,7 @@ func (h *RollingUpdateHandler) ConfirmUpgrade(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": node.NodeName})
-	h.auditLog(c, clusterID,jobID.String(), "node_upgrade_confirmed", details)
+	h.auditLog(c, clusterID, jobID.String(), "node_upgrade_confirmed", details)
 
 	return c.JSON(fiber.Map{"status": "confirmed"})
 }
@@ -639,7 +640,7 @@ func (h *RollingUpdateHandler) SkipNode(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": node.NodeName})
-	h.auditLog(c, clusterID,jobID.String(), "node_skipped", details)
+	h.auditLog(c, clusterID, jobID.String(), "node_skipped", details)
 
 	return c.JSON(fiber.Map{"status": "skipped"})
 }
@@ -811,11 +812,11 @@ func (h *RollingUpdateHandler) UpsertSSHCredentials(c *fiber.Ctx) error {
 	}
 
 	creds, err := h.queries.UpsertClusterSSHCredentials(c.Context(), db.UpsertClusterSSHCredentialsParams{
-		ClusterID:         clusterID,
-		Username:          req.Username,
-		Port:              req.Port,
-		AuthType:          req.AuthType,
-		EncryptedPassword: encPassword,
+		ClusterID:           clusterID,
+		Username:            req.Username,
+		Port:                req.Port,
+		AuthType:            req.AuthType,
+		EncryptedPassword:   encPassword,
 		EncryptedPrivateKey: encKey,
 	})
 	if err != nil {

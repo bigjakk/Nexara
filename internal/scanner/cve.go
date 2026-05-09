@@ -16,18 +16,8 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
-
-// safeInt32 converts an int to int32 with bounds clamping (gosec G115).
-func safeInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v) //nolint:gosec // bounds checked above
-}
 
 // Engine performs CVE scanning on Proxmox clusters.
 //
@@ -95,7 +85,7 @@ func (e *Engine) ScanCluster(ctx context.Context, clusterID uuid.UUID) (uuid.UUI
 	scan, err := e.queries.InsertCVEScan(ctx, db.InsertCVEScanParams{
 		ClusterID:  clusterID,
 		Status:     "running",
-		TotalNodes: safeInt32(len(nodes)),
+		TotalNodes: safeconv.Int32(len(nodes)),
 	})
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("create scan: %w", err)
@@ -117,7 +107,7 @@ func (e *Engine) RunScanWithID(ctx context.Context, clusterID, scanID uuid.UUID)
 	// knows how many nodes the cluster has.
 	_ = e.queries.UpdateCVEScanTotalNodes(ctx, db.UpdateCVEScanTotalNodesParams{
 		ID:         scanID,
-		TotalNodes: safeInt32(len(nodes)),
+		TotalNodes: safeconv.Int32(len(nodes)),
 	})
 
 	_ = e.queries.UpdateCVEScanCounts(ctx, db.UpdateCVEScanCountsParams{
@@ -318,14 +308,14 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 			}
 		}
 
-		nodeVulns := safeInt32(len(vulns))
+		nodeVulns := safeconv.Int32(len(vulns))
 		postureScore := ComputePostureScore(nodeCritical, nodeHigh, nodeMedium, nodeLow, nodeUnknown)
 
 		now := time.Now()
 		_ = e.queries.UpdateCVEScanNode(ctx, db.UpdateCVEScanNodeParams{
 			ID:            scanNode.ID,
 			Status:        "completed",
-			PackagesTotal: safeInt32(len(updates)),
+			PackagesTotal: safeconv.Int32(len(updates)),
 			VulnsFound:    nodeVulns,
 			PostureScore:  pgtype.Float4{Float32: postureScore, Valid: true},
 			ScannedAt:     pgtype.Timestamptz{Time: now, Valid: true},

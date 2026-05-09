@@ -14,6 +14,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/notifications"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // NotificationDLQHandler exposes the dead-letter queue produced by the alert
@@ -140,8 +141,8 @@ func (h *NotificationDLQHandler) List(c *fiber.Ctx) error {
 	rows, err := h.queries.ListNotificationDLQ(c.Context(), db.ListNotificationDLQParams{
 		State:     state,
 		ChannelID: channelIDPg,
-		LimitVal:  safeInt32(limit),
-		OffsetVal: safeInt32(offset),
+		LimitVal:  safeconv.Int32(limit),
+		OffsetVal: safeconv.Int32(offset),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list DLQ entries")

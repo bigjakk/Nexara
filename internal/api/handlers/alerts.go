@@ -14,6 +14,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/notifications"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // AlertHandler handles alert rules, history, notification channels, and maintenance windows.
@@ -355,8 +356,8 @@ func (h *AlertHandler) ListRules(c *fiber.Ctx) error {
 		}
 		rules, err := h.queries.ListAlertRulesByCluster(c.Context(), db.ListAlertRulesByClusterParams{
 			ClusterID: pgtype.UUID{Bytes: cid, Valid: true},
-			Limit:     safeInt32(limit),
-			Offset:    safeInt32(offset),
+			Limit:     safeconv.Int32(limit),
+			Offset:    safeconv.Int32(offset),
 		})
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list alert rules")
@@ -369,8 +370,8 @@ func (h *AlertHandler) ListRules(c *fiber.Ctx) error {
 	}
 
 	rules, err := h.queries.ListAlertRules(c.Context(), db.ListAlertRulesParams{
-		Limit:  safeInt32(limit),
-		Offset: safeInt32(offset),
+		Limit:  safeconv.Int32(limit),
+		Offset: safeconv.Int32(offset),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list alert rules")
@@ -792,8 +793,8 @@ func (h *AlertHandler) ListAlerts(c *fiber.Ctx) error {
 		State:     state,
 		Severity:  severity,
 		ClusterID: clusterID,
-		LimitVal:  safeInt32(limit),
-		OffsetVal: safeInt32(offset),
+		LimitVal:  safeconv.Int32(limit),
+		OffsetVal: safeconv.Int32(offset),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list alerts")
@@ -972,8 +973,8 @@ func (h *AlertHandler) ListAlertsByCluster(c *fiber.Ctx) error {
 
 	alerts, err := h.queries.ListAlertHistoryByCluster(c.Context(), db.ListAlertHistoryByClusterParams{
 		ClusterID: pgtype.UUID{Bytes: clusterID, Valid: true},
-		Limit:     safeInt32(limit),
-		Offset:    safeInt32(offset),
+		Limit:     safeconv.Int32(limit),
+		Offset:    safeconv.Int32(offset),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list alerts")
@@ -1062,11 +1063,11 @@ func (h *AlertHandler) CreateChannel(c *fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	ch, err := h.queries.InsertNotificationChannel(c.Context(), db.InsertNotificationChannelParams{
-		Name:             req.Name,
-		ChannelType:      req.ChannelType,
-		ConfigEncrypted:  encrypted,
-		Enabled:          enabled,
-		CreatedBy:        userID,
+		Name:            req.Name,
+		ChannelType:     req.ChannelType,
+		ConfigEncrypted: encrypted,
+		Enabled:         enabled,
+		CreatedBy:       userID,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create channel")
@@ -1271,8 +1272,8 @@ func (h *AlertHandler) ListMaintenanceWindows(c *fiber.Ctx) error {
 
 	windows, err := h.queries.ListMaintenanceWindows(c.Context(), db.ListMaintenanceWindowsParams{
 		ClusterID: clusterID,
-		Limit:     safeInt32(limit),
-		Offset:    safeInt32(offset),
+		Limit:     safeconv.Int32(limit),
+		Offset:    safeconv.Int32(offset),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list maintenance windows")

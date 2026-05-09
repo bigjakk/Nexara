@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"strings"
 	"time"
 
@@ -15,19 +14,8 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
-
-// safeInt32 converts an int to int32 with bounds clamping.
-// Proxmox VMIDs always fit in int32, but this satisfies gosec G115.
-func safeInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v) //nolint:gosec // bounds checked above
-}
 
 // SystemUserID is the well-known UUID for the DRS scheduler system user.
 // Created by migration 000013_system_user.
@@ -68,7 +56,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			ClusterID:   clusterID,
 			SourceNode:  rec.SourceNode,
 			TargetNode:  rec.TargetNode,
-			VmID:        safeInt32(rec.VMID),
+			VmID:        safeconv.Int32(rec.VMID),
 			VmType:      rec.VMType,
 			Reason:      rec.Reason,
 			ScoreBefore: rec.ScoreBefore,
@@ -249,7 +237,7 @@ func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node s
 func (e *Executor) resolveVMDBID(ctx context.Context, clusterID uuid.UUID, vmid int) string {
 	vm, err := e.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
 		ClusterID: clusterID,
-		Vmid:      safeInt32(vmid),
+		Vmid:      safeconv.Int32(vmid),
 	})
 	if err != nil {
 		return ""

@@ -17,6 +17,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // BackupHandler handles PBS backup management endpoints.
@@ -418,14 +419,14 @@ func (h *BackupHandler) PruneDatastore(c *fiber.Ctx) error {
 
 	if !req.DryRun {
 		details, _ := json.Marshal(map[string]interface{}{
-			"store":       store,
-			"backup_type": req.BackupType,
-			"backup_id":   req.BackupID,
-			"keep_last":   req.KeepLast,
-			"keep_daily":  req.KeepDaily,
-			"keep_weekly": req.KeepWeekly,
+			"store":        store,
+			"backup_type":  req.BackupType,
+			"backup_id":    req.BackupID,
+			"keep_last":    req.KeepLast,
+			"keep_daily":   req.KeepDaily,
+			"keep_weekly":  req.KeepWeekly,
 			"keep_monthly": req.KeepMonthly,
-			"keep_yearly": req.KeepYearly,
+			"keep_yearly":  req.KeepYearly,
 		})
 		h.auditLog(c, store, "datastore_pruned", details)
 		h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "datastore_pruned")
@@ -1141,7 +1142,7 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 	if req.Force {
 		existingVM, vmErr := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
 			ClusterID: clusterID,
-			Vmid:      safeInt32(req.VMID),
+			Vmid:      safeconv.Int32(req.VMID),
 		})
 		if vmErr != nil && !errors.Is(vmErr, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to check existing VM")
@@ -1238,7 +1239,7 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 	if req.StartAfterRestore {
 		go func() {
 			ctx := context.Background() //nolint:gosec // G118: intentionally detached; Fiber recycles request context
-			for i := 0; i < 600; i++ { // up to 10 minutes
+			for i := 0; i < 600; i++ {  // up to 10 minutes
 				time.Sleep(2 * time.Second)
 				ts, tsErr := pveClient.GetTaskStatus(ctx, req.TargetNode, upid)
 				if tsErr != nil {
@@ -1278,24 +1279,24 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 
 // backupCoverageEntry is a single VM's backup coverage info.
 type backupCoverageEntry struct {
-	VMID            int32  `json:"vmid"`
-	Name            string `json:"name"`
-	Type            string `json:"type"`
-	Status          string `json:"status"`
-	ClusterID       string `json:"cluster_id"`
-	ClusterName     string `json:"cluster_name"`
-	LatestBackup    *int64 `json:"latest_backup"`
-	BackupCount     int    `json:"backup_count"`
-	CoverageStatus  string `json:"coverage_status"` // "recent", "stale", "none"
+	VMID           int32  `json:"vmid"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Status         string `json:"status"`
+	ClusterID      string `json:"cluster_id"`
+	ClusterName    string `json:"cluster_name"`
+	LatestBackup   *int64 `json:"latest_backup"`
+	BackupCount    int    `json:"backup_count"`
+	CoverageStatus string `json:"coverage_status"` // "recent", "stale", "none"
 }
 
 // GetBackupCoverage handles GET /api/v1/backup-coverage
 //
 // Cross-references three data sources to determine backup coverage:
-// 1. PVE storage pools — which clusters have PBS-type storage and which
-//    datastore name each maps to (PVE's PBS storage name = PBS datastore name)
-// 2. PBS snapshots — keyed by (datastore, backup_id/VMID)
-// 3. VMs — matched only against datastores their cluster actually uses
+//  1. PVE storage pools — which clusters have PBS-type storage and which
+//     datastore name each maps to (PVE's PBS storage name = PBS datastore name)
+//  2. PBS snapshots — keyed by (datastore, backup_id/VMID)
+//  3. VMs — matched only against datastores their cluster actually uses
 //
 // This correctly handles multi-cluster setups where different clusters
 // use different PBS datastores, even with overlapping VMIDs.
