@@ -419,10 +419,17 @@ function ClusterChart({
   const seedData = useSeedMetrics(summary.cluster.id);
   const isLive = timeRange === "live";
 
-  const liveHistory = liveMetrics?.history ?? [];
-  const chartData = isLive
-    ? (liveHistory.length > 0 ? liveHistory : (seedData ?? []))
-    : (historicalQuery.data ?? []);
+  const liveHistory = liveMetrics?.history;
+  const chartData = useMemo(() => {
+    if (!isLive) return historicalQuery.data ?? [];
+    const seed = seedData ?? [];
+    const live = liveHistory ?? [];
+    if (live.length === 0) return seed;
+    if (seed.length === 0) return live;
+    const firstLiveTs = live[0]?.timestamp ?? 0;
+    const seedBefore = seed.filter((p) => p.timestamp < firstLiveTs);
+    return [...seedBefore, ...live];
+  }, [isLive, liveHistory, seedData, historicalQuery.data]);
 
   const chartConfigs = {
     cpu: { titleKey: "cpuUsage", dataKey: "cpuPercent" as const, color: "#3b82f6" },
