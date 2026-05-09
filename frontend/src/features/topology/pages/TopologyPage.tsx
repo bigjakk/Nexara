@@ -1,5 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Network } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
+import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { useTopologyData } from "../api/topology-queries";
 import { TopologyCanvas } from "../components/TopologyCanvas";
 import { TopologyControls } from "../components/TopologyControls";
@@ -8,6 +11,7 @@ import type { TopologyFilters } from "../lib/topology-transform";
 
 export function TopologyPage() {
   const { t } = useTranslation("topology");
+  const { t: td } = useTranslation("dashboard");
   const { input, isLoading, error } = useTopologyData();
 
   const [filters, setFilters] = useState<TopologyFilters>({
@@ -38,10 +42,13 @@ export function TopologyPage() {
 
   if (input.clusters.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-muted-foreground">
-          {t("noClustersTopology")}
-        </div>
+      <div className="flex h-full items-center justify-center p-6">
+        <EmptyState
+          icon={Network}
+          title={td("noClustersRegistered")}
+          description={t("noClustersTopology")}
+          action={<AddClusterDialog />}
+        />
       </div>
     );
   }

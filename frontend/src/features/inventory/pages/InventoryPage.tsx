@@ -3,15 +3,21 @@ import { useTranslation } from "react-i18next";
 import { AlertCircle, Loader2, Package, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EmptyState } from "@/components/EmptyState";
 import { useInventoryData } from "../api/inventory-queries";
 import { ResourceTable } from "../components/ResourceTable";
 import { DeployTemplateDialog } from "@/features/vms/components/DeployTemplateDialog";
+import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import type { ResourceKind } from "@/features/vms/types/vm";
 
 export function InventoryPage() {
   const { t } = useTranslation("inventory");
   const { t: tc } = useTranslation("common");
+  const { t: td } = useTranslation("dashboard");
   const { rows, isLoading, error } = useInventoryData();
+  const { data: clusters } = useClusters();
+  const hasClusters = (clusters?.length ?? 0) > 0;
 
   const [deployTarget, setDeployTarget] = useState<{
     clusterId: string;
@@ -48,10 +54,20 @@ export function InventoryPage() {
       )}
 
       {!isLoading && !error && rows.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-          <Package className="mb-2 h-10 w-10" />
-          <p className="text-sm">{t("noResources")}</p>
-        </div>
+        hasClusters ? (
+          <EmptyState
+            icon={Package}
+            title={t("noResources")}
+            description={t("noResourcesDescription")}
+          />
+        ) : (
+          <EmptyState
+            icon={Package}
+            title={td("noClustersRegistered")}
+            description={td("addClusterToGetStarted")}
+            action={<AddClusterDialog />}
+          />
+        )
       )}
 
       {!isLoading && !error && rows.length > 0 && (

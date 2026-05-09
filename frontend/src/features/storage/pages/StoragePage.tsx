@@ -1,11 +1,14 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { HardDrive, ChevronDown, ChevronRight, Server, Share2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/EmptyState";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import {
   useClusterStorage,
@@ -88,6 +91,7 @@ function groupStorage(
 }
 
 export function StoragePage() {
+  const { t: td } = useTranslation("dashboard");
   const [searchParams] = useSearchParams();
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
@@ -166,9 +170,20 @@ export function StoragePage() {
             />
           ))}
           {pools.length === 0 && (
-            <p className="py-8 text-center text-muted-foreground">
-              No storage pools found.
-            </p>
+            clusters.length === 0 ? (
+              <EmptyState
+                icon={HardDrive}
+                title={td("noClustersRegistered")}
+                description={td("addClusterToGetStarted")}
+                action={<AddClusterDialog />}
+              />
+            ) : (
+              <EmptyState
+                icon={HardDrive}
+                title="No storage pools yet"
+                description="This cluster has no storage pools configured. Add one in the Proxmox UI to see it here."
+              />
+            )
           )}
         </>
       )}
