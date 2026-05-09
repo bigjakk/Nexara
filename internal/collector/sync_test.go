@@ -83,6 +83,17 @@ func (m *mockQueries) UpsertVM(_ context.Context, arg db.UpsertVMParams) (db.Vm,
 	return vm, nil
 }
 
+func (m *mockQueries) SetVMOSType(_ context.Context, arg db.SetVMOSTypeParams) error {
+	for k, vm := range m.vms {
+		if vm.ID == arg.ID {
+			vm.Ostype = arg.Ostype
+			m.vms[k] = vm
+			break
+		}
+	}
+	return nil
+}
+
 func (m *mockQueries) UpsertStoragePool(_ context.Context, arg db.UpsertStoragePoolParams) (db.UpsertStoragePoolRow, error) {
 	m.upsertStorageCalls = append(m.upsertStorageCalls, arg)
 	row := db.UpsertStoragePoolRow{

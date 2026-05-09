@@ -371,6 +371,7 @@ type Querier interface {
 	SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error
+	SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error
 	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) error
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error

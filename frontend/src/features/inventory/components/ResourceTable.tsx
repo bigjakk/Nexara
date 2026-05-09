@@ -27,6 +27,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge } from "./StatusBadge";
 import { ResourceTypeBadge } from "./ResourceTypeBadge";
+import { OSIcon } from "@/components/OSIcon";
+import { classifyOS } from "@/lib/os-classify";
 import { MetricMiniBar } from "./MetricMiniBar";
 import { SearchBar } from "./SearchBar";
 import { ColumnToggle } from "./ColumnToggle";
@@ -252,7 +254,16 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("type", {
       header: "Type",
-      cell: ({ row, getValue }) => <ResourceTypeBadge type={getValue()} template={row.original.template} />,
+      cell: ({ row, getValue }) => {
+        const r = row.original;
+        const showOS = (r.type === "vm" || r.type === "ct") && classifyOS(r.ostype) !== "unknown";
+        return (
+          <span className="inline-flex items-center gap-1.5">
+            <ResourceTypeBadge type={getValue()} template={r.template} />
+            {showOS && <OSIcon ostype={r.ostype} />}
+          </span>
+        );
+      },
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("name", {

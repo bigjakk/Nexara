@@ -939,6 +939,7 @@ type Vm struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+	Ostype     string    `json:"ostype"`
 }
 
 type VmMetric struct {

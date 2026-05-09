@@ -29,6 +29,8 @@ export interface InventoryRow {
   haState: string;
   pool: string;
   template: boolean;
+  /** Proxmox ostype string (e.g. "l26", "win11", "debian", "ubuntu"); empty for nodes or when unknown */
+  ostype: string;
   /** Live metric: CPU usage percent (null = no data) */
   cpuPercent: number | null;
   /** Live metric: memory usage percent (null = no data) */

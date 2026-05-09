@@ -38,6 +38,9 @@ SELECT * FROM vms WHERE id = $1 AND type = 'lxc';
 -- name: UpdateVMStatus :exec
 UPDATE vms SET status = $2, updated_at = now() WHERE id = $1;
 
+-- name: SetVMOSType :exec
+UPDATE vms SET ostype = $2, updated_at = now() WHERE id = $1;
+
 -- name: ListVMStatusesByCluster :many
 SELECT id, vmid, node_id, status FROM vms WHERE cluster_id = $1;
 

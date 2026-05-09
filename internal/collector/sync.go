@@ -25,6 +25,7 @@ type SyncQueries interface {
 	ListActiveClusters(ctx context.Context) ([]db.Cluster, error)
 	UpsertNode(ctx context.Context, arg db.UpsertNodeParams) (db.Node, error)
 	UpsertVM(ctx context.Context, arg db.UpsertVMParams) (db.Vm, error)
+	SetVMOSType(ctx context.Context, arg db.SetVMOSTypeParams) error
 	UpsertStoragePool(ctx context.Context, arg db.UpsertStoragePoolParams) (db.UpsertStoragePoolRow, error)
 	DeleteStaleStoragePools(ctx context.Context, arg db.DeleteStaleStoragePoolsParams) (int64, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
@@ -71,6 +72,9 @@ type ProxmoxClient interface {
 	GetNetworkInterfaces(ctx context.Context, node string) ([]proxmox.NetworkInterface, error)
 	GetVMs(ctx context.Context, node string) ([]proxmox.VirtualMachine, error)
 	GetContainers(ctx context.Context, node string) ([]proxmox.Container, error)
+	GetVMConfig(ctx context.Context, node string, vmid int) (proxmox.VMConfig, error)
+	GetCTConfig(ctx context.Context, node string, vmid int) (proxmox.VMConfig, error)
+	GetGuestAgentOSInfo(ctx context.Context, node string, vmid int) (*proxmox.GuestOSInfo, error)
 	GetStoragePools(ctx context.Context, node string) ([]proxmox.StoragePool, error)
 	GetCephStatus(ctx context.Context, node string) (*proxmox.CephStatus, error)
 	GetCephOSDs(ctx context.Context, node string) (*proxmox.CephOSDResponse, error)
@@ -685,6 +689,8 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 			return nil, fmt.Errorf("upsert VM %d on %s: %w", vm.VMID, nodeName, err)
 		}
 
+		s.refreshOSType(ctx, client, dbVM, nodeName, vm.VMID, "qemu", vm.EffectiveStatus())
+
 		snapshots = append(snapshots, vmMetricSnapshot{
 			VMID:      dbVM.ID,
 			CPUUsage:  vm.CPU,
@@ -698,6 +704,63 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 	}
 
 	return snapshots, nil
+}
+
+// refreshOSType detects the current OS for a guest and persists it when the
+// detected value differs from what's already stored. Best-effort — a failure
+// is logged but never propagated, since the per-VM config call is just for
+// cosmetic OS detection.
+//
+// Detection order (running QEMU only):
+//  1. QEMU guest agent's reported os-info — gives the actual running OS
+//     (handles cases where the Proxmox config says "other" but the guest is
+//     really Linux). Reported `id` is preferred (e.g. "ubuntu", "debian",
+//     "mswindows"); falls back to a normalized `name`.
+//  2. /qemu/{vmid}/config.ostype — Proxmox-configured OS family.
+//
+// Stopped QEMU and LXC always fall through to the config call only.
+func (s *Syncer) refreshOSType(ctx context.Context, client ProxmoxClient, dbVM db.Vm, nodeName string, vmid int, kind, status string) {
+	detected := ""
+
+	if kind == "qemu" && status == "running" {
+		if info, err := client.GetGuestAgentOSInfo(ctx, nodeName, vmid); err == nil && info != nil {
+			if info.ID != "" {
+				detected = strings.ToLower(info.ID)
+			} else if info.Name != "" {
+				detected = strings.ToLower(info.Name)
+			}
+		}
+	}
+
+	if detected == "" {
+		var (
+			config proxmox.VMConfig
+			err    error
+		)
+		switch kind {
+		case "qemu":
+			config, err = client.GetVMConfig(ctx, nodeName, vmid)
+		case "lxc":
+			config, err = client.GetCTConfig(ctx, nodeName, vmid)
+		default:
+			return
+		}
+		if err != nil {
+			s.logger.Debug("ostype fetch failed",
+				"vmid", vmid, "node", nodeName, "kind", kind, "error", err)
+			return
+		}
+		raw, _ := config["ostype"].(string)
+		detected = strings.ToLower(raw)
+	}
+
+	if detected == "" || detected == dbVM.Ostype {
+		return
+	}
+	if err := s.queries.SetVMOSType(ctx, db.SetVMOSTypeParams{ID: dbVM.ID, Ostype: detected}); err != nil {
+		s.logger.Debug("ostype persist failed",
+			"vmid", vmid, "kind", kind, "error", err)
+	}
 }
 
 func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string, vmExtra map[int32]vmExtraFields) ([]vmMetricSnapshot, error) {
@@ -728,6 +791,8 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 		if err != nil {
 			return nil, fmt.Errorf("upsert container %d on %s: %w", ct.VMID, nodeName, err)
 		}
+
+		s.refreshOSType(ctx, client, dbVM, nodeName, ct.VMID, "lxc", ct.Status)
 
 		snapshots = append(snapshots, vmMetricSnapshot{
 			VMID:      dbVM.ID,

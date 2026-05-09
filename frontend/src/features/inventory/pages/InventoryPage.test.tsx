@@ -68,6 +68,7 @@ describe("InventoryPage", () => {
           haState: "",
           pool: "",
           template: false,
+          ostype: "",
           cpuPercent: 50,
           memPercent: 60,
         },

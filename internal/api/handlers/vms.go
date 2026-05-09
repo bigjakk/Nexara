@@ -46,6 +46,7 @@ type vmResponse struct {
 	Tags      string    `json:"tags"`
 	HaState   string    `json:"ha_state"`
 	Pool      string    `json:"pool"`
+	OSType    string    `json:"ostype"`
 
 	LastSeenAt time.Time `json:"last_seen_at"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -69,6 +70,7 @@ func toVMResponse(v db.Vm) vmResponse {
 		Tags:       v.Tags,
 		HaState:    v.HaState,
 		Pool:       v.Pool,
+		OSType:     v.Ostype,
 		LastSeenAt: v.LastSeenAt,
 		CreatedAt:  v.CreatedAt,
 		UpdatedAt:  v.UpdatedAt,
