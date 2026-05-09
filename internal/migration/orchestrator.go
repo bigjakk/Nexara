@@ -566,7 +566,7 @@ func (o *Orchestrator) waitForTask(ctx context.Context, client *proxmox.Client, 
 			if status.Status == "running" {
 				continue
 			}
-			if migrationSucceeded(status.ExitStatus) {
+			if proxmox.TaskSucceeded(status.ExitStatus) {
 				return nil
 			}
 			return fmt.Errorf("task exit status: %s", status.ExitStatus)
@@ -780,7 +780,7 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 
 			job := mc.job
 
-			if migrationSucceeded(status.ExitStatus) {
+			if proxmox.TaskSucceeded(status.ExitStatus) {
 				_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
 					ID:          jobID,
 					Status:      StatusCompleted,
@@ -894,12 +894,6 @@ func (o *Orchestrator) recordDiskMove(ctx context.Context, mc *migrationContext,
 // Cancel cancels a pending or checking job.
 func (o *Orchestrator) Cancel(ctx context.Context, jobID uuid.UUID) error {
 	return o.queries.CancelMigrationJob(ctx, jobID)
-}
-
-// migrationSucceeded returns true if a Proxmox task exit status indicates success.
-func migrationSucceeded(exitStatus string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(exitStatus))
-	return upper == "" || upper == "OK" || strings.HasPrefix(upper, "OK ") || upper == "WARNINGS"
 }
 
 // formatMapping converts a map to Proxmox's "src:tgt,src2:tgt2" format.

@@ -1360,7 +1360,7 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 			ts, err := client.GetTaskStatus(finalCtx, node, upid)
 			finalCancel()
 			if err == nil && ts.Status == "stopped" {
-				if taskSucceeded(ts.ExitStatus) {
+				if proxmox.TaskSucceeded(ts.ExitStatus) {
 					return "completed"
 				}
 				return "failed"
@@ -1372,18 +1372,13 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 				continue
 			}
 			if ts.Status == "stopped" {
-				if taskSucceeded(ts.ExitStatus) {
+				if proxmox.TaskSucceeded(ts.ExitStatus) {
 					return "completed"
 				}
 				return "failed"
 			}
 		}
 	}
-}
-
-func taskSucceeded(exitStatus string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(exitStatus))
-	return upper == "" || upper == "OK" || strings.HasPrefix(upper, "OK ") || upper == "WARNINGS"
 }
 
 func (o *Orchestrator) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {

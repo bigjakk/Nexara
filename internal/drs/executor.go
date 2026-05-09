@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -178,16 +177,6 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 	return nil
 }
 
-// taskSucceeded returns true if a Proxmox task exit status indicates success.
-// Proxmox uses "OK" for clean exits but can also return statuses like
-// "WARNINGS" or "OK (with warnings)" which still mean the task completed.
-// An empty exit status with a stopped task also indicates success on some
-// Proxmox versions.
-func taskSucceeded(exitStatus string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(exitStatus))
-	return upper == "" || upper == "OK" || strings.HasPrefix(upper, "OK ") || upper == "WARNINGS"
-}
-
 func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) (status string, detail string) {
 	// Use a dedicated timeout context derived from the per-server shutdown
 	// context. Live migrations can take 15+ minutes for large VMs, so we
@@ -211,7 +200,7 @@ func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node s
 			ts, err := client.GetTaskStatus(finalCtx, node, upid)
 			finalCancel()
 			if err == nil && ts.Status == "stopped" {
-				if taskSucceeded(ts.ExitStatus) {
+				if proxmox.TaskSucceeded(ts.ExitStatus) {
 					return "completed", ts.ExitStatus
 				}
 				return "failed", ts.ExitStatus
@@ -224,7 +213,7 @@ func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node s
 				continue
 			}
 			if ts.Status == "stopped" {
-				if taskSucceeded(ts.ExitStatus) {
+				if proxmox.TaskSucceeded(ts.ExitStatus) {
 					return "completed", ts.ExitStatus
 				}
 				return "failed", ts.ExitStatus
