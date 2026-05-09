@@ -117,7 +117,17 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 		s.sessionManager = auth.NewSessionManager(s.queries, rdb)
 	}
 
-	if s.queries != nil && rdb != nil {
+	// rdb may be nil (REDIS_URL unset / parse failure / connection
+	// rejected at startup); the engine's read + write-back paths
+	// already guard `if e.redis != nil` so it falls through to a
+	// straight Postgres lookup. The 5.1 helper-side fail-loud requires
+	// the engine itself to be present, so don't gate construction on
+	// Redis — that would brick every authenticated request when Redis
+	// is misconfigured.
+	if s.queries != nil {
+		if rdb == nil {
+			slog.Default().Warn("rbac engine: Redis unavailable, permission lookups will hit Postgres on every check")
+		}
 		s.rbacEngine = auth.NewRBACEngine(s.queries, rdb)
 	}
 

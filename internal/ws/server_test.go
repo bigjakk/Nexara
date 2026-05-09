@@ -40,7 +40,14 @@ func setupIntegration(t *testing.T) (*testEnv, func()) {
 
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
 
-	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second)
+	// Test-mode permission checker grants every action — the integration
+	// suite exercises subscribe/publish wiring, not the gate (covered
+	// in subscribe_auth_test.go). Production wires RBACEngine instead.
+	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second, ServerConfig{
+		TestPermissionChecker: func(_ context.Context, _ uuid.UUID, _, _, _ string, _ uuid.UUID) (bool, error) {
+			return true, nil
+		},
+	})
 
 	// Start Redis subscriber.
 	ctx, cancel := context.WithCancel(context.Background())

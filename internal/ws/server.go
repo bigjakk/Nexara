@@ -25,9 +25,14 @@ type Server struct {
 	// rbacEngine resolves view:cluster permissions for the subscribe-time
 	// gate in client.go::canSubscribe (security review H1). Plumbed
 	// through ServerConfig from main.go. Production runs MUST set this;
-	// when nil, cluster channels fall open with a server-side warning
-	// log to support test fixtures.
+	// when nil (and no testPermissionChecker is set), cluster channel
+	// subscribes fail closed.
 	rbacEngine *auth.RBACEngine
+	// testPermissionChecker is an optional override used by integration
+	// tests so they can run the subscribe gate end-to-end without
+	// spinning up a real RBAC engine. When set, it takes precedence
+	// over rbacEngine.HasPermission. Never set in production builds.
+	testPermissionChecker PermissionChecker
 	// allowedOrigins is the WebSocket upgrade Origin allow-list. nil or
 	// empty preserves the gofiber/contrib/websocket default of allowing
 	// all origins (the historical behaviour, suitable for dev/lab
@@ -44,9 +49,14 @@ type ServerConfig struct {
 	ConsoleHandler *ConsoleHandler
 	VNCHandler     *VNCHandler
 	// RBACEngine is required in production for the subscribe-time
-	// permission check on cluster channels. If nil, the WS server logs
-	// a warning at startup and falls open on cluster subscriptions.
+	// permission check on cluster channels. If nil (and no
+	// TestPermissionChecker is set), the WS server logs a warning at
+	// startup and cluster subscribes fail closed.
 	RBACEngine *auth.RBACEngine
+	// TestPermissionChecker, when non-nil, overrides the RBAC engine for
+	// the subscribe gate. Reserved for integration tests that exercise
+	// the gate without a full Postgres+Redis-backed engine.
+	TestPermissionChecker PermissionChecker
 	// AllowedOrigins, when non-empty, enables strict Origin checking on
 	// the /ws, /ws/console, and /ws/vnc upgrade endpoints. Each entry is
 	// matched against the request's Origin header byte-for-byte (so the
@@ -71,15 +81,16 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		s.consoleHandler = opts[0].ConsoleHandler
 		s.vncHandler = opts[0].VNCHandler
 		s.rbacEngine = opts[0].RBACEngine
+		s.testPermissionChecker = opts[0].TestPermissionChecker
 		s.allowedOrigins = opts[0].AllowedOrigins
 	}
 
-	if s.rbacEngine == nil {
-		// Production deploys MUST configure this — without it any
-		// authenticated user can subscribe to any cluster channel
-		// (security review H1 fix). Log loudly so misconfiguration
-		// is caught at startup rather than discovered post-deploy.
-		s.logger.Warn("ws server: no RBAC engine configured — cluster channel subscriptions will not be authorization-checked")
+	if s.rbacEngine == nil && s.testPermissionChecker == nil {
+		// Production deploys MUST configure RBACEngine — without it
+		// cluster channel subscribes fail closed (post-5.1) and every
+		// subscribe attempt logs a warning. Log loudly at startup so
+		// misconfiguration is caught early.
+		s.logger.Warn("ws server: no RBAC engine configured — cluster channel subscriptions will be denied")
 	}
 
 	if len(s.allowedOrigins) == 0 {
@@ -486,11 +497,14 @@ func (s *Server) handleWS(conn *websocket.Conn) {
 
 	// Pass userID + a permission-check closure into the client so
 	// canSubscribe() can enforce per-cluster view permissions on each
-	// subscribe message (security review H1). The closure is nil when
-	// no RBAC engine was wired in (test fixtures); the client falls
-	// open in that case with a server-side warning.
+	// subscribe message (security review H1). Test override beats the
+	// real engine when present; nil leaves canSubscribe to deny cluster
+	// channels (post-5.1, no synthetic-admin fall-open).
 	var checker PermissionChecker
-	if s.rbacEngine != nil {
+	switch {
+	case s.testPermissionChecker != nil:
+		checker = s.testPermissionChecker
+	case s.rbacEngine != nil:
 		checker = s.rbacEngine.HasPermission
 	}
 	client := NewClient(

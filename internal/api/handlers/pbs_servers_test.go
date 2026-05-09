@@ -29,6 +29,7 @@ func newPBSTestApp(t *testing.T) *fiber.App {
 		}
 		return c.Next()
 	})
+	installStubEngineMiddleware(app)
 
 	app.Post("/pbs-servers", handler.Create)
 	app.Get("/pbs-servers", handler.List)
@@ -156,7 +157,7 @@ func TestPBSGet_InvalidUUID(t *testing.T) {
 	}
 }
 
-func TestPBS_NoAuth(t *testing.T) {
+func TestPBS_NonAdminDenied(t *testing.T) {
 	app := newPBSTestApp(t)
 
 	// Endpoints that gate on auth before any DB access (so nil queries is
@@ -179,6 +180,7 @@ func TestPBS_NoAuth(t *testing.T) {
 			}
 			req := httptest.NewRequest(ep.method, ep.path, body)
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Test-Role", "user")
 			resp, err := app.Test(req)
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
@@ -194,8 +196,9 @@ func TestPBS_NoAuth(t *testing.T) {
 }
 
 func TestPBS_NonAdminWriteForbidden(t *testing.T) {
-	// Non-admin writes still 403 via the legacy fallback path. GET /pbs-servers
-	// now returns a filtered list (covered by clusterAccess unit tests).
+	// Non-admin writes are denied by requireClusterPerm via the stub
+	// permissionEngine. GET /pbs-servers returns a filtered list
+	// (covered by clusterAccess unit tests).
 	app := newPBSTestApp(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/pbs-servers", bytes.NewBufferString(`{}`))

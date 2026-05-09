@@ -475,15 +475,6 @@ func testClusterConnectivity(apiURL, tokenID, tokenSecret, tlsFingerprint string
 	}
 }
 
-// requireAdmin checks that the request was made by an admin user.
-func requireAdmin(c *fiber.Ctx) error {
-	role, _ := c.Locals("role").(string)
-	if role != "admin" {
-		return fiber.NewError(fiber.StatusForbidden, "Admin access required")
-	}
-	return nil
-}
-
 type fetchFingerprintRequest struct {
 	APIURL              string `json:"api_url"`
 	AllowPrivateAddress bool   `json:"allow_private_address,omitempty"`
