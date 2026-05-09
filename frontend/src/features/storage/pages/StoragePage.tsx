@@ -16,6 +16,7 @@ import {
 } from "../api/storage-queries";
 import { StorageCapacityBar } from "../components/StorageCapacityBar";
 import { StorageContentTable } from "../components/StorageContentTable";
+import { StorageGuestTable } from "../components/StorageGuestTable";
 import { UploadDialog } from "../components/UploadDialog";
 import { BulkMoveDialog } from "../components/BulkMoveDialog";
 import { AddStorageDialog } from "../components/AddStorageDialog";
@@ -409,10 +410,9 @@ function StoragePoolDetail({
           </TabsList>
           {hasGuestVolumes && (
             <TabsContent value="guests">
-              <StorageContentTable
+              <StorageGuestTable
                 items={guestItems}
                 clusterId={clusterId}
-                storageId={pool.id}
                 migrateTargets={migrateTargets}
               />
             </TabsContent>
@@ -423,7 +423,6 @@ function StoragePoolDetail({
                 items={filterByType(t)}
                 clusterId={clusterId}
                 storageId={pool.id}
-                migrateTargets={t === "images" || t === "rootdir" ? migrateTargets : []}
               />
             </TabsContent>
           ))}
@@ -432,7 +431,6 @@ function StoragePoolDetail({
               items={items}
               clusterId={clusterId}
               storageId={pool.id}
-              migrateTargets={migrateTargets}
             />
           </TabsContent>
         </Tabs>
@@ -443,7 +441,6 @@ function StoragePoolDetail({
           items={items}
           clusterId={clusterId}
           storageId={pool.id}
-          migrateTargets={hasGuestVolumes ? migrateTargets : []}
         />
       )}
 
