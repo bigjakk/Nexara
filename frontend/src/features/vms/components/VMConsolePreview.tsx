@@ -76,6 +76,7 @@ export function VMConsolePreview({ clusterId, node, vmid, onOpen }: VMConsolePre
           node,
           type: "vm_vnc",
           vmid,
+          silent: true,
         });
         token = minted.token;
       } catch {

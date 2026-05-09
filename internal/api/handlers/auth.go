@@ -587,6 +587,13 @@ type consoleTokenRequest struct {
 	Node      string `json:"node"`
 	VMID      int    `json:"vmid,omitempty"`
 	Type      string `json:"type"`
+	// Silent skips the audit-log entry for this mint. Used by background
+	// previews (e.g. VM thumbnails) that would otherwise flood the activity
+	// feed every page load. The mint is still slog'd at INFO so it's not
+	// invisible to operators, and RBAC still applies — silent does not grant
+	// any new authority. Honoured only for vm_vnc / ct_vnc; user-initiated
+	// console types (node_shell, vm_serial, ct_attach) always audit.
+	Silent bool `json:"silent,omitempty"`
 }
 
 type consoleTokenResponse struct {
@@ -685,13 +692,26 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to mint console token")
 	}
 
-	details, _ := json.Marshal(map[string]any{
-		"cluster_id": req.ClusterID,
-		"node":       req.Node,
-		"vmid":       req.VMID,
-		"type":       req.Type,
-	})
-	h.authAuditLog(c, userID, "console_token_mint", details)
+	// Honour silent only for VNC types — the "preview thumbnail" use case.
+	// Terminal/serial mints are always user-initiated and always audit.
+	silent := req.Silent && (req.Type == "vm_vnc" || req.Type == "ct_vnc")
+	if silent {
+		slog.Info("console_token_mint (silent)",
+			"user_id", userID,
+			"cluster_id", req.ClusterID,
+			"node", req.Node,
+			"vmid", req.VMID,
+			"type", req.Type,
+		)
+	} else {
+		details, _ := json.Marshal(map[string]any{
+			"cluster_id": req.ClusterID,
+			"node":       req.Node,
+			"vmid":       req.VMID,
+			"type":       req.Type,
+		})
+		h.authAuditLog(c, userID, "console_token_mint", details)
+	}
 
 	return c.JSON(consoleTokenResponse{
 		Token:     token,

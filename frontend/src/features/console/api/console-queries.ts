@@ -14,6 +14,13 @@ export interface MintConsoleTokenParams {
   type: ConsoleScopeType;
   /** Required for everything except node_shell. */
   vmid?: number;
+  /**
+   * When true, the backend skips the audit-log entry for this mint and only
+   * slog's it. Used by background previews (VM thumbnails) so they don't
+   * flood the activity feed on every page visit. Honoured only for
+   * vm_vnc / ct_vnc — user-initiated console types always audit.
+   */
+  silent?: boolean;
 }
 
 export interface ConsoleTokenResponse {
@@ -40,6 +47,7 @@ export async function mintConsoleToken(
     node: string;
     type: ConsoleScopeType;
     vmid?: number;
+    silent?: boolean;
   } = {
     cluster_id: params.clusterId,
     node: params.node,
@@ -47,6 +55,9 @@ export async function mintConsoleToken(
   };
   if (params.vmid !== undefined) {
     body.vmid = params.vmid;
+  }
+  if (params.silent === true) {
+    body.silent = true;
   }
   return apiClient.post<ConsoleTokenResponse>(
     "/api/v1/auth/console-token",
