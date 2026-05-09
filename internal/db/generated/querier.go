@@ -114,6 +114,14 @@ type Querier interface {
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
+	// Cross-source UPID lookup: returns true if ANY audit_log row references
+	// this UPID, regardless of whether it was written by the Nexara handler
+	// (source='nexara') or previously ingested from Proxmox
+	// (source='proxmox'). Used by collector/task_ingest.go to skip
+	// ingesting tasks Nexara already audited — without that, the user sees
+	// duplicate activity rows when they trigger an action through the UI
+	// (one from the handler, one from the post-hoc proxmox task ingest).
+	// Backed by idx_audit_log_upid (migration 000060).
 	ExistsAuditLogByUPID(ctx context.Context, upid string) (bool, error)
 	ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error)
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error
