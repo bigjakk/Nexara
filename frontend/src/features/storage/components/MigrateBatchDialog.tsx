@@ -24,7 +24,7 @@ import {
 import type { VMActionResponse } from "@/features/vms/types/vm";
 
 export interface MigrateBatchJob {
-  /** Display label for the row (e.g. "pelican.ad.crjlab.net (100)" or just the volid). */
+  /** Display label for the row (e.g. "web-01 (100)" or just the volid). */
   label: string;
   /** Owning guest's UUID (already resolved by the caller). */
   guestId: string;
