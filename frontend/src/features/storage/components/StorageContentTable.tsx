@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { useQueryClient } from "@tanstack/react-query";
 import type { StorageContentItem } from "../types/storage";
 import { useDeleteContent } from "../api/storage-queries";
+import { formatBytes } from "@/lib/format";
 
 interface StorageContentTableProps {
   items: StorageContentItem[];
@@ -20,14 +21,6 @@ interface StorageContentTableProps {
   storageId: string;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const k = 1024;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const value = bytes / Math.pow(k, i);
-  return `${value.toFixed(1)} ${units[i] ?? "?"}`;
-}
 
 function formatDate(unixTs: number): string {
   if (unixTs === 0) return "-";

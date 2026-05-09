@@ -48,23 +48,9 @@ import {
   getDefaultColumnVisibility,
 } from "../lib/column-presets";
 import type { InventoryRow, ParsedQuery } from "../types/inventory";
+import { formatBytes, formatUptime } from "@/lib/format";
 
-function formatUptime(seconds: number): string {
-  if (seconds <= 0) return "--";
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  if (days > 0) return `${String(days)}d ${String(hours)}h`;
-  const mins = Math.floor((seconds % 3600) / 60);
-  return hours > 0 ? `${String(hours)}h ${String(mins)}m` : `${String(mins)}m`;
-}
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const val = bytes / Math.pow(1024, i);
-  return `${val.toFixed(val >= 100 ? 0 : 1)} ${units[i] ?? ""}`;
-}
 
 function toContextTarget(row: InventoryRow): VMContextTarget | null {
   if (row.type === "node" || row.vmid === null) return null;

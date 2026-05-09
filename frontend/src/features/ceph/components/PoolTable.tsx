@@ -4,20 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 import { PoolDeleteDialog } from "./PoolDeleteDialog";
 import type { CephPool } from "../types/ceph";
+import { formatBytes } from "@/lib/format";
 
 interface PoolTableProps {
   pools: CephPool[];
   clusterId: string;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const k = 1024;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const idx = Math.min(i, units.length - 1);
-  return `${(bytes / Math.pow(k, idx)).toFixed(1)} ${units[idx] ?? "?"}`;
-}
 
 export function PoolTable({ pools, clusterId }: PoolTableProps) {
   const [deletePool, setDeletePool] = useState<string | null>(null);

@@ -12,14 +12,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePBSDatastoreRRD } from "../api/backup-queries";
 import type { PBSDatastoreRRDEntry } from "../types/backup";
+import { formatBytesPerSecond } from "@/lib/format";
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B/s", "KB/s", "MB/s", "GB/s"];
-  const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i] ?? ""}`;
-}
 
 function formatIOPS(value: number): string {
   if (value < 1) return value.toFixed(2);
@@ -110,8 +104,8 @@ export function DatastoreIOChart({ pbsId, store }: DatastoreIOChartProps) {
       {/* Averages summary */}
       {avgs && (
         <div className="grid grid-cols-4 gap-3">
-          <StatCard label="Avg Read" value={formatBytes(avgs.avgReadBytes)} />
-          <StatCard label="Avg Write" value={formatBytes(avgs.avgWriteBytes)} />
+          <StatCard label="Avg Read" value={formatBytesPerSecond(avgs.avgReadBytes)} />
+          <StatCard label="Avg Write" value={formatBytesPerSecond(avgs.avgWriteBytes)} />
           <StatCard label="Avg Read IOPS" value={formatIOPS(avgs.avgReadIOs)} />
           <StatCard label="Avg Write IOPS" value={formatIOPS(avgs.avgWriteIOs)} />
         </div>
@@ -130,10 +124,10 @@ export function DatastoreIOChart({ pbsId, store }: DatastoreIOChartProps) {
                 <AreaChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="time" tick={{ fontSize: 10 }} />
-                  <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => formatBytes(v)} />
+                  <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => formatBytesPerSecond(v)} />
                   <Tooltip
                     formatter={(value: number | undefined, name: string | undefined) => [
-                      formatBytes(value ?? 0),
+                      formatBytesPerSecond(value ?? 0),
                       name ?? "",
                     ]}
                   />

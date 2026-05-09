@@ -29,14 +29,7 @@ import { RestoreDialog } from "@/features/backup/components/RestoreDialog";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { PBSSnapshot } from "@/features/backup/types/backup";
 import { Archive, Play, Trash2, Loader2, Star } from "lucide-react";
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i] ?? ""}`;
-}
+import { formatBytes } from "@/lib/format";
 
 function formatUnixTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString();

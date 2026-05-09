@@ -275,11 +275,8 @@ export function getGuestStatusColor(status: string): string {
   }
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KiB", "MiB", "GiB", "TiB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const value = bytes / Math.pow(k, i);
-  return `${value.toFixed(1)} ${sizes[i] ?? "B"}`;
-}
+// Re-exported from the canonical lib for the topology nodes that import
+// it from this file. Topology previously used IEC binary suffixes
+// (KiB / MiB / TiB); we standardised on the rest-of-app KB / MB / TB
+// nomenclature in Phase 5.4.
+export { formatBytes } from "@/lib/format";

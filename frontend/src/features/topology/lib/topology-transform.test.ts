@@ -3,7 +3,6 @@ import {
   buildTopologyGraph,
   getStatusColor,
   getGuestStatusColor,
-  formatBytes,
 } from "./topology-transform";
 import type { TopologyInput, TopologyFilters } from "./topology-transform";
 import type {
@@ -288,19 +287,6 @@ describe("getGuestStatusColor", () => {
   });
 });
 
-describe("formatBytes", () => {
-  it("returns 0 B for zero", () => {
-    expect(formatBytes(0)).toBe("0 B");
-  });
-
-  it("formats bytes correctly", () => {
-    expect(formatBytes(1024)).toBe("1.0 KiB");
-    expect(formatBytes(1048576)).toBe("1.0 MiB");
-    expect(formatBytes(1073741824)).toBe("1.0 GiB");
-    expect(formatBytes(1099511627776)).toBe("1.0 TiB");
-  });
-
-  it("formats fractional values", () => {
-    expect(formatBytes(1536)).toBe("1.5 KiB");
-  });
-});
+// formatBytes coverage now lives in src/lib/format.test.ts; topology
+// re-exports it from there as of Phase 5.4 (KB / MB / TB nomenclature
+// matching the rest of the app, not IEC binary suffixes).

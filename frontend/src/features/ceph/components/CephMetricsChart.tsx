@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { useCephMetrics } from "../api/ceph-queries";
 import type { CephStatus } from "../types/ceph";
+import { formatBytes } from "@/lib/format";
 
 interface CephMetricsChartProps {
   clusterId: string;
@@ -36,14 +37,6 @@ function formatTime(ts: string, timeframe: Timeframe): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const k = 1024;
-  const i = Math.floor(Math.log(Math.abs(bytes)) / Math.log(k));
-  const idx = Math.min(i, units.length - 1);
-  return `${(bytes / Math.pow(k, idx)).toFixed(1)} ${units[idx] ?? "?"}`;
-}
 
 function formatOps(ops: number): string {
   if (ops >= 1000000) return `${(ops / 1000000).toFixed(1)}M`;

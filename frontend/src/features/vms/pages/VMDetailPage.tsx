@@ -30,23 +30,9 @@ import { BackupPanel } from "../components/BackupPanel";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
+import { formatBytes, formatUptime } from "@/lib/format";
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const val = bytes / Math.pow(1024, i);
-  return `${val.toFixed(val >= 100 ? 0 : 1)} ${units[i] ?? ""}`;
-}
 
-function formatUptime(seconds: number): string {
-  if (seconds <= 0) return "--";
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  if (days > 0) return `${String(days)}d ${String(hours)}h`;
-  const mins = Math.floor((seconds % 3600) / 60);
-  return hours > 0 ? `${String(hours)}h ${String(mins)}m` : `${String(mins)}m`;
-}
 
 export function VMDetailPage() {
   const { clusterId = "", vmId = "", kind: rawKind } = useParams<{

@@ -1,16 +1,10 @@
+import { formatBytes } from "@/lib/format";
+
 interface StorageCapacityBarProps {
   used: number;
   total: number;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const k = 1024;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const value = bytes / Math.pow(k, i);
-  return `${value.toFixed(1)} ${units[i] ?? "?"}`;
-}
 
 export function StorageCapacityBar({ used, total }: StorageCapacityBarProps) {
   const pct = total > 0 ? (used / total) * 100 : 0;
