@@ -14,11 +14,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { StorageContentItem } from "../types/storage";
 import { useDeleteContent } from "../api/storage-queries";
 import { formatBytes } from "@/lib/format";
+import { MigrateItemDialog } from "./MigrateItemDialog";
 
 interface StorageContentTableProps {
   items: StorageContentItem[];
   clusterId: string;
   storageId: string;
+  /**
+   * Storage names eligible as a migration target for VM-disk / CT-volume rows.
+   * When non-empty, an inline Migrate button shows up next to Delete on each
+   * `images` / `rootdir` row. Pass `[]` to suppress the button (e.g. tabs that
+   * never contain migrate-able items, or pools with no peer storage).
+   */
+  migrateTargets?: string[];
 }
 
 
@@ -46,6 +54,7 @@ export function StorageContentTable({
   items,
   clusterId,
   storageId,
+  migrateTargets = [],
 }: StorageContentTableProps) {
   const deleteMutation = useDeleteContent();
   const queryClient = useQueryClient();
@@ -85,7 +94,7 @@ export function StorageContentTable({
           <TableHead className="text-right">Size</TableHead>
           <TableHead>Created</TableHead>
           <TableHead>VMID</TableHead>
-          <TableHead className="w-12" />
+          <TableHead className="w-20" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -110,15 +119,25 @@ export function StorageContentTable({
               {item.vmid ? item.vmid : "-"}
             </TableCell>
             <TableCell>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => { handleDelete(item.volid); }}
-                disabled={deletingVolid === item.volid}
-              >
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
+              <div className="flex items-center justify-end gap-1">
+                {migrateTargets.length > 0 &&
+                  (item.content === "images" || item.content === "rootdir") && (
+                    <MigrateItemDialog
+                      clusterId={clusterId}
+                      item={item}
+                      targetOptions={migrateTargets}
+                    />
+                  )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => { handleDelete(item.volid); }}
+                  disabled={deletingVolid === item.volid}
+                >
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                </Button>
+              </div>
             </TableCell>
           </TableRow>
         ))}
