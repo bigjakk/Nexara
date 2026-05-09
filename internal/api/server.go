@@ -280,6 +280,13 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 	s.setupMiddleware()
 	s.setupRoutes()
 
+	// Wire the API docs handler to the now-fully-built Fiber app so it
+	// can enumerate the registered routes at request time. Must happen
+	// after setupRoutes; before that, app.GetRoutes() is empty.
+	if s.apiDocsHandler != nil {
+		s.apiDocsHandler.SetApp(s.app)
+	}
+
 	return s
 }
 
