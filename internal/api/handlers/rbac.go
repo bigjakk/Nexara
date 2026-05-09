@@ -401,6 +401,10 @@ func (h *RBACHandler) AssignUserRole(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
 	}
 
+	if userID == auth.SystemUserID {
+		return fiber.NewError(fiber.StatusForbidden, "Cannot modify the system account")
+	}
+
 	var req assignRoleRequest
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
@@ -465,6 +469,10 @@ func (h *RBACHandler) RevokeUserRole(c *fiber.Ctx) error {
 	userID, err := uuid.Parse(c.Params("user_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+	}
+
+	if userID == auth.SystemUserID {
+		return fiber.NewError(fiber.StatusForbidden, "Cannot modify the system account")
 	}
 
 	assignmentID, err := uuid.Parse(c.Params("id"))

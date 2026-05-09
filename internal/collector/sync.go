@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -105,9 +106,6 @@ type PBSProxmoxClient interface {
 
 // PBSClientFactory creates a PBSProxmoxClient from server credentials.
 type PBSClientFactory func(apiURL, tokenID, tokenSecret, tlsFingerprint string) (PBSProxmoxClient, error)
-
-// systemUserID is the well-known UUID for system-initiated actions (migration 000013).
-var systemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // DefaultClientFactory creates a real proxmox.Client.
 func DefaultClientFactory(apiURL, tokenID, tokenSecret, tlsFingerprint string) (ProxmoxClient, error) {
@@ -1217,7 +1215,7 @@ func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncEr
 
 	_ = s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: systemUserID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "cluster",
 		ResourceID:   cluster.ID.String(),
 		Action:       action,

@@ -134,6 +134,10 @@ func (h *UserHandler) Update(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
 	}
 
+	if id == auth.SystemUserID {
+		return fiber.NewError(fiber.StatusForbidden, "Cannot modify the system account")
+	}
+
 	existing, err := h.queries.GetUserByID(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -220,6 +224,10 @@ func (h *UserHandler) Delete(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+	}
+
+	if id == auth.SystemUserID {
+		return fiber.NewError(fiber.StatusForbidden, "Cannot delete the system account")
 	}
 
 	// Prevent self-deletion

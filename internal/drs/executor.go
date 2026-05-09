@@ -10,15 +10,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/safeconv"
 )
-
-// SystemUserID is the well-known UUID for the DRS scheduler system user.
-// Created by migration 000013_system_user.
-var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // Executor handles DRS migration execution and history recording.
 type Executor struct {
@@ -126,7 +123,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			rec.VMType, rec.VMID, rec.SourceNode, rec.TargetNode)
 		_, taskErr := e.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
 			ClusterID:   clusterID,
-			UserID:      SystemUserID,
+			UserID:      auth.SystemUserID,
 			Upid:        upid,
 			Description: description,
 			Status:      "running",
@@ -253,7 +250,7 @@ func (e *Executor) auditLogWithUPID(ctx context.Context, clusterID uuid.UUID, re
 
 	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: SystemUserID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "vm",
 		ResourceID:   resourceID,
 		Action:       action,
@@ -280,7 +277,7 @@ func (e *Executor) auditLog(ctx context.Context, clusterID uuid.UUID, resourceID
 
 	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: SystemUserID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "vm",
 		ResourceID:   resourceID,
 		Action:       action,

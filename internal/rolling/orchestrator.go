@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
@@ -22,9 +23,6 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 )
-
-// SystemUserID is the well-known UUID for automated system operations.
-var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // validDebianPkgName matches valid Debian package names: lowercase alphanum, dots, plus, hyphens.
 var validDebianPkgName = regexp.MustCompile(`^[a-z0-9][a-z0-9.+\-]{0,127}$`)
@@ -1556,7 +1554,7 @@ func (o *Orchestrator) auditLog(ctx context.Context, clusterID uuid.UUID, jobID 
 
 	err := o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: SystemUserID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "rolling_update",
 		ResourceID:   jobID.String(),
 		Action:       action,
