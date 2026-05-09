@@ -63,6 +63,7 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/auth/logout":             {Description: "End the current session", Group: "Authentication"},
 	"POST /api/v1/auth/logout-all":         {Description: "End all sessions for the current user", Group: "Authentication"},
 	"POST /api/v1/auth/console-token":      {Description: "Mint a short-lived scope-locked JWT for a specific console WebSocket (mobile)", Permission: "view:vm|view:container|view:node", Group: "Authentication"},
+	"POST /api/v1/auth/ws-token":           {Description: "Mint a short-lived JWT for the /ws hub upgrade (subscription channels)", Group: "Authentication"},
 	"GET /api/v1/auth/me":                  {Description: "Get current user profile", Group: "Authentication"},
 	"PUT /api/v1/auth/profile":             {Description: "Update display name", Group: "Authentication"},
 	"POST /api/v1/auth/change-password":    {Description: "Change account password", Group: "Authentication"},

@@ -18,8 +18,8 @@ Thank you for your interest in contributing to Nexara! This guide covers the dev
 
 ```bash
 # Clone the repo
-git clone https://github.com/nexara/nexara.git
-cd nexara
+git clone https://github.com/bigjakk/Nexara.git
+cd Nexara
 
 # Start dependencies (DB + Redis)
 docker compose up -d nexara-db nexara-redis
@@ -282,6 +282,6 @@ make clean          # Remove build artifacts
 
 ## Getting Help
 
-- Open an issue on [GitHub](https://github.com/nexara/nexara/issues)
+- Open an issue on [GitHub](https://github.com/bigjakk/Nexara/issues)
 - Check existing documentation in `docs/`
 - Review `CLAUDE.md` for codebase conventions

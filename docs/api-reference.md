@@ -2,6 +2,13 @@
 
 Nexara exposes a REST API at `/api/v1`. All endpoints (except auth and health) require a valid JWT bearer token.
 
+> **The live source of truth is the in-app catalog at `/settings/api-docs`.**
+> That page enumerates every route from the running Fiber router at request
+> time, so it cannot drift from what the server actually serves. This file
+> covers the auth handshake, error envelope, and WebSocket protocol — the
+> parts the auto-generated catalog can't infer — plus a hand-curated
+> overview of the major endpoint groups for offline reference.
+
 ## Base URL
 
 ```
@@ -17,16 +24,16 @@ https://nexara.example.com/api/v1
 
 ### JWT Flow
 
-1. **Register** (first user only):
+1. **Register** (first user only — anonymous; subsequent registrations require an admin caller):
    ```
    POST /api/v1/auth/register
-   Body: { "username": "admin", "email": "admin@example.com", "password": "..." }
+   Body: { "email": "admin@example.com", "password": "...", "display_name": "Admin" }
    ```
 
 2. **Login**:
    ```
    POST /api/v1/auth/login
-   Body: { "username": "admin", "password": "..." }
+   Body: { "email": "admin@example.com", "password": "..." }
    Response: { "access_token": "...", "refresh_token": "...", "user": {...} }
    ```
 
@@ -144,13 +151,15 @@ Returns the application version, commit hash, and build time.
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/auth/register` | Register a new user (first user becomes admin) |
-| POST | `/auth/login` | Login with username/password |
+| POST | `/auth/login` | Login with email and password |
 | POST | `/auth/refresh` | Refresh access token |
 | POST | `/auth/logout` | Logout (invalidate tokens) |
 | POST | `/auth/logout-all` | Logout all sessions |
 | GET | `/auth/me` | Get current user profile |
 | PUT | `/auth/profile` | Update user profile |
 | POST | `/auth/change-password` | Change password |
+| POST | `/auth/ws-token` | Mint a 60 s scope-locked JWT for the `/ws` hub upgrade |
+| POST | `/auth/console-token` | Mint a 60 s scope-locked JWT bound to a single console (`/ws/console`, `/ws/vnc`) |
 | GET | `/auth/setup-status` | Check if initial registration is needed |
 | GET | `/auth/sso-status` | Check if OIDC/SSO is configured |
 | GET | `/auth/oidc/authorize` | Start OIDC authorization flow |
@@ -735,31 +744,74 @@ Returns the application version, commit hash, and build time.
 
 ## WebSocket
 
-The WebSocket server runs on the same port as the API and provides real-time data streaming and console access.
+The WebSocket server runs on the same port as the API and provides real-time
+data streaming and console access.
 
 | Path | Description |
 |------|-------------|
 | `/ws` | Metric and event subscription hub |
-| `/ws/console` | Serial console proxy (xterm.js) |
+| `/ws/console` | Serial / node-shell console proxy (xterm.js) |
 | `/ws/vnc` | VNC console proxy (noVNC) |
 
-All WebSocket connections require authentication via query parameter:
+### Authentication
+
+The long-lived access token is **never** accepted on a WebSocket upgrade.
+Every connection requires a short-lived (60 s) scope-locked JWT minted
+right before the upgrade:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/v1/auth/ws-token` | Hub token for `/ws` subscription channels |
+| `POST /api/v1/auth/console-token` | Console token bound to a single `(cluster, node, vmid, type)` tuple for `/ws/console` or `/ws/vnc` |
+
+The token rides in the WebSocket subprotocol so it never appears in URLs,
+proxy logs, or `Referer` headers:
+
 ```
-ws://localhost:8080/ws?token=<access_token>
+Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>
+```
+
+In the browser this looks like:
+
+```js
+const { token } = await fetch("/api/v1/auth/ws-token", { method: "POST" }).then(r => r.json());
+const ws = new WebSocket(
+  `wss://nexara.example.com/ws`,
+  ["nexara.token", `nexara.token.${token}`],
+);
 ```
 
 ### Subscribing to channels
 
-Send JSON messages to subscribe to real-time data:
+Once `/ws` is open, send JSON messages to subscribe to real-time data:
+
 ```json
-{"action": "subscribe", "channel": "metrics:cluster:<cluster_id>"}
-{"action": "subscribe", "channel": "events:cluster:<cluster_id>"}
+{"action": "subscribe", "channel": "cluster:<cluster_id>:metrics"}
+{"action": "subscribe", "channel": "cluster:<cluster_id>:events"}
 ```
+
+The hub validates per-channel RBAC on subscribe; subscribing to a cluster
+you don't have `view:cluster` on returns an error message and closes the
+channel.
 
 ### Console connections
 
-VNC and serial console WebSocket connections proxy directly to Proxmox. Pass the cluster ID, node, VM ID, and console type as query parameters:
+VNC and serial console WebSocket connections proxy directly to Proxmox.
+Mint a console token first (which embeds the target tuple), then upgrade
+with the scope params on the URL:
+
 ```
-ws://localhost:8080/ws/vnc?token=<access_token>&cluster=<id>&node=<node>&vmid=<vmid>
-ws://localhost:8080/ws/console?token=<access_token>&cluster=<id>&node=<node>&vmid=<vmid>
+POST /api/v1/auth/console-token
+Body: { "cluster_id": "<uuid>", "node": "<name>", "vmid": <int>, "type": "vm_vnc" }
+Response: { "token": "...", "expires_in": 60 }
 ```
+
+```
+wss://nexara.example.com/ws/vnc?cluster_id=<uuid>&node=<name>&vmid=<int>
+wss://nexara.example.com/ws/console?cluster_id=<uuid>&node=<name>&vmid=<int>&type=<console_type>
+Sec-WebSocket-Protocol: nexara.token, nexara.token.<console_jwt>
+```
+
+`type` values: `node_shell`, `vm_serial`, `vm_vnc`, `ct_attach`, `ct_vnc`.
+A console token is single-purpose — it's rejected on any upgrade whose
+scope tuple doesn't match the one it was minted for.

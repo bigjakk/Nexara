@@ -277,7 +277,7 @@ nexara.example.com {
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Go 1.24, Fiber v3, sqlc + pgx, gorilla/websocket |
+| Backend | Go 1.24, Fiber v2, sqlc + pgx, gorilla/websocket |
 | Frontend | React 19, TypeScript 5, Vite 6, Shadcn/ui, TanStack Query/Table, Zustand, Recharts, xterm.js, noVNC, React Flow |
 | Database | PostgreSQL 16 + TimescaleDB |
 | Cache | Redis 7 (Valkey compatible) |
