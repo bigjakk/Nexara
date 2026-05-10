@@ -387,7 +387,7 @@ function GeneralSection({
       return;
     }
 
-    updateOpts.mutate(params as Partial<ClusterOptions>, {
+    updateOpts.mutate(params, {
       onSuccess: () => {
         setDirty(false);
         setFeedback({ kind: "success", message: "Datacenter options saved." });

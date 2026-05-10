@@ -41,6 +41,7 @@ function makeRow(overrides: Partial<InventoryRow> & { key: string }): InventoryR
     haState: "",
     pool: "",
     template: false,
+    ostype: "",
     cpuPercent: 50,
     memPercent: 60,
     ...overrides,

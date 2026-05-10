@@ -120,7 +120,11 @@ type createPoolRequest struct {
 
 // GetStatus handles GET /api/v1/clusters/:cluster_id/ceph/status
 func (h *CephHandler) GetStatus(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -159,7 +163,11 @@ func (h *CephHandler) GetStatus(c *fiber.Ctx) error {
 
 // ListOSDs handles GET /api/v1/clusters/:cluster_id/ceph/osds
 func (h *CephHandler) ListOSDs(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -213,7 +221,11 @@ func boolToInt(b bool) int {
 
 // ListPools handles GET /api/v1/clusters/:cluster_id/ceph/pools
 func (h *CephHandler) ListPools(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -250,7 +262,11 @@ func (h *CephHandler) ListPools(c *fiber.Ctx) error {
 
 // ListMonitors handles GET /api/v1/clusters/:cluster_id/ceph/monitors
 func (h *CephHandler) ListMonitors(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -278,7 +294,11 @@ func (h *CephHandler) ListMonitors(c *fiber.Ctx) error {
 
 // ListFS handles GET /api/v1/clusters/:cluster_id/ceph/fs
 func (h *CephHandler) ListFS(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -305,7 +325,11 @@ func (h *CephHandler) ListFS(c *fiber.Ctx) error {
 
 // ListCrushRules handles GET /api/v1/clusters/:cluster_id/ceph/rules
 func (h *CephHandler) ListCrushRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -334,7 +358,11 @@ func (h *CephHandler) ListCrushRules(c *fiber.Ctx) error {
 
 // CreatePool handles POST /api/v1/clusters/:cluster_id/ceph/pools
 func (h *CephHandler) CreatePool(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -369,7 +397,6 @@ func (h *CephHandler) CreatePool(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	clusterID, _ := uuid.Parse(c.Params("cluster_id"))
 	h.auditLog(c, clusterID, "ceph_pool", req.Name, "create")
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
@@ -380,7 +407,11 @@ func (h *CephHandler) CreatePool(c *fiber.Ctx) error {
 
 // DeletePool handles DELETE /api/v1/clusters/:cluster_id/ceph/pools/:pool_name
 func (h *CephHandler) DeletePool(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ceph", clusterID); err != nil {
 		return err
 	}
 
@@ -398,7 +429,6 @@ func (h *CephHandler) DeletePool(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	clusterID, _ := uuid.Parse(c.Params("cluster_id"))
 	h.auditLog(c, clusterID, "ceph_pool", poolName, "delete")
 
 	return c.JSON(fiber.Map{
@@ -411,13 +441,12 @@ func (h *CephHandler) DeletePool(c *fiber.Ctx) error {
 
 // GetHistorical handles GET /api/v1/clusters/:cluster_id/ceph/metrics
 func (h *CephHandler) GetHistorical(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
+		return err
 	}
 
 	timeframe := c.Query("timeframe", "1h")
@@ -451,13 +480,12 @@ func (h *CephHandler) GetHistorical(c *fiber.Ctx) error {
 
 // GetOSDMetrics handles GET /api/v1/clusters/:cluster_id/ceph/osds/metrics
 func (h *CephHandler) GetOSDMetrics(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
+		return err
 	}
 
 	metrics, err := h.queries.GetLatestCephOSDMetrics(c.Context(), clusterID)
@@ -470,13 +498,12 @@ func (h *CephHandler) GetOSDMetrics(c *fiber.Ctx) error {
 
 // GetPoolMetrics handles GET /api/v1/clusters/:cluster_id/ceph/pools/metrics
 func (h *CephHandler) GetPoolMetrics(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "ceph"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "ceph", clusterID); err != nil {
+		return err
 	}
 
 	metrics, err := h.queries.GetLatestCephPoolMetrics(c.Context(), clusterID)

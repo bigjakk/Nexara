@@ -16,6 +16,26 @@ var (
 	ErrPasswordWeak     = errors.New("password must contain uppercase, lowercase, digit, and special character")
 )
 
+// dummyBcryptHash is a precomputed bcrypt hash used to pad authentication
+// failure paths so that login response time does not reveal whether a given
+// email maps to a real local account. Computed once at package init.
+var dummyBcryptHash []byte
+
+func init() {
+	// The seed string is arbitrary — it is never compared against real
+	// plaintext, only used to produce a hash with the same cost factor as
+	// production hashes. RunDummyBcrypt verifies a different password, so
+	// the comparison is always guaranteed to fail.
+	h, err := bcrypt.GenerateFromPassword([]byte("nexara-dummy-bcrypt-seed"), bcryptCost)
+	if err != nil {
+		// bcrypt.GenerateFromPassword can only error if cost is out of
+		// range, which is impossible at our compile-time constant.
+		// Refuse to start rather than serve logins without timing parity.
+		panic("auth: failed to compute dummy bcrypt hash: " + err.Error())
+	}
+	dummyBcryptHash = h
+}
+
 // HashPassword hashes a plaintext password using bcrypt.
 func HashPassword(password string) (string, error) {
 	if err := ValidatePasswordStrength(password); err != nil {
@@ -32,6 +52,18 @@ func HashPassword(password string) (string, error) {
 // Uses constant-time comparison internally via bcrypt.
 func CheckPassword(hash, password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+}
+
+// RunDummyBcrypt runs a bcrypt comparison against a precomputed hash so the
+// caller burns CPU time equivalent to a real CheckPassword call. Used on
+// authentication failure paths (nonexistent user, OIDC-source user trying
+// password login, inactive account) so login response time does not leak
+// whether the email maps to a real local account.
+//
+// The result is intentionally discarded — the comparison is guaranteed to
+// fail for any caller-provided password.
+func RunDummyBcrypt(password string) {
+	_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(password))
 }
 
 // ValidatePasswordStrength checks that a password meets minimum complexity requirements.

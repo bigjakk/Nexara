@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/http"
 	"strings"
 	"time"
 
@@ -15,25 +16,29 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
-// safeInt32 converts an int to int32 with bounds clamping (gosec G115).
-func safeInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v) //nolint:gosec // bounds checked above
-}
-
 // Engine performs CVE scanning on Proxmox clusters.
+//
+// Per Finding A4 + A23 (Phase 3.8): the per-feed clients (Debian tracker, KEV,
+// EPSS) are constructed *once* here and reused across every cluster scan.
+// Before this refactor each `runScan` built a fresh CVEClient with an empty
+// trackerData map, forcing a new ~80 MB Debian tracker download per cluster.
+// Now the in-memory map is held under CVEClient.mu and revalidated against
+// cacheTTL on each scan; a stale or empty map falls back to the persisted
+// external_feed_cache row before reaching out to the network.
 type Engine struct {
 	queries       *db.Queries
 	encryptionKey string
+	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	logger        *slog.Logger
 	notifier      *Notifier // optional; if nil, post-scan notifications are skipped
+
+	httpClient *http.Client
+	cveClient  *CVEClient
+	kevClient  *KEVClient
+	epssClient *EPSSClient
 }
 
 // NewEngine creates a new CVE scanner engine. registry may be nil — when it
@@ -42,10 +47,16 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, r
 	if logger == nil {
 		logger = slog.Default()
 	}
+
+	httpClient := newScannerHTTPClient(120 * time.Second)
 	e := &Engine{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		logger:        logger,
+		httpClient:    httpClient,
+		cveClient:     NewCVEClient(queries, httpClient, logger.With("component", "cve-client")),
+		kevClient:     NewKEVClient(queries, httpClient, logger.With("component", "kev-client")),
+		epssClient:    NewEPSSClient(queries, httpClient, logger.With("component", "epss-client")),
 	}
 	if registry != nil {
 		n := NewNotifier(queries, registry, logger.With("component", "cve-notifier"))
@@ -54,6 +65,11 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, r
 	}
 	return e
 }
+
+// KEVClient exposes the engine's shared KEV client so the scheduler's hourly
+// refresh tick reuses the same connection pool / dial guard / signature hook
+// rather than spinning up a fresh client on every tick.
+func (e *Engine) KEVClient() *KEVClient { return e.kevClient }
 
 // ScanCluster performs a full CVE scan of all nodes in a cluster.
 // It creates its own scan record and returns the scan ID.
@@ -69,7 +85,7 @@ func (e *Engine) ScanCluster(ctx context.Context, clusterID uuid.UUID) (uuid.UUI
 	scan, err := e.queries.InsertCVEScan(ctx, db.InsertCVEScanParams{
 		ClusterID:  clusterID,
 		Status:     "running",
-		TotalNodes: safeInt32(len(nodes)),
+		TotalNodes: safeconv.Int32(len(nodes)),
 	})
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("create scan: %w", err)
@@ -91,7 +107,7 @@ func (e *Engine) RunScanWithID(ctx context.Context, clusterID, scanID uuid.UUID)
 	// knows how many nodes the cluster has.
 	_ = e.queries.UpdateCVEScanTotalNodes(ctx, db.UpdateCVEScanTotalNodesParams{
 		ID:         scanID,
-		TotalNodes: safeInt32(len(nodes)),
+		TotalNodes: safeconv.Int32(len(nodes)),
 	})
 
 	_ = e.queries.UpdateCVEScanCounts(ctx, db.UpdateCVEScanCountsParams{
@@ -121,10 +137,12 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 		return scanID, nil
 	}
 
-	// CVE data + risk enrichment clients.
-	cveClient := NewCVEClient(e.queries, e.logger.With("component", "cve-client"))
-	kevClient := NewKEVClient(e.queries, e.logger.With("component", "kev-client"))
-	epssClient := NewEPSSClient(e.queries, e.logger.With("component", "epss-client"))
+	// CVE data + risk enrichment clients are held on the Engine and reused
+	// across every cluster scan; their backing caches (tracker JSON in
+	// memory, KEV in kev_cache, EPSS in epss_cache) survive the call.
+	cveClient := e.cveClient
+	kevClient := e.kevClient
+	epssClient := e.epssClient
 
 	// Per-scan changelog cache. Proxmox's apt/changelog endpoint covers
 	// Proxmox-built packages (e.g. proxmox-kernel-*) that the Debian
@@ -290,14 +308,14 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 			}
 		}
 
-		nodeVulns := safeInt32(len(vulns))
+		nodeVulns := safeconv.Int32(len(vulns))
 		postureScore := ComputePostureScore(nodeCritical, nodeHigh, nodeMedium, nodeLow, nodeUnknown)
 
 		now := time.Now()
 		_ = e.queries.UpdateCVEScanNode(ctx, db.UpdateCVEScanNodeParams{
 			ID:            scanNode.ID,
 			Status:        "completed",
-			PackagesTotal: safeInt32(len(updates)),
+			PackagesTotal: safeconv.Int32(len(updates)),
 			VulnsFound:    nodeVulns,
 			PostureScore:  pgtype.Float4{Float32: postureScore, Valid: true},
 			ScannedAt:     pgtype.Timestamptz{Time: now, Valid: true},
@@ -373,7 +391,21 @@ func (e *Engine) runScan(ctx context.Context, clusterID, scanID uuid.UUID, nodes
 	return scanID, nil
 }
 
+// SetProxmoxCache attaches the shared per-server cache. Nil-safe.
+func (e *Engine) SetProxmoxCache(cache *proxmox.ClientCache) {
+	e.cache = cache
+}
+
 func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
+	if e.cache != nil {
+		client, err := e.cache.Get(ctx, clusterID)
+		if err == nil {
+			return client, nil
+		}
+		e.logger.Warn("cve scanner: proxmox cache get failed, building per-call",
+			"cluster_id", clusterID, "error", err)
+	}
+
 	cluster, err := e.queries.GetCluster(ctx, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)

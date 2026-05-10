@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -64,13 +63,12 @@ type ctVolumeMoveRequest struct {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/containers.
 func (h *ContainerHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
+		return err
 	}
 
 	cts, err := h.queries.ListContainersByCluster(c.Context(), clusterID)
@@ -88,7 +86,11 @@ func (h *ContainerHandler) ListByCluster(c *fiber.Ctx) error {
 
 // GetContainer handles GET /api/v1/clusters/:cluster_id/containers/:ct_id.
 func (h *ContainerHandler) GetContainer(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
 		return err
 	}
 
@@ -110,13 +112,12 @@ func (h *ContainerHandler) GetContainer(c *fiber.Ctx) error {
 
 // PerformAction handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/status.
 func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -171,13 +172,12 @@ func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
 
 // CloneContainer handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone.
 func (h *ContainerHandler) CloneContainer(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -222,13 +222,12 @@ func (h *ContainerHandler) CloneContainer(c *fiber.Ctx) error {
 
 // MigrateContainer handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/migrate.
 func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -271,13 +270,12 @@ func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
 // ConvertToTemplate handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/convert-to-template.
 // This converts a stopped container to a template. The operation is irreversible in Proxmox.
 func (h *ContainerHandler) ConvertToTemplate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -316,13 +314,12 @@ func (h *ContainerHandler) ConvertToTemplate(c *fiber.Ctx) error {
 // CloneToTemplate handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone-to-template.
 // This clones a container and then automatically converts the clone to a template.
 func (h *ContainerHandler) CloneToTemplate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -412,13 +409,12 @@ func (h *ContainerHandler) convertCloneToTemplate(pxClient *proxmox.Client, node
 
 // DestroyContainer handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id.
 func (h *ContainerHandler) DestroyContainer(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -477,20 +473,9 @@ func (h *ContainerHandler) resolveCT(c *fiber.Ctx, clusterID, ctID uuid.UUID) (d
 		return zeroCT, zeroNode, zeroCluster, nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
 	}
 
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
+	pxClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 	if err != nil {
-		return zeroCT, zeroNode, zeroCluster, nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Second,
-	})
-	if err != nil {
-		return zeroCT, zeroNode, zeroCluster, nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
+		return zeroCT, zeroNode, zeroCluster, nil, err
 	}
 
 	return ct, node, cluster, pxClient, nil
@@ -500,13 +485,12 @@ func (h *ContainerHandler) resolveCT(c *fiber.Ctx, clusterID, ctID uuid.UUID) (d
 
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
 func (h *ContainerHandler) ListSnapshots(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -543,13 +527,12 @@ func (h *ContainerHandler) ListSnapshots(c *fiber.Ctx) error {
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
 func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -590,13 +573,12 @@ func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
 
 // DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name.
 func (h *ContainerHandler) DeleteSnapshot(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -631,13 +613,12 @@ func (h *ContainerHandler) DeleteSnapshot(c *fiber.Ctx) error {
 
 // RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback.
 func (h *ContainerHandler) RollbackSnapshot(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -697,13 +678,12 @@ type createCTRequest struct {
 
 // CreateContainer handles POST /api/v1/clusters/:cluster_id/containers.
 func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
+		return err
 	}
 
 	var req createCTRequest
@@ -765,13 +745,12 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 
 // GetContainerConfig handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/config.
 func (h *ContainerHandler) GetContainerConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -794,13 +773,12 @@ func (h *ContainerHandler) GetContainerConfig(c *fiber.Ctx) error {
 
 // ResizeDisk handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/disks/resize.
 func (h *ContainerHandler) ResizeDisk(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -843,13 +821,12 @@ func (h *ContainerHandler) ResizeDisk(c *fiber.Ctx) error {
 
 // MoveVolume handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/volumes/move.
 func (h *ContainerHandler) MoveVolume(c *fiber.Ctx) error {
-	if err := requirePerm(c, "execute", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))
@@ -896,13 +873,12 @@ type setCTConfigRequest struct {
 
 // SetContainerConfig handles PUT /api/v1/clusters/:cluster_id/containers/:ct_id/config.
 func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "container"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "container", clusterID); err != nil {
+		return err
 	}
 
 	ctID, err := uuid.Parse(c.Params("ct_id"))

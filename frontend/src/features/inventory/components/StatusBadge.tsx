@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { StatusIcon } from "@/components/StatusIcon";
 import type { ResourceStatus } from "../types/inventory";
 
 const statusConfig: Record<ResourceStatus, { label: string; className: string }> = {
@@ -19,7 +20,8 @@ interface StatusBadgeProps {
 export function StatusBadge({ status }: StatusBadgeProps) {
   const config = statusConfig[status];
   return (
-    <Badge variant="outline" className={cn("text-xs font-medium", config.className)}>
+    <Badge variant="outline" className={cn("gap-1.5 text-xs font-medium", config.className)}>
+      <StatusIcon status={status} />
       {config.label}
     </Badge>
   );

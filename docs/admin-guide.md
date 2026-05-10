@@ -9,6 +9,7 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 - [RBAC Setup](#rbac-setup)
 - [Authentication Providers](#authentication-providers)
 - [DRS Configuration](#drs-configuration)
+- [Storage Management](#storage-management)
 - [Backup Management](#backup-management)
 - [Alert Configuration](#alert-configuration)
 - [CVE Scanning](#cve-scanning)
@@ -68,11 +69,33 @@ From the Users page, administrators can:
 ### Auth Sources
 
 Each user has an auth source:
-- **local** — username/password stored in Nexara
+- **local** — email + password stored in Nexara
 - **ldap** — authenticated against LDAP/Active Directory
 - **oidc** — authenticated via OIDC/SSO provider
 
 LDAP and OIDC users are provisioned automatically (JIT) on first login.
+
+### Recovering from a Lost Admin Account
+
+If every administrator has lost access (forgotten password, lost 2FA
+device with no recovery codes), drop the login-capable rows directly
+in the database to re-trigger the first-run setup flow:
+
+```bash
+docker exec -it nexara-db psql -U nexara nexara
+
+DELETE FROM users WHERE id != '00000000-0000-0000-0000-000000000001';
+```
+
+The `WHERE` clause keeps the seeded system actor (UUID
+`00000000-…-001`) that audit-log entries and DRS / scheduler tasks
+attribute to — removing that row would break those references.
+
+After the delete, `/api/v1/auth/setup-status` returns `needs_setup:
+true`, the registration page reappears, and the next sign-up becomes
+the new admin. LDAP and OIDC configurations remain intact, so users
+authenticated via those providers will be re-provisioned on their
+next login.
 
 ---
 
@@ -200,7 +223,7 @@ Navigate to **Admin > OIDC** to configure single sign-on.
 #### Login with 2FA
 
 When 2FA is enabled, login becomes a two-step process:
-1. Enter username/password (or complete SSO)
+1. Enter email/password (or LDAP username + password, or complete SSO)
 2. Enter the 6-digit TOTP code from your authenticator app
 3. If you lose your device, use a recovery code instead
 
@@ -236,6 +259,62 @@ Click **Evaluate Now** to trigger an immediate DRS evaluation. In manual mode, t
 ### DRS History
 
 The DRS History tab shows all past evaluations, including which migrations were recommended and executed.
+
+---
+
+## Storage Management
+
+Navigate to **Storage** from the sidebar. The pool list groups shared
+storage at the top and per-node storage below.
+
+### Pool Detail
+
+Click a pool to open its detail page. Tabs split content by Proxmox
+content type:
+
+- **VMs/CTs** — guest-grouped view of every VM disk (`images`) and
+  container volume (`rootdir`) currently consuming this pool. Selected
+  by default when the pool can hold guest volumes.
+- **iso** / **vztmpl** / **snippets** / **backup** — raw item lists
+  per content type.
+- **All** — every volume on the pool regardless of content type.
+
+### Migrating Guests Off a Pool
+
+The **VMs/CTs** tab shows one row per guest with name, VMID, kind, disk
+count, and total bytes consumed. Two ways to move:
+
+- **Per-guest migrate** — click the migrate icon at the end of a row
+  (or right-click and pick *Migrate <N> disks*). The dialog walks every
+  disk that guest owns on this pool and dispatches them sequentially to
+  the chosen target storage, showing per-volume progress. Most users
+  want this — they don't need to know whether the volume key is
+  `scsi0` or `mp0`; Nexara resolves it from the guest config.
+- **Bulk migrate** — tick the checkbox on multiple guests, then use
+  *Migrate selected* in the toolbar that appears above the table.
+  Same sequential runner, longer job list.
+
+The migrate target dropdown is filtered to other active pools in the
+same cluster that accept `images` or `rootdir` content. The "Delete
+original after move completes" checkbox is on by default — uncheck it
+if you want to keep both copies for a rollback window.
+
+### Bulk Delete
+
+Multi-select with the checkbox column works on every tab. Once
+anything is selected, a toolbar appears with **Delete selected**.
+Useful for ISO / template cleanup. Each delete is a separate Proxmox
+task; failures are reported individually so a single broken volume
+doesn't block the rest of the batch.
+
+### Evacuating a Pool Entirely
+
+The **Evacuate** button at the top of a pool detail page kicks off a
+bulk move of every VM disk on the pool to a target storage —
+equivalent to selecting all guests in the VMs/CTs tab and migrating,
+but with a dedicated dialog tuned for "I'm decommissioning this
+pool" workflows. Container volumes are not yet covered by Evacuate;
+use the per-guest migrate or bulk-migrate flow for those.
 
 ---
 

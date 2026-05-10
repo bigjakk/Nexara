@@ -16,6 +16,11 @@ import { Plus, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useCreatePBSServer } from "../api/backup-queries";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { apiClient } from "@/lib/api-client";
+import {
+  privateAddressWarningFromError,
+  type PrivateAddressWarning as PrivateAddressDetails,
+} from "@/lib/private-address";
+import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 
 interface FingerprintResponse {
   fingerprint: string;
@@ -44,6 +49,10 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
     null,
   );
 
+  const [privateWarning, setPrivateWarning] =
+    useState<PrivateAddressDetails | null>(null);
+  const [allowPrivate, setAllowPrivate] = useState(false);
+
   const createPBS = useCreatePBSServer();
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
@@ -58,6 +67,8 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
     setFingerprintAccepted(false);
     setFetchingFingerprint(false);
     setFingerprintError(null);
+    setPrivateWarning(null);
+    setAllowPrivate(false);
     createPBS.reset();
   }
 
@@ -68,30 +79,43 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
     }
   }
 
-  async function handleFetchFingerprint(
-    e: React.SyntheticEvent<HTMLFormElement>,
-  ) {
-    e.preventDefault();
+  async function fetchFingerprint(allow: boolean) {
     setFingerprintError(null);
+    setPrivateWarning(null);
     setFetchingFingerprint(true);
     try {
       const resp = await apiClient.post<FingerprintResponse>(
         "/api/v1/clusters/fetch-fingerprint",
-        { api_url: apiUrl },
+        { api_url: apiUrl, allow_private_address: allow },
       );
       setFingerprint(resp);
       if (!resp.self_signed) {
         setFingerprintAccepted(true);
       }
     } catch (err) {
-      setFingerprintError(
-        err instanceof Error
-          ? err.message
-          : "Failed to fetch TLS certificate",
-      );
+      const warn = privateAddressWarningFromError(err);
+      if (warn != null) {
+        setPrivateWarning(warn);
+      } else {
+        setFingerprintError(
+          err instanceof Error
+            ? err.message
+            : "Failed to fetch TLS certificate",
+        );
+      }
     } finally {
       setFetchingFingerprint(false);
     }
+  }
+
+  function handleFetchFingerprint(e: React.SyntheticEvent<HTMLFormElement>) {
+    e.preventDefault();
+    void fetchFingerprint(allowPrivate);
+  }
+
+  function handleConfirmPrivate() {
+    setAllowPrivate(true);
+    void fetchFingerprint(true);
   }
 
   function handleCreate() {
@@ -103,6 +127,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
         token_secret: tokenSecret,
         tls_fingerprint: fingerprint?.fingerprint ?? "",
         cluster_id: clusterId || null,
+        ...(allowPrivate ? { allow_private_address: true } : {}),
       },
       {
         onSuccess: () => {
@@ -142,7 +167,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
         </DialogHeader>
 
         {!showFingerprint ? (
-          <form onSubmit={(e) => { void handleFetchFingerprint(e); }} className="space-y-4">
+          <form onSubmit={handleFetchFingerprint} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="pbs-name">Server Name</Label>
               <Input
@@ -211,7 +236,17 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
               </select>
             </div>
 
-            {fingerprintError != null && (
+            {privateWarning != null && (
+              <PrivateAddressWarning
+                ip={privateWarning.ip}
+                url={apiUrl}
+                onConfirm={handleConfirmPrivate}
+                onCancel={() => { setPrivateWarning(null); }}
+                pending={fetchingFingerprint}
+              />
+            )}
+
+            {privateWarning == null && fingerprintError != null && (
               <p className="text-sm text-destructive">{fingerprintError}</p>
             )}
 

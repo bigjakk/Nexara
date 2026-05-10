@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -12,13 +13,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
+// firstUserAdvisoryLockKey is the constant passed to pg_advisory_xact_lock so
+// concurrent /auth/register calls serialise during the count-then-create
+// window. Anything fits — the value just has to be stable across processes
+// (it is the lock identity in pg_locks). The lock auto-releases on COMMIT or
+// ROLLBACK, so there is no caller responsibility to drop it.
+const firstUserAdvisoryLockKey int64 = 0x4E455841524131 // ASCII "NEXARA1"
+
 // AuthHandler handles authentication endpoints.
 type AuthHandler struct {
+	pool           *pgxpool.Pool
 	queries        *db.Queries
 	jwtService     *auth.JWTService
 	sessionManager *auth.SessionManager
@@ -33,9 +43,12 @@ type totpRequiredResponse struct {
 	TOTPPendingToken string `json:"totp_pending_token"`
 }
 
-// NewAuthHandler creates a new auth handler.
-func NewAuthHandler(queries *db.Queries, jwtSvc *auth.JWTService, sessMgr *auth.SessionManager, rbac *auth.RBACEngine) *AuthHandler {
+// NewAuthHandler creates a new auth handler. pool is required for the
+// register-time advisory-lock transaction; passing nil is supported only
+// for unit tests that exercise validation paths above the DB layer.
+func NewAuthHandler(pool *pgxpool.Pool, queries *db.Queries, jwtSvc *auth.JWTService, sessMgr *auth.SessionManager, rbac *auth.RBACEngine) *AuthHandler {
 	return &AuthHandler{
+		pool:           pool,
 		queries:        queries,
 		jwtService:     jwtSvc,
 		sessionManager: sessMgr,
@@ -139,8 +152,24 @@ func (h *AuthHandler) authAuditLog(c *fiber.Ctx, userID uuid.UUID, action string
 }
 
 // Register handles user registration.
-// First user is auto-promoted to admin and requires no auth.
-// Subsequent users require admin auth (checked via authOptional middleware + handler check).
+//
+// First user is auto-promoted to admin and requires no auth. Subsequent
+// users require admin auth (checked via authOptional middleware + handler
+// check).
+//
+// Order of operations (Findings #17, #18):
+//   - Cheap validation (body shape, email format, password complexity) runs
+//     first, before any DB or bcrypt work — bcrypt at cost 12 burns ~80–100ms
+//     per call, so an unauthenticated attacker spamming /auth/register would
+//     otherwise force every request through an expensive hash even though
+//     the admin gate would reject all of them.
+//   - The count-then-create pair runs inside a transaction guarded by
+//     pg_advisory_xact_lock so two simultaneous registrations on a fresh
+//     install can't both observe count == 0 and both promote themselves to
+//     admin. The lock is released automatically when the transaction commits
+//     or rolls back.
+//   - HashPassword runs only after the admin gate passes. Failed gates burn
+//     no bcrypt CPU.
 func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	var req registerRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -155,16 +184,45 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid email address")
 	}
 
-	// Validate password strength before hitting the database.
-	hashedPassword, err := auth.HashPassword(req.Password)
-	if err != nil {
-		if errors.Is(err, auth.ErrPasswordTooShort) || errors.Is(err, auth.ErrPasswordTooLong) || errors.Is(err, auth.ErrPasswordWeak) {
-			return fiber.NewError(fiber.StatusBadRequest, err.Error())
-		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process password")
+	// Validate password complexity before any DB or bcrypt work — this is a
+	// pure-string check that costs microseconds, while bcrypt costs ~80–100ms.
+	if err := auth.ValidatePasswordStrength(req.Password); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	count, err := h.queries.CountUsers(c.Context())
+	if h.pool == nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "registration unavailable")
+	}
+
+	tx, err := h.pool.Begin(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to start transaction")
+	}
+	// Rollback runs after request context is already cancelled on a happy
+	// commit (no-op since the tx is closed) or after an early return on
+	// failure (the request context may also be cancelled). Bound the
+	// rollback context so a hung Postgres can't pin the connection — and
+	// log non-ErrTxClosed failures so a leaked transaction is observable.
+	defer func() {
+		rbCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer rbCancel()
+		if rbErr := tx.Rollback(rbCtx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			slog.Warn("register: transaction rollback failed", "error", rbErr)
+		}
+	}()
+
+	// Serialise concurrent first-user registrations. The transaction-scoped
+	// advisory lock forces any other Register call to block here until we
+	// commit or roll back, so the count we read on the next line is the
+	// authoritative answer for this candidate registration. Lock auto-
+	// releases on COMMIT/ROLLBACK.
+	if _, err := tx.Exec(c.Context(), "SELECT pg_advisory_xact_lock($1)", firstUserAdvisoryLockKey); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to acquire registration lock")
+	}
+
+	q := h.queries.WithTx(tx)
+
+	count, err := q.CountUsers(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check user count")
 	}
@@ -175,8 +233,27 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	} else {
 		callerRole, _ := c.Locals("role").(string)
 		if callerRole != "admin" {
+			// Reject before bcrypt — this is the entire point of #17.
 			return fiber.NewError(fiber.StatusForbidden, "Only admins can register new users")
 		}
+	}
+
+	// Admin gate passed (or this is the first user). Hash the password now.
+	// Note: bcrypt runs while we still hold the advisory lock and a pool
+	// connection. That's deliberate — non-admin attempts were already
+	// rejected above with no bcrypt work, so an unauthenticated attacker
+	// cannot pin pool slots through this path. The remaining path
+	// (authenticated admin or first-user) is bounded by the auth limiter
+	// (15 req/min/IP) and is intentionally serialised so concurrent
+	// first-user registrations cannot both observe count == 0.
+	hashedPassword, err := auth.HashPassword(req.Password)
+	if err != nil {
+		// ValidatePasswordStrength already ran above, so password-class errors
+		// here would be a logic bug. Any other error path is a server fault.
+		if errors.Is(err, auth.ErrPasswordTooShort) || errors.Is(err, auth.ErrPasswordTooLong) || errors.Is(err, auth.ErrPasswordWeak) {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to process password")
 	}
 
 	displayName := req.DisplayName
@@ -184,7 +261,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 		displayName = req.Email
 	}
 
-	user, err := h.queries.CreateUser(c.Context(), db.CreateUserParams{
+	user, err := q.CreateUser(c.Context(), db.CreateUserParams{
 		Email:        req.Email,
 		PasswordHash: hashedPassword,
 		DisplayName:  displayName,
@@ -196,6 +273,10 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusConflict, "Email already registered")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create user")
+	}
+
+	if err := tx.Commit(c.Context()); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to commit registration")
 	}
 
 	// Assign RBAC role: admin -> Admin, user -> Viewer
@@ -236,6 +317,13 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 
 	perms := h.loadPerms(c, user.ID)
 
+	setRefreshCookie(c, refreshToken, h.jwtService.RefreshTokenTTL())
+
+	bodyRefreshToken := ""
+	if isMobileClient(c) {
+		bodyRefreshToken = refreshToken
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(authResponse{
 		User: authUserResponse{
 			ID:          user.ID,
@@ -244,14 +332,33 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 			Role:        user.Role,
 		},
 		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		RefreshToken: bodyRefreshToken,
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
 }
 
 // Login handles user authentication.
-// If LDAP is enabled, tries LDAP authentication first, then falls back to local auth.
+//
+// Lookup-first ordering: a local user's password is NEVER shipped to the
+// LDAP server (closes the data leak from Finding #12 where every login
+// attempt's plaintext password was sent to LDAP regardless of auth_source).
+//
+// Constant-time failure paths: every rejection runs a dummy bcrypt so a
+// stopwatch on /auth/login cannot distinguish "real local user, bad
+// password" from "no such user", "OIDC user trying password login", or
+// "disabled account" (closes Finding #11 username-enumeration timing
+// oracle).
+//
+// Residual oracle (LDAP-enabled deployments only): when LDAP is enabled
+// AND the email is unknown locally, the request takes one LDAP roundtrip
+// PLUS the dummy bcrypt; when LDAP is disabled it takes only the dummy
+// bcrypt. The wall-clock differential leaks "this email is/isn't in your
+// directory" — a strictly weaker oracle than #11 (it's about directory
+// membership, not local-account existence) and unavoidable without
+// disabling JIT-provisioning of new LDAP users on first login. Operators
+// who accept this trade can leave it; tighter postures should disable JIT
+// and pre-provision LDAP users.
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req loginRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -264,26 +371,43 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 
 	invalidCredentials := fiber.NewError(fiber.StatusUnauthorized, "Invalid email or password")
 
-	// Try LDAP authentication first if enabled
-	if user, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
-		return h.issueOrTOTP(c, user, "ldap_login")
-	}
-
-	// Fall back to local authentication
 	user, err := h.queries.GetUserByEmail(c.Context(), req.Email)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return invalidCredentials
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up user")
 		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up user")
-	}
-
-	// LDAP/OIDC-sourced users cannot log in with local passwords
-	if user.AuthSource == "ldap" || user.AuthSource == "oidc" {
+		// No local user with this email. If LDAP is enabled, try it —
+		// the LDAP path handles JIT-provisioning of new directory users.
+		// Otherwise fall through to a dummy bcrypt so timing matches the
+		// "real user, bad password" path.
+		if ldapUser, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
+			return h.issueOrTOTP(c, ldapUser, "ldap_login")
+		}
+		auth.RunDummyBcrypt(req.Password)
 		return invalidCredentials
 	}
 
+	switch user.AuthSource {
+	case "ldap":
+		if ldapUser, ok := h.tryLDAPLogin(c, req.Email, req.Password); ok {
+			return h.issueOrTOTP(c, ldapUser, "ldap_login")
+		}
+		// Pad failure to keep timing roughly aligned with the local-bcrypt
+		// path. LDAP roundtrip dominates wall-clock anyway, so this is a
+		// best-effort defence-in-depth, not a strict equaliser.
+		auth.RunDummyBcrypt(req.Password)
+		return invalidCredentials
+	case "oidc":
+		// OIDC-sourced users cannot log in via password. Burn equivalent
+		// CPU so the response time is indistinguishable from a real
+		// local user with a wrong password.
+		auth.RunDummyBcrypt(req.Password)
+		return invalidCredentials
+	}
+
+	// auth_source == "local" from here.
 	if !user.IsActive {
+		auth.RunDummyBcrypt(req.Password)
 		return invalidCredentials
 	}
 
@@ -295,6 +419,17 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 }
 
 // tryLDAPLogin attempts LDAP authentication. Returns the DB user and true on success.
+//
+// Failure modes are logged at WARN with the email but never the password,
+// so an admin investigating "why is LDAP login broken" gets a signal without
+// the silent-failure mode the original implementation suffered from.
+//
+// Residual race (acknowledged): if a local user with the same email is
+// being created concurrently with a JIT-provisioning LDAP login, the LDAP
+// path still ships the password to the LDAP server before the duplicate-key
+// path discovers the conflict. Vanishingly narrow window in practice and
+// no different from the LDAP-bound attempt the user was about to make
+// anyway, but worth documenting.
 func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.User, bool) {
 	if h.ldapHandler == nil {
 		return db.User{}, false
@@ -302,17 +437,28 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 
 	ldapCfg, err := h.queries.GetEnabledLDAPConfig(c.Context())
 	if err != nil {
+		// pgx.ErrNoRows here is the common case — LDAP just isn't enabled.
+		// Don't log that. Other DB errors are operationally interesting.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("ldap login: failed to load config", "error", err)
+		}
 		return db.User{}, false
 	}
 
 	authCfg, err := h.ldapHandler.BuildLDAPConfigFromDB(ldapCfg)
 	if err != nil {
+		slog.Warn("ldap login: invalid stored config", "email", email, "error", err)
 		return db.User{}, false
 	}
 
 	client := auth.NewLDAPClient(authCfg)
 	ldapUser, err := client.Authenticate(email, password)
 	if err != nil {
+		// LDAP rejection / connection failure / search failure — typed
+		// errors carry the class. Log so admins can distinguish "wrong
+		// password" from "directory unreachable" without us leaking which
+		// to the client.
+		slog.Warn("ldap login: authentication failed", "email", email, "error", err)
 		return db.User{}, false
 	}
 
@@ -329,6 +475,7 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 	})
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("ldap login: failed to look up user", "email", userEmail, "error", err)
 			return db.User{}, false
 		}
 
@@ -349,9 +496,11 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 					AuthSource: "ldap",
 				})
 				if err != nil {
+					slog.Warn("ldap login: post-race lookup failed", "email", userEmail, "error", err)
 					return db.User{}, false
 				}
 			} else {
+				slog.Warn("ldap login: JIT provisioning failed", "email", userEmail, "error", err)
 				return db.User{}, false
 			}
 		}
@@ -366,6 +515,7 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 	}
 
 	if !user.IsActive {
+		slog.Warn("ldap login: account disabled", "email", userEmail, "user_id", user.ID)
 		return db.User{}, false
 	}
 
@@ -406,6 +556,13 @@ func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string
 
 	perms := h.loadPerms(c, user.ID)
 
+	setRefreshCookie(c, refreshToken, h.jwtService.RefreshTokenTTL())
+
+	bodyRefreshToken := ""
+	if isMobileClient(c) {
+		bodyRefreshToken = refreshToken
+	}
+
 	return c.JSON(authResponse{
 		User: authUserResponse{
 			ID:          user.ID,
@@ -414,7 +571,7 @@ func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string
 			Role:        user.Role,
 		},
 		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		RefreshToken: bodyRefreshToken,
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
@@ -430,6 +587,13 @@ type consoleTokenRequest struct {
 	Node      string `json:"node"`
 	VMID      int    `json:"vmid,omitempty"`
 	Type      string `json:"type"`
+	// Silent skips the audit-log entry for this mint. Used by background
+	// previews (e.g. VM thumbnails) that would otherwise flood the activity
+	// feed every page load. The mint is still slog'd at INFO so it's not
+	// invisible to operators, and RBAC still applies — silent does not grant
+	// any new authority. Honoured only for vm_vnc / ct_vnc; user-initiated
+	// console types (node_shell, vm_serial, ct_attach) always audit.
+	Silent bool `json:"silent,omitempty"`
 }
 
 type consoleTokenResponse struct {
@@ -459,7 +623,8 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 	if req.ClusterID == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "cluster_id is required")
 	}
-	if _, err := uuid.Parse(req.ClusterID); err != nil {
+	clusterUUID, err := uuid.Parse(req.ClusterID)
+	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "cluster_id must be a UUID")
 	}
 	if req.Node == "" {
@@ -491,7 +656,10 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid console type")
 	}
 
-	if err := requirePerm(c, "view", resource); err != nil {
+	// Console tokens scope to a specific cluster — gate on per-cluster perm so
+	// a user with view:vm only on cluster X cannot mint a console token for
+	// cluster Y.
+	if err := requireClusterPerm(c, "view", resource, clusterUUID); err != nil {
 		return err
 	}
 
@@ -504,7 +672,12 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
 	}
 
-	const consoleTokenTTL = 5 * time.Minute
+	// Console tokens are bound to a single immediate WS upgrade — the SPA
+	// (or mobile shell) mints and connects within ~50ms. 60 seconds is
+	// generous but tight enough that a leaked URL or proxy access log
+	// entry is unusable by the time it surfaces. Reduced from 5 minutes
+	// per remediation 2.7 (≤60s scope for all WS-bound JWTs).
+	const consoleTokenTTL = 60 * time.Second
 	token, _, err := h.jwtService.GenerateConsoleToken(
 		user.ID, user.Email, user.Role,
 		auth.ConsoleScope{
@@ -519,13 +692,26 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to mint console token")
 	}
 
-	details, _ := json.Marshal(map[string]any{
-		"cluster_id": req.ClusterID,
-		"node":       req.Node,
-		"vmid":       req.VMID,
-		"type":       req.Type,
-	})
-	h.authAuditLog(c, userID, "console_token_mint", details)
+	// Honour silent only for VNC types — the "preview thumbnail" use case.
+	// Terminal/serial mints are always user-initiated and always audit.
+	silent := req.Silent && (req.Type == "vm_vnc" || req.Type == "ct_vnc")
+	if silent {
+		slog.Info("console_token_mint (silent)",
+			"user_id", userID,
+			"cluster_id", req.ClusterID,
+			"node", req.Node,
+			"vmid", req.VMID,
+			"type", req.Type,
+		)
+	} else {
+		details, _ := json.Marshal(map[string]any{
+			"cluster_id": req.ClusterID,
+			"node":       req.Node,
+			"vmid":       req.VMID,
+			"type":       req.Type,
+		})
+		h.authAuditLog(c, userID, "console_token_mint", details)
+	}
 
 	return c.JSON(consoleTokenResponse{
 		Token:     token,
@@ -533,30 +719,122 @@ func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
 	})
 }
 
-// Refresh exchanges a valid refresh token for a new token pair.
+type wsTokenResponse struct {
+	Token     string `json:"token"`
+	ExpiresIn int    `json:"expires_in"`
+}
+
+// WSToken mints a short-lived (60s) JWT whose only valid use is upgrading the
+// generic /ws hub. It carries the same UserID/Role as the access token but
+// is restricted by Claims.WSScope == "hub" — the WS auth middleware refuses
+// it on console paths, and refuses regular access tokens on the hub.
+//
+// The point is to keep the long-lived access token out of the WebSocket
+// upgrade entirely. The hub token can be carried in `?token=` or in the
+// `Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>` subprotocol
+// header (preferred — keeps the JWT out of proxy access logs and Referer).
+func (h *AuthHandler) WSToken(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
+	}
+
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusUnauthorized, "User not found")
+	}
+	if !user.IsActive {
+		// Audit the deny — a disabled user trying to open a WS is a
+		// signal worth surfacing in the log. (Successful mints aren't
+		// audited; every reconnect mints, so it'd be log noise.)
+		h.authAuditLog(c, userID, "ws_token_denied_inactive", nil)
+		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
+	}
+
+	const wsHubTokenTTL = 60 * time.Second
+	token, _, err := h.jwtService.GenerateWSHubToken(user.ID, user.Email, user.Role, wsHubTokenTTL)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to mint ws token")
+	}
+
+	return c.JSON(wsTokenResponse{
+		Token:     token,
+		ExpiresIn: int(wsHubTokenTTL.Seconds()),
+	})
+}
+
+// Refresh exchanges a valid refresh token for a new token pair. The refresh
+// token is read from the JSON body when present (mobile path) and otherwise
+// from the HttpOnly cookie set on prior auth responses (web path).
 func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 	var req refreshRequest
-	if err := c.BodyParser(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	// Body is optional — web clients post `{}` and rely on the cookie.
+	_ = c.BodyParser(&req)
+
+	if req.RefreshToken == "" {
+		req.RefreshToken = readRefreshTokenFromCookie(c)
 	}
 
 	if req.RefreshToken == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Refresh token is required")
+		// Auth state, not a malformed request — return 401 so the SPA's
+		// refresh-failure path treats it consistently with stale-cookie
+		// rejections, and so an attacker scanning for /auth/refresh cannot
+		// distinguish "no cookie" from "stale cookie" via the status code.
+		clearRefreshCookie(c)
+		return fiber.NewError(fiber.StatusUnauthorized, "Refresh token is required")
 	}
 
 	session, err := h.sessionManager.ValidateRefreshToken(c.Context(), req.RefreshToken)
 	if err != nil {
+		// Stale cookie → clear it so the browser stops sending it.
+		clearRefreshCookie(c)
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired refresh token")
 	}
 
-	user, err := h.queries.GetUserByID(c.Context(), session.UserID)
+	// User load, role-rotation guard, permission load, and refresh-token
+	// rotation share one transaction so an admin demoting the user mid-
+	// refresh cannot race past the role check (Finding A11). Redis cache
+	// update happens after commit; ValidateRefreshToken hits Postgres so a
+	// stale Redis row is non-load-bearing.
+	tx, err := h.pool.Begin(c.Context())
 	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to start transaction")
+	}
+	defer func() {
+		rbCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer rbCancel()
+		if rbErr := tx.Rollback(rbCtx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+			slog.Warn("refresh: transaction rollback failed", "error", rbErr)
+		}
+	}()
+	qx := h.queries.WithTx(tx)
+
+	user, err := qx.GetUserByID(c.Context(), session.UserID)
+	if err != nil {
+		_ = h.sessionManager.RevokeSession(c.Context(), session.ID)
+		clearRefreshCookie(c)
 		return fiber.NewError(fiber.StatusUnauthorized, "User not found")
 	}
 
 	if !user.IsActive {
 		_ = h.sessionManager.RevokeSession(c.Context(), session.ID)
+		clearRefreshCookie(c)
 		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
+	}
+
+	// Role rotation guard: if the legacy users.role at session creation is
+	// non-empty and has since changed, force re-login. Empty user_role
+	// means a pre-migration session — accept it once so the upgrade path
+	// does not log out every existing user; it gets populated below.
+	if session.UserRole != "" && session.UserRole != user.Role {
+		_ = h.sessionManager.RevokeSession(c.Context(), session.ID)
+		clearRefreshCookie(c)
+		details, _ := json.Marshal(map[string]string{
+			"session_role": session.UserRole,
+			"current_role": user.Role,
+		})
+		h.authAuditLog(c, user.ID, "refresh_denied_role_changed", details)
+		return fiber.NewError(fiber.StatusUnauthorized, "Role changed; please log in again")
 	}
 
 	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
@@ -569,11 +847,37 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate refresh token")
 	}
 
-	if err := h.sessionManager.RotateRefreshToken(c.Context(), session.ID, newRefreshToken, user.Role, h.jwtService.RefreshTokenTTL()); err != nil {
+	newHash := auth.HashToken(newRefreshToken)
+	if err := qx.UpdateSessionTokenHash(c.Context(), db.UpdateSessionTokenHashParams{
+		ID:        session.ID,
+		TokenHash: newHash,
+		UserRole:  user.Role,
+	}); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to rotate refresh token")
 	}
 
+	if err := tx.Commit(c.Context()); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to commit refresh")
+	}
+
+	// Detached context: post-commit Redis cache write should converge even
+	// if the HTTP client disconnects between commit and response. Redis is
+	// a cache (ValidateRefreshToken reads Postgres), so a transient
+	// failure here is non-fatal — log and continue.
+	redisCtx, redisCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer redisCancel()
+	if err := h.sessionManager.WriteSessionRedis(redisCtx, session.ID, user.ID, newHash, user.Role, h.jwtService.RefreshTokenTTL()); err != nil {
+		slog.Warn("refresh: redis cache update failed", "session_id", session.ID, "error", err)
+	}
+
 	perms := h.loadPerms(c, user.ID)
+
+	setRefreshCookie(c, newRefreshToken, h.jwtService.RefreshTokenTTL())
+
+	bodyRefreshToken := ""
+	if isMobileClient(c) {
+		bodyRefreshToken = newRefreshToken
+	}
 
 	return c.JSON(authResponse{
 		User: authUserResponse{
@@ -583,21 +887,31 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 			Role:        user.Role,
 		},
 		AccessToken:  accessToken,
-		RefreshToken: newRefreshToken,
+		RefreshToken: bodyRefreshToken,
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
 }
 
-// Logout revokes the session identified by the refresh token in the request body.
+// Logout revokes the session identified by the refresh token (cookie for
+// browser clients, body for mobile clients) and clears the browser cookie.
+// The cookie is cleared unconditionally so a stale cookie does not linger
+// after logout even if the token is already invalid.
 func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 	var req logoutRequest
-	if err := c.BodyParser(&req); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
-	}
+	// Body is optional for browser clients (cookie carries the token).
+	_ = c.BodyParser(&req)
 
 	if req.RefreshToken == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Refresh token is required")
+		req.RefreshToken = readRefreshTokenFromCookie(c)
+	}
+
+	// Always clear the cookie regardless of whether we found a token.
+	clearRefreshCookie(c)
+
+	if req.RefreshToken == "" {
+		// Nothing to revoke — treat as idempotent success.
+		return c.JSON(fiber.Map{"message": "Logged out successfully"})
 	}
 
 	session, err := h.sessionManager.ValidateRefreshToken(c.Context(), req.RefreshToken)
@@ -606,22 +920,27 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"message": "Logged out successfully"})
 	}
 
-	// Verify the session belongs to the authenticated user
-	userID, _ := c.Locals("user_id").(uuid.UUID)
-	if session.UserID != userID {
-		return fiber.NewError(fiber.StatusForbidden, "Session does not belong to authenticated user")
+	// Defence-in-depth: when an access token IS present, verify the session
+	// owner matches. With authOptional Logout supports an expired access
+	// token + valid cookie; we only enforce the cross-check when a caller
+	// happens to also send an Authorization header.
+	if userID, ok := c.Locals("user_id").(uuid.UUID); ok {
+		if session.UserID != userID {
+			return fiber.NewError(fiber.StatusForbidden, "Session does not belong to authenticated user")
+		}
 	}
 
 	if err := h.sessionManager.RevokeSession(c.Context(), session.ID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revoke session")
 	}
 
-	h.authAuditLog(c, userID, "logout", nil)
+	h.authAuditLog(c, session.UserID, "logout", nil)
 
 	return c.JSON(fiber.Map{"message": "Logged out successfully"})
 }
 
-// LogoutAll revokes all sessions for the current user.
+// LogoutAll revokes all sessions for the current user and clears the browser
+// refresh cookie.
 func (h *AuthHandler) LogoutAll(c *fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
@@ -631,6 +950,8 @@ func (h *AuthHandler) LogoutAll(c *fiber.Ctx) error {
 	if err := h.sessionManager.RevokeAllUserSessions(c.Context(), userID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revoke sessions")
 	}
+
+	clearRefreshCookie(c)
 
 	h.authAuditLog(c, userID, "logout_all", nil)
 
@@ -769,7 +1090,7 @@ func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
 		Role:        user.Role,
 		AuthSource:  user.AuthSource,
 		TOTPEnabled: user.TotpSecret.Valid,
-		CreatedAt:   user.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -825,7 +1146,7 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 		Role:        updated.Role,
 		AuthSource:  updated.AuthSource,
 		TOTPEnabled: updated.TotpSecret.Valid,
-		CreatedAt:   updated.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   updated.CreatedAt.Format(time.RFC3339Nano),
 	})
 }
 

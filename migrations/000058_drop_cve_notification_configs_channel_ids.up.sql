@@ -1,0 +1,40 @@
+-- ⚠️ BREAKING UPGRADE — manual steps required
+-- See migrations/000058_drop_cve_notification_configs_channel_ids.up.sql for the full upgrade procedure.
+--
+-- Phase 4.8c (final release of the multi-step plan that started with 4.8a).
+-- 4.8a added the cve_notification_config_channels join table and started
+-- dual-writing both representations. 4.8b switched every read to the
+-- join table. This migration completes the move by dropping the legacy
+-- channel_ids UUID[] column from cve_notification_configs.
+--
+-- Upgrade procedure for an in-place install:
+--
+--   1. Apply 4.8a (000057) — join table created and backfilled. Reversible.
+--   2. Roll out 4.8b (code-only read-flip). Reversible by reverting the commit.
+--   3. Apply this migration. THIS IS THE DATA-LOSS POINT — rolling back to
+--      a 4.8a-or-earlier binary requires running .down.sql which rebuilds
+--      the column via array_agg over the join table. The rebuild is exact
+--      for any installation whose join table held only valid live
+--      channels (which is everything 4.8a wrote and everything 4.8b read).
+--      An installation that somehow had stale UUIDs in the array (channels
+--      deleted between 4.8a and 4.8c upgrade) loses those stale UUIDs on
+--      rollback — they're already invalid references, so this is a
+--      benign loss.
+--
+-- After this migration:
+--   - cve_notification_configs has no channel_ids column.
+--   - sqlc-generated code drops the ChannelIds field from the model.
+--   - The handler's upsert no longer dual-writes the array.
+--   - The join table is the single source of truth.
+--
+-- Running this against a binary that still expects channel_ids (e.g. a
+-- 4.8a binary) will cause query failures on any UpsertCVENotificationConfig
+-- call. Operators upgrading in place must move the binary forward to a
+-- 4.8c-or-later release before applying this migration; rolling restarts
+-- with mixed-version replicas are NOT supported across this boundary.
+--
+-- Operators may skip 4.8b — its read-flip is a strict no-op when the
+-- array and join table are in lockstep, which 4.8a's transactional
+-- dual-write guarantees. The 4.8a → 4.8c jump is supported.
+
+ALTER TABLE cve_notification_configs DROP COLUMN IF EXISTS channel_ids;

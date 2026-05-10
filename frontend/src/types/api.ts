@@ -400,6 +400,39 @@ export interface TestChannelResponse {
   message: string;
 }
 
+export type DLQState =
+  | "pending"
+  | "rate_limited"
+  | "retrying"
+  | "resolved"
+  | "dismissed";
+
+export type DLQFailureKind = "send_failed" | "rate_limited" | "config_error";
+
+export interface NotificationDLQEntry {
+  id: string;
+  channel_id?: string;
+  channel_type: string;
+  channel_name: string;
+  alert_id?: string;
+  rule_id?: string;
+  payload: Record<string, unknown>;
+  last_error: string;
+  attempt_count: number;
+  state: DLQState;
+  failure_kind: DLQFailureKind;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationDLQSummary {
+  pending: number;
+  rate_limited: number;
+  retrying: number;
+  resolved: number;
+  dismissed: number;
+}
+
 export interface MaintenanceWindow {
   id: string;
   cluster_id: string;
@@ -485,6 +518,7 @@ export interface CreateClusterRequest {
   token_secret: string;
   tls_fingerprint?: string;
   sync_interval_seconds?: number;
+  allow_private_address?: boolean;
 }
 
 export interface ConnectivityResult {
@@ -519,6 +553,7 @@ export interface NodeResponse {
   id: string;
   cluster_id: string;
   name: string;
+  address: string;
   status: string;
   cpu_count: number;
   cpu_model: string;
@@ -605,6 +640,7 @@ export interface VMResponse {
   tags: string;
   ha_state: string;
   pool: string;
+  ostype: string;
   last_seen_at: string;
   created_at: string;
   updated_at: string;
@@ -743,9 +779,37 @@ export interface SSHCredential {
   updated_at: string;
 }
 
+export interface SSHHostKeyPending {
+  host: string;
+  port: number;
+  fingerprint: string;
+  public_key: string;
+}
+
+export interface SSHHostKeyMismatch {
+  host: string;
+  port: number;
+  expected_fingerprint: string;
+  presented_fingerprint: string;
+  presented_public_key: string;
+}
+
 export interface SSHTestResponse {
   success: boolean;
   message: string;
+  fingerprint?: string;
+  host_key_pending?: SSHHostKeyPending;
+  host_key_mismatch?: SSHHostKeyMismatch;
+}
+
+export interface SSHKnownHost {
+  id: string;
+  cluster_id: string;
+  host: string;
+  port: number;
+  fingerprint: string;
+  pinned_by?: string;
+  pinned_at: string;
 }
 
 export interface HAConflict {

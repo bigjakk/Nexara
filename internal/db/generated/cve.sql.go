@@ -13,6 +13,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteCVENotificationConfigChannels = `-- name: DeleteCVENotificationConfigChannels :exec
+DELETE FROM cve_notification_config_channels WHERE config_id = $1
+`
+
+func (q *Queries) DeleteCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteCVENotificationConfigChannels, configID)
+	return err
+}
+
 const deleteCVEScan = `-- name: DeleteCVEScan :exec
 DELETE FROM cve_scans WHERE id = $1
 `
@@ -53,7 +62,7 @@ func (q *Queries) GetCVECacheByID(ctx context.Context, cveID string) (CveCache, 
 }
 
 const getCVENotificationConfig = `-- name: GetCVENotificationConfig :one
-SELECT cluster_id, enabled, notify_on_act, notify_on_attend, channel_ids, cooldown_minutes, last_notified_at, last_notified_signature, created_at, updated_at FROM cve_notification_configs WHERE cluster_id = $1
+SELECT cluster_id, enabled, notify_on_act, notify_on_attend, cooldown_minutes, last_notified_at, last_notified_signature, created_at, updated_at FROM cve_notification_configs WHERE cluster_id = $1
 `
 
 func (q *Queries) GetCVENotificationConfig(ctx context.Context, clusterID uuid.UUID) (CveNotificationConfig, error) {
@@ -64,7 +73,6 @@ func (q *Queries) GetCVENotificationConfig(ctx context.Context, clusterID uuid.U
 		&i.Enabled,
 		&i.NotifyOnAct,
 		&i.NotifyOnAttend,
-		&i.ChannelIds,
 		&i.CooldownMinutes,
 		&i.LastNotifiedAt,
 		&i.LastNotifiedSignature,
@@ -307,6 +315,22 @@ func (q *Queries) GetLatestCVEScan(ctx context.Context, clusterID uuid.UUID) (Cv
 	return i, err
 }
 
+const insertCVENotificationConfigChannel = `-- name: InsertCVENotificationConfigChannel :exec
+INSERT INTO cve_notification_config_channels (config_id, channel_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type InsertCVENotificationConfigChannelParams struct {
+	ConfigID  uuid.UUID `json:"config_id"`
+	ChannelID uuid.UUID `json:"channel_id"`
+}
+
+func (q *Queries) InsertCVENotificationConfigChannel(ctx context.Context, arg InsertCVENotificationConfigChannelParams) error {
+	_, err := q.db.Exec(ctx, insertCVENotificationConfigChannel, arg.ConfigID, arg.ChannelID)
+	return err
+}
+
 const insertCVEScan = `-- name: InsertCVEScan :one
 INSERT INTO cve_scans (cluster_id, status, total_nodes)
 VALUES ($1, $2, $3)
@@ -448,6 +472,33 @@ func (q *Queries) InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnPa
 		&i.SsvcLabel,
 	)
 	return i, err
+}
+
+const listCVENotificationConfigChannels = `-- name: ListCVENotificationConfigChannels :many
+SELECT channel_id
+FROM cve_notification_config_channels
+WHERE config_id = $1
+ORDER BY channel_id
+`
+
+func (q *Queries) ListCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listCVENotificationConfigChannels, configID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var channel_id uuid.UUID
+		if err := rows.Scan(&channel_id); err != nil {
+			return nil, err
+		}
+		items = append(items, channel_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCVEScanNodes = `-- name: ListCVEScanNodes :many
@@ -990,35 +1041,36 @@ func (q *Queries) UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) 
 const upsertCVENotificationConfig = `-- name: UpsertCVENotificationConfig :one
 INSERT INTO cve_notification_configs (
     cluster_id, enabled, notify_on_act, notify_on_attend,
-    channel_ids, cooldown_minutes, updated_at
+    cooldown_minutes, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, now())
+VALUES ($1, $2, $3, $4, $5, now())
 ON CONFLICT (cluster_id) DO UPDATE SET
     enabled = EXCLUDED.enabled,
     notify_on_act = EXCLUDED.notify_on_act,
     notify_on_attend = EXCLUDED.notify_on_attend,
-    channel_ids = EXCLUDED.channel_ids,
     cooldown_minutes = EXCLUDED.cooldown_minutes,
     updated_at = now()
-RETURNING cluster_id, enabled, notify_on_act, notify_on_attend, channel_ids, cooldown_minutes, last_notified_at, last_notified_signature, created_at, updated_at
+RETURNING cluster_id, enabled, notify_on_act, notify_on_attend, cooldown_minutes, last_notified_at, last_notified_signature, created_at, updated_at
 `
 
 type UpsertCVENotificationConfigParams struct {
-	ClusterID       uuid.UUID   `json:"cluster_id"`
-	Enabled         bool        `json:"enabled"`
-	NotifyOnAct     bool        `json:"notify_on_act"`
-	NotifyOnAttend  bool        `json:"notify_on_attend"`
-	ChannelIds      []uuid.UUID `json:"channel_ids"`
-	CooldownMinutes int32       `json:"cooldown_minutes"`
+	ClusterID       uuid.UUID `json:"cluster_id"`
+	Enabled         bool      `json:"enabled"`
+	NotifyOnAct     bool      `json:"notify_on_act"`
+	NotifyOnAttend  bool      `json:"notify_on_attend"`
+	CooldownMinutes int32     `json:"cooldown_minutes"`
 }
 
+// 4.8c: channel_ids array dropped; the join table
+// cve_notification_config_channels is now the single source of truth.
+// The handler dual-writes the join table inside the same transaction
+// as this upsert.
 func (q *Queries) UpsertCVENotificationConfig(ctx context.Context, arg UpsertCVENotificationConfigParams) (CveNotificationConfig, error) {
 	row := q.db.QueryRow(ctx, upsertCVENotificationConfig,
 		arg.ClusterID,
 		arg.Enabled,
 		arg.NotifyOnAct,
 		arg.NotifyOnAttend,
-		arg.ChannelIds,
 		arg.CooldownMinutes,
 	)
 	var i CveNotificationConfig
@@ -1027,7 +1079,6 @@ func (q *Queries) UpsertCVENotificationConfig(ctx context.Context, arg UpsertCVE
 		&i.Enabled,
 		&i.NotifyOnAct,
 		&i.NotifyOnAttend,
-		&i.ChannelIds,
 		&i.CooldownMinutes,
 		&i.LastNotifiedAt,
 		&i.LastNotifiedSignature,

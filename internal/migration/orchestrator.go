@@ -18,10 +18,24 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
+// cleanupCtxFor returns (ctx, no-op cancel) when ctx is still alive, or a
+// fresh 5-second timeout context derived from Background when the parent
+// is already cancelled. Use it for the DB / event / audit-log writes that
+// record a failure outcome — without it, a SIGTERM cancellation would
+// leave a migration row in 'migrating' status forever because the DB
+// write silently no-ops on a cancelled context.
+func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.Background(), 5*time.Second)
+}
+
 // Orchestrator manages migration job execution.
 type Orchestrator struct {
 	queries       *db.Queries
 	encryptionKey string
+	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	logger        *slog.Logger
 	eventPub      *events.Publisher
 }
@@ -39,6 +53,11 @@ func NewOrchestrator(queries *db.Queries, encryptionKey string, logger *slog.Log
 	}
 }
 
+// SetProxmoxCache attaches the shared per-server cache. Nil-safe.
+func (o *Orchestrator) SetProxmoxCache(cache *proxmox.ClientCache) {
+	o.cache = cache
+}
+
 // migrationContext holds resolved metadata used for task tracking and audit logging.
 type migrationContext struct {
 	job       db.MigrationJob
@@ -49,10 +68,22 @@ type migrationContext struct {
 }
 
 // clientForCluster creates a Proxmox client from stored cluster credentials.
+// Prefers the shared cache when available; falls back to per-call construction
+// otherwise. The cluster row is also returned so callers can read auxiliary
+// fields (Name, ApiUrl) without an extra DB roundtrip on the cache-hit path.
 func (o *Orchestrator) clientForCluster(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, db.Cluster, error) {
 	cluster, err := o.queries.GetCluster(ctx, clusterID)
 	if err != nil {
 		return nil, cluster, fmt.Errorf("get cluster %s: %w", clusterID, err)
+	}
+
+	if o.cache != nil {
+		if client, err := o.cache.Get(ctx, clusterID); err == nil {
+			return client, cluster, nil
+		} else {
+			o.logger.Warn("migration: proxmox cache get failed, building per-call",
+				"cluster_id", clusterID, "error", err)
+		}
 	}
 
 	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, o.encryptionKey)
@@ -535,7 +566,7 @@ func (o *Orchestrator) waitForTask(ctx context.Context, client *proxmox.Client, 
 			if status.Status == "running" {
 				continue
 			}
-			if migrationSucceeded(status.ExitStatus) {
+			if proxmox.TaskSucceeded(status.ExitStatus) {
 				return nil
 			}
 			return fmt.Errorf("task exit status: %s", status.ExitStatus)
@@ -749,7 +780,7 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 
 			job := mc.job
 
-			if migrationSucceeded(status.ExitStatus) {
+			if proxmox.TaskSucceeded(status.ExitStatus) {
 				_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
 					ID:          jobID,
 					Status:      StatusCompleted,
@@ -778,8 +809,13 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 
 func (o *Orchestrator) failJob(ctx context.Context, jobID uuid.UUID, errMsg string, mc *migrationContext) {
 	o.logger.Error("migration job failed", "job_id", jobID, "error", errMsg)
+	// If ctx was cancelled (graceful shutdown), the DB write would no-op and
+	// the row would orphan in 'migrating' status forever. Use a fresh
+	// 5-second cleanup context so the failure outcome lands in the row.
+	dbCtx, cancel := cleanupCtxFor(ctx)
+	defer cancel()
 	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
-	_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
+	_ = o.queries.CompleteMigrationJob(dbCtx, db.CompleteMigrationJobParams{
 		ID:           jobID,
 		Status:       StatusFailed,
 		CompletedAt:  now,
@@ -795,7 +831,7 @@ func (o *Orchestrator) failJob(ctx context.Context, jobID uuid.UUID, errMsg stri
 		if job.MigrationType == TypeCrossCluster {
 			actionPrefix = "cross_cluster_migrate"
 		}
-		o.auditLog(ctx, mc, actionPrefix+"_failed",
+		o.auditLog(dbCtx, mc, actionPrefix+"_failed",
 			fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"migration_type":%q,"error":%q}`,
 				job.Vmid, typeLabel, job.SourceNode, job.TargetNode, job.MigrationType, errMsg))
 	}
@@ -858,12 +894,6 @@ func (o *Orchestrator) recordDiskMove(ctx context.Context, mc *migrationContext,
 // Cancel cancels a pending or checking job.
 func (o *Orchestrator) Cancel(ctx context.Context, jobID uuid.UUID) error {
 	return o.queries.CancelMigrationJob(ctx, jobID)
-}
-
-// migrationSucceeded returns true if a Proxmox task exit status indicates success.
-func migrationSucceeded(exitStatus string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(exitStatus))
-	return upper == "" || upper == "OK" || strings.HasPrefix(upper, "OK ") || upper == "WARNINGS"
 }
 
 // formatMapping converts a map to Proxmox's "src:tgt,src2:tgt2" format.

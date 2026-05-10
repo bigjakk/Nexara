@@ -19,9 +19,17 @@ func (s *Server) setupRoutes() {
 		authGroup.Post("/register", s.authOptional(), s.authHandler.Register)
 		authGroup.Post("/login", s.authHandler.Login)
 		authGroup.Post("/refresh", s.authHandler.Refresh)
-		authGroup.Post("/logout", s.authRequired(), s.authHandler.Logout)
+		// Logout intentionally uses authOptional so a user with an expired
+		// access token (but a valid refresh cookie) can still revoke the
+		// server-side session. The cookie itself is the auth artefact for
+		// this endpoint; the user_id check below only fires when an access
+		// token IS present, defending against an attacker with a stolen
+		// cookie attempting to log out an unrelated user (covered by
+		// SameSite=Strict + same-origin SPA already, but defence-in-depth).
+		authGroup.Post("/logout", s.authOptional(), s.authHandler.Logout)
 		authGroup.Post("/logout-all", s.authRequired(), s.authHandler.LogoutAll)
 		authGroup.Post("/console-token", s.authRequired(), s.authHandler.ConsoleToken)
+		authGroup.Post("/ws-token", s.authRequired(), s.authHandler.WSToken)
 
 		// Mobile push device registration (lives under /me).
 		//
@@ -373,6 +381,11 @@ func (s *Server) setupRoutes() {
 			clusters.Put("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.UpsertSSHCredentials)
 			clusters.Delete("/:cluster_id/ssh-credentials", s.rollingUpdateHandler.DeleteSSHCredentials)
 			clusters.Post("/:cluster_id/ssh-credentials/test", s.rollingUpdateHandler.TestSSHConnection)
+
+			// SSH known-host (pinned host key) management.
+			clusters.Get("/:cluster_id/ssh-known-hosts", s.rollingUpdateHandler.ListSSHKnownHosts)
+			clusters.Post("/:cluster_id/ssh-known-hosts", s.rollingUpdateHandler.PinSSHHostKey)
+			clusters.Delete("/:cluster_id/ssh-known-hosts/:id", s.rollingUpdateHandler.DeleteSSHKnownHost)
 		}
 
 		// Cluster options, tags, and config routes.
@@ -510,6 +523,16 @@ func (s *Server) setupRoutes() {
 		notifChannels.Put("/:id", s.alertHandler.UpdateChannel)
 		notifChannels.Delete("/:id", s.alertHandler.DeleteChannel)
 		notifChannels.Post("/:id/test", s.alertHandler.TestChannel)
+	}
+
+	// Notification dead-letter queue.
+	if s.notificationDLQHandler != nil {
+		dlq := v1.Group("/notification-dlq", s.authRequired())
+		dlq.Get("/", s.notificationDLQHandler.List)
+		dlq.Get("/summary", s.notificationDLQHandler.Summary)
+		dlq.Post("/:id/retry", s.notificationDLQHandler.Retry)
+		dlq.Post("/:id/dismiss", s.notificationDLQHandler.Dismiss)
+		dlq.Delete("/:id", s.notificationDLQHandler.Delete)
 	}
 
 	// Report routes.

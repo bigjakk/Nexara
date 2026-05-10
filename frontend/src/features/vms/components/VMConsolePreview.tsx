@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import RFB from "@novnc/novnc/lib/rfb";
+import RFB from "@novnc/novnc";
 import { Maximize2 } from "lucide-react";
+import {
+  mintConsoleToken,
+  wsAuthProtocols,
+} from "@/features/console/api/console-queries";
 
 interface VMConsolePreviewProps {
   clusterId: string;
@@ -11,12 +15,15 @@ interface VMConsolePreviewProps {
 
 type PreviewStatus = "connecting" | "connected" | "paused" | "error";
 
-function buildVncWsUrl(clusterID: string, node: string, vmid: number): string {
-  const token = localStorage.getItem("access_token");
+function buildVncWsUrl(
+  clusterID: string,
+  node: string,
+  vmid: number,
+): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
+  // Token rides in Sec-WebSocket-Protocol; URL has only scope params.
   const params = new URLSearchParams({
-    token: token ?? "",
     cluster_id: clusterID,
     node,
     vmid: String(vmid),
@@ -56,55 +63,87 @@ export function VMConsolePreview({ clusterId, node, vmid, onOpen }: VMConsolePre
     if (!node) return;
 
     setStatus("connecting");
-    const ws = new WebSocket(buildVncWsUrl(clusterId, node, vmid));
-    ws.binaryType = "arraybuffer";
+    let ws: WebSocket | null = null;
+    let cancelled = false;
 
-    ws.onmessage = (event: MessageEvent) => {
-      if (typeof event.data === "string") {
-        try {
-          const msg = JSON.parse(event.data) as { type: string; password?: string };
-          if (msg.type === "connected") {
-            if (!containerRef.current) return;
-            const options: Record<string, unknown> = {};
-            if (msg.password) {
-              options["credentials"] = { password: msg.password };
-            }
-            const rfbInstance = new RFB(containerRef.current, ws, options);
-            rfbInstance.scaleViewport = true;
-            rfbInstance.resizeSession = false;
-            rfbInstance.viewOnly = true;
-            rfbInstance.focusOnClick = false;
-
-            rfbInstance.addEventListener("connect", () => { setStatus("connected"); });
-            rfbInstance.addEventListener("disconnect", () => {
-              setStatus("error");
-              rfbRef.current = null;
-            });
-            rfbInstance.addEventListener("securityfailure", () => { setStatus("error"); });
-
-            rfbRef.current = rfbInstance;
-            return;
-          }
-          if (msg.type === "error") {
-            setStatus("error");
-          }
-        } catch {
-          // not JSON
-        }
+    const connect = async () => {
+      // /ws/vnc requires a scoped console token (security review fix #1).
+      // The mint endpoint enforces per-cluster RBAC.
+      let token: string;
+      try {
+        const minted = await mintConsoleToken({
+          clusterId,
+          node,
+          type: "vm_vnc",
+          vmid,
+          silent: true,
+        });
+        token = minted.token;
+      } catch {
+        if (!cancelled) setStatus("error");
+        return;
       }
+
+      if (cancelled) return;
+
+      ws = new WebSocket(
+        buildVncWsUrl(clusterId, node, vmid),
+        wsAuthProtocols(token),
+      );
+      ws.binaryType = "arraybuffer";
+
+      const localWs = ws;
+
+      localWs.onmessage = (event: MessageEvent) => {
+        if (typeof event.data === "string") {
+          try {
+            const msg = JSON.parse(event.data) as { type: string; password?: string };
+            if (msg.type === "connected") {
+              if (!containerRef.current) return;
+              const options: Record<string, unknown> = {};
+              if (msg.password) {
+                options["credentials"] = { password: msg.password };
+              }
+              const rfbInstance = new RFB(containerRef.current, localWs, options);
+              rfbInstance.scaleViewport = true;
+              rfbInstance.resizeSession = false;
+              rfbInstance.viewOnly = true;
+              rfbInstance.focusOnClick = false;
+
+              rfbInstance.addEventListener("connect", () => { setStatus("connected"); });
+              rfbInstance.addEventListener("disconnect", () => {
+                setStatus("error");
+                rfbRef.current = null;
+              });
+              rfbInstance.addEventListener("securityfailure", () => { setStatus("error"); });
+
+              rfbRef.current = rfbInstance;
+              return;
+            }
+            if (msg.type === "error") {
+              setStatus("error");
+            }
+          } catch {
+            // not JSON
+          }
+        }
+      };
+
+      localWs.onclose = () => {
+        if (!rfbRef.current) setStatus("error");
+      };
+      localWs.onerror = () => { setStatus("error"); };
     };
 
-    ws.onclose = () => {
-      if (!rfbRef.current) setStatus("error");
-    };
-    ws.onerror = () => { setStatus("error"); };
+    void connect();
 
     return () => {
+      cancelled = true;
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;
       } else {
-        ws.close();
+        ws?.close();
       }
     };
   }, [clusterId, node, vmid, visible]);

@@ -8,6 +8,7 @@ import type {
   HAPreFlightReport,
   SSHCredential,
   SSHTestResponse,
+  SSHKnownHost,
 } from "@/types/api";
 
 export function useRollingUpdateJobs(clusterId: string) {
@@ -325,5 +326,61 @@ export function useTestSSHConnection() {
         `/api/v1/clusters/${clusterId}/ssh-credentials/test`,
         { node_name: nodeName },
       ),
+  });
+}
+
+export function useSSHKnownHosts(clusterId: string) {
+  return useQuery({
+    queryKey: ["ssh-known-hosts", clusterId],
+    queryFn: () =>
+      apiClient.get<SSHKnownHost[]>(
+        `/api/v1/clusters/${clusterId}/ssh-known-hosts`,
+      ),
+    enabled: !!clusterId,
+  });
+}
+
+export function usePinSSHHostKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      clusterId,
+      nodeName,
+      expectedFingerprint,
+    }: {
+      clusterId: string;
+      nodeName: string;
+      expectedFingerprint: string;
+    }) =>
+      apiClient.post<SSHKnownHost>(
+        `/api/v1/clusters/${clusterId}/ssh-known-hosts`,
+        { node_name: nodeName, expected_fingerprint: expectedFingerprint },
+      ),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({
+        queryKey: ["ssh-known-hosts", vars.clusterId],
+      });
+    },
+  });
+}
+
+export function useDeleteSSHKnownHost() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      clusterId,
+      id,
+    }: {
+      clusterId: string;
+      id: string;
+    }) =>
+      apiClient.delete(
+        `/api/v1/clusters/${clusterId}/ssh-known-hosts/${id}`,
+      ),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({
+        queryKey: ["ssh-known-hosts", vars.clusterId],
+      });
+    },
   });
 }

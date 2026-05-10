@@ -48,7 +48,7 @@ func (q *Queries) DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMs
 }
 
 const getContainer = `-- name: GetContainer :one
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE id = $1 AND type = 'lxc'
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype FROM vms WHERE id = $1 AND type = 'lxc'
 `
 
 func (q *Queries) GetContainer(ctx context.Context, id uuid.UUID) (Vm, error) {
@@ -73,12 +73,13 @@ func (q *Queries) GetContainer(ctx context.Context, id uuid.UUID) (Vm, error) {
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Ostype,
 	)
 	return i, err
 }
 
 const getVM = `-- name: GetVM :one
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE id = $1
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype FROM vms WHERE id = $1
 `
 
 func (q *Queries) GetVM(ctx context.Context, id uuid.UUID) (Vm, error) {
@@ -103,12 +104,13 @@ func (q *Queries) GetVM(ctx context.Context, id uuid.UUID) (Vm, error) {
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Ostype,
 	)
 	return i, err
 }
 
 const getVMByClusterAndVmid = `-- name: GetVMByClusterAndVmid :one
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE cluster_id = $1 AND vmid = $2
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype FROM vms WHERE cluster_id = $1 AND vmid = $2
 `
 
 type GetVMByClusterAndVmidParams struct {
@@ -138,12 +140,13 @@ func (q *Queries) GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterA
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Ostype,
 	)
 	return i, err
 }
 
 const listAllVMs = `-- name: ListAllVMs :many
-SELECT v.id, v.cluster_id, v.node_id, v.vmid, v.name, v.type, v.status, v.cpu_count, v.mem_total, v.disk_total, v.uptime, v.template, v.tags, v.ha_state, v.pool, v.last_seen_at, v.created_at, v.updated_at, c.name AS cluster_name
+SELECT v.id, v.cluster_id, v.node_id, v.vmid, v.name, v.type, v.status, v.cpu_count, v.mem_total, v.disk_total, v.uptime, v.template, v.tags, v.ha_state, v.pool, v.last_seen_at, v.created_at, v.updated_at, v.ostype, c.name AS cluster_name
 FROM vms v
 JOIN clusters c ON c.id = v.cluster_id
 WHERE v.template = false
@@ -169,6 +172,7 @@ type ListAllVMsRow struct {
 	LastSeenAt  time.Time `json:"last_seen_at"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	Ostype      string    `json:"ostype"`
 	ClusterName string    `json:"cluster_name"`
 }
 
@@ -200,6 +204,7 @@ func (q *Queries) ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error) {
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Ostype,
 			&i.ClusterName,
 		); err != nil {
 			return nil, err
@@ -213,7 +218,7 @@ func (q *Queries) ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error) {
 }
 
 const listContainersByCluster = `-- name: ListContainersByCluster :many
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid
 `
 
 func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error) {
@@ -244,6 +249,7 @@ func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UU
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Ostype,
 		); err != nil {
 			return nil, err
 		}
@@ -292,7 +298,7 @@ func (q *Queries) ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UU
 }
 
 const listVMsByCluster = `-- name: ListVMsByCluster :many
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE cluster_id = $1 ORDER BY vmid
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype FROM vms WHERE cluster_id = $1 ORDER BY vmid
 `
 
 func (q *Queries) ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error) {
@@ -323,6 +329,7 @@ func (q *Queries) ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Ostype,
 		); err != nil {
 			return nil, err
 		}
@@ -335,7 +342,7 @@ func (q *Queries) ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]
 }
 
 const listVMsByNode = `-- name: ListVMsByNode :many
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at FROM vms WHERE node_id = $1 ORDER BY vmid
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype FROM vms WHERE node_id = $1 ORDER BY vmid
 `
 
 func (q *Queries) ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error) {
@@ -366,6 +373,7 @@ func (q *Queries) ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, er
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Ostype,
 		); err != nil {
 			return nil, err
 		}
@@ -375,6 +383,20 @@ func (q *Queries) ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, er
 		return nil, err
 	}
 	return items, nil
+}
+
+const setVMOSType = `-- name: SetVMOSType :exec
+UPDATE vms SET ostype = $2, updated_at = now() WHERE id = $1
+`
+
+type SetVMOSTypeParams struct {
+	ID     uuid.UUID `json:"id"`
+	Ostype string    `json:"ostype"`
+}
+
+func (q *Queries) SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error {
+	_, err := q.db.Exec(ctx, setVMOSType, arg.ID, arg.Ostype)
+	return err
 }
 
 const updateVMPool = `-- name: UpdateVMPool :exec
@@ -422,7 +444,7 @@ ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     ha_state = EXCLUDED.ha_state,
     pool = EXCLUDED.pool,
     last_seen_at = now()
-RETURNING id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at
+RETURNING id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype
 `
 
 type UpsertVMParams struct {
@@ -479,6 +501,7 @@ func (q *Queries) UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error) 
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Ostype,
 	)
 	return i, err
 }

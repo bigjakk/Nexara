@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -22,7 +23,7 @@ func newTestServer(t *testing.T) *Server {
 		AccessTokenTTL:      15 * time.Minute,
 		RefreshTokenTTL:     7 * 24 * time.Hour,
 	}
-	return New(cfg, nil, nil)
+	return New(context.Background(), cfg, nil, nil)
 }
 
 func TestHealthEndpoint_ReturnsOK(t *testing.T) {

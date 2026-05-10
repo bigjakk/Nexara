@@ -2,7 +2,6 @@ import { create } from "zustand";
 import type {
   AuthResponse,
   LoginRequest,
-  LogoutRequest,
   RegisterRequest,
   TOTPRequiredResponse,
   TOTPVerifyLoginRequest,
@@ -13,6 +12,7 @@ import {
   clearTokens,
   getStoredUser,
   setAuthFailureCallback,
+  setAuthRefreshCallback,
   storeTokens,
 } from "@/lib/api-client";
 
@@ -24,6 +24,11 @@ interface AuthState {
   isInitialized: boolean;
   totpPending: boolean;
   totpPendingToken: string | null;
+  // True between the moment logout starts and the local clearAuth that
+  // follows it. Suppresses the refresh-rehydration callback so a
+  // /auth/refresh that resolves mid-logout cannot re-flip
+  // isAuthenticated back to true.
+  isLoggingOut: boolean;
 }
 
 interface AuthActions {
@@ -53,8 +58,27 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   isInitialized: false,
   totpPending: false,
   totpPendingToken: null,
+  isLoggingOut: false,
 
   initialize: async () => {
+    // Register callback for forced logout on auth failure first so any
+    // refresh failure inside this method also routes through it.
+    setAuthFailureCallback(() => {
+      get().clearAuth();
+    });
+
+    // Re-hydrate user + permissions on every successful background
+    // refresh so a permission rotation reaches the SPA within one access-
+    // token lifetime (Finding A11 — no logout required). Suppressed
+    // during logout so a refresh that resolves mid-logout cannot re-flip
+    // isAuthenticated back to true.
+    setAuthRefreshCallback((res) => {
+      if (get().isLoggingOut) return;
+      get().setAuthFromResponse(res);
+    });
+
+    // Cached user metadata only seeds optimistic UI; the cookie-backed
+    // /auth/refresh below is the actual authentication gate.
     const storedUser = getStoredUser();
     if (!storedUser) {
       set({ isInitialized: true });
@@ -64,12 +88,10 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
     set({ isLoading: true });
 
     try {
-      // Try refreshing to validate the session
+      // Empty body — the HttpOnly refresh cookie carries the token.
       const res = await apiClient.postPublic<AuthResponse>(
         "/api/v1/auth/refresh",
-        {
-          refresh_token: localStorage.getItem("refresh_token"),
-        },
+        {},
       );
       storeTokens(res);
       set({
@@ -89,11 +111,6 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
         isInitialized: true,
       });
     }
-
-    // Register callback for forced logout on auth failure
-    setAuthFailureCallback(() => {
-      get().clearAuth();
-    });
   },
 
   login: async (req: LoginRequest) => {
@@ -210,14 +227,13 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   },
 
   logout: async () => {
-    const refreshToken = localStorage.getItem("refresh_token");
-    if (refreshToken) {
-      try {
-        const body: LogoutRequest = { refresh_token: refreshToken };
-        await apiClient.post("/api/v1/auth/logout", body);
-      } catch {
-        // Proceed with local cleanup even if server logout fails
-      }
+    set({ isLoggingOut: true });
+    // Empty body — the HttpOnly cookie carries the refresh token. Always hit
+    // /auth/logout so the server can revoke the session and clear the cookie.
+    try {
+      await apiClient.post("/api/v1/auth/logout", {});
+    } catch {
+      // Proceed with local cleanup even if server logout fails
     }
     clearTokens();
     set({
@@ -226,10 +242,12 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       isAuthenticated: false,
       totpPending: false,
       totpPendingToken: null,
+      isLoggingOut: false,
     });
   },
 
   logoutAll: async () => {
+    set({ isLoggingOut: true });
     try {
       await apiClient.post("/api/v1/auth/logout-all");
     } catch {
@@ -242,6 +260,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       isAuthenticated: false,
       totpPending: false,
       totpPendingToken: null,
+      isLoggingOut: false,
     });
   },
 
@@ -253,6 +272,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       isAuthenticated: false,
       totpPending: false,
       totpPendingToken: null,
+      isLoggingOut: false,
     });
   },
 

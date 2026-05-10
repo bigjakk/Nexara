@@ -1,17 +1,26 @@
 import { useEffect, useRef, useState } from "react";
-import RFB from "@novnc/novnc/lib/rfb";
+import RFB from "@novnc/novnc";
 import type { ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import { VNCToolbar } from "./VNCToolbar";
+import {
+  mintConsoleToken,
+  wsAuthProtocols,
+} from "../api/console-queries";
 
 interface VNCViewerProps {
   tab: ConsoleTab;
   visible: boolean;
   /**
-   * Optional override for the access token used in the WS URL. When
-   * provided, the component uses this token instead of reading
-   * `localStorage.access_token`. Used by the /mobile-console route to pass
-   * a short-lived scope-locked JWT minted via /api/v1/auth/console-token.
+   * Optional pre-minted scoped console token. When provided, the component
+   * skips the inline mint and uses this token directly (mobile passes a
+   * token minted upstream by its native shell). When omitted, the desktop
+   * flow mints via POST /api/v1/auth/console-token before opening the WS.
+   *
+   * Either way the token rides in `Sec-WebSocket-Protocol` (per remediation
+   * 2.7) — never in the URL — so it's not exposed in proxy access logs or
+   * Referer headers. The /ws/vnc endpoint rejects regular access tokens
+   * (per-cluster RBAC enforcement, security fix #1).
    */
   accessToken?: string;
 }
@@ -47,18 +56,14 @@ export function typeTextIntoVnc(rfb: RFB, text: string) {
 function buildVncWsUrl(
   clusterID: string,
   node: string,
-  vmid?: number,
-  guestType?: string,
-  overrideToken?: string,
+  vmid: number | undefined,
+  guestType: string | undefined,
 ): string {
-  // overrideToken is used by the /mobile-console route which receives a
-  // short-lived scope-locked JWT in its URL params. Desktop usage falls
-  // back to the access token in localStorage.
-  const token = overrideToken ?? localStorage.getItem("access_token");
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const host = window.location.host;
+  // Token is delivered via Sec-WebSocket-Protocol (subprotocol); the URL
+  // only carries scope-validation params.
   const params = new URLSearchParams({
-    token: token ?? "",
     cluster_id: clusterID,
     node,
   });
@@ -97,153 +102,199 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
 
   useEffect(() => {
     intentionalCloseRef.current = false;
-    const wsUrl = buildVncWsUrl(clusterID, node, vmid, guestType, accessToken);
-    console.log("[VNCViewer] opening WS", wsUrl.replace(/token=[^&]+/, "token=***"));
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = "arraybuffer";
-    wsRef.current = ws;
+    let ws: WebSocket | null = null;
+    let stateLog1Timer: ReturnType<typeof setTimeout> | null = null;
+    let stateLog2Timer: ReturnType<typeof setTimeout> | null = null;
 
-    ws.onopen = () => {
-      console.log("[VNCViewer] WS open, readyState:", ws.readyState);
-    };
+    const connect = async () => {
+      // Acquire the WS upgrade token. Desktop callers omit accessToken and
+      // mint a short-lived scoped JWT; mobile passes its pre-minted token
+      // through the prop.
+      let token: string;
+      try {
+        if (accessToken) {
+          token = accessToken;
+        } else {
+          // VNC scope type matches the tab type directly here — Terminal
+          // uses node_shell/vm_serial/ct_attach, VNCViewer uses
+          // vm_vnc/ct_vnc. The VNC subset is what tab.type can hold for
+          // this component.
+          const minted = await mintConsoleToken({
+            clusterId: clusterID,
+            node,
+            type: tab.type,
+            ...(vmid !== undefined ? { vmid } : {}),
+          });
+          token = minted.token;
+        }
+      } catch (err) {
+        if (intentionalCloseRef.current) return;
+        console.error("[VNCViewer] failed to mint console token", err);
+        updateTabStatusRef.current(tabIdRef.current, "error");
+        return;
+      }
 
-    // Diagnostic: log readyState 1 second and 5 seconds after creation in
-    // case onopen / onerror / onclose never fire (silent failure mode).
-    setTimeout(() => {
+      if (intentionalCloseRef.current) return;
+
+      const wsUrl = buildVncWsUrl(clusterID, node, vmid, guestType);
+      // The wsUrl is now token-free (token rides in subprotocol). Log it.
       console.log(
-        "[VNCViewer] WS state @ 1s",
-        "readyState:", ws.readyState,
-        "(0=connecting, 1=open, 2=closing, 3=closed)",
+        "[VNCViewer] opening WS",
+        wsUrl,
+        JSON.stringify({ clusterID, node, vmid, guestType }),
       );
-    }, 1000);
-    setTimeout(() => {
-      console.log("[VNCViewer] WS state @ 5s readyState:", ws.readyState);
-    }, 5000);
+      ws = new WebSocket(wsUrl, wsAuthProtocols(token));
+      ws.binaryType = "arraybuffer";
+      wsRef.current = ws;
 
-    ws.onmessage = (event: MessageEvent) => {
-      if (typeof event.data === "string") {
-        try {
-          const msg = JSON.parse(event.data) as {
-            type: string;
-            message?: string;
-            password?: string;
-          };
-          if (msg.type === "connected") {
-            // Backend proxy is connected to Proxmox — now initialize noVNC RFB.
-            console.log("[VNCViewer] received connected, container:", !!containerRef.current);
-            if (!containerRef.current) {
-              console.error("[VNCViewer] containerRef is null at connected time");
-              return;
-            }
+      const localWs = ws; // narrow non-null binding for closures
 
-            retryCountRef.current = 0;
+      localWs.onopen = () => {
+        console.log("[VNCViewer] WS open, readyState:", localWs.readyState);
+      };
 
-            const options: Record<string, unknown> = {};
-            if (msg.password) {
-              options["credentials"] = { password: msg.password };
-            }
+      // Diagnostic: log readyState 1 second and 5 seconds after creation in
+      // case onopen / onerror / onclose never fire (silent failure mode).
+      stateLog1Timer = setTimeout(() => {
+        console.log(
+          "[VNCViewer] WS state @ 1s",
+          "readyState:", localWs.readyState,
+          "(0=connecting, 1=open, 2=closing, 3=closed)",
+        );
+      }, 1000);
+      stateLog2Timer = setTimeout(() => {
+        console.log("[VNCViewer] WS state @ 5s readyState:", localWs.readyState);
+      }, 5000);
 
-            const rfbInstance = new RFB(containerRef.current, ws, options);
-            rfbInstance.scaleViewport = true;
-            rfbInstance.resizeSession = false;
-            rfbInstance.focusOnClick = true;
-
-            rfbInstance.addEventListener("connect", () => {
-              console.log("[VNCViewer] RFB connect event fired");
-              updateTabStatusRef.current(tabIdRef.current, "connected");
-            });
-
-            rfbInstance.addEventListener("disconnect", () => {
-              console.log("[VNCViewer] RFB disconnect event fired");
-              if (intentionalCloseRef.current) {
-                updateTabStatusRef.current(tabIdRef.current, "disconnected");
-                rfbRef.current = null;
-                setRfb(null);
+      localWs.onmessage = (event: MessageEvent) => {
+        if (typeof event.data === "string") {
+          try {
+            const msg = JSON.parse(event.data) as {
+              type: string;
+              message?: string;
+              password?: string;
+            };
+            if (msg.type === "connected") {
+              // Backend proxy is connected to Proxmox — now initialize noVNC RFB.
+              console.log("[VNCViewer] received connected, container:", !!containerRef.current);
+              if (!containerRef.current) {
+                console.error("[VNCViewer] containerRef is null at connected time");
                 return;
               }
 
-              rfbRef.current = null;
-              setRfb(null);
+              retryCountRef.current = 0;
 
-              if (retryCountRef.current < MAX_AUTO_RETRIES) {
-                const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
-                retryCountRef.current++;
-                updateTabStatusRef.current(tabIdRef.current, "reconnecting");
-                retryTimerRef.current = setTimeout(() => {
-                  void resolveAndReconnectRef.current(tabIdRef.current);
-                }, delay);
-              } else {
-                updateTabStatusRef.current(tabIdRef.current, "disconnected");
+              const options: Record<string, unknown> = {};
+              if (msg.password) {
+                options["credentials"] = { password: msg.password };
               }
-            });
 
-            rfbInstance.addEventListener("securityfailure", () => {
+              const rfbInstance = new RFB(containerRef.current, localWs, options);
+              rfbInstance.scaleViewport = true;
+              rfbInstance.resizeSession = false;
+              rfbInstance.focusOnClick = true;
+
+              rfbInstance.addEventListener("connect", () => {
+                console.log("[VNCViewer] RFB connect event fired");
+                updateTabStatusRef.current(tabIdRef.current, "connected");
+              });
+
+              rfbInstance.addEventListener("disconnect", () => {
+                console.log("[VNCViewer] RFB disconnect event fired");
+                if (intentionalCloseRef.current) {
+                  updateTabStatusRef.current(tabIdRef.current, "disconnected");
+                  rfbRef.current = null;
+                  setRfb(null);
+                  return;
+                }
+
+                rfbRef.current = null;
+                setRfb(null);
+
+                if (retryCountRef.current < MAX_AUTO_RETRIES) {
+                  const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
+                  retryCountRef.current++;
+                  updateTabStatusRef.current(tabIdRef.current, "reconnecting");
+                  retryTimerRef.current = setTimeout(() => {
+                    void resolveAndReconnectRef.current(tabIdRef.current);
+                  }, delay);
+                } else {
+                  updateTabStatusRef.current(tabIdRef.current, "disconnected");
+                }
+              });
+
+              rfbInstance.addEventListener("securityfailure", () => {
+                updateTabStatusRef.current(tabIdRef.current, "error");
+              });
+
+              rfbRef.current = rfbInstance;
+              setRfb(rfbInstance);
+              return;
+            }
+            if (msg.type === "error") {
               updateTabStatusRef.current(tabIdRef.current, "error");
-            });
-
-            rfbRef.current = rfbInstance;
-            setRfb(rfbInstance);
-            return;
+              return;
+            }
+          } catch {
+            // Not JSON — ignore
           }
-          if (msg.type === "error") {
-            updateTabStatusRef.current(tabIdRef.current, "error");
-            return;
+        }
+      };
+
+      localWs.onclose = (event) => {
+        console.log(
+          "[VNCViewer] WS close",
+          "code:", event.code,
+          "reason:", event.reason || "(none)",
+          "wasClean:", event.wasClean,
+          "readyState:", localWs.readyState,
+        );
+        if (intentionalCloseRef.current) return;
+        if (!rfbRef.current) {
+          // WS closed before RFB was established — auto-reconnect
+          if (retryCountRef.current < MAX_AUTO_RETRIES) {
+            const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
+            retryCountRef.current++;
+            updateTabStatusRef.current(tabIdRef.current, "reconnecting");
+            retryTimerRef.current = setTimeout(() => {
+              void resolveAndReconnectRef.current(tabIdRef.current);
+            }, delay);
+          } else {
+            updateTabStatusRef.current(tabIdRef.current, "disconnected");
           }
-        } catch {
-          // Not JSON — ignore
         }
-      }
+      };
+
+      localWs.onerror = (event) => {
+        console.error(
+          "[VNCViewer] WS error event",
+          "type:", event.type,
+          "readyState:", localWs.readyState,
+        );
+        if (!intentionalCloseRef.current) {
+          updateTabStatusRef.current(tabIdRef.current, "error");
+        }
+      };
     };
 
-    ws.onclose = (event) => {
-      console.log(
-        "[VNCViewer] WS close",
-        "code:", event.code,
-        "reason:", event.reason || "(none)",
-        "wasClean:", event.wasClean,
-        "readyState:", ws.readyState,
-      );
-      if (intentionalCloseRef.current) return;
-      if (!rfbRef.current) {
-        // WS closed before RFB was established — auto-reconnect
-        if (retryCountRef.current < MAX_AUTO_RETRIES) {
-          const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
-          retryCountRef.current++;
-          updateTabStatusRef.current(tabIdRef.current, "reconnecting");
-          retryTimerRef.current = setTimeout(() => {
-            void resolveAndReconnectRef.current(tabIdRef.current);
-          }, delay);
-        } else {
-          updateTabStatusRef.current(tabIdRef.current, "disconnected");
-        }
-      }
-    };
-
-    ws.onerror = (event) => {
-      console.error(
-        "[VNCViewer] WS error event",
-        "type:", event.type,
-        "readyState:", ws.readyState,
-      );
-      if (!intentionalCloseRef.current) {
-        updateTabStatusRef.current(tabIdRef.current, "error");
-      }
-    };
+    void connect();
 
     return () => {
       intentionalCloseRef.current = true;
       clearTimeout(retryTimerRef.current);
+      if (stateLog1Timer) clearTimeout(stateLog1Timer);
+      if (stateLog2Timer) clearTimeout(stateLog2Timer);
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;
         setRfb(null);
       } else {
-        ws.close();
+        ws?.close();
       }
       wsRef.current = null;
     };
     // Only re-run when the actual connection parameters change.
-  }, [tabId, clusterID, node, vmid, guestType, reconnectKey, accessToken]);
+  }, [tabId, tab.type, clusterID, node, vmid, guestType, reconnectKey, accessToken]);
 
   const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
 

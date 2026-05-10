@@ -50,10 +50,8 @@ export function MetricChart({
     return tsFormatter(Number(label));
   };
 
-  const tooltipValueFormatter = (
-    value: number | string | Array<number | string> | undefined,
-  ): [string, string] => {
-    return [formatter(Number(value ?? 0)), title];
+  const tooltipValueFormatter = (value: unknown): [string, string] => {
+    return [formatter(typeof value === "number" ? value : Number(value ?? 0)), title];
   };
 
   if (data.length === 0) {

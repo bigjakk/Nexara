@@ -1,11 +1,14 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { HardDrive, ChevronDown, ChevronRight, Server, Share2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/EmptyState";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import {
   useClusterStorage,
@@ -13,6 +16,7 @@ import {
 } from "../api/storage-queries";
 import { StorageCapacityBar } from "../components/StorageCapacityBar";
 import { StorageContentTable } from "../components/StorageContentTable";
+import { StorageGuestTable } from "../components/StorageGuestTable";
 import { UploadDialog } from "../components/UploadDialog";
 import { BulkMoveDialog } from "../components/BulkMoveDialog";
 import { AddStorageDialog } from "../components/AddStorageDialog";
@@ -88,6 +92,7 @@ function groupStorage(
 }
 
 export function StoragePage() {
+  const { t: td } = useTranslation("dashboard");
   const [searchParams] = useSearchParams();
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
@@ -166,9 +171,20 @@ export function StoragePage() {
             />
           ))}
           {pools.length === 0 && (
-            <p className="py-8 text-center text-muted-foreground">
-              No storage pools found.
-            </p>
+            clusters.length === 0 ? (
+              <EmptyState
+                icon={HardDrive}
+                title={td("noClustersRegistered")}
+                description={td("addClusterToGetStarted")}
+                action={<AddClusterDialog />}
+              />
+            ) : (
+              <EmptyState
+                icon={HardDrive}
+                title="No storage pools yet"
+                description="This cluster has no storage pools configured. Add one in the Proxmox UI to see it here."
+              />
+            )
           )}
         </>
       )}
@@ -275,6 +291,8 @@ function StoragePoolDetail({
 
   const contentTypes = pool.content.split(",").map((s) => s.trim());
   const hasImages = contentTypes.includes("images");
+  const hasRootdir = contentTypes.includes("rootdir");
+  const hasGuestVolumes = hasImages || hasRootdir;
   const filterableTypes = contentTypes.filter(
     (t) => t === "iso" || t === "vztmpl" || t === "images" || t === "backup" || t === "rootdir" || t === "snippets",
   );
@@ -292,10 +310,36 @@ function StoragePoolDetail({
       .map((p) => p.storage);
   }, [allPools, pool.storage]);
 
+  // Migration targets for the inline per-row Migrate button. A pool is a valid
+  // destination if it accepts the same guest-volume content (images for VMs,
+  // rootdir for CTs) — we accept either to keep the option list useful for the
+  // combined "VMs/CTs" tab; the backend rejects mismatches.
+  const migrateTargets = useMemo(() => {
+    const seen = new Set<string>();
+    return allPools
+      .filter(
+        (p) =>
+          p.storage !== pool.storage &&
+          p.active &&
+          p.enabled &&
+          (p.content.includes("images") || p.content.includes("rootdir")),
+      )
+      .filter((p) => {
+        if (seen.has(p.storage)) return false;
+        seen.add(p.storage);
+        return true;
+      })
+      .map((p) => p.storage);
+  }, [allPools, pool.storage]);
+
   // Group items by content type.
   function filterByType(type: string): StorageContentItem[] {
     return items.filter((item) => item.content === type);
   }
+
+  const guestItems = items.filter(
+    (item) => item.content === "images" || item.content === "rootdir",
+  );
 
   return (
     <div className="space-y-4">
@@ -350,8 +394,13 @@ function StoragePoolDetail({
       )}
 
       {!contentQuery.isLoading && filterableTypes.length > 1 && (
-        <Tabs defaultValue={filterableTypes[0] ?? "all"}>
+        <Tabs defaultValue={hasGuestVolumes ? "guests" : (filterableTypes[0] ?? "all")}>
           <TabsList>
+            {hasGuestVolumes && (
+              <TabsTrigger value="guests">
+                VMs/CTs ({guestItems.length})
+              </TabsTrigger>
+            )}
             {filterableTypes.map((t) => (
               <TabsTrigger key={t} value={t}>
                 {t} ({filterByType(t).length})
@@ -359,6 +408,15 @@ function StoragePoolDetail({
             ))}
             <TabsTrigger value="all">All ({items.length})</TabsTrigger>
           </TabsList>
+          {hasGuestVolumes && (
+            <TabsContent value="guests">
+              <StorageGuestTable
+                items={guestItems}
+                clusterId={clusterId}
+                migrateTargets={migrateTargets}
+              />
+            </TabsContent>
+          )}
           {filterableTypes.map((t) => (
             <TabsContent key={t} value={t}>
               <StorageContentTable

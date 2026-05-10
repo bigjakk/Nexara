@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -90,8 +91,8 @@ func (h *RBACHandler) ListRoles(c *fiber.Ctx) error {
 			Name:        r.Name,
 			Description: r.Description,
 			IsBuiltin:   r.IsBuiltin,
-			CreatedAt:   r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			UpdatedAt:   r.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			CreatedAt:   r.CreatedAt.Format(time.RFC3339Nano),
+			UpdatedAt:   r.UpdatedAt.Format(time.RFC3339Nano),
 		}
 	}
 
@@ -138,8 +139,8 @@ func (h *RBACHandler) GetRole(c *fiber.Ctx) error {
 		Description: role.Description,
 		IsBuiltin:   role.IsBuiltin,
 		Permissions: permResp,
-		CreatedAt:   role.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:   role.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:   role.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   role.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -186,8 +187,8 @@ func (h *RBACHandler) CreateRole(c *fiber.Ctx) error {
 		Name:        role.Name,
 		Description: role.Description,
 		IsBuiltin:   role.IsBuiltin,
-		CreatedAt:   role.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:   role.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:   role.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   role.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -265,8 +266,8 @@ func (h *RBACHandler) UpdateRole(c *fiber.Ctx) error {
 		Name:        role.Name,
 		Description: role.Description,
 		IsBuiltin:   role.IsBuiltin,
-		CreatedAt:   role.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:   role.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:   role.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   role.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -378,7 +379,7 @@ func (h *RBACHandler) ListUserRoles(c *fiber.Ctx) error {
 			RoleDescription: r.RoleDescription,
 			IsBuiltin:       r.IsBuiltin,
 			ScopeType:       r.ScopeType,
-			CreatedAt:       r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			CreatedAt:       r.CreatedAt.Format(time.RFC3339Nano),
 		}
 		if r.ScopeID.Valid {
 			sid, _ := uuid.FromBytes(r.ScopeID.Bytes[:])
@@ -398,6 +399,10 @@ func (h *RBACHandler) AssignUserRole(c *fiber.Ctx) error {
 	userID, err := uuid.Parse(c.Params("user_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+	}
+
+	if userID == auth.SystemUserID {
+		return fiber.NewError(fiber.StatusForbidden, "Cannot modify the system account")
 	}
 
 	var req assignRoleRequest
@@ -451,7 +456,7 @@ func (h *RBACHandler) AssignUserRole(c *fiber.Ctx) error {
 		"user_id":    assignment.UserID,
 		"role_id":    assignment.RoleID,
 		"scope_type": assignment.ScopeType,
-		"created_at": assignment.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"created_at": assignment.CreatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -464,6 +469,10 @@ func (h *RBACHandler) RevokeUserRole(c *fiber.Ctx) error {
 	userID, err := uuid.Parse(c.Params("user_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid user ID")
+	}
+
+	if userID == auth.SystemUserID {
+		return fiber.NewError(fiber.StatusForbidden, "Cannot modify the system account")
 	}
 
 	assignmentID, err := uuid.Parse(c.Params("id"))
@@ -518,7 +527,7 @@ func (h *RBACHandler) MyPermissions(c *fiber.Ctx) error {
 			RoleDescription: r.RoleDescription,
 			IsBuiltin:       r.IsBuiltin,
 			ScopeType:       r.ScopeType,
-			CreatedAt:       r.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			CreatedAt:       r.CreatedAt.Format(time.RFC3339Nano),
 		}
 		if r.ScopeID.Valid {
 			sid, _ := uuid.FromBytes(r.ScopeID.Bytes[:])

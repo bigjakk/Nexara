@@ -36,14 +36,20 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.RateLimitExpiration != time.Minute {
 		t.Errorf("RateLimitExpiration = %v, want 1m", cfg.RateLimitExpiration)
 	}
-	if cfg.CORSAllowOrigins != "http://localhost:3001" {
-		t.Errorf("CORSAllowOrigins = %q, want %q", cfg.CORSAllowOrigins, "http://localhost:3001")
+	if cfg.CORSAllowOrigins != "" {
+		t.Errorf("CORSAllowOrigins = %q, want empty (operator must opt in to a public origin)", cfg.CORSAllowOrigins)
 	}
 	if cfg.AccessTokenTTL != 15*time.Minute {
 		t.Errorf("AccessTokenTTL = %v, want 15m", cfg.AccessTokenTTL)
 	}
 	if cfg.RefreshTokenTTL != 168*time.Hour {
 		t.Errorf("RefreshTokenTTL = %v, want 168h", cfg.RefreshTokenTTL)
+	}
+	if len(cfg.TrustedProxies) != 0 {
+		t.Errorf("TrustedProxies = %v, want empty (XFF must be untrusted by default)", cfg.TrustedProxies)
+	}
+	if cfg.ProxyHeader != "X-Forwarded-For" {
+		t.Errorf("ProxyHeader = %q, want %q", cfg.ProxyHeader, "X-Forwarded-For")
 	}
 }
 
@@ -54,6 +60,8 @@ func TestLoad_CustomValues(t *testing.T) {
 	t.Setenv("RATE_LIMIT_MAX", "200")
 	t.Setenv("RATE_LIMIT_EXPIRATION", "5m")
 	t.Setenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:5173")
+	t.Setenv("TRUSTED_PROXIES", "127.0.0.1,10.0.0.0/8")
+	t.Setenv("PROXY_HEADER", "X-Real-IP")
 
 	cfg, err := Load()
 	if err != nil {
@@ -74,6 +82,12 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 	if cfg.CORSAllowOrigins != "http://localhost:3000,http://localhost:5173" {
 		t.Errorf("CORSAllowOrigins = %q", cfg.CORSAllowOrigins)
+	}
+	if len(cfg.TrustedProxies) != 2 || cfg.TrustedProxies[0] != "127.0.0.1" || cfg.TrustedProxies[1] != "10.0.0.0/8" {
+		t.Errorf("TrustedProxies = %v, want [127.0.0.1, 10.0.0.0/8]", cfg.TrustedProxies)
+	}
+	if cfg.ProxyHeader != "X-Real-IP" {
+		t.Errorf("ProxyHeader = %q, want %q", cfg.ProxyHeader, "X-Real-IP")
 	}
 }
 

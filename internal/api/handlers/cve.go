@@ -3,34 +3,54 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/notifications"
+	"github.com/bigjakk/nexara/internal/safeconv"
 	"github.com/bigjakk/nexara/internal/scanner"
 )
 
 // CVEHandler handles CVE scanning endpoints.
 type CVEHandler struct {
+	pool          *pgxpool.Pool
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
 	registry      *notifications.Registry
+
+	// engine is the long-lived scanner used by every API-triggered CVE scan
+	// in this process. Building it once here (rather than per request) is
+	// what makes the in-memory tracker cache effective — without this the
+	// CVEClient.trackerData map would be empty on every scan and we'd hit
+	// the DB cache on every API trigger even within the cacheTTL.
+	engine *scanner.Engine
 }
 
-// NewCVEHandler creates a new CVE handler.
-func NewCVEHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher, registry *notifications.Registry) *CVEHandler {
+// NewCVEHandler creates a new CVE handler. pool is required for the dual-write
+// transaction that keeps cve_notification_configs.channel_ids and the new
+// cve_notification_config_channels join table in lockstep; passing nil is
+// supported for unit tests that exercise paths above the DB layer.
+func NewCVEHandler(pool *pgxpool.Pool, queries *db.Queries, encryptionKey string, eventPub *events.Publisher, registry *notifications.Registry) *CVEHandler {
 	return &CVEHandler{
+		pool:          pool,
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
 		registry:      registry,
+		engine:        scanner.NewEngine(queries, encryptionKey, slog.Default().With("component", "cve-engine"), registry),
 	}
 }
 
@@ -74,14 +94,14 @@ func toCVEScanResponse(s db.CveScan) cveScanResponse {
 		HighCount:     s.HighCount,
 		MediumCount:   s.MediumCount,
 		LowCount:      s.LowCount,
-		StartedAt:     s.StartedAt.Format("2006-01-02T15:04:05Z"),
-		CreatedAt:     s.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		StartedAt:     s.StartedAt.Format(time.RFC3339Nano),
+		CreatedAt:     s.CreatedAt.Format(time.RFC3339Nano),
 	}
 	if s.ErrorMessage.Valid {
 		r.ErrorMessage = s.ErrorMessage.String
 	}
 	if s.CompletedAt.Valid {
-		r.CompletedAt = s.CompletedAt.Time.Format("2006-01-02T15:04:05Z")
+		r.CompletedAt = s.CompletedAt.Time.Format(time.RFC3339Nano)
 	}
 	return r
 }
@@ -116,7 +136,7 @@ func toCVEScanNodeResponse(n db.CveScanNode) cveScanNodeResponse {
 		r.ErrorMessage = n.ErrorMessage.String
 	}
 	if n.ScannedAt.Valid {
-		r.ScannedAt = n.ScannedAt.Time.Format("2006-01-02T15:04:05Z")
+		r.ScannedAt = n.ScannedAt.Time.Format(time.RFC3339Nano)
 	}
 	return r
 }
@@ -129,10 +149,10 @@ type cveScanVulnResponse struct {
 	PackageName    string    `json:"package_name"`
 	CurrentVersion string    `json:"current_version"`
 	FixedVersion   string    `json:"fixed_version,omitempty"`
-	Severity       string    `json:"severity"`        // Debian tracker urgency
-	RiskSeverity   string    `json:"risk_severity"`   // bucket derived from risk_score
-	RiskScore      float32   `json:"risk_score"`      // 0–10, drives posture
-	SSVCLabel      string    `json:"ssvc_label"`      // act/attend/track_star/track
+	Severity       string    `json:"severity"`      // Debian tracker urgency
+	RiskSeverity   string    `json:"risk_severity"` // bucket derived from risk_score
+	RiskScore      float32   `json:"risk_score"`    // 0–10, drives posture
+	SSVCLabel      string    `json:"ssvc_label"`    // act/attend/track_star/track
 	CVSSScore      float32   `json:"cvss_score"`
 	EPSS           *float32  `json:"epss,omitempty"`
 	EPSSPercentile *float32  `json:"epss_percentile,omitempty"`
@@ -201,12 +221,11 @@ var validSeverities = map[string]bool{
 
 // ListScans lists CVE scans for a cluster.
 func (h *CVEHandler) ListScans(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -221,8 +240,8 @@ func (h *CVEHandler) ListScans(c *fiber.Ctx) error {
 
 	scans, err := h.queries.ListCVEScans(c.Context(), db.ListCVEScansParams{
 		ClusterID: clusterID,
-		Limit:     safeInt32(limit),
-		Offset:    safeInt32(offset),
+		Limit:     safeconv.Int32(limit),
+		Offset:    safeconv.Int32(offset),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list scans")
@@ -237,12 +256,11 @@ func (h *CVEHandler) ListScans(c *fiber.Ctx) error {
 
 // TriggerScan starts a new CVE scan for a cluster.
 func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -262,8 +280,9 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create scan record")
 	}
 
-	// Create the scan engine with a proper logger
-	eng := scanner.NewEngine(h.queries, h.encryptionKey, slog.Default(), h.registry)
+	// Reuse the handler's long-lived scanner Engine so the in-memory
+	// Debian-tracker cache survives across API-triggered scans.
+	eng := h.engine
 
 	h.auditLog(c, clusterID, "cve_scan", scan.ID.String(), "cve_scan_triggered", nil)
 
@@ -292,12 +311,11 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 
 // GetScan returns a single CVE scan with its node results.
 func (h *CVEHandler) GetScan(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -334,12 +352,11 @@ func (h *CVEHandler) GetScan(c *fiber.Ctx) error {
 
 // ListVulnerabilities returns vulnerabilities for a scan.
 func (h *CVEHandler) ListVulnerabilities(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -402,12 +419,11 @@ func (h *CVEHandler) ListVulnerabilities(c *fiber.Ctx) error {
 
 // DeleteScan deletes a CVE scan and its results.
 func (h *CVEHandler) DeleteScan(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -436,12 +452,11 @@ func (h *CVEHandler) DeleteScan(c *fiber.Ctx) error {
 
 // GetSecurityPosture returns the security posture summary for a cluster.
 func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -483,10 +498,10 @@ func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
 		TotalNodes:     summary.TotalNodes,
 		ScannedNodes:   summary.ScannedNodes,
 		PostureScore:   score,
-		StartedAt:      summary.StartedAt.Format("2006-01-02T15:04:05Z"),
+		StartedAt:      summary.StartedAt.Format(time.RFC3339Nano),
 	}
 	if summary.CompletedAt.Valid {
-		resp.CompletedAt = summary.CompletedAt.Time.Format("2006-01-02T15:04:05Z")
+		resp.CompletedAt = summary.CompletedAt.Time.Format(time.RFC3339Nano)
 	}
 
 	return c.JSON(resp)
@@ -508,12 +523,11 @@ type updateCVEScheduleRequest struct {
 
 // GetSchedule returns the CVE scan schedule for a cluster.
 func (h *CVEHandler) GetSchedule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -531,18 +545,17 @@ func (h *CVEHandler) GetSchedule(c *fiber.Ctx) error {
 		ClusterID:     schedule.ClusterID,
 		Enabled:       schedule.Enabled,
 		IntervalHours: schedule.IntervalHours,
-		UpdatedAt:     schedule.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     schedule.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
 // UpdateSchedule updates the CVE scan schedule for a cluster.
 func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cve_scan"); err != nil {
-		return err
-	}
-
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -587,20 +600,20 @@ func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
 		ClusterID:     schedule.ClusterID,
 		Enabled:       schedule.Enabled,
 		IntervalHours: schedule.IntervalHours,
-		UpdatedAt:     schedule.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     schedule.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
 // --- CVE notification config ---
 
 type cveNotifyConfigResponse struct {
-	ClusterID        uuid.UUID   `json:"cluster_id"`
-	Enabled          bool        `json:"enabled"`
-	NotifyOnAct      bool        `json:"notify_on_act"`
-	NotifyOnAttend   bool        `json:"notify_on_attend"`
-	ChannelIDs       []uuid.UUID `json:"channel_ids"`
-	CooldownMinutes  int32       `json:"cooldown_minutes"`
-	LastNotifiedAt   string      `json:"last_notified_at,omitempty"`
+	ClusterID       uuid.UUID   `json:"cluster_id"`
+	Enabled         bool        `json:"enabled"`
+	NotifyOnAct     bool        `json:"notify_on_act"`
+	NotifyOnAttend  bool        `json:"notify_on_attend"`
+	ChannelIDs      []uuid.UUID `json:"channel_ids"`
+	CooldownMinutes int32       `json:"cooldown_minutes"`
+	LastNotifiedAt  string      `json:"last_notified_at,omitempty"`
 }
 
 type updateCVENotifyConfigRequest struct {
@@ -614,11 +627,11 @@ type updateCVENotifyConfigRequest struct {
 // GetCVENotificationConfig returns the per-cluster CVE notification config.
 // Falls back to disabled defaults when no config exists yet.
 func (h *CVEHandler) GetCVENotificationConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cve_scan"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -634,27 +647,38 @@ func (h *CVEHandler) GetCVENotificationConfig(c *fiber.Ctx) error {
 		})
 	}
 
+	// 4.8b read-flip: channel list comes from the join table, not the
+	// dual-written array. The array can hold stale UUIDs if a channel was
+	// deleted (FK on the join cleans up; array has none).
+	channelIDs, err := h.queries.ListCVENotificationConfigChannels(c.Context(), clusterID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to load notification channels")
+	}
+	if channelIDs == nil {
+		channelIDs = []uuid.UUID{}
+	}
+
 	resp := cveNotifyConfigResponse{
 		ClusterID:       cfg.ClusterID,
 		Enabled:         cfg.Enabled,
 		NotifyOnAct:     cfg.NotifyOnAct,
 		NotifyOnAttend:  cfg.NotifyOnAttend,
-		ChannelIDs:      cfg.ChannelIds,
+		ChannelIDs:      channelIDs,
 		CooldownMinutes: cfg.CooldownMinutes,
 	}
 	if cfg.LastNotifiedAt.Valid {
-		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format("2006-01-02T15:04:05Z")
+		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format(time.RFC3339Nano)
 	}
 	return c.JSON(resp)
 }
 
 // UpdateCVENotificationConfig upserts the per-cluster CVE notification config.
 func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cve_scan"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "cve_scan", clusterID); err != nil {
 		return err
 	}
 
@@ -673,8 +697,18 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 		enabled = existing.Enabled
 		notifyOnAct = existing.NotifyOnAct
 		notifyOnAttend = existing.NotifyOnAttend
-		channelIDs = existing.ChannelIds
 		cooldownMinutes = existing.CooldownMinutes
+		// 4.8c: the legacy array column is gone; the join table is the
+		// single source of truth for the existing channel set. A read
+		// error here surfaces as a 500 because there's no other
+		// representation to fall back to — losing the existing channels
+		// silently and rewriting the row with an empty default is worse
+		// than a transient failure that the user can retry.
+		existingChannels, lerr := h.queries.ListCVENotificationConfigChannels(c.Context(), clusterID)
+		if lerr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to load existing notification channels")
+		}
+		channelIDs = existingChannels
 	}
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -709,31 +743,88 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 		}
 	}
 
-	cfg, err := h.queries.UpsertCVENotificationConfig(c.Context(), db.UpsertCVENotificationConfigParams{
-		ClusterID:       clusterID,
-		Enabled:         enabled,
-		NotifyOnAct:     notifyOnAct,
-		NotifyOnAttend:  notifyOnAttend,
-		ChannelIds:      channelIDs,
-		CooldownMinutes: cooldownMinutes,
-	})
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification config")
+	// 4.8c: array column dropped; the join table is the single source of
+	// truth. The upsert + clear children + per-row insert still all run in
+	// one transaction so the config row and its channels commit together.
+	// If the pool isn't wired (unit-test path) fall back to the legacy
+	// single-statement upsert without a join-table write.
+	var cfg db.CveNotificationConfig
+	if h.pool != nil {
+		tx, err := h.pool.Begin(c.Context())
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to start transaction")
+		}
+		defer func() {
+			rbCtx, rbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer rbCancel()
+			if rbErr := tx.Rollback(rbCtx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+				slog.Warn("update cve notification config: rollback failed", "error", rbErr)
+			}
+		}()
+
+		qx := h.queries.WithTx(tx)
+		cfg, err = qx.UpsertCVENotificationConfig(c.Context(), db.UpsertCVENotificationConfigParams{
+			ClusterID:       clusterID,
+			Enabled:         enabled,
+			NotifyOnAct:     notifyOnAct,
+			NotifyOnAttend:  notifyOnAttend,
+			CooldownMinutes: cooldownMinutes,
+		})
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification config")
+		}
+		if err := qx.DeleteCVENotificationConfigChannels(c.Context(), clusterID); err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification channels")
+		}
+		for _, chID := range channelIDs {
+			if err := qx.InsertCVENotificationConfigChannel(c.Context(), db.InsertCVENotificationConfigChannelParams{
+				ConfigID:  clusterID,
+				ChannelID: chID,
+			}); err != nil {
+				// Pre-flight GetNotificationChannel runs outside the tx; a
+				// concurrent channel delete between then and now races the
+				// FK insert. Surface as 409 with an actionable message
+				// instead of an opaque 500.
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
+					return fiber.NewError(fiber.StatusConflict,
+						"One or more channels were deleted while saving; refresh and retry")
+				}
+				return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification channels")
+			}
+		}
+		if err := tx.Commit(c.Context()); err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to commit notification config update")
+		}
+	} else {
+		var err error
+		cfg, err = h.queries.UpsertCVENotificationConfig(c.Context(), db.UpsertCVENotificationConfigParams{
+			ClusterID:       clusterID,
+			Enabled:         enabled,
+			NotifyOnAct:     notifyOnAct,
+			NotifyOnAttend:  notifyOnAttend,
+			CooldownMinutes: cooldownMinutes,
+		})
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to update notification config")
+		}
 	}
 
 	h.auditLog(c, clusterID, "cve_scan", clusterID.String(), "cve_notify_config_updated", nil)
 
 	resp := cveNotifyConfigResponse{
-		ClusterID:       cfg.ClusterID,
-		Enabled:         cfg.Enabled,
-		NotifyOnAct:     cfg.NotifyOnAct,
-		NotifyOnAttend:  cfg.NotifyOnAttend,
-		ChannelIDs:      cfg.ChannelIds,
+		ClusterID:      cfg.ClusterID,
+		Enabled:        cfg.Enabled,
+		NotifyOnAct:    cfg.NotifyOnAct,
+		NotifyOnAttend: cfg.NotifyOnAttend,
+		// 4.8b read-flip: return the in-flight slice we just dual-wrote.
+		// The transaction has committed, so this matches the join table
+		// exactly and avoids a redundant SELECT.
+		ChannelIDs:      channelIDs,
 		CooldownMinutes: cfg.CooldownMinutes,
 	}
 	if cfg.LastNotifiedAt.Valid {
-		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format("2006-01-02T15:04:05Z")
+		resp.LastNotifiedAt = cfg.LastNotifiedAt.Time.Format(time.RFC3339Nano)
 	}
 	return c.JSON(resp)
 }
-

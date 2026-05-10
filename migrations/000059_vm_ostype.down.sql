@@ -1,0 +1,2 @@
+ALTER TABLE vms
+    DROP COLUMN IF EXISTS ostype;

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, getValidAccessToken } from "@/lib/api-client";
 import type { StorageResponse } from "@/types/api";
 import type {
   StorageContentItem,
@@ -47,12 +47,16 @@ interface UploadParams {
   onProgress?: (percent: number) => void;
 }
 
-function uploadFile({ clusterId, storageId, content, file, onProgress }: UploadParams): Promise<StorageActionResponse> {
+async function uploadFile({ clusterId, storageId, content, file, onProgress }: UploadParams): Promise<StorageActionResponse> {
+  // Resolve a fresh access token via the cookie-backed refresh path before
+  // opening the XHR. XHR authorization must be set before send() and is too
+  // late to refresh once a 401 lands.
+  const token = await getValidAccessToken();
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/v1/clusters/${clusterId}/storage/${storageId}/upload`);
+    xhr.withCredentials = true;
 
-    const token = localStorage.getItem("access_token");
     if (token) {
       xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     }

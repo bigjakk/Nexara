@@ -1,4 +1,4 @@
-declare module "@novnc/novnc/lib/rfb" {
+declare module "@novnc/novnc" {
   interface RFBOptions {
     shared?: boolean;
     credentials?: { password?: string; target?: string; username?: string };

@@ -13,6 +13,7 @@ import (
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // PBSHandler handles PBS server CRUD endpoints.
@@ -32,21 +33,23 @@ func NewPBSHandler(queries *db.Queries, encryptionKey string, eventPub *events.P
 }
 
 type createPBSRequest struct {
-	Name           string  `json:"name"`
-	APIURL         string  `json:"api_url"`
-	TokenID        string  `json:"token_id"`
-	TokenSecret    string  `json:"token_secret"`
-	TLSFingerprint string  `json:"tls_fingerprint"`
-	ClusterID      *string `json:"cluster_id"`
+	Name                string  `json:"name"`
+	APIURL              string  `json:"api_url"`
+	TokenID             string  `json:"token_id"`
+	TokenSecret         string  `json:"token_secret"`
+	TLSFingerprint      string  `json:"tls_fingerprint"`
+	ClusterID           *string `json:"cluster_id"`
+	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
 }
 
 type updatePBSRequest struct {
-	Name           *string `json:"name"`
-	APIURL         *string `json:"api_url"`
-	TokenID        *string `json:"token_id"`
-	TokenSecret    *string `json:"token_secret"`
-	TLSFingerprint *string `json:"tls_fingerprint"`
-	ClusterID      *string `json:"cluster_id"`
+	Name                *string `json:"name"`
+	APIURL              *string `json:"api_url"`
+	TokenID             *string `json:"token_id"`
+	TokenSecret         *string `json:"token_secret"`
+	TLSFingerprint      *string `json:"tls_fingerprint"`
+	ClusterID           *string `json:"cluster_id"`
+	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
 }
 
 type pbsResponse struct {
@@ -85,13 +88,27 @@ func (h *PBSHandler) auditLog(c *fiber.Ctx, resourceType, resourceID, action str
 
 // Create handles POST /api/v1/pbs-servers.
 func (h *PBSHandler) Create(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "pbs"); err != nil {
-		return err
-	}
-
 	var req createPBSRequest
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	// Permission gate runs against the cluster_id in the body when present
+	// (so an operator with manage:pbs only on cluster X can attach a PBS to
+	// cluster X), or globally otherwise.
+	if req.ClusterID != nil && *req.ClusterID != "" {
+		parsed, err := uuid.Parse(*req.ClusterID)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id format")
+		}
+		if err := requireClusterPerm(c, "manage", "pbs", parsed); err != nil {
+			return err
+		}
+	} else {
+		// Standalone PBS server — gate behind global manage:pbs.
+		if err := requirePerm(c, "manage", "pbs"); err != nil {
+			return err
+		}
 	}
 
 	if req.Name == "" || req.APIURL == "" || req.TokenID == "" || req.TokenSecret == "" {
@@ -102,22 +119,22 @@ func (h *PBSHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
 	}
 
-	if err := validateURL(req.APIURL); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	if err := validateURLFormat(req.APIURL); err != nil {
+		return err
+	}
+	if err := enforceURLAddressPolicy(c.Context(), req.APIURL, req.AllowPrivateAddress); err != nil {
+		return renderAddressPolicyError(c, err)
+	}
+
+	var clusterID pgtype.UUID
+	if req.ClusterID != nil && *req.ClusterID != "" {
+		parsed, _ := uuid.Parse(*req.ClusterID)
+		clusterID = pgtype.UUID{Bytes: parsed, Valid: true}
 	}
 
 	encrypted, err := crypto.Encrypt(req.TokenSecret, h.encryptionKey)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt token secret")
-	}
-
-	var clusterID pgtype.UUID
-	if req.ClusterID != nil {
-		parsed, err := uuid.Parse(*req.ClusterID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id format")
-		}
-		clusterID = pgtype.UUID{Bytes: parsed, Valid: true}
 	}
 
 	pbs, err := h.queries.CreatePBSServer(c.Context(), db.CreatePBSServerParams{
@@ -140,7 +157,8 @@ func (h *PBSHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/pbs-servers.
 func (h *PBSHandler) List(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "pbs"); err != nil {
+	access, err := accessibleClusters(c, "view", "pbs")
+	if err != nil {
 		return err
 	}
 
@@ -149,9 +167,18 @@ func (h *PBSHandler) List(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list PBS servers")
 	}
 
-	resp := make([]pbsResponse, len(servers))
-	for i, s := range servers {
-		resp[i] = toPBSResponse(s)
+	resp := make([]pbsResponse, 0, len(servers))
+	for _, s := range servers {
+		// Standalone PBS (no cluster_id) requires global view:pbs; cluster-bound
+		// PBS requires view:pbs on that cluster.
+		if !s.ClusterID.Valid {
+			if !access.HasGlobal {
+				continue
+			}
+		} else if !access.PermitsCluster(uuid.UUID(s.ClusterID.Bytes)) {
+			continue
+		}
+		resp = append(resp, toPBSResponse(s))
 	}
 
 	return c.JSON(resp)
@@ -159,13 +186,12 @@ func (h *PBSHandler) List(c *fiber.Ctx) error {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/pbs-servers.
 func (h *PBSHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "pbs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "pbs", clusterID); err != nil {
+		return err
 	}
 
 	servers, err := h.queries.ListPBSServersByCluster(c.Context(), pgtype.UUID{Bytes: clusterID, Valid: true})
@@ -183,10 +209,6 @@ func (h *PBSHandler) ListByCluster(c *fiber.Ctx) error {
 
 // Get handles GET /api/v1/pbs-servers/:id.
 func (h *PBSHandler) Get(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "pbs"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
@@ -200,15 +222,19 @@ func (h *PBSHandler) Get(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get PBS server")
 	}
 
+	if pbs.ClusterID.Valid {
+		if err := requireClusterPerm(c, "view", "pbs", uuid.UUID(pbs.ClusterID.Bytes)); err != nil {
+			return err
+		}
+	} else if err := requirePerm(c, "view", "pbs"); err != nil {
+		return err
+	}
+
 	return c.JSON(toPBSResponse(pbs))
 }
 
 // Update handles PUT /api/v1/pbs-servers/:id.
 func (h *PBSHandler) Update(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "pbs"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
@@ -225,6 +251,24 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusNotFound, "PBS server not found")
 		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get PBS server")
+	}
+
+	if existing.ClusterID.Valid {
+		if err := requireClusterPerm(c, "manage", "pbs", uuid.UUID(existing.ClusterID.Bytes)); err != nil {
+			return err
+		}
+	} else if err := requirePerm(c, "manage", "pbs"); err != nil {
+		return err
+	}
+	// If the user is moving the PBS server to a different cluster, also require
+	// manage:pbs on the target cluster.
+	if req.ClusterID != nil {
+		parsed, perr := uuid.Parse(*req.ClusterID)
+		if perr == nil {
+			if err := requireClusterPerm(c, "manage", "pbs", parsed); err != nil {
+				return err
+			}
+		}
 	}
 
 	params := db.UpdatePBSServerParams{
@@ -244,8 +288,11 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 		params.Name = *req.Name
 	}
 	if req.APIURL != nil {
-		if err := validateURL(*req.APIURL); err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		if err := validateURLFormat(*req.APIURL); err != nil {
+			return err
+		}
+		if err := enforceURLAddressPolicy(c.Context(), *req.APIURL, req.AllowPrivateAddress); err != nil {
+			return renderAddressPolicyError(c, err)
 		}
 		params.ApiUrl = *req.APIURL
 	}
@@ -275,6 +322,10 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update PBS server")
 	}
 
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPBS, pbs.ID)
+	}
+
 	h.auditLog(c, "pbs_server", pbs.ID.String(), "pbs_updated",
 		json.RawMessage(`{"name":"`+pbs.Name+`"}`), pbs.ClusterID)
 
@@ -283,10 +334,6 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/pbs-servers/:id.
 func (h *PBSHandler) Delete(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "pbs"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
@@ -300,11 +347,23 @@ func (h *PBSHandler) Delete(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get PBS server")
 	}
 
+	if existing.ClusterID.Valid {
+		if err := requireClusterPerm(c, "delete", "pbs", uuid.UUID(existing.ClusterID.Bytes)); err != nil {
+			return err
+		}
+	} else if err := requirePerm(c, "delete", "pbs"); err != nil {
+		return err
+	}
+
 	h.auditLog(c, "pbs_server", id.String(), "pbs_deleted",
 		json.RawMessage(`{"name":"`+existing.Name+`"}`), existing.ClusterID)
 
 	if err := h.queries.DeletePBSServer(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete PBS server")
+	}
+
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPBS, id)
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)

@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
@@ -22,9 +23,6 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 )
-
-// SystemUserID is the well-known UUID for automated system operations.
-var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // validDebianPkgName matches valid Debian package names: lowercase alphanum, dots, plus, hyphens.
 var validDebianPkgName = regexp.MustCompile(`^[a-z0-9][a-z0-9.+\-]{0,127}$`)
@@ -37,19 +35,35 @@ func isValidDebianPkgName(name string) bool {
 type Orchestrator struct {
 	queries        *db.Queries
 	encryptionKey  string
+	cache          *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	logger         *slog.Logger
 	eventPub       *events.Publisher
 	notifyRegistry *notifications.Registry
+	// shutdownCtx is the parent for goroutines that must outlive a
+	// scheduler tick (SSH upgrade, task polling, notification dispatch)
+	// but should still be cancelled on graceful shutdown (SIGTERM).
+	shutdownCtx context.Context
 }
 
-// NewOrchestrator creates a new rolling update orchestrator.
-func NewOrchestrator(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher, notifyRegistry *notifications.Registry) *Orchestrator {
+// SetProxmoxCache attaches the shared per-server cache. Nil-safe.
+func (o *Orchestrator) SetProxmoxCache(cache *proxmox.ClientCache) {
+	o.cache = cache
+}
+
+// NewOrchestrator creates a new rolling update orchestrator. shutdownCtx
+// should be the per-server context that's cancelled on SIGTERM; nil falls
+// back to context.Background() for tests / partial construction.
+func NewOrchestrator(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher, notifyRegistry *notifications.Registry) *Orchestrator {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	return &Orchestrator{
 		queries:        queries,
 		encryptionKey:  encryptionKey,
 		logger:         logger,
 		eventPub:       eventPub,
 		notifyRegistry: notifyRegistry,
+		shutdownCtx:    shutdownCtx,
 	}
 }
 
@@ -619,21 +633,41 @@ func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Cli
 	}
 
 	// Look up the node's IP address from the DB (populated by collector from corosync).
-	sshHost := node.NodeName
-	nodeAddr, addrErr := o.queries.GetNodeAddressByName(ctx, db.GetNodeAddressByNameParams{
+	// Fail loudly if missing — the previous fallback to using node name as
+	// hostname could end up at any DNS-resolved address.
+	sshHost, addrErr := o.queries.GetNodeAddressByName(ctx, db.GetNodeAddressByNameParams{
 		ClusterID: job.ClusterID,
 		Name:      node.NodeName,
 	})
-	if addrErr == nil && nodeAddr != "" {
-		sshHost = nodeAddr
+	if addrErr != nil || sshHost == "" {
+		o.failNode(ctx, job, node, fmt.Sprintf("no IP address known for node %q (collector hasn't reported it). Wait for the collector to tick, then retry.", node.NodeName))
+		return
+	}
+
+	// Require a pinned host key. The previous InsecureIgnoreHostKey policy
+	// is gone; an unpinned host now fails closed.
+	pinned, pinErr := o.queries.GetSSHKnownHost(ctx, db.GetSSHKnownHostParams{
+		ClusterID: job.ClusterID,
+		Host:      sshHost,
+		Port:      sshCreds.Port,
+	})
+	if pinErr != nil {
+		o.failNode(ctx, job, node, fmt.Sprintf("SSH host key not pinned for %s. Visit Settings → SSH Credentials, run Test Connection, and confirm the fingerprint to pin it.", sshHost))
+		return
+	}
+	knownKey, parseErr := sshpkg.ParseAuthorizedKey(pinned.PublicKey)
+	if parseErr != nil {
+		o.failNode(ctx, job, node, fmt.Sprintf("stored SSH host key for %s is corrupt: %v — delete and re-pin", sshHost, parseErr))
+		return
 	}
 
 	sshCfg := sshpkg.Config{
-		Host:       sshHost,
-		Port:       int(sshCreds.Port),
-		Username:   sshCreds.Username,
-		Password:   password,
-		PrivateKey: privateKey,
+		Host:         sshHost,
+		Port:         int(sshCreds.Port),
+		Username:     sshCreds.Username,
+		Password:     password,
+		PrivateKey:   privateKey,
+		KnownHostKey: knownKey,
 	}
 
 	_ = o.queries.SetNodeUpgradeStarted(ctx, node.ID)
@@ -641,8 +675,10 @@ func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Cli
 	o.logger.Info("starting automated apt dist-upgrade via SSH", "node", node.NodeName)
 
 	// Run apt dist-upgrade in a goroutine so we don't block the tick.
-	// Use a detached context with a 25-minute timeout since this outlives the scheduler tick.
-	upgradeCtx, upgradeCancel := context.WithTimeout(context.Background(), 25*time.Minute) //nolint:gosec // intentionally detached from request scope
+	// Detach from the tick scope so a tick rollover doesn't cancel a
+	// 25-minute SSH session, but stay rooted in shutdownCtx so a graceful
+	// SIGTERM aborts the SSH call cleanly instead of orphaning the goroutine.
+	upgradeCtx, upgradeCancel := context.WithTimeout(o.shutdownCtx, 25*time.Minute)
 	go o.runSSHUpgrade(upgradeCtx, upgradeCancel, job, node, client, sshCfg)
 }
 
@@ -1229,11 +1265,13 @@ func (o *Orchestrator) sendJobNotification(ctx context.Context, job db.RollingUp
 		ResourceName: clusterName,
 		ClusterID:    clusterName,
 		Message:      message,
-		FiredAt:      time.Now().UTC().Format(time.RFC3339),
+		FiredAt:      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	go func() {
-		sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// Derive from shutdownCtx so SIGTERM aborts the dispatch quickly;
+		// detach from the tick context so a tick rollover doesn't kill it.
+		sendCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Second)
 		defer cancel()
 
 		if err := dispatcher.Send(sendCtx, json.RawMessage(configJSON), payload); err != nil {
@@ -1263,29 +1301,51 @@ func (o *Orchestrator) restoreHAStates(ctx context.Context, client *proxmox.Clie
 
 func (o *Orchestrator) failNode(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode, reason string) {
 	o.logger.Error("rolling update node failed", "node", node.NodeName, "reason", reason)
-	_ = o.queries.FailRollingUpdateNode(ctx, db.FailRollingUpdateNodeParams{
+	dbCtx, cancel := cleanupCtxFor(ctx)
+	defer cancel()
+	_ = o.queries.FailRollingUpdateNode(dbCtx, db.FailRollingUpdateNodeParams{
 		ID:            node.ID,
 		FailureReason: reason,
 	})
-	o.publishEvent(ctx, job.ClusterID, job.ID, "node_failed")
-	o.failJob(ctx, job, fmt.Sprintf("node %s failed: %s", node.NodeName, reason))
+	o.publishEvent(dbCtx, job.ClusterID, job.ID, "node_failed")
+	o.failJob(dbCtx, job, fmt.Sprintf("node %s failed: %s", node.NodeName, reason))
 }
 
 func (o *Orchestrator) failJob(ctx context.Context, job db.RollingUpdateJob, reason string) {
 	o.logger.Error("rolling update job failed", "job_id", job.ID, "reason", reason)
-	_ = o.queries.FailRollingUpdateJob(ctx, db.FailRollingUpdateJobParams{
+	dbCtx, cancel := cleanupCtxFor(ctx)
+	defer cancel()
+	_ = o.queries.FailRollingUpdateJob(dbCtx, db.FailRollingUpdateJobParams{
 		ID:            job.ID,
 		FailureReason: reason,
 	})
-	o.publishEvent(ctx, job.ClusterID, job.ID, "failed")
-	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_failed", map[string]string{"reason": reason})
-	o.sendJobNotification(ctx, job, "failed", fmt.Sprintf("Rolling update failed: %s", reason))
+	o.publishEvent(dbCtx, job.ClusterID, job.ID, "failed")
+	o.auditLog(dbCtx, job.ClusterID, job.ID, "rolling_update_failed", map[string]string{"reason": reason})
+	o.sendJobNotification(dbCtx, job, "failed", fmt.Sprintf("Rolling update failed: %s", reason))
 	// Re-enable DRS if we disabled it at the start.
-	o.restoreDRS(ctx, job)
+	o.restoreDRS(dbCtx, job)
+}
+
+// cleanupCtxFor returns (ctx, no-op cancel) when ctx is still alive, or a
+// fresh 5-second timeout context derived from Background when the parent
+// is already cancelled. Use it for the DB / event writes that record a
+// failure outcome — without it, a SIGTERM cancellation would leave the
+// row in 'running' / 'migrating' status forever because the DB write
+// silently no-ops on a cancelled context.
+func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.Background(), 5*time.Second)
 }
 
 func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) string {
-	pollCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// Detach from the scheduler tick so a tick rollover doesn't abandon
+	// in-flight Proxmox tasks, but root in shutdownCtx so SIGTERM cancels
+	// the poll loop. The final-check block below uses context.Background()
+	// on purpose so the outcome can still be recorded during graceful
+	// shutdown instead of orphaning the task.
+	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Minute)
 	defer cancel()
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -1298,7 +1358,7 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 			ts, err := client.GetTaskStatus(finalCtx, node, upid)
 			finalCancel()
 			if err == nil && ts.Status == "stopped" {
-				if taskSucceeded(ts.ExitStatus) {
+				if proxmox.TaskSucceeded(ts.ExitStatus) {
 					return "completed"
 				}
 				return "failed"
@@ -1310,7 +1370,7 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 				continue
 			}
 			if ts.Status == "stopped" {
-				if taskSucceeded(ts.ExitStatus) {
+				if proxmox.TaskSucceeded(ts.ExitStatus) {
 					return "completed"
 				}
 				return "failed"
@@ -1319,12 +1379,26 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 	}
 }
 
-func taskSucceeded(exitStatus string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(exitStatus))
-	return upper == "" || upper == "OK" || strings.HasPrefix(upper, "OK ") || upper == "WARNINGS"
-}
-
 func (o *Orchestrator) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
+	// The cache covers the primary-URL happy path. If it returns
+	// successfully and a quick connectivity probe succeeds, we keep the
+	// cached instance; otherwise we fall through to the failover-URL
+	// loop below, which builds throwaway clients pointed at alternate
+	// node addresses (those clients are not cached because they're
+	// keyed by node-address, not cluster).
+	if o.cache != nil {
+		if client, err := o.cache.Get(ctx, clusterID); err == nil {
+			if _, testErr := client.GetNodes(ctx); testErr == nil {
+				return client, nil
+			}
+			o.logger.Warn("rolling: cached primary URL unreachable, trying failover nodes",
+				"cluster_id", clusterID)
+		} else {
+			o.logger.Warn("rolling: proxmox cache get failed, building per-call",
+				"cluster_id", clusterID, "error", err)
+		}
+	}
+
 	cluster, err := o.queries.GetCluster(ctx, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
@@ -1480,7 +1554,7 @@ func (o *Orchestrator) auditLog(ctx context.Context, clusterID uuid.UUID, jobID 
 
 	err := o.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: SystemUserID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "rolling_update",
 		ResourceID:   jobID.String(),
 		Action:       action,

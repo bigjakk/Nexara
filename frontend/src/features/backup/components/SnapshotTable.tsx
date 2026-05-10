@@ -28,14 +28,8 @@ import {
   useProtectSnapshot,
   useUpdateSnapshotNotes,
 } from "../api/backup-queries";
+import { formatBytes } from "@/lib/format";
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i] ?? ""}`;
-}
 
 function formatUnixTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString();

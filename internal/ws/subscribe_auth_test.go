@@ -197,21 +197,21 @@ func TestClientCanSubscribe_ClusterChannelChecksRBAC(t *testing.T) {
 	})
 }
 
-// TestClientCanSubscribe_NoCheckerFallsOpen documents the test-fixture
-// fallback: if no permission checker is wired (e.g. integration tests
-// constructing the server without an RBAC engine), the subscribe path
-// allows the channel and logs a warning. Production deploys MUST set
-// the engine — main.go pulls it from `srv.RBACEngine()` and the WS
-// server logs a warning at startup when it's nil.
-func TestClientCanSubscribe_NoCheckerFallsOpen(t *testing.T) {
+// TestClientCanSubscribe_NoCheckerFailsClosed locks down the 5.1
+// posture: when no permission checker is wired (test fixtures, or a
+// misconfigured server), cluster channel subscribes are denied. There
+// is no longer a synthetic-admin fall-open — production main.go always
+// installs the engine, and a missing engine is a misconfiguration that
+// must not silently expose cross-tenant data.
+func TestClientCanSubscribe_NoCheckerFailsClosed(t *testing.T) {
 	c := &Client{
 		id:              "test",
 		logger:          testLogger(),
 		userID:          uuid.New(),
 		checkPermission: nil,
 	}
-	if !c.canSubscribe("cluster:550e8400-e29b-41d4-a716-446655440000:metrics") {
-		t.Errorf("expected nil-checker fall-open for test fixtures")
+	if c.canSubscribe("cluster:550e8400-e29b-41d4-a716-446655440000:metrics") {
+		t.Errorf("expected canSubscribe to deny when no checker wired")
 	}
 }
 

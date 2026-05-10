@@ -6,31 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
-
-// safeInt32 converts an int to int32 with bounds clamping.
-// Values from the Proxmox API (VMID, CPU count, etc.) always fit in int32,
-// but this satisfies gosec G115.
-func safeInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v) //nolint:gosec // bounds checked above
-}
 
 // SyncQueries defines the database operations needed by the Syncer.
 // This interface enables testing with mock implementations.
@@ -38,6 +26,7 @@ type SyncQueries interface {
 	ListActiveClusters(ctx context.Context) ([]db.Cluster, error)
 	UpsertNode(ctx context.Context, arg db.UpsertNodeParams) (db.Node, error)
 	UpsertVM(ctx context.Context, arg db.UpsertVMParams) (db.Vm, error)
+	SetVMOSType(ctx context.Context, arg db.SetVMOSTypeParams) error
 	UpsertStoragePool(ctx context.Context, arg db.UpsertStoragePoolParams) (db.UpsertStoragePoolRow, error)
 	DeleteStaleStoragePools(ctx context.Context, arg db.DeleteStaleStoragePoolsParams) (int64, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
@@ -84,6 +73,9 @@ type ProxmoxClient interface {
 	GetNetworkInterfaces(ctx context.Context, node string) ([]proxmox.NetworkInterface, error)
 	GetVMs(ctx context.Context, node string) ([]proxmox.VirtualMachine, error)
 	GetContainers(ctx context.Context, node string) ([]proxmox.Container, error)
+	GetVMConfig(ctx context.Context, node string, vmid int) (proxmox.VMConfig, error)
+	GetCTConfig(ctx context.Context, node string, vmid int) (proxmox.VMConfig, error)
+	GetGuestAgentOSInfo(ctx context.Context, node string, vmid int) (*proxmox.GuestOSInfo, error)
 	GetStoragePools(ctx context.Context, node string) ([]proxmox.StoragePool, error)
 	GetCephStatus(ctx context.Context, node string) (*proxmox.CephStatus, error)
 	GetCephOSDs(ctx context.Context, node string) (*proxmox.CephOSDResponse, error)
@@ -115,9 +107,6 @@ type PBSProxmoxClient interface {
 // PBSClientFactory creates a PBSProxmoxClient from server credentials.
 type PBSClientFactory func(apiURL, tokenID, tokenSecret, tlsFingerprint string) (PBSProxmoxClient, error)
 
-// systemUserID is the well-known UUID for system-initiated actions (migration 000013).
-var systemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
-
 // DefaultClientFactory creates a real proxmox.Client.
 func DefaultClientFactory(apiURL, tokenID, tokenSecret, tlsFingerprint string) (ProxmoxClient, error) {
 	return proxmox.NewClient(proxmox.ClientConfig{
@@ -146,6 +135,7 @@ type Syncer struct {
 	encryptionKey    string
 	clientFactory    ClientFactory
 	pbsClientFactory PBSClientFactory
+	cache            *proxmox.ClientCache // nil-safe; tests may leave unset
 	healthMonitor    *HealthMonitor
 	eventPub         *events.Publisher
 	logger           *slog.Logger
@@ -168,6 +158,59 @@ func (s *Syncer) SetEventPublisher(pub *events.Publisher) {
 	s.eventPub = pub
 }
 
+// SetProxmoxCache attaches the per-server cache so SyncCluster can reuse
+// cached *Client instances across ticks. Nil-safe: when unset, the
+// Syncer falls back to clientFactory + per-call construction.
+func (s *Syncer) SetProxmoxCache(cache *proxmox.ClientCache) {
+	s.cache = cache
+}
+
+// proxmoxClient returns a ProxmoxClient for the given cluster, preferring
+// the shared cache when available so collector ticks reuse the same
+// *http.Transport idle-conn pool. Falls through to the legacy
+// clientFactory path when the cache is nil (test scaffolding).
+func (s *Syncer) proxmoxClient(ctx context.Context, cluster db.Cluster) (ProxmoxClient, error) {
+	if s.cache != nil {
+		client, err := s.cache.Get(ctx, cluster.ID)
+		if err == nil {
+			return client, nil
+		}
+		s.logger.Warn("collector: proxmox cache get failed, building per-call",
+			"cluster_id", cluster.ID, "error", err)
+	}
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, s.encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt token: %w", err)
+	}
+	client, err := s.clientFactory(cluster.ApiUrl, cluster.TokenID, tokenSecret, cluster.TlsFingerprint)
+	if err != nil {
+		return nil, fmt.Errorf("create client: %w", err)
+	}
+	return client, nil
+}
+
+// pbsProxmoxClient returns a PBSProxmoxClient for the given PBS server,
+// preferring the cache. Mirrors proxmoxClient's logic.
+func (s *Syncer) pbsProxmoxClient(ctx context.Context, server db.PbsServer) (PBSProxmoxClient, error) {
+	if s.cache != nil {
+		client, err := s.cache.GetPBS(ctx, server.ID)
+		if err == nil {
+			return client, nil
+		}
+		s.logger.Warn("collector: pbs cache get failed, building per-call",
+			"pbs_id", server.ID, "error", err)
+	}
+	tokenSecret, err := crypto.Decrypt(server.TokenSecretEncrypted, s.encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt token: %w", err)
+	}
+	client, err := s.pbsClientFactory(server.ApiUrl, server.TokenID, tokenSecret, server.TlsFingerprint)
+	if err != nil {
+		return nil, fmt.Errorf("create pbs client: %w", err)
+	}
+	return client, nil
+}
+
 // SetHealthMonitor attaches a health monitor to the syncer.
 func (s *Syncer) SetHealthMonitor(h *HealthMonitor) {
 	s.healthMonitor = h
@@ -176,14 +219,9 @@ func (s *Syncer) SetHealthMonitor(h *HealthMonitor) {
 // SyncCluster discovers nodes, VMs, containers, and storage from a Proxmox cluster,
 // upserts them into the database, and returns collected metric snapshots.
 func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterMetricResult, error) {
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, s.encryptionKey)
+	client, err := s.proxmoxClient(ctx, cluster)
 	if err != nil {
-		return nil, fmt.Errorf("sync cluster %s: decrypt token: %w", cluster.ID, err)
-	}
-
-	client, err := s.clientFactory(cluster.ApiUrl, cluster.TokenID, tokenSecret, cluster.TlsFingerprint)
-	if err != nil {
-		return nil, fmt.Errorf("sync cluster %s: create client: %w", cluster.ID, err)
+		return nil, fmt.Errorf("sync cluster %s: %w", cluster.ID, err)
 	}
 
 	nodes, err := client.GetNodes(ctx)
@@ -197,7 +235,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	if resources, resErr := client.GetClusterResources(ctx, ""); resErr == nil {
 		for _, r := range resources {
 			if (r.Type == "qemu" || r.Type == "lxc") && r.VMID > 0 {
-				vmExtra[safeInt32(r.VMID)] = vmExtraFields{HAState: r.HAState, Pool: r.Pool}
+				vmExtra[safeconv.Int32(r.VMID)] = vmExtraFields{HAState: r.HAState, Pool: r.Pool}
 			}
 		}
 	} else {
@@ -392,22 +430,22 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 			"node", node.Node,
 			"error", err,
 		)
-		cpuCount = safeInt32(node.MaxCPU)
+		cpuCount = safeconv.Int32(node.MaxCPU)
 		memTotal = node.MaxMem
 		diskTotal = node.MaxDisk
 		cpuUsage = node.CPU
 		memUsed = node.Mem
 	} else {
 		pveVersion = status.PVEVersion
-		cpuCount = safeInt32(status.CPUInfo.CPUs)
+		cpuCount = safeconv.Int32(status.CPUInfo.CPUs)
 		memTotal = status.Memory.Total
 		diskTotal = status.RootFS.Total
 		cpuUsage = status.CPU
 		memUsed = status.Memory.Used
 		cpuModel = status.CPUInfo.Model
-		cpuCores = safeInt32(status.CPUInfo.Cores)
-		cpuSockets = safeInt32(status.CPUInfo.Sockets)
-		cpuThreads = safeInt32(status.CPUInfo.Threads)
+		cpuCores = safeconv.Int32(status.CPUInfo.Cores)
+		cpuSockets = safeconv.Int32(status.CPUInfo.Sockets)
+		cpuThreads = safeconv.Int32(status.CPUInfo.Threads)
 		cpuMhz = status.CPUInfo.MHz
 		kernelVersion = status.Kversion
 		swapTotal = status.Swap.Total
@@ -529,7 +567,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				DiskType:  d.Type,
 				Health:    d.Health,
 				Wearout:   d.Wearout.String(),
-				Rpm:       safeInt32(d.RPM),
+				Rpm:       safeconv.Int32(d.RPM),
 				Vendor:    d.Vendor,
 				Wwn:       d.WWN,
 			}); err != nil {
@@ -580,7 +618,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				VendorName:      d.VendorName,
 				Device:          d.Device,
 				Vendor:          d.Vendor,
-				IommuGroup:      safeInt32(d.IOMMUGroup),
+				IommuGroup:      safeconv.Int32(d.IOMMUGroup),
 				SubsystemDevice: d.SubsystemDevice,
 				SubsystemVendor: d.SubsystemVendor,
 			}); err != nil {
@@ -628,15 +666,15 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 
 	snapshots := make([]vmMetricSnapshot, 0, len(vms))
 	for _, vm := range vms {
-		extra := vmExtra[safeInt32(vm.VMID)]
+		extra := vmExtra[safeconv.Int32(vm.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{
 			ClusterID: clusterID,
 			NodeID:    nodeID,
-			Vmid:      safeInt32(vm.VMID),
+			Vmid:      safeconv.Int32(vm.VMID),
 			Name:      vm.Name,
 			Type:      "qemu",
 			Status:    vm.EffectiveStatus(),
-			CpuCount:  safeInt32(vm.CPUs),
+			CpuCount:  safeconv.Int32(vm.CPUs),
 			MemTotal:  vm.MaxMem,
 			DiskTotal: vm.MaxDisk,
 			Uptime:    vm.Uptime,
@@ -648,6 +686,8 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 		if err != nil {
 			return nil, fmt.Errorf("upsert VM %d on %s: %w", vm.VMID, nodeName, err)
 		}
+
+		s.refreshOSType(ctx, client, dbVM, nodeName, vm.VMID, "qemu", vm.EffectiveStatus())
 
 		snapshots = append(snapshots, vmMetricSnapshot{
 			VMID:      dbVM.ID,
@@ -664,6 +704,63 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 	return snapshots, nil
 }
 
+// refreshOSType detects the current OS for a guest and persists it when the
+// detected value differs from what's already stored. Best-effort — a failure
+// is logged but never propagated, since the per-VM config call is just for
+// cosmetic OS detection.
+//
+// Detection order (running QEMU only):
+//  1. QEMU guest agent's reported os-info — gives the actual running OS
+//     (handles cases where the Proxmox config says "other" but the guest is
+//     really Linux). Reported `id` is preferred (e.g. "ubuntu", "debian",
+//     "mswindows"); falls back to a normalized `name`.
+//  2. /qemu/{vmid}/config.ostype — Proxmox-configured OS family.
+//
+// Stopped QEMU and LXC always fall through to the config call only.
+func (s *Syncer) refreshOSType(ctx context.Context, client ProxmoxClient, dbVM db.Vm, nodeName string, vmid int, kind, status string) {
+	detected := ""
+
+	if kind == "qemu" && status == "running" {
+		if info, err := client.GetGuestAgentOSInfo(ctx, nodeName, vmid); err == nil && info != nil {
+			if info.ID != "" {
+				detected = strings.ToLower(info.ID)
+			} else if info.Name != "" {
+				detected = strings.ToLower(info.Name)
+			}
+		}
+	}
+
+	if detected == "" {
+		var (
+			config proxmox.VMConfig
+			err    error
+		)
+		switch kind {
+		case "qemu":
+			config, err = client.GetVMConfig(ctx, nodeName, vmid)
+		case "lxc":
+			config, err = client.GetCTConfig(ctx, nodeName, vmid)
+		default:
+			return
+		}
+		if err != nil {
+			s.logger.Debug("ostype fetch failed",
+				"vmid", vmid, "node", nodeName, "kind", kind, "error", err)
+			return
+		}
+		raw, _ := config["ostype"].(string)
+		detected = strings.ToLower(raw)
+	}
+
+	if detected == "" || detected == dbVM.Ostype {
+		return
+	}
+	if err := s.queries.SetVMOSType(ctx, db.SetVMOSTypeParams{ID: dbVM.ID, Ostype: detected}); err != nil {
+		s.logger.Debug("ostype persist failed",
+			"vmid", vmid, "kind", kind, "error", err)
+	}
+}
+
 func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string, vmExtra map[int32]vmExtraFields) ([]vmMetricSnapshot, error) {
 	cts, err := client.GetContainers(ctx, nodeName)
 	if err != nil {
@@ -672,15 +769,15 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 
 	snapshots := make([]vmMetricSnapshot, 0, len(cts))
 	for _, ct := range cts {
-		extra := vmExtra[safeInt32(ct.VMID)]
+		extra := vmExtra[safeconv.Int32(ct.VMID)]
 		dbVM, err := s.queries.UpsertVM(ctx, db.UpsertVMParams{
 			ClusterID: clusterID,
 			NodeID:    nodeID,
-			Vmid:      safeInt32(ct.VMID),
+			Vmid:      safeconv.Int32(ct.VMID),
 			Name:      ct.Name,
 			Type:      "lxc",
 			Status:    ct.Status,
-			CpuCount:  safeInt32(ct.CPUs),
+			CpuCount:  safeconv.Int32(ct.CPUs),
 			MemTotal:  ct.MaxMem,
 			DiskTotal: ct.MaxDisk,
 			Uptime:    ct.Uptime,
@@ -692,6 +789,8 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 		if err != nil {
 			return nil, fmt.Errorf("upsert container %d on %s: %w", ct.VMID, nodeName, err)
 		}
+
+		s.refreshOSType(ctx, client, dbVM, nodeName, ct.VMID, "lxc", ct.Status)
 
 		snapshots = append(snapshots, vmMetricSnapshot{
 			VMID:      dbVM.ID,
@@ -880,14 +979,9 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 
 // syncPBSServer syncs a single PBS server: datastores, snapshots, sync jobs, verify jobs.
 func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMetricResult, error) {
-	tokenSecret, err := crypto.Decrypt(server.TokenSecretEncrypted, s.encryptionKey)
+	client, err := s.pbsProxmoxClient(ctx, server)
 	if err != nil {
-		return nil, fmt.Errorf("sync PBS %s: decrypt token: %w", server.ID, err)
-	}
-
-	client, err := s.pbsClientFactory(server.ApiUrl, server.TokenID, tokenSecret, server.TlsFingerprint)
-	if err != nil {
-		return nil, fmt.Errorf("sync PBS %s: create client: %w", server.ID, err)
+		return nil, fmt.Errorf("sync PBS %s: %w", server.ID, err)
 	}
 
 	now := time.Now()
@@ -1121,7 +1215,7 @@ func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncEr
 
 	_ = s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: systemUserID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "cluster",
 		ResourceID:   cluster.ID.String(),
 		Action:       action,

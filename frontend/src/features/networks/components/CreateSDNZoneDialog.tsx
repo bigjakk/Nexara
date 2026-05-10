@@ -124,7 +124,7 @@ export function CreateSDNZoneDialog({
     if (isEdit) {
       const updateParams: Omit<CreateSDNZoneRequest, "zone" | "type"> = Object.fromEntries(
         Object.entries(params).filter(([k]) => k !== "zone" && k !== "type"),
-      ) as Omit<CreateSDNZoneRequest, "zone" | "type">;
+      );
       update.mutate(
         { zone: initialData.zone, params: updateParams },
         { onSuccess: () => { setOpen(false); } },

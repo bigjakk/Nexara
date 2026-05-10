@@ -8,6 +8,17 @@ vi.mock("../api/inventory-queries", () => ({
   useInventoryData: vi.fn(),
 }));
 
+vi.mock("@/features/dashboard/api/dashboard-queries", () => ({
+  useClusters: () => ({ data: [] }),
+  useCreateCluster: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    error: null,
+    data: null,
+    reset: vi.fn(),
+  }),
+}));
+
 import { useInventoryData } from "../api/inventory-queries";
 
 const mockUseInventoryData = vi.mocked(useInventoryData);
@@ -42,9 +53,7 @@ describe("InventoryPage", () => {
       error: null,
     });
     renderWithProviders(<InventoryPage />);
-    expect(
-      screen.getByText("No resources found. Add a cluster to get started."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("No clusters registered")).toBeInTheDocument();
   });
 
   it("renders table when data is available", () => {
@@ -68,6 +77,7 @@ describe("InventoryPage", () => {
           haState: "",
           pool: "",
           template: false,
+          ostype: "",
           cpuPercent: 50,
           memPercent: 60,
         },

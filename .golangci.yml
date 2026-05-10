@@ -30,13 +30,9 @@ linters:
         - exitAfterDefer
         - paramTypeCombine
         - httpNoBody
-        - hugeParam
-        - rangeValCopy
     gosec:
       excludes:
         - G101
-        - G104
-        - G118
         - G120
     revive:
       rules:
@@ -66,13 +62,16 @@ linters:
           - bodyclose
           - unparam
           - gocritic
-      # .Close() calls — safe to ignore error returns
+      # .Close() calls — safe to ignore error returns. gosec G104 and
+      # errcheck both flag these; the source pattern silences both.
       - linters:
           - errcheck
+          - gosec
         source: "\\.Close\\(\\)"
-      # WebSocket close messages in defers
+      # WebSocket close messages in defers — same shape, same fix.
       - linters:
           - errcheck
+          - gosec
         source: "\\.WriteMessage\\("
       # Replication handler always audits as "replication" by design
       - linters:

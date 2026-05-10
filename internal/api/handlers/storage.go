@@ -96,13 +96,12 @@ type deleteContentResponse struct {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/storage.
 func (h *StorageHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "storage"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "storage", clusterID); err != nil {
+		return err
 	}
 
 	pools, err := h.queries.ListStoragePoolsByCluster(c.Context(), clusterID)
@@ -120,7 +119,11 @@ func (h *StorageHandler) ListByCluster(c *fiber.Ctx) error {
 
 // GetContent handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/content.
 func (h *StorageHandler) GetContent(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "storage"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "storage", clusterID); err != nil {
 		return err
 	}
 
@@ -163,7 +166,11 @@ func (h *StorageHandler) GetContent(c *fiber.Ctx) error {
 //
 // The frontend must send form fields in order: content, filesize, file.
 func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "storage"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
 		return err
 	}
 
@@ -260,7 +267,11 @@ func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 
 // DeleteContent handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/:volume.
 func (h *StorageHandler) DeleteContent(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "storage"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "delete", "storage", clusterID); err != nil {
 		return err
 	}
 
@@ -313,7 +324,11 @@ var validStorageTypes = map[string]bool{
 // GetConfig handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/config.
 // Returns the Proxmox-level storage configuration (paths, servers, etc.).
 func (h *StorageHandler) GetConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "storage"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "storage", clusterID); err != nil {
 		return err
 	}
 
@@ -339,13 +354,12 @@ type createStorageRequest struct {
 
 // Create handles POST /api/v1/clusters/:cluster_id/storage.
 func (h *StorageHandler) Create(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "storage"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
+		return err
 	}
 
 	var req createStorageRequest
@@ -395,7 +409,11 @@ type updateStorageRequest struct {
 
 // Update handles PUT /api/v1/clusters/:cluster_id/storage/:storage_id.
 func (h *StorageHandler) Update(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "storage"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
 		return err
 	}
 
@@ -433,7 +451,11 @@ func (h *StorageHandler) Update(c *fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id.
 func (h *StorageHandler) Delete(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "storage"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "delete", "storage", clusterID); err != nil {
 		return err
 	}
 

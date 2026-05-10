@@ -14,6 +14,11 @@ import {
 } from "@/components/ui/dialog";
 import { ShieldAlert, ShieldCheck, RefreshCw, AlertTriangle } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import {
+  privateAddressWarningFromError,
+  type PrivateAddressWarning as PrivateAddressDetails,
+} from "@/lib/private-address";
+import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import type { ClusterResponse } from "@/types/api";
 
 interface FingerprintResponse {
@@ -39,6 +44,13 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
   const [fetchingFingerprint, setFetchingFingerprint] = useState(false);
   const [fingerprintError, setFingerprintError] = useState<string | null>(null);
 
+  // SSRF policy gate.
+  const [privateWarning, setPrivateWarning] =
+    useState<PrivateAddressDetails | null>(null);
+  const [privateWarningSource, setPrivateWarningSource] =
+    useState<"fetch" | "update" | null>(null);
+  const [allowPrivate, setAllowPrivate] = useState(false);
+
   const updateMutation = useUpdateCluster();
 
   function resetFingerprintState() {
@@ -46,38 +58,76 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
     setFingerprintAccepted(false);
     setFetchingFingerprint(false);
     setFingerprintError(null);
+    setPrivateWarning(null);
+    setPrivateWarningSource(null);
+    setAllowPrivate(false);
   }
 
-  async function handleFetchFingerprint() {
+  async function fetchFingerprint(allow: boolean) {
     setFingerprintError(null);
+    setPrivateWarning(null);
+    setPrivateWarningSource(null);
     setFetchingFingerprint(true);
     try {
       const resp = await apiClient.post<FingerprintResponse>(
         "/api/v1/clusters/fetch-fingerprint",
-        { api_url: apiUrl },
+        { api_url: apiUrl, allow_private_address: allow },
       );
       setFingerprint(resp);
       if (!resp.self_signed) {
         setFingerprintAccepted(true);
       }
     } catch (err) {
-      setFingerprintError(
-        err instanceof Error ? err.message : "Failed to fetch TLS certificate",
-      );
+      const warn = privateAddressWarningFromError(err);
+      if (warn != null) {
+        setPrivateWarning(warn);
+        setPrivateWarningSource("fetch");
+      } else {
+        setFingerprintError(
+          err instanceof Error ? err.message : "Failed to fetch TLS certificate",
+        );
+      }
     } finally {
       setFetchingFingerprint(false);
     }
   }
 
+  function handleFetchFingerprint() {
+    void fetchFingerprint(allowPrivate);
+  }
+
+  function handleConfirmPrivate() {
+    setAllowPrivate(true);
+    if (privateWarningSource === "update") {
+      submitUpdate(true);
+    } else {
+      void fetchFingerprint(true);
+    }
+  }
+
   function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
-    const body: Record<string, string> = {};
-    if (name !== cluster.name) body["name"] = name;
-    if (apiUrl !== cluster.api_url) body["api_url"] = apiUrl;
-    if (tokenId !== cluster.token_id) body["token_id"] = tokenId;
-    if (tokenSecret) body["token_secret"] = tokenSecret;
+    submitUpdate(allowPrivate);
+  }
+
+  function submitUpdate(allow: boolean) {
+    const body: {
+      name?: string;
+      api_url?: string;
+      token_id?: string;
+      token_secret?: string;
+      tls_fingerprint?: string;
+      allow_private_address?: boolean;
+    } = {};
+    if (name !== cluster.name) body.name = name;
+    if (apiUrl !== cluster.api_url) body.api_url = apiUrl;
+    if (tokenId !== cluster.token_id) body.token_id = tokenId;
+    if (tokenSecret) body.token_secret = tokenSecret;
     if (fingerprint && fingerprintAccepted) {
-      body["tls_fingerprint"] = fingerprint.fingerprint;
+      body.tls_fingerprint = fingerprint.fingerprint;
+    }
+    if (allow) {
+      body.allow_private_address = true;
     }
 
     if (Object.keys(body).length === 0) {
@@ -85,12 +135,22 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
       return;
     }
 
+    setPrivateWarning(null);
+    setPrivateWarningSource(null);
+
     updateMutation.mutate(
       { id: cluster.id, body },
       {
         onSuccess: () => {
           onOpenChange(false);
           resetFingerprintState();
+        },
+        onError: (err) => {
+          const warn = privateAddressWarningFromError(err);
+          if (warn != null) {
+            setPrivateWarning(warn);
+            setPrivateWarningSource("update");
+          }
         },
       },
     );
@@ -140,7 +200,7 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => { void handleFetchFingerprint(); }}
+                onClick={handleFetchFingerprint}
                 disabled={fetchingFingerprint || !apiUrl}
               >
                 <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${fetchingFingerprint ? "animate-spin" : ""}`} />
@@ -217,7 +277,20 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
             )}
           </div>
 
-          {updateMutation.isError && (
+          {privateWarning != null && (
+            <PrivateAddressWarning
+              ip={privateWarning.ip}
+              url={apiUrl}
+              onConfirm={handleConfirmPrivate}
+              onCancel={() => {
+                setPrivateWarning(null);
+                setPrivateWarningSource(null);
+              }}
+              pending={updateMutation.isPending || fetchingFingerprint}
+            />
+          )}
+
+          {privateWarning == null && updateMutation.isError && (
             <p className="text-sm text-destructive">
               {updateMutation.error instanceof Error ? updateMutation.error.message : "Update failed"}
             </p>

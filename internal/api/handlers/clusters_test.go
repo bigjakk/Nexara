@@ -24,7 +24,8 @@ func newClusterTestApp(t *testing.T) *fiber.App {
 		ErrorHandler: testErrorHandler,
 	})
 
-	// Middleware to inject role from X-Test-Role header.
+	// Inject role + user_id from X-Test-Role, then wire the stub
+	// permissionEngine so the production gate path runs end-to-end.
 	app.Use(func(c *fiber.Ctx) error {
 		role := c.Get("X-Test-Role")
 		if role != "" {
@@ -33,6 +34,7 @@ func newClusterTestApp(t *testing.T) *fiber.App {
 		}
 		return c.Next()
 	})
+	installStubEngineMiddleware(app)
 
 	app.Post("/clusters", handler.Create)
 	app.Get("/clusters", handler.List)
@@ -159,15 +161,19 @@ func TestClusterGet_InvalidUUID(t *testing.T) {
 	}
 }
 
-func TestCluster_NoAuth(t *testing.T) {
+func TestCluster_NonAdminDenied(t *testing.T) {
 	app := newClusterTestApp(t)
 
+	// GET /clusters now returns an empty filtered list rather than 403 — the
+	// per-row scope check in handlers/clusters.go::List drops every cluster
+	// when the caller has no scope. The other write/read-by-id paths still
+	// 403 because requireClusterPerm rejects non-admin callers via the
+	// stub permissionEngine (engine wired, role=user has no permissions).
 	endpoints := []struct {
 		method string
 		path   string
 	}{
 		{http.MethodPost, "/clusters"},
-		{http.MethodGet, "/clusters"},
 		{http.MethodGet, "/clusters/" + uuid.New().String()},
 		{http.MethodPut, "/clusters/" + uuid.New().String()},
 		{http.MethodDelete, "/clusters/" + uuid.New().String()},
@@ -181,7 +187,7 @@ func TestCluster_NoAuth(t *testing.T) {
 			}
 			req := httptest.NewRequest(ep.method, ep.path, body)
 			req.Header.Set("Content-Type", "application/json")
-			// No X-Test-Role header — unauthenticated
+			req.Header.Set("X-Test-Role", "user")
 			resp, err := app.Test(req)
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
@@ -193,22 +199,6 @@ func TestCluster_NoAuth(t *testing.T) {
 				t.Errorf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusForbidden, respBody)
 			}
 		})
-	}
-}
-
-func TestCluster_NonAdmin(t *testing.T) {
-	app := newClusterTestApp(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/clusters", nil)
-	req.Header.Set("X-Test-Role", "user")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
 	}
 }
 

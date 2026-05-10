@@ -15,6 +15,11 @@ import {
 import { Plus, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useCreateCluster } from "../api/dashboard-queries";
 import { apiClient } from "@/lib/api-client";
+import {
+  privateAddressWarningFromError,
+  type PrivateAddressWarning as PrivateAddressDetails,
+} from "@/lib/private-address";
+import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 
 interface FingerprintResponse {
   fingerprint: string;
@@ -38,6 +43,11 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
   const [fetchingFingerprint, setFetchingFingerprint] = useState(false);
   const [fingerprintError, setFingerprintError] = useState<string | null>(null);
 
+  // SSRF policy gate — set when the backend returns 422 for a private IP.
+  const [privateWarning, setPrivateWarning] =
+    useState<PrivateAddressDetails | null>(null);
+  const [allowPrivate, setAllowPrivate] = useState(false);
+
   const createCluster = useCreateCluster();
 
   function resetForm() {
@@ -49,6 +59,8 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
     setFingerprintAccepted(false);
     setFetchingFingerprint(false);
     setFingerprintError(null);
+    setPrivateWarning(null);
+    setAllowPrivate(false);
     createCluster.reset();
   }
 
@@ -59,14 +71,14 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
     }
   }
 
-  async function handleFetchFingerprint(e: React.SyntheticEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function fetchFingerprint(allow: boolean) {
     setFingerprintError(null);
+    setPrivateWarning(null);
     setFetchingFingerprint(true);
     try {
       const resp = await apiClient.post<FingerprintResponse>(
         "/api/v1/clusters/fetch-fingerprint",
-        { api_url: apiUrl },
+        { api_url: apiUrl, allow_private_address: allow },
       );
       setFingerprint(resp);
       // Auto-accept if the cert is NOT self-signed (trusted CA)
@@ -74,12 +86,29 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
         setFingerprintAccepted(true);
       }
     } catch (err) {
-      setFingerprintError(
-        err instanceof Error ? err.message : "Failed to fetch TLS certificate",
-      );
+      const warn = privateAddressWarningFromError(err);
+      if (warn != null) {
+        setPrivateWarning(warn);
+      } else {
+        setFingerprintError(
+          err instanceof Error ? err.message : "Failed to fetch TLS certificate",
+        );
+      }
     } finally {
       setFetchingFingerprint(false);
     }
+  }
+
+  function handleFetchFingerprintSubmit(
+    e: React.SyntheticEvent<HTMLFormElement>,
+  ) {
+    e.preventDefault();
+    void fetchFingerprint(allowPrivate);
+  }
+
+  function handleConfirmPrivate() {
+    setAllowPrivate(true);
+    void fetchFingerprint(true);
   }
 
   function handleCreate() {
@@ -92,15 +121,15 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
     if (fingerprint) {
       req.tls_fingerprint = fingerprint.fingerprint;
     }
-    createCluster.mutate(
-      req,
-      {
-        onSuccess: () => {
-          setOpen(false);
-          resetForm();
-        },
+    if (allowPrivate) {
+      req.allow_private_address = true;
+    }
+    createCluster.mutate(req, {
+      onSuccess: () => {
+        setOpen(false);
+        resetForm();
       },
-    );
+    });
   }
 
   function handleBack() {
@@ -133,7 +162,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
         </DialogHeader>
 
         {!showFingerprint ? (
-          <form onSubmit={(e) => { void handleFetchFingerprint(e); }} className="space-y-4">
+          <form onSubmit={handleFetchFingerprintSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="cluster-name">Cluster Name</Label>
               <Input
@@ -176,7 +205,17 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
               />
             </div>
 
-            {fingerprintError != null && (
+            {privateWarning != null && (
+              <PrivateAddressWarning
+                ip={privateWarning.ip}
+                url={apiUrl}
+                onConfirm={handleConfirmPrivate}
+                onCancel={() => { setPrivateWarning(null); }}
+                pending={fetchingFingerprint}
+              />
+            )}
+
+            {privateWarning == null && fingerprintError != null && (
               <p className="text-sm text-destructive">{fingerprintError}</p>
             )}
 

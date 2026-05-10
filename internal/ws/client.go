@@ -56,10 +56,11 @@ type Client struct {
 	userID uuid.UUID
 
 	// checkPermission resolves "can this user view this specific cluster"
-	// per-subscribe. May be nil in test setups; in production it's
-	// always populated by NewServer when the API server's engine is
-	// available. When nil, the subscribe path falls open — same as the
-	// API request handlers' `requireAdmin` fallback path.
+	// per-subscribe. May be nil in test setups that exercise non-RBAC
+	// paths; in production NewServer always populates it from the API
+	// server's RBAC engine. When nil, cluster channel subscribes fail
+	// closed — there is no synthetic-admin fallback (that path was
+	// removed in 5.1 along with the handlers' requireAdmin fallback).
 	checkPermission PermissionChecker
 }
 
@@ -75,9 +76,9 @@ func (c *Client) closeSend() {
 // `userID` and `checkPermission` are required for cross-tenant
 // subscription safety (security review H1): without them, any
 // authenticated user could subscribe to any cluster's metric / event /
-// alert channel just by knowing the cluster UUID. Pass them in even
-// when checkPermission is nil — the subscribe path tolerates that for
-// tests but flags it loudly server-side via `slog.Warn`.
+// alert channel just by knowing the cluster UUID. Tests that don't
+// exercise the subscribe gate may pass nil — cluster channels then
+// fail closed (a server-side warning is logged on each attempt).
 func NewClient(
 	id string,
 	conn *websocket.Conn,
@@ -215,13 +216,11 @@ func (c *Client) handleMessage(msg IncomingMessage) {
 // `system:events` is allowed for any authenticated session because it
 // only carries non-cluster events (task_created, audit_entry, etc.).
 //
-// If the RBAC engine is nil (e.g. test fixtures, or a misconfigured
-// production server), we fail OPEN and log a warning. This matches the
-// behavior of `requirePerm` in `internal/api/handlers/permission.go`,
-// which falls back to a legacy admin check when RBAC isn't available.
-// Production deploys MUST have the engine wired (verified by an init
-// check in main.go) — the open fallback only exists so test harnesses
-// don't have to spin up a full RBAC stack.
+// If the RBAC engine is nil (test fixtures only — production main.go
+// always wires it), cluster channel subscribes fail CLOSED. This is the
+// 5.1-aligned behaviour: there is no synthetic-admin fallback in either
+// the HTTP or WS path. A server with a missing engine in production is
+// a misconfiguration that must surface loudly.
 func (c *Client) canSubscribe(channel string) bool {
 	clusterID, isCluster := ChannelClusterID(channel)
 	if !isCluster {
@@ -231,11 +230,11 @@ func (c *Client) canSubscribe(channel string) bool {
 	}
 
 	if c.checkPermission == nil {
-		c.logger.Warn("ws subscribe: no permission checker, allowing cluster channel",
+		c.logger.Warn("ws subscribe: no permission checker, denying cluster channel",
 			"client", c.id,
 			"channel", channel,
 		)
-		return true
+		return false
 	}
 
 	clusterUUID, err := uuid.Parse(clusterID)

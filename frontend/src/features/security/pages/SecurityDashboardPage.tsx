@@ -3,7 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert, Loader2, RefreshCw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EmptyState } from "@/components/EmptyState";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useCVEScans,
@@ -31,6 +33,7 @@ import type { RollingUpdateJob } from "@/types/api";
 
 export function SecurityDashboardPage() {
   const { t } = useTranslation("security");
+  const { t: td } = useTranslation("dashboard");
   const { hasPermission } = useAuth();
   const canManageRolling = hasPermission("manage", "rolling_update");
   const canManageSSH = hasPermission("manage", "ssh_credentials");
@@ -100,11 +103,13 @@ export function SecurityDashboardPage() {
 
   if (!clusters || clusters.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center text-muted-foreground">
-          <ShieldAlert className="mx-auto mb-2 h-12 w-12" />
-          <p>{t("noClustersConfigured")}</p>
-        </div>
+      <div className="flex h-full items-center justify-center p-6">
+        <EmptyState
+          icon={ShieldAlert}
+          title={td("noClustersRegistered")}
+          description={t("noClustersConfigured")}
+          action={<AddClusterDialog />}
+        />
       </div>
     );
   }

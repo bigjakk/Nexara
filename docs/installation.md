@@ -62,8 +62,9 @@ The database schema is applied automatically on first startup. All 3 services wi
 # Check all services are running
 docker compose ps
 
-# Check API health
-curl http://localhost:8080/healthz
+# Check API health (the compose file maps host port 80 → container 8080;
+# substitute your own host port if you've changed the mapping)
+curl http://localhost/healthz
 ```
 
 ## Configuration Reference
@@ -85,6 +86,8 @@ All configuration is via environment variables in `.env`:
 | `PUID` | No | `1000` | User ID for the container process and data directory |
 | `PGID` | No | `1000` | Group ID for the container process and data directory |
 | `DATA_DIR` | No | Docker volume | Custom data path for secrets, branding, uploads (e.g. NFS mount) |
+| `TRUSTED_PROXIES` | **Yes for production behind a reverse proxy** | empty | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is honored. Without it the rate limiters can't tell clients apart behind nginx/Traefik/Caddy. Examples: `127.0.0.1`, `10.0.0.0/8,172.16.0.0/12`. Leave empty when Nexara is exposed directly. |
+| `PROXY_HEADER` | No | `X-Forwarded-For` | Header consulted for the client IP when the remote is on `TRUSTED_PROXIES`. Override only for non-standard upstreams. |
 
 ## First-Time Setup
 
@@ -240,8 +243,12 @@ If you lose access to your admin account:
 # Connect to the database
 docker exec -it nexara-db psql -U nexara nexara
 
-# Delete all users to re-trigger the registration page
-DELETE FROM users;
+# Delete every login-capable user; keep the seeded system actor that
+# audit-log entries and DRS / scheduler tasks attribute to. Removing
+# that row would break those references on the first system action.
+DELETE FROM users WHERE id != '00000000-0000-0000-0000-000000000001';
 ```
 
-Then visit the web UI to create a new admin account.
+Then visit the web UI — `/api/v1/auth/setup-status` will report
+`needs_setup: true` again and the registration page will appear so you
+can create a new admin account.

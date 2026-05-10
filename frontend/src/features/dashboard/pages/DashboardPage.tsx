@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/lib/i18n";
-import { LayoutGrid, Lock } from "lucide-react";
+import { LayoutGrid, Lock, ServerCrash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDashboardData } from "../api/dashboard-queries";
 import type { ClusterSummary } from "../api/dashboard-queries";
@@ -10,7 +10,7 @@ import { useDashboardMetrics } from "@/hooks/useMetrics";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { StatsOverview } from "../components/StatsOverview";
 import { ClusterCard } from "../components/ClusterCard";
-import { EmptyState } from "../components/EmptyState";
+import { EmptyState } from "@/components/EmptyState";
 import { AddClusterDialog } from "../components/AddClusterDialog";
 import { TimeRangeSelector } from "../components/TimeRangeSelector";
 import { RefreshRateSelector } from "../components/RefreshRateSelector";
@@ -368,7 +368,14 @@ export function DashboardPage() {
         </div>
       ) : (
         <>
-          {!isLoading && data?.clusters.length === 0 && <EmptyState />}
+          {!isLoading && data?.clusters.length === 0 && (
+            <EmptyState
+              icon={ServerCrash}
+              title={t("noClustersRegistered")}
+              description={t("addClusterToGetStarted")}
+              action={<AddClusterDialog />}
+            />
+          )}
 
           {data != null && data.clusters.length > 0 && (
             <DashboardGrid
@@ -419,10 +426,17 @@ function ClusterChart({
   const seedData = useSeedMetrics(summary.cluster.id);
   const isLive = timeRange === "live";
 
-  const liveHistory = liveMetrics?.history ?? [];
-  const chartData = isLive
-    ? (liveHistory.length > 0 ? liveHistory : (seedData ?? []))
-    : (historicalQuery.data ?? []);
+  const liveHistory = liveMetrics?.history;
+  const chartData = useMemo(() => {
+    if (!isLive) return historicalQuery.data ?? [];
+    const seed = seedData ?? [];
+    const live = liveHistory ?? [];
+    if (live.length === 0) return seed;
+    if (seed.length === 0) return live;
+    const firstLiveTs = live[0]?.timestamp ?? 0;
+    const seedBefore = seed.filter((p) => p.timestamp < firstLiveTs);
+    return [...seedBefore, ...live];
+  }, [isLive, liveHistory, seedData, historicalQuery.data]);
 
   const chartConfigs = {
     cpu: { titleKey: "cpuUsage", dataKey: "cpuPercent" as const, color: "#3b82f6" },

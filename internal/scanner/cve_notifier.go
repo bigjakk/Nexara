@@ -71,7 +71,18 @@ func (n *Notifier) MaybeNotify(ctx context.Context, clusterID uuid.UUID, scanID 
 		// No config = feature disabled for this cluster.
 		return
 	}
-	if !cfg.Enabled || len(cfg.ChannelIds) == 0 {
+	if !cfg.Enabled {
+		return
+	}
+
+	// Read channels from the join table — the single source of truth.
+	// The legacy cfg.ChannelIds array column was dropped in 4.8c (mig 058).
+	channelIDs, err := n.queries.ListCVENotificationConfigChannels(ctx, clusterID)
+	if err != nil {
+		n.logger.Warn("failed to list cve notification channels", "cluster_id", clusterID, "error", err)
+		return
+	}
+	if len(channelIDs) == 0 {
 		return
 	}
 
@@ -124,11 +135,11 @@ func (n *Notifier) MaybeNotify(ctx context.Context, clusterID uuid.UUID, scanID 
 		ResourceName: clusterName,
 		ClusterID:    clusterID.String(),
 		Message:      message,
-		FiredAt:      time.Now().UTC().Format(time.RFC3339),
+		FiredAt:      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	dispatched := 0
-	for _, channelID := range cfg.ChannelIds {
+	for _, channelID := range channelIDs {
 		if n.dispatch(ctx, channelID, payload) {
 			dispatched++
 		}

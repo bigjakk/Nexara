@@ -33,32 +33,84 @@ type Scheduler struct {
 	reportGen     *reports.Generator
 	rollingOrch   *rolling.Orchestrator
 	eventPub      *events.Publisher
+	cache         *proxmox.ClientCache // nil-safe; passed through to sub-engines
 	drsLastEval   map[uuid.UUID]time.Time
 }
 
-// New creates a new Scheduler.
-func New(queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
-	registry := newDispatcherRegistry(queries)
+// New creates a new Scheduler. shutdownCtx should be the per-server context
+// cancelled on SIGTERM; it's threaded into the DRS executor and rolling
+// orchestrator so detached goroutines they spawn (poll loops, SSH upgrades)
+// abort cleanly on graceful shutdown instead of orphaning past the process.
+func New(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
+	registry := notifications.BuildRegistry(queries)
 	return &Scheduler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		logger:        logger,
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
-		drsExecutor:   drs.NewExecutor(queries, logger.With("component", "drs-executor"), eventPub),
+		drsExecutor:   drs.NewExecutor(shutdownCtx, queries, logger.With("component", "drs-executor"), eventPub),
 		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner"), registry),
-		alertEngine:   notifications.NewEngine(queries, logger.With("component", "alert-engine"), eventPub, registry, encryptionKey),
+		alertEngine:   notifications.NewEngine(shutdownCtx, queries, logger.With("component", "alert-engine"), eventPub, registry, encryptionKey),
 		reportGen:     reports.NewGenerator(queries, logger.With("component", "report-gen")),
-		rollingOrch:   rolling.NewOrchestrator(queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry),
+		rollingOrch:   rolling.NewOrchestrator(shutdownCtx, queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry),
 		eventPub:      eventPub,
 		drsLastEval:   make(map[uuid.UUID]time.Time),
 	}
 }
 
-// Run finds all due tasks and executes them.
+// taskClaimGuardSeconds is how far we push next_run_at into the future
+// when claiming a task. This prevents a re-pickup by a subsequent tick
+// (or another scheduler instance during a leader-takeover overlap) while
+// the run is in flight; the completion path overwrites next_run_at with
+// the real cron-computed value via UpdateTaskLastRun.
+//
+// taskClaimStaleSeconds is how long after the claim we allow the row to
+// be reclaimed by another scheduler. Crash recovery: a process that
+// takes the claim and dies stops heartbeating last_run_at; once the
+// claim ages out, the row becomes eligible again so the task isn't
+// stuck in 'running' forever. Set wider than typical task duration but
+// narrow enough that a crashed leader's tasks resume on the new leader.
+const (
+	taskClaimGuardSeconds = 600 // 10 minutes
+	taskClaimStaleSeconds = 600 // 10 minutes
+)
+
+// dueTaskClaimer is the subset of db.Querier used by claimDueTasks.
+// Carved out so the param wiring (guard/stale) and error pass-through
+// can be unit-tested with a small fake without touching the rest of
+// the scheduler graph.
+type dueTaskClaimer interface {
+	ClaimDueTasks(ctx context.Context, arg db.ClaimDueTasksParams) ([]db.ScheduledTask, error)
+}
+
+// claimDueTasks invokes ClaimDueTasks with the standard guard/stale
+// constants. Extracted from Run() so tests can verify the params
+// without spinning up a live Postgres.
+func claimDueTasks(ctx context.Context, claimer dueTaskClaimer) ([]db.ScheduledTask, error) {
+	return claimer.ClaimDueTasks(ctx, db.ClaimDueTasksParams{
+		GuardSeconds: taskClaimGuardSeconds,
+		StaleSeconds: taskClaimStaleSeconds,
+	})
+}
+
+// Run finds all due tasks and executes them. Uses an atomic claim
+// (SELECT ... FOR UPDATE SKIP LOCKED + status=running + bumped
+// next_run_at) so that the same task can't be picked up twice by
+// concurrent ticks or by overlapping scheduler instances during a
+// leader-takeover window.
 func (s *Scheduler) Run(ctx context.Context) {
-	tasks, err := s.queries.ListDueTasks(ctx)
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("scheduler Run panicked", "panic", r)
+		}
+	}()
+
+	tasks, err := claimDueTasks(ctx, s.queries)
 	if err != nil {
-		s.logger.Error("failed to list due tasks", "error", err)
+		s.logger.Error("failed to claim due tasks", "error", err)
 		return
 	}
 
@@ -154,6 +206,10 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 // (~1500 entries) and updated multiple times per week — refreshing hourly is
 // cheap and keeps the "actively exploited" signal current. Best-effort:
 // failures are logged but don't impact scans (existing cache stays usable).
+//
+// Reuses the scanner Engine's shared KEV client (and its underlying HTTP
+// client) so the hourly refresh and the per-cluster scan share a connection
+// pool, redirect policy, and SSRF dial guard.
 func (s *Scheduler) RunKEVRefresh(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -161,7 +217,7 @@ func (s *Scheduler) RunKEVRefresh(ctx context.Context) {
 		}
 	}()
 
-	kev := scanner.NewKEVClient(s.queries, s.logger.With("component", "kev-client"))
+	kev := s.cveScanner.KEVClient()
 	written, err := kev.Refresh(ctx)
 	if err != nil {
 		s.logger.Warn("KEV refresh failed", "error", err)
@@ -348,7 +404,37 @@ func (s *Scheduler) executeReboot(ctx context.Context, client *proxmox.Client, t
 	}
 }
 
+// SetProxmoxCache attaches the per-server cache so createClient can
+// reuse cached *Client instances. Also propagates the cache to the DRS,
+// CVE, and rolling-update sub-engines that build Proxmox clients of
+// their own. drsExecutor is intentionally NOT included: it takes a
+// *Client as a parameter (built by Engine.createClient) rather than
+// constructing one itself. The notifications alertEngine never talks
+// to the Proxmox API (alerts evaluate against DB metrics), so it is
+// also excluded. Nil-safe.
+func (s *Scheduler) SetProxmoxCache(cache *proxmox.ClientCache) {
+	s.cache = cache
+	if s.drsEngine != nil {
+		s.drsEngine.SetProxmoxCache(cache)
+	}
+	if s.cveScanner != nil {
+		s.cveScanner.SetProxmoxCache(cache)
+	}
+	if s.rollingOrch != nil {
+		s.rollingOrch.SetProxmoxCache(cache)
+	}
+}
+
 func (s *Scheduler) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
+	if s.cache != nil {
+		client, err := s.cache.Get(ctx, clusterID)
+		if err == nil {
+			return client, nil
+		}
+		s.logger.Warn("scheduler: proxmox cache get failed, building per-call",
+			"cluster_id", clusterID, "error", err)
+	}
+
 	cluster, err := s.queries.GetCluster(ctx, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
@@ -525,25 +611,6 @@ func (s *Scheduler) RunRollingUpdates(ctx context.Context) {
 // RollingOrchestrator returns the rolling update orchestrator for use by API handlers.
 func (s *Scheduler) RollingOrchestrator() *rolling.Orchestrator {
 	return s.rollingOrch
-}
-
-// newDispatcherRegistry creates a registry with all notification dispatchers.
-//
-// IMPORTANT: This function is duplicated in `internal/api/server.go`. When
-// adding a new dispatcher, register it in BOTH files. The duplication exists
-// because the API server and the scheduler both need to dispatch alerts and
-// we don't want a circular import between the two packages.
-func newDispatcherRegistry(queries *db.Queries) *notifications.Registry {
-	r := notifications.NewRegistry()
-	r.Register(&notifications.SMTPDispatcher{})
-	r.Register(&notifications.SlackDispatcher{})
-	r.Register(&notifications.DiscordDispatcher{})
-	r.Register(&notifications.TeamsDispatcher{})
-	r.Register(&notifications.TelegramDispatcher{})
-	r.Register(&notifications.WebhookDispatcher{})
-	r.Register(&notifications.PagerDutyDispatcher{})
-	r.Register(notifications.NewExpoPushDispatcher(queries))
-	return r
 }
 
 // mustAtoi converts a string to int, returning 0 on failure.

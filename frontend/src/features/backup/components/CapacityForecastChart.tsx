@@ -12,14 +12,8 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePBSDatastoreMetrics } from "../api/backup-queries";
+import { formatBytes } from "@/lib/format";
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i] ?? ""}`;
-}
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -182,8 +176,8 @@ export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartPro
             />
             <Tooltip
               labelFormatter={(label) => new Date(Number(label)).toLocaleString()}
-              formatter={(value: number | undefined, name: string | undefined) => [
-                formatBytes(value ?? 0),
+              formatter={(value: unknown, name: unknown) => [
+                formatBytes(typeof value === "number" ? value : Number(value ?? 0)),
                 name === "used" ? "Used" : name === "forecast" ? "Forecast" : "Total",
               ]}
               contentStyle={{

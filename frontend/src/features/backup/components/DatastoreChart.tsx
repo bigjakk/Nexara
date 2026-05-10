@@ -11,14 +11,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePBSDatastoreMetrics } from "../api/backup-queries";
 import type { PBSDatastoreMetric } from "../types/backup";
+import { formatBytes } from "@/lib/format";
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i] ?? ""}`;
-}
 
 const TIMEFRAMES = ["1h", "6h", "24h", "7d"] as const;
 type Timeframe = (typeof TIMEFRAMES)[number];
@@ -91,8 +85,8 @@ export function DatastoreChart({ pbsId }: DatastoreChartProps) {
                 tickFormatter={(v: number) => formatBytes(v)}
               />
               <Tooltip
-                formatter={(value: number | undefined) =>
-                  value != null ? formatBytes(value) : "0"
+                formatter={(value: unknown) =>
+                  typeof value === "number" ? formatBytes(value) : "0"
                 }
               />
               <Area

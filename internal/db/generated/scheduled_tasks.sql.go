@@ -13,6 +13,79 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimDueTasks = `-- name: ClaimDueTasks :many
+WITH due AS (
+    SELECT id FROM scheduled_tasks
+    WHERE enabled = true
+      AND (next_run_at IS NULL OR next_run_at <= now())
+      AND (
+          last_status IS DISTINCT FROM 'running'
+          OR last_run_at IS NULL
+          OR last_run_at < now() - make_interval(secs => $2::float)
+      )
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE scheduled_tasks st
+SET last_status = 'running',
+    last_run_at = now(),
+    next_run_at = now() + make_interval(secs => $1::float),
+    updated_at  = now()
+FROM due
+WHERE st.id = due.id
+RETURNING st.id, st.cluster_id, st.resource_type, st.resource_id, st.node, st.action, st.schedule, st.params, st.enabled, st.last_run_at, st.next_run_at, st.last_status, st.last_error, st.created_at, st.updated_at
+`
+
+type ClaimDueTasksParams struct {
+	GuardSeconds float64 `json:"guard_seconds"`
+	StaleSeconds float64 `json:"stale_seconds"`
+}
+
+// Atomically claims due tasks so concurrent schedulers (e.g. during leader
+// takeover) don't double-run the same row. SKIP LOCKED makes each
+// competing transaction return a disjoint set without blocking. Inside the
+// claim we mark last_status='running' and bump next_run_at past the
+// guard window so even after the transaction commits the row won't
+// re-match the due predicate until either (a) the run finishes and the
+// caller writes the real next_run_at via UpdateTaskLastRun or (b) the
+// claim goes stale (caller crashed) and the stale-recovery branch picks
+// it up again. stale_seconds = reclaim threshold for crashed claimants;
+// guard_seconds = how far to bump next_run_at upfront.
+func (q *Queries) ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error) {
+	rows, err := q.db.Query(ctx, claimDueTasks, arg.GuardSeconds, arg.StaleSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ScheduledTask{}
+	for rows.Next() {
+		var i ScheduledTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.Node,
+			&i.Action,
+			&i.Schedule,
+			&i.Params,
+			&i.Enabled,
+			&i.LastRunAt,
+			&i.NextRunAt,
+			&i.LastStatus,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteScheduledTask = `-- name: DeleteScheduledTask :exec
 DELETE FROM scheduled_tasks WHERE id = $1
 `
@@ -98,47 +171,6 @@ func (q *Queries) InsertScheduledTask(ctx context.Context, arg InsertScheduledTa
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const listDueTasks = `-- name: ListDueTasks :many
-SELECT id, cluster_id, resource_type, resource_id, node, action, schedule, params, enabled, last_run_at, next_run_at, last_status, last_error, created_at, updated_at FROM scheduled_tasks
-WHERE enabled = true AND (next_run_at IS NULL OR next_run_at <= now())
-`
-
-func (q *Queries) ListDueTasks(ctx context.Context) ([]ScheduledTask, error) {
-	rows, err := q.db.Query(ctx, listDueTasks)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ScheduledTask{}
-	for rows.Next() {
-		var i ScheduledTask
-		if err := rows.Scan(
-			&i.ID,
-			&i.ClusterID,
-			&i.ResourceType,
-			&i.ResourceID,
-			&i.Node,
-			&i.Action,
-			&i.Schedule,
-			&i.Params,
-			&i.Enabled,
-			&i.LastRunAt,
-			&i.NextRunAt,
-			&i.LastStatus,
-			&i.LastError,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listScheduledTasksByCluster = `-- name: ListScheduledTasksByCluster :many

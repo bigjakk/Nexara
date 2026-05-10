@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/api/handlers"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -31,6 +32,17 @@ func (s *Server) setupMiddleware() {
 		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		return c.Next()
 	})
+
+	// Expose the shared Proxmox client cache to every request so
+	// handlers.CreateProxmoxClient routes through it. Nil-safe: when
+	// proxmoxCache is unset (no encryption key, test scaffolding) the
+	// helper falls through to per-call construction.
+	if s.proxmoxCache != nil {
+		s.app.Use(func(c *fiber.Ctx) error {
+			handlers.SetProxmoxCacheLocal(c, s.proxmoxCache)
+			return c.Next()
+		})
+	}
 
 	// Add unique request ID.
 	s.app.Use(requestid.New())
@@ -65,8 +77,12 @@ func (s *Server) setupMiddleware() {
 		return c.Next()
 	})
 
-	// Strict rate limiter for login/register — 15 attempts per minute per IP.
-	// Applied before the general limiter so auth brute-force is caught early.
+	// Strict rate limiter for login/register and TOTP code-validating paths
+	// — 15 attempts per minute per IP. Applied before the general limiter so
+	// auth brute-force is caught early. Includes Disable and
+	// RegenerateRecoveryCodes because both validate a TOTP code; without this,
+	// an attacker holding a stolen access token would have no per-IP cap and
+	// only the per-user lockout (5 fails / 5 min cooldown) — see Phase 4.4.
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        15,
 		Expiration: 1 * time.Minute,
@@ -74,10 +90,48 @@ func (s *Server) setupMiddleware() {
 			return c.IP() + ":auth"
 		},
 		Next: func(c *fiber.Ctx) bool {
-			p := c.Path()
-			return p != "/api/v1/auth/login" &&
-				p != "/api/v1/auth/register" &&
-				p != "/api/v1/auth/totp/verify-login"
+			switch c.Path() {
+			case "/api/v1/auth/login",
+				"/api/v1/auth/register",
+				"/api/v1/auth/totp/verify-login",
+				"/api/v1/auth/totp",
+				"/api/v1/auth/totp/",
+				"/api/v1/auth/totp/recovery-codes/regenerate":
+				return false
+			}
+			return true
+		},
+	}))
+
+	// Refresh-specific rate limiter — 30/min/IP. Tighter than the general
+	// limiter because /auth/refresh is below the general bypass; comfortably
+	// above any legitimate pattern (proactive refresh fires once every ~14
+	// minutes per session). Caps cookie-replay grinding without breaking
+	// normal browser sessions.
+	s.app.Use(limiter.New(limiter.Config{
+		Max:        30,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP() + ":refresh"
+		},
+		Next: func(c *fiber.Ctx) bool {
+			return c.Path() != "/api/v1/auth/refresh"
+		},
+	}))
+
+	// WS-token mint limiter — 60/min/IP. Each /ws connection mints one
+	// token; legitimate reconnect/backoff is well under 1/sec. The
+	// limiter sits inside the auth-bypassed group, so without this an
+	// authenticated user could fire mints in a tight loop. Per-IP
+	// (vs per-user) because limiter middleware runs before authRequired.
+	s.app.Use(limiter.New(limiter.Config{
+		Max:        60,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP() + ":ws-token"
+		},
+		Next: func(c *fiber.Ctx) bool {
+			return c.Path() != "/api/v1/auth/ws-token"
 		},
 	}))
 
@@ -126,6 +180,11 @@ func (s *Server) authRequired() fiber.Handler {
 		if claims.ConsoleScope != nil {
 			return fiber.NewError(fiber.StatusUnauthorized, "Console-scoped token cannot be used for API requests")
 		}
+		// Same logic for WS-hub-scoped tokens — they only authorize the
+		// /ws upgrade, never an API request.
+		if claims.WSScope != "" {
+			return fiber.NewError(fiber.StatusUnauthorized, "WS-scoped token cannot be used for API requests")
+		}
 
 		c.Locals("user_id", claims.UserID)
 		c.Locals("email", claims.Email)
@@ -165,8 +224,8 @@ func (s *Server) authOptional() fiber.Handler {
 			return c.Next()
 		}
 
-		// Scoped console tokens must not be treated as general-purpose auth.
-		if claims.ConsoleScope != nil {
+		// Scoped console / WS-hub tokens must not be treated as general-purpose auth.
+		if claims.ConsoleScope != nil || claims.WSScope != "" {
 			return c.Next()
 		}
 

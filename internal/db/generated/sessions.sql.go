@@ -14,9 +14,9 @@ import (
 )
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at, device_name, device_type, device_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id
+INSERT INTO sessions (user_id, token_hash, user_agent, ip_address, expires_at, device_name, device_type, device_id, user_role)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id, user_role
 `
 
 type CreateSessionParams struct {
@@ -28,6 +28,7 @@ type CreateSessionParams struct {
 	DeviceName pgtype.Text `json:"device_name"`
 	DeviceType pgtype.Text `json:"device_type"`
 	DeviceID   pgtype.Text `json:"device_id"`
+	UserRole   string      `json:"user_role"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
@@ -40,6 +41,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.DeviceName,
 		arg.DeviceType,
 		arg.DeviceID,
+		arg.UserRole,
 	)
 	var i Session
 	err := row.Scan(
@@ -55,6 +57,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.DeviceName,
 		&i.DeviceType,
 		&i.DeviceID,
+		&i.UserRole,
 	)
 	return i, err
 }
@@ -69,7 +72,7 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id FROM sessions WHERE id = $1
+SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id, user_role FROM sessions WHERE id = $1
 `
 
 func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error) {
@@ -88,12 +91,13 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, er
 		&i.DeviceName,
 		&i.DeviceType,
 		&i.DeviceID,
+		&i.UserRole,
 	)
 	return i, err
 }
 
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
-SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id FROM sessions WHERE token_hash = $1 AND is_revoked = false
+SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id, user_role FROM sessions WHERE token_hash = $1 AND is_revoked = false
 `
 
 func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error) {
@@ -112,12 +116,13 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (
 		&i.DeviceName,
 		&i.DeviceType,
 		&i.DeviceID,
+		&i.UserRole,
 	)
 	return i, err
 }
 
 const listUserSessions = `-- name: ListUserSessions :many
-SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id FROM sessions WHERE user_id = $1 AND is_revoked = false AND expires_at > now()
+SELECT id, user_id, token_hash, user_agent, ip_address, is_revoked, created_at, expires_at, last_used_at, device_name, device_type, device_id, user_role FROM sessions WHERE user_id = $1 AND is_revoked = false AND expires_at > now()
 ORDER BY created_at DESC
 `
 
@@ -143,6 +148,7 @@ func (q *Queries) ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Ses
 			&i.DeviceName,
 			&i.DeviceType,
 			&i.DeviceID,
+			&i.UserRole,
 		); err != nil {
 			return nil, err
 		}
@@ -173,15 +179,16 @@ func (q *Queries) RevokeSession(ctx context.Context, id uuid.UUID) error {
 }
 
 const updateSessionTokenHash = `-- name: UpdateSessionTokenHash :exec
-UPDATE sessions SET token_hash = $2, last_used_at = now() WHERE id = $1
+UPDATE sessions SET token_hash = $2, user_role = $3, last_used_at = now() WHERE id = $1
 `
 
 type UpdateSessionTokenHashParams struct {
 	ID        uuid.UUID `json:"id"`
 	TokenHash string    `json:"token_hash"`
+	UserRole  string    `json:"user_role"`
 }
 
 func (q *Queries) UpdateSessionTokenHash(ctx context.Context, arg UpdateSessionTokenHashParams) error {
-	_, err := q.db.Exec(ctx, updateSessionTokenHash, arg.ID, arg.TokenHash)
+	_, err := q.db.Exec(ctx, updateSessionTokenHash, arg.ID, arg.TokenHash, arg.UserRole)
 	return err
 }

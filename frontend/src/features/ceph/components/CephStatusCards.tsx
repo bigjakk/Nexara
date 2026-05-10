@@ -2,19 +2,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Activity, HardDrive, Database, Gauge } from "lucide-react";
 import { CephHealthBadge } from "./CephHealthBadge";
 import type { CephStatus } from "../types/ceph";
+import { formatBytes } from "@/lib/format";
 
 interface CephStatusCardsProps {
   status: CephStatus;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const k = 1024;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const idx = Math.min(i, units.length - 1);
-  return `${(bytes / Math.pow(k, idx)).toFixed(1)} ${units[idx] ?? "?"}`;
-}
 
 function formatOps(ops: number): string {
   if (ops >= 1000000) return `${(ops / 1000000).toFixed(1)}M`;

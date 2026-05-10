@@ -34,11 +34,11 @@ func (h *ReplicationHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourc
 
 // ListJobs handles GET /clusters/:cluster_id/replication.
 func (h *ReplicationHandler) ListJobs(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "replication"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "replication", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -54,11 +54,11 @@ func (h *ReplicationHandler) ListJobs(c *fiber.Ctx) error {
 
 // CreateJob handles POST /clusters/:cluster_id/replication.
 func (h *ReplicationHandler) CreateJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "replication"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "replication", clusterID); err != nil {
 		return err
 	}
 	var req proxmox.CreateReplicationJobParams
@@ -86,11 +86,11 @@ func (h *ReplicationHandler) CreateJob(c *fiber.Ctx) error {
 
 // GetJob handles GET /clusters/:cluster_id/replication/:job_id.
 func (h *ReplicationHandler) GetJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "replication"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "replication", clusterID); err != nil {
 		return err
 	}
 	jobID := c.Params("job_id")
@@ -107,11 +107,11 @@ func (h *ReplicationHandler) GetJob(c *fiber.Ctx) error {
 
 // UpdateJob handles PUT /clusters/:cluster_id/replication/:job_id.
 func (h *ReplicationHandler) UpdateJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "replication"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "replication", clusterID); err != nil {
 		return err
 	}
 	jobID := c.Params("job_id")
@@ -134,11 +134,11 @@ func (h *ReplicationHandler) UpdateJob(c *fiber.Ctx) error {
 
 // DeleteJob handles DELETE /clusters/:cluster_id/replication/:job_id.
 func (h *ReplicationHandler) DeleteJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "replication"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "replication", clusterID); err != nil {
 		return err
 	}
 	jobID := c.Params("job_id")
@@ -157,11 +157,11 @@ func (h *ReplicationHandler) DeleteJob(c *fiber.Ctx) error {
 
 // TriggerSync handles POST /clusters/:cluster_id/replication/:job_id/trigger.
 func (h *ReplicationHandler) TriggerSync(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "replication"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "replication", clusterID); err != nil {
 		return err
 	}
 	jobID := c.Params("job_id")
@@ -184,11 +184,11 @@ func (h *ReplicationHandler) TriggerSync(c *fiber.Ctx) error {
 
 // GetStatus handles GET /clusters/:cluster_id/replication/:job_id/status.
 func (h *ReplicationHandler) GetStatus(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "replication"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "replication", clusterID); err != nil {
 		return err
 	}
 	jobID := c.Params("job_id")
@@ -209,11 +209,11 @@ func (h *ReplicationHandler) GetStatus(c *fiber.Ctx) error {
 
 // GetLog handles GET /clusters/:cluster_id/replication/:job_id/log.
 func (h *ReplicationHandler) GetLog(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "replication"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "replication", clusterID); err != nil {
 		return err
 	}
 	jobID := c.Params("job_id")

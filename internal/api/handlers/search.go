@@ -34,10 +34,16 @@ type searchResult struct {
 }
 
 // GlobalSearch handles GET /api/v1/search?q=...
+//
+// Results are filtered per-row against the caller's view:cluster permissions
+// so users with cluster-scoped roles only see entries in clusters they have
+// access to. A caller with no clusters in scope receives an empty list.
 func (h *SearchHandler) GlobalSearch(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
+	access, err := accessibleClusters(c, "view", "cluster")
+	if err != nil {
 		return err
 	}
+
 	query := strings.TrimSpace(c.Query("q"))
 	if query == "" || len(query) < 2 {
 		return c.JSON([]searchResult{})
@@ -53,6 +59,9 @@ func (h *SearchHandler) GlobalSearch(c *fiber.Ctx) error {
 		nodeNames := make(map[string]string)
 
 		for _, vm := range allVMs {
+			if !access.PermitsCluster(vm.ClusterID) {
+				continue
+			}
 			nameLower := strings.ToLower(vm.Name)
 			vmidStr := fmt.Sprintf("%d", vm.Vmid)
 			if strings.Contains(nameLower, queryLower) || strings.Contains(vmidStr, queryLower) {
@@ -92,6 +101,9 @@ func (h *SearchHandler) GlobalSearch(c *fiber.Ctx) error {
 	clusters, err := h.queries.ListClusters(c.Context())
 	if err == nil {
 		for _, cluster := range clusters {
+			if !access.PermitsCluster(cluster.ID) {
+				continue
+			}
 			// Nodes.
 			nodes, nodeErr := h.queries.ListNodesByCluster(c.Context(), cluster.ID)
 			if nodeErr == nil {
@@ -149,6 +161,9 @@ func (h *SearchHandler) GlobalSearch(c *fiber.Ctx) error {
 
 	// Search clusters themselves.
 	for _, cluster := range clusters {
+		if !access.PermitsCluster(cluster.ID) {
+			continue
+		}
 		if strings.Contains(strings.ToLower(cluster.Name), queryLower) {
 			results = append(results, searchResult{
 				Type:        "cluster",

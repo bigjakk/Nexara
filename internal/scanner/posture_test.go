@@ -20,7 +20,7 @@ func TestComputePostureScoreAnchors(t *testing.T) {
 		{"hundred lows", 0, 0, 0, 100, 0, 85, 88},
 		{"hundred unknowns", 0, 0, 0, 0, 100, 85, 88},
 		{"thousand lows do not floor", 0, 0, 0, 1000, 0, 78, 82},
-		{"crjlab actual", 0, 0, 3, 96, 18, 65, 72},
+		{"realistic mix", 0, 0, 3, 96, 18, 65, 72},
 		{"five criticals", 5, 0, 0, 0, 0, 32, 38},
 		// Quantity flooding doesn't beat severity:
 		{"100 lows still scores higher than 1 critical",

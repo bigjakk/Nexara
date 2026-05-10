@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -54,7 +55,7 @@ type ldapConfigRequest struct {
 	GroupSearchBaseDN    string            `json:"group_search_base_dn"`
 	GroupFilter          string            `json:"group_filter"`
 	GroupAttribute       string            `json:"group_attribute"`
-	GroupRoleMapping      map[string]string `json:"group_role_mapping"`
+	GroupRoleMapping     map[string]string `json:"group_role_mapping"`
 	DefaultRoleID        *string           `json:"default_role_id"`
 	SyncIntervalMinutes  int32             `json:"sync_interval_minutes"`
 }
@@ -76,7 +77,7 @@ type ldapConfigResponse struct {
 	GroupSearchBaseDN    string            `json:"group_search_base_dn"`
 	GroupFilter          string            `json:"group_filter"`
 	GroupAttribute       string            `json:"group_attribute"`
-	GroupRoleMapping      map[string]string `json:"group_role_mapping"`
+	GroupRoleMapping     map[string]string `json:"group_role_mapping"`
 	DefaultRoleID        *string           `json:"default_role_id"`
 	SyncIntervalMinutes  int32             `json:"sync_interval_minutes"`
 	LastSyncAt           *string           `json:"last_sync_at"`
@@ -103,8 +104,8 @@ func toLDAPConfigResponse(cfg db.LdapConfig) ldapConfigResponse {
 		GroupFilter:          cfg.GroupFilter,
 		GroupAttribute:       cfg.GroupAttribute,
 		SyncIntervalMinutes:  cfg.SyncIntervalMinutes,
-		CreatedAt:            cfg.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:            cfg.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:            cfg.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:            cfg.UpdatedAt.Format(time.RFC3339Nano),
 	}
 
 	// Parse group_role_mapping from JSONB
@@ -121,7 +122,7 @@ func toLDAPConfigResponse(cfg db.LdapConfig) ldapConfigResponse {
 	}
 
 	if cfg.LastSyncAt.Valid {
-		s := cfg.LastSyncAt.Time.Format("2006-01-02T15:04:05Z07:00")
+		s := cfg.LastSyncAt.Time.Format(time.RFC3339Nano)
 		resp.LastSyncAt = &s
 	}
 
@@ -515,9 +516,9 @@ func (h *LDAPHandler) Sync(c *fiber.Ctx) error {
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "ldap", id.String(), "ldap_sync", details)
 
 	return c.JSON(fiber.Map{
-		"message":      "Sync complete",
-		"users_synced": synced,
-		"users_disabled": disabled,
+		"message":          "Sync complete",
+		"users_synced":     synced,
+		"users_disabled":   disabled,
 		"users_re_enabled": reEnabled,
 	})
 }

@@ -69,13 +69,13 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 		ExitStatus:  t.ExitStatus,
 		Node:        t.Node,
 		TaskType:    t.TaskType,
-		StartedAt:   t.StartedAt.Format(time.RFC3339),
+		StartedAt:   t.StartedAt.Format(time.RFC3339Nano),
 	}
 	if t.Progress.Valid {
 		resp.Progress = &t.Progress.Float64
 	}
 	if t.FinishedAt.Valid {
-		s := t.FinishedAt.Time.Format(time.RFC3339)
+		s := t.FinishedAt.Time.Format(time.RFC3339Nano)
 		resp.FinishedAt = &s
 	}
 	return resp
@@ -83,7 +83,8 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 
 // List returns task history for all users (includes DRS/system tasks).
 func (h *TaskHandler) List(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "task"); err != nil {
+	access, err := accessibleClusters(c, "view", "task")
+	if err != nil {
 		return err
 	}
 
@@ -92,19 +93,18 @@ func (h *TaskHandler) List(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list tasks")
 	}
 
-	result := make([]taskResponse, len(tasks))
-	for i, t := range tasks {
-		result[i] = mapTaskHistory(t)
+	result := make([]taskResponse, 0, len(tasks))
+	for _, t := range tasks {
+		if !access.PermitsCluster(t.ClusterID) {
+			continue
+		}
+		result = append(result, mapTaskHistory(t))
 	}
 	return c.JSON(result)
 }
 
 // Create creates a new task history record.
 func (h *TaskHandler) Create(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "task"); err != nil {
-		return err
-	}
-
 	uid, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid user")
@@ -118,6 +118,12 @@ func (h *TaskHandler) Create(c *fiber.Ctx) error {
 	clusterID, err := uuid.Parse(req.ClusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+	}
+
+	// Per-cluster gate so a user with manage:task scoped to cluster X
+	// cannot insert task records claiming cluster Y.
+	if err := requireClusterPerm(c, "manage", "task", clusterID); err != nil {
+		return err
 	}
 
 	if req.UPID == "" {
@@ -149,10 +155,6 @@ func (h *TaskHandler) Create(c *fiber.Ctx) error {
 
 // Update updates a task history record by UPID.
 func (h *TaskHandler) Update(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "task"); err != nil {
-		return err
-	}
-
 	rawUPID := c.Params("upid")
 	if rawUPID == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "upid is required")
@@ -162,6 +164,15 @@ func (h *TaskHandler) Update(c *fiber.Ctx) error {
 	upid, err := url.PathUnescape(rawUPID)
 	if err != nil {
 		upid = rawUPID
+	}
+
+	// Look up the task to find its cluster, then gate on per-cluster perm.
+	task, err := h.queries.GetTaskByUpid(c.Context(), upid)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "Task not found")
+	}
+	if err := requireClusterPerm(c, "manage", "task", task.ClusterID); err != nil {
+		return err
 	}
 
 	var req updateTaskRequest
@@ -196,7 +207,12 @@ func (h *TaskHandler) Update(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// ClearCompleted deletes all completed/failed tasks.
+// ClearCompleted deletes all completed/failed tasks across every cluster.
+//
+// Because the underlying delete is unscoped (and adding a per-user cluster
+// filter would require an array-of-uuid SQL parameter), this stays gated on
+// global manage:task — i.e. effectively admin-only. A user with manage:task
+// scoped only to cluster X cannot wipe history that includes cluster Y.
 func (h *TaskHandler) ClearCompleted(c *fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "task"); err != nil {
 		return err

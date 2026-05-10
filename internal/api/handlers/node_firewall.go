@@ -10,11 +10,11 @@ import (
 
 // ListNodeFirewallRules handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules.
 func (h *NodeHandler) ListNodeFirewallRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "firewall"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "firewall", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -62,11 +62,11 @@ func (r nodeFirewallRuleRequest) toParams() proxmox.FirewallRuleParams {
 
 // CreateNodeFirewallRule handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules.
 func (h *NodeHandler) CreateNodeFirewallRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "firewall", clusterID); err != nil {
 		return err
 	}
 	var req nodeFirewallRuleRequest
@@ -90,11 +90,11 @@ func (h *NodeHandler) CreateNodeFirewallRule(c *fiber.Ctx) error {
 
 // UpdateNodeFirewallRule handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules/:pos.
 func (h *NodeHandler) UpdateNodeFirewallRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "firewall", clusterID); err != nil {
 		return err
 	}
 	pos, err := strconv.Atoi(c.Params("pos"))
@@ -119,11 +119,11 @@ func (h *NodeHandler) UpdateNodeFirewallRule(c *fiber.Ctx) error {
 
 // DeleteNodeFirewallRule handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules/:pos.
 func (h *NodeHandler) DeleteNodeFirewallRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "firewall"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "firewall", clusterID); err != nil {
 		return err
 	}
 	pos, err := strconv.Atoi(c.Params("pos"))
@@ -143,11 +143,11 @@ func (h *NodeHandler) DeleteNodeFirewallRule(c *fiber.Ctx) error {
 
 // GetNodeFirewallLog handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/log.
 func (h *NodeHandler) GetNodeFirewallLog(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "firewall"); err != nil {
-		return err
-	}
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "firewall", clusterID); err != nil {
 		return err
 	}
 	limit, _ := strconv.Atoi(c.Query("limit", "500"))

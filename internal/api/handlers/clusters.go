@@ -21,6 +21,7 @@ import (
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/netguard"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -51,6 +52,10 @@ type createClusterRequest struct {
 	TokenSecret         string `json:"token_secret"`
 	TLSFingerprint      string `json:"tls_fingerprint"`
 	SyncIntervalSeconds *int32 `json:"sync_interval_seconds"`
+	// AllowPrivateAddress, when true, lets the URL resolve to a private/
+	// loopback/link-local IP (typical homelab setup). Cloud metadata,
+	// unspecified, and multicast addresses are still rejected.
+	AllowPrivateAddress bool `json:"allow_private_address,omitempty"`
 }
 
 type updateClusterRequest struct {
@@ -61,6 +66,7 @@ type updateClusterRequest struct {
 	TLSFingerprint      *string `json:"tls_fingerprint"`
 	SyncIntervalSeconds *int32  `json:"sync_interval_seconds"`
 	IsActive            *bool   `json:"is_active"`
+	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
 }
 
 type clusterResponse struct {
@@ -147,8 +153,11 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
 	}
 
-	if err := validateURL(req.APIURL); err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	if err := validateURLFormat(req.APIURL); err != nil {
+		return err
+	}
+	if err := enforceURLAddressPolicy(c.Context(), req.APIURL, req.AllowPrivateAddress); err != nil {
+		return renderAddressPolicyError(c, err)
 	}
 
 	syncInterval := int32(30)
@@ -217,7 +226,8 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/clusters.
 func (h *ClusterHandler) List(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
+	access, err := accessibleClusters(c, "view", "cluster")
+	if err != nil {
 		return err
 	}
 
@@ -234,9 +244,12 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 		}
 	}
 
-	resp := make([]clusterResponse, len(clusters))
-	for i, cl := range clusters {
-		resp[i] = toClusterResponse(cl, nsiMap[cl.ID])
+	resp := make([]clusterResponse, 0, len(clusters))
+	for _, cl := range clusters {
+		if !access.PermitsCluster(cl.ID) {
+			continue
+		}
+		resp = append(resp, toClusterResponse(cl, nsiMap[cl.ID]))
 	}
 
 	return c.JSON(resp)
@@ -244,13 +257,12 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 
 // Get handles GET /api/v1/clusters/:id.
 func (h *ClusterHandler) Get(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "cluster"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	if err := requireClusterPerm(c, "view", "cluster", id); err != nil {
+		return err
 	}
 
 	cluster, err := h.queries.GetCluster(c.Context(), id)
@@ -276,13 +288,12 @@ func (h *ClusterHandler) Get(c *fiber.Ctx) error {
 
 // Update handles PUT /api/v1/clusters/:id.
 func (h *ClusterHandler) Update(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	if err := requireClusterPerm(c, "manage", "cluster", id); err != nil {
+		return err
 	}
 
 	var req updateClusterRequest
@@ -317,8 +328,11 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 		params.Name = *req.Name
 	}
 	if req.APIURL != nil {
-		if err := validateURL(*req.APIURL); err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		if err := validateURLFormat(*req.APIURL); err != nil {
+			return err
+		}
+		if err := enforceURLAddressPolicy(c.Context(), *req.APIURL, req.AllowPrivateAddress); err != nil {
+			return renderAddressPolicyError(c, err)
 		}
 		params.ApiUrl = *req.APIURL
 	}
@@ -348,6 +362,14 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 	cluster, err := h.queries.UpdateCluster(c.Context(), params)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update cluster")
+	}
+
+	// Drop any cached *proxmox.Client built from the prior credentials so
+	// the next API call rebuilds against the new BaseURL/TokenID/TokenSecret/
+	// fingerprint. Same channel fans out to peer replicas so a multi-replica
+	// deployment converges without waiting for cacheTTL.
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPVE, cluster.ID)
 	}
 
 	updateDetails, _ := json.Marshal(map[string]string{"name": cluster.Name})
@@ -381,13 +403,12 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 
 // Delete handles DELETE /api/v1/clusters/:id.
 func (h *ClusterHandler) Delete(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "cluster"); err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
+	if err := requireClusterPerm(c, "delete", "cluster", id); err != nil {
+		return err
 	}
 
 	// Verify the cluster exists.
@@ -403,6 +424,10 @@ func (h *ClusterHandler) Delete(c *fiber.Ctx) error {
 
 	if err := h.queries.DeleteCluster(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete cluster")
+	}
+
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPVE, id)
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)
@@ -450,17 +475,9 @@ func testClusterConnectivity(apiURL, tokenID, tokenSecret, tlsFingerprint string
 	}
 }
 
-// requireAdmin checks that the request was made by an admin user.
-func requireAdmin(c *fiber.Ctx) error {
-	role, _ := c.Locals("role").(string)
-	if role != "admin" {
-		return fiber.NewError(fiber.StatusForbidden, "Admin access required")
-	}
-	return nil
-}
-
 type fetchFingerprintRequest struct {
-	APIURL string `json:"api_url"`
+	APIURL              string `json:"api_url"`
+	AllowPrivateAddress bool   `json:"allow_private_address,omitempty"`
 }
 
 type fetchFingerprintResponse struct {
@@ -482,8 +499,11 @@ func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
 	if req.APIURL == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "api_url is required")
 	}
-	if err := validateURL(req.APIURL); err != nil {
+	if err := validateURLFormat(req.APIURL); err != nil {
 		return err
+	}
+	if err := enforceURLAddressPolicy(c.Context(), req.APIURL, req.AllowPrivateAddress); err != nil {
+		return renderAddressPolicyError(c, err)
 	}
 
 	u, _ := url.Parse(req.APIURL)
@@ -493,7 +513,13 @@ func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
 	}
 
 	// Connect with InsecureSkipVerify to get the certificate regardless of CA trust.
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	// The Control hook re-checks the resolved IP against the always-block set
+	// so a hostile DNS authority can't redirect us to cloud metadata between
+	// validation and dial.
+	dialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+		Control: netguard.DialControlSSRFGuard,
+	}
 	conn, err := tls.DialWithDialer(dialer, "tcp", host, &tls.Config{
 		InsecureSkipVerify: true, //nolint:gosec // Intentional: we're fetching the fingerprint for user verification
 		MinVersion:         tls.VersionTLS12,
@@ -534,20 +560,3 @@ func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
 	})
 }
 
-// validateURL checks that a string is a valid HTTPS URL with scheme and host.
-func validateURL(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid URL format")
-	}
-	if u.Scheme == "" || u.Host == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "URL must include scheme and host")
-	}
-	if u.Scheme != "https" {
-		return fiber.NewError(fiber.StatusBadRequest, "URL must use HTTPS scheme")
-	}
-	if u.User != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "URL must not contain credentials")
-	}
-	return nil
-}

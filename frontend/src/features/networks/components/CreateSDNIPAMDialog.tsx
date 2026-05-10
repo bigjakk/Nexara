@@ -80,7 +80,7 @@ export function CreateSDNIPAMDialog({
           Object.entries(params).filter(
             ([k]) => k !== "ipam" && k !== "type",
           ),
-        ) as Omit<CreateSDNIPAMRequest, "ipam" | "type">;
+        );
       update.mutate(
         { ipam: initialData.ipam, params: updateParams },
         { onSuccess: () => { setOpen(false); } },

@@ -27,6 +27,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge } from "./StatusBadge";
 import { ResourceTypeBadge } from "./ResourceTypeBadge";
+import { OSIcon } from "@/components/OSIcon";
+import { classifyOS } from "@/lib/os-classify";
 import { MetricMiniBar } from "./MetricMiniBar";
 import { SearchBar } from "./SearchBar";
 import { ColumnToggle } from "./ColumnToggle";
@@ -48,23 +50,9 @@ import {
   getDefaultColumnVisibility,
 } from "../lib/column-presets";
 import type { InventoryRow, ParsedQuery } from "../types/inventory";
+import { formatBytes, formatUptime } from "@/lib/format";
 
-function formatUptime(seconds: number): string {
-  if (seconds <= 0) return "--";
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  if (days > 0) return `${String(days)}d ${String(hours)}h`;
-  const mins = Math.floor((seconds % 3600) / 60);
-  return hours > 0 ? `${String(hours)}h ${String(mins)}m` : `${String(mins)}m`;
-}
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const val = bytes / Math.pow(1024, i);
-  return `${val.toFixed(val >= 100 ? 0 : 1)} ${units[i] ?? ""}`;
-}
 
 function toContextTarget(row: InventoryRow): VMContextTarget | null {
   if (row.type === "node" || row.vmid === null) return null;
@@ -263,10 +251,19 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
       ),
       enableSorting: false,
       enableHiding: false,
-    }) as ColumnDef<InventoryRow>,
+    }),
     columnHelper.accessor("type", {
       header: "Type",
-      cell: ({ row, getValue }) => <ResourceTypeBadge type={getValue()} template={row.original.template} />,
+      cell: ({ row, getValue }) => {
+        const r = row.original;
+        const showOS = (r.type === "vm" || r.type === "ct") && classifyOS(r.ostype) !== "unknown";
+        return (
+          <span className="inline-flex items-center gap-1.5">
+            <ResourceTypeBadge type={getValue()} template={r.template} />
+            {showOS && <OSIcon ostype={r.ostype} />}
+          </span>
+        );
+      },
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor("name", {

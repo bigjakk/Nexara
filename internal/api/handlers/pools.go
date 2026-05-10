@@ -33,11 +33,11 @@ func (h *PoolHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, 
 
 // ListPools handles GET /clusters/:cluster_id/pools.
 func (h *PoolHandler) ListPools(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "pool"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "pool", clusterID); err != nil {
 		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -53,11 +53,11 @@ func (h *PoolHandler) ListPools(c *fiber.Ctx) error {
 
 // CreatePool handles POST /clusters/:cluster_id/pools.
 func (h *PoolHandler) CreatePool(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "pool"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "pool", clusterID); err != nil {
 		return err
 	}
 	var req proxmox.CreatePoolParams
@@ -82,11 +82,11 @@ func (h *PoolHandler) CreatePool(c *fiber.Ctx) error {
 
 // GetPool handles GET /clusters/:cluster_id/pools/:pool_id.
 func (h *PoolHandler) GetPool(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "pool"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "pool", clusterID); err != nil {
 		return err
 	}
 	poolID := c.Params("pool_id")
@@ -106,11 +106,11 @@ func (h *PoolHandler) GetPool(c *fiber.Ctx) error {
 
 // UpdatePool handles PUT /clusters/:cluster_id/pools/:pool_id.
 func (h *PoolHandler) UpdatePool(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "pool"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "pool", clusterID); err != nil {
 		return err
 	}
 	poolID := c.Params("pool_id")
@@ -136,11 +136,11 @@ func (h *PoolHandler) UpdatePool(c *fiber.Ctx) error {
 
 // DeletePool handles DELETE /clusters/:cluster_id/pools/:pool_id.
 func (h *PoolHandler) DeletePool(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "pool"); err != nil {
-		return err
-	}
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "pool", clusterID); err != nil {
 		return err
 	}
 	poolID := c.Params("pool_id")

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/gofiber/fiber/v2"
@@ -73,8 +74,8 @@ func toMobileDeviceResponse(d db.MobileDevice) mobileDeviceResponse {
 		DeviceID:   d.DeviceID,
 		DeviceName: d.DeviceName,
 		Platform:   d.Platform,
-		LastSeenAt: d.LastSeenAt.Format("2006-01-02T15:04:05Z"),
-		CreatedAt:  d.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		LastSeenAt: d.LastSeenAt.Format(time.RFC3339Nano),
+		CreatedAt:  d.CreatedAt.Format(time.RFC3339Nano),
 	}
 }
 

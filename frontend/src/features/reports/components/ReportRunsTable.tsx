@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Eye, Download } from "lucide-react";
 import { useReportRuns } from "../api/report-queries";
+import { getValidAccessToken } from "@/lib/api-client";
 import type { ReportRun } from "@/types/api";
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
@@ -39,20 +40,18 @@ export function ReportRunsTable({ onPreview }: ReportRunsTableProps) {
   if (error) return <div className="py-8 text-center text-destructive">Failed to load report history: {error instanceof Error ? error.message : "Unknown error"}</div>;
   if (!runs?.length) return <div className="py-8 text-center text-muted-foreground">No report runs yet.</div>;
 
-  const handleDownloadCSV = (run: ReportRun) => {
-    const token = localStorage.getItem("access_token") ?? "";
-    const link = document.createElement("a");
-    // Use fetch to handle auth
-    void fetch(`/api/v1/reports/runs/${run.id}/csv`, {
+  const handleDownloadCSV = async (run: ReportRun) => {
+    const token = (await getValidAccessToken()) ?? "";
+    const res = await fetch(`/api/v1/reports/runs/${run.id}/csv`, {
       headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => res.blob())
-      .then((blob) => {
-        link.href = URL.createObjectURL(blob);
-        link.download = `report-${run.id}.csv`;
-        link.click();
-        URL.revokeObjectURL(link.href);
-      });
+      credentials: "same-origin",
+    });
+    const blob = await res.blob();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `report-${run.id}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   return (
@@ -106,7 +105,7 @@ export function ReportRunsTable({ onPreview }: ReportRunsTableProps) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => { handleDownloadCSV(run); }}
+                    onClick={() => { void handleDownloadCSV(run); }}
                     title="Download CSV"
                   >
                     <Download className="h-4 w-4" />

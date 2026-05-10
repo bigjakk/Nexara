@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/bigjakk/nexara/internal/netguard"
 )
 
 // maxResponseSize caps how much data we read from a Proxmox API response (50 MB).
@@ -78,6 +80,9 @@ func newAPIClient(cfg ClientConfig, authPrefix string) (*apiClient, error) {
 		DialContext: (&net.Dialer{
 			Timeout:   cfg.Timeout,
 			KeepAlive: 30 * time.Second,
+			// Block dialing to cloud metadata, multicast, broadcast, Class E,
+			// or unspecified IPs even if DNS resolves to one (rebinding defence).
+			Control: netguard.DialControlSSRFGuard,
 		}).DialContext,
 		MaxIdleConnsPerHost: 10,
 		IdleConnTimeout:     90 * time.Second,
@@ -87,12 +92,31 @@ func newAPIClient(cfg ClientConfig, authPrefix string) (*apiClient, error) {
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   cfg.Timeout,
+			// Surface any redirect as a caller-visible error rather than
+			// silently following. Proxmox API endpoints don't legitimately
+			// 3xx — a redirect almost certainly means a misconfigured
+			// reverse-proxy or a hostile upstream; either way the safe
+			// posture is to stop. Go's stdlib already strips Authorization
+			// on cross-host redirects, but turning the redirect into a
+			// caller error also defeats the case where a redirect lands on
+			// a same-host different-path endpoint that would still observe
+			// the bearer.
+			CheckRedirect: refuseRedirect,
 		},
 		baseURL:    baseURL,
 		authHeader: buildAuthHeader(authPrefix, cfg.TokenID, cfg.TokenSecret),
 		tokenID:    cfg.TokenID,
 		tlsCfg:     tlsCfg,
 	}, nil
+}
+
+// refuseRedirect tells net/http to NOT follow any redirect; the caller's
+// Do() returns the 3xx response with the body so the caller can decide.
+// We could return ErrUseLastResponse to surface the response intact, but
+// the Proxmox API never legitimately redirects, so an explicit error is
+// clearer in stack traces.
+func refuseRedirect(req *http.Request, via []*http.Request) error {
+	return fmt.Errorf("proxmox: refusing redirect from %s to %s", via[len(via)-1].URL, req.URL)
 }
 
 // buildAuthHeader constructs the Authorization header value.
@@ -328,8 +352,9 @@ func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[str
 	uploadTransport.WriteBufferSize = 256 * 1024 // 256KB write buffer (default 4KB)
 	uploadTransport.ReadBufferSize = 64 * 1024   // 64KB read buffer for the response
 	uploadClient := &http.Client{
-		Transport: uploadTransport,
-		Timeout:   0, // no timeout; context controls cancellation
+		Transport:     uploadTransport,
+		Timeout:       0, // no timeout; context controls cancellation
+		CheckRedirect: refuseRedirect,
 	}
 
 	resp, err := uploadClient.Do(req)

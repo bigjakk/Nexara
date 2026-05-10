@@ -17,6 +17,7 @@ import (
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // DRSHandler handles DRS configuration and evaluation endpoints.
@@ -24,14 +25,23 @@ type DRSHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	// shutdownCtx is the parent for the manual-trigger goroutine so a
+	// long-running ad-hoc DRS pass aborts cleanly on SIGTERM rather than
+	// orphaning. Falls back to context.Background() if nil for tests.
+	shutdownCtx context.Context
 }
 
-// NewDRSHandler creates a new DRS handler.
-func NewDRSHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *DRSHandler {
+// NewDRSHandler creates a new DRS handler. shutdownCtx should be the
+// per-server shutdown context; nil falls back to context.Background().
+func NewDRSHandler(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *DRSHandler {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	return &DRSHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
+		shutdownCtx:   shutdownCtx,
 	}
 }
 
@@ -74,8 +84,8 @@ func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 		ImbalanceThreshold:  c.ImbalanceThreshold,
 		EvalIntervalSeconds: c.EvalIntervalSeconds,
 		IncludeContainers:   c.IncludeContainers,
-		CreatedAt:           c.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:           c.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:           c.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:           c.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -108,8 +118,8 @@ func toDRSRuleResponse(r db.DrsRule) drsRuleResponse {
 		NodeNames: r.NodeNames,
 		Enabled:   r.Enabled,
 		Source:    "manual",
-		CreatedAt: r.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt: r.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt: r.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt: r.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -140,10 +150,10 @@ func toDRSHistoryResponse(h db.DrsHistory) drsHistoryResponse {
 		ScoreBefore: h.ScoreBefore,
 		ScoreAfter:  h.ScoreAfter,
 		Status:      h.Status,
-		CreatedAt:   h.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   h.CreatedAt.Format(time.RFC3339Nano),
 	}
 	if h.ExecutedAt.Valid {
-		s := h.ExecutedAt.Time.Format("2006-01-02T15:04:05Z")
+		s := h.ExecutedAt.Time.Format(time.RFC3339Nano)
 		r.ExecutedAt = &s
 	}
 	return r
@@ -165,13 +175,12 @@ var validRuleTypes = map[string]bool{
 
 // GetConfig handles GET /api/v1/clusters/:cluster_id/drs/config.
 func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
+		return err
 	}
 
 	cfg, err := h.queries.GetDRSConfig(c.Context(), clusterID)
@@ -193,13 +202,12 @@ func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
 
 // UpdateConfig handles PUT /api/v1/clusters/:cluster_id/drs/config.
 func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	var req drsConfigRequest
@@ -244,13 +252,12 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 
 // ListRules handles GET /api/v1/clusters/:cluster_id/drs/rules.
 func (h *DRSHandler) ListRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
+		return err
 	}
 
 	rules, err := h.queries.ListDRSRules(c.Context(), clusterID)
@@ -268,13 +275,12 @@ func (h *DRSHandler) ListRules(c *fiber.Ctx) error {
 
 // CreateRule handles POST /api/v1/clusters/:cluster_id/drs/rules.
 func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	var req drsRuleRequest
@@ -312,11 +318,13 @@ func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
 
 // DeleteRule handles DELETE /api/v1/clusters/:cluster_id/drs/rules/:rule_id.
 func (h *DRSHandler) DeleteRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, _ := uuid.Parse(c.Params("cluster_id"))
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
+	}
 
 	ruleID, err := uuid.Parse(c.Params("rule_id"))
 	if err != nil {
@@ -334,13 +342,12 @@ func (h *DRSHandler) DeleteRule(c *fiber.Ctx) error {
 
 // TriggerEvaluate handles POST /api/v1/clusters/:cluster_id/drs/evaluate.
 func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	engine := drs.NewEngine(h.queries, h.encryptionKey, slog.Default())
@@ -363,18 +370,18 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 		if clientErr != nil {
 			slog.Default().Error("DRS manual trigger: failed to create client", "error", clientErr)
 		} else {
-			executor := drs.NewExecutor(h.queries, slog.Default(), h.eventPub)
+			executor := drs.NewExecutor(h.shutdownCtx, h.queries, slog.Default(), h.eventPub)
 			// Execute in a goroutine so the API response is not blocked by
-			// potentially long-running migrations. Use a detached context
-			// so the work continues after the HTTP response is sent.
+			// potentially long-running migrations. Detach from the request
+			// scope but stay rooted in shutdownCtx so SIGTERM cancels the
+			// migration cleanly instead of orphaning it.
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
 						slog.Default().Error("DRS manual execution panicked", "panic", r)
 					}
 				}()
-				execCtx := context.Background()
-				if execErr := executor.Execute(execCtx, client, clusterID, cfg.Mode, recommendations); execErr != nil {
+				if execErr := executor.Execute(h.shutdownCtx, client, clusterID, cfg.Mode, recommendations); execErr != nil {
 					slog.Default().Error("DRS manual trigger execution failed", "error", execErr)
 				}
 			}()
@@ -386,7 +393,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 				ClusterID:   clusterID,
 				SourceNode:  rec.SourceNode,
 				TargetNode:  rec.TargetNode,
-				VmID:        safeInt32(rec.VMID),
+				VmID:        safeconv.Int32(rec.VMID),
 				VmType:      rec.VMType,
 				Reason:      rec.Reason,
 				ScoreBefore: rec.ScoreBefore,
@@ -407,10 +414,10 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 	}
 
 	type nodeScoreResponse struct {
-		Node       string  `json:"node"`
-		Score      float64 `json:"score"`
-		CPULoad    float64 `json:"cpu_load"`
-		MemLoad    float64 `json:"mem_load"`
+		Node    string  `json:"node"`
+		Score   float64 `json:"score"`
+		CPULoad float64 `json:"cpu_load"`
+		MemLoad float64 `json:"mem_load"`
 	}
 
 	resp := make([]evalRecommendation, len(recommendations))
@@ -456,13 +463,12 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 
 // ListHistory handles GET /api/v1/clusters/:cluster_id/drs/history.
 func (h *DRSHandler) ListHistory(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
+		return err
 	}
 
 	limit := int32(50)
@@ -551,13 +557,12 @@ func haRuleToResponse(clusterID uuid.UUID, entry proxmox.HARuleEntry) drsRuleRes
 
 // ListHARules handles GET /api/v1/clusters/:cluster_id/drs/ha-rules.
 func (h *DRSHandler) ListHARules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "drs", clusterID); err != nil {
+		return err
 	}
 
 	client, err := h.createProxmoxClient(c, clusterID)
@@ -580,13 +585,12 @@ func (h *DRSHandler) ListHARules(c *fiber.Ctx) error {
 
 // CreateHARule handles POST /api/v1/clusters/:cluster_id/drs/ha-rules.
 func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	var req struct {
@@ -654,13 +658,12 @@ func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
 
 // DeleteHARule handles DELETE /api/v1/clusters/:cluster_id/drs/ha-rules/:rule_name.
 func (h *DRSHandler) DeleteHARule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "drs"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "drs", clusterID); err != nil {
+		return err
 	}
 
 	ruleName := c.Params("rule_name")

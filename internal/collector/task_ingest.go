@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -149,7 +150,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 
 	if err := s.queries.InsertAuditLogWithSource(ctx, db.InsertAuditLogWithSourceParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: systemUserID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: mapping.ResourceType,
 		ResourceID:   resourceID,
 		Action:       mapping.Action,

@@ -20,6 +20,9 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import { StatusIcon } from "@/components/StatusIcon";
+import { OSIcon } from "@/components/OSIcon";
+import { classifyOS } from "@/lib/os-classify";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useClusterNodes, useClusterVMs } from "@/features/clusters/api/cluster-queries";
 import { useSidebarStore } from "@/stores/sidebar-store";
@@ -38,18 +41,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { ClusterResponse, NodeResponse, VMResponse } from "@/types/api";
-
-function StatusDot({ status }: { status: string }) {
-  const color =
-    status === "running" || status === "online" || status === "active"
-      ? "bg-green-500"
-      : status === "stopped" || status === "offline"
-        ? "bg-red-500"
-        : status === "suspended" || status === "paused" || status === "degraded"
-          ? "bg-yellow-500"
-          : "bg-gray-400";
-  return <span className={cn("inline-block h-2 w-2 shrink-0 rounded-full", color)} />;
-}
 
 function VMIcon({ type, template }: { type: string; template?: boolean }) {
   if (template) {
@@ -118,7 +109,7 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
           className="flex min-w-0 flex-1 items-center gap-1.5"
         >
           <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <StatusDot status={node.status} />
+          <StatusIcon status={node.status} />
           <span className="truncate">{node.name}</span>
         </button>
       </div>
@@ -153,7 +144,8 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
                     )}
                   >
                     <VMIcon type={vm.type} template={vm.template} />
-                    <StatusDot status={vm.status} />
+                    <StatusIcon status={vm.status} />
+                    {classifyOS(vm.ostype) !== "unknown" && <OSIcon ostype={vm.ostype} />}
                     <span className={cn("truncate", vm.template && "text-amber-700 dark:text-amber-400")}>
                       {vm.vmid} {vm.name}
                     </span>
@@ -225,7 +217,7 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
                 className="flex min-w-0 flex-1 items-center gap-1.5"
               >
                 <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
-                <StatusDot status={cluster.status === "degraded" ? "degraded" : cluster.status} />
+                <StatusIcon status={cluster.status === "degraded" ? "degraded" : cluster.status} />
                 <span className="truncate font-medium">{cluster.name}</span>
               </button>
 

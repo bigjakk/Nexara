@@ -3,8 +3,8 @@ import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Terminal, Cpu, MemoryStick, HardDrive, Info,
   Network, CircuitBoard, Globe, Trash2, RotateCcw, Check,
-  Pencil, Power, RefreshCw, Cog, FileText, Play, Square, RotateCw,
-  ArrowRightLeft, Plus, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  Pencil, Cog, FileText, Play, Square, RotateCw,
+  Plus, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,13 +12,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,19 +23,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
-import { MetricChart } from "@/features/dashboard/components/MetricChart";
-import { useNodeHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import {
   useClusterNodes,
   useNodeDisks,
   useNodePCIDevices,
-  useNodeDNS,
-  useSetNodeDNS,
-  useSetNodeTimezone,
-  useShutdownNode,
-  useRebootNode,
   useDiskSMART,
   useNodeZFSPools,
   useNodeLVM,
@@ -70,8 +55,6 @@ import {
   useCreateNodeFirewallRule,
   useDeleteNodeFirewallRule,
   useNodeFirewallLog,
-  useEvacuateNode,
-  type EvacuateMigration,
 } from "../api/cluster-queries";
 import {
   useNodeNetworkInterfaces as useNodeNetworkInterfacesLive,
@@ -83,17 +66,11 @@ import {
 import type { UpdateNetworkInterfaceRequest } from "@/features/networks/types/network";
 import { CreateInterfaceDialog } from "@/features/networks/components/CreateInterfaceDialog";
 import { useConsoleStore } from "@/stores/console-store";
-import { useTaskLogStore } from "@/stores/task-log-store";
 import { NodeAptRepositories } from "../components/NodeAptRepositories";
+import { NodePowerActions } from "../components/node/NodePowerActions";
+import { NodeMetricsPanel } from "../components/node/NodeMetricsPanel";
+import { EditDNSDialog, EditTimezoneDialog } from "../components/node/NodeSettingsDialogs";
 import { formatBytes, formatUptime } from "@/lib/format";
-import type { TimeRange } from "@/types/api";
-
-const TIME_RANGES: { label: string; value: TimeRange }[] = [
-  { label: "1h", value: "1h" },
-  { label: "6h", value: "6h" },
-  { label: "24h", value: "24h" },
-  { label: "7d", value: "7d" },
-];
 
 export function NodeDetailPage() {
   const { clusterId = "", nodeId = "" } = useParams<{
@@ -1627,386 +1604,3 @@ function HardwareSectionWithAction({
   );
 }
 
-function EditDNSDialog({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
-  const [open, setOpen] = useState(false);
-  const { data: dns } = useNodeDNS(clusterId, nodeName);
-  const [search, setSearch] = useState("");
-  const [dns1, setDns1] = useState("");
-  const [dns2, setDns2] = useState("");
-  const [dns3, setDns3] = useState("");
-  const setNodeDNS = useSetNodeDNS(clusterId, nodeName);
-
-  const handleOpen = (isOpen: boolean) => {
-    if (isOpen && dns) {
-      setSearch(dns.search);
-      setDns1(dns.dns1);
-      setDns2(dns.dns2);
-      setDns3(dns.dns3);
-    }
-    setOpen(isOpen);
-  };
-
-  const handleSave = () => {
-    setNodeDNS.mutate(
-      { search, dns1, dns2, dns3 },
-      { onSuccess: () => { setOpen(false); } },
-    );
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-6 w-6">
-          <Pencil className="h-3 w-3" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Edit DNS Configuration - {nodeName}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Search Domain</Label>
-            <Input value={search} onChange={(e) => { setSearch(e.target.value); }} placeholder="e.g. example.com" />
-          </div>
-          <div className="space-y-2">
-            <Label>DNS Server 1</Label>
-            <Input value={dns1} onChange={(e) => { setDns1(e.target.value); }} placeholder="e.g. 8.8.8.8" />
-          </div>
-          <div className="space-y-2">
-            <Label>DNS Server 2</Label>
-            <Input value={dns2} onChange={(e) => { setDns2(e.target.value); }} placeholder="e.g. 8.8.4.4" />
-          </div>
-          <div className="space-y-2">
-            <Label>DNS Server 3</Label>
-            <Input value={dns3} onChange={(e) => { setDns3(e.target.value); }} placeholder="Optional" />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>Cancel</Button>
-            <Button onClick={handleSave} disabled={!search || setNodeDNS.isPending}>Save</Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function EditTimezoneDialog({ clusterId, nodeName, currentTimezone }: { clusterId: string; nodeName: string; currentTimezone: string }) {
-  const [open, setOpen] = useState(false);
-  const [timezone, setTimezone] = useState(currentTimezone || "UTC");
-  const setNodeTimezone = useSetNodeTimezone(clusterId, nodeName);
-
-  const handleOpen = (isOpen: boolean) => {
-    if (isOpen) {
-      setTimezone(currentTimezone || "UTC");
-    }
-    setOpen(isOpen);
-  };
-
-  const handleSave = () => {
-    setNodeTimezone.mutate(
-      { timezone },
-      { onSuccess: () => { setOpen(false); } },
-    );
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-6 w-6">
-          <Pencil className="h-3 w-3" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Edit Timezone - {nodeName}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Timezone</Label>
-            <Input value={timezone} onChange={(e) => { setTimezone(e.target.value); }} placeholder="e.g. America/New_York" />
-            <p className="text-xs text-muted-foreground">Enter an IANA timezone (e.g. UTC, America/New_York, Europe/London)</p>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>Cancel</Button>
-            <Button onClick={handleSave} disabled={!timezone || setNodeTimezone.isPending}>Save</Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function NodePowerActions({ clusterId, nodeName, otherNodes }: { clusterId: string; nodeName: string; otherNodes: string[] }) {
-  const shutdown = useShutdownNode(clusterId, nodeName);
-  const reboot = useRebootNode(clusterId, nodeName);
-  const evacuate = useEvacuateNode(clusterId, nodeName);
-  const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
-  const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [evacuateOpen, setEvacuateOpen] = useState(false);
-  const [mode, setMode] = useState<"distribute" | "single">("distribute");
-  const [targetNode, setTargetNode] = useState("");
-  const [migrations, setMigrations] = useState<EvacuateMigration[] | null>(null);
-
-  const handleError = (err: unknown) => {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    setActionError(msg);
-  };
-
-  const handleEvacuate = () => {
-    if (mode === "single" && !targetNode) return;
-    setActionError(null);
-    setMigrations(null);
-    const params = mode === "single" ? { target_node: targetNode } : {};
-    evacuate.mutate(params, {
-      onSuccess: (data) => {
-        setMigrations(data.migrations);
-        // Focus the first successful migration task.
-        const first = data.migrations.find((m) => m.upid && !m.error);
-        if (first) {
-          setFocusedTask({ clusterId, upid: first.upid, description: `Evacuate ${nodeName}` });
-          setPanelOpen(true);
-        }
-      },
-      onError: handleError,
-    });
-  };
-
-  const closeEvacuate = () => {
-    setEvacuateOpen(false);
-    setTargetNode("");
-    setMode("distribute");
-    setMigrations(null);
-  };
-
-  return (
-    <>
-      {actionError && (
-        <div className="flex items-center gap-2 rounded-md border border-destructive bg-destructive/10 px-3 py-1.5 text-sm text-destructive">
-          <span className="flex-1">{actionError}</span>
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => { setActionError(null); }}>Dismiss</Button>
-        </div>
-      )}
-      <Dialog open={evacuateOpen} onOpenChange={(v) => { if (!v) closeEvacuate(); else setEvacuateOpen(true); }}>
-        <DialogTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-1.5" disabled={otherNodes.length === 0}>
-            <ArrowRightLeft className="h-4 w-4" />
-            Evacuate
-          </Button>
-        </DialogTrigger>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Evacuate all guests from {nodeName}</DialogTitle>
-          </DialogHeader>
-
-          {!migrations ? (
-            <>
-              <p className="text-sm text-muted-foreground">
-                Migrate all VMs and containers off this node.
-              </p>
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label>Distribution Mode</Label>
-                  <div className="flex gap-3">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="radio" name="evac-mode" checked={mode === "distribute"} onChange={() => { setMode("distribute"); setTargetNode(""); }} />
-                      Distribute across nodes (DRS-aware)
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="radio" name="evac-mode" checked={mode === "single"} onChange={() => { setMode("single"); }} />
-                      Single target
-                    </label>
-                  </div>
-                </div>
-                {mode === "single" && (
-                  <div className="space-y-2">
-                    <Label>Target Node</Label>
-                    <select
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      value={targetNode}
-                      onChange={(e) => { setTargetNode(e.target.value); }}
-                    >
-                      <option value="">Select a target node...</option>
-                      {otherNodes.map((n) => (
-                        <option key={n} value={n}>{n}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" onClick={closeEvacuate}>Cancel</Button>
-                <Button onClick={handleEvacuate} disabled={(mode === "single" && !targetNode) || evacuate.isPending}>
-                  {evacuate.isPending ? "Evacuating…" : "Evacuate"}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <p className="text-sm font-medium">{migrations.length} guest{migrations.length !== 1 ? "s" : ""} migrated:</p>
-                <div className="max-h-64 space-y-1 overflow-auto">
-                  {migrations.map((m) => (
-                    <div
-                      key={m.vmid}
-                      className={`flex items-center justify-between rounded px-2 py-1 text-sm ${m.error ? "bg-destructive/10 text-destructive" : "bg-muted"}`}
-                    >
-                      <span className="font-medium">{m.name} <span className="text-muted-foreground">({m.type === "lxc" ? "CT" : "VM"} {String(m.vmid)})</span></span>
-                      {m.error ? (
-                        <span className="text-xs">{m.error}</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="text-xs text-primary hover:underline"
-                          onClick={() => { setFocusedTask({ clusterId, upid: m.upid, description: `Migrate ${m.name}` }); setPanelOpen(true); }}
-                        >
-                          → {m.target_node}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex justify-end pt-2">
-                <Button variant="outline" onClick={closeEvacuate}>Close</Button>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <RefreshCw className="h-4 w-4" />
-            Reboot
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reboot {nodeName}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will reboot the node. All running guests will be affected if not migrated first.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => { setActionError(null); reboot.mutate(undefined, { onError: handleError }); }}
-              disabled={reboot.isPending}
-            >
-              Reboot
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button variant="destructive" size="sm" className="gap-1.5">
-            <Power className="h-4 w-4" />
-            Shutdown
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Shutdown {nodeName}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will shut down the node. It will go offline and all running guests will be stopped. You will need physical or out-of-band access to power it back on.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => { setActionError(null); shutdown.mutate(undefined, { onError: handleError }); }}
-              disabled={shutdown.isPending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Shutdown
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
-}
-
-function NodeMetricsPanel({
-  clusterId,
-  nodeId,
-  liveMetric,
-}: {
-  clusterId: string;
-  nodeId: string;
-  liveMetric: { cpuPercent: number; memPercent: number } | undefined;
-}) {
-  const [timeRange, setTimeRange] = useState<TimeRange>("1h");
-  const { data: historicalData, isLoading } = useNodeHistoricalMetrics(clusterId, nodeId, timeRange);
-  const chartData = historicalData ?? [];
-
-  return (
-    <div className="space-y-4">
-      {/* Live gauges */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-muted-foreground">CPU Usage (Live)</p>
-          <MetricMiniBar value={liveMetric?.cpuPercent ?? null} />
-          <p className="mt-1 text-xs text-muted-foreground">
-            {liveMetric ? `${liveMetric.cpuPercent.toFixed(1)}%` : "No live data"}
-          </p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-muted-foreground">Memory Usage (Live)</p>
-          <MetricMiniBar value={liveMetric?.memPercent ?? null} />
-          <p className="mt-1 text-xs text-muted-foreground">
-            {liveMetric ? `${liveMetric.memPercent.toFixed(1)}%` : "No live data"}
-          </p>
-        </div>
-      </div>
-
-      {/* Time range selector */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground">Historical:</span>
-        <div className="flex gap-1">
-          {TIME_RANGES.map((tr) => (
-            <Button
-              key={tr.value}
-              size="sm"
-              variant={timeRange === tr.value ? "default" : "outline"}
-              className="h-7 px-2.5 text-xs"
-              onClick={() => { setTimeRange(tr.value); }}
-            >
-              {tr.label}
-            </Button>
-          ))}
-        </div>
-        {isLoading && (
-          <span className="text-xs text-muted-foreground">Loading...</span>
-        )}
-      </div>
-
-      {/* Historical charts */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="h-64">
-          <MetricChart title="CPU Usage" data={chartData} dataKey="cpuPercent" color="hsl(221, 83%, 53%)" timeRange={timeRange} />
-        </div>
-        <div className="h-64">
-          <MetricChart title="Memory Usage" data={chartData} dataKey="memPercent" color="hsl(142, 71%, 45%)" timeRange={timeRange} />
-        </div>
-        <div className="h-64">
-          <MetricChart title="Disk Read" data={chartData} dataKey="diskReadBps" color="hsl(38, 92%, 50%)" timeRange={timeRange} />
-        </div>
-        <div className="h-64">
-          <MetricChart title="Disk Write" data={chartData} dataKey="diskWriteBps" color="hsl(0, 84%, 60%)" timeRange={timeRange} />
-        </div>
-        <div className="h-64">
-          <MetricChart title="Network In" data={chartData} dataKey="netInBps" color="hsl(262, 83%, 58%)" timeRange={timeRange} />
-        </div>
-        <div className="h-64">
-          <MetricChart title="Network Out" data={chartData} dataKey="netOutBps" color="hsl(330, 81%, 60%)" timeRange={timeRange} />
-        </div>
-      </div>
-    </div>
-  );
-}

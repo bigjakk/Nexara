@@ -18,21 +18,22 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus } from "lucide-react";
+import { Plus, ShieldAlert } from "lucide-react";
 import {
   useCreateNotificationChannel,
   useUpdateNotificationChannel,
 } from "../api/alert-queries";
-import { useUsers } from "@/features/admin/api/rbac-queries";
 import type { ChannelType } from "@/types/api";
 
-// expo_push is intentionally omitted from this list — push notifications
-// are wired but disabled at the UI level because the mobile registration
-// flow isn't shipping yet. To re-enable, add `{ value: "expo_push", label:
-// "Mobile push (Expo)" }` and re-enable the validChannelTypes entry in
-// internal/api/handlers/alerts.go. The user-picker render block + the
-// buildConfig case below are kept as dead code so re-enabling is a single
-// list-entry change.
+// expo_push is intentionally omitted from this list — the mobile push
+// dispatcher (internal/notifications/expo_push.go) is wired and the
+// mobile_devices table exists, but the mobile-side registration flow
+// isn't shipping for v1.0. The web UI doesn't expose the channel type;
+// re-enabling the surface end-to-end requires four reverts, all
+// documented in mobile/PLAN.md (alerts.go validChannelTypes, this list,
+// the mobile feature flag, and the EAS init). The expo_push entry on
+// the ChannelType union and CHANNEL_TYPE_LABELS Record stays for the
+// dispatcher's continued backend existence — see Phase 5.9.
 const CHANNEL_TYPES: { value: ChannelType; label: string }[] = [
   { value: "email", label: "Email (SMTP)" },
   { value: "slack", label: "Slack" },
@@ -101,13 +102,8 @@ export function ChannelForm({
   // PagerDuty fields
   const [pdRoutingKey, setPdRoutingKey] = useState("");
 
-  // Expo push fields — recipient is a Nexara user; the dispatcher fans out
-  // to every mobile device that user has registered.
-  const [expoPushUserId, setExpoPushUserId] = useState("");
-
   const createMutation = useCreateNotificationChannel();
   const updateMutation = useUpdateNotificationChannel();
-  const usersQuery = useUsers();
 
   const buildConfig = (): Record<string, unknown> => {
     switch (channelType) {
@@ -162,8 +158,6 @@ export function ChannelForm({
       }
       case "pagerduty":
         return { routing_key: pdRoutingKey };
-      case "expo_push":
-        return { user_id: expoPushUserId };
       default:
         return {};
     }
@@ -318,30 +312,6 @@ export function ChannelForm({
                 routingKey={pdRoutingKey}
                 setRoutingKey={setPdRoutingKey}
               />
-            )}
-            {channelType === "expo_push" && (
-              <div className="space-y-2">
-                <Label>Recipient user</Label>
-                <Select
-                  value={expoPushUserId}
-                  onValueChange={setExpoPushUserId}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a user…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(usersQuery.data ?? []).map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.display_name || u.email} ({u.email})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Notifications fan out to every mobile device this user has
-                  registered via the Nexara mobile app.
-                </p>
-              </div>
             )}
           </>
         )}
@@ -503,9 +473,26 @@ function EmailFields({
           required
         />
       </div>
-      <div className="flex items-center gap-2">
-        <Switch checked={tls} onCheckedChange={setTls} />
-        <Label>Use TLS</Label>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Switch checked={tls} onCheckedChange={setTls} />
+          <Label>Use STARTTLS</Label>
+        </div>
+        {!tls && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+            <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <div className="space-y-1">
+              <p className="font-medium">Cleartext SMTP — local development only</p>
+              <p>
+                With STARTTLS off, credentials and message bodies are sent
+                unencrypted. The server will refuse cleartext sends to any
+                host that does not resolve to a loopback address (e.g.{" "}
+                <code>127.0.0.1</code>, <code>localhost</code>). Leave this
+                on for any production relay.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
       <div className="space-y-1">
         <Label>Subject Template (optional)</Label>

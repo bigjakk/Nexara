@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // NetworkHandler handles network, firewall, and SDN endpoints.
@@ -41,13 +43,12 @@ func (h *NetworkHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceTyp
 
 // ListNetworkInterfaces handles GET /clusters/:cluster_id/networks.
 func (h *NetworkHandler) ListNetworkInterfaces(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -82,13 +83,12 @@ func (h *NetworkHandler) ListNetworkInterfaces(c *fiber.Ctx) error {
 
 // ListNodeNetworkInterfaces handles GET /clusters/:cluster_id/networks/:node_name.
 func (h *NetworkHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -111,13 +111,12 @@ func (h *NetworkHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
 
 // CreateNetworkInterface handles POST /clusters/:cluster_id/networks/:node_name.
 func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -151,13 +150,12 @@ func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
 
 // UpdateNetworkInterface handles PUT /clusters/:cluster_id/networks/:node_name/:iface.
 func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -192,13 +190,12 @@ func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
 
 // DeleteNetworkInterface handles DELETE /clusters/:cluster_id/networks/:node_name/:iface.
 func (h *NetworkHandler) DeleteNetworkInterface(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "network", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -224,13 +221,12 @@ func (h *NetworkHandler) DeleteNetworkInterface(c *fiber.Ctx) error {
 
 // ApplyNetworkConfig handles POST /clusters/:cluster_id/networks/:node_name/apply.
 func (h *NetworkHandler) ApplyNetworkConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -255,13 +251,12 @@ func (h *NetworkHandler) ApplyNetworkConfig(c *fiber.Ctx) error {
 
 // RevertNetworkConfig handles POST /clusters/:cluster_id/networks/:node_name/revert.
 func (h *NetworkHandler) RevertNetworkConfig(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	nodeName := c.Params("node_name")
@@ -288,13 +283,12 @@ func (h *NetworkHandler) RevertNetworkConfig(c *fiber.Ctx) error {
 
 // ListClusterFirewallRules handles GET /clusters/:cluster_id/firewall/rules.
 func (h *NetworkHandler) ListClusterFirewallRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -312,13 +306,12 @@ func (h *NetworkHandler) ListClusterFirewallRules(c *fiber.Ctx) error {
 
 // CreateClusterFirewallRule handles POST /clusters/:cluster_id/firewall/rules.
 func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	var req proxmox.FirewallRuleParams
@@ -347,13 +340,12 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
 
 // UpdateClusterFirewallRule handles PUT /clusters/:cluster_id/firewall/rules/:pos.
 func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	pos, err := strconv.Atoi(c.Params("pos"))
@@ -383,13 +375,12 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
 
 // DeleteClusterFirewallRule handles DELETE /clusters/:cluster_id/firewall/rules/:pos.
 func (h *NetworkHandler) DeleteClusterFirewallRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "network", clusterID); err != nil {
+		return err
 	}
 
 	pos, err := strconv.Atoi(c.Params("pos"))
@@ -437,13 +428,12 @@ func (h *NetworkHandler) resolveVMNode(c *fiber.Ctx, clusterID uuid.UUID, vmid i
 
 // ListVMFirewallRules handles GET /clusters/:cluster_id/vms/:vm_id/firewall/rules.
 func (h *NetworkHandler) ListVMFirewallRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 
 	vmid, err := strconv.Atoi(c.Params("vm_id"))
@@ -451,7 +441,7 @@ func (h *NetworkHandler) ListVMFirewallRules(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
 	}
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeInt32(vmid))
+	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -471,13 +461,12 @@ func (h *NetworkHandler) ListVMFirewallRules(c *fiber.Ctx) error {
 
 // CreateVMFirewallRule handles POST /clusters/:cluster_id/vms/:vm_id/firewall/rules.
 func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	vmid, err := strconv.Atoi(c.Params("vm_id"))
@@ -494,7 +483,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "action and type are required")
 	}
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeInt32(vmid))
+	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -516,13 +505,12 @@ func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
 
 // UpdateVMFirewallRule handles PUT /clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos.
 func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	vmid, err := strconv.Atoi(c.Params("vm_id"))
@@ -540,7 +528,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeInt32(vmid))
+	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -562,13 +550,12 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
 
 // DeleteVMFirewallRule handles DELETE /clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos.
 func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "network", clusterID); err != nil {
+		return err
 	}
 
 	vmid, err := strconv.Atoi(c.Params("vm_id"))
@@ -581,7 +568,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule position")
 	}
 
-	nodeName, err := h.resolveVMNode(c, clusterID, safeInt32(vmid))
+	nodeName, err := h.resolveVMNode(c, clusterID, safeconv.Int32(vmid))
 	if err != nil {
 		return err
 	}
@@ -605,13 +592,12 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
 
 // GetFirewallOptions handles GET /clusters/:cluster_id/firewall/options.
 func (h *NetworkHandler) GetFirewallOptions(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -629,13 +615,12 @@ func (h *NetworkHandler) GetFirewallOptions(c *fiber.Ctx) error {
 
 // SetFirewallOptions handles PUT /clusters/:cluster_id/firewall/options.
 func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	var req proxmox.FirewallOptions
@@ -662,13 +647,12 @@ func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
 
 // ListSDNZones handles GET /clusters/:cluster_id/sdn/zones.
 func (h *NetworkHandler) ListSDNZones(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -686,13 +670,12 @@ func (h *NetworkHandler) ListSDNZones(c *fiber.Ctx) error {
 
 // ListSDNVNets handles GET /clusters/:cluster_id/sdn/vnets.
 func (h *NetworkHandler) ListSDNVNets(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -712,13 +695,12 @@ func (h *NetworkHandler) ListSDNVNets(c *fiber.Ctx) error {
 
 // CreateSDNZone handles POST /clusters/:cluster_id/sdn/zones.
 func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	var req proxmox.CreateSDNZoneParams
@@ -747,13 +729,12 @@ func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
 
 // UpdateSDNZone handles PUT /clusters/:cluster_id/sdn/zones/:zone.
 func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	zone := c.Params("zone")
@@ -783,13 +764,12 @@ func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
 
 // DeleteSDNZone handles DELETE /clusters/:cluster_id/sdn/zones/:zone.
 func (h *NetworkHandler) DeleteSDNZone(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "network", clusterID); err != nil {
+		return err
 	}
 
 	zone := c.Params("zone")
@@ -814,13 +794,12 @@ func (h *NetworkHandler) DeleteSDNZone(c *fiber.Ctx) error {
 
 // CreateSDNVNet handles POST /clusters/:cluster_id/sdn/vnets.
 func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	var req proxmox.CreateSDNVNetParams
@@ -849,13 +828,12 @@ func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
 
 // UpdateSDNVNet handles PUT /clusters/:cluster_id/sdn/vnets/:vnet.
 func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	vnet := c.Params("vnet")
@@ -885,13 +863,12 @@ func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
 
 // DeleteSDNVNet handles DELETE /clusters/:cluster_id/sdn/vnets/:vnet.
 func (h *NetworkHandler) DeleteSDNVNet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "network", clusterID); err != nil {
+		return err
 	}
 
 	vnet := c.Params("vnet")
@@ -916,13 +893,12 @@ func (h *NetworkHandler) DeleteSDNVNet(c *fiber.Ctx) error {
 
 // ListSDNSubnets handles GET /clusters/:cluster_id/sdn/vnets/:vnet/subnets.
 func (h *NetworkHandler) ListSDNSubnets(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 
 	vnet := c.Params("vnet")
@@ -945,13 +921,12 @@ func (h *NetworkHandler) ListSDNSubnets(c *fiber.Ctx) error {
 
 // CreateSDNSubnet handles POST /clusters/:cluster_id/sdn/vnets/:vnet/subnets.
 func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	vnet := c.Params("vnet")
@@ -988,13 +963,12 @@ func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
 
 // UpdateSDNSubnet handles PUT /clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet.
 func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	vnet := c.Params("vnet")
@@ -1025,13 +999,12 @@ func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
 
 // DeleteSDNSubnet handles DELETE /clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet.
 func (h *NetworkHandler) DeleteSDNSubnet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "network", clusterID); err != nil {
+		return err
 	}
 
 	vnet := c.Params("vnet")
@@ -1057,13 +1030,12 @@ func (h *NetworkHandler) DeleteSDNSubnet(c *fiber.Ctx) error {
 
 // ApplySDN handles PUT /clusters/:cluster_id/sdn/apply.
 func (h *NetworkHandler) ApplySDN(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1084,12 +1056,12 @@ func (h *NetworkHandler) ApplySDN(c *fiber.Ctx) error {
 
 // ListSDNControllers handles GET /clusters/:cluster_id/sdn/controllers.
 func (h *NetworkHandler) ListSDNControllers(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1104,12 +1076,12 @@ func (h *NetworkHandler) ListSDNControllers(c *fiber.Ctx) error {
 
 // CreateSDNController handles POST /clusters/:cluster_id/sdn/controllers.
 func (h *NetworkHandler) CreateSDNController(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	var req proxmox.CreateSDNControllerParams
 	if err := c.BodyParser(&req); err != nil {
@@ -1132,12 +1104,12 @@ func (h *NetworkHandler) CreateSDNController(c *fiber.Ctx) error {
 
 // UpdateSDNController handles PUT /clusters/:cluster_id/sdn/controllers/:controller.
 func (h *NetworkHandler) UpdateSDNController(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	controller := c.Params("controller")
 	if controller == "" {
@@ -1161,12 +1133,12 @@ func (h *NetworkHandler) UpdateSDNController(c *fiber.Ctx) error {
 
 // DeleteSDNController handles DELETE /clusters/:cluster_id/sdn/controllers/:controller.
 func (h *NetworkHandler) DeleteSDNController(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "network", clusterID); err != nil {
+		return err
 	}
 	controller := c.Params("controller")
 	if controller == "" {
@@ -1188,12 +1160,12 @@ func (h *NetworkHandler) DeleteSDNController(c *fiber.Ctx) error {
 
 // ListSDNIPAMs handles GET /clusters/:cluster_id/sdn/ipams.
 func (h *NetworkHandler) ListSDNIPAMs(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1208,12 +1180,12 @@ func (h *NetworkHandler) ListSDNIPAMs(c *fiber.Ctx) error {
 
 // CreateSDNIPAM handles POST /clusters/:cluster_id/sdn/ipams.
 func (h *NetworkHandler) CreateSDNIPAM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	var req proxmox.CreateSDNIPAMParams
 	if err := c.BodyParser(&req); err != nil {
@@ -1236,12 +1208,12 @@ func (h *NetworkHandler) CreateSDNIPAM(c *fiber.Ctx) error {
 
 // UpdateSDNIPAM handles PUT /clusters/:cluster_id/sdn/ipams/:ipam.
 func (h *NetworkHandler) UpdateSDNIPAM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	ipam := c.Params("ipam")
 	if ipam == "" {
@@ -1265,12 +1237,12 @@ func (h *NetworkHandler) UpdateSDNIPAM(c *fiber.Ctx) error {
 
 // DeleteSDNIPAM handles DELETE /clusters/:cluster_id/sdn/ipams/:ipam.
 func (h *NetworkHandler) DeleteSDNIPAM(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "network", clusterID); err != nil {
+		return err
 	}
 	ipam := c.Params("ipam")
 	if ipam == "" {
@@ -1292,12 +1264,12 @@ func (h *NetworkHandler) DeleteSDNIPAM(c *fiber.Ctx) error {
 
 // ListSDNDNS handles GET /clusters/:cluster_id/sdn/dns.
 func (h *NetworkHandler) ListSDNDNS(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1312,12 +1284,12 @@ func (h *NetworkHandler) ListSDNDNS(c *fiber.Ctx) error {
 
 // CreateSDNDNS handles POST /clusters/:cluster_id/sdn/dns.
 func (h *NetworkHandler) CreateSDNDNS(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	var req proxmox.CreateSDNDNSParams
 	if err := c.BodyParser(&req); err != nil {
@@ -1340,12 +1312,12 @@ func (h *NetworkHandler) CreateSDNDNS(c *fiber.Ctx) error {
 
 // UpdateSDNDNS handles PUT /clusters/:cluster_id/sdn/dns/:dns.
 func (h *NetworkHandler) UpdateSDNDNS(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	dns := c.Params("dns")
 	if dns == "" {
@@ -1369,12 +1341,12 @@ func (h *NetworkHandler) UpdateSDNDNS(c *fiber.Ctx) error {
 
 // DeleteSDNDNS handles DELETE /clusters/:cluster_id/sdn/dns/:dns.
 func (h *NetworkHandler) DeleteSDNDNS(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "network", clusterID); err != nil {
+		return err
 	}
 	dns := c.Params("dns")
 	if dns == "" {
@@ -1409,8 +1381,8 @@ func toTemplateResponse(t db.FirewallTemplate) templateResponse {
 		Name:        t.Name,
 		Description: t.Description,
 		Rules:       t.Rules,
-		CreatedAt:   t.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:   t.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   t.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:   t.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 
@@ -1561,13 +1533,12 @@ func (h *NetworkHandler) DeleteTemplate(c *fiber.Ctx) error {
 
 // ApplyTemplate handles POST /clusters/:cluster_id/firewall-templates/:id/apply.
 func (h *NetworkHandler) ApplyTemplate(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 
 	templateID, err := uuid.Parse(c.Params("id"))
@@ -1620,12 +1591,12 @@ func (h *NetworkHandler) ApplyTemplate(c *fiber.Ctx) error {
 
 // ListFirewallAliases handles GET /clusters/:cluster_id/firewall/aliases.
 func (h *NetworkHandler) ListFirewallAliases(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1640,12 +1611,12 @@ func (h *NetworkHandler) ListFirewallAliases(c *fiber.Ctx) error {
 
 // CreateFirewallAlias handles POST /clusters/:cluster_id/firewall/aliases.
 func (h *NetworkHandler) CreateFirewallAlias(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	var req proxmox.FirewallAliasParams
 	if err := c.BodyParser(&req); err != nil {
@@ -1668,12 +1639,12 @@ func (h *NetworkHandler) CreateFirewallAlias(c *fiber.Ctx) error {
 
 // UpdateFirewallAlias handles PUT /clusters/:cluster_id/firewall/aliases/:name.
 func (h *NetworkHandler) UpdateFirewallAlias(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	name := c.Params("name")
 	var req proxmox.FirewallAliasParams
@@ -1694,12 +1665,12 @@ func (h *NetworkHandler) UpdateFirewallAlias(c *fiber.Ctx) error {
 
 // DeleteFirewallAlias handles DELETE /clusters/:cluster_id/firewall/aliases/:name.
 func (h *NetworkHandler) DeleteFirewallAlias(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	name := c.Params("name")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1718,12 +1689,12 @@ func (h *NetworkHandler) DeleteFirewallAlias(c *fiber.Ctx) error {
 
 // ListFirewallIPSets handles GET /clusters/:cluster_id/firewall/ipset.
 func (h *NetworkHandler) ListFirewallIPSets(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1738,12 +1709,12 @@ func (h *NetworkHandler) ListFirewallIPSets(c *fiber.Ctx) error {
 
 // CreateFirewallIPSet handles POST /clusters/:cluster_id/firewall/ipset.
 func (h *NetworkHandler) CreateFirewallIPSet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	var req struct {
 		Name    string `json:"name"`
@@ -1769,12 +1740,12 @@ func (h *NetworkHandler) CreateFirewallIPSet(c *fiber.Ctx) error {
 
 // DeleteFirewallIPSet handles DELETE /clusters/:cluster_id/firewall/ipset/:name.
 func (h *NetworkHandler) DeleteFirewallIPSet(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	name := c.Params("name")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1791,12 +1762,12 @@ func (h *NetworkHandler) DeleteFirewallIPSet(c *fiber.Ctx) error {
 
 // ListFirewallIPSetEntries handles GET /clusters/:cluster_id/firewall/ipset/:name/entries.
 func (h *NetworkHandler) ListFirewallIPSetEntries(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 	name := c.Params("name")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1812,12 +1783,12 @@ func (h *NetworkHandler) ListFirewallIPSetEntries(c *fiber.Ctx) error {
 
 // AddFirewallIPSetEntry handles POST /clusters/:cluster_id/firewall/ipset/:name/entries.
 func (h *NetworkHandler) AddFirewallIPSetEntry(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	name := c.Params("name")
 	var req proxmox.FirewallIPSetEntryParams
@@ -1841,12 +1812,12 @@ func (h *NetworkHandler) AddFirewallIPSetEntry(c *fiber.Ctx) error {
 
 // DeleteFirewallIPSetEntry handles DELETE /clusters/:cluster_id/firewall/ipset/:name/entries/:cidr.
 func (h *NetworkHandler) DeleteFirewallIPSetEntry(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	name := c.Params("name")
 	cidr := c.Params("cidr")
@@ -1866,12 +1837,12 @@ func (h *NetworkHandler) DeleteFirewallIPSetEntry(c *fiber.Ctx) error {
 
 // ListSecurityGroups handles GET /clusters/:cluster_id/firewall/groups.
 func (h *NetworkHandler) ListSecurityGroups(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -1886,12 +1857,12 @@ func (h *NetworkHandler) ListSecurityGroups(c *fiber.Ctx) error {
 
 // CreateSecurityGroup handles POST /clusters/:cluster_id/firewall/groups.
 func (h *NetworkHandler) CreateSecurityGroup(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	var req proxmox.FirewallSecurityGroupParams
 	if err := c.BodyParser(&req); err != nil {
@@ -1914,12 +1885,12 @@ func (h *NetworkHandler) CreateSecurityGroup(c *fiber.Ctx) error {
 
 // DeleteSecurityGroup handles DELETE /clusters/:cluster_id/firewall/groups/:group.
 func (h *NetworkHandler) DeleteSecurityGroup(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	group := c.Params("group")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1936,12 +1907,12 @@ func (h *NetworkHandler) DeleteSecurityGroup(c *fiber.Ctx) error {
 
 // ListSecurityGroupRules handles GET /clusters/:cluster_id/firewall/groups/:group/rules.
 func (h *NetworkHandler) ListSecurityGroupRules(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 	group := c.Params("group")
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1957,12 +1928,12 @@ func (h *NetworkHandler) ListSecurityGroupRules(c *fiber.Ctx) error {
 
 // CreateSecurityGroupRule handles POST /clusters/:cluster_id/firewall/groups/:group/rules.
 func (h *NetworkHandler) CreateSecurityGroupRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	group := c.Params("group")
 	var req proxmox.FirewallRuleParams
@@ -1983,12 +1954,12 @@ func (h *NetworkHandler) CreateSecurityGroupRule(c *fiber.Ctx) error {
 
 // UpdateSecurityGroupRule handles PUT /clusters/:cluster_id/firewall/groups/:group/rules/:pos.
 func (h *NetworkHandler) UpdateSecurityGroupRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	group := c.Params("group")
 	pos, err := strconv.Atoi(c.Params("pos"))
@@ -2013,12 +1984,12 @@ func (h *NetworkHandler) UpdateSecurityGroupRule(c *fiber.Ctx) error {
 
 // DeleteSecurityGroupRule handles DELETE /clusters/:cluster_id/firewall/groups/:group/rules/:pos.
 func (h *NetworkHandler) DeleteSecurityGroupRule(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "network", clusterID); err != nil {
+		return err
 	}
 	group := c.Params("group")
 	pos, err := strconv.Atoi(c.Params("pos"))
@@ -2041,12 +2012,12 @@ func (h *NetworkHandler) DeleteSecurityGroupRule(c *fiber.Ctx) error {
 
 // GetFirewallLog handles GET /clusters/:cluster_id/firewall/log.
 func (h *NetworkHandler) GetFirewallLog(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "network"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "network", clusterID); err != nil {
+		return err
 	}
 	nodeName := c.Query("node")
 	if nodeName == "" {

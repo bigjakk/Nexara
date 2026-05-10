@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -17,8 +18,8 @@ import (
 
 // SettingsHandler handles application settings endpoints.
 type SettingsHandler struct {
-	queries  *db.Queries
-	dataDir  string // directory to store uploaded files (logos, favicons)
+	queries *db.Queries
+	dataDir string // directory to store uploaded files (logos, favicons)
 }
 
 // NewSettingsHandler creates a new settings handler.
@@ -42,8 +43,8 @@ func toSettingResponse(s db.Setting) settingResponse {
 		Key:       s.Key,
 		Value:     s.Value,
 		Scope:     s.Scope,
-		CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt: s.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt: s.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if s.ScopeID.Valid {
 		id := s.ScopeID.Bytes
@@ -270,6 +271,13 @@ func (h *SettingsHandler) UploadLogo(c *fiber.Ctx) error {
 	if err != nil {
 		return fmt.Errorf("read uploaded file: %w", err)
 	}
+	if int64(len(content)) > 2*1024*1024 {
+		return fiber.NewError(fiber.StatusBadRequest, "Logo file too large (max 2MB)")
+	}
+
+	if err := validateImageUpload(content, ext); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid image: "+err.Error())
+	}
 
 	// Ensure data directory exists
 	brandingDir := filepath.Join(h.dataDir, "branding")
@@ -310,19 +318,7 @@ func (h *SettingsHandler) UploadLogo(c *fiber.Ctx) error {
 // ServeLogo serves the uploaded logo file.
 // GET /api/v1/settings/branding/logo-file
 func (h *SettingsHandler) ServeLogo(c *fiber.Ctx) error {
-	brandingDir := filepath.Join(h.dataDir, "branding")
-	entries, err := os.ReadDir(brandingDir)
-	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, "No logo uploaded")
-	}
-
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "logo.") {
-			return c.SendFile(filepath.Join(brandingDir, entry.Name()))
-		}
-	}
-
-	return fiber.NewError(fiber.StatusNotFound, "No logo uploaded")
+	return h.serveBrandingFile(c, "logo")
 }
 
 // UploadFavicon handles favicon file upload for branding.
@@ -356,6 +352,13 @@ func (h *SettingsHandler) UploadFavicon(c *fiber.Ctx) error {
 	content, err := io.ReadAll(io.LimitReader(src, 512*1024+1))
 	if err != nil {
 		return fmt.Errorf("read uploaded file: %w", err)
+	}
+	if int64(len(content)) > 512*1024 {
+		return fiber.NewError(fiber.StatusBadRequest, "Favicon file too large (max 512KB)")
+	}
+
+	if err := validateImageUpload(content, ext); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid image: "+err.Error())
 	}
 
 	brandingDir := filepath.Join(h.dataDir, "branding")
@@ -394,19 +397,80 @@ func (h *SettingsHandler) UploadFavicon(c *fiber.Ctx) error {
 // ServeFavicon serves the uploaded favicon file.
 // GET /api/v1/settings/branding/favicon-file
 func (h *SettingsHandler) ServeFavicon(c *fiber.Ctx) error {
+	return h.serveBrandingFile(c, "favicon")
+}
+
+// serveBrandingFile serves an uploaded branding asset (logo or favicon) with
+// hardened response headers: explicit Content-Type, X-Content-Type-Options
+// nosniff, and a default-src 'none' CSP that neutralises any script that
+// slipped past the upload validator. This is the second layer of defence —
+// the upload validator is the first.
+func (h *SettingsHandler) serveBrandingFile(c *fiber.Ctx, prefix string) error {
 	brandingDir := filepath.Join(h.dataDir, "branding")
 	entries, err := os.ReadDir(brandingDir)
 	if err != nil {
-		return fiber.NewError(fiber.StatusNotFound, "No favicon uploaded")
+		return fiber.NewError(fiber.StatusNotFound, "No "+prefix+" uploaded")
 	}
 
+	var match os.DirEntry
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), "favicon.") {
-			return c.SendFile(filepath.Join(brandingDir, entry.Name()))
+		if strings.HasPrefix(entry.Name(), prefix+".") {
+			match = entry
+			break
 		}
 	}
+	if match == nil {
+		return fiber.NewError(fiber.StatusNotFound, "No "+prefix+" uploaded")
+	}
 
-	return fiber.NewError(fiber.StatusNotFound, "No favicon uploaded")
+	// Defence-in-depth: filepath.Base strips any path components ReadDir
+	// shouldn't have produced anyway, and the post-Clean prefix check ensures
+	// the resolved path stays inside brandingDir.
+	safeName := filepath.Base(match.Name())
+	joined := filepath.Join(brandingDir, safeName)
+	cleanDir := filepath.Clean(brandingDir) + string(os.PathSeparator)
+	if !strings.HasPrefix(filepath.Clean(joined), cleanDir) {
+		return fiber.NewError(fiber.StatusInternalServerError, "Branding asset path escaped data directory")
+	}
+
+	ext := strings.ToLower(filepath.Ext(safeName))
+	if ct, ok := brandingContentType(ext); ok {
+		c.Set(fiber.HeaderContentType, ct)
+	}
+	c.Set("X-Content-Type-Options", "nosniff")
+	// Block any script execution and external resource loading even if a
+	// malicious SVG slipped past validation. style-src 'unsafe-inline' is
+	// retained because legitimate SVGs carry inline <style> for presentation.
+	// Bare `sandbox` is the most restrictive sandbox per CSP3 — blocks scripts,
+	// forms, top-level navigation, plugins, and same-origin treatment when the
+	// asset is loaded as a top-level document.
+	c.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox")
+	c.Set("Cross-Origin-Resource-Policy", "same-origin")
+	// Force download for SVG when navigated directly. <img>, <link rel="icon">,
+	// and CSS background-image ignore Content-Disposition, so the BrandingPage
+	// preview, sidebar logo, and favicon link still render normally — but
+	// pasting the URL in the address bar produces a download instead of an
+	// inline render in the Nexara same-origin context.
+	if ext == ".svg" {
+		c.Set("Content-Disposition", `attachment; filename="`+prefix+`.svg"`)
+	}
+	return c.SendFile(joined)
+}
+
+func brandingContentType(ext string) (string, bool) {
+	switch ext {
+	case ".svg":
+		return "image/svg+xml; charset=utf-8", true
+	case ".png":
+		return "image/png", true
+	case ".jpg", ".jpeg":
+		return "image/jpeg", true
+	case ".webp":
+		return "image/webp", true
+	case ".ico":
+		return "image/x-icon", true
+	}
+	return "", false
 }
 
 // GetBranding returns all global branding settings (public, no auth for logo/favicon serving).

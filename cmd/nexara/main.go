@@ -25,9 +25,10 @@ import (
 	"github.com/bigjakk/nexara/internal/collector"
 	"github.com/bigjakk/nexara/internal/config"
 	"github.com/bigjakk/nexara/internal/db"
-	"github.com/bigjakk/nexara/internal/debug"
 	dbgen "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/debug"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/scheduler"
 	"github.com/bigjakk/nexara/internal/ws"
 	"github.com/bigjakk/nexara/pkg/redisutil"
@@ -37,6 +38,14 @@ func main() {
 	// Healthcheck CLI mode for Docker HEALTHCHECK.
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		runHealthcheck()
+		return
+	}
+
+	// Maintenance CLI: full integrity repair including hypertable REINDEX.
+	// Long-running and AccessExclusiveLock-blocking — never invoked from the
+	// normal startup path.
+	if len(os.Args) > 1 && os.Args[1] == "repair-integrity" {
+		runRepairIntegrity()
 		return
 	}
 
@@ -63,13 +72,15 @@ func main() {
 	logger.Info("connected to database")
 
 	// Run embedded schema migrations.
-	if err := db.EnsureSchema(ctx, pool); err != nil {
+	if err := db.EnsureSchema(ctx, pool, cfg.DatabaseURL, logger); err != nil {
 		log.Fatalf("failed to ensure database schema: %v", err)
 	}
 
-	// Detect and fix data integrity issues (duplicate rows from index corruption
-	// or concurrent instances). Safe to run on every startup.
-	if err := db.RepairIntegrity(ctx, pool, logger); err != nil {
+	// Detect and remove duplicate inventory rows (cheap, no-op in normal
+	// operation). The hypertable REINDEX is intentionally NOT run here —
+	// it holds AccessExclusiveLock and can take hours. Operators must invoke
+	// `nexara repair-integrity` explicitly to run that path.
+	if err := db.RepairIntegrity(ctx, pool, logger, db.RepairOptions{}); err != nil {
 		logger.Error("integrity repair failed", "error", err)
 	}
 
@@ -105,7 +116,18 @@ func main() {
 	}
 
 	// ---- API server (registers /api/v1/* and /healthz) ----
-	srv := api.New(cfg, pool, rdb)
+	// ctx is the per-server shutdown context; the API server threads it
+	// into handlers and orchestrators that spawn detached goroutines
+	// (migration, DRS, rolling update) so a graceful SIGTERM cancels
+	// in-flight Proxmox/SSH calls instead of orphaning them.
+	srv := api.New(ctx, cfg, pool, rdb)
+	// Tear down the Proxmox client cache's pub/sub goroutine on
+	// shutdown. Belt-and-braces: ctx cancellation already exits the
+	// runSubscriber loop, but Close also handles paths where ctx
+	// might be reused.
+	if cache := srv.ProxmoxCache(); cache != nil {
+		defer cache.Close()
+	}
 
 	// ---- WebSocket server (registers /ws/* on the API's Fiber app) ----
 	queries := dbgen.New(pool)
@@ -119,6 +141,14 @@ func main() {
 	if cfg.EncryptionKey != "" {
 		consoleHandler = ws.NewConsoleHandler(queries, cfg.EncryptionKey, jwtSvc, logger.With("component", "console"))
 		vncHandler = ws.NewVNCHandler(queries, cfg.EncryptionKey, jwtSvc, logger.With("component", "vnc"))
+		// Share the API server's Proxmox client cache so WS console/VNC
+		// connections reuse the same cached *Client instance that the
+		// HTTP handlers do — avoids a fresh TLS handshake every time a
+		// user opens a node shell or VM console.
+		if cache := srv.ProxmoxCache(); cache != nil {
+			consoleHandler.SetProxmoxCache(cache)
+			vncHandler.SetProxmoxCache(cache)
+		}
 	}
 
 	wsServer := ws.NewServer(hub, jwtSvc, logger.With("component", "ws"), cfg.WSPingInterval, cfg.WSPongTimeout, ws.ServerConfig{
@@ -131,6 +161,11 @@ func main() {
 		// review H1). If srv.RBACEngine() is nil here, the WS server
 		// will warn at startup and fall open on cluster channels.
 		RBACEngine: srv.RBACEngine(),
+		// Origin allow-list for /ws, /ws/console, /ws/vnc upgrades.
+		// Empty/wildcard preserves the legacy "accept any origin"
+		// behaviour and triggers a startup warning; explicit values
+		// enforce CSRF defence-in-depth at the upgrade boundary.
+		AllowedOrigins: ws.ParseAllowedOrigins(cfg.WSAllowedOrigins),
 	})
 	wsServer.RegisterRoutes(srv.App())
 
@@ -152,10 +187,10 @@ func main() {
 	}))
 
 	// ---- Collector goroutine ----
-	go runCollector(ctx, cfg, pool, rdb, logger.With("component", "collector"))
+	go runCollector(ctx, cfg, pool, rdb, srv.ProxmoxCache(), logger.With("component", "collector"))
 
 	// ---- Scheduler goroutine ----
-	go runScheduler(ctx, cfg, pool, rdb, logger.With("component", "scheduler"))
+	go runScheduler(ctx, cfg, pool, rdb, srv.ProxmoxCache(), logger.With("component", "scheduler"))
 
 	// ---- Start server ----
 	addr := fmt.Sprintf(":%d", cfg.APIPort)
@@ -197,6 +232,55 @@ func runHealthcheck() {
 		os.Exit(1)
 	}
 	fmt.Println("ok")
+}
+
+// runRepairIntegrity executes the full integrity repair, including the
+// hypertable REINDEX that the normal startup path skips. Intended for
+// operator-triggered maintenance windows: invoke via
+// `docker exec <nexara-container> /nexara repair-integrity`.
+//
+// The hypertable REINDEX holds AccessExclusiveLock for the duration and
+// blocks all writes to node_metrics / vm_metrics — collector ingest will
+// stall until it completes.
+func runRepairIntegrity() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repair-integrity: failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: cfg.SlogLevel(),
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Surface SIGINT/SIGTERM so an operator can abort a long-running REINDEX.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig, ok := <-quit
+		if !ok {
+			return
+		}
+		logger.Warn("repair-integrity received signal, cancelling", "signal", sig)
+		cancel()
+	}()
+
+	pool, err := db.ConnectWithRetry(ctx, cfg.DatabaseURL, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "repair-integrity: failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	logger.Info("starting full integrity repair (hypertable REINDEX will block writes)")
+	if err := db.RepairIntegrity(ctx, pool, logger, db.RepairOptions{ReindexHypertables: true}); err != nil {
+		logger.Error("integrity repair failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("integrity repair completed")
 }
 
 // Heartbeat-based leader election. Only one instance across the cluster
@@ -340,7 +424,7 @@ func runWithLeaderRetry(ctx context.Context, pool *pgxpool.Pool, role string, lo
 
 // runCollector runs the metric collection loop. Uses leader election so only
 // one instance across the Swarm cluster runs the collector at any time.
-func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, logger *slog.Logger) {
+func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, cache *proxmox.ClientCache, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("collector panic", "error", r)
@@ -349,6 +433,7 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 
 	queries := dbgen.New(pool)
 	syncer := collector.NewSyncer(queries, cfg.EncryptionKey, logger)
+	syncer.SetProxmoxCache(cache)
 
 	if rdb != nil {
 		eventPub := events.NewPublisher(rdb, logger)
@@ -389,7 +474,7 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 }
 
 // runScheduler runs all scheduler tickers (mirrors cmd/scheduler logic).
-func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, logger *slog.Logger) {
+func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, cache *proxmox.ClientCache, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("scheduler panic", "error", r)
@@ -403,7 +488,8 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		eventPub = events.NewPublisher(rdb, logger.With("component", "events"))
 	}
 
-	sched := scheduler.New(queries, cfg.EncryptionKey, logger, eventPub)
+	sched := scheduler.New(ctx, queries, cfg.EncryptionKey, logger, eventPub)
+	sched.SetProxmoxCache(cache)
 
 	runWithLeaderRetry(ctx, pool, "scheduler", logger, func(ctx context.Context) {
 		logger.Info("scheduler started",

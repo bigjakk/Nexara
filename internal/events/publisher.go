@@ -89,7 +89,7 @@ func (p *Publisher) Publish(ctx context.Context, event Event) {
 		return
 	}
 	if event.Timestamp == "" {
-		event.Timestamp = time.Now().UTC().Format(time.RFC3339)
+		event.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 
 	data, err := json.Marshal(event)

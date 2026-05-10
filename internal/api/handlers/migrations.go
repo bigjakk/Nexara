@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -12,22 +13,56 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/migration"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
+
+// MigrationConcurrencyLimit caps the number of in-flight user-initiated
+// migrations the API server will run as detached goroutines. Excess
+// requests are rejected with 429 Too Many Requests so the operator gets
+// immediate feedback rather than queuing forever in memory.
+const MigrationConcurrencyLimit = 4
 
 // MigrationHandler handles migration job endpoints.
 type MigrationHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	// shutdownCtx is the parent for the detached migration goroutine so a
+	// graceful SIGTERM aborts in-flight Proxmox calls instead of orphaning
+	// the goroutine. Falls back to context.Background() if nil for tests.
+	shutdownCtx context.Context
+	// slots is a buffered-channel semaphore that caps the number of
+	// concurrent in-flight migration goroutines. A non-blocking send on
+	// Execute reserves a slot; the goroutine releases on exit.
+	slots chan struct{}
 }
 
-// NewMigrationHandler creates a new MigrationHandler.
-func NewMigrationHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *MigrationHandler {
+// NewMigrationHandler creates a new MigrationHandler. shutdownCtx should be
+// the per-server context cancelled on SIGTERM; nil falls back to
+// context.Background().
+func NewMigrationHandler(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *MigrationHandler {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	return &MigrationHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
+		shutdownCtx:   shutdownCtx,
+		slots:         make(chan struct{}, MigrationConcurrencyLimit),
 	}
+}
+
+// newOrchestrator builds a migration.Orchestrator wired with the per-server
+// Proxmox client cache stashed in fiber Locals by the API middleware.
+// Falls back to a cache-less orchestrator if the middleware didn't run
+// (e.g. partial-construction tests).
+func (h *MigrationHandler) newOrchestrator(c *fiber.Ctx) *migration.Orchestrator {
+	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		orch.SetProxmoxCache(cache)
+	}
+	return orch
 }
 
 // --- Request / Response types ---
@@ -101,15 +136,15 @@ func toMigrationJobResponse(j db.MigrationJob) migrationJobResponse {
 		Progress:        j.Progress,
 		CheckResults:    j.CheckResults,
 		ErrorMessage:    j.ErrorMessage,
-		CreatedAt:       j.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:       j.UpdatedAt.Format(time.RFC3339),
+		CreatedAt:       j.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:       j.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	if j.StartedAt.Valid {
-		s := j.StartedAt.Time.Format(time.RFC3339)
+		s := j.StartedAt.Time.Format(time.RFC3339Nano)
 		r.StartedAt = &s
 	}
 	if j.CompletedAt.Valid {
-		s := j.CompletedAt.Time.Format(time.RFC3339)
+		s := j.CompletedAt.Time.Format(time.RFC3339Nano)
 		r.CompletedAt = &s
 	}
 	return r
@@ -139,10 +174,6 @@ var validMigrationModes = map[string]bool{
 
 // Create handles POST /api/v1/migrations.
 func (h *MigrationHandler) Create(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "migration"); err != nil {
-		return err
-	}
-
 	var req createMigrationRequest
 	if err := c.BodyParser(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
@@ -187,6 +218,16 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 	tgtClusterID, err := uuid.Parse(req.TargetClusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid target_cluster_id")
+	}
+
+	// Caller needs manage:migration on BOTH source and target clusters.
+	if err := requireClusterPerm(c, "manage", "migration", srcClusterID); err != nil {
+		return err
+	}
+	if srcClusterID != tgtClusterID {
+		if err := requireClusterPerm(c, "manage", "migration", tgtClusterID); err != nil {
+			return err
+		}
 	}
 
 	// For intra-cluster, source and target must be the same cluster.
@@ -267,15 +308,16 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 
 // List handles GET /api/v1/migrations.
 func (h *MigrationHandler) List(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "migration"); err != nil {
+	access, err := accessibleClusters(c, "view", "migration")
+	if err != nil {
 		return err
 	}
 
-	limit := safeInt32(50)
+	limit := safeconv.Int32(50)
 	if l := c.QueryInt("limit", 50); l > 0 && l <= 500 {
-		limit = safeInt32(l)
+		limit = safeconv.Int32(l)
 	}
-	offset := safeInt32(c.QueryInt("offset", 0))
+	offset := safeconv.Int32(c.QueryInt("offset", 0))
 
 	jobs, err := h.queries.ListMigrationJobs(c.Context(), db.ListMigrationJobsParams{
 		Limit:  limit,
@@ -285,9 +327,14 @@ func (h *MigrationHandler) List(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list migration jobs")
 	}
 
-	resp := make([]migrationJobResponse, len(jobs))
-	for i, j := range jobs {
-		resp[i] = toMigrationJobResponse(j)
+	resp := make([]migrationJobResponse, 0, len(jobs))
+	for _, j := range jobs {
+		// A migration straddles two clusters; require visibility on at least
+		// one to know it exists, the same as the cluster-detail pages.
+		if !access.PermitsCluster(j.SourceClusterID) && !access.PermitsCluster(j.TargetClusterID) {
+			continue
+		}
+		resp = append(resp, toMigrationJobResponse(j))
 	}
 
 	return c.JSON(resp)
@@ -295,10 +342,6 @@ func (h *MigrationHandler) List(c *fiber.Ctx) error {
 
 // Get handles GET /api/v1/migrations/:id.
 func (h *MigrationHandler) Get(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "migration"); err != nil {
-		return err
-	}
-
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -309,21 +352,37 @@ func (h *MigrationHandler) Get(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
 	}
 
+	if err := requireClusterPerm(c, "view", "migration", job.SourceClusterID); err != nil {
+		// Allow target-cluster operators to see the job too.
+		if errTgt := requireClusterPerm(c, "view", "migration", job.TargetClusterID); errTgt != nil {
+			return err
+		}
+	}
+
 	return c.JSON(toMigrationJobResponse(job))
 }
 
 // RunCheck handles POST /api/v1/migrations/:id/check.
 func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "migration"); err != nil {
-		return err
-	}
-
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
 	}
 
-	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
+	job, err := h.queries.GetMigrationJob(c.Context(), jobID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
+	}
+	if err := requireClusterPerm(c, "manage", "migration", job.SourceClusterID); err != nil {
+		return err
+	}
+	if job.TargetClusterID != job.SourceClusterID {
+		if err := requireClusterPerm(c, "manage", "migration", job.TargetClusterID); err != nil {
+			return err
+		}
+	}
+
+	orch := h.newOrchestrator(c)
 	report, err := orch.RunPreFlight(c.Context(), jobID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
@@ -334,10 +393,6 @@ func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
 
 // Execute handles POST /api/v1/migrations/:id/execute.
 func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "migration"); err != nil {
-		return err
-	}
-
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -346,6 +401,15 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 	job, err := h.queries.GetMigrationJob(c.Context(), jobID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
+	}
+
+	if err := requireClusterPerm(c, "manage", "migration", job.SourceClusterID); err != nil {
+		return err
+	}
+	if job.TargetClusterID != job.SourceClusterID {
+		if err := requireClusterPerm(c, "manage", "migration", job.TargetClusterID); err != nil {
+			return err
+		}
 	}
 
 	if job.Status != migration.StatusPending && job.Status != migration.StatusChecking {
@@ -358,10 +422,24 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 		userID = uid
 	}
 
-	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
+	// Reserve a concurrency slot up-front. Non-blocking — if the cap is
+	// already saturated we reject with 429 rather than queue indefinitely.
+	select {
+	case h.slots <- struct{}{}:
+	default:
+		return fiber.NewError(fiber.StatusTooManyRequests,
+			"too many migrations in flight (max "+strconv.Itoa(MigrationConcurrencyLimit)+"); wait for one to finish before starting another")
+	}
 
-	// Launch execution in background goroutine.
-	go orch.Execute(context.Background(), jobID, userID) //nolint:gosec // G118: intentionally detached; Fiber recycles request context
+	orch := h.newOrchestrator(c)
+
+	// Launch execution in a background goroutine rooted in shutdownCtx so a
+	// graceful shutdown aborts the migration cleanly. Slot is released on
+	// exit, including on panic.
+	go func() {
+		defer func() { <-h.slots }()
+		orch.Execute(h.shutdownCtx, jobID, userID)
+	}()
 
 	h.eventPub.ClusterEvent(c.Context(), job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "started")
 
@@ -384,10 +462,6 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 
 // Cancel handles POST /api/v1/migrations/:id/cancel.
 func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "migration"); err != nil {
-		return err
-	}
-
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -398,7 +472,16 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Migration job not found")
 	}
 
-	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
+	if err := requireClusterPerm(c, "manage", "migration", job.SourceClusterID); err != nil {
+		return err
+	}
+	if job.TargetClusterID != job.SourceClusterID {
+		if err := requireClusterPerm(c, "manage", "migration", job.TargetClusterID); err != nil {
+			return err
+		}
+	}
+
+	orch := h.newOrchestrator(c)
 	if err := orch.Cancel(c.Context(), jobID); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to cancel migration job")
 	}
@@ -417,20 +500,19 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/migrations.
 func (h *MigrationHandler) ListByCluster(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "migration"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "migration", clusterID); err != nil {
 		return err
 	}
 
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
-	}
-
-	limit := safeInt32(50)
+	limit := safeconv.Int32(50)
 	if l := c.QueryInt("limit", 50); l > 0 && l <= 500 {
-		limit = safeInt32(l)
+		limit = safeconv.Int32(l)
 	}
-	offset := safeInt32(c.QueryInt("offset", 0))
+	offset := safeconv.Int32(c.QueryInt("offset", 0))
 
 	jobs, err := h.queries.ListMigrationJobsByCluster(c.Context(), db.ListMigrationJobsByClusterParams{
 		SourceClusterID: clusterID,

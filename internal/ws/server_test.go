@@ -40,7 +40,14 @@ func setupIntegration(t *testing.T) (*testEnv, func()) {
 
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)
 
-	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second)
+	// Test-mode permission checker grants every action — the integration
+	// suite exercises subscribe/publish wiring, not the gate (covered
+	// in subscribe_auth_test.go). Production wires RBACEngine instead.
+	server := NewServer(hub, jwtSvc, logger, 25*time.Second, 30*time.Second, ServerConfig{
+		TestPermissionChecker: func(_ context.Context, _ uuid.UUID, _, _, _ string, _ uuid.UUID) (bool, error) {
+			return true, nil
+		},
+	})
 
 	// Start Redis subscriber.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -88,7 +95,10 @@ func setupIntegration(t *testing.T) (*testEnv, func()) {
 func (e *testEnv) generateToken(t *testing.T) string {
 	t.Helper()
 	userID := uuid.New()
-	token, _, err := e.jwtSvc.GenerateAccessToken(userID, "test@example.com", "admin")
+	// Per remediation 2.7, /ws upgrade requires a hub-scoped token; the
+	// long-lived access token is rejected. Tests that exercise the hub
+	// path mint a hub token (≤60s TTL) the same way the SPA does.
+	token, _, err := e.jwtSvc.GenerateWSHubToken(userID, "test@example.com", "admin", 60*time.Second)
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
@@ -101,6 +111,24 @@ func (e *testEnv) dialWS(t *testing.T, token string) *gorillaws.Conn {
 	conn, _, err := gorillaws.DefaultDialer.Dial(url, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
+	}
+	return conn
+}
+
+// dialWSSubprotocol exercises the Sec-WebSocket-Protocol auth path —
+// `nexara.token, nexara.token.<jwt>`. The server must echo back
+// `nexara.token` for the connection to open.
+func (e *testEnv) dialWSSubprotocol(t *testing.T, token string) *gorillaws.Conn {
+	t.Helper()
+	url := fmt.Sprintf("ws://127.0.0.1:%d/ws", e.port)
+	dialer := *gorillaws.DefaultDialer
+	dialer.Subprotocols = []string{"nexara.token", "nexara.token." + token}
+	conn, resp, err := dialer.Dial(url, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != "nexara.token" {
+		t.Errorf("expected echo Sec-WebSocket-Protocol=nexara.token, got %q", got)
 	}
 	return conn
 }
@@ -159,6 +187,47 @@ func TestIntegrationWSConnectAndWelcome(t *testing.T) {
 	msg := readMsg(t, conn, 3*time.Second)
 	if msg.Type != MsgTypeWelcome {
 		t.Errorf("expected welcome, got %s", msg.Type)
+	}
+}
+
+// TestIntegrationWSConnectViaSubprotocol verifies the preferred auth path:
+// the JWT rides in `Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>`
+// instead of the URL. Server echoes `nexara.token` back, browser opens the
+// connection cleanly.
+func TestIntegrationWSConnectViaSubprotocol(t *testing.T) {
+	env, cleanup := setupIntegration(t)
+	defer cleanup()
+
+	token := env.generateToken(t)
+	conn := env.dialWSSubprotocol(t, token)
+	defer conn.Close()
+
+	msg := readMsg(t, conn, 3*time.Second)
+	if msg.Type != MsgTypeWelcome {
+		t.Errorf("expected welcome, got %s", msg.Type)
+	}
+}
+
+// TestIntegrationWSAccessTokenRejected confirms that a plain access token
+// (the kind the API uses for Authorization: Bearer) is REJECTED on the
+// /ws upgrade. Per remediation 2.7, only hub-scoped tokens are accepted.
+func TestIntegrationWSAccessTokenRejected(t *testing.T) {
+	env, cleanup := setupIntegration(t)
+	defer cleanup()
+
+	userID := uuid.New()
+	accessToken, _, err := env.jwtSvc.GenerateAccessToken(userID, "test@example.com", "admin")
+	if err != nil {
+		t.Fatalf("generate access token: %v", err)
+	}
+
+	url := fmt.Sprintf("ws://127.0.0.1:%d/ws?token=%s", env.port, accessToken)
+	_, resp, err := gorillaws.DefaultDialer.Dial(url, nil)
+	if err == nil {
+		t.Fatal("expected error: access token must not be accepted on /ws")
+	}
+	if resp == nil || resp.StatusCode != 403 {
+		t.Errorf("expected 403, got %v", resp)
 	}
 }
 

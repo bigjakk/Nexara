@@ -5,47 +5,42 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
-
-// safeInt32 converts an int to int32 with bounds clamping.
-// Proxmox VMIDs always fit in int32, but this satisfies gosec G115.
-func safeInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v) //nolint:gosec // bounds checked above
-}
-
-// SystemUserID is the well-known UUID for the DRS scheduler system user.
-// Created by migration 000013_system_user.
-var SystemUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 // Executor handles DRS migration execution and history recording.
 type Executor struct {
 	queries  *db.Queries
 	logger   *slog.Logger
 	eventPub *events.Publisher
+	// shutdownCtx is the parent for any context that must outlive a
+	// scheduler tick but should still be cancelled on graceful shutdown
+	// (SIGTERM). nil falls back to context.Background() so a partially
+	// constructed Executor (tests) still works.
+	shutdownCtx context.Context
 }
 
-// NewExecutor creates a new DRS executor.
-func NewExecutor(queries *db.Queries, logger *slog.Logger, eventPub *events.Publisher) *Executor {
+// NewExecutor creates a new DRS executor. shutdownCtx should be the
+// per-server context that's cancelled on SIGTERM; pass context.Background()
+// from contexts that don't have one (e.g. tests).
+func NewExecutor(shutdownCtx context.Context, queries *db.Queries, logger *slog.Logger, eventPub *events.Publisher) *Executor {
+	if shutdownCtx == nil {
+		shutdownCtx = context.Background()
+	}
 	return &Executor{
-		queries:  queries,
-		logger:   logger,
-		eventPub: eventPub,
+		queries:     queries,
+		logger:      logger,
+		eventPub:    eventPub,
+		shutdownCtx: shutdownCtx,
 	}
 }
 
@@ -57,7 +52,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			ClusterID:   clusterID,
 			SourceNode:  rec.SourceNode,
 			TargetNode:  rec.TargetNode,
-			VmID:        safeInt32(rec.VMID),
+			VmID:        safeconv.Int32(rec.VMID),
 			VmType:      rec.VMType,
 			Reason:      rec.Reason,
 			ScoreBefore: rec.ScoreBefore,
@@ -128,7 +123,7 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			rec.VMType, rec.VMID, rec.SourceNode, rec.TargetNode)
 		_, taskErr := e.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
 			ClusterID:   clusterID,
-			UserID:      SystemUserID,
+			UserID:      auth.SystemUserID,
 			Upid:        upid,
 			Description: description,
 			Status:      "running",
@@ -179,21 +174,13 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 	return nil
 }
 
-// taskSucceeded returns true if a Proxmox task exit status indicates success.
-// Proxmox uses "OK" for clean exits but can also return statuses like
-// "WARNINGS" or "OK (with warnings)" which still mean the task completed.
-// An empty exit status with a stopped task also indicates success on some
-// Proxmox versions.
-func taskSucceeded(exitStatus string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(exitStatus))
-	return upper == "" || upper == "OK" || strings.HasPrefix(upper, "OK ") || upper == "WARNINGS"
-}
-
 func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) (status string, detail string) {
-	// Use a dedicated timeout context so that scheduler shutdown doesn't
-	// prematurely mark in-flight migrations as cancelled. Live migrations
-	// can take 15+ minutes for large VMs.
-	pollCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// Use a dedicated timeout context derived from the per-server shutdown
+	// context. Live migrations can take 15+ minutes for large VMs, so we
+	// don't tie this to the scheduler tick context. We DO honor SIGTERM via
+	// shutdownCtx so a `docker compose stop` cancels the poll loop instead
+	// of orphaning it.
+	pollCtx, cancel := context.WithTimeout(e.shutdownCtx, 30*time.Minute)
 	defer cancel()
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -203,12 +190,14 @@ func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node s
 		select {
 		case <-pollCtx.Done():
 			// Do one final check — the migration may have finished while we
-			// were waiting. Use a short independent context for the API call.
+			// were waiting. Use a short independent context (NOT derived from
+			// shutdownCtx) so we still record the outcome during graceful
+			// shutdown rather than orphan a tracked task.
 			finalCtx, finalCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			ts, err := client.GetTaskStatus(finalCtx, node, upid)
 			finalCancel()
 			if err == nil && ts.Status == "stopped" {
-				if taskSucceeded(ts.ExitStatus) {
+				if proxmox.TaskSucceeded(ts.ExitStatus) {
 					return "completed", ts.ExitStatus
 				}
 				return "failed", ts.ExitStatus
@@ -221,7 +210,7 @@ func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node s
 				continue
 			}
 			if ts.Status == "stopped" {
-				if taskSucceeded(ts.ExitStatus) {
+				if proxmox.TaskSucceeded(ts.ExitStatus) {
 					return "completed", ts.ExitStatus
 				}
 				return "failed", ts.ExitStatus
@@ -234,7 +223,7 @@ func (e *Executor) waitForTask(_ context.Context, client *proxmox.Client, node s
 func (e *Executor) resolveVMDBID(ctx context.Context, clusterID uuid.UUID, vmid int) string {
 	vm, err := e.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
 		ClusterID: clusterID,
-		Vmid:      safeInt32(vmid),
+		Vmid:      safeconv.Int32(vmid),
 	})
 	if err != nil {
 		return ""
@@ -261,7 +250,7 @@ func (e *Executor) auditLogWithUPID(ctx context.Context, clusterID uuid.UUID, re
 
 	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: SystemUserID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "vm",
 		ResourceID:   resourceID,
 		Action:       action,
@@ -288,7 +277,7 @@ func (e *Executor) auditLog(ctx context.Context, clusterID uuid.UUID, resourceID
 
 	err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: clusterID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: SystemUserID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "vm",
 		ResourceID:   resourceID,
 		Action:       action,

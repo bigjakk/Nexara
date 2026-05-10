@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
-	"net"
-	"net/smtp"
 	"strings"
-	"time"
 )
 
 type smtpConfig struct {
@@ -18,8 +15,17 @@ type smtpConfig struct {
 	Password        string   `json:"password"`
 	From            string   `json:"from"`
 	To              []string `json:"to"`
-	TLS             bool     `json:"tls"`
+	TLS             *bool    `json:"tls,omitempty"`
 	SubjectTemplate string   `json:"subject_template"`
+}
+
+// useSTARTTLS reports whether the dispatcher should perform a STARTTLS
+// upgrade. Defaults to true (mandatory) when the field is absent.
+func (c smtpConfig) useSTARTTLS() bool {
+	if c.TLS == nil {
+		return true
+	}
+	return *c.TLS
 }
 
 // SMTPDispatcher sends alert notifications via email.
@@ -56,38 +62,16 @@ func (d *SMTPDispatcher) Send(ctx context.Context, config json.RawMessage, paylo
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=\"UTF-8\"\r\n\r\n%s",
 		safeFrom, safeTo, safeSubject, body)
 
-	// Resolve DNS and verify host does not point to a private/loopback address.
-	ips, err := net.DefaultResolver.LookupHost(ctx, cfg.Host)
-	if err != nil || len(ips) == 0 {
-		return fmt.Errorf("cannot resolve SMTP host: %w", err)
-	}
-	for _, ipStr := range ips {
-		ip := net.ParseIP(ipStr)
-		if ip != nil && isPrivateOrReserved(ip) {
-			return fmt.Errorf("SMTP host resolves to a private/loopback address")
-		}
-	}
-
-	// Use resolved IP to prevent DNS rebinding.
-	resolvedAddr := fmt.Sprintf("%s:%d", ips[0], cfg.Port)
-
-	errCh := make(chan error, 1)
-	go func() {
-		var auth smtp.Auth
-		if cfg.Username != "" {
-			auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
-		}
-		errCh <- smtp.SendMail(resolvedAddr, auth, cfg.From, cfg.To, []byte(msg))
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(30 * time.Second):
-		return fmt.Errorf("smtp send timed out")
-	}
+	return SendSMTPMessage(ctx, SMTPSendOptions{
+		Host:        cfg.Host,
+		Port:        cfg.Port,
+		Username:    cfg.Username,
+		Password:    cfg.Password,
+		From:        cfg.From,
+		To:          cfg.To,
+		Message:     []byte(msg),
+		UseSTARTTLS: cfg.useSTARTTLS(),
+	})
 }
 
 func buildEmailBody(p AlertPayload) string {

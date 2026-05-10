@@ -16,6 +16,25 @@ type PagerDutyDispatcher struct{}
 
 func (d *PagerDutyDispatcher) Type() string { return "pagerduty" }
 
+// pagerdutyDedupKey builds a stable dedup_key for PagerDuty Events API v2.
+// PagerDuty groups events sharing a dedup_key into one incident; trigger and
+// resolve events for the same alert must share a key for the resolve to land
+// on the right incident.
+//
+// Keying on rule_id alone (the previous behaviour) was wrong: two alerts
+// firing on different resources from the same rule (e.g. CPU > 90 on vm-a
+// AND vm-b) collapsed into one incident, suppressing the second resource's
+// notification. Keying on (rule, cluster, resource) keeps each
+// (rule, resource) pair as its own incident while still deduping repeat
+// firings on that pair.
+func pagerdutyDedupKey(payload AlertPayload) string {
+	cluster := payload.ClusterID
+	if cluster == "" {
+		cluster = "global"
+	}
+	return fmt.Sprintf("nexara-%s-%s-%s", payload.RuleID, cluster, payload.ResourceName)
+}
+
 func (d *PagerDutyDispatcher) Send(ctx context.Context, config json.RawMessage, payload AlertPayload) error {
 	var cfg pagerdutyConfig
 	if err := json.Unmarshal(config, &cfg); err != nil {
@@ -38,7 +57,7 @@ func (d *PagerDutyDispatcher) Send(ctx context.Context, config json.RawMessage, 
 	body := map[string]interface{}{
 		"routing_key":  cfg.RoutingKey,
 		"event_action": eventAction,
-		"dedup_key":    fmt.Sprintf("nexara-%s", payload.RuleID),
+		"dedup_key":    pagerdutyDedupKey(payload),
 		"payload": map[string]interface{}{
 			"summary":  fmt.Sprintf("%s: %s on %s", payload.Severity, payload.RuleName, payload.ResourceName),
 			"severity": pdSeverity,

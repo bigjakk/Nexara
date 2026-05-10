@@ -16,9 +16,11 @@ import { useAdminResetTOTP } from "@/features/settings/api/totp-queries";
 import { RoleAssignDialog } from "../components/RoleAssignDialog";
 import { CreateUserDialog } from "../components/CreateUserDialog";
 import { AdminNav } from "../components/AdminNav";
+import { SYSTEM_USER_ID } from "@/lib/constants";
 
 export function UsersPage() {
-  const { data: users, isLoading } = useUsers();
+  const { data: rawUsers, isLoading } = useUsers();
+  const users = rawUsers?.filter((u) => u.id !== SYSTEM_USER_ID);
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
   const resetTotp = useAdminResetTOTP();

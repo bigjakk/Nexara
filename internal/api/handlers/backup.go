@@ -17,6 +17,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // BackupHandler handles PBS backup management endpoints.
@@ -37,8 +38,22 @@ func (h *BackupHandler) auditLog(c *fiber.Ctx, resourceID, action string, detail
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", resourceID, action, details)
 }
 
-// createPBSClient creates a PBS client for the given server ID.
+// createPBSClient creates a PBS client for the given server ID. Routes
+// through the per-server Proxmox client cache when one is available
+// (set on the request via api/middleware), falling back to per-call
+// construction otherwise.
 func (h *BackupHandler) createPBSClient(c *fiber.Ctx, pbsServerID uuid.UUID) (*proxmox.PBSClient, error) {
+	if cache := proxmoxCacheFromCtx(c); cache != nil {
+		client, err := cache.GetPBS(c.Context(), pbsServerID)
+		if err == nil {
+			return client, nil
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fiber.NewError(fiber.StatusNotFound, "PBS server not found")
+		}
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create PBS client")
+	}
+
 	server, err := h.queries.GetPBSServer(c.Context(), pbsServerID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -74,16 +89,34 @@ func parsePBSID(c *fiber.Ctx) (uuid.UUID, error) {
 	return id, nil
 }
 
+// requirePBSPerm gates an operation on a PBS server. If the PBS server is
+// linked to a cluster, the caller must have (action, "backup") on that cluster
+// — so a user with cluster-scoped backup rights cannot drive a PBS bound to a
+// different cluster. Standalone PBS servers (no cluster_id) fall back to the
+// global requirePerm.
+func (h *BackupHandler) requirePBSPerm(c *fiber.Ctx, pbsID uuid.UUID, action string) error {
+	server, err := h.queries.GetPBSServer(c.Context(), pbsID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusNotFound, "PBS server not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get PBS server")
+	}
+	if server.ClusterID.Valid {
+		return requireClusterPerm(c, action, "backup", uuid.UUID(server.ClusterID.Bytes))
+	}
+	return requirePerm(c, action, "backup")
+}
+
 // --- Live proxy endpoints ---
 
 // ListDatastores handles GET /api/v1/pbs-servers/:pbs_id/datastores
 func (h *BackupHandler) ListDatastores(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -102,12 +135,11 @@ func (h *BackupHandler) ListDatastores(c *fiber.Ctx) error {
 
 // GetDatastoreStatus handles GET /api/v1/pbs-servers/:pbs_id/datastores/status
 func (h *BackupHandler) GetDatastoreStatus(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -127,12 +159,11 @@ func (h *BackupHandler) GetDatastoreStatus(c *fiber.Ctx) error {
 
 // TriggerGC handles POST /api/v1/pbs-servers/:pbs_id/datastores/:store/gc
 func (h *BackupHandler) TriggerGC(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
 		return err
 	}
 
@@ -165,12 +196,11 @@ type deleteSnapshotRequest struct {
 
 // DeleteSnapshot handles DELETE /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots
 func (h *BackupHandler) DeleteSnapshot(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "delete"); err != nil {
 		return err
 	}
 
@@ -217,12 +247,11 @@ type protectSnapshotRequest struct {
 
 // ProtectSnapshot handles PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/protect
 func (h *BackupHandler) ProtectSnapshot(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
 		return err
 	}
 
@@ -275,12 +304,11 @@ type updateSnapshotNotesRequest struct {
 
 // UpdateSnapshotNotes handles PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/notes
 func (h *BackupHandler) UpdateSnapshotNotes(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
 		return err
 	}
 
@@ -313,12 +341,11 @@ func (h *BackupHandler) UpdateSnapshotNotes(c *fiber.Ctx) error {
 
 // GetTaskLog handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid/log
 func (h *BackupHandler) GetTaskLog(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -353,12 +380,11 @@ type pruneDatastoreRequest struct {
 
 // PruneDatastore handles POST /api/v1/pbs-servers/:pbs_id/datastores/:store/prune
 func (h *BackupHandler) PruneDatastore(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
 		return err
 	}
 
@@ -393,14 +419,14 @@ func (h *BackupHandler) PruneDatastore(c *fiber.Ctx) error {
 
 	if !req.DryRun {
 		details, _ := json.Marshal(map[string]interface{}{
-			"store":       store,
-			"backup_type": req.BackupType,
-			"backup_id":   req.BackupID,
-			"keep_last":   req.KeepLast,
-			"keep_daily":  req.KeepDaily,
-			"keep_weekly": req.KeepWeekly,
+			"store":        store,
+			"backup_type":  req.BackupType,
+			"backup_id":    req.BackupID,
+			"keep_last":    req.KeepLast,
+			"keep_daily":   req.KeepDaily,
+			"keep_weekly":  req.KeepWeekly,
 			"keep_monthly": req.KeepMonthly,
-			"keep_yearly": req.KeepYearly,
+			"keep_yearly":  req.KeepYearly,
 		})
 		h.auditLog(c, store, "datastore_pruned", details)
 		h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "datastore_pruned")
@@ -436,12 +462,11 @@ func (h *BackupHandler) GetDatastoreConfig(c *fiber.Ctx) error {
 
 // RunSyncJob handles POST /api/v1/pbs-servers/:pbs_id/sync-jobs/:job_id/run
 func (h *BackupHandler) RunSyncJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
 		return err
 	}
 
@@ -468,12 +493,11 @@ func (h *BackupHandler) RunSyncJob(c *fiber.Ctx) error {
 
 // RunVerifyJob handles POST /api/v1/pbs-servers/:pbs_id/verify-jobs/:job_id/run
 func (h *BackupHandler) RunVerifyJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
 		return err
 	}
 
@@ -500,12 +524,11 @@ func (h *BackupHandler) RunVerifyJob(c *fiber.Ctx) error {
 
 // ListTasks handles GET /api/v1/pbs-servers/:pbs_id/tasks
 func (h *BackupHandler) ListTasks(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -532,12 +555,11 @@ func (h *BackupHandler) ListTasks(c *fiber.Ctx) error {
 
 // GetTaskStatus handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid
 func (h *BackupHandler) GetTaskStatus(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -563,12 +585,11 @@ func (h *BackupHandler) GetTaskStatus(c *fiber.Ctx) error {
 
 // ListSnapshots handles GET /api/v1/pbs-servers/:pbs_id/snapshots
 func (h *BackupHandler) ListSnapshots(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -594,12 +615,11 @@ func (h *BackupHandler) ListSnapshots(c *fiber.Ctx) error {
 
 // ListSyncJobs handles GET /api/v1/pbs-servers/:pbs_id/sync-jobs
 func (h *BackupHandler) ListSyncJobs(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -613,12 +633,11 @@ func (h *BackupHandler) ListSyncJobs(c *fiber.Ctx) error {
 
 // ListVerifyJobs handles GET /api/v1/pbs-servers/:pbs_id/verify-jobs
 func (h *BackupHandler) ListVerifyJobs(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -632,12 +651,11 @@ func (h *BackupHandler) ListVerifyJobs(c *fiber.Ctx) error {
 
 // GetDatastoreMetrics handles GET /api/v1/pbs-servers/:pbs_id/metrics
 func (h *BackupHandler) GetDatastoreMetrics(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -681,12 +699,11 @@ func (h *BackupHandler) GetDatastoreMetrics(c *fiber.Ctx) error {
 // GetDatastoreRRD handles GET /api/v1/pbs-servers/:pbs_id/datastores/:store/rrd
 // Live proxy to PBS RRD — returns IO performance metrics (transfer rate, IOPS).
 func (h *BackupHandler) GetDatastoreRRD(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
-		return err
-	}
-
 	pbsID, err := parsePBSID(c)
 	if err != nil {
+		return err
+	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -712,9 +729,13 @@ func (h *BackupHandler) GetDatastoreRRD(c *fiber.Ctx) error {
 }
 
 // ListSnapshotsByBackupID handles GET /api/v1/pbs-snapshots?backup_id=XXX
-// Returns all PBS snapshots across all servers matching a given backup_id (VMID).
+// Returns all PBS snapshots across all servers matching a given backup_id (VMID),
+// filtered to PBS servers whose cluster the caller has view:backup on.
+// Standalone PBS servers (no cluster_id) are visible only to callers with the
+// global view:backup grant.
 func (h *BackupHandler) ListSnapshotsByBackupID(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
+	access, err := accessibleClusters(c, "view", "backup")
+	if err != nil {
 		return err
 	}
 
@@ -723,42 +744,44 @@ func (h *BackupHandler) ListSnapshotsByBackupID(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "backup_id query parameter is required")
 	}
 
+	// Build the set of PBS servers the caller can see, mapped to whether
+	// they're cluster-bound (and which cluster).
+	servers, err := h.queries.ListPBSServers(c.Context())
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list PBS servers")
+	}
+	allowedPBS := make(map[uuid.UUID]bool, len(servers))
+	for _, s := range servers {
+		if s.ClusterID.Valid {
+			if access.PermitsCluster(uuid.UUID(s.ClusterID.Bytes)) {
+				allowedPBS[s.ID] = true
+			}
+		} else if access.HasGlobal {
+			allowedPBS[s.ID] = true
+		}
+	}
+
 	snaps, err := h.queries.ListPBSSnapshotsByBackupID(c.Context(), backupID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list snapshots")
 	}
 
-	return c.JSON(snaps)
+	filtered := snaps[:0]
+	for _, sn := range snaps {
+		if allowedPBS[sn.PbsServerID] {
+			filtered = append(filtered, sn)
+		}
+	}
+
+	return c.JSON(filtered)
 }
 
 // --- Backup Job endpoints (PVE vzdump) ---
 
-// createPVEClient creates a PVE client for the given cluster ID.
+// createPVEClient creates a PVE client for the given cluster ID. Routes
+// through the per-server Proxmox client cache when one is available.
 func (h *BackupHandler) createPVEClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "Cluster not found")
-		}
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	client, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        60 * time.Second,
-	})
-	if err != nil {
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
-	}
-	return client, nil
+	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 60*time.Second)
 }
 
 type triggerBackupRequest struct {
@@ -771,13 +794,12 @@ type triggerBackupRequest struct {
 
 // TriggerBackup handles POST /api/v1/clusters/:cluster_id/backup
 func (h *BackupHandler) TriggerBackup(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
+		return err
 	}
 
 	var req triggerBackupRequest
@@ -834,13 +856,12 @@ func (h *BackupHandler) TriggerBackup(c *fiber.Ctx) error {
 
 // ListBackupJobs handles GET /api/v1/clusters/:cluster_id/backup-jobs
 func (h *BackupHandler) ListBackupJobs(c *fiber.Ctx) error {
-	if err := requirePerm(c, "view", "backup"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "view", "backup", clusterID); err != nil {
+		return err
 	}
 
 	client, err := h.createPVEClient(c, clusterID)
@@ -872,13 +893,12 @@ type backupJobRequest struct {
 
 // CreateBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs
 func (h *BackupHandler) CreateBackupJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
+		return err
 	}
 
 	var req backupJobRequest
@@ -914,13 +934,12 @@ func (h *BackupHandler) CreateBackupJob(c *fiber.Ctx) error {
 
 // UpdateBackupJob handles PUT /api/v1/clusters/:cluster_id/backup-jobs/:job_id
 func (h *BackupHandler) UpdateBackupJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
+		return err
 	}
 
 	jobID := c.Params("job_id")
@@ -961,13 +980,12 @@ func (h *BackupHandler) UpdateBackupJob(c *fiber.Ctx) error {
 
 // DeleteBackupJob handles DELETE /api/v1/clusters/:cluster_id/backup-jobs/:job_id
 func (h *BackupHandler) DeleteBackupJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "delete", "backup"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "delete", "backup", clusterID); err != nil {
+		return err
 	}
 
 	jobID := c.Params("job_id")
@@ -991,13 +1009,12 @@ func (h *BackupHandler) DeleteBackupJob(c *fiber.Ctx) error {
 
 // RunBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs/:job_id/run
 func (h *BackupHandler) RunBackupJob(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
+		return err
 	}
 
 	jobID := c.Params("job_id")
@@ -1056,13 +1073,12 @@ type restoreBackupRequest struct {
 
 // RestoreBackup handles POST /api/v1/clusters/:cluster_id/restore
 func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "backup"); err != nil {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
 		return err
 	}
-
-	clusterID, err := uuid.Parse(c.Params("cluster_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
+		return err
 	}
 
 	var req restoreBackupRequest
@@ -1087,9 +1103,9 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get PBS server")
 	}
 
-	// Create PVE client for the target cluster.
-	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
-	if err != nil {
+	// Verify the target cluster exists. The actual *Client is fetched
+	// from the cache below via CreateProxmoxClient.
+	if _, err := h.queries.GetCluster(c.Context(), clusterID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusNotFound, "Cluster not found")
 		}
@@ -1114,22 +1130,11 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 
 	// Build the archive path: <pve-storage>:backup/<type>/<id>/<ISO-timestamp>
 	backupTime := time.Unix(req.BackupTime, 0).UTC()
-	archive := pveStorageName + ":backup/" + req.BackupType + "/" + req.BackupID + "/" + backupTime.Format("2006-01-02T15:04:05Z")
+	archive := pveStorageName + ":backup/" + req.BackupType + "/" + req.BackupID + "/" + backupTime.Format(time.RFC3339Nano)
 
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
+	pveClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 60*time.Second)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to decrypt cluster credentials")
-	}
-
-	pveClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        60 * time.Second,
-	})
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create Proxmox client")
+		return err
 	}
 
 	// When overwriting an existing VM, PVE requires the VM to be on the same
@@ -1137,7 +1142,7 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 	if req.Force {
 		existingVM, vmErr := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
 			ClusterID: clusterID,
-			Vmid:      safeInt32(req.VMID),
+			Vmid:      safeconv.Int32(req.VMID),
 		})
 		if vmErr != nil && !errors.Is(vmErr, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to check existing VM")
@@ -1234,7 +1239,7 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 	if req.StartAfterRestore {
 		go func() {
 			ctx := context.Background() //nolint:gosec // G118: intentionally detached; Fiber recycles request context
-			for i := 0; i < 600; i++ { // up to 10 minutes
+			for i := 0; i < 600; i++ {  // up to 10 minutes
 				time.Sleep(2 * time.Second)
 				ts, tsErr := pveClient.GetTaskStatus(ctx, req.TargetNode, upid)
 				if tsErr != nil {
@@ -1274,32 +1279,45 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 
 // backupCoverageEntry is a single VM's backup coverage info.
 type backupCoverageEntry struct {
-	VMID            int32  `json:"vmid"`
-	Name            string `json:"name"`
-	Type            string `json:"type"`
-	Status          string `json:"status"`
-	ClusterID       string `json:"cluster_id"`
-	ClusterName     string `json:"cluster_name"`
-	LatestBackup    *int64 `json:"latest_backup"`
-	BackupCount     int    `json:"backup_count"`
-	CoverageStatus  string `json:"coverage_status"` // "recent", "stale", "none"
+	VMID           int32  `json:"vmid"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Status         string `json:"status"`
+	ClusterID      string `json:"cluster_id"`
+	ClusterName    string `json:"cluster_name"`
+	LatestBackup   *int64 `json:"latest_backup"`
+	BackupCount    int    `json:"backup_count"`
+	CoverageStatus string `json:"coverage_status"` // "recent", "stale", "none"
 }
 
 // GetBackupCoverage handles GET /api/v1/backup-coverage
 //
 // Cross-references three data sources to determine backup coverage:
-// 1. PVE storage pools — which clusters have PBS-type storage and which
-//    datastore name each maps to (PVE's PBS storage name = PBS datastore name)
-// 2. PBS snapshots — keyed by (datastore, backup_id/VMID)
-// 3. VMs — matched only against datastores their cluster actually uses
+//  1. PVE storage pools — which clusters have PBS-type storage and which
+//     datastore name each maps to (PVE's PBS storage name = PBS datastore name)
+//  2. PBS snapshots — keyed by (datastore, backup_id/VMID)
+//  3. VMs — matched only against datastores their cluster actually uses
 //
 // This correctly handles multi-cluster setups where different clusters
 // use different PBS datastores, even with overlapping VMIDs.
 func (h *BackupHandler) GetBackupCoverage(c *fiber.Ctx) error {
+	access, err := accessibleClusters(c, "view", "backup")
+	if err != nil {
+		return err
+	}
+
 	vms, err := h.queries.ListAllVMs(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list VMs")
 	}
+	// Restrict the input set to VMs in clusters the user can view.
+	filteredVMs := vms[:0]
+	for _, vm := range vms {
+		if access.PermitsCluster(vm.ClusterID) {
+			filteredVMs = append(filteredVMs, vm)
+		}
+	}
+	vms = filteredVMs
 
 	// Step 1: Build cluster → set of PBS datastore names from PVE storage config.
 	// PVE's PBS storage pool name IS the datastore name on the PBS server.

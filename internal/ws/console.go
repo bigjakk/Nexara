@@ -22,10 +22,28 @@ import (
 	"github.com/google/uuid"
 )
 
+// MaxBrowserConsoleMessageBytes caps the size of a single WebSocket message
+// we'll accept from the browser side of a console / VNC proxy.
+//
+// This is the per-frame limit applied via fasthttp/websocket's SetReadLimit.
+// Hitting it sends a close frame to the peer and returns ErrReadLimit on the
+// next read — i.e. a single oversized frame cleanly tears down the
+// connection rather than letting the read loop allocate unbounded memory.
+//
+// Sized for the actual workload:
+//   - terminal keystrokes / resize JSON: tens of bytes
+//   - clipboard paste into a terminal: occasional KBs, not MBs
+//   - noVNC RFB client→server messages: <100 bytes (key/mouse events),
+//     ClientCutText for clipboard could exceed this on large pastes — at
+//     which point noVNC chunks or the user retries. 64 KiB is the standard
+//     industry cap and matches gorilla/websocket's recommended default.
+const MaxBrowserConsoleMessageBytes int64 = 64 * 1024
+
 // ConsoleHandler manages terminal proxy connections.
 type ConsoleHandler struct {
 	queries       *db.Queries
 	encryptionKey string
+	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	jwt           *auth.JWTService
 	logger        *slog.Logger
 }
@@ -40,6 +58,13 @@ func NewConsoleHandler(queries *db.Queries, encryptionKey string, jwt *auth.JWTS
 	}
 }
 
+// SetProxmoxCache wires a shared cache into the handler. Called from
+// cmd/nexara/main.go after construction so a single ClientCache backs
+// every HTTP and WS handler.
+func (h *ConsoleHandler) SetProxmoxCache(cache *proxmox.ClientCache) {
+	h.cache = cache
+}
+
 // consoleResizeMsg is sent by the browser when the terminal is resized.
 type consoleResizeMsg struct {
 	Type string `json:"type"`
@@ -49,6 +74,10 @@ type consoleResizeMsg struct {
 
 // HandleConsole proxies a browser terminal session to Proxmox vncwebsocket.
 func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
+	// Cap any single browser→backend frame so a malicious tab cannot push a
+	// multi-megabyte payload at us. Applied before any ReadMessage call.
+	conn.SetReadLimit(MaxBrowserConsoleMessageBytes)
+
 	clusterIDStr := conn.Query("cluster_id")
 	node := conn.Query("node")
 	consoleType := conn.Query("type")
@@ -89,21 +118,9 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 		return
 	}
 
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
+	pxClient, err := h.proxmoxClientFor(ctx, clusterID, cluster)
 	if err != nil {
-		h.writeError(conn, "failed to decrypt cluster credentials")
-		return
-	}
-
-	pxClient, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        30 * time.Second,
-	})
-	if err != nil {
-		h.writeError(conn, "failed to create Proxmox client")
+		h.writeError(conn, err.Error())
 		return
 	}
 
@@ -266,4 +283,37 @@ func (h *ConsoleHandler) writeError(conn *fiberWs.Conn, msg string) {
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(errMsg))
 	_ = conn.WriteMessage(fiberWs.CloseMessage,
 		fiberWs.FormatCloseMessage(fiberWs.CloseInternalServerErr, msg))
+}
+
+// proxmoxClientFor returns a Proxmox client backed by the shared cache when
+// available; falls back to per-call construction otherwise. The cluster row
+// is already looked up by the caller and threaded in so the cache lookup
+// + the not-found path stay readable in HandleConsole.
+func (h *ConsoleHandler) proxmoxClientFor(ctx context.Context, clusterID uuid.UUID, cluster db.Cluster) (*proxmox.Client, error) {
+	if h.cache != nil {
+		client, err := h.cache.Get(ctx, clusterID)
+		if err == nil {
+			return client, nil
+		}
+		// Fall through to per-call build on cache failure so a transient
+		// pub/sub or DB blip doesn't break console connections.
+		h.logger.Warn("console: proxmox cache get failed, building per-call",
+			"cluster_id", clusterID, "error", err)
+	}
+
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, h.encryptionKey)
+	if err != nil {
+		return nil, errors.New("failed to decrypt cluster credentials")
+	}
+	client, err := proxmox.NewClient(proxmox.ClientConfig{
+		BaseURL:        cluster.ApiUrl,
+		TokenID:        cluster.TokenID,
+		TokenSecret:    tokenSecret,
+		TLSFingerprint: cluster.TlsFingerprint,
+		Timeout:        30 * time.Second,
+	})
+	if err != nil {
+		return nil, errors.New("failed to create Proxmox client")
+	}
+	return client, nil
 }

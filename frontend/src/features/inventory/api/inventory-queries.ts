@@ -60,6 +60,7 @@ function vmToRow(
     haState: vm.ha_state,
     pool: vm.pool,
     template: vm.template,
+    ostype: vm.ostype,
     cpuPercent: live?.cpuPercent ?? null,
     memPercent: live?.memPercent ?? null,
   };
@@ -89,6 +90,7 @@ function nodeToRow(
     haState: "",
     pool: "",
     template: false,
+    ostype: "",
     cpuPercent: live?.cpuPercent ?? null,
     memPercent: live?.memPercent ?? null,
   };

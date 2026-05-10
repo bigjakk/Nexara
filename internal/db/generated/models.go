@@ -202,12 +202,16 @@ type CveNotificationConfig struct {
 	Enabled               bool               `json:"enabled"`
 	NotifyOnAct           bool               `json:"notify_on_act"`
 	NotifyOnAttend        bool               `json:"notify_on_attend"`
-	ChannelIds            []uuid.UUID        `json:"channel_ids"`
 	CooldownMinutes       int32              `json:"cooldown_minutes"`
 	LastNotifiedAt        pgtype.Timestamptz `json:"last_notified_at"`
 	LastNotifiedSignature string             `json:"last_notified_signature"`
 	CreatedAt             time.Time          `json:"created_at"`
 	UpdatedAt             time.Time          `json:"updated_at"`
+}
+
+type CveNotificationConfigChannel struct {
+	ConfigID  uuid.UUID `json:"config_id"`
+	ChannelID uuid.UUID `json:"channel_id"`
 }
 
 type CveScan struct {
@@ -318,6 +322,13 @@ type EpssCache struct {
 	Score      float32   `json:"score"`
 	Percentile float32   `json:"percentile"`
 	FetchedAt  time.Time `json:"fetched_at"`
+}
+
+type ExternalFeedCache struct {
+	Source      string    `json:"source"`
+	Body        []byte    `json:"body"`
+	ContentHash string    `json:"content_hash"`
+	FetchedAt   time.Time `json:"fetched_at"`
 }
 
 type FirewallTemplate struct {
@@ -567,6 +578,23 @@ type NotificationChannel struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+type NotificationDlq struct {
+	ID           uuid.UUID       `json:"id"`
+	ChannelID    pgtype.UUID     `json:"channel_id"`
+	ChannelType  string          `json:"channel_type"`
+	ChannelName  string          `json:"channel_name"`
+	AlertID      pgtype.UUID     `json:"alert_id"`
+	RuleID       pgtype.UUID     `json:"rule_id"`
+	ClusterID    pgtype.UUID     `json:"cluster_id"`
+	Payload      json.RawMessage `json:"payload"`
+	LastError    string          `json:"last_error"`
+	AttemptCount int32           `json:"attempt_count"`
+	State        string          `json:"state"`
+	FailureKind  string          `json:"failure_kind"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
 type OidcConfig struct {
 	ID                    uuid.UUID       `json:"id"`
 	Name                  string          `json:"name"`
@@ -804,6 +832,7 @@ type Session struct {
 	DeviceName pgtype.Text `json:"device_name"`
 	DeviceType pgtype.Text `json:"device_type"`
 	DeviceID   pgtype.Text `json:"device_id"`
+	UserRole   string      `json:"user_role"`
 }
 
 type Setting struct {
@@ -814,6 +843,17 @@ type Setting struct {
 	ScopeID   pgtype.UUID     `json:"scope_id"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+type SshKnownHost struct {
+	ID          uuid.UUID   `json:"id"`
+	ClusterID   uuid.UUID   `json:"cluster_id"`
+	Host        string      `json:"host"`
+	Port        int32       `json:"port"`
+	PublicKey   string      `json:"public_key"`
+	Fingerprint string      `json:"fingerprint"`
+	PinnedBy    pgtype.UUID `json:"pinned_by"`
+	PinnedAt    time.Time   `json:"pinned_at"`
 }
 
 type StoragePool struct {
@@ -899,6 +939,7 @@ type Vm struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+	Ostype     string    `json:"ostype"`
 }
 
 type VmMetric struct {

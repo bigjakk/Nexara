@@ -3,11 +3,13 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -18,7 +20,7 @@ import (
 const (
 	debianTrackerURL = "https://security-tracker.debian.org/tracker/data/json"
 	cacheTTL         = 24 * time.Hour
-	maxTrackerSize   = 100 * 1024 * 1024 // 100 MB limit for tracker data
+	maxTrackerSize   = 100 * 1024 * 1024 // 100 MB cap on the JSON dump
 )
 
 // CVEInfo holds enriched CVE data from the Debian security tracker.
@@ -30,12 +32,24 @@ type CVEInfo struct {
 }
 
 // CVEClient fetches and caches CVE data from the Debian Security Tracker.
+//
+// The client is intended to be long-lived — one per scanner Engine, shared
+// across every cluster scan. The parsed tracker map (~80 MB unmarshalled)
+// is held in process memory under mu and re-validated against trackerLoadedAt
+// + cacheTTL on every entry. When the in-memory copy is stale (or never
+// loaded — fresh process start), we attempt a DB hit (external_feed_cache);
+// a miss there falls through to a full HTTP fetch from
+// security-tracker.debian.org.
 type CVEClient struct {
 	httpClient *http.Client
 	queries    *db.Queries
 	logger     *slog.Logger
-	// trackerData caches the parsed Debian tracker JSON for the duration of a scan
-	trackerData map[string]map[string]debianCVEEntry
+
+	mu                sync.Mutex
+	trackerData       map[string]map[string]debianCVEEntry
+	trackerLoadedAt   time.Time
+	cacheTTL          time.Duration // overridable for tests
+	feedURL           string        // overridable for tests
 }
 
 // debianCVEEntry is the per-CVE entry inside a package's map.
@@ -52,25 +66,37 @@ type debianRelease struct {
 	Urgency      string `json:"urgency"`
 }
 
-// NewCVEClient creates a new CVE data client.
-func NewCVEClient(queries *db.Queries, logger *slog.Logger) *CVEClient {
+// NewCVEClient creates a new CVE data client. The caller supplies the shared
+// scanner HTTP client so connection pools, redirect policy, and SSRF guards
+// are consistent across all feed fetches. Pass nil for httpClient in tests
+// to fall back to a local default.
+func NewCVEClient(queries *db.Queries, httpClient *http.Client, logger *slog.Logger) *CVEClient {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if httpClient == nil {
+		httpClient = newScannerHTTPClient(120 * time.Second)
+	}
 	return &CVEClient{
-		httpClient: &http.Client{Timeout: 120 * time.Second},
+		httpClient: httpClient,
 		queries:    queries,
 		logger:     logger,
+		cacheTTL:   cacheTTL,
+		feedURL:    debianTrackerURL,
 	}
 }
 
 // LookupPackageCVEs returns known CVEs for the given package names.
 // It fetches from the Debian Security Tracker and caches results in DB.
 func (c *CVEClient) LookupPackageCVEs(ctx context.Context, packageNames []string) (map[string][]CVEInfo, error) {
-	if err := c.ensureTrackerData(ctx); err != nil {
+	tracker, err := c.snapshot(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("fetch tracker data: %w", err)
 	}
 
 	result := make(map[string][]CVEInfo)
 	for _, pkg := range packageNames {
-		cves, ok := c.trackerData[pkg]
+		cves, ok := tracker[pkg]
 		if !ok {
 			continue
 		}
@@ -108,7 +134,8 @@ func (c *CVEClient) LookupPackageCVEs(ctx context.Context, packageNames []string
 // CVEs that don't apply to that release, or that the user has already patched
 // past, are filtered out. Pass "" to disable release-aware filtering.
 func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdateInfo, release string) ([]VulnResult, error) {
-	if err := c.ensureTrackerData(ctx); err != nil {
+	tracker, err := c.snapshot(ctx)
+	if err != nil {
 		return nil, fmt.Errorf("fetch tracker data: %w", err)
 	}
 
@@ -116,7 +143,7 @@ func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdat
 	seen := make(map[string]bool)
 
 	for _, upd := range updates {
-		pkgCVEs, ok := c.trackerData[upd.Package]
+		pkgCVEs, ok := tracker[upd.Package]
 		if !ok {
 			// Even without CVE data, security-origin updates are vulnerabilities
 			if upd.IsSecurityUpdate {
@@ -207,41 +234,119 @@ func (c *CVEClient) LookupPackageUpdates(ctx context.Context, updates []AptUpdat
 	return results, nil
 }
 
-func (c *CVEClient) ensureTrackerData(ctx context.Context) error {
-	if c.trackerData != nil {
-		return nil
+// snapshot returns the current tracker data, loading it from process cache,
+// DB cache, or network in that order. Safe to call concurrently — the load
+// is serialised by mu so simultaneous cluster scans share the result.
+func (c *CVEClient) snapshot(ctx context.Context) (map[string]map[string]debianCVEEntry, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.trackerData != nil && time.Since(c.trackerLoadedAt) < c.cacheTTL {
+		return c.trackerData, nil
 	}
 
-	c.logger.Info("fetching Debian security tracker data")
+	// Try the DB-backed cache before reaching out to the network.
+	if c.queries != nil {
+		if body, fetchedAt, hit, err := loadFeedCache(ctx, c.queries, feedSourceDebianTracker, c.cacheTTL); err != nil {
+			c.logger.Warn("debian tracker DB cache read failed; falling through to network",
+				"error", err)
+		} else if hit {
+			parsed, err := parseTracker(body)
+			if err != nil {
+				c.logger.Warn("debian tracker DB cache parse failed; falling through to network",
+					"error", err)
+			} else {
+				c.trackerData = parsed
+				c.trackerLoadedAt = fetchedAt
+				c.logger.Info("loaded Debian security tracker from DB cache",
+					"packages", len(parsed),
+					"age", time.Since(fetchedAt).Round(time.Second).String())
+				return c.trackerData, nil
+			}
+		}
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, debianTrackerURL, nil)
+	// Fetch fresh from upstream.
+	body, err := c.fetchTracker(ctx)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		// Network failure: only fall back to the in-memory copy when it's
+		// recent enough that callers couldn't have noticed the difference
+		// (within 2× cacheTTL). We do NOT silently fall back to an old
+		// (>2× TTL) snapshot — a tracker that's a week stale is missing
+		// every CVE filed since, and surfacing the network error gives
+		// runScan a chance to surface the partial-data state via
+		// securityUpdatesToVulns instead of pretending all is well.
+		if c.trackerData != nil && time.Since(c.trackerLoadedAt) < 2*c.cacheTTL {
+			c.logger.Warn("debian tracker fetch failed; reusing recent in-memory copy",
+				"age", time.Since(c.trackerLoadedAt).Round(time.Second).String(),
+				"error", err)
+			return c.trackerData, nil
+		}
+		return nil, err
 	}
+
+	parsed, perr := parseTracker(body)
+	if perr != nil {
+		return nil, fmt.Errorf("parse tracker JSON: %w", perr)
+	}
+
+	c.trackerData = parsed
+	c.trackerLoadedAt = time.Now()
+
+	// Persist to DB so the next scheduler restart hits cache instead of the
+	// network. Best-effort: store errors are logged but don't fail the load.
+	if c.queries != nil {
+		if err := storeFeedCache(ctx, c.queries, feedSourceDebianTracker, body); err != nil {
+			c.logger.Warn("failed to persist debian tracker cache to DB", "error", err)
+		}
+	}
+
+	c.logger.Info("loaded Debian security tracker from network",
+		"packages", len(parsed),
+		"size_bytes", len(body))
+	return c.trackerData, nil
+}
+
+func (c *CVEClient) fetchTracker(ctx context.Context) ([]byte, error) {
+	c.logger.Info("fetching Debian security tracker data", "url", c.feedURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.feedURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Nexara/1.0 CVE-scanner")
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("http get: %w", err)
+		return nil, fmt.Errorf("http get: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("tracker returned status %d", resp.StatusCode)
+	if err := checkUpstreamStatus(resp); err != nil {
+		return nil, err
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTrackerSize))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTrackerSize+1))
 	if err != nil {
-		return fmt.Errorf("read body: %w", err)
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if int64(len(body)) > maxTrackerSize {
+		return nil, fmt.Errorf("tracker body exceeds %d bytes", maxTrackerSize)
 	}
 
+	return body, nil
+}
+
+func parseTracker(body []byte) (map[string]map[string]debianCVEEntry, error) {
 	var data map[string]map[string]debianCVEEntry
 	if err := json.Unmarshal(body, &data); err != nil {
-		return fmt.Errorf("parse tracker JSON: %w", err)
+		return nil, err
 	}
-
-	c.trackerData = data
-	c.logger.Info("loaded Debian security tracker", "packages", len(data))
-	return nil
+	if len(data) == 0 {
+		return nil, errors.New("tracker JSON parsed but contained no packages")
+	}
+	return data, nil
 }
 
 // AptUpdateInfo represents a pending package update from Proxmox.
