@@ -8,7 +8,6 @@ import { useConsoleStore } from "@/stores/console-store";
 import {
   mintConsoleToken,
   wsAuthProtocols,
-  type ConsoleScopeType,
 } from "../api/console-queries";
 
 interface TerminalProps {
@@ -131,7 +130,7 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
           const minted = await mintConsoleToken({
             clusterId: clusterID,
             node,
-            type: type as ConsoleScopeType,
+            type: type,
             ...(vmid !== undefined ? { vmid } : {}),
           });
           token = minted.token;

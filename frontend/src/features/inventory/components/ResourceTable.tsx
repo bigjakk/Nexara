@@ -251,7 +251,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
       ),
       enableSorting: false,
       enableHiding: false,
-    }) as ColumnDef<InventoryRow>,
+    }),
     columnHelper.accessor("type", {
       header: "Type",
       cell: ({ row, getValue }) => {

@@ -85,8 +85,8 @@ export function DatastoreChart({ pbsId }: DatastoreChartProps) {
                 tickFormatter={(v: number) => formatBytes(v)}
               />
               <Tooltip
-                formatter={(value: number | undefined) =>
-                  value != null ? formatBytes(value) : "0"
+                formatter={(value: unknown) =>
+                  typeof value === "number" ? formatBytes(value) : "0"
                 }
               />
               <Area

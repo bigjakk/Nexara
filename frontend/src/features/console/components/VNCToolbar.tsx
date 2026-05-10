@@ -26,7 +26,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type RFB from "@novnc/novnc/lib/rfb";
+import type RFB from "@novnc/novnc";
 import type { ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import { useVM, useVMAction, useVMConfig } from "@/features/vms/api/vm-queries";

@@ -126,9 +126,9 @@ export function DatastoreIOChart({ pbsId, store }: DatastoreIOChartProps) {
                   <XAxis dataKey="time" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => formatBytesPerSecond(v)} />
                   <Tooltip
-                    formatter={(value: number | undefined, name: string | undefined) => [
-                      formatBytesPerSecond(value ?? 0),
-                      name ?? "",
+                    formatter={(value: unknown, name: unknown) => [
+                      formatBytesPerSecond(typeof value === "number" ? value : Number(value ?? 0)),
+                      typeof name === "string" ? name : "",
                     ]}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -167,9 +167,9 @@ export function DatastoreIOChart({ pbsId, store }: DatastoreIOChartProps) {
                   <XAxis dataKey="time" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => formatIOPS(v)} />
                   <Tooltip
-                    formatter={(value: number | undefined, name: string | undefined) => [
-                      formatIOPS(value ?? 0),
-                      name ?? "",
+                    formatter={(value: unknown, name: unknown) => [
+                      formatIOPS(typeof value === "number" ? value : Number(value ?? 0)),
+                      typeof name === "string" ? name : "",
                     ]}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />

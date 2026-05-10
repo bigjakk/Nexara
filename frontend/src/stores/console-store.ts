@@ -52,7 +52,7 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
     (set, get) => ({
       tabs: [],
       activeTabId: null,
-      windowMode: "hidden" as WindowMode,
+      windowMode: "hidden",
       windowPosition: defaultPosition(),
       windowSize: { width: 800, height: 500 },
 
@@ -111,7 +111,7 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
         set((state) => ({
           tabs: state.tabs.map((t) =>
             t.id === id
-              ? { ...t, status: "connecting" as ConsoleStatus, reconnectKey: t.reconnectKey + 1 }
+              ? { ...t, status: "connecting", reconnectKey: t.reconnectKey + 1 }
               : t,
           ),
         }));
@@ -121,7 +121,7 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
         set((state) => ({
           tabs: state.tabs.map((t) =>
             t.clusterID === clusterID && t.vmid === vmid && t.node !== newNode
-              ? { ...t, node: newNode, status: "connecting" as ConsoleStatus, reconnectKey: t.reconnectKey + 1 }
+              ? { ...t, node: newNode, status: "connecting", reconnectKey: t.reconnectKey + 1 }
               : t,
           ),
         }));
@@ -151,7 +151,7 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
               set((s) => ({
                 tabs: s.tabs.map((t) =>
                   t.id === id
-                    ? { ...t, node: resolved.name, status: "connecting" as ConsoleStatus, reconnectKey: t.reconnectKey + 1 }
+                    ? { ...t, node: resolved.name, status: "connecting", reconnectKey: t.reconnectKey + 1 }
                     : t,
                 ),
               }));
@@ -166,7 +166,7 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
         set((s) => ({
           tabs: s.tabs.map((t) =>
             t.id === id
-              ? { ...t, status: "connecting" as ConsoleStatus, reconnectKey: t.reconnectKey + 1 }
+              ? { ...t, status: "connecting", reconnectKey: t.reconnectKey + 1 }
               : t,
           ),
         }));
@@ -196,11 +196,11 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
       partialize: (state) => ({
         tabs: state.tabs.map((t) => ({
           ...t,
-          status: "connecting" as ConsoleStatus,
+          status: "connecting",
           reconnectKey: 0,
         })),
         activeTabId: state.activeTabId,
-        windowMode: state.tabs.length > 0 ? state.windowMode : "hidden" as WindowMode,
+        windowMode: state.tabs.length > 0 ? state.windowMode : "hidden",
         windowPosition: state.windowPosition,
         windowSize: state.windowSize,
       }),

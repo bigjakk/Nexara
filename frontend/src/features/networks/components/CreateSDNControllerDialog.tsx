@@ -109,7 +109,7 @@ export function CreateSDNControllerDialog({
           Object.entries(params).filter(
             ([k]) => k !== "controller" && k !== "type",
           ),
-        ) as Omit<CreateSDNControllerRequest, "controller" | "type">;
+        );
       update.mutate(
         { controller: initialData.controller, params: updateParams },
         { onSuccess: () => { setOpen(false); } },

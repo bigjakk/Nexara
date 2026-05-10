@@ -74,7 +74,7 @@ export function CreateSDNDNSDialog({
           Object.entries(params).filter(
             ([k]) => k !== "dns" && k !== "type",
           ),
-        ) as Omit<CreateSDNDNSRequest, "dns" | "type">;
+        );
       update.mutate(
         { dns: initialData.dns, params: updateParams },
         { onSuccess: () => { setOpen(false); } },

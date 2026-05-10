@@ -176,8 +176,8 @@ export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartPro
             />
             <Tooltip
               labelFormatter={(label) => new Date(Number(label)).toLocaleString()}
-              formatter={(value: number | undefined, name: string | undefined) => [
-                formatBytes(value ?? 0),
+              formatter={(value: unknown, name: unknown) => [
+                formatBytes(typeof value === "number" ? value : Number(value ?? 0)),
                 name === "used" ? "Used" : name === "forecast" ? "Forecast" : "Total",
               ]}
               contentStyle={{

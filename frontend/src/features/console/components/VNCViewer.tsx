@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import RFB from "@novnc/novnc/lib/rfb";
+import RFB from "@novnc/novnc";
 import type { ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import { VNCToolbar } from "./VNCToolbar";
 import {
   mintConsoleToken,
   wsAuthProtocols,
-  type ConsoleScopeType,
 } from "../api/console-queries";
 
 interface VNCViewerProps {
@@ -123,7 +122,7 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
           const minted = await mintConsoleToken({
             clusterId: clusterID,
             node,
-            type: tab.type as ConsoleScopeType,
+            type: tab.type,
             ...(vmid !== undefined ? { vmid } : {}),
           });
           token = minted.token;

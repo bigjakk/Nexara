@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import RFB from "@novnc/novnc/lib/rfb";
+import RFB from "@novnc/novnc";
 import { Keyboard, Maximize, Minimize, ClipboardPaste, Move, RectangleHorizontal, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {

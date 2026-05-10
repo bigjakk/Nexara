@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import RFB from "@novnc/novnc/lib/rfb";
+import RFB from "@novnc/novnc";
 import { Maximize2 } from "lucide-react";
 import {
   mintConsoleToken,
