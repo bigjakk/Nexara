@@ -66,6 +66,7 @@ export function EditStorageDialog({
 }: EditStorageDialogProps) {
   const [open, setOpen] = useState(false);
   const [params, setParams] = useState<Record<string, string>>({});
+  const [initialParams, setInitialParams] = useState<Record<string, string>>({});
   const [selectedContent, setSelectedContent] = useState<Set<StorageContentType>>(new Set());
   const [nodes, setNodes] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +93,7 @@ export function EditStorageDialog({
         if (v) p[field.key] = v;
       }
       setParams(p);
+      setInitialParams(p);
 
       // Parse content types
       const content = cfg.content ?? "";
@@ -131,20 +133,30 @@ export function EditStorageDialog({
 
     const submitParams: Record<string, string> = {};
 
-    // Only include type-specific fields that have values
+    // Only include type-specific fields whose value changed from the loaded
+    // config. Proxmox's PUT /storage/{id} schema rejects backend-identifying
+    // fields like NFS `export` even when echoed back unchanged — sending them
+    // would fail validation, so only forward what the user actually edited.
     for (const field of typeFields) {
       const v = params[field.key];
-      if (v !== undefined && v !== "") {
+      if (v !== undefined && v !== "" && v !== (initialParams[field.key] ?? "")) {
         submitParams[field.key] = v;
       }
     }
 
-    if (selectedContent.size > 0) {
-      submitParams["content"] = Array.from(selectedContent).join(",");
+    const newContent = Array.from(selectedContent).join(",");
+    if (newContent !== (configQuery.data?.content ?? "") && selectedContent.size > 0) {
+      submitParams["content"] = newContent;
     }
 
-    if (nodes.trim()) {
-      submitParams["nodes"] = nodes.trim();
+    const newNodes = nodes.trim();
+    if (newNodes !== (configQuery.data?.nodes ?? "") && newNodes !== "") {
+      submitParams["nodes"] = newNodes;
+    }
+
+    if (Object.keys(submitParams).length === 0) {
+      setError("No changes to save");
+      return;
     }
 
     updateMutation.mutate(
