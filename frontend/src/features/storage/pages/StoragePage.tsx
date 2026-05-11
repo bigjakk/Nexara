@@ -393,7 +393,7 @@ function StoragePoolDetail({
         </div>
       )}
 
-      {!contentQuery.isLoading && filterableTypes.length > 1 && (
+      {!contentQuery.isLoading && (hasGuestVolumes || filterableTypes.length > 1) && (
         <Tabs defaultValue={hasGuestVolumes ? "guests" : (filterableTypes[0] ?? "all")}>
           <TabsList>
             {hasGuestVolumes && (
@@ -436,7 +436,7 @@ function StoragePoolDetail({
         </Tabs>
       )}
 
-      {!contentQuery.isLoading && filterableTypes.length <= 1 && (
+      {!contentQuery.isLoading && !hasGuestVolumes && filterableTypes.length <= 1 && (
         <StorageContentTable
           items={items}
           clusterId={clusterId}
