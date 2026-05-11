@@ -46,16 +46,21 @@ func New(shutdownCtx context.Context, queries *db.Queries, encryptionKey string,
 		shutdownCtx = context.Background()
 	}
 	registry := notifications.BuildRegistry(queries)
+	cveScanner := scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner"), registry)
+	rollingOrch := rolling.NewOrchestrator(shutdownCtx, queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry)
+	// Refresh security posture as soon as a rolling update finishes rather
+	// than waiting for the next 6-hour scheduled scan tick.
+	rollingOrch.SetCVEScanner(cveScanner)
 	return &Scheduler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		logger:        logger,
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
 		drsExecutor:   drs.NewExecutor(shutdownCtx, queries, logger.With("component", "drs-executor"), eventPub),
-		cveScanner:    scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner"), registry),
+		cveScanner:    cveScanner,
 		alertEngine:   notifications.NewEngine(shutdownCtx, queries, logger.With("component", "alert-engine"), eventPub, registry, encryptionKey),
 		reportGen:     reports.NewGenerator(queries, logger.With("component", "report-gen")),
-		rollingOrch:   rolling.NewOrchestrator(shutdownCtx, queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry),
+		rollingOrch:   rollingOrch,
 		eventPub:      eventPub,
 		drsLastEval:   make(map[uuid.UUID]time.Time),
 	}

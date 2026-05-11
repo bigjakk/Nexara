@@ -31,6 +31,14 @@ func isValidDebianPkgName(name string) bool {
 	return validDebianPkgName.MatchString(name)
 }
 
+// CVEScanner is the subset of the scanner.Engine API the orchestrator
+// uses to trigger a post-upgrade rescan. Kept as a small interface so the
+// rolling package doesn't import scanner directly (and so tests don't
+// need to construct a real engine).
+type CVEScanner interface {
+	ScanCluster(ctx context.Context, clusterID uuid.UUID) (uuid.UUID, error)
+}
+
 // Orchestrator drives the rolling update state machine on a scheduler tick.
 type Orchestrator struct {
 	queries        *db.Queries
@@ -39,6 +47,7 @@ type Orchestrator struct {
 	logger         *slog.Logger
 	eventPub       *events.Publisher
 	notifyRegistry *notifications.Registry
+	cveScanner     CVEScanner // nil-safe; when set, a post-upgrade scan fires on successful completion
 	// shutdownCtx is the parent for goroutines that must outlive a
 	// scheduler tick (SSH upgrade, task polling, notification dispatch)
 	// but should still be cancelled on graceful shutdown (SIGTERM).
@@ -48,6 +57,12 @@ type Orchestrator struct {
 // SetProxmoxCache attaches the shared per-server cache. Nil-safe.
 func (o *Orchestrator) SetProxmoxCache(cache *proxmox.ClientCache) {
 	o.cache = cache
+}
+
+// SetCVEScanner attaches the CVE scanner used to refresh the cluster's
+// security posture after a rolling update completes successfully. Nil-safe.
+func (o *Orchestrator) SetCVEScanner(s CVEScanner) {
+	o.cveScanner = s
 }
 
 // NewOrchestrator creates a new rolling update orchestrator. shutdownCtx
@@ -163,6 +178,7 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 			o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_completed", nil)
 			o.sendJobNotification(ctx, job, "completed", "Rolling update completed successfully")
 			o.logger.Info("rolling update job completed", "job_id", job.ID)
+			o.triggerPostUpgradeCVEScan(job)
 		}
 		// Re-enable DRS if we disabled it at the start.
 		o.restoreDRS(ctx, job)
@@ -1281,6 +1297,54 @@ func (o *Orchestrator) sendJobNotification(ctx context.Context, job db.RollingUp
 			o.logger.Info("rolling update notification sent",
 				"channel_id", channelID, "status", status)
 		}
+	}()
+}
+
+// triggerPostUpgradeCVEScan kicks off a CVE rescan in the background after a
+// rolling update completes successfully so the security posture reflects the
+// new package state without waiting for the next scheduled tick. The scan
+// itself handles a concurrent-running scan via the existing scheduler logic;
+// here we only guard against firing while a scan is already in flight.
+func (o *Orchestrator) triggerPostUpgradeCVEScan(job db.RollingUpdateJob) {
+	if o.cveScanner == nil {
+		return
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				o.logger.Error("post-upgrade CVE scan panicked",
+					"job_id", job.ID, "cluster_id", job.ClusterID, "panic", r)
+			}
+		}()
+
+		// Detach from the tick context (tick rollover would cancel it) but
+		// derive from shutdownCtx so SIGTERM still aborts the scan cleanly.
+		// CVE scans can take a while across many nodes, so cap the budget
+		// generously rather than relying on the scheduler's per-tick deadline.
+		scanCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Minute)
+		defer cancel()
+
+		// Skip if a scan is already running/pending for this cluster — the
+		// existing scan will capture the post-upgrade state.
+		if latest, err := o.queries.GetLatestCVEScan(scanCtx, job.ClusterID); err == nil {
+			if latest.Status == "running" || latest.Status == "pending" {
+				o.logger.Info("post-upgrade CVE scan skipped — scan already in progress",
+					"job_id", job.ID, "cluster_id", job.ClusterID, "existing_scan_id", latest.ID)
+				return
+			}
+		}
+
+		o.logger.Info("triggering post-upgrade CVE scan",
+			"job_id", job.ID, "cluster_id", job.ClusterID)
+		scanID, err := o.cveScanner.ScanCluster(scanCtx, job.ClusterID)
+		if err != nil {
+			o.logger.Error("post-upgrade CVE scan failed",
+				"job_id", job.ID, "cluster_id", job.ClusterID, "error", err)
+			return
+		}
+		o.logger.Info("post-upgrade CVE scan completed",
+			"job_id", job.ID, "cluster_id", job.ClusterID, "scan_id", scanID)
 	}()
 }
 
