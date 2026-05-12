@@ -5,6 +5,10 @@ import { getDistroIcon } from "@/lib/distro-icons";
 
 interface OSIconProps {
   ostype: string;
+  /** Proxmox config ostype (e.g. "l26", "win11"). Used as a fallback when
+   * `ostype` is non-empty but doesn't classify (e.g. guest agent reports
+   * "home-assistant" — unknown distro, but config says "l26" → render Linux). */
+  configOstype?: string;
   className?: string;
 }
 
@@ -15,12 +19,18 @@ interface OSIconProps {
 // permission terms. Windows VMs render a stylized 4-pane mark used in
 // nominative fashion to identify Microsoft Windows guests, mirroring the
 // convention used by Proxmox VE, libvirt/virt-manager, and similar tools.
-export function OSIcon({ ostype, className }: OSIconProps) {
-  const family = classifyOS(ostype);
+export function OSIcon({ ostype, configOstype, className }: OSIconProps) {
+  // Distro-specific brand icon takes priority over the generic family icon —
+  // and we only ever try the brand icon on the guest-agent value, never the
+  // generic config value like "l26".
+  const distro = getDistroIcon(ostype);
+  const guestFamily = classifyOS(ostype);
+  // If the guest-agent reported value is unknown (e.g. "home-assistant"),
+  // fall back to the Proxmox config ostype for the family classification.
+  const family =
+    guestFamily === "unknown" && configOstype ? classifyOS(configOstype) : guestFamily;
   const baseClass = cn("h-4 w-4 shrink-0", className);
 
-  // Distro-specific brand icon takes priority over the generic family icon.
-  const distro = getDistroIcon(ostype);
   if (distro) {
     return (
       <svg

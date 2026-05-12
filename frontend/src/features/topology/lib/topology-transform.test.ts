@@ -81,6 +81,7 @@ function makeVM(overrides: Partial<VMResponse> = {}): VMResponse {
     ha_state: "",
     pool: "",
     ostype: "",
+    config_ostype: "",
     last_seen_at: "2024-01-01T00:00:00Z",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",

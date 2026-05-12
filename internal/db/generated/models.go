@@ -921,25 +921,26 @@ type UserRole struct {
 }
 
 type Vm struct {
-	ID         uuid.UUID `json:"id"`
-	ClusterID  uuid.UUID `json:"cluster_id"`
-	NodeID     uuid.UUID `json:"node_id"`
-	Vmid       int32     `json:"vmid"`
-	Name       string    `json:"name"`
-	Type       string    `json:"type"`
-	Status     string    `json:"status"`
-	CpuCount   int32     `json:"cpu_count"`
-	MemTotal   int64     `json:"mem_total"`
-	DiskTotal  int64     `json:"disk_total"`
-	Uptime     int64     `json:"uptime"`
-	Template   bool      `json:"template"`
-	Tags       string    `json:"tags"`
-	HaState    string    `json:"ha_state"`
-	Pool       string    `json:"pool"`
-	LastSeenAt time.Time `json:"last_seen_at"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Ostype     string    `json:"ostype"`
+	ID           uuid.UUID `json:"id"`
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	NodeID       uuid.UUID `json:"node_id"`
+	Vmid         int32     `json:"vmid"`
+	Name         string    `json:"name"`
+	Type         string    `json:"type"`
+	Status       string    `json:"status"`
+	CpuCount     int32     `json:"cpu_count"`
+	MemTotal     int64     `json:"mem_total"`
+	DiskTotal    int64     `json:"disk_total"`
+	Uptime       int64     `json:"uptime"`
+	Template     bool      `json:"template"`
+	Tags         string    `json:"tags"`
+	HaState      string    `json:"ha_state"`
+	Pool         string    `json:"pool"`
+	LastSeenAt   time.Time `json:"last_seen_at"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Ostype       string    `json:"ostype"`
+	ConfigOstype string    `json:"config_ostype"`
 }
 
 type VmMetric struct {

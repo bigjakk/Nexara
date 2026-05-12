@@ -22,6 +22,7 @@ function makeRow(overrides: Partial<InventoryRow> = {}): InventoryRow {
     pool: "webpool",
     template: false,
     ostype: "",
+    configOstype: "",
     cpuPercent: 45,
     memPercent: 60,
     ...overrides,

@@ -61,6 +61,7 @@ function vmToRow(
     pool: vm.pool,
     template: vm.template,
     ostype: vm.ostype,
+    configOstype: vm.config_ostype,
     cpuPercent: live?.cpuPercent ?? null,
     memPercent: live?.memPercent ?? null,
   };
@@ -91,6 +92,7 @@ function nodeToRow(
     pool: "",
     template: false,
     ostype: "",
+    configOstype: "",
     cpuPercent: live?.cpuPercent ?? null,
     memPercent: live?.memPercent ?? null,
   };

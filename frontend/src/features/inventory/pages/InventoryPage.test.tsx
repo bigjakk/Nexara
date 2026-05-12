@@ -78,6 +78,7 @@ describe("InventoryPage", () => {
           pool: "",
           template: false,
           ostype: "",
+          configOstype: "",
           cpuPercent: 50,
           memPercent: 60,
         },

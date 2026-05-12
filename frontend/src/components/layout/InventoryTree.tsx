@@ -145,7 +145,10 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
                   >
                     <VMIcon type={vm.type} template={vm.template} />
                     <StatusIcon status={vm.status} />
-                    {classifyOS(vm.ostype) !== "unknown" && <OSIcon ostype={vm.ostype} />}
+                    {(classifyOS(vm.ostype) !== "unknown" ||
+                      classifyOS(vm.config_ostype) !== "unknown") && (
+                      <OSIcon ostype={vm.ostype} configOstype={vm.config_ostype} />
+                    )}
                     <span className={cn("truncate", vm.template && "text-amber-700 dark:text-amber-400")}>
                       {vm.vmid} {vm.name}
                     </span>

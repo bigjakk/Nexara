@@ -29,8 +29,10 @@ export interface InventoryRow {
   haState: string;
   pool: string;
   template: boolean;
-  /** Proxmox ostype string (e.g. "l26", "win11", "debian", "ubuntu"); empty for nodes or when unknown */
+  /** Detected ostype: guest-agent OS ID when available, else Proxmox config setting */
   ostype: string;
+  /** Proxmox config ostype (e.g. "l26", "win11"); used as a fallback for the icon when `ostype` is an unknown distro */
+  configOstype: string;
   /** Live metric: CPU usage percent (null = no data) */
   cpuPercent: number | null;
   /** Live metric: memory usage percent (null = no data) */

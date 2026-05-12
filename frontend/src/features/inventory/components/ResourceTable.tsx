@@ -256,11 +256,13 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
       header: "Type",
       cell: ({ row, getValue }) => {
         const r = row.original;
-        const showOS = (r.type === "vm" || r.type === "ct") && classifyOS(r.ostype) !== "unknown";
+        const showOS =
+          (r.type === "vm" || r.type === "ct") &&
+          (classifyOS(r.ostype) !== "unknown" || classifyOS(r.configOstype) !== "unknown");
         return (
           <span className="inline-flex items-center gap-1.5">
             <ResourceTypeBadge type={getValue()} template={r.template} />
-            {showOS && <OSIcon ostype={r.ostype} />}
+            {showOS && <OSIcon ostype={r.ostype} configOstype={r.configOstype} />}
           </span>
         );
       },

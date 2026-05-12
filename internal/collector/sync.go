@@ -27,6 +27,7 @@ type SyncQueries interface {
 	UpsertNode(ctx context.Context, arg db.UpsertNodeParams) (db.Node, error)
 	UpsertVM(ctx context.Context, arg db.UpsertVMParams) (db.Vm, error)
 	SetVMOSType(ctx context.Context, arg db.SetVMOSTypeParams) error
+	SetVMConfigOSType(ctx context.Context, arg db.SetVMConfigOSTypeParams) error
 	UpsertStoragePool(ctx context.Context, arg db.UpsertStoragePoolParams) (db.UpsertStoragePoolRow, error)
 	DeleteStaleStoragePools(ctx context.Context, arg db.DeleteStaleStoragePoolsParams) (int64, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
@@ -704,22 +705,52 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 	return snapshots, nil
 }
 
-// refreshOSType detects the current OS for a guest and persists it when the
-// detected value differs from what's already stored. Best-effort — a failure
-// is logged but never propagated, since the per-VM config call is just for
-// cosmetic OS detection.
+// refreshOSType detects the current OS for a guest and persists it. Tracks
+// two fields:
 //
-// Detection order (running QEMU only):
-//  1. QEMU guest agent's reported os-info — gives the actual running OS
-//     (handles cases where the Proxmox config says "other" but the guest is
-//     really Linux). Reported `id` is preferred (e.g. "ubuntu", "debian",
-//     "mswindows"); falls back to a normalized `name`.
-//  2. /qemu/{vmid}/config.ostype — Proxmox-configured OS family.
+//   - ostype: the "best detected" value — guest-agent ID when available
+//     (e.g. "ubuntu", "home-assistant"), else the Proxmox config setting.
+//   - config_ostype: the Proxmox config setting (e.g. "l26", "win11") used
+//     as a UI fallback when the guest-agent value isn't a known distro and
+//     we still want to render a family icon.
 //
-// Stopped QEMU and LXC always fall through to the config call only.
+// Best-effort — a failure is logged but never propagated, since this is a
+// cosmetic OS detection path.
 func (s *Syncer) refreshOSType(ctx context.Context, client ProxmoxClient, dbVM db.Vm, nodeName string, vmid int, kind, status string) {
-	detected := ""
+	// Always fetch the Proxmox config first — its ostype value is the
+	// fallback we display when the guest-agent reports something the UI
+	// doesn't recognize.
+	var (
+		config proxmox.VMConfig
+		err    error
+	)
+	switch kind {
+	case "qemu":
+		config, err = client.GetVMConfig(ctx, nodeName, vmid)
+	case "lxc":
+		config, err = client.GetCTConfig(ctx, nodeName, vmid)
+	default:
+		return
+	}
+	if err != nil {
+		s.logger.Debug("ostype fetch failed",
+			"vmid", vmid, "node", nodeName, "kind", kind, "error", err)
+		return
+	}
+	rawConfigOS, _ := config["ostype"].(string)
+	configOSType := strings.ToLower(rawConfigOS)
 
+	if configOSType != "" && configOSType != dbVM.ConfigOstype {
+		if err := s.queries.SetVMConfigOSType(ctx, db.SetVMConfigOSTypeParams{ID: dbVM.ID, ConfigOstype: configOSType}); err != nil {
+			s.logger.Debug("config_ostype persist failed",
+				"vmid", vmid, "kind", kind, "error", err)
+		}
+	}
+
+	// Prefer the guest-agent reported OS when QEMU and running — it's more
+	// specific (distro name vs. generic "l26") and handles the case where
+	// the Proxmox config says "other" but the guest is really Linux.
+	detected := ""
 	if kind == "qemu" && status == "running" {
 		if info, err := client.GetGuestAgentOSInfo(ctx, nodeName, vmid); err == nil && info != nil {
 			if info.ID != "" {
@@ -729,27 +760,8 @@ func (s *Syncer) refreshOSType(ctx context.Context, client ProxmoxClient, dbVM d
 			}
 		}
 	}
-
 	if detected == "" {
-		var (
-			config proxmox.VMConfig
-			err    error
-		)
-		switch kind {
-		case "qemu":
-			config, err = client.GetVMConfig(ctx, nodeName, vmid)
-		case "lxc":
-			config, err = client.GetCTConfig(ctx, nodeName, vmid)
-		default:
-			return
-		}
-		if err != nil {
-			s.logger.Debug("ostype fetch failed",
-				"vmid", vmid, "node", nodeName, "kind", kind, "error", err)
-			return
-		}
-		raw, _ := config["ostype"].(string)
-		detected = strings.ToLower(raw)
+		detected = configOSType
 	}
 
 	if detected == "" || detected == dbVM.Ostype {
@@ -760,6 +772,7 @@ func (s *Syncer) refreshOSType(ctx context.Context, client ProxmoxClient, dbVM d
 			"vmid", vmid, "kind", kind, "error", err)
 	}
 }
+
 
 func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string, vmExtra map[int32]vmExtraFields) ([]vmMetricSnapshot, error) {
 	cts, err := client.GetContainers(ctx, nodeName)

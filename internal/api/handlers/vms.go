@@ -31,22 +31,23 @@ func NewVMHandler(queries *db.Queries, encryptionKey string, eventPub *events.Pu
 }
 
 type vmResponse struct {
-	ID        uuid.UUID `json:"id"`
-	ClusterID uuid.UUID `json:"cluster_id"`
-	NodeID    uuid.UUID `json:"node_id"`
-	Vmid      int32     `json:"vmid"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Status    string    `json:"status"`
-	CPUCount  int32     `json:"cpu_count"`
-	MemTotal  int64     `json:"mem_total"`
-	DiskTotal int64     `json:"disk_total"`
-	Uptime    int64     `json:"uptime"`
-	Template  bool      `json:"template"`
-	Tags      string    `json:"tags"`
-	HaState   string    `json:"ha_state"`
-	Pool      string    `json:"pool"`
-	OSType    string    `json:"ostype"`
+	ID           uuid.UUID `json:"id"`
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	NodeID       uuid.UUID `json:"node_id"`
+	Vmid         int32     `json:"vmid"`
+	Name         string    `json:"name"`
+	Type         string    `json:"type"`
+	Status       string    `json:"status"`
+	CPUCount     int32     `json:"cpu_count"`
+	MemTotal     int64     `json:"mem_total"`
+	DiskTotal    int64     `json:"disk_total"`
+	Uptime       int64     `json:"uptime"`
+	Template     bool      `json:"template"`
+	Tags         string    `json:"tags"`
+	HaState      string    `json:"ha_state"`
+	Pool         string    `json:"pool"`
+	OSType       string    `json:"ostype"`
+	ConfigOSType string    `json:"config_ostype"`
 
 	LastSeenAt time.Time `json:"last_seen_at"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -55,25 +56,26 @@ type vmResponse struct {
 
 func toVMResponse(v db.Vm) vmResponse {
 	return vmResponse{
-		ID:         v.ID,
-		ClusterID:  v.ClusterID,
-		NodeID:     v.NodeID,
-		Vmid:       v.Vmid,
-		Name:       v.Name,
-		Type:       v.Type,
-		Status:     v.Status,
-		CPUCount:   v.CpuCount,
-		MemTotal:   v.MemTotal,
-		DiskTotal:  v.DiskTotal,
-		Uptime:     v.Uptime,
-		Template:   v.Template,
-		Tags:       v.Tags,
-		HaState:    v.HaState,
-		Pool:       v.Pool,
-		OSType:     v.Ostype,
-		LastSeenAt: v.LastSeenAt,
-		CreatedAt:  v.CreatedAt,
-		UpdatedAt:  v.UpdatedAt,
+		ID:           v.ID,
+		ClusterID:    v.ClusterID,
+		NodeID:       v.NodeID,
+		Vmid:         v.Vmid,
+		Name:         v.Name,
+		Type:         v.Type,
+		Status:       v.Status,
+		CPUCount:     v.CpuCount,
+		MemTotal:     v.MemTotal,
+		DiskTotal:    v.DiskTotal,
+		Uptime:       v.Uptime,
+		Template:     v.Template,
+		Tags:         v.Tags,
+		HaState:      v.HaState,
+		Pool:         v.Pool,
+		OSType:       v.Ostype,
+		ConfigOSType: v.ConfigOstype,
+		LastSeenAt:   v.LastSeenAt,
+		CreatedAt:    v.CreatedAt,
+		UpdatedAt:    v.UpdatedAt,
 	}
 }
 

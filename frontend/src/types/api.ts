@@ -641,6 +641,7 @@ export interface VMResponse {
   ha_state: string;
   pool: string;
   ostype: string;
+  config_ostype: string;
   last_seen_at: string;
   created_at: string;
   updated_at: string;
