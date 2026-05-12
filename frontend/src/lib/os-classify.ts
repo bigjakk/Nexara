@@ -52,7 +52,18 @@ const linuxIDs = new Set([
   "kde-neon",
   "neon",
   "mx",
+  "mxlinux",
   "antix",
+  "solus",
+  "openwrt",
+  "haos",
+  "homeassistant",
+  "qubes",
+  "qubesos",
+  "tails",
+  "android",
+  "pve",
+  "proxmox",
 ]);
 
 export function classifyOS(ostype: string): OSFamily {
