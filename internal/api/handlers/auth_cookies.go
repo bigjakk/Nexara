@@ -20,15 +20,22 @@ const RefreshCookieName = "nexara_refresh_token"
 // children only.
 const refreshCookiePath = "/api/v1/auth/"
 
-// setRefreshCookie installs the refresh-token cookie with HttpOnly, Secure,
-// SameSite=Strict, and a path scoped to the auth endpoints.
+// setRefreshCookie installs the refresh-token cookie with HttpOnly, Secure
+// (when the request is HTTPS), SameSite=Strict, and a path scoped to the auth
+// endpoints. The Secure flag is downgraded on plain-HTTP requests so homelab
+// IP-only deploys don't have the browser silently drop the cookie — those
+// users have already accepted the risk by not fronting Nexara with TLS, and
+// "Set-Cookie disappears" is a worse failure mode than "cookie not Secure".
+// `c.Protocol()` honors X-Forwarded-Proto only when the upstream is in
+// TRUSTED_PROXIES, so a TLS-terminating proxy with that config set still
+// gets a Secure cookie.
 func setRefreshCookie(c *fiber.Ctx, token string, ttl time.Duration) {
 	c.Cookie(&fiber.Cookie{
 		Name:     RefreshCookieName,
 		Value:    token,
 		Path:     refreshCookiePath,
 		HTTPOnly: true,
-		Secure:   true,
+		Secure:   c.Protocol() == "https",
 		SameSite: "Strict",
 		Expires:  time.Now().Add(ttl),
 	})
@@ -36,14 +43,15 @@ func setRefreshCookie(c *fiber.Ctx, token string, ttl time.Duration) {
 
 // clearRefreshCookie expires the refresh-token cookie immediately. The
 // attributes (Path/Domain/Secure/SameSite) must match the original Set-Cookie
-// for the browser to accept the deletion.
+// for the browser to accept the deletion, so Secure tracks the request scheme
+// the same way as setRefreshCookie.
 func clearRefreshCookie(c *fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{
 		Name:     RefreshCookieName,
 		Value:    "",
 		Path:     refreshCookiePath,
 		HTTPOnly: true,
-		Secure:   true,
+		Secure:   c.Protocol() == "https",
 		SameSite: "Strict",
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
