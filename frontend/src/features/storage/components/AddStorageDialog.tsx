@@ -32,6 +32,13 @@ import {
 
 interface AddStorageDialogProps {
   clusterId: string;
+  /**
+   * When provided, the dialog runs in controlled mode and the built-in
+   * trigger button is hidden. The caller is responsible for opening it
+   * (e.g. from a context menu item).
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 const ALL_STORAGE_TYPES = Object.keys(STORAGE_TYPE_LABELS) as StorageType[];
@@ -45,8 +52,18 @@ const ALL_CONTENT_TYPES: { value: StorageContentType; label: string }[] = [
   { value: "snippets", label: "Snippets" },
 ];
 
-export function AddStorageDialog({ clusterId }: AddStorageDialogProps) {
-  const [open, setOpen] = useState(false);
+export function AddStorageDialog({
+  clusterId,
+  open: openProp,
+  onOpenChange,
+}: AddStorageDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (!controlled) setInternalOpen(v);
+    onOpenChange?.(v);
+  };
   const [storageType, setStorageType] = useState<StorageType>("dir");
   const [storageName, setStorageName] = useState("");
   const [params, setParams] = useState<Record<string, string>>({});
@@ -149,12 +166,14 @@ export function AddStorageDialog({ clusterId }: AddStorageDialogProps) {
         }
       }}
     >
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus className="mr-1 h-4 w-4" />
-          Add Storage
-        </Button>
-      </DialogTrigger>
+      {!controlled && (
+        <DialogTrigger asChild>
+          <Button size="sm">
+            <Plus className="mr-1 h-4 w-4" />
+            Add Storage
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

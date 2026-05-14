@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -8,11 +8,19 @@ import {
   Database,
   Share2,
   FolderArchive,
+  Plus,
 } from "lucide-react";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
+import { AddStorageDialog } from "@/features/storage/components/AddStorageDialog";
 import { useSidebarStore } from "@/stores/sidebar-store";
 import type { ClusterResponse, StorageResponse } from "@/types/api";
 
@@ -123,6 +131,7 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
   const clusterKey = `storage-cluster:${cluster.id}`;
   const isExpanded = expandedNodes.has(clusterKey);
+  const [addStorageOpen, setAddStorageOpen] = useState(false);
 
   const { data: pools } = useClusterStorage(isExpanded ? cluster.id : "");
   const { data: nodes } = useClusterNodes(isExpanded ? cluster.id : "");
@@ -167,35 +176,51 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
 
   return (
     <div>
-      <div
-        className={cn(
-          "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-          isClusterActive && "bg-accent text-accent-foreground",
-        )}
-      >
-        <button
-          onClick={() => {
-            toggleNode(clusterKey);
-          }}
-          className="shrink-0"
-        >
-          <ChevronRight
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
             className={cn(
-              "h-3 w-3 transition-transform",
-              isExpanded && "rotate-90",
+              "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
+              isClusterActive && "bg-accent text-accent-foreground",
             )}
-          />
-        </button>
-        <button
-          onClick={() => {
-            void navigate(`/storage?cluster=${cluster.id}`);
-          }}
-          className="flex min-w-0 flex-1 items-center gap-1.5"
-        >
-          <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
-          <span className="truncate font-medium">{cluster.name}</span>
-        </button>
-      </div>
+          >
+            <button
+              onClick={() => {
+                toggleNode(clusterKey);
+              }}
+              className="shrink-0"
+            >
+              <ChevronRight
+                className={cn(
+                  "h-3 w-3 transition-transform",
+                  isExpanded && "rotate-90",
+                )}
+              />
+            </button>
+            <button
+              onClick={() => {
+                void navigate(`/storage?cluster=${cluster.id}`);
+              }}
+              className="flex min-w-0 flex-1 items-center gap-1.5"
+            >
+              <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="truncate font-medium">{cluster.name}</span>
+            </button>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-40">
+          <ContextMenuItem onClick={() => { setAddStorageOpen(true); }}>
+            <Plus className="mr-2 h-3.5 w-3.5" />
+            Add storage
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+
+      <AddStorageDialog
+        clusterId={cluster.id}
+        open={addStorageOpen}
+        onOpenChange={setAddStorageOpen}
+      />
 
       {isExpanded && pools && (
         <div>
