@@ -1,10 +1,13 @@
 import { create } from "zustand";
 
+export type TreePerspective = "hosts" | "storage";
+
 interface SidebarState {
   collapsed: boolean;
   treeVisible: boolean;
   expandedNodes: Set<string>;
   width: number;
+  perspective: TreePerspective;
 }
 
 interface SidebarActions {
@@ -13,6 +16,7 @@ interface SidebarActions {
   toggleNode: (key: string) => void;
   expandNode: (key: string) => void;
   setWidth: (width: number) => void;
+  setPerspective: (perspective: TreePerspective) => void;
 }
 
 const STORAGE_KEY = "nexara-sidebar";
@@ -24,6 +28,7 @@ function loadPersistedState(): SidebarState {
       const parsed: unknown = JSON.parse(raw);
       if (parsed && typeof parsed === "object") {
         const obj = parsed as Record<string, unknown>;
+        const persp = obj["perspective"];
         return {
           collapsed: typeof obj["collapsed"] === "boolean" ? obj["collapsed"] : false,
           treeVisible: typeof obj["treeVisible"] === "boolean" ? obj["treeVisible"] : true,
@@ -31,13 +36,20 @@ function loadPersistedState(): SidebarState {
             ? new Set(obj["expandedNodes"] as string[])
             : new Set<string>(),
           width: typeof obj["width"] === "number" ? obj["width"] : 240,
+          perspective: persp === "storage" ? "storage" : "hosts",
         };
       }
     }
   } catch {
     // ignore
   }
-  return { collapsed: false, treeVisible: true, expandedNodes: new Set<string>(), width: 240 };
+  return {
+    collapsed: false,
+    treeVisible: true,
+    expandedNodes: new Set<string>(),
+    width: 240,
+    perspective: "hosts",
+  };
 }
 
 function persist(state: SidebarState) {
@@ -49,6 +61,7 @@ function persist(state: SidebarState) {
         treeVisible: state.treeVisible,
         expandedNodes: [...state.expandedNodes],
         width: state.width,
+        perspective: state.perspective,
       }),
     );
   } catch {
@@ -94,6 +107,11 @@ export const useSidebarStore = create<SidebarState & SidebarActions>()(
       const clamped = Math.min(480, Math.max(180, width));
       const state = { ...get(), width: clamped };
       set({ width: clamped });
+      persist(state);
+    },
+    setPerspective: (perspective: TreePerspective) => {
+      const state = { ...get(), perspective };
+      set({ perspective });
       persist(state);
     },
   }),

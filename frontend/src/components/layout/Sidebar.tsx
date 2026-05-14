@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useSidebarStore } from "@/stores/sidebar-store";
 import { useBrandingStore } from "@/stores/branding-store";
-import { InventoryTree } from "./InventoryTree";
+import { TreeView } from "./TreeView";
 import {
   Tooltip,
   TooltipContent,
@@ -55,13 +55,25 @@ const navItems: NavItem[] = [
 ];
 
 function isInventoryRoute(pathname: string): boolean {
-  return pathname.startsWith("/inventory") || pathname.startsWith("/clusters");
+  return (
+    pathname.startsWith("/inventory") ||
+    pathname.startsWith("/clusters") ||
+    pathname.startsWith("/storage")
+  );
 }
 
 export function Sidebar() {
   const { t } = useTranslation("navigation");
   const { hasPermission } = useAuth();
-  const { collapsed, toggleCollapsed, treeVisible, setTreeVisible, width, setWidth } = useSidebarStore();
+  const {
+    collapsed,
+    toggleCollapsed,
+    treeVisible,
+    setTreeVisible,
+    width,
+    setWidth,
+    setPerspective,
+  } = useSidebarStore();
   const { appTitle, logoUrl } = useBrandingStore();
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
@@ -74,14 +86,24 @@ export function Sidebar() {
       .catch(() => {});
   }, []);
 
-  // Auto-expand tree when navigating to inventory/clusters routes
+  // Auto-expand tree when navigating to inventory/clusters/storage routes
   useEffect(() => {
     const prev = prevPathRef.current;
     prevPathRef.current = location.pathname;
     if (isInventoryRoute(location.pathname) && !isInventoryRoute(prev)) {
       setTreeVisible(true);
     }
-  }, [location.pathname, setTreeVisible]);
+    // Flip perspective on direct nav to a storage route (e.g. clicking the
+    // sidebar "Storage" item) so the tree shows pools instead of hosts.
+    if (location.pathname.startsWith("/storage")) {
+      setPerspective("storage");
+    } else if (
+      location.pathname.startsWith("/inventory") ||
+      location.pathname.startsWith("/clusters")
+    ) {
+      setPerspective("hosts");
+    }
+  }, [location.pathname, setTreeVisible, setPerspective]);
 
   const visibleItems = navItems.filter((item) => {
     if (!item.requiredPermission) return true;
@@ -231,7 +253,7 @@ export function Sidebar() {
                 {/* Render tree inline below Inventory — persists across routes */}
                 {isInventoryItem && showTree && (
                   <div className="mt-1 max-h-[calc(100vh-20rem)] overflow-y-auto">
-                    <InventoryTree />
+                    <TreeView />
                   </div>
                 )}
               </div>

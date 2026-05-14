@@ -43,6 +43,11 @@ const StoragePage = lazy(() =>
     default: m.StoragePage,
   })),
 );
+const StorageDetailPage = lazy(() =>
+  import("@/features/storage/pages/StorageDetailPage").then((m) => ({
+    default: m.StorageDetailPage,
+  })),
+);
 const BackupDashboardPage = lazy(() =>
   import("@/features/backup/pages/BackupDashboardPage").then((m) => ({
     default: m.BackupDashboardPage,
@@ -192,6 +197,10 @@ const router = createBrowserRouter([
           {
             path: "storage",
             element: <LazyPage><StoragePage /></LazyPage>,
+          },
+          {
+            path: "storage/:clusterId/:storageId",
+            element: <LazyPage><StorageDetailPage /></LazyPage>,
           },
           {
             path: "backup",
