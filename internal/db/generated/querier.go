@@ -16,6 +16,7 @@ type Querier interface {
 	AcknowledgeAlert(ctx context.Context, arg AcknowledgeAlertParams) error
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
 	AssignUserRole(ctx context.Context, arg AssignUserRoleParams) (UserRole, error)
+	AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) error
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
 	CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) error
@@ -70,6 +71,7 @@ type Querier interface {
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreateVMFolder(ctx context.Context, arg CreateVMFolderParams) (VmFolder, error)
 	DeleteAlertRule(ctx context.Context, id uuid.UUID) error
 	DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) error
 	DeleteCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) error
@@ -113,6 +115,7 @@ type Querier interface {
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	DeleteVMFolder(ctx context.Context, id uuid.UUID) error
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	// Cross-source UPID lookup: returns true if ANY audit_log row references
 	// this UPID, regardless of whether it was written by the Nexara handler
@@ -212,6 +215,8 @@ type Querier interface {
 	GetUserTOTPSecret(ctx context.Context, id uuid.UUID) (GetUserTOTPSecretRow, error)
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
+	GetVMFolder(ctx context.Context, id uuid.UUID) (VmFolder, error)
+	GetVMFolderMembership(ctx context.Context, vmID uuid.UUID) (VmFolderMembership, error)
 	GetVMIODailyRate(ctx context.Context, arg GetVMIODailyRateParams) ([]GetVMIODailyRateRow, error)
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
@@ -335,6 +340,8 @@ type Querier interface {
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersWithRoles(ctx context.Context) ([]ListUsersWithRolesRow, error)
+	ListVMFolderMembershipsByCluster(ctx context.Context, clusterID uuid.UUID) ([]VmFolderMembership, error)
+	ListVMFoldersByCluster(ctx context.Context, clusterID uuid.UUID) ([]VmFolder, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
@@ -343,6 +350,7 @@ type Querier interface {
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	MarkNotificationDLQResolved(ctx context.Context, id uuid.UUID) error
+	MoveVMFolder(ctx context.Context, arg MoveVMFolderParams) (VmFolder, error)
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	PurgeOldNotificationDLQ(ctx context.Context) error
 	// Upserts a device by expo_push_token. The UPDATE branch only fires when the
@@ -354,6 +362,7 @@ type Querier interface {
 	// hijack).
 	RegisterMobileDevice(ctx context.Context, arg RegisterMobileDeviceParams) (MobileDevice, error)
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
+	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)
 	ResolveAlert(ctx context.Context, arg ResolveAlertParams) error
 	ResumeRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	RevokeAPIKey(ctx context.Context, id uuid.UUID) error
@@ -391,6 +400,7 @@ type Querier interface {
 	TouchMobileDevice(ctx context.Context, id uuid.UUID) error
 	TouchRollingUpdateNode(ctx context.Context, id uuid.UUID) error
 	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error
+	UnassignVMFromFolder(ctx context.Context, vmID uuid.UUID) error
 	UpdateAPIKeyLastUsed(ctx context.Context, arg UpdateAPIKeyLastUsedParams) error
 	UpdateAlertEscalation(ctx context.Context, arg UpdateAlertEscalationParams) error
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)

@@ -943,6 +943,21 @@ type Vm struct {
 	ConfigOstype string    `json:"config_ostype"`
 }
 
+type VmFolder struct {
+	ID        uuid.UUID   `json:"id"`
+	ClusterID uuid.UUID   `json:"cluster_id"`
+	ParentID  pgtype.UUID `json:"parent_id"`
+	Name      string      `json:"name"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
+}
+
+type VmFolderMembership struct {
+	VmID      uuid.UUID `json:"vm_id"`
+	FolderID  uuid.UUID `json:"folder_id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type VmMetric struct {
 	Time      time.Time `json:"time"`
 	VmID      uuid.UUID `json:"vm_id"`

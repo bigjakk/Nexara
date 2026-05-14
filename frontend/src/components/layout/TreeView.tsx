@@ -1,4 +1,4 @@
-import { Boxes, HardDrive } from "lucide-react";
+import { Boxes, HardDrive, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSidebarStore, type TreePerspective } from "@/stores/sidebar-store";
 import {
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { InventoryTree } from "./InventoryTree";
 import { StorageTree } from "./StorageTree";
+import { VMTree } from "./VMTree";
 
 interface PerspectiveOption {
   value: TreePerspective;
@@ -17,6 +18,7 @@ interface PerspectiveOption {
 
 const PERSPECTIVES: PerspectiveOption[] = [
   { value: "hosts", label: "Hosts & VMs", Icon: Boxes },
+  { value: "vms", label: "VMs & Templates", Icon: Layers },
   { value: "storage", label: "Storage", Icon: HardDrive },
 ];
 
@@ -57,7 +59,9 @@ export function TreeView() {
   return (
     <div className="flex flex-col">
       <PerspectiveToggle />
-      {perspective === "hosts" ? <InventoryTree /> : <StorageTree />}
+      {perspective === "hosts" && <InventoryTree />}
+      {perspective === "vms" && <VMTree />}
+      {perspective === "storage" && <StorageTree />}
     </div>
   );
 }

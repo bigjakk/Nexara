@@ -37,6 +37,7 @@ type Server struct {
 	vmHandler             *handlers.VMHandler
 	containerHandler      *handlers.ContainerHandler
 	storageHandler        *handlers.StorageHandler
+	vmFoldersHandler      *handlers.VMFoldersHandler
 	metricsHandler        *handlers.MetricsHandler
 	cephHandler           *handlers.CephHandler
 	backupHandler         *handlers.BackupHandler
@@ -278,6 +279,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 		s.taskHandler = handlers.NewTaskHandler(d.queries, d.eventPub)
 		s.scheduleHandler = handlers.NewScheduleHandler(d.queries, d.eventPub)
 		s.auditHandler = handlers.NewAuditHandler(d.queries, d.eventPub)
+		s.vmFoldersHandler = handlers.NewVMFoldersHandler(d.queries, d.eventPub)
 	}
 }
 

@@ -7,6 +7,7 @@ import { DeployTemplateDialog } from "./DeployTemplateDialog";
 import { MigrateJobDialog } from "./MigrateJobDialog";
 import { DestroyDialog } from "./DestroyDialog";
 import { ConvertToTemplateDialog } from "./ConvertToTemplateDialog";
+import { MoveToFolderDialog } from "./MoveToFolderDialog";
 import {
   Dialog,
   DialogContent,
@@ -83,6 +84,14 @@ export function VMContextDialogs() {
         resourceId={target.resourceId}
         kind={target.kind}
         resourceName={target.name}
+      />
+
+      <MoveToFolderDialog
+        open={openDialog === "move-to-folder"}
+        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        clusterId={target.clusterId}
+        vmId={target.resourceId}
+        vmName={target.name}
       />
 
       <Dialog

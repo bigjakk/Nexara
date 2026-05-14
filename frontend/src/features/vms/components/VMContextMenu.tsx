@@ -7,7 +7,7 @@ import {
   ContextMenuLabel,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { Monitor } from "lucide-react";
+import { Monitor, FolderInput } from "lucide-react";
 import { useVMAction } from "../api/vm-queries";
 import { lifecycleActions, managementActions } from "../lib/vm-action-defs";
 import {
@@ -24,7 +24,7 @@ interface VMContextMenuProps {
 }
 
 export function VMContextMenu({ target, children }: VMContextMenuProps) {
-  const { openClone, openCloneToTemplate, openDeploy, openMigrate, openDestroy, openConvertToTemplate, openConfirmAction } =
+  const { openClone, openCloneToTemplate, openDeploy, openMigrate, openDestroy, openConvertToTemplate, openConfirmAction, openMoveToFolder } =
     useVMContextMenuStore();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
@@ -120,6 +120,12 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
             </ContextMenuItem>
           </>
         )}
+
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => { openMoveToFolder(target); }}>
+          <span className="mr-2"><FolderInput className="h-4 w-4" /></span>
+          Move to folder…
+        </ContextMenuItem>
 
         {visibleManagement.length > 0 && <ContextMenuSeparator />}
 

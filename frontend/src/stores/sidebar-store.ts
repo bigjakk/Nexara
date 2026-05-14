@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type TreePerspective = "hosts" | "storage";
+export type TreePerspective = "hosts" | "storage" | "vms";
 
 interface SidebarState {
   collapsed: boolean;
@@ -36,7 +36,12 @@ function loadPersistedState(): SidebarState {
             ? new Set(obj["expandedNodes"] as string[])
             : new Set<string>(),
           width: typeof obj["width"] === "number" ? obj["width"] : 240,
-          perspective: persp === "storage" ? "storage" : "hosts",
+          perspective:
+            persp === "storage"
+              ? "storage"
+              : persp === "vms"
+                ? "vms"
+                : "hosts",
         };
       }
     }

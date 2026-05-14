@@ -12,7 +12,7 @@ export interface VMContextTarget {
   template?: boolean;
 }
 
-type OpenDialog = "clone" | "clone-to-template" | "deploy" | "migrate" | "destroy" | "convert-to-template" | "confirm-action" | null;
+type OpenDialog = "clone" | "clone-to-template" | "deploy" | "migrate" | "destroy" | "convert-to-template" | "confirm-action" | "move-to-folder" | null;
 
 interface VMContextMenuState {
   target: VMContextTarget | null;
@@ -29,6 +29,7 @@ interface VMContextMenuActions {
   openDestroy: (target: VMContextTarget) => void;
   openConvertToTemplate: (target: VMContextTarget) => void;
   openConfirmAction: (target: VMContextTarget, action: string, label: string) => void;
+  openMoveToFolder: (target: VMContextTarget) => void;
   closeDialog: () => void;
 }
 
@@ -48,6 +49,7 @@ export const useVMContextMenuStore = create<VMContextMenuState & VMContextMenuAc
     openConfirmAction: (target, action, label) => {
       set({ target, openDialog: "confirm-action", confirmAction: action, confirmActionLabel: label });
     },
+    openMoveToFolder: (target) => { set({ target, openDialog: "move-to-folder" }); },
     closeDialog: () => { set({ openDialog: null, confirmAction: null, confirmActionLabel: null }); },
   }),
 );

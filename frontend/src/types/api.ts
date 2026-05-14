@@ -913,3 +913,21 @@ export interface APIEndpoint {
   permission: string;
   group: string;
 }
+
+// VM folder organisation (used by the "VMs & Templates" tree perspective).
+export interface VMFolder {
+  id: string;
+  cluster_id: string;
+  parent_id: string | null;
+  name: string;
+}
+
+export interface VMFolderMembership {
+  vm_id: string;
+  folder_id: string;
+}
+
+export interface VMFolderListResponse {
+  folders: VMFolder[];
+  memberships: VMFolderMembership[];
+}

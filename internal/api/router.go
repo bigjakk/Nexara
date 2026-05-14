@@ -193,6 +193,13 @@ func (s *Server) setupRoutes() {
 			clusters.Put("/:cluster_id/vms/:vm_id/pool", s.vmHandler.SetVMPool)
 			clusters.Get("/:cluster_id/pools", s.vmHandler.ListResourcePools)
 		}
+		if s.vmFoldersHandler != nil {
+			clusters.Get("/:cluster_id/vm-folders", s.vmFoldersHandler.List)
+			clusters.Post("/:cluster_id/vm-folders", s.vmFoldersHandler.Create)
+			clusters.Patch("/:cluster_id/vm-folders/:folder_id", s.vmFoldersHandler.Update)
+			clusters.Delete("/:cluster_id/vm-folders/:folder_id", s.vmFoldersHandler.Delete)
+			clusters.Put("/:cluster_id/vms/:vm_id/folder", s.vmFoldersHandler.AssignVM)
+		}
 		if s.storageHandler != nil {
 			clusters.Get("/:cluster_id/storage", s.storageHandler.ListByCluster)
 			clusters.Post("/:cluster_id/storage", s.storageHandler.Create)
