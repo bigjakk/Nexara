@@ -1,29 +1,18 @@
 import { useState, useMemo, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { HardDrive, ChevronDown, ChevronRight, Server, Share2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
-import {
-  useClusterStorage,
-  useStorageContent,
-} from "../api/storage-queries";
+import { useClusterStorage } from "../api/storage-queries";
 import { StorageCapacityBar } from "../components/StorageCapacityBar";
-import { StorageContentTable } from "../components/StorageContentTable";
-import { StorageGuestTable } from "../components/StorageGuestTable";
-import { UploadDialog } from "../components/UploadDialog";
-import { BulkMoveDialog } from "../components/BulkMoveDialog";
 import { AddStorageDialog } from "../components/AddStorageDialog";
-import { EditStorageDialog } from "../components/EditStorageDialog";
-import { DeleteStorageDialog } from "../components/DeleteStorageDialog";
 import type { StorageResponse, NodeResponse } from "@/types/api";
-import type { StorageContentItem } from "../types/storage";
 
 interface StorageGroup {
   label: string;
@@ -93,20 +82,17 @@ function groupStorage(
 
 export function StoragePage() {
   const { t: td } = useTranslation("dashboard");
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
   const clusterParam = searchParams.get("cluster") ?? "";
   const [selectedClusterId, setSelectedClusterId] = useState<string>(clusterParam);
-  const [selectedPool, setSelectedPool] = useState<StorageResponse | null>(
-    null,
-  );
 
   // Sync with URL query param when it changes (e.g. navigating from search)
   useEffect(() => {
     if (clusterParam) {
       setSelectedClusterId(clusterParam);
-      setSelectedPool(null);
     }
   }, [clusterParam]);
 
@@ -119,6 +105,10 @@ export function StoragePage() {
   const nodes = useMemo(() => nodesQuery.data ?? [], [nodesQuery.data]);
 
   const groups = useMemo(() => groupStorage(pools, nodes), [pools, nodes]);
+
+  function openPool(pool: StorageResponse) {
+    void navigate(`/storage/${activeClusterId}/${pool.id}`);
+  }
 
   return (
     <div className="space-y-6">
@@ -139,7 +129,6 @@ export function StoragePage() {
               key={cluster.id}
               onClick={() => {
                 setSelectedClusterId(cluster.id);
-                setSelectedPool(null);
               }}
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 activeClusterId === cluster.id
@@ -161,13 +150,13 @@ export function StoragePage() {
         </div>
       )}
 
-      {!selectedPool && !storageQuery.isLoading && (
+      {!storageQuery.isLoading && (
         <>
           {groups.map((group) => (
             <StorageGroupSection
               key={group.label}
               group={group}
-              onSelectPool={setSelectedPool}
+              onSelectPool={openPool}
             />
           ))}
           {pools.length === 0 && (
@@ -187,15 +176,6 @@ export function StoragePage() {
             )
           )}
         </>
-      )}
-
-      {selectedPool && (
-        <StoragePoolDetail
-          pool={selectedPool}
-          clusterId={activeClusterId}
-          allPools={pools}
-          onBack={() => { setSelectedPool(null); }}
-        />
       )}
     </div>
   );
@@ -266,188 +246,6 @@ function StorageGroupSection({ group, onSelectPool }: StorageGroupSectionProps) 
             </Card>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-// --- Storage Pool Detail View ---
-
-interface StoragePoolDetailProps {
-  pool: StorageResponse;
-  clusterId: string;
-  allPools: StorageResponse[];
-  onBack: () => void;
-}
-
-function StoragePoolDetail({
-  pool,
-  clusterId,
-  allPools,
-  onBack,
-}: StoragePoolDetailProps) {
-  const contentQuery = useStorageContent(clusterId, pool.id);
-  const items = contentQuery.data ?? [];
-
-  const contentTypes = pool.content.split(",").map((s) => s.trim());
-  const hasImages = contentTypes.includes("images");
-  const hasRootdir = contentTypes.includes("rootdir");
-  const hasGuestVolumes = hasImages || hasRootdir;
-  const filterableTypes = contentTypes.filter(
-    (t) => t === "iso" || t === "vztmpl" || t === "images" || t === "backup" || t === "rootdir" || t === "snippets",
-  );
-
-  // Deduplicated target storage options (other image-capable pools)
-  const evacuateTargets = useMemo(() => {
-    const seen = new Set<string>();
-    return allPools
-      .filter((p) => p.content.includes("images") && p.storage !== pool.storage && p.active && p.enabled)
-      .filter((p) => {
-        if (seen.has(p.storage)) return false;
-        seen.add(p.storage);
-        return true;
-      })
-      .map((p) => p.storage);
-  }, [allPools, pool.storage]);
-
-  // Migration targets for the inline per-row Migrate button. A pool is a valid
-  // destination if it accepts the same guest-volume content (images for VMs,
-  // rootdir for CTs) — we accept either to keep the option list useful for the
-  // combined "VMs/CTs" tab; the backend rejects mismatches.
-  const migrateTargets = useMemo(() => {
-    const seen = new Set<string>();
-    return allPools
-      .filter(
-        (p) =>
-          p.storage !== pool.storage &&
-          p.active &&
-          p.enabled &&
-          (p.content.includes("images") || p.content.includes("rootdir")),
-      )
-      .filter((p) => {
-        if (seen.has(p.storage)) return false;
-        seen.add(p.storage);
-        return true;
-      })
-      .map((p) => p.storage);
-  }, [allPools, pool.storage]);
-
-  // Group items by content type.
-  function filterByType(type: string): StorageContentItem[] {
-    return items.filter((item) => item.content === type);
-  }
-
-  const guestItems = items.filter(
-    (item) => item.content === "images" || item.content === "rootdir",
-  );
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            &larr; All Pools
-          </button>
-          <h2 className="text-xl font-semibold">{pool.storage}</h2>
-          <Badge variant="outline">{pool.type}</Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          {hasImages && evacuateTargets.length > 0 && (
-            <BulkMoveDialog
-              clusterId={clusterId}
-              storageId={pool.id}
-              storageName={pool.storage}
-              targetOptions={evacuateTargets}
-            />
-          )}
-          <UploadDialog
-            clusterId={clusterId}
-            storageId={pool.id}
-            supportedContent={pool.content}
-          />
-          <EditStorageDialog
-            clusterId={clusterId}
-            storageId={pool.id}
-            storageName={pool.storage}
-            storageType={pool.type}
-          />
-          <DeleteStorageDialog
-            clusterId={clusterId}
-            storageId={pool.id}
-            storageName={pool.storage}
-            onDeleted={onBack}
-          />
-        </div>
-      </div>
-
-      <StorageCapacityBar used={pool.used} total={pool.total} />
-
-      {contentQuery.isLoading && (
-        <div className="space-y-2">
-          <Skeleton className="h-8 w-full" />
-          <Skeleton className="h-8 w-full" />
-          <Skeleton className="h-8 w-full" />
-        </div>
-      )}
-
-      {!contentQuery.isLoading && (hasGuestVolumes || filterableTypes.length > 1) && (
-        <Tabs defaultValue={hasGuestVolumes ? "guests" : (filterableTypes[0] ?? "all")}>
-          <TabsList>
-            {hasGuestVolumes && (
-              <TabsTrigger value="guests">
-                VMs/CTs ({guestItems.length})
-              </TabsTrigger>
-            )}
-            {filterableTypes.map((t) => (
-              <TabsTrigger key={t} value={t}>
-                {t} ({filterByType(t).length})
-              </TabsTrigger>
-            ))}
-            <TabsTrigger value="all">All ({items.length})</TabsTrigger>
-          </TabsList>
-          {hasGuestVolumes && (
-            <TabsContent value="guests">
-              <StorageGuestTable
-                items={guestItems}
-                clusterId={clusterId}
-                migrateTargets={migrateTargets}
-              />
-            </TabsContent>
-          )}
-          {filterableTypes.map((t) => (
-            <TabsContent key={t} value={t}>
-              <StorageContentTable
-                items={filterByType(t)}
-                clusterId={clusterId}
-                storageId={pool.id}
-              />
-            </TabsContent>
-          ))}
-          <TabsContent value="all">
-            <StorageContentTable
-              items={items}
-              clusterId={clusterId}
-              storageId={pool.id}
-            />
-          </TabsContent>
-        </Tabs>
-      )}
-
-      {!contentQuery.isLoading && !hasGuestVolumes && filterableTypes.length <= 1 && (
-        <StorageContentTable
-          items={items}
-          clusterId={clusterId}
-          storageId={pool.id}
-        />
-      )}
-
-      {contentQuery.isError && (
-        <p className="text-sm text-destructive">
-          Failed to load storage content.
-        </p>
       )}
     </div>
   );
