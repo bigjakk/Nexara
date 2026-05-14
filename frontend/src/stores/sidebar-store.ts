@@ -53,7 +53,7 @@ function loadPersistedState(): SidebarState {
     treeVisible: true,
     expandedNodes: new Set<string>(),
     width: 240,
-    perspective: "hosts",
+    perspective: "vms",
   };
 }
 

@@ -9,7 +9,6 @@ import {
   ShieldAlert,
   Bell,
   FileText,
-  HardDrive,
   TerminalSquare,
   ScrollText,
   PanelLeftClose,
@@ -44,7 +43,6 @@ const navItems: NavItem[] = [
   { labelKey: "inventory", to: "/inventory", icon: Package },
   { labelKey: "topology", to: "/topology", icon: Network },
   { labelKey: "console", to: "/console", icon: TerminalSquare },
-  { labelKey: "storage", to: "/storage", icon: HardDrive },
   { labelKey: "backup", to: "/backup", icon: Shield },
   { labelKey: "alerts", to: "/alerts", icon: Bell, requiredPermission: "view:alert" },
   { labelKey: "reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
@@ -93,15 +91,13 @@ export function Sidebar() {
     if (isInventoryRoute(location.pathname) && !isInventoryRoute(prev)) {
       setTreeVisible(true);
     }
-    // Flip perspective on direct nav to a storage route (e.g. clicking the
-    // sidebar "Storage" item) so the tree shows pools instead of hosts.
-    if (location.pathname.startsWith("/storage")) {
+    // Navigating into a storage-detail route is the one case where the tree
+    // must be in a specific perspective — the route itself is only reachable
+    // by clicking a pool inside the Storage tree, so flip there if needed.
+    // Cluster/inventory routes are reachable from all three perspectives, so
+    // we leave the user's choice alone.
+    if (location.pathname.startsWith("/storage/")) {
       setPerspective("storage");
-    } else if (
-      location.pathname.startsWith("/inventory") ||
-      location.pathname.startsWith("/clusters")
-    ) {
-      setPerspective("hosts");
     }
   }, [location.pathname, setTreeVisible, setPerspective]);
 
