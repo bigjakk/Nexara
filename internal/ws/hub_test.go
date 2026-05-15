@@ -14,8 +14,9 @@ func testLogger() *slog.Logger {
 
 func newTestClient() *Client {
 	return &Client{
-		id:   "test-" + time.Now().Format("150405.000"),
-		send: make(chan []byte, clientSendBuffer),
+		id:      "test-" + time.Now().Format("150405.000"),
+		send:    make(chan []byte, clientSendBuffer),
+		closing: make(chan struct{}),
 	}
 }
 
@@ -118,13 +119,13 @@ func TestHubUnregisterCleansUpRooms(t *testing.T) {
 	drainOne(t, c, time.Second) // subscribed
 
 	h.Unregister(c)
-	// Channel should be closed after unregister.
-	time.Sleep(50 * time.Millisecond)
-
-	// Verify send channel is closed.
-	_, ok := <-c.send
-	if ok {
-		t.Error("expected send channel to be closed")
+	// The closing channel should be closed after unregister so the writer
+	// exits. (The send channel itself is intentionally never closed — see
+	// closeSend.)
+	select {
+	case <-c.closing:
+	case <-time.After(time.Second):
+		t.Error("expected closing channel to be closed after unregister")
 	}
 }
 
@@ -179,8 +180,9 @@ func TestHubSlowClientEviction(t *testing.T) {
 
 	// Create a client with a tiny buffer to simulate slow client.
 	slow := &Client{
-		id:   "slow-client",
-		send: make(chan []byte, 1), // Very small buffer.
+		id:      "slow-client",
+		send:    make(chan []byte, 1), // Very small buffer.
+		closing: make(chan struct{}),
 	}
 
 	h.Register(slow)
@@ -197,13 +199,13 @@ func TestHubSlowClientEviction(t *testing.T) {
 	// Wait for the hub to process.
 	time.Sleep(100 * time.Millisecond)
 
-	// After eviction, send channel should be closed.
-	// Drain whatever is buffered first.
-	for {
-		_, ok := <-slow.send
-		if !ok {
-			break
-		}
+	// After eviction, the closing channel should be closed so the writer
+	// stops. (We do not close the send channel itself; doing so would race
+	// against any in-flight trySend — see closeSend.)
+	select {
+	case <-slow.closing:
+	case <-time.After(time.Second):
+		t.Fatal("slow client was not evicted (closing channel never closed)")
 	}
-	t.Log("slow client was evicted and send channel closed")
+	t.Log("slow client was evicted")
 }

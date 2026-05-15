@@ -43,6 +43,7 @@ type Client struct {
 	conn      *websocket.Conn
 	hub       *Hub
 	send      chan []byte
+	closing   chan struct{} // closed by closeSend to signal the writer to exit
 	done      chan struct{} // closed when writePump exits
 	closeOnce sync.Once
 	logger    *slog.Logger
@@ -64,10 +65,17 @@ type Client struct {
 	checkPermission PermissionChecker
 }
 
-// closeSend closes the send channel exactly once.
+// closeSend signals the writer to exit. Idempotent.
+//
+// The send channel itself is never closed — closing it would race with any
+// goroutine that holds a reference to the client (e.g. handleWS sending the
+// welcome message, or readPump dispatching an error response) and is
+// concurrently calling trySend. Instead, closing `closing` tells writePump to
+// stop and trySend to drop the message; the send buffer is GC'd with the
+// Client.
 func (c *Client) closeSend() {
 	c.closeOnce.Do(func() {
-		close(c.send)
+		close(c.closing)
 	})
 }
 
@@ -93,6 +101,7 @@ func NewClient(
 		conn:            conn,
 		hub:             hub,
 		send:            make(chan []byte, clientSendBuffer),
+		closing:         make(chan struct{}),
 		done:            make(chan struct{}),
 		logger:          logger,
 		pingInterval:    pingInterval,
@@ -148,12 +157,14 @@ func (c *Client) writePump() {
 
 	for {
 		select {
-		case message, ok := <-c.send:
-			if !ok {
-				// Hub closed the channel.
-				_ = c.conn.WriteControl(websocket.CloseMessage, nil, time.Now().Add(writeWait))
-				return
-			}
+		case <-c.closing:
+			// Hub asked us to shut down (or the connection's readPump exited
+			// and the hub unregistered us). Send a graceful close frame and
+			// exit. Any buffered messages in c.send are discarded.
+			_ = c.conn.WriteControl(websocket.CloseMessage, nil, time.Now().Add(writeWait))
+			return
+
+		case message := <-c.send:
 			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
 				return
 			}
@@ -277,8 +288,15 @@ func (c *Client) canSubscribe(channel string) bool {
 }
 
 // trySend performs a non-blocking send to the client's send channel.
+//
+// The `closing` case prevents a race against closeSend: if the client is
+// shutting down, the send is dropped instead of going into a buffer no one
+// will drain. Because c.send is never closed (see closeSend), there is no
+// possibility of a send-on-closed-channel panic here.
 func (c *Client) trySend(data []byte) {
 	select {
+	case <-c.closing:
+		// Client is shutting down; drop the message.
 	case c.send <- data:
 	default:
 		// Buffer full — message dropped. The hub will evict if needed.
