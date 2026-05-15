@@ -32,6 +32,7 @@ import {
   useAssignVMToFolder,
 } from "@/features/vms/api/folder-queries";
 import { useSidebarStore } from "@/stores/sidebar-store";
+import { useDragAutoScroll } from "@/hooks/useDragAutoScroll";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
 import { CreateFolderDialog } from "@/features/vms/components/CreateFolderDialog";
@@ -453,6 +454,12 @@ export function VMTree() {
   const { t } = useTranslation("common");
   const { data: clusters, isLoading } = useClusters();
   const deleteFolder = useDeleteVMFolder();
+
+  // Auto-scroll the sidebar tree container while dragging a VM near its
+  // top/bottom edges. The browser's native drag autoscroll has a tiny
+  // (~10 px) hot zone and a fixed, fast speed, so users often can't reach
+  // a folder that is just out of view.
+  useDragAutoScroll({ selector: "[data-tree-scroller]" });
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createCtx, setCreateCtx] = useState<{

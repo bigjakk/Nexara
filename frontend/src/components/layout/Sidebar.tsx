@@ -248,7 +248,10 @@ export function Sidebar() {
 
                 {/* Render tree inline below Inventory — persists across routes */}
                 {isInventoryItem && showTree && (
-                  <div className="mt-1 max-h-[calc(100vh-20rem)] overflow-y-auto">
+                  <div
+                    data-tree-scroller
+                    className="mt-1 max-h-[calc(100vh-20rem)] overflow-y-auto"
+                  >
                     <TreeView />
                   </div>
                 )}
