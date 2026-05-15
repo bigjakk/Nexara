@@ -54,13 +54,13 @@ func (rs *rateState) Apply(
 	now time.Time,
 	nodes []nodeMetricSnapshot,
 	vms []vmMetricSnapshot,
-) (map[uuid.UUID]entityRates, map[uuid.UUID]entityRates) {
+) (nodeRates, vmRates map[uuid.UUID]entityRates) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 
 	prev := rs.perCluster[clusterID]
-	nodeRates := make(map[uuid.UUID]entityRates, len(nodes))
-	vmRates := make(map[uuid.UUID]entityRates, len(vms))
+	nodeRates = make(map[uuid.UUID]entityRates, len(nodes))
+	vmRates = make(map[uuid.UUID]entityRates, len(vms))
 
 	nextNodes := make(map[uuid.UUID]entityCounter, len(nodes))
 	for _, n := range nodes {
