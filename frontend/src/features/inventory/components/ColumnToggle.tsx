@@ -23,6 +23,8 @@ const COLUMN_LABELS: Record<string, string> = {
   diskTotal: "Disk",
   cpuPercent: "CPU %",
   memPercent: "Mem %",
+  network: "Network",
+  disk: "Disk",
   uptime: "Uptime",
   tags: "Tags",
   haState: "HA State",

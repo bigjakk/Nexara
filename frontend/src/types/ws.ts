@@ -34,6 +34,11 @@ export interface NodeMetricSnapshot {
   disk_write: number;
   net_in: number;
   net_out: number;
+  /** Bytes-per-second rates derived server-side from the prior cycle. */
+  disk_read_bps: number;
+  disk_write_bps: number;
+  net_in_bps: number;
+  net_out_bps: number;
 }
 
 export interface VmMetricSnapshot {
@@ -45,6 +50,11 @@ export interface VmMetricSnapshot {
   disk_write: number;
   net_in: number;
   net_out: number;
+  /** Bytes-per-second rates derived server-side from the prior cycle. */
+  disk_read_bps: number;
+  disk_write_bps: number;
+  net_in_bps: number;
+  net_out_bps: number;
 }
 
 export interface ClusterMetricSummary {
@@ -75,10 +85,14 @@ export interface MetricDataPoint {
   netOutBps: number;
 }
 
-/** Per-VM live metric snapshot (CPU and memory percent). */
+/** Per-VM live metric snapshot (CPU/mem percent + disk/net rates). */
 export interface VmLiveMetric {
   cpuPercent: number;
   memPercent: number;
+  diskReadBps: number;
+  diskWriteBps: number;
+  netInBps: number;
+  netOutBps: number;
 }
 
 /** Aggregated live metrics for a single cluster. */

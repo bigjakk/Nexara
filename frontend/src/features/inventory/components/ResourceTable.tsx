@@ -14,7 +14,14 @@ import {
   type RowSelectionState,
 } from "@tanstack/react-table";
 import { Link } from "react-router-dom";
-import { ArrowUpDown, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Monitor,
+} from "lucide-react";
 import {
   Table,
   TableBody,
@@ -50,7 +57,30 @@ import {
   getDefaultColumnVisibility,
 } from "../lib/column-presets";
 import type { InventoryRow, ParsedQuery } from "../types/inventory";
-import { formatBytes, formatUptime } from "@/lib/format";
+import { formatBytes, formatBytesPerSecond, formatUptime } from "@/lib/format";
+
+function RateCell({ inBps, outBps, inLabel, outLabel }: {
+  inBps: number | null;
+  outBps: number | null;
+  inLabel: "in" | "read";
+  outLabel: "out" | "write";
+}) {
+  if (inBps === null && outBps === null) {
+    return <span className="text-xs text-muted-foreground">--</span>;
+  }
+  return (
+    <div className="flex flex-col text-xs tabular-nums leading-tight">
+      <span className="inline-flex items-center gap-1 text-muted-foreground">
+        <ArrowDown className="h-3 w-3" aria-label={inLabel} />
+        {formatBytesPerSecond(inBps ?? 0)}
+      </span>
+      <span className="inline-flex items-center gap-1 text-muted-foreground">
+        <ArrowUp className="h-3 w-3" aria-label={outLabel} />
+        {formatBytesPerSecond(outBps ?? 0)}
+      </span>
+    </div>
+  );
+}
 
 
 
@@ -395,6 +425,60 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
       sortUndefined: "last",
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
+    columnHelper.accessor(
+      (row) => (row.netInBps ?? 0) + (row.netOutBps ?? 0),
+      {
+        id: "network",
+        header: ({ column }) => (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-3 h-8"
+            onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+          >
+            Network
+            <ArrowUpDown className="ml-1 h-3 w-3" />
+          </Button>
+        ),
+        cell: ({ row }) => (
+          <RateCell
+            inBps={row.original.netInBps}
+            outBps={row.original.netOutBps}
+            inLabel="in"
+            outLabel="out"
+          />
+        ),
+        sortUndefined: "last",
+        enableHiding: true,
+      },
+    ) as ColumnDef<InventoryRow>,
+    columnHelper.accessor(
+      (row) => (row.diskReadBps ?? 0) + (row.diskWriteBps ?? 0),
+      {
+        id: "disk",
+        header: ({ column }) => (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-3 h-8"
+            onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+          >
+            Disk
+            <ArrowUpDown className="ml-1 h-3 w-3" />
+          </Button>
+        ),
+        cell: ({ row }) => (
+          <RateCell
+            inBps={row.original.diskReadBps}
+            outBps={row.original.diskWriteBps}
+            inLabel="read"
+            outLabel="write"
+          />
+        ),
+        sortUndefined: "last",
+        enableHiding: true,
+      },
+    ) as ColumnDef<InventoryRow>,
     columnHelper.accessor("uptime", {
       header: ({ column }) => (
         <Button

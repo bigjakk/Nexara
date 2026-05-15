@@ -38,7 +38,7 @@ function vmToRow(
   vm: VMResponse,
   cluster: ClusterResponse,
   nodeMap: Map<string, string>,
-  liveMetrics: Map<string, { cpuPercent: number; memPercent: number }>,
+  liveMetrics: Map<string, VmLiveMetric>,
 ): InventoryRow {
   const type = vmTypeToResourceType(vm.type);
   const live = liveMetrics.get(vm.id);
@@ -64,6 +64,10 @@ function vmToRow(
     configOstype: vm.config_ostype,
     cpuPercent: live?.cpuPercent ?? null,
     memPercent: live?.memPercent ?? null,
+    diskReadBps: live?.diskReadBps ?? null,
+    diskWriteBps: live?.diskWriteBps ?? null,
+    netInBps: live?.netInBps ?? null,
+    netOutBps: live?.netOutBps ?? null,
   };
 }
 
@@ -95,6 +99,10 @@ function nodeToRow(
     configOstype: "",
     cpuPercent: live?.cpuPercent ?? null,
     memPercent: live?.memPercent ?? null,
+    diskReadBps: live?.diskReadBps ?? null,
+    diskWriteBps: live?.diskWriteBps ?? null,
+    netInBps: live?.netInBps ?? null,
+    netOutBps: live?.netOutBps ?? null,
   };
 }
 

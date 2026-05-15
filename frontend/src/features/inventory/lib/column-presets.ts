@@ -40,6 +40,8 @@ export function getDefaultColumnVisibility(): Record<string, boolean> {
     "diskTotal",
     "cpuPercent",
     "memPercent",
+    "network",
+    "disk",
     "uptime",
     "tags",
     "haState",

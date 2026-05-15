@@ -37,6 +37,14 @@ export interface InventoryRow {
   cpuPercent: number | null;
   /** Live metric: memory usage percent (null = no data) */
   memPercent: number | null;
+  /** Live metric: disk read bytes/sec (null = no data) */
+  diskReadBps: number | null;
+  /** Live metric: disk write bytes/sec (null = no data) */
+  diskWriteBps: number | null;
+  /** Live metric: network in bytes/sec (null = no data) */
+  netInBps: number | null;
+  /** Live metric: network out bytes/sec (null = no data) */
+  netOutBps: number | null;
 }
 
 export type FilterOperator = "eq" | "neq" | "gt" | "lt";
@@ -67,6 +75,8 @@ export const DEFAULT_VISIBLE_COLUMNS = [
   "vmid",
   "cpuPercent",
   "memPercent",
+  "network",
+  "disk",
   "uptime",
 ] as const;
 
@@ -82,6 +92,8 @@ export const ALL_DATA_COLUMNS = [
   "diskTotal",
   "cpuPercent",
   "memPercent",
+  "network",
+  "disk",
   "uptime",
   "tags",
   "haState",

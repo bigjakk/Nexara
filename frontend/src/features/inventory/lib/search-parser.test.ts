@@ -25,6 +25,10 @@ function makeRow(overrides: Partial<InventoryRow> = {}): InventoryRow {
     configOstype: "",
     cpuPercent: 45,
     memPercent: 60,
+    diskReadBps: null,
+    diskWriteBps: null,
+    netInBps: null,
+    netOutBps: null,
     ...overrides,
   };
 }
