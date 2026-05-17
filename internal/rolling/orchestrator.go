@@ -752,7 +752,16 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 	})
 
 	if result.ExitCode != 0 {
-		o.failNode(ctx, job, node, fmt.Sprintf("apt dist-upgrade exited with code %d: %s", result.ExitCode, result.Stderr))
+		// The apt command uses `2>&1` so Stderr is empty on failure. Tail the
+		// combined output (capped to keep the failure_reason readable) so the
+		// real cause — mirror sync error, broken package, etc. — is visible
+		// without having to query the upgrade_output column in the DB.
+		tail := output
+		const maxTail = 2000
+		if len(tail) > maxTail {
+			tail = "…(truncated)…\n" + tail[len(tail)-maxTail:]
+		}
+		o.failNode(ctx, job, node, fmt.Sprintf("apt dist-upgrade exited with code %d:\n%s", result.ExitCode, tail))
 		return
 	}
 
