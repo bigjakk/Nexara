@@ -100,7 +100,9 @@ func (c *Client) PullOCIImage(ctx context.Context, node, storage string, params 
 	form := url.Values{}
 	form.Set("reference", params.Reference)
 	if params.FileName != "" {
-		form.Set("file-name", params.FileName)
+		// Upstream parameter is `filename` (no separator). See:
+		// https://lore.proxmox.com/pve-devel/20251117171528.262443-4-f.schauer@proxmox.com/
+		form.Set("filename", params.FileName)
 	}
 
 	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/oci-registry-pull"

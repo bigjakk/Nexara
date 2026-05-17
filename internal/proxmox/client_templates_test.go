@@ -69,8 +69,8 @@ func TestPullOCIImage_Success(t *testing.T) {
 	if got := form.Get("reference"); got != "docker.io/library/hello-world:latest" {
 		t.Errorf("unexpected reference: %q", got)
 	}
-	if form.Has("file-name") {
-		t.Errorf("file-name should be omitted when blank")
+	if form.Has("filename") {
+		t.Errorf("filename should be omitted when blank")
 	}
 }
 
@@ -94,8 +94,8 @@ func TestPullOCIImage_WithFilename(t *testing.T) {
 		t.Fatalf("PullOCIImage: %v", err)
 	}
 	form, _ := url.ParseQuery(capturedBody)
-	if got := form.Get("file-name"); got != "myimage" {
-		t.Errorf("file-name not forwarded: got %q", got)
+	if got := form.Get("filename"); got != "myimage" {
+		t.Errorf("filename not forwarded: got %q", got)
 	}
 }
 
