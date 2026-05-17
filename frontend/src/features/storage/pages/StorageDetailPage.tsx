@@ -6,15 +6,19 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
-import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
+import { useCluster, useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage, useStorageContent } from "../api/storage-queries";
 import { StorageCapacityBar } from "../components/StorageCapacityBar";
 import { StorageContentTable } from "../components/StorageContentTable";
 import { StorageGuestTable } from "../components/StorageGuestTable";
 import { UploadDialog } from "../components/UploadDialog";
+import { URLDownloadDialog } from "../components/URLDownloadDialog";
+import { OCIPullDialog } from "../components/OCIPullDialog";
+import { ApplianceBrowserDialog } from "../components/ApplianceBrowserDialog";
 import { BulkMoveDialog } from "../components/BulkMoveDialog";
 import { EditStorageDialog } from "../components/EditStorageDialog";
 import { DeleteStorageDialog } from "../components/DeleteStorageDialog";
+import { isPVEAtLeast } from "../lib/pve-version";
 import type { StorageContentItem } from "../types/storage";
 
 export function StorageDetailPage() {
@@ -27,6 +31,7 @@ export function StorageDetailPage() {
   const storageQuery = useClusterStorage(clusterId);
   const nodesQuery = useClusterNodes(clusterId);
   const contentQuery = useStorageContent(clusterId, storageId);
+  const clusterQuery = useCluster(clusterId);
 
   const pools = useMemo(() => storageQuery.data ?? [], [storageQuery.data]);
   const pool = useMemo(
@@ -47,6 +52,11 @@ export function StorageDetailPage() {
   const hasImages = contentTypes.includes("images");
   const hasRootdir = contentTypes.includes("rootdir");
   const hasGuestVolumes = hasImages || hasRootdir;
+  const hasVztmpl = contentTypes.includes("vztmpl");
+  const hasIso = contentTypes.includes("iso");
+  const hasImport = contentTypes.includes("import");
+  // OCI requires a file-based storage with vztmpl + PVE 9.1+.
+  const pveSupportsOCI = isPVEAtLeast(clusterQuery.data?.pve_version ?? "", "9.1");
   const filterableTypes = contentTypes.filter(
     (t) =>
       t === "iso" ||
@@ -146,7 +156,7 @@ export function StorageDetailPage() {
           ) : null}
           {!pool.active && <Badge variant="destructive">inactive</Badge>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {hasImages && evacuateTargets.length > 0 && (
             <BulkMoveDialog
               clusterId={clusterId}
@@ -160,6 +170,26 @@ export function StorageDetailPage() {
             storageId={pool.id}
             supportedContent={pool.content}
           />
+          {(hasIso || hasVztmpl || hasImport) && (
+            <URLDownloadDialog
+              clusterId={clusterId}
+              storageId={pool.id}
+              supportedContent={pool.content}
+            />
+          )}
+          {hasVztmpl && pveSupportsOCI && (
+            <OCIPullDialog
+              clusterId={clusterId}
+              storageId={pool.id}
+            />
+          )}
+          {hasVztmpl && (
+            <ApplianceBrowserDialog
+              clusterId={clusterId}
+              storageId={pool.id}
+              storageName={pool.storage}
+            />
+          )}
           <EditStorageDialog
             clusterId={clusterId}
             storageId={pool.id}

@@ -17,6 +17,46 @@ export interface StorageActionResponse {
   status: string;
 }
 
+/** Body for POST /api/v1/clusters/:cid/storage/:sid/oci-pull */
+export interface OCIPullRequest {
+  reference: string;
+  file_name?: string;
+}
+
+/** Body for POST /api/v1/clusters/:cid/storage/:sid/download-url */
+export interface DownloadURLRequest {
+  url: string;
+  content: "iso" | "vztmpl" | "import";
+  filename: string;
+  checksum?: string;
+  checksum_algorithm?: "md5" | "sha1" | "sha224" | "sha256" | "sha384" | "sha512";
+  decompression_algorithm?: "gz" | "lzo" | "zst" | "bz2";
+  verify_certificates?: boolean;
+}
+
+/** Body for POST /api/v1/clusters/:cid/storage/:sid/appliances */
+export interface DownloadApplianceRequest {
+  template: string;
+}
+
+/** Appliance entry from GET /api/v1/clusters/:cid/appliances */
+export interface ApplianceTemplate {
+  template: string;
+  os: string;
+  type: string;
+  version: string;
+  section: string;
+  package: string;
+  description: string;
+  headline: string;
+  info_page?: string;
+  source?: string;
+  location?: string;
+  manage_url?: string;
+  sha512sum?: string;
+  architecture?: string;
+}
+
 export interface DiskResizeRequest {
   disk: string;
   size: string;

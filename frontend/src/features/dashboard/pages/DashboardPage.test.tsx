@@ -16,6 +16,7 @@ const mockDashboardData: DashboardData = {
         sync_interval_seconds: 60,
         is_active: true,
         status: "online",
+        pve_version: "",
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       },

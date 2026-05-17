@@ -232,6 +232,14 @@ export function CreateCTDialog({
     return parts.length > 1 ? (parts[parts.length - 1] ?? volid) : volid;
   }
 
+  // Heuristic: OCI archives are stored as plain `.tar` (no compression). Standard
+  // pveam templates are `.tar.gz`, `.tar.xz`, or `.tar.zst`. Used to flag OCI rows
+  // in the picker — not authoritative, just a UX hint.
+  function looksLikeOCI(volid: string): boolean {
+    const name = extractFilename(volid).toLowerCase();
+    return name.endsWith(".tar");
+  }
+
   function buildNet0(): string {
     let net = `name=${nicName},bridge=${bridge}`;
     if (macAddress) net += `,hwaddr=${macAddress}`;
@@ -533,6 +541,7 @@ export function CreateCTDialog({
                       {templates.map((t) => (
                         <option key={t.volid} value={t.volid}>
                           {extractFilename(t.volid)} ({formatSize(t.size)})
+                          {looksLikeOCI(t.volid) ? "  — OCI (preview)" : ""}
                         </option>
                       ))}
                     </select>
@@ -541,6 +550,17 @@ export function CreateCTDialog({
                         No templates found on this storage. Upload a container
                         template first.
                       </p>
+                    )}
+                    {selectedTemplate && looksLikeOCI(selectedTemplate) && (
+                      <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-2 text-xs">
+                        <p className="font-medium text-yellow-700 dark:text-yellow-400">
+                          OCI image (tech preview)
+                        </p>
+                        <p className="mt-1 text-muted-foreground">
+                          Layers will be squashed on create. In-place updates aren&apos;t
+                          supported — re-create the container to apply image changes.
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}

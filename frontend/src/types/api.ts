@@ -545,6 +545,7 @@ export interface ClusterResponse {
   sync_interval_seconds: number;
   is_active: boolean;
   status: "online" | "degraded" | "offline" | "inactive" | "unknown";
+  pve_version: string;
   created_at: string;
   updated_at: string;
 }

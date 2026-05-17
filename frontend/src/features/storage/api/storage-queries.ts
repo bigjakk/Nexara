@@ -7,6 +7,10 @@ import type {
   StorageConfigResponse,
   CreateStorageRequest,
   UpdateStorageRequest,
+  OCIPullRequest,
+  DownloadURLRequest,
+  DownloadApplianceRequest,
+  ApplianceTemplate,
 } from "../types/storage";
 
 // --- Storage pools for a cluster ---
@@ -206,6 +210,111 @@ export function useUpdateStorage() {
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
         queryKey: ["clusters", variables.clusterId, "storage"],
+      });
+    },
+  });
+}
+
+// --- Pull OCI image ---
+
+interface PullOCIParams {
+  clusterId: string;
+  storageId: string;
+  data: OCIPullRequest;
+}
+
+export function usePullOCIImage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clusterId, storageId, data }: PullOCIParams) =>
+      apiClient.post<StorageActionResponse>(
+        `/api/v1/clusters/${clusterId}/storage/${storageId}/oci-pull`,
+        data,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "storage",
+          variables.storageId,
+          "content",
+        ],
+      });
+    },
+  });
+}
+
+// --- Download URL to storage ---
+
+interface DownloadURLParams {
+  clusterId: string;
+  storageId: string;
+  data: DownloadURLRequest;
+}
+
+export function useDownloadURL() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clusterId, storageId, data }: DownloadURLParams) =>
+      apiClient.post<StorageActionResponse>(
+        `/api/v1/clusters/${clusterId}/storage/${storageId}/download-url`,
+        data,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "storage",
+          variables.storageId,
+          "content",
+        ],
+      });
+    },
+  });
+}
+
+// --- Appliance catalog ---
+
+export function useAppliances(clusterId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "appliances"],
+    queryFn: () =>
+      apiClient.get<ApplianceTemplate[]>(
+        `/api/v1/clusters/${clusterId}/appliances`,
+      ),
+    enabled: enabled && clusterId.length > 0,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
+  });
+}
+
+// --- Download appliance ---
+
+interface DownloadApplianceParams {
+  clusterId: string;
+  storageId: string;
+  data: DownloadApplianceRequest;
+}
+
+export function useDownloadAppliance() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clusterId, storageId, data }: DownloadApplianceParams) =>
+      apiClient.post<StorageActionResponse>(
+        `/api/v1/clusters/${clusterId}/storage/${storageId}/appliances`,
+        data,
+      ),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "storage",
+          variables.storageId,
+          "content",
+        ],
       });
     },
   });
