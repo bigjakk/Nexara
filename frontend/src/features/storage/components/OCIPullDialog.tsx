@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Container } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,7 @@ export function OCIPullDialog({ clusterId, storageId }: OCIPullDialogProps) {
   const [filename, setFilename] = useState("");
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
   const pullMutation = usePullOCIImage();
+  const queryClient = useQueryClient();
 
   const referenceTrimmed = reference.trim();
   const filenameTrimmed = filename.trim();
@@ -166,6 +168,9 @@ export function OCIPullDialog({ clusterId, storageId }: OCIPullDialogProps) {
               upid={taskUpid}
               description={`Pull ${referenceTrimmed}`}
               onComplete={() => {
+                void queryClient.invalidateQueries({
+                  queryKey: ["clusters", clusterId, "storage", storageId, "content"],
+                });
                 setTaskUpid(null);
                 setOpen(false);
               }}

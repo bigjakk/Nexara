@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -55,6 +56,7 @@ export function URLDownloadDialog({
   const [verifyCerts, setVerifyCerts] = useState(true);
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
   const downloadMutation = useDownloadURL();
+  const queryClient = useQueryClient();
 
   const urlTrimmed = url.trim();
   const filenameTrimmed = filename.trim();
@@ -311,6 +313,9 @@ export function URLDownloadDialog({
               upid={taskUpid}
               description={`Download ${filenameTrimmed}`}
               onComplete={() => {
+                void queryClient.invalidateQueries({
+                  queryKey: ["clusters", clusterId, "storage", storageId, "content"],
+                });
                 setTaskUpid(null);
                 setOpen(false);
               }}

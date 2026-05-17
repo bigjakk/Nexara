@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { Upload } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +34,7 @@ export function UploadDialog({
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadFile();
+  const queryClient = useQueryClient();
 
   const supportsIso = supportedContent.includes("iso");
   const supportsVztmpl = supportedContent.includes("vztmpl");
@@ -64,6 +66,9 @@ export function UploadDialog({
   }
 
   function handleTaskComplete() {
+    void queryClient.invalidateQueries({
+      queryKey: ["clusters", clusterId, "storage", storageId, "content"],
+    });
     setTaskUpid(null);
     setOpen(false);
     setSelectedFile(null);

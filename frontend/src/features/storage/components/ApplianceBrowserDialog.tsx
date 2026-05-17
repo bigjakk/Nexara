@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { LibraryBig, RefreshCw, Search } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +46,7 @@ export function ApplianceBrowserDialog({
 
   const appliancesQuery = useAppliances(clusterId, open);
   const downloadMutation = useDownloadAppliance();
+  const queryClient = useQueryClient();
 
   const appliances: ApplianceTemplate[] = useMemo(
     () => appliancesQuery.data ?? [],
@@ -173,6 +175,9 @@ export function ApplianceBrowserDialog({
               upid={taskUpid}
               description={`Download ${activeTemplate}`}
               onComplete={() => {
+                void queryClient.invalidateQueries({
+                  queryKey: ["clusters", clusterId, "storage", storageId, "content"],
+                });
                 setTaskUpid(null);
                 setActiveTemplate("");
               }}
