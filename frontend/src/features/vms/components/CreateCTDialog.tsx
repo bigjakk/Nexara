@@ -24,6 +24,7 @@ import {
   useResourcePools,
 } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
+import { filterStorageByContent } from "../lib/storage-filter";
 
 interface CreateCTDialogProps {
   open: boolean;
@@ -79,25 +80,27 @@ export function CreateCTDialog({
   const createMutation = useCreateContainer();
 
   // Template storage selection for browsing vztmpl content
+  // Target node name (Step 1). Declared up here so the storage filters below
+  // can react to it.
+  const [node, setNode] = useState("");
+
   const [templateStorageId, setTemplateStorageId] = useState("");
   const { data: templateContent } = useStorageContent(
     clusterId,
     templateStorageId,
   );
 
-  const templateStoragePools = useMemo(() => {
-    if (!storageList) return [];
-    const seen = new Set<string>();
-    return storageList
-      .filter((s) => {
-        if (!s.active || !s.enabled || !s.content.includes("vztmpl"))
-          return false;
-        if (seen.has(s.storage)) return false;
-        seen.add(s.storage);
-        return true;
-      })
-      .sort((a, b) => a.storage.localeCompare(b.storage));
-  }, [storageList]);
+  // Storages are filtered by both content type AND target-node reachability.
+  // A storage is reachable from the target node iff it's marked shared (visible
+  // on every node) or its node_id matches the selected target node. Without this
+  // node filter, deduping by name can surface a per-node-local storage (e.g.
+  // `local-lvm`) configured on a different node, then container create fails at
+  // submit time because Proxmox can't find that storage on the target node.
+
+  const templateStoragePools = useMemo(
+    () => filterStorageByContent(storageList, "vztmpl", nodes, node),
+    [storageList, nodes, node],
+  );
 
   const templates = useMemo(() => {
     if (!templateContent) return [];
@@ -106,19 +109,10 @@ export function CreateCTDialog({
       .sort((a, b) => b.ctime - a.ctime);
   }, [templateContent]);
 
-  const rootdirStoragePools = useMemo(() => {
-    if (!storageList) return [];
-    const seen = new Set<string>();
-    return storageList
-      .filter((s) => {
-        if (!s.active || !s.enabled || !s.content.includes("rootdir"))
-          return false;
-        if (seen.has(s.storage)) return false;
-        seen.add(s.storage);
-        return true;
-      })
-      .sort((a, b) => a.storage.localeCompare(b.storage));
-  }, [storageList]);
+  const rootdirStoragePools = useMemo(
+    () => filterStorageByContent(storageList, "rootdir", nodes, node),
+    [storageList, nodes, node],
+  );
 
   // Best available node: sort by available resources (total - allocated)
   const bestNode = useMemo(() => {
@@ -164,7 +158,6 @@ export function CreateCTDialog({
   // Step 1: General
   const [vmid, setVmid] = useState("");
   const [hostname, setHostname] = useState("");
-  const [node, setNode] = useState("");
   const [pool, setPool] = useState("");
   const [unprivileged, setUnprivileged] = useState(true);
   const [nesting, setNesting] = useState(false);
