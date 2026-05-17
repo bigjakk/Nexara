@@ -209,6 +209,10 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/storage/:storage_id/content", s.storageHandler.GetContent)
 			clusters.Post("/:cluster_id/storage/:storage_id/upload", s.storageHandler.UploadFile)
 			clusters.Delete("/:cluster_id/storage/:storage_id/content/*", s.storageHandler.DeleteContent)
+			clusters.Post("/:cluster_id/storage/:storage_id/oci-pull", s.storageHandler.PullOCI)
+			clusters.Post("/:cluster_id/storage/:storage_id/download-url", s.storageHandler.DownloadURL)
+			clusters.Post("/:cluster_id/storage/:storage_id/appliances", s.storageHandler.DownloadAppliance)
+			clusters.Get("/:cluster_id/appliances", s.storageHandler.ListAppliances)
 		}
 		if s.metricsHandler != nil {
 			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)

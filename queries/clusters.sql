@@ -26,3 +26,6 @@ DELETE FROM clusters WHERE id = $1;
 
 -- name: ListActiveClusters :many
 SELECT * FROM clusters WHERE is_active = true ORDER BY created_at;
+
+-- name: UpdateClusterPVEVersion :exec
+UPDATE clusters SET pve_version = $2 WHERE id = $1;

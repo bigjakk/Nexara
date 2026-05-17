@@ -411,6 +411,7 @@ type Querier interface {
 	UpdateCVEScanStatus(ctx context.Context, arg UpdateCVEScanStatusParams) error
 	UpdateCVEScanTotalNodes(ctx context.Context, arg UpdateCVEScanTotalNodesParams) error
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
+	UpdateClusterPVEVersion(ctx context.Context, arg UpdateClusterPVEVersionParams) error
 	UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHistoryStatusParams) error
 	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error
 	UpdateFirewallTemplate(ctx context.Context, arg UpdateFirewallTemplateParams) (FirewallTemplate, error)

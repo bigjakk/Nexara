@@ -14,7 +14,7 @@ import (
 const createCluster = `-- name: CreateCluster :one
 INSERT INTO clusters (name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at
+RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version
 `
 
 type CreateClusterParams struct {
@@ -49,6 +49,7 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PveVersion,
 	)
 	return i, err
 }
@@ -63,7 +64,7 @@ func (q *Queries) DeleteCluster(ctx context.Context, id uuid.UUID) error {
 }
 
 const getCluster = `-- name: GetCluster :one
-SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at FROM clusters WHERE id = $1
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version FROM clusters WHERE id = $1
 `
 
 func (q *Queries) GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error) {
@@ -80,12 +81,13 @@ func (q *Queries) GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PveVersion,
 	)
 	return i, err
 }
 
 const listActiveClusters = `-- name: ListActiveClusters :many
-SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at FROM clusters WHERE is_active = true ORDER BY created_at
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version FROM clusters WHERE is_active = true ORDER BY created_at
 `
 
 func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
@@ -108,6 +110,7 @@ func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PveVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -120,7 +123,7 @@ func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
 }
 
 const listClusters = `-- name: ListClusters :many
-SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at FROM clusters ORDER BY created_at DESC
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version FROM clusters ORDER BY created_at DESC
 `
 
 func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
@@ -143,6 +146,7 @@ func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PveVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -164,7 +168,7 @@ SET name = $2,
     sync_interval_seconds = $7,
     is_active = $8
 WHERE id = $1
-RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at
+RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version
 `
 
 type UpdateClusterParams struct {
@@ -201,6 +205,21 @@ func (q *Queries) UpdateCluster(ctx context.Context, arg UpdateClusterParams) (C
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PveVersion,
 	)
 	return i, err
+}
+
+const updateClusterPVEVersion = `-- name: UpdateClusterPVEVersion :exec
+UPDATE clusters SET pve_version = $2 WHERE id = $1
+`
+
+type UpdateClusterPVEVersionParams struct {
+	ID         uuid.UUID `json:"id"`
+	PveVersion string    `json:"pve_version"`
+}
+
+func (q *Queries) UpdateClusterPVEVersion(ctx context.Context, arg UpdateClusterPVEVersionParams) error {
+	_, err := q.db.Exec(ctx, updateClusterPVEVersion, arg.ID, arg.PveVersion)
+	return err
 }

@@ -208,6 +208,10 @@ func (m *mockQueries) ListNodesByCluster(_ context.Context, _ uuid.UUID) ([]db.N
 	return nil, nil
 }
 
+func (m *mockQueries) UpdateClusterPVEVersion(_ context.Context, _ db.UpdateClusterPVEVersionParams) error {
+	return nil
+}
+
 func (m *mockQueries) UpsertNodeDisk(_ context.Context, _ db.UpsertNodeDiskParams) (db.NodeDisk, error) {
 	return db.NodeDisk{}, nil
 }

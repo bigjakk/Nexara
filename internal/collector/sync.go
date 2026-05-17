@@ -25,6 +25,7 @@ import (
 type SyncQueries interface {
 	ListActiveClusters(ctx context.Context) ([]db.Cluster, error)
 	UpsertNode(ctx context.Context, arg db.UpsertNodeParams) (db.Node, error)
+	UpdateClusterPVEVersion(ctx context.Context, arg db.UpdateClusterPVEVersionParams) error
 	UpsertVM(ctx context.Context, arg db.UpsertVMParams) (db.Vm, error)
 	SetVMOSType(ctx context.Context, arg db.SetVMOSTypeParams) error
 	SetVMConfigOSType(ctx context.Context, arg db.SetVMConfigOSTypeParams) error
@@ -84,6 +85,7 @@ type ProxmoxClient interface {
 	GetClusterStatus(ctx context.Context) ([]proxmox.ClusterStatusEntry, error)
 	GetClusterResources(ctx context.Context, resourceType string) ([]proxmox.ClusterResource, error)
 	GetNodeTasks(ctx context.Context, node string, since int64, limit int) ([]proxmox.NodeTask, error)
+	GetVersion(ctx context.Context) (*proxmox.Version, error)
 }
 
 // ClientFactory creates a ProxmoxClient from cluster credentials.
@@ -228,6 +230,23 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	nodes, err := client.GetNodes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("sync cluster %s: get nodes: %w", cluster.ID, err)
+	}
+
+	// Capture the PVE version once per sync cycle. Used by frontend feature gates
+	// (e.g. OCI image pull requires PVE 9.1+). Failure is non-fatal.
+	if ver, verErr := client.GetVersion(ctx); verErr == nil && ver != nil && ver.Release != "" {
+		if ver.Release != cluster.PveVersion {
+			if updErr := s.queries.UpdateClusterPVEVersion(ctx, db.UpdateClusterPVEVersionParams{
+				ID:         cluster.ID,
+				PveVersion: ver.Release,
+			}); updErr != nil {
+				s.logger.Warn("failed to update cluster PVE version",
+					"cluster_id", cluster.ID, "error", updErr)
+			}
+		}
+	} else if verErr != nil {
+		s.logger.Debug("failed to fetch PVE version",
+			"cluster_id", cluster.ID, "error", verErr)
 	}
 
 	// Fetch cluster-level resource data for HA state and pool membership.

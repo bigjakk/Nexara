@@ -510,6 +510,55 @@ type StorageContent struct {
 	VMID    int    `json:"vmid,omitempty"`
 }
 
+// OCIPullParams holds parameters for POST /nodes/{node}/storage/{storage}/oci-registry-pull.
+// Available in Proxmox VE 9.1+. Requires skopeo on the node and a file-based storage
+// with vztmpl content enabled.
+type OCIPullParams struct {
+	// Reference is the OCI image reference (e.g. "docker.io/library/nginx:latest").
+	Reference string
+	// FileName is the optional output basename (no extension; server appends ".tar").
+	FileName string
+}
+
+// URLDownloadParams holds parameters for POST /nodes/{node}/storage/{storage}/download-url.
+type URLDownloadParams struct {
+	URL                    string
+	Content                string // "iso" | "vztmpl" | "import"
+	Filename               string
+	Checksum               string
+	ChecksumAlgorithm      string // "md5"|"sha1"|"sha224"|"sha256"|"sha384"|"sha512"
+	DecompressionAlgorithm string // "gz"|"lzo"|"zst"|"bz2"
+	VerifyCertificates     *bool  // nil = default (true)
+}
+
+// ApplianceTemplate represents an entry from GET /nodes/{node}/aplinfo —
+// the catalog of official Proxmox appliance templates (Debian/Ubuntu/Turnkey/etc).
+type ApplianceTemplate struct {
+	Template    string `json:"template"`
+	OS          string `json:"os"`
+	Type        string `json:"type"`
+	Version     string `json:"version"`
+	Section     string `json:"section"`
+	Package     string `json:"package"`
+	Description string `json:"description"`
+	Headline    string `json:"headline"`
+	InfoPage    string `json:"infopage"`
+	Source      string `json:"source"`
+	Location    string `json:"location"`
+	ManageURL   string `json:"manageurl"`
+	SHA512Sum   string `json:"sha512sum"`
+	Architecture string `json:"architecture"`
+}
+
+// Version represents the response from GET /version — Proxmox VE release info.
+// Release is the marketing version ("9.1.2"); RepoID is the build hash;
+// Version is the major.minor ("9.1") used for feature gating.
+type Version struct {
+	Release string `json:"release"`
+	RepoID  string `json:"repoid"`
+	Version string `json:"version"`
+}
+
 // MachineType represents a QEMU machine type from GET /nodes/{node}/capabilities/qemu/machines.
 type MachineType struct {
 	ID   string `json:"id"`

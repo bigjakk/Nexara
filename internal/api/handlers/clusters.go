@@ -78,6 +78,7 @@ type clusterResponse struct {
 	SyncIntervalSeconds int32     `json:"sync_interval_seconds"`
 	IsActive            bool      `json:"is_active"`
 	Status              string    `json:"status"`
+	PVEVersion          string    `json:"pve_version"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -129,6 +130,7 @@ func toClusterResponse(c db.Cluster, nsi nodeStatusInfo) clusterResponse {
 		SyncIntervalSeconds: c.SyncIntervalSeconds,
 		IsActive:            c.IsActive,
 		Status:              computeClusterStatus(c, nsi),
+		PVEVersion:          c.PveVersion,
 		CreatedAt:           c.CreatedAt,
 		UpdatedAt:           c.UpdatedAt,
 	}

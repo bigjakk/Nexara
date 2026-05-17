@@ -173,6 +173,7 @@ type Cluster struct {
 	IsActive             bool      `json:"is_active"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
+	PveVersion           string    `json:"pve_version"`
 }
 
 type ClusterSshCredential struct {

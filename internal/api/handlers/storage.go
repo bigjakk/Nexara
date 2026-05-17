@@ -393,7 +393,7 @@ func (h *StorageHandler) Create(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"storage": req.Storage, "type": req.Type})
-	h.auditLogDetails(c, clusterID, "storage", req.Storage, "create", details)
+	h.auditLogDetails(c, clusterID, req.Storage, "create", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"status":  "created",
@@ -528,7 +528,7 @@ func (h *StorageHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID,
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", resourceID, action, nil)
 }
 
-// auditLogDetails writes an audit log entry with details.
-func (h *StorageHandler) auditLogDetails(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
+// auditLogDetails writes an audit log entry with details. Resource type is always "storage".
+func (h *StorageHandler) auditLogDetails(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string, details json.RawMessage) {
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", resourceID, action, details)
 }
