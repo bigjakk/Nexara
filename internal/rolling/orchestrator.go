@@ -422,6 +422,10 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			o.failNode(ctx, job, node, fmt.Sprintf("migration of %s %d failed (status: %s)", guest.Type, guest.VMID, status))
 			return
 		}
+		if lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID); lockStatus != "completed" {
+			o.failNode(ctx, job, node, fmt.Sprintf("%s %d still locked after migrate (status: %s)", guest.Type, guest.VMID, lockStatus))
+			return
+		}
 
 		// Update workload map so next guest picks an accurate target.
 		w := drs.Workload{VMID: guest.VMID, Name: guest.Name, Type: guest.Type, Node: target}
@@ -577,6 +581,10 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 		status := o.waitForTask(ctx, client, node.NodeName, upid)
 		if status != "completed" {
 			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — migration of %s %d failed (status: %s)", guest.Type, guest.VMID, status))
+			return
+		}
+		if lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID); lockStatus != "completed" {
+			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — %s %d still locked after migrate (status: %s)", guest.Type, guest.VMID, lockStatus))
 			return
 		}
 
@@ -996,6 +1004,14 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 		if status != "completed" {
 			o.logger.Warn("guest restore migration failed",
 				"vmid", guest.VMID, "status", status)
+			continue
+		}
+		// HA-managed guests redirect to a fast hamigrate UPID; wait for the
+		// underlying qmigrate to drop the lock so the next node's drain
+		// doesn't race the in-flight restore migration.
+		if lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID); lockStatus != "completed" {
+			o.logger.Warn("guest still locked after restore migrate",
+				"vmid", guest.VMID, "status", lockStatus)
 		}
 	}
 
@@ -1401,6 +1417,74 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 		return ctx, func() {}
 	}
 	return context.WithTimeout(context.Background(), 5*time.Second)
+}
+
+// waitForGuestUnlocked polls the cluster until the guest's lock clears.
+//
+// HA-managed guests redirect the migrate call to the HA manager, which
+// returns a fast "hamigrate" UPID that completes the moment the request is
+// queued. The underlying qmigrate runs asynchronously and leaves the guest
+// in lock=migrate state for the actual migration duration. Without this
+// wait, the next orchestration step (next node's drain, restore, etc.)
+// races the in-flight migration and fails with "VM is locked (migrate)".
+//
+// For non-HA guests the migration UPID itself tracks the work, so the
+// post-task lock is normally clear on the first poll — making this safe
+// to call unconditionally.
+func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.Client, guestType string, vmid int) string {
+	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Minute)
+	defer cancel()
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	matchesGuest := func(r proxmox.ClusterResource) bool {
+		if r.VMID != vmid {
+			return false
+		}
+		switch guestType {
+		case "qemu":
+			return r.Type == "qemu"
+		case "lxc":
+			return r.Type == "lxc"
+		}
+		return false
+	}
+
+	var lastLock string
+	for {
+		select {
+		case <-pollCtx.Done():
+			if lastLock == "" {
+				return "completed"
+			}
+			o.logger.Warn("guest still locked at deadline",
+				"vmid", vmid, "type", guestType, "lock", lastLock)
+			return "timeout"
+		case <-ticker.C:
+			resources, err := client.GetClusterResources(pollCtx, "vm")
+			if err != nil {
+				continue
+			}
+			found := false
+			for _, r := range resources {
+				if !matchesGuest(r) {
+					continue
+				}
+				found = true
+				lastLock = r.Lock
+				if r.Lock == "" {
+					return "completed"
+				}
+				break
+			}
+			if !found {
+				// Guest is no longer visible (deleted/destroyed) — treat
+				// as settled so we don't loop forever.
+				return "completed"
+			}
+		}
+	}
 }
 
 func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) string {

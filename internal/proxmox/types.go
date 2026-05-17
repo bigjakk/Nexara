@@ -342,6 +342,7 @@ type ClusterResource struct {
 	Uptime     int64   `json:"uptime,omitempty"`
 	Template   int     `json:"template,omitempty"`
 	HAState    string  `json:"hastate,omitempty"`
+	Lock       string  `json:"lock,omitempty"`
 	Pool       string  `json:"pool,omitempty"`
 	Storage    string  `json:"storage,omitempty"`
 	PluginType string  `json:"plugintype,omitempty"`
