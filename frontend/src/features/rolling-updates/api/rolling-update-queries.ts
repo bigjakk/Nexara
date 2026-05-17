@@ -292,7 +292,11 @@ export function useUpsertSSHCredentials() {
         `/api/v1/clusters/${clusterId}/ssh-credentials`,
         body,
       ),
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
+      // Seed the cache so the view-mode form (which hosts the bulk-pin
+      // dialog) renders on the next tick instead of flashing the
+      // "no credentials" block while the refetch is in flight.
+      qc.setQueryData(["ssh-credentials", vars.clusterId], data);
       void qc.invalidateQueries({
         queryKey: ["ssh-credentials", vars.clusterId],
       });

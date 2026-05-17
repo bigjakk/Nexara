@@ -115,6 +115,12 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
         setEditing(false);
         setPassword("");
         setPrivateKey("");
+        // Rolling updates require every node's host key to be pinned. Launch
+        // the bulk-pin flow automatically so it isn't a separate step the
+        // user has to remember after saving credentials.
+        if (unpinnedNodes.length > 0) {
+          setBulkOpen(true);
+        }
       },
     });
   };
