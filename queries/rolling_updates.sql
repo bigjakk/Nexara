@@ -122,8 +122,12 @@ SET upgrade_confirmed_at = now(), updated_at = now()
 WHERE id = $1 AND step = 'awaiting_upgrade';
 
 -- name: SetNodeUpgradeStarted :exec
+-- COALESCE preserves the original upgrade_started_at on a resume re-launch
+-- (after a Swarm reschedule or K8s rolling restart killed the previous
+-- SSH goroutine) so the absolute upgrade timeout in advanceUpgrading
+-- measures from the first launch attempt, not the most recent.
 UPDATE rolling_update_nodes
-SET upgrade_started_at = now(), updated_at = now()
+SET upgrade_started_at = COALESCE(upgrade_started_at, now()), updated_at = now()
 WHERE id = $1;
 
 -- name: SetNodeUpgradeCompleted :exec

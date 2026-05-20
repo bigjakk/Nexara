@@ -703,10 +703,14 @@ func (q *Queries) SetNodeUpgradeOutput(ctx context.Context, arg SetNodeUpgradeOu
 
 const setNodeUpgradeStarted = `-- name: SetNodeUpgradeStarted :exec
 UPDATE rolling_update_nodes
-SET upgrade_started_at = now(), updated_at = now()
+SET upgrade_started_at = COALESCE(upgrade_started_at, now()), updated_at = now()
 WHERE id = $1
 `
 
+// COALESCE preserves the original upgrade_started_at on a resume re-launch
+// (after a Swarm reschedule or K8s rolling restart killed the previous
+// SSH goroutine) so the absolute upgrade timeout in advanceUpgrading
+// measures from the first launch attempt, not the most recent.
 func (q *Queries) SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, setNodeUpgradeStarted, id)
 	return err

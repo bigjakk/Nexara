@@ -389,6 +389,10 @@ type Querier interface {
 	SetNodeUpgradeCompleted(ctx context.Context, id uuid.UUID) error
 	SetNodeUpgradeCompletedNoReboot(ctx context.Context, id uuid.UUID) error
 	SetNodeUpgradeOutput(ctx context.Context, arg SetNodeUpgradeOutputParams) error
+	// COALESCE preserves the original upgrade_started_at on a resume re-launch
+	// (after a Swarm reschedule or K8s rolling restart killed the previous
+	// SSH goroutine) so the absolute upgrade timeout in advanceUpgrading
+	// measures from the first launch attempt, not the most recent.
 	SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error

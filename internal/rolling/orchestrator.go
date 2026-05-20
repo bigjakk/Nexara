@@ -361,6 +361,11 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			}
 
 			status := o.waitForTask(ctx, client, node.NodeName, upid)
+			if status == "interrupted" {
+				o.logger.Info("drain interrupted by shutdown during passthrough shutdown; next leader will resume",
+					"node", node.NodeName, "vmid", guest.VMID)
+				return
+			}
 			if status != "completed" {
 				// Graceful shutdown failed — force stop.
 				o.logger.Warn("graceful shutdown failed, force stopping passthrough guest",
@@ -375,7 +380,11 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 					o.failNode(ctx, job, node, fmt.Sprintf("force stop passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
 					return
 				}
-				o.waitForTask(ctx, client, node.NodeName, upid)
+				if forceStatus := o.waitForTask(ctx, client, node.NodeName, upid); forceStatus == "interrupted" {
+					o.logger.Info("drain interrupted by shutdown during passthrough force-stop; next leader will resume",
+						"node", node.NodeName, "vmid", guest.VMID)
+					return
+				}
 			}
 
 			o.logger.Info("passthrough guest shut down, will restart after update",
@@ -418,11 +427,22 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 
 		// Wait for migration to complete.
 		status := o.waitForTask(ctx, client, node.NodeName, upid)
+		if status == "interrupted" {
+			o.logger.Info("drain interrupted by shutdown while waiting for migration; next leader will resume",
+				"node", node.NodeName, "vmid", guest.VMID, "upid", upid)
+			return
+		}
 		if status != "completed" {
 			o.failNode(ctx, job, node, fmt.Sprintf("migration of %s %d failed (status: %s)", guest.Type, guest.VMID, status))
 			return
 		}
-		if lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID); lockStatus != "completed" {
+		lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID)
+		if lockStatus == "interrupted" {
+			o.logger.Info("drain interrupted by shutdown while waiting for guest unlock; next leader will resume",
+				"node", node.NodeName, "vmid", guest.VMID)
+			return
+		}
+		if lockStatus != "completed" {
 			o.failNode(ctx, job, node, fmt.Sprintf("%s %d still locked after migrate (status: %s)", guest.Type, guest.VMID, lockStatus))
 			return
 		}
@@ -532,6 +552,11 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 				return
 			}
 			status := o.waitForTask(ctx, client, node.NodeName, upid)
+			if status == "interrupted" {
+				o.logger.Info("resume drain interrupted by shutdown during passthrough shutdown; next leader will resume",
+					"node", node.NodeName, "vmid", guest.VMID)
+				return
+			}
 			if status != "completed" {
 				switch guest.Type {
 				case "qemu":
@@ -543,8 +568,33 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 					o.failNode(ctx, job, node, fmt.Sprintf("resume drain — force stop passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
 					return
 				}
-				o.waitForTask(ctx, client, node.NodeName, upid)
+				if forceStatus := o.waitForTask(ctx, client, node.NodeName, upid); forceStatus == "interrupted" {
+					o.logger.Info("resume drain interrupted by shutdown during passthrough force-stop; next leader will resume",
+						"node", node.NodeName, "vmid", guest.VMID)
+					return
+				}
 			}
+			continue
+		}
+
+		// Before issuing a new migration, wait for any in-flight Proxmox
+		// lock to clear. A previous orchestrator instance may have started
+		// a migrate that's still progressing (or has just completed) — if
+		// we issue a fresh MigrateVM call while the guest is locked, Proxmox
+		// returns "VM is locked (migrate)" and we'd falsely mark the node
+		// failed. After the lock clears, re-check whether the guest is even
+		// still on the source node before deciding to migrate again.
+		lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID)
+		if lockStatus == "interrupted" {
+			o.logger.Info("resume drain interrupted by shutdown while waiting for prior lock to clear",
+				"node", node.NodeName, "vmid", guest.VMID)
+			return
+		}
+		if !o.isGuestOnNode(ctx, client, node.NodeName, guest) {
+			o.logger.Info("resume drain: guest already migrated by prior orchestrator instance, skipping",
+				"vmid", guest.VMID, "type", guest.Type, "node", node.NodeName)
+			// Track the moved guest as an additional workload on its current
+			// location so subsequent target selections stay accurate.
 			continue
 		}
 
@@ -579,12 +629,23 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 			"vmid", guest.VMID, "type", guest.Type, "from", node.NodeName, "to", target)
 
 		status := o.waitForTask(ctx, client, node.NodeName, upid)
+		if status == "interrupted" {
+			o.logger.Info("resume drain interrupted by shutdown while waiting for migration; next leader will resume",
+				"node", node.NodeName, "vmid", guest.VMID, "upid", upid)
+			return
+		}
 		if status != "completed" {
 			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — migration of %s %d failed (status: %s)", guest.Type, guest.VMID, status))
 			return
 		}
-		if lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID); lockStatus != "completed" {
-			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — %s %d still locked after migrate (status: %s)", guest.Type, guest.VMID, lockStatus))
+		postLockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID)
+		if postLockStatus == "interrupted" {
+			o.logger.Info("resume drain interrupted by shutdown while waiting for guest unlock; next leader will resume",
+				"node", node.NodeName, "vmid", guest.VMID)
+			return
+		}
+		if postLockStatus != "completed" {
+			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — %s %d still locked after migrate (status: %s)", guest.Type, guest.VMID, postLockStatus))
 			return
 		}
 
@@ -622,17 +683,42 @@ func (o *Orchestrator) getGuestStatus(ctx context.Context, client *proxmox.Clien
 	return ""
 }
 
+// upgradeAbsoluteTimeout caps the time we'll keep retrying a node's
+// apt dist-upgrade from the first launch. Long enough to cover one full
+// re-launch cycle after a container restart plus dpkg-lock waits.
+const upgradeAbsoluteTimeout = 60 * time.Minute
+
+// upgradeHeartbeatStale is how long updated_at can go without a touch
+// before we conclude the SSH goroutine died (Swarm reschedule, K8s
+// rolling restart, OOM-kill) and re-launch the upgrade. The runSSHUpgrade
+// heartbeat ticks every 30s, so 3 minutes catches a dead goroutine
+// quickly while tolerating transient DB hiccups.
+const upgradeHeartbeatStale = 3 * time.Minute
+
 func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
-	// If upgrade already started, check for timeout (30 minutes).
+	// If upgrade already started, check the absolute timeout first.
 	if node.UpgradeStartedAt.Valid {
-		if time.Since(node.UpgradeStartedAt.Time) > 30*time.Minute {
-			o.failNode(ctx, job, node, "automated upgrade timed out after 30 minutes")
+		if time.Since(node.UpgradeStartedAt.Time) > upgradeAbsoluteTimeout {
+			o.failNode(ctx, job, node, fmt.Sprintf("automated upgrade timed out after %s", upgradeAbsoluteTimeout))
+			return
 		}
-		// Otherwise still running — wait for next tick.
-		return
+		// If the heartbeat is fresh, an SSH goroutine is still working —
+		// just wait for the next tick.
+		if node.UpdatedAt.IsZero() || time.Since(node.UpdatedAt) <= upgradeHeartbeatStale {
+			return
+		}
+		// Heartbeat is stale: the previous SSH goroutine died with its
+		// container. Fall through to re-launch. The remote apt command
+		// is resume-safe — it waits for any still-running dpkg to release
+		// the lock and exits 0 when there's nothing left to upgrade.
+		o.logger.Info("upgrade heartbeat stale, re-launching SSH upgrade after orchestrator restart",
+			"node", node.NodeName,
+			"last_heartbeat", node.UpdatedAt,
+			"upgrade_started_at", node.UpgradeStartedAt.Time)
 	}
 
-	// First time seeing this node in 'upgrading' — kick off the SSH upgrade.
+	// First time seeing this node in 'upgrading' (or resuming after a
+	// dead SSH goroutine) — kick off the SSH upgrade.
 	sshCreds, err := o.queries.GetClusterSSHCredentials(ctx, job.ClusterID)
 	if err != nil {
 		o.failNode(ctx, job, node, fmt.Sprintf("SSH credentials not found: %v", err))
@@ -695,19 +781,57 @@ func (o *Orchestrator) advanceUpgrading(ctx context.Context, client *proxmox.Cli
 	}
 
 	_ = o.queries.SetNodeUpgradeStarted(ctx, node.ID)
-	o.publishEvent(ctx, job.ClusterID, job.ID, "node_upgrade_started")
-	o.logger.Info("starting automated apt dist-upgrade via SSH", "node", node.NodeName)
+	if !node.UpgradeStartedAt.Valid {
+		o.publishEvent(ctx, job.ClusterID, job.ID, "node_upgrade_started")
+		o.logger.Info("starting automated apt dist-upgrade via SSH", "node", node.NodeName)
+	}
 
 	// Run apt dist-upgrade in a goroutine so we don't block the tick.
 	// Detach from the tick scope so a tick rollover doesn't cancel a
-	// 25-minute SSH session, but stay rooted in shutdownCtx so a graceful
-	// SIGTERM aborts the SSH call cleanly instead of orphaning the goroutine.
-	upgradeCtx, upgradeCancel := context.WithTimeout(o.shutdownCtx, 25*time.Minute)
+	// long-running SSH session, but stay rooted in shutdownCtx so a
+	// graceful SIGTERM aborts the SSH call cleanly. The 45-minute SSH
+	// timeout gives breathing room for dpkg-lock waits when this is a
+	// re-launch after a prior orchestrator instance was killed mid-upgrade.
+	upgradeCtx, upgradeCancel := context.WithTimeout(o.shutdownCtx, 45*time.Minute)
 	go o.runSSHUpgrade(upgradeCtx, upgradeCancel, job, node, client, sshCfg)
+}
+
+// startUpgradeHeartbeat spawns a 30-second-interval goroutine that bumps
+// updated_at on the rolling_update_nodes row while the SSH upgrade is in
+// flight. advanceUpgrading on a different scheduler-leader instance uses
+// the staleness of updated_at to detect a goroutine that died with its
+// container (Swarm reschedule, K8s rolling restart, OOM) and re-launch.
+//
+// Parented to the SSH upgrade ctx so the heartbeat stops promptly when
+// SSH returns or shutdownCtx cancels.
+func (o *Orchestrator) startUpgradeHeartbeat(ctx context.Context, nodeID uuid.UUID) {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = o.queries.TouchRollingUpdateNode(ctx, nodeID)
+			}
+		}
+	}()
 }
 
 func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelFunc, job db.RollingUpdateJob, node db.RollingUpdateNode, client *proxmox.Client, sshCfg sshpkg.Config) {
 	defer cancel()
+
+	// Heartbeat: keep updated_at fresh so advanceUpgrading on another
+	// scheduler-leader instance can distinguish a live SSH session from a
+	// goroutine that died with its container. Without this, a leader
+	// takeover during an SSH session can't tell whether to wait or resume.
+	//
+	// Parented to ctx (the SSH upgrade context) so the ticker stops as
+	// soon as the SSH call returns or shutdownCtx cancels — at that point
+	// it's correct for the heartbeat to stop, since the next leader
+	// should treat us as dead and re-launch.
+	o.startUpgradeHeartbeat(ctx, node.ID)
 
 	// Build package exclude args with strict validation.
 	// Debian package names: [a-z0-9][a-z0-9.+\-]+ (max 128 chars).
@@ -722,13 +846,27 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 		}
 	}
 
-	// The command: update index, then dist-upgrade.
-	// DEBIAN_FRONTEND=noninteractive prevents any interactive prompts.
-	// -o Dpkg::Options prevents dpkg config file prompts.
+	// The command: recover any half-installed package state from a prior
+	// interrupted run, refresh the apt index, then dist-upgrade.
+	//
+	// Resume-safe design — this command can be re-run after a prior
+	// orchestrator instance was killed mid-upgrade:
+	//   - `dpkg --configure -a` finishes configuring packages that were
+	//     unpacked but not configured when the previous SSH session was
+	//     terminated. The `|| true` keeps us moving if there's nothing
+	//     to recover or if the dpkg lock is briefly held by another apt.
+	//   - DPkg::Lock::Timeout=1800 makes apt wait up to 30 min for the
+	//     dpkg lock to clear (Debian/Proxmox apt 2.0+).
+	//   - apt-get update + dist-upgrade are both idempotent: when there's
+	//     nothing left to upgrade, dist-upgrade exits 0 with "0 upgraded".
+	//   - DEBIAN_FRONTEND=noninteractive and the Dpkg::Options=--force-conf*
+	//     flags prevent any interactive prompts.
 	cmd := fmt.Sprintf(
 		"export DEBIAN_FRONTEND=noninteractive && "+
-			"apt-get update && "+
+			"(dpkg --configure -a 2>&1 || true) && "+
+			"apt-get update -o DPkg::Lock::Timeout=1800 && "+
 			"apt-get dist-upgrade -y"+
+			" -o DPkg::Lock::Timeout=1800"+
 			" -o Dpkg::Options::=--force-confdef"+
 			" -o Dpkg::Options::=--force-confold"+
 			"%s 2>&1",
@@ -737,6 +875,21 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 
 	result, err := sshpkg.Execute(ctx, sshCfg, cmd)
 	if err != nil {
+		// A graceful container shutdown (Swarm reschedule, K8s rolling
+		// restart) cancels upgradeCtx mid-SSH and surfaces here as a
+		// context.Canceled error. The dpkg/apt process on the remote
+		// keeps running independently of our SSH stream, so marking the
+		// node failed here would discard work that the OS is still doing.
+		// Instead, exit cleanly. The next scheduler leader's
+		// advanceUpgrading will detect the stalled UpgradeStartedAt and
+		// re-launch the upgrade — apt is idempotent (a re-run after
+		// completion is a no-op), and if dpkg is still running it'll
+		// block on the dpkg lock and report so via exit code.
+		if errors.Is(err, context.Canceled) || o.shutdownCtx.Err() != nil {
+			o.logger.Info("SSH upgrade interrupted by shutdown — dpkg may still be running on remote; next leader will resume",
+				"node", node.NodeName)
+			return
+		}
 		o.failNode(ctx, job, node, fmt.Sprintf("SSH upgrade failed: %v", err))
 		return
 	}
@@ -968,6 +1121,11 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 			}
 
 			status := o.waitForTask(ctx, client, node.NodeName, upid)
+			if status == "interrupted" {
+				o.logger.Info("restore interrupted by shutdown during passthrough start; next leader will resume",
+					"node", node.NodeName, "vmid", guest.VMID)
+				return
+			}
 			if status != "completed" {
 				o.logger.Warn("passthrough guest start failed",
 					"vmid", guest.VMID, "status", status)
@@ -1010,6 +1168,11 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 			"from", currentNode, "to", node.NodeName)
 
 		status := o.waitForTask(ctx, client, currentNode, upid)
+		if status == "interrupted" {
+			o.logger.Info("restore interrupted by shutdown while waiting for migration; next leader will resume",
+				"node", node.NodeName, "vmid", guest.VMID, "upid", upid)
+			return
+		}
 		if status != "completed" {
 			o.logger.Warn("guest restore migration failed",
 				"vmid", guest.VMID, "status", status)
@@ -1018,7 +1181,13 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 		// HA-managed guests redirect to a fast hamigrate UPID; wait for the
 		// underlying qmigrate to drop the lock so the next node's drain
 		// doesn't race the in-flight restore migration.
-		if lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID); lockStatus != "completed" {
+		lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID)
+		if lockStatus == "interrupted" {
+			o.logger.Info("restore interrupted by shutdown while waiting for guest unlock; next leader will resume",
+				"node", node.NodeName, "vmid", guest.VMID)
+			return
+		}
+		if lockStatus != "completed" {
 			o.logger.Warn("guest still locked after restore migrate",
 				"vmid", guest.VMID, "status", lockStatus)
 		}
@@ -1440,6 +1609,14 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 // For non-HA guests the migration UPID itself tracks the work, so the
 // post-task lock is normally clear on the first poll — making this safe
 // to call unconditionally.
+//
+// Return values:
+//   - "completed"   the guest is unlocked (or no longer visible)
+//   - "timeout"     the 30-minute deadline elapsed while still locked
+//   - "interrupted" the shutdown context was cancelled (graceful container
+//                   restart in Swarm/K8s). The lock may still be in place;
+//                   the next scheduler leader will resume polling via the
+//                   stall detector in advanceDraining / advanceRestoring.
 func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.Client, guestType string, vmid int) string {
 	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Minute)
 	defer cancel()
@@ -1464,6 +1641,14 @@ func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.C
 	for {
 		select {
 		case <-pollCtx.Done():
+			// Discriminate: graceful shutdown (recoverable) vs real 30-min
+			// deadline. shutdownCtx cancellation propagates into pollCtx,
+			// so check it first.
+			if o.shutdownCtx.Err() != nil {
+				o.logger.Info("waitForGuestUnlocked interrupted by shutdown",
+					"vmid", vmid, "type", guestType, "lock", lastLock)
+				return "interrupted"
+			}
 			if lastLock == "" {
 				return "completed"
 			}
@@ -1496,6 +1681,20 @@ func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.C
 	}
 }
 
+// waitForTask polls a Proxmox task UPID until it reaches a terminal state.
+//
+// Return values:
+//   - "completed"   the task finished with a successful exit status
+//   - "failed"      the task finished with a non-OK exit status
+//   - "timeout"     the 30-minute deadline elapsed before the task stopped
+//   - "interrupted" the shutdown context was cancelled (graceful container
+//                   restart in Swarm/K8s) while the task was still running.
+//                   The task remains in flight on Proxmox; callers must NOT
+//                   mark the rolling-update node as failed — the next
+//                   scheduler leader will resume polling via the stall
+//                   detector in advanceDraining / advanceRestoring (which
+//                   re-checks guest state and re-attempts only what's still
+//                   pending).
 func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) string {
 	// Detach from the scheduler tick so a tick rollover doesn't abandon
 	// in-flight Proxmox tasks, but root in shutdownCtx so SIGTERM cancels
@@ -1511,6 +1710,18 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 	for {
 		select {
 		case <-pollCtx.Done():
+			// If shutdownCtx is cancelled, this is a graceful container
+			// shutdown (Swarm reschedule / K8s rolling restart) — the task
+			// on Proxmox is still progressing. Return "interrupted" so the
+			// caller can exit cleanly without marking the node failed.
+			// The next scheduler leader will resume via the stall detector.
+			if o.shutdownCtx.Err() != nil {
+				o.logger.Info("waitForTask interrupted by shutdown — task may still be running on Proxmox",
+					"node", node, "upid", upid)
+				return "interrupted"
+			}
+			// Real 30-minute deadline — try a final status read on a fresh
+			// Background-derived ctx so the outcome can still be recorded.
 			finalCtx, finalCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			ts, err := client.GetTaskStatus(finalCtx, node, upid)
 			finalCancel()

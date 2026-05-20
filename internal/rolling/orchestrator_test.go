@@ -88,11 +88,17 @@ func TestNewOrchestrator_NilShutdownCtxFallback(t *testing.T) {
 }
 
 // TestOrchestrator_WaitForTask_CancelsOnShutdown is the load-bearing test
-// for Finding #14: if the per-server shutdown context is cancelled while
-// waitForTask is polling a Proxmox task, the function must exit promptly
-// instead of running its full 30-minute timeout. It does one final-check
-// call on Background-derived ctx to record the outcome — that part should
-// succeed against a stub server returning "running".
+// for the Swarm/K8s rolling-restart resilience fix: if the per-server
+// shutdown context is cancelled while waitForTask is polling a Proxmox
+// task, the function must exit promptly with "interrupted" (NOT "timeout")
+// so callers know to leave the rolling-update node in its current step
+// and let the next scheduler-leader resume — rather than marking it failed.
+//
+// The old behavior returned "timeout" here, which prod-tripped a node
+// failure during a Docker Swarm reschedule: an in-flight migration was
+// labelled "migration of qemu 111 failed (status: timeout)" 105 seconds
+// after job start (well short of the 30-min real timeout) even though
+// the Proxmox migrate task actually succeeded.
 func TestOrchestrator_WaitForTask_CancelsOnShutdown(t *testing.T) {
 	// Stub Proxmox: always return a "running" task — never completes on
 	// its own. This way the only way out is via shutdownCtx.
@@ -133,11 +139,64 @@ func TestOrchestrator_WaitForTask_CancelsOnShutdown(t *testing.T) {
 
 	select {
 	case status := <-done:
-		// "timeout" is expected (final check still saw "running").
-		if status != "timeout" {
-			t.Errorf("waitForTask = %q, want %q after shutdown cancel", status, "timeout")
+		if status != "interrupted" {
+			t.Errorf("waitForTask = %q, want %q after shutdown cancel", status, "interrupted")
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("waitForTask did not return within 3s of shutdown cancel — pollCtx is not derived from shutdownCtx")
+	}
+}
+
+// TestOrchestrator_WaitForGuestUnlocked_CancelsOnShutdown ensures the
+// post-migrate lock-wait helper also returns "interrupted" (not "timeout")
+// when the container is being shut down. Callers branch on this to skip
+// the failNode path so the next scheduler leader can resume.
+func TestOrchestrator_WaitForGuestUnlocked_CancelsOnShutdown(t *testing.T) {
+	// Stub Proxmox: always reports the guest as locked, never clears.
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api2/json/cluster/resources" {
+			payload, _ := json.Marshal(map[string]interface{}{
+				"data": []proxmox.ClusterResource{
+					{Type: "qemu", VMID: 999, Node: "test-node", Lock: "migrate"},
+				},
+			})
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(payload)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer stub.Close()
+
+	client, err := proxmox.NewClient(proxmox.ClientConfig{
+		BaseURL:     stub.URL,
+		TokenID:     "user@pam!test",
+		TokenSecret: "secret",
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
+	o := NewOrchestrator(shutdownCtx, nil, "", slog.Default(), nil, nil)
+
+	done := make(chan string, 1)
+	go func() {
+		done <- o.waitForGuestUnlocked(context.Background(), client, "qemu", 999)
+	}()
+
+	// Give the goroutine a moment to enter the for-select before cancelling.
+	// waitForGuestUnlocked has a 3s ticker, so cancel happens before the
+	// first tick — the pollCtx.Done branch is what's under test.
+	time.Sleep(50 * time.Millisecond)
+	cancelShutdown()
+
+	select {
+	case status := <-done:
+		if status != "interrupted" {
+			t.Errorf("waitForGuestUnlocked = %q, want %q after shutdown cancel", status, "interrupted")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("waitForGuestUnlocked did not return within 3s of shutdown cancel — pollCtx is not derived from shutdownCtx")
 	}
 }
