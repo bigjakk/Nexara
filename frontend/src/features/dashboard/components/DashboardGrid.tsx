@@ -78,7 +78,14 @@ export function DashboardGrid({
 
   const handleResponsiveLayoutChange = useCallback(
     (...args: [Layout, Partial<Record<string, Layout>>]) => {
-      handleLayoutChange(args[0]);
+      // When the viewport crosses a breakpoint (e.g. lg → md), react-grid-layout
+      // generates a layout fitted to the new breakpoint and fires this callback
+      // with that derived layout as args[0]. Saving it back overwrites our
+      // canonical `lg` layout, so on the way back up the dashboard renders with
+      // the compacted small-breakpoint layout — the "stuck after resize" bug.
+      // args[1].lg is preserved across breakpoint changes; only real drag/resize
+      // at the lg breakpoint mutates it.
+      handleLayoutChange(args[1]["lg"] ?? args[0]);
     },
     [handleLayoutChange],
   );
