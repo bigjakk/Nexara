@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import {
   Select,
@@ -27,7 +26,6 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   const updateConfig = useUpdateDRSConfig(clusterId);
 
   const [mode, setMode] = useState<DRSMode>("disabled");
-  const [enabled, setEnabled] = useState(false);
   const [cpuWeight, setCpuWeight] = useState(0.5);
   const [memWeight, setMemWeight] = useState(0.5);
   const [threshold, setThreshold] = useState(0.25);
@@ -40,7 +38,6 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   useEffect(() => {
     if (config) {
       setMode(config.mode);
-      setEnabled(config.enabled);
       // Normalize legacy configs that included a network weight.
       const rawCpu = config.weights.cpu;
       const rawMem = config.weights.memory;
@@ -66,7 +63,6 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
     setSaveStatus("idle");
     const request: DRSConfigRequest = {
       mode,
-      enabled,
       weights: { cpu: cpuWeight, memory: memWeight },
       imbalance_threshold: threshold,
       eval_interval_seconds: evalInterval,
@@ -94,20 +90,6 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <Label htmlFor="drs-enabled">Enabled</Label>
-            <p className="text-xs text-muted-foreground">
-              Enable automatic workload balancing across nodes
-            </p>
-          </div>
-          <Switch
-            id="drs-enabled"
-            checked={enabled}
-            onCheckedChange={setEnabled}
-          />
-        </div>
-
         <div className="space-y-2">
           <Label>Mode</Label>
           <Select value={mode} onValueChange={(v) => { setMode(v as DRSMode); }}>
@@ -115,13 +97,13 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="disabled">Disabled</SelectItem>
+              <SelectItem value="disabled">Disabled &mdash; do nothing</SelectItem>
               <SelectItem value="advisory">Advisory &mdash; recommend only</SelectItem>
               <SelectItem value="automatic">Automatic &mdash; migrate VMs</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            Advisory logs recommendations without acting. Automatic will live-migrate VMs.
+            Disabled turns DRS off. Advisory logs recommendations without acting. Automatic will live-migrate VMs.
           </p>
         </div>
 

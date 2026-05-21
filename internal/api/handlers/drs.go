@@ -54,7 +54,6 @@ func (h *DRSHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, r
 
 type drsConfigRequest struct {
 	Mode                string          `json:"mode"`
-	Enabled             bool            `json:"enabled"`
 	Weights             json.RawMessage `json:"weights"`
 	ImbalanceThreshold  float64         `json:"imbalance_threshold"`
 	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
@@ -231,10 +230,15 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 		req.Weights = json.RawMessage(`{"cpu":0.3,"memory":0.7}`)
 	}
 
+	// `enabled` is derived from `mode` — the user-facing config no longer
+	// exposes a separate toggle. The DB column remains because the
+	// rolling-update orchestrator uses it as a runtime pause flag.
+	enabled := req.Mode != "disabled"
+
 	cfg, err := h.queries.UpsertDRSConfig(c.Context(), db.UpsertDRSConfigParams{
 		ClusterID:           clusterID,
 		Mode:                req.Mode,
-		Enabled:             req.Enabled,
+		Enabled:             enabled,
 		Weights:             req.Weights,
 		ImbalanceThreshold:  req.ImbalanceThreshold,
 		EvalIntervalSeconds: req.EvalIntervalSeconds,
@@ -244,7 +248,7 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update DRS config")
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{"mode": req.Mode, "enabled": req.Enabled, "imbalance_threshold": req.ImbalanceThreshold})
+	details, _ := json.Marshal(map[string]interface{}{"mode": req.Mode, "imbalance_threshold": req.ImbalanceThreshold})
 	h.auditLog(c, clusterID, "drs", cfg.ID.String(), "config_update", details)
 
 	return c.JSON(toDRSConfigResponse(cfg))

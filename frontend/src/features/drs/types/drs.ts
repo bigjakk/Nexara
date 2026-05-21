@@ -22,7 +22,6 @@ export interface DRSConfig {
 
 export interface DRSConfigRequest {
   mode: DRSMode;
-  enabled: boolean;
   weights: DRSWeights;
   imbalance_threshold: number;
   eval_interval_seconds: number;
