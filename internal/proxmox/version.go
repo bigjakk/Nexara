@@ -15,6 +15,8 @@ const (
 	CapOCIImages = "9.1"
 	// CapCRSDynamic — CRS dynamic load balancer, i.e. native DRS (PVE 9.2).
 	CapCRSDynamic = "9.2"
+	// CapHAArmDisarm — cluster-wide Arm/Disarm HA maintenance (PVE 9.2).
+	CapHAArmDisarm = "9.2"
 )
 
 var versionRe = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)

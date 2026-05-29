@@ -30,6 +30,7 @@ import {
 } from "@/features/ha/api/ha-queries";
 import { HAResourceForm } from "@/features/ha/components/HAResourceForm";
 import { HARuleForm } from "@/features/ha/components/HARuleForm";
+import { HAMaintenanceCard } from "@/features/ha/components/HAMaintenanceCard";
 import { useClusterVMs, useClusterNodes } from "../api/cluster-queries";
 import type { VMResponse } from "@/types/api";
 import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
@@ -274,6 +275,8 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
               <QuorumCard entry={quorum} />
               <ServiceSummaryCard services={serviceEntries} />
             </div>
+
+            <HAMaintenanceCard clusterId={clusterId} pveVersion={pveVersion} />
 
             {nodeEntries.length > 0 && (
               <Card>

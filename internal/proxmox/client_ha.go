@@ -25,6 +25,28 @@ func (c *Client) SetHAResourceState(ctx context.Context, sid string, state strin
 	}
 	return nil
 }
+
+// ArmHA re-arms the HA stack cluster-wide after it was disarmed (PVE 9.2+),
+// restoring automatic fencing/recovery. POST /cluster/ha/status/arm-ha.
+func (c *Client) ArmHA(ctx context.Context) error {
+	if err := c.doPost(ctx, "/cluster/ha/status/arm-ha", url.Values{}, nil); err != nil {
+		return fmt.Errorf("arm HA: %w", err)
+	}
+	return nil
+}
+
+// DisarmHA disarms the HA stack cluster-wide for planned maintenance (PVE 9.2+),
+// releasing all watchdogs so controlled actions aren't treated as failures.
+// resourceMode is "freeze" (lock services in place) or "ignore" (suspend HA
+// tracking so services can be managed manually). POST /cluster/ha/status/disarm-ha.
+func (c *Client) DisarmHA(ctx context.Context, resourceMode string) error {
+	form := url.Values{}
+	form.Set("resource-mode", resourceMode)
+	if err := c.doPost(ctx, "/cluster/ha/status/disarm-ha", form, nil); err != nil {
+		return fmt.Errorf("disarm HA (%s): %w", resourceMode, err)
+	}
+	return nil
+}
 func (c *Client) GetHAGroups(ctx context.Context) ([]HAGroup, error) {
 	var groups []HAGroup
 	if err := c.do(ctx, "/cluster/ha/groups", &groups); err != nil {

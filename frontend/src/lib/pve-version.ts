@@ -31,4 +31,6 @@ export const PVE_FEATURES = {
   OCI_IMAGES: "9.1",
   /** CRS dynamic load balancer — native DRS. */
   CRS_DYNAMIC: "9.2",
+  /** Cluster-wide Arm/Disarm HA maintenance. */
+  HA_ARM_DISARM: "9.2",
 } as const;

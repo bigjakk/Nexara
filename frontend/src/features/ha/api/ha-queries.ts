@@ -225,3 +225,22 @@ export function useHAStatus(clusterId: string) {
     refetchInterval: 30_000,
   });
 }
+
+/** Re-arm the HA stack cluster-wide (PVE 9.2+). */
+export function useArmHA(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiClient.post(`/api/v1/clusters/${clusterId}/ha/arm`, {}),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+  });
+}
+
+/** Disarm the HA stack cluster-wide for maintenance (PVE 9.2+). */
+export function useDisarmHA(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (resourceMode: "freeze" | "ignore") =>
+      apiClient.post(`/api/v1/clusters/${clusterId}/ha/disarm`, { resource_mode: resourceMode }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+  });
+}

@@ -102,6 +102,80 @@ func (h *HAHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*pro
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
+// requireArmDisarmSupport rejects Arm/Disarm HA on clusters older than PVE 9.2.
+// Best-effort: if the cached version can't be read, defer to Proxmox to reject.
+func (h *HAHandler) requireArmDisarmSupport(c *fiber.Ctx, clusterID uuid.UUID) error {
+	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
+	if err != nil {
+		return nil
+	}
+	if !proxmox.VersionAtLeast(cluster.PveVersion, proxmox.CapHAArmDisarm) {
+		return fiber.NewError(fiber.StatusBadRequest, "Arm/Disarm HA requires Proxmox VE 9.2 or newer")
+	}
+	return nil
+}
+
+// ArmHA handles POST /clusters/:cluster_id/ha/arm — re-arms the HA stack
+// cluster-wide after a disarm window.
+func (h *HAHandler) ArmHA(c *fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
+		return err
+	}
+	if err := h.requireArmDisarmSupport(c, clusterID); err != nil {
+		return err
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.ArmHA(c.Context()); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]any{"action": "arm-ha"})
+	h.auditLog(c, clusterID, "ha", clusterID.String(), "arm_ha", details)
+	h.publishHA(c, clusterID, clusterID.String(), "arm_ha")
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// DisarmHA handles POST /clusters/:cluster_id/ha/disarm — disarms the HA stack
+// cluster-wide for planned maintenance. Body: {"resource_mode": "freeze"|"ignore"}.
+func (h *HAHandler) DisarmHA(c *fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "ha", clusterID); err != nil {
+		return err
+	}
+	if err := h.requireArmDisarmSupport(c, clusterID); err != nil {
+		return err
+	}
+	var req struct {
+		ResourceMode string `json:"resource_mode"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.ResourceMode != "freeze" && req.ResourceMode != "ignore" {
+		return fiber.NewError(fiber.StatusBadRequest, "resource_mode must be 'freeze' or 'ignore'")
+	}
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return err
+	}
+	if err := pxClient.DisarmHA(c.Context(), req.ResourceMode); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]any{"action": "disarm-ha", "resource_mode": req.ResourceMode})
+	h.auditLog(c, clusterID, "ha", clusterID.String(), "disarm_ha", details)
+	h.publishHA(c, clusterID, clusterID.String(), "disarm_ha")
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
 func (h *HAHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }
