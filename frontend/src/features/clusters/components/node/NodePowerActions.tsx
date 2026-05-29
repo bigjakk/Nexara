@@ -31,7 +31,7 @@ import {
 import { useSSHCredentials } from "@/features/rolling-updates/api/rolling-update-queries";
 import { useTaskLogStore } from "@/stores/task-log-store";
 
-export function NodePowerActions({ clusterId, nodeName, otherNodes }: { clusterId: string; nodeName: string; otherNodes: string[] }) {
+export function NodePowerActions({ clusterId, nodeName, otherNodes, inMaintenance }: { clusterId: string; nodeName: string; otherNodes: string[]; inMaintenance: boolean }) {
   const shutdown = useShutdownNode(clusterId, nodeName);
   const reboot = useRebootNode(clusterId, nodeName);
   const evacuate = useEvacuateNode(clusterId, nodeName);
@@ -174,62 +174,37 @@ export function NodePowerActions({ clusterId, nodeName, otherNodes }: { clusterI
       </Dialog>
 
       {hasSSH ? (
-        <>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <Wrench className="h-4 w-4" />
-                Enter Maintenance
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Enter maintenance on {nodeName}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Puts the node into HA maintenance: HA-managed guests are migrated
-                  away and the node will not receive new ones, while the rest of the
-                  cluster stays HA-protected. Runs ha-manager node-maintenance over SSH.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => { setActionError(null); maintenance.mutate(true, { onError: handleError }); }}
-                  disabled={maintenance.isPending}
-                >
-                  Enter Maintenance
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <Wrench className="h-4 w-4" />
-                Exit Maintenance
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Exit maintenance on {nodeName}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Takes the node out of HA maintenance so HA can place guests on it
-                  again. Runs ha-manager node-maintenance disable over SSH.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => { setActionError(null); maintenance.mutate(false, { onError: handleError }); }}
-                  disabled={maintenance.isPending}
-                >
-                  Exit Maintenance
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <Wrench className="h-4 w-4" />
+              {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {inMaintenance
+                  ? `Exit maintenance on ${nodeName}?`
+                  : `Enter maintenance on ${nodeName}?`}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {inMaintenance
+                  ? "Takes the node out of HA maintenance so HA can place guests on it again. Runs ha-manager node-maintenance disable over SSH."
+                  : "Puts the node into HA maintenance: HA-managed guests are migrated away and the node will not receive new ones, while the rest of the cluster stays HA-protected. Runs ha-manager node-maintenance over SSH."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => { setActionError(null); maintenance.mutate(!inMaintenance, { onError: handleError }); }}
+                disabled={maintenance.isPending}
+              >
+                {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       ) : (
         <Button
           variant="outline"

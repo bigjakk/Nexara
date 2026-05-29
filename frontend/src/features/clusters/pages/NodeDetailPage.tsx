@@ -159,7 +159,7 @@ export function NodeDetailPage() {
               <Terminal className="h-4 w-4" />
               Shell
             </Button>
-            <NodePowerActions clusterId={clusterId} nodeName={node.name} otherNodes={(nodes ?? []).filter((n) => n.name !== node.name && n.status === "online").map((n) => n.name)} />
+            <NodePowerActions clusterId={clusterId} nodeName={node.name} inMaintenance={node.ha_state === "maintenance"} otherNodes={(nodes ?? []).filter((n) => n.name !== node.name && n.status === "online").map((n) => n.name)} />
           </div>
         )}
       </div>

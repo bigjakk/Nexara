@@ -25,7 +25,19 @@ import { StatusIcon } from "@/components/StatusIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { classifyOS } from "@/lib/os-classify";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useClusterNodes, useClusterVMs } from "@/features/clusters/api/cluster-queries";
+import { useClusterNodes, useClusterVMs, useSetNodeMaintenance } from "@/features/clusters/api/cluster-queries";
+import { useSSHCredentials } from "@/features/rolling-updates/api/rolling-update-queries";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useSidebarStore } from "@/stores/sidebar-store";
 import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
 import { EditClusterDialog } from "@/features/clusters/components/EditClusterDialog";
@@ -67,6 +79,12 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
   const isExpanded = expandedNodes.has(nodeKey);
   const nodeVMs = vms.filter((vm) => vm.node_id === node.id);
   const isActive = location.pathname === `/clusters/${clusterId}/nodes/${node.id}`;
+  const { canManage } = useAuth();
+  const { data: sshCreds } = useSSHCredentials(clusterId);
+  const maintenance = useSetNodeMaintenance(clusterId, node.name);
+  const inMaintenance = node.ha_state === "maintenance";
+  const canMaintenance = sshCreds != null && canManage("node");
+  const [maintOpen, setMaintOpen] = useState(false);
 
   // Auto-expand if a child VM is active
   useEffect(() => {
@@ -84,43 +102,55 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
 
   return (
     <div className="border-l border-border pl-3 ml-3">
-      <div
-        className={cn(
-          "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-          isActive && "bg-accent text-accent-foreground",
-        )}
-      >
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (nodeVMs.length > 0) toggleNode(nodeKey);
-          }}
-          className="shrink-0"
-        >
-          <ChevronRight
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
             className={cn(
-              "h-3 w-3 transition-transform",
-              nodeVMs.length === 0 && "invisible",
-              isExpanded && "rotate-90",
+              "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
+              isActive && "bg-accent text-accent-foreground",
             )}
-          />
-        </button>
-        <button
-          onClick={() => { void navigate(`/clusters/${clusterId}/nodes/${node.id}`); }}
-          className="flex min-w-0 flex-1 items-center gap-1.5"
-        >
-          <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          {node.ha_state === "maintenance" ? (
-            <Wrench
-              aria-label="Maintenance"
-              className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-500"
-            />
-          ) : (
-            <StatusIcon status={node.status} />
-          )}
-          <span className="truncate">{node.name}</span>
-        </button>
-      </div>
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (nodeVMs.length > 0) toggleNode(nodeKey);
+              }}
+              className="shrink-0"
+            >
+              <ChevronRight
+                className={cn(
+                  "h-3 w-3 transition-transform",
+                  nodeVMs.length === 0 && "invisible",
+                  isExpanded && "rotate-90",
+                )}
+              />
+            </button>
+            <button
+              onClick={() => { void navigate(`/clusters/${clusterId}/nodes/${node.id}`); }}
+              className="flex min-w-0 flex-1 items-center gap-1.5"
+            >
+              <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              {node.ha_state === "maintenance" ? (
+                <Wrench
+                  aria-label="Maintenance"
+                  className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-500"
+                />
+              ) : (
+                <StatusIcon status={node.status} />
+              )}
+              <span className="truncate">{node.name}</span>
+            </button>
+          </div>
+        </ContextMenuTrigger>
+        {canMaintenance && (
+          <ContextMenuContent className="w-48">
+            <ContextMenuItem onClick={() => { setMaintOpen(true); }}>
+              <Wrench className="mr-2 h-3.5 w-3.5" />
+              {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        )}
+      </ContextMenu>
 
       {isExpanded && nodeVMs.length > 0 && (
         <div className="border-l border-border pl-3 ml-3">
@@ -166,6 +196,32 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
             })}
         </div>
       )}
+
+      <AlertDialog open={maintOpen} onOpenChange={setMaintOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {inMaintenance
+                ? `Exit maintenance on ${node.name}?`
+                : `Enter maintenance on ${node.name}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {inMaintenance
+                ? "Takes the node out of HA maintenance so HA can place guests on it again. Runs ha-manager node-maintenance over SSH."
+                : "Puts the node into HA maintenance: HA-managed guests are migrated away and the node will not receive new ones. Runs ha-manager node-maintenance over SSH."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { maintenance.mutate(!inMaintenance); }}
+              disabled={maintenance.isPending}
+            >
+              {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
