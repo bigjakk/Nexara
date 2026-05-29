@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -24,6 +25,7 @@ interface DRSConfigCardProps {
 export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   const { data: config, isLoading } = useDRSConfig(clusterId);
   const updateConfig = useUpdateDRSConfig(clusterId);
+  const nativeRebalance = config?.native_crs?.auto_rebalance ?? false;
 
   const [mode, setMode] = useState<DRSMode>("disabled");
   const [cpuWeight, setCpuWeight] = useState(0.5);
@@ -90,6 +92,24 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
+        {nativeRebalance && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
+              <p className="font-medium">Proxmox native Dynamic Load Balancer is active</p>
+              <p>
+                This cluster&apos;s Proxmox CRS is auto-rebalancing HA-managed guests. Nexara DRS{" "}
+                <strong>Automatic</strong> mode is disabled to avoid conflicting migrations &mdash;{" "}
+                <strong>Advisory</strong> still works as a read-only second opinion. Manage the native
+                balancer under{" "}
+                <Link to={`/clusters/${clusterId}?tab=options`} className="underline">
+                  Datacenter &rarr; Options &rarr; CRS
+                </Link>
+                .
+              </p>
+            </div>
+          </div>
+        )}
         <div className="space-y-2">
           <Label>Mode</Label>
           <Select value={mode} onValueChange={(v) => { setMode(v as DRSMode); }}>
@@ -99,11 +119,12 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             <SelectContent>
               <SelectItem value="disabled">Disabled &mdash; do nothing</SelectItem>
               <SelectItem value="advisory">Advisory &mdash; recommend only</SelectItem>
-              <SelectItem value="automatic">Automatic &mdash; migrate VMs</SelectItem>
+              <SelectItem value="automatic" disabled={nativeRebalance}>Automatic &mdash; migrate VMs</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
             Disabled turns DRS off. Advisory logs recommendations without acting. Automatic will live-migrate VMs.
+            {nativeRebalance && " Automatic is unavailable while Proxmox native CRS rebalancing is on."}
           </p>
         </div>
 

@@ -71,6 +71,21 @@ type drsConfigResponse struct {
 	IncludeContainers   bool            `json:"include_containers"`
 	CreatedAt           string          `json:"created_at"`
 	UpdatedAt           string          `json:"updated_at"`
+	// NativeCRS describes the cluster's Proxmox CRS dynamic load-balancer config
+	// (PVE 9.2+). Nil when unknown or unset. When AutoRebalance is true, Nexara
+	// DRS automatic migrations are suppressed to avoid conflicting migrations.
+	NativeCRS *nativeCRSStatus `json:"native_crs,omitempty"`
+}
+
+// nativeCRSStatus mirrors proxmox.CRSSettings for the API response.
+type nativeCRSStatus struct {
+	HA               string `json:"ha"`
+	AutoRebalance    bool   `json:"auto_rebalance"`
+	Threshold        int    `json:"threshold"`
+	HoldDuration     int    `json:"hold_duration"`
+	Margin           int    `json:"margin"`
+	Method           string `json:"method"`
+	RebalanceOnStart bool   `json:"rebalance_on_start"`
 }
 
 func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
@@ -182,10 +197,11 @@ func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
 		return err
 	}
 
+	var resp drsConfigResponse
 	cfg, err := h.queries.GetDRSConfig(c.Context(), clusterID)
 	if err != nil {
 		// No config means DRS is disabled (default state).
-		return c.JSON(drsConfigResponse{
+		resp = drsConfigResponse{
 			ClusterID:           clusterID,
 			Mode:                "disabled",
 			Enabled:             false,
@@ -193,10 +209,42 @@ func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
 			ImbalanceThreshold:  0.25,
 			EvalIntervalSeconds: 300,
 			IncludeContainers:   false,
-		})
+		}
+	} else {
+		resp = toDRSConfigResponse(cfg)
 	}
 
-	return c.JSON(toDRSConfigResponse(cfg))
+	// Best-effort: surface the cluster's native Proxmox CRS state so the UI can
+	// warn about and defer to it. Never fail the config read on this.
+	resp.NativeCRS = h.detectNativeCRS(c, clusterID)
+	return c.JSON(resp)
+}
+
+// detectNativeCRS reads the cluster's Proxmox CRS configuration so the UI can
+// warn about (and defer to) the native dynamic load balancer. Returns nil when
+// the options can't be fetched or no CRS is configured.
+func (h *DRSHandler) detectNativeCRS(c *fiber.Ctx, clusterID uuid.UUID) *nativeCRSStatus {
+	client, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return nil
+	}
+	opts, err := client.GetClusterOptions(c.Context())
+	if err != nil {
+		return nil
+	}
+	s := proxmox.ParseCRSSettings(opts.CRS)
+	if s.HA == "" && !s.AutoRebalance && !s.RebalanceOnStart {
+		return nil
+	}
+	return &nativeCRSStatus{
+		HA:               s.HA,
+		AutoRebalance:    s.AutoRebalance,
+		Threshold:        s.Threshold,
+		HoldDuration:     s.HoldDuration,
+		Margin:           s.Margin,
+		Method:           s.Method,
+		RebalanceOnStart: s.RebalanceOnStart,
+	}
 }
 
 // UpdateConfig handles PUT /api/v1/clusters/:cluster_id/drs/config.
@@ -360,6 +408,22 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}
 
+	// If Proxmox's native CRS auto-rebalance suppressed automatic migrations,
+	// don't run or record anything — tell the user why.
+	if result != nil && result.BlockedByNativeCRS {
+		details, _ := json.Marshal(map[string]any{"reason": result.BlockReason})
+		h.auditLog(c, clusterID, "drs", clusterID.String(), "evaluate_blocked_native_crs", details)
+		return c.JSON(fiber.Map{
+			"blocked":         true,
+			"block_reason":    result.BlockReason,
+			"recommendations": []any{},
+			"count":           0,
+			"node_scores":     []any{},
+			"imbalance":       0,
+			"threshold":       0,
+		})
+	}
+
 	var recommendations []drs.Recommendation
 	if result != nil {
 		recommendations = result.Recommendations
@@ -457,6 +521,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindDRSAction, "drs", clusterID.String(), "evaluate_triggered")
 
 	return c.JSON(fiber.Map{
+		"blocked":         false,
 		"recommendations": resp,
 		"count":           len(resp),
 		"node_scores":     nodeScores,

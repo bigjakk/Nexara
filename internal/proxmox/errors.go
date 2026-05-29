@@ -3,6 +3,7 @@ package proxmox
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -27,4 +28,12 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	return fmt.Sprintf("proxmox API error %d: %s", e.StatusCode, e.Message)
+}
+
+// IsGroupsMigratedError reports whether err is the Proxmox VE 9.x response
+// indicating HA groups have been migrated to (and superseded by) HA rules — at
+// which point the /cluster/ha/groups write endpoints are soft-disabled and
+// return an error containing "migrated to rules".
+func IsGroupsMigratedError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "migrated to rules")
 }

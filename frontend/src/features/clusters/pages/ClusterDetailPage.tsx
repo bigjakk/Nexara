@@ -215,11 +215,17 @@ export function ClusterDetailPage() {
             </TabsContent>
 
             <TabsContent value="options">
-              <ClusterOptionsTab clusterId={clusterId ?? ""} />
+              <ClusterOptionsTab
+                clusterId={clusterId ?? ""}
+                pveVersion={cluster?.pve_version ?? ""}
+              />
             </TabsContent>
 
             <TabsContent value="ha">
-              <ClusterHATab clusterId={clusterId ?? ""} />
+              <ClusterHATab
+                clusterId={clusterId ?? ""}
+                pveVersion={cluster?.pve_version ?? ""}
+              />
             </TabsContent>
 
             <TabsContent value="pools">

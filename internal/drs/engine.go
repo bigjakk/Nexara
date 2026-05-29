@@ -21,8 +21,8 @@ import (
 
 // Weights holds the scoring weight configuration.
 type Weights struct {
-	CPU     float64 `json:"cpu"`
-	Memory  float64 `json:"memory"`
+	CPU    float64 `json:"cpu"`
+	Memory float64 `json:"memory"`
 }
 
 // DefaultWeights returns the default scoring weights.
@@ -75,6 +75,11 @@ type EvalResult struct {
 	Imbalance       float64
 	Threshold       float64
 	Weights         Weights
+	// BlockedByNativeCRS is set when Proxmox's native CRS dynamic load balancer
+	// is auto-rebalancing, so Nexara DRS automatic migrations were suppressed to
+	// avoid conflicting migrations. No recommendations are produced in this case.
+	BlockedByNativeCRS bool
+	BlockReason        string
 }
 
 // Engine is the DRS evaluation engine.
@@ -99,6 +104,16 @@ func (e *Engine) SetProxmoxCache(cache *proxmox.ClientCache) {
 	e.cache = cache
 }
 
+// drsBlockedByNativeCRS reports whether DRS must suppress automatic migrations
+// because Proxmox's native CRS dynamic load balancer is auto-rebalancing. Only
+// automatic mode conflicts; advisory mode (recommendations only) is allowed.
+func drsBlockedByNativeCRS(mode string, opts *proxmox.ClusterOptions) bool {
+	if mode != "automatic" || opts == nil {
+		return false
+	}
+	return proxmox.ParseCRSSettings(opts.CRS).AutoRebalanceActive()
+}
+
 // Evaluate runs DRS evaluation for a single cluster and returns recommendations.
 func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult, error) {
 	cfg, err := e.queries.GetDRSConfig(ctx, clusterID)
@@ -120,6 +135,27 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 	client, err := e.createClient(ctx, clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("create proxmox client: %w", err)
+	}
+
+	// Coexistence guard: Proxmox VE 9.2's native CRS dynamic load balancer, when
+	// set to auto-rebalance, already live-migrates HA-managed guests. Running
+	// Nexara DRS in automatic mode on top of that makes the two fight over the
+	// same guests, so we suppress automatic migrations here. Advisory mode is
+	// unaffected (recommendations only — no migration). Fail open on a read
+	// error: the DRS config page surfaces native-CRS state separately, and a
+	// transient options fetch shouldn't silently disable a configured feature.
+	if cfg.Mode == "automatic" {
+		if opts, optErr := client.GetClusterOptions(ctx); optErr != nil {
+			e.logger.Warn("DRS: could not read cluster options for native-CRS coexistence check",
+				"cluster_id", clusterID, "error", optErr)
+		} else if drsBlockedByNativeCRS(cfg.Mode, opts) {
+			e.logger.Info("DRS: suppressing automatic migrations — Proxmox native CRS auto-rebalance is enabled",
+				"cluster_id", clusterID)
+			return &EvalResult{
+				BlockedByNativeCRS: true,
+				BlockReason:        "Proxmox native CRS auto-rebalance is enabled on this cluster; Nexara DRS automatic migrations are disabled to avoid conflicting migrations. Advisory mode still works.",
+			}, nil
+		}
 	}
 
 	nodes, err := client.GetNodes(ctx)

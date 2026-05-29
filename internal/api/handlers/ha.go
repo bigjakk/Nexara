@@ -314,8 +314,12 @@ func (h *HAHandler) DeleteResource(c *fiber.Ctx) error {
 
 // --- HA Groups ---
 
+// haGroupsMigratedMsg is returned for HA group write attempts on PVE 9.x
+// clusters, where the groups API is soft-disabled in favor of HA rules.
+const haGroupsMigratedMsg = "HA Groups were migrated to HA Rules in Proxmox VE 9 — use the HA Rules tab instead."
+
 // ListGroups handles GET /clusters/:cluster_id/ha/groups.
-// On PVE 8.3+ where groups have been migrated to rules, returns an empty array.
+// On PVE 9.x where groups have been migrated to rules, returns an empty array.
 func (h *HAHandler) ListGroups(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
@@ -330,8 +334,9 @@ func (h *HAHandler) ListGroups(c *fiber.Ctx) error {
 	}
 	groups, err := pxClient.GetHAGroups(c.Context())
 	if err != nil {
-		// PVE 8.3+ migrated groups to rules — return empty list gracefully
-		if strings.Contains(err.Error(), "migrated to rules") {
+		// PVE 9.x soft-disables the groups API once migrated to rules — there
+		// are simply no groups to list anymore, so return an empty array.
+		if proxmox.IsGroupsMigratedError(err) {
 			return c.JSON([]proxmox.HAGroup{})
 		}
 		return mapProxmoxError(err)
@@ -363,6 +368,9 @@ func (h *HAHandler) CreateGroup(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.CreateHAGroup(c.Context(), req); err != nil {
+		if proxmox.IsGroupsMigratedError(err) {
+			return fiber.NewError(fiber.StatusConflict, haGroupsMigratedMsg)
+		}
 		return mapProxmoxError(err)
 	}
 	detailMap := map[string]any{"group": req.Group, "nodes": req.Nodes}
@@ -403,6 +411,9 @@ func (h *HAHandler) UpdateGroup(c *fiber.Ctx) error {
 		return err
 	}
 	if err := pxClient.UpdateHAGroup(c.Context(), group, req); err != nil {
+		if proxmox.IsGroupsMigratedError(err) {
+			return fiber.NewError(fiber.StatusConflict, haGroupsMigratedMsg)
+		}
 		return mapProxmoxError(err)
 	}
 	detailMap := map[string]any{"group": group}
@@ -444,6 +455,9 @@ func (h *HAHandler) DeleteGroup(c *fiber.Ctx) error {
 	// Snapshot the group before deletion so the audit entry has context.
 	snapshot, _ := pxClient.GetHAGroup(c.Context(), group)
 	if err := pxClient.DeleteHAGroup(c.Context(), group); err != nil {
+		if proxmox.IsGroupsMigratedError(err) {
+			return fiber.NewError(fiber.StatusConflict, haGroupsMigratedMsg)
+		}
 		return mapProxmoxError(err)
 	}
 	detailMap := map[string]any{"group": group}

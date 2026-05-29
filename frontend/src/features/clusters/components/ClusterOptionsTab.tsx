@@ -33,6 +33,7 @@ import {
   serializePropString,
 } from "../lib/prop-string";
 import { useNetworkInterfaces } from "@/features/networks/api/network-queries";
+import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
 
 /** Compute the network address of an IPv4 CIDR, e.g.
  *  "10.10.10.5/24" → "10.10.10.0/24". Returns null on invalid input or
@@ -72,6 +73,12 @@ interface OptionsFormData {
   // CRS property string subfields
   crs_ha: string;
   crs_rebalance_on_start: boolean;
+  // CRS dynamic load-balancer subfields (PVE 9.2+)
+  crs_auto_rebalance: boolean;
+  crs_threshold: string;
+  crs_hold_duration: string;
+  crs_margin: string;
+  crs_method: string;
   // bwlimit property string subfields (KiB/s, "" = unset, "0" = unlimited)
   bwlimit_clone: string;
   bwlimit_migration: string;
@@ -90,6 +97,8 @@ const EMPTY_FORM: OptionsFormData = {
   migration_type: "", migration_network: "",
   ha_shutdown_policy: "",
   crs_ha: "", crs_rebalance_on_start: false,
+  crs_auto_rebalance: false, crs_threshold: "", crs_hold_duration: "",
+  crs_margin: "", crs_method: "",
   bwlimit_clone: "", bwlimit_migration: "", bwlimit_move: "",
   bwlimit_restore: "", bwlimit_default: "",
   next_id_lower: "", next_id_upper: "",
@@ -134,6 +143,11 @@ function optsToForm(d: ClusterOptions): OptionsFormData {
 
     crs_ha: crs["ha"] ?? "",
     crs_rebalance_on_start: crs["ha-rebalance-on-start"] === "1",
+    crs_auto_rebalance: crs["ha-auto-rebalance"] === "1",
+    crs_threshold: crs["ha-auto-rebalance-threshold"] ?? "",
+    crs_hold_duration: crs["ha-auto-rebalance-hold-duration"] ?? "",
+    crs_margin: crs["ha-auto-rebalance-margin"] ?? "",
+    crs_method: crs["ha-auto-rebalance-method"] ?? "",
 
     bwlimit_clone: bw["clone"] ?? "",
     bwlimit_migration: bw["migration"] ?? "",
@@ -164,6 +178,18 @@ function buildPropStrings(form: OptionsFormData): {
     crs: serializePropString({
       ha: form.crs_ha,
       "ha-rebalance-on-start": form.crs_rebalance_on_start ? "1" : "",
+      // Auto-rebalance keys apply only to the dynamic scheduler; omit them
+      // otherwise so Proxmox doesn't reject ha-auto-rebalance with a
+      // non-dynamic scheduler. (serializePropString drops empty values.)
+      ...(form.crs_ha === "dynamic"
+        ? {
+            "ha-auto-rebalance": form.crs_auto_rebalance ? "1" : "",
+            "ha-auto-rebalance-threshold": form.crs_auto_rebalance ? form.crs_threshold : "",
+            "ha-auto-rebalance-hold-duration": form.crs_auto_rebalance ? form.crs_hold_duration : "",
+            "ha-auto-rebalance-margin": form.crs_auto_rebalance ? form.crs_margin : "",
+            "ha-auto-rebalance-method": form.crs_auto_rebalance ? form.crs_method : "",
+          }
+        : {}),
     }),
     bwlimit: serializePropString({
       clone: form.bwlimit_clone,
@@ -181,6 +207,7 @@ function buildPropStrings(form: OptionsFormData): {
 
 interface ClusterOptionsTabProps {
   clusterId: string;
+  pveVersion: string;
 }
 
 function ErrorBanner({ error }: { error: Error }) {
@@ -198,7 +225,7 @@ function ErrorBanner({ error }: { error: Error }) {
   );
 }
 
-export function ClusterOptionsTab({ clusterId }: ClusterOptionsTabProps) {
+export function ClusterOptionsTab({ clusterId, pveVersion }: ClusterOptionsTabProps) {
   const { canManage } = useAuth();
   const optionsQuery = useClusterOptions(clusterId);
   const descQuery = useClusterDescription(clusterId);
@@ -228,6 +255,7 @@ export function ClusterOptionsTab({ clusterId }: ClusterOptionsTabProps) {
           updateOpts={updateOpts}
           canEdit={canManage("cluster")}
           clusterId={clusterId}
+          pveVersion={pveVersion}
         />
       </TabsContent>
 
@@ -293,13 +321,15 @@ function NotesSection({
 // --- General Options Section (Editable) ---
 
 function GeneralSection({
-  optionsQuery, updateOpts, canEdit, clusterId,
+  optionsQuery, updateOpts, canEdit, clusterId, pveVersion,
 }: {
   optionsQuery: ReturnType<typeof useClusterOptions>;
   updateOpts: ReturnType<typeof useUpdateClusterOptions>;
   canEdit: boolean;
   clusterId: string;
+  pveVersion: string;
 }) {
+  const crsDynamicSupported = isPVEAtLeast(pveVersion, PVE_FEATURES.CRS_DYNAMIC);
   const [form, setForm] = useState<OptionsFormData>({ ...EMPTY_FORM });
   const [dirty, setDirty] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
@@ -626,8 +656,16 @@ function GeneralSection({
                   <SelectItem value="__default__">Default (basic)</SelectItem>
                   <SelectItem value="basic">Basic — round-robin failover</SelectItem>
                   <SelectItem value="static">Static — assignment-based</SelectItem>
+                  {(crsDynamicSupported || form.crs_ha === "dynamic") && (
+                    <SelectItem value="dynamic">Dynamic — live load balancing</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
+              {!crsDynamicSupported && (
+                <p className="text-xs text-muted-foreground">
+                  Dynamic load balancing requires Proxmox VE 9.2 or newer.
+                </p>
+              )}
             </div>
             <div className="flex items-center justify-between rounded-md border p-3">
               <div>
@@ -641,6 +679,46 @@ function GeneralSection({
               />
             </div>
           </div>
+          {form.crs_ha === "dynamic" && (
+            <div className="mt-4 space-y-4 rounded-md border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm font-medium">Automatic Rebalancing</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Let Proxmox live-migrate HA-managed guests to even out node load. While this is on,
+                    Nexara DRS automatic mode is disabled to avoid conflicting migrations.
+                  </p>
+                </div>
+                <Switch
+                  checked={form.crs_auto_rebalance}
+                  onCheckedChange={(v) => { updateField("crs_auto_rebalance", v); }}
+                  disabled={!canEdit}
+                />
+              </div>
+              {form.crs_auto_rebalance && (
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <NumField label="Threshold %" value={form.crs_threshold} onChange={(v) => { updateField("crs_threshold", v); }} disabled={!canEdit} placeholder="30" />
+                  <NumField label="Hold (rounds)" value={form.crs_hold_duration} onChange={(v) => { updateField("crs_hold_duration", v); }} disabled={!canEdit} placeholder="3" />
+                  <NumField label="Margin %" value={form.crs_margin} onChange={(v) => { updateField("crs_margin", v); }} disabled={!canEdit} placeholder="10" />
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Method</Label>
+                    <Select
+                      value={form.crs_method || "__default__"}
+                      onValueChange={(v) => { updateField("crs_method", v === "__default__" ? "" : v); }}
+                      disabled={!canEdit}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default__">Default (bruteforce)</SelectItem>
+                        <SelectItem value="bruteforce">Bruteforce</SelectItem>
+                        <SelectItem value="topsis">TOPSIS</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </Section>
 
         {/* Bandwidth Limits */}

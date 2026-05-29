@@ -32,9 +32,11 @@ import { HAResourceForm } from "@/features/ha/components/HAResourceForm";
 import { HARuleForm } from "@/features/ha/components/HARuleForm";
 import { useClusterVMs, useClusterNodes } from "../api/cluster-queries";
 import type { VMResponse } from "@/types/api";
+import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
 
 interface ClusterHATabProps {
   clusterId: string;
+  pveVersion: string;
 }
 
 function ErrorBanner({ error }: { error: Error }) {
@@ -106,8 +108,11 @@ function vmToSID(vm: VMResponse): string {
   return `${vm.type === "lxc" ? "ct" : "vm"}:${String(vm.vmid)}`;
 }
 
-export function ClusterHATab({ clusterId }: ClusterHATabProps) {
+export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   const { canManage } = useAuth();
+  // PVE 9 deprecated HA groups in favor of node-affinity rules and soft-disables
+  // the groups write API once migrated. Gate group creation/editing accordingly.
+  const groupsDeprecated = isPVEAtLeast(pveVersion, PVE_FEATURES.HA_RULES);
   const resourcesQuery = useHAResources(clusterId);
   const groupsQuery = useHAGroups(clusterId);
   const rulesQuery = useHARules(clusterId);
@@ -583,7 +588,7 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
               <CardTitle>
                 HA Groups{rulesSupported && <span className="ml-2 text-xs text-muted-foreground font-normal">(Legacy — superseded by Rules in PVE 9)</span>}
               </CardTitle>
-              {canManage("ha") && (
+              {canManage("ha") && !groupsDeprecated && (
                 <Dialog open={grpCreateOpen} onOpenChange={setGrpCreateOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm"><Plus className="mr-2 h-4 w-4" />Add Group</Button>
@@ -613,10 +618,15 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
               )}
             </CardHeader>
             <CardContent>
-              {rulesSupported && hasGroups && (
-                <p className="mb-3 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
-                  Proxmox VE 9 migrated HA Groups to HA Rules. New deployments should use Rules; existing groups continue to work.
-                </p>
+              {groupsDeprecated && (
+                <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                  <span>
+                    Proxmox VE 9 migrated HA Groups to <strong>HA Rules</strong> (node affinity).
+                    Creating or editing groups is disabled &mdash; use the <strong>Rules</strong> section
+                    above. Any existing groups are shown read-only.
+                  </span>
+                </div>
               )}
               {groupsQuery.isLoading && <Skeleton className="h-20 w-full" />}
               {groupsQuery.isError && <ErrorBanner error={groupsQuery.error} />}
@@ -645,9 +655,11 @@ export function ClusterHATab({ clusterId }: ClusterHATabProps) {
                           </TableCell>
                           {canManage("ha") && (
                             <TableCell className="text-right space-x-1">
-                              <Button variant="ghost" size="sm" onClick={() => { startEditGroup(g); }}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
+                              {!groupsDeprecated && (
+                                <Button variant="ghost" size="sm" onClick={() => { startEditGroup(g); }}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
                               <Button variant="ghost" size="sm" disabled={deleteGroup.isPending} onClick={() => { handleDeleteGroup(g.group); }}>
                                 <Trash2 className="h-4 w-4 text-destructive" />
                               </Button>

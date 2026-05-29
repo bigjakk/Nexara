@@ -185,6 +185,12 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 			continue
 		}
 
+		if result != nil && result.BlockedByNativeCRS {
+			s.logger.Info("DRS skipped: Proxmox native CRS auto-rebalance is active",
+				"cluster_id", cfg.ClusterID)
+			continue
+		}
+
 		if result == nil || len(result.Recommendations) == 0 {
 			continue
 		}
@@ -356,9 +362,9 @@ func (s *Scheduler) executeTask(ctx context.Context, client *proxmox.Client, tas
 	}
 
 	if err := s.queries.UpdateTaskLastRun(ctx, db.UpdateTaskLastRunParams{
-		ID:        task.ID,
-		LastRunAt: pgtype.Timestamptz{Time: now, Valid: true},
-		NextRunAt: pgtype.Timestamptz{Time: nextRun, Valid: cronErr == nil},
+		ID:         task.ID,
+		LastRunAt:  pgtype.Timestamptz{Time: now, Valid: true},
+		NextRunAt:  pgtype.Timestamptz{Time: nextRun, Valid: cronErr == nil},
 		LastStatus: pgtype.Text{String: status, Valid: true},
 		LastError:  pgtype.Text{String: errMsg, Valid: errMsg != ""},
 	}); err != nil {

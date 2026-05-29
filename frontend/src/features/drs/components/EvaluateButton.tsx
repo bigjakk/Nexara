@@ -50,6 +50,8 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   const [imbalance, setImbalance] = useState(0);
   const [threshold, setThreshold] = useState(0);
   const [evaluated, setEvaluated] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [blockReason, setBlockReason] = useState("");
 
   // Reset state when switching clusters.
   useEffect(() => {
@@ -58,6 +60,8 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
     setImbalance(0);
     setThreshold(0);
     setEvaluated(false);
+    setBlocked(false);
+    setBlockReason("");
   }, [clusterId]);
 
   const handleEvaluate = () => {
@@ -67,11 +71,15 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
         setNodeScores(data.node_scores);
         setImbalance(data.imbalance);
         setThreshold(data.threshold);
+        setBlocked(data.blocked ?? false);
+        setBlockReason(data.block_reason ?? "");
         setEvaluated(true);
       },
       onError: () => {
         setResults([]);
         setNodeScores(null);
+        setBlocked(false);
+        setBlockReason("");
         setEvaluated(true);
       },
     });
@@ -80,7 +88,8 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   const errorMessage =
     evaluation.error instanceof Error ? evaluation.error.message : "";
 
-  const hasResults = evaluated && results !== null;
+  const isBlocked = evaluated && blocked;
+  const hasResults = evaluated && results !== null && !blocked;
   const isBalanced = hasResults && imbalance <= threshold;
   const isImbalancedNoMoves = hasResults && imbalance > threshold && results.length === 0;
   const isImbalancedWithMoves = hasResults && results.length > 0;
@@ -107,6 +116,23 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
 
       {errorMessage && (
         <p className="text-sm text-destructive">{errorMessage}</p>
+      )}
+
+      {isBlocked && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              Evaluation skipped — Proxmox native CRS active
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              {blockReason ||
+                "Proxmox native CRS auto-rebalance is enabled on this cluster, so Nexara automatic migrations are paused. Switch DRS to Advisory mode to generate recommendations without migrating."}
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {hasResults && (
