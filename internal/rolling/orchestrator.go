@@ -1425,6 +1425,14 @@ func (o *Orchestrator) disableDRSIfEnabled(ctx context.Context, job db.RollingUp
 
 // restoreDRS re-enables DRS if it was disabled at the start of the rolling update.
 func (o *Orchestrator) restoreDRS(ctx context.Context, job db.RollingUpdateJob) {
+	// Re-read the job so a fail-on-the-same-tick-as-disable path still sees the
+	// persisted flag: disableDRSIfEnabled sets drs_was_enabled in the DB but not
+	// on the in-memory struct passed in (read at the top of the tick), so a
+	// first-tick failNode → failJob → restoreDRS would otherwise skip the
+	// re-enable and leave DRS off permanently. Mirrors restoreNativeCRS.
+	if fresh, err := o.queries.GetRollingUpdateJob(ctx, job.ID); err == nil {
+		job = fresh
+	}
 	if !job.DrsWasEnabled {
 		return
 	}
