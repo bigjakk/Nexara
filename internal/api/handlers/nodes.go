@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,6 +28,68 @@ type NodeHandler struct {
 // NewNodeHandler creates a new node handler.
 func NewNodeHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *NodeHandler {
 	return &NodeHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
+}
+
+// nodeMaintenanceNameRe restricts node names to safe characters before they are
+// interpolated into the SSH command (defense-in-depth on top of single-quoting).
+var nodeMaintenanceNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// nodeMaintenanceCommand builds the ha-manager CRM command. The node name is
+// single-quoted; callers MUST validate it against nodeMaintenanceNameRe first
+// (which already excludes quotes, whitespace, and shell metacharacters).
+func nodeMaintenanceCommand(enable bool, nodeName string) string {
+	action := "disable"
+	if enable {
+		action = "enable"
+	}
+	return fmt.Sprintf("ha-manager crm-command node-maintenance %s '%s'", action, nodeName)
+}
+
+// SetNodeMaintenance handles POST /clusters/:cluster_id/nodes/:node_name/maintenance.
+// Body: {"enable": true|false}. Proxmox has no REST API for node maintenance, so
+// this runs `ha-manager crm-command node-maintenance enable|disable <node>` over
+// SSH using the cluster's stored credentials. Clusters without SSH configured can
+// use the REST "Evacuate" action instead.
+func (h *NodeHandler) SetNodeMaintenance(c *fiber.Ctx) error {
+	clusterID, nodeName, err := h.resolveNodeName(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "node", clusterID); err != nil {
+		return err
+	}
+	if !nodeMaintenanceNameRe.MatchString(nodeName) {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid node name")
+	}
+	var req struct {
+		Enable bool `json:"enable"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), 45*time.Second)
+	defer cancel()
+
+	result, err := rolling.RunNodeCommand(ctx, h.queries, h.encryptionKey, clusterID, nodeName, nodeMaintenanceCommand(req.Enable, nodeName))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, err.Error())
+	}
+	if result.ExitCode != 0 {
+		msg := strings.TrimSpace(result.Stderr)
+		if msg == "" {
+			msg = strings.TrimSpace(result.Stdout)
+		}
+		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("ha-manager exited %d: %s", result.ExitCode, msg))
+	}
+
+	action := "node_maintenance_exit"
+	if req.Enable {
+		action = "node_maintenance_enter"
+	}
+	details, _ := json.Marshal(map[string]any{"enable": req.Enable})
+	h.auditLog(c, clusterID, nodeName, action, details)
+	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster ID.
@@ -253,7 +317,7 @@ func (h *NodeHandler) ListNodePCIDevices(c *fiber.Ctx) error {
 			ID: d.ID, PCIID: d.PciID, Class: d.Class,
 			DeviceName: d.DeviceName, VendorName: d.VendorName,
 			Device: d.Device, Vendor: d.Vendor,
-			IOMMUGroup: d.IommuGroup,
+			IOMMUGroup:      d.IommuGroup,
 			SubsystemDevice: d.SubsystemDevice, SubsystemVendor: d.SubsystemVendor,
 		}
 	}

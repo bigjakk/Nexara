@@ -698,6 +698,23 @@ export function useRebootNode(clusterId: string, nodeName: string) {
   });
 }
 
+/** Enter (enable=true) or exit (enable=false) HA node maintenance via SSH. */
+export function useSetNodeMaintenance(clusterId: string, nodeName: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enable: boolean) =>
+      apiClient.post<{ status: string }>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/maintenance`,
+        { enable },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["clusters", clusterId, "nodes"],
+      });
+    },
+  });
+}
+
 export function useClusterVMs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vms"],

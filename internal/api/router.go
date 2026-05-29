@@ -104,6 +104,7 @@ func (s *Server) setupRoutes() {
 			clusters.Put("/:cluster_id/nodes/:node_name/time", s.nodeHandler.SetNodeTimezone)
 			clusters.Post("/:cluster_id/nodes/:node_name/shutdown", s.nodeHandler.ShutdownNode)
 			clusters.Post("/:cluster_id/nodes/:node_name/reboot", s.nodeHandler.RebootNode)
+			clusters.Post("/:cluster_id/nodes/:node_name/maintenance", s.nodeHandler.SetNodeMaintenance)
 
 			// Node disk management (SMART, ZFS, LVM, LVMthin, Init, Wipe).
 			clusters.Get("/:cluster_id/nodes/:node_name/disks/list", s.nodeHandler.ListLiveDisks)
