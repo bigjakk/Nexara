@@ -109,6 +109,14 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 		return
 	}
 
+	// Pause Proxmox's native CRS dynamic auto-rebalancer (PVE 9.2+) for the
+	// duration of the job so it can't migrate HA guests back onto a node we're
+	// draining/rebooting. Runs after the client is built (it needs cluster
+	// options). Mirrors the DRS-disable above; restored on completion/failure.
+	if !job.NativeCrsPaused {
+		o.pauseNativeCRSIfActive(ctx, client, job)
+	}
+
 	nodes, err := o.queries.ListRollingUpdateNodes(ctx, job.ID)
 	if err != nil {
 		o.logger.Error("failed to list rolling update nodes", "job_id", job.ID, "error", err)
@@ -180,8 +188,9 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 			o.logger.Info("rolling update job completed", "job_id", job.ID)
 			o.triggerPostUpgradeCVEScan(job)
 		}
-		// Re-enable DRS if we disabled it at the start.
+		// Re-enable DRS + native CRS if we paused them at the start.
 		o.restoreDRS(ctx, job)
+		o.restoreNativeCRS(ctx, job)
 	}
 }
 
@@ -1432,6 +1441,97 @@ func (o *Orchestrator) restoreDRS(ctx context.Context, job db.RollingUpdateJob) 
 	}
 }
 
+// pauseNativeCRSIfActive turns off Proxmox's native CRS dynamic auto-rebalancer
+// for the duration of the rolling update. Because we drain nodes with plain
+// live-migration (which leaves the node online and HA-eligible), the native
+// balancer would otherwise migrate HA guests right back onto a node we're
+// draining or rebooting. This mirrors disableDRSIfEnabled for Nexara's own DRS.
+//
+// Fail-open: any error leaves the cluster's CRS untouched and the update
+// proceeds — the HA-rule disabling and Nexara-DRS disable still apply, and the
+// operator can pause auto-rebalance manually. Only clusters on PVE 9.2+ with
+// ha-auto-rebalance=1 are affected; for everyone else this is a no-op.
+func (o *Orchestrator) pauseNativeCRSIfActive(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob) {
+	opts, err := client.GetClusterOptions(ctx)
+	if err != nil {
+		o.logger.Warn("rolling: could not read cluster options to check native CRS; proceeding without pausing it",
+			"job_id", job.ID, "cluster_id", job.ClusterID, "error", err)
+		return
+	}
+	crs := proxmox.ParseCRSSettings(opts.CRS)
+	if !crs.AutoRebalanceActive() {
+		return // Native auto-rebalance off (or pre-9.2 cluster) — nothing to pause.
+	}
+
+	saved := crs.Restorable()
+	paused := crs.PausedAutoRebalance()
+
+	if err := client.SetClusterOptions(ctx, proxmox.UpdateClusterOptionsParams{CRS: &paused}); err != nil {
+		o.logger.Warn("rolling: failed to pause native CRS auto-rebalance; proceeding (native balancer may contend with the drain)",
+			"job_id", job.ID, "error", err)
+		return
+	}
+
+	if err := o.queries.SetJobNativeCRSPaused(ctx, db.SetJobNativeCRSPausedParams{
+		ID:             job.ID,
+		SavedCrsConfig: saved,
+	}); err != nil {
+		// We changed Proxmox but couldn't persist the restore state. Roll the
+		// pause back immediately so we don't leave the balancer off with no
+		// record to restore it from later.
+		o.logger.Error("rolling: paused native CRS but failed to persist restore state; rolling back",
+			"job_id", job.ID, "error", err)
+		if rbErr := client.SetClusterOptions(ctx, proxmox.UpdateClusterOptionsParams{CRS: &saved}); rbErr != nil {
+			o.logger.Error("rolling: failed to roll back native CRS pause — auto-rebalance left off; restore manually via Datacenter Options → CRS",
+				"job_id", job.ID, "saved_crs", saved, "error", rbErr)
+		}
+		return
+	}
+
+	o.logger.Info("paused native CRS auto-rebalance for rolling update",
+		"job_id", job.ID, "cluster_id", job.ClusterID, "saved_crs", saved, "paused_crs", paused)
+	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_paused",
+		map[string]string{"saved_crs": saved, "paused_crs": paused})
+}
+
+// restoreNativeCRS writes back the CRS config saved by pauseNativeCRSIfActive.
+// It re-reads the job first so a fail-on-the-same-tick-as-pause path still sees
+// the persisted flag (the in-memory job copy may predate the pause). It builds
+// its own client so it can run from the no-client failJob path as well. If the
+// restore can't be applied, it logs loudly and audits a restore_failed entry so
+// the operator knows auto-rebalance is still paused.
+func (o *Orchestrator) restoreNativeCRS(ctx context.Context, job db.RollingUpdateJob) {
+	if fresh, err := o.queries.GetRollingUpdateJob(ctx, job.ID); err == nil {
+		job = fresh
+	}
+	if !job.NativeCrsPaused {
+		return
+	}
+
+	saved := job.SavedCrsConfig
+	client, err := o.createClient(ctx, job.ClusterID)
+	if err != nil {
+		o.logger.Error("rolling: failed to build client to restore native CRS — auto-rebalance left paused; restore manually via Datacenter Options → CRS",
+			"job_id", job.ID, "cluster_id", job.ClusterID, "error", err)
+		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restore_failed",
+			map[string]string{"saved_crs": saved, "error": err.Error()})
+		return
+	}
+
+	if err := client.SetClusterOptions(ctx, proxmox.UpdateClusterOptionsParams{CRS: &saved}); err != nil {
+		o.logger.Error("rolling: failed to restore native CRS auto-rebalance — left paused; restore manually",
+			"job_id", job.ID, "saved_crs", saved, "error", err)
+		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restore_failed",
+			map[string]string{"saved_crs": saved, "error": err.Error()})
+		return
+	}
+
+	o.logger.Info("restored native CRS auto-rebalance after rolling update",
+		"job_id", job.ID, "cluster_id", job.ClusterID, "crs", saved)
+	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restored",
+		map[string]string{"crs": saved})
+}
+
 // sendJobNotification dispatches a notification to the configured channel when a job completes or fails.
 func (o *Orchestrator) sendJobNotification(ctx context.Context, job db.RollingUpdateJob, status, message string) {
 	if o.notifyRegistry == nil || !job.NotifyChannelID.Valid {
@@ -1580,8 +1680,9 @@ func (o *Orchestrator) failJob(ctx context.Context, job db.RollingUpdateJob, rea
 	o.publishEvent(dbCtx, job.ClusterID, job.ID, "failed")
 	o.auditLog(dbCtx, job.ClusterID, job.ID, "rolling_update_failed", map[string]string{"reason": reason})
 	o.sendJobNotification(dbCtx, job, "failed", fmt.Sprintf("Rolling update failed: %s", reason))
-	// Re-enable DRS if we disabled it at the start.
+	// Re-enable DRS + native CRS if we paused them at the start.
 	o.restoreDRS(dbCtx, job)
+	o.restoreNativeCRS(dbCtx, job)
 }
 
 // cleanupCtxFor returns (ctx, no-op cancel) when ctx is still alive, or a

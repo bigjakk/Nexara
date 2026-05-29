@@ -373,6 +373,7 @@ type Querier interface {
 	RevokeUserRole(ctx context.Context, arg RevokeUserRoleParams) error
 	SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error
 	SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabledParams) error
+	SetJobNativeCRSPaused(ctx context.Context, arg SetJobNativeCRSPausedParams) error
 	SetLDAPUserActive(ctx context.Context, arg SetLDAPUserActiveParams) error
 	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
 	SetNodeDisabledHARules(ctx context.Context, arg SetNodeDisabledHARulesParams) error

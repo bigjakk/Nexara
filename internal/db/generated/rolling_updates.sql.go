@@ -159,7 +159,7 @@ func (q *Queries) GetNextPendingNode(ctx context.Context, jobID uuid.UUID) (Roll
 }
 
 const getRollingUpdateJob = `-- name: GetRollingUpdateJob :one
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id FROM rolling_update_jobs WHERE id = $1
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config FROM rolling_update_jobs WHERE id = $1
 `
 
 func (q *Queries) GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (RollingUpdateJob, error) {
@@ -184,6 +184,8 @@ func (q *Queries) GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (Rollin
 		&i.AutoUpgrade,
 		&i.DrsWasEnabled,
 		&i.NotifyChannelID,
+		&i.NativeCrsPaused,
+		&i.SavedCrsConfig,
 	)
 	return i, err
 }
@@ -240,7 +242,7 @@ func (q *Queries) HasRunningJobForCluster(ctx context.Context, clusterID uuid.UU
 const insertRollingUpdateJob = `-- name: InsertRollingUpdateJob :one
 INSERT INTO rolling_update_jobs (cluster_id, parallelism, reboot_after_update, auto_restore_guests, package_excludes, ha_policy, ha_warnings, auto_upgrade, created_by, notify_channel_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id
+RETURNING id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config
 `
 
 type InsertRollingUpdateJobParams struct {
@@ -289,6 +291,8 @@ func (q *Queries) InsertRollingUpdateJob(ctx context.Context, arg InsertRollingU
 		&i.AutoUpgrade,
 		&i.DrsWasEnabled,
 		&i.NotifyChannelID,
+		&i.NativeCrsPaused,
+		&i.SavedCrsConfig,
 	)
 	return i, err
 }
@@ -343,7 +347,7 @@ func (q *Queries) InsertRollingUpdateNode(ctx context.Context, arg InsertRolling
 }
 
 const listRollingUpdateJobs = `-- name: ListRollingUpdateJobs :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config FROM rolling_update_jobs
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -383,6 +387,8 @@ func (q *Queries) ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpda
 			&i.AutoUpgrade,
 			&i.DrsWasEnabled,
 			&i.NotifyChannelID,
+			&i.NativeCrsPaused,
+			&i.SavedCrsConfig,
 		); err != nil {
 			return nil, err
 		}
@@ -445,7 +451,7 @@ func (q *Queries) ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) (
 }
 
 const listRunningRollingUpdateJobs = `-- name: ListRunningRollingUpdateJobs :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config FROM rolling_update_jobs
 WHERE status = 'running'
 ORDER BY created_at
 `
@@ -478,6 +484,8 @@ func (q *Queries) ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUp
 			&i.AutoUpgrade,
 			&i.DrsWasEnabled,
 			&i.NotifyChannelID,
+			&i.NativeCrsPaused,
+			&i.SavedCrsConfig,
 		); err != nil {
 			return nil, err
 		}
@@ -524,6 +532,22 @@ type SetJobDRSWasEnabledParams struct {
 
 func (q *Queries) SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabledParams) error {
 	_, err := q.db.Exec(ctx, setJobDRSWasEnabled, arg.ID, arg.DrsWasEnabled)
+	return err
+}
+
+const setJobNativeCRSPaused = `-- name: SetJobNativeCRSPaused :exec
+UPDATE rolling_update_jobs
+SET native_crs_paused = true, saved_crs_config = $2, updated_at = now()
+WHERE id = $1
+`
+
+type SetJobNativeCRSPausedParams struct {
+	ID             uuid.UUID `json:"id"`
+	SavedCrsConfig string    `json:"saved_crs_config"`
+}
+
+func (q *Queries) SetJobNativeCRSPaused(ctx context.Context, arg SetJobNativeCRSPausedParams) error {
+	_, err := q.db.Exec(ctx, setJobNativeCRSPaused, arg.ID, arg.SavedCrsConfig)
 	return err
 }
 

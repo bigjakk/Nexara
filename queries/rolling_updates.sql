@@ -194,6 +194,11 @@ UPDATE rolling_update_jobs
 SET drs_was_enabled = $2, updated_at = now()
 WHERE id = $1;
 
+-- name: SetJobNativeCRSPaused :exec
+UPDATE rolling_update_jobs
+SET native_crs_paused = true, saved_crs_config = $2, updated_at = now()
+WHERE id = $1;
+
 -- name: TouchRollingUpdateNode :exec
 UPDATE rolling_update_nodes
 SET updated_at = now()

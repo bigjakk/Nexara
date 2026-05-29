@@ -110,3 +110,87 @@ func crsValueToString(v interface{}) string {
 		return ""
 	}
 }
+
+// Restorable returns a property-string that, when written back to
+// /cluster/options, restores these settings. It prefers the verbatim original
+// raw string (so keys Nexara doesn't model are preserved) and falls back to
+// serializing the parsed fields when the value arrived in object shape.
+func (s CRSSettings) Restorable() string {
+	if s.Raw != "" {
+		return s.Raw
+	}
+	return s.serialize()
+}
+
+// PausedAutoRebalance returns a property-string identical to the original but
+// with ha-auto-rebalance turned off, preserving every other key. Used to pause
+// Proxmox's native dynamic load balancer for the duration of a rolling update.
+func (s CRSSettings) PausedAutoRebalance() string {
+	if s.Raw != "" {
+		return setCRSKey(s.Raw, "ha-auto-rebalance", "0")
+	}
+	cp := s
+	cp.AutoRebalance = false
+	return cp.serialize()
+}
+
+// setCRSKey returns the property-string raw with key set to val, replacing it
+// in place if present (order preserved) or appending it otherwise. Bare tokens
+// and surrounding whitespace are normalized away.
+func setCRSKey(raw, key, val string) string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts)+1)
+	replaced := false
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		k, _, found := strings.Cut(part, "=")
+		if found && strings.TrimSpace(k) == key {
+			out = append(out, key+"="+val)
+			replaced = true
+			continue
+		}
+		out = append(out, part)
+	}
+	if !replaced {
+		out = append(out, key+"="+val)
+	}
+	return strings.Join(out, ",")
+}
+
+// serialize rebuilds a property-string from the parsed fields. Only used as the
+// object-shape fallback for Restorable/PausedAutoRebalance; the common
+// string-shape path edits the verbatim raw string instead. Integer knobs are
+// emitted only when non-zero so an absent (defaulted) value isn't pinned to 0.
+func (s CRSSettings) serialize() string {
+	var parts []string
+	if s.HA != "" {
+		parts = append(parts, "ha="+s.HA)
+	}
+	parts = append(parts, "ha-auto-rebalance="+crsBoolStr(s.AutoRebalance))
+	if s.Threshold > 0 {
+		parts = append(parts, "ha-auto-rebalance-threshold="+strconv.Itoa(s.Threshold))
+	}
+	if s.HoldDuration > 0 {
+		parts = append(parts, "ha-auto-rebalance-hold-duration="+strconv.Itoa(s.HoldDuration))
+	}
+	if s.Margin > 0 {
+		parts = append(parts, "ha-auto-rebalance-margin="+strconv.Itoa(s.Margin))
+	}
+	if s.Method != "" {
+		parts = append(parts, "ha-auto-rebalance-method="+s.Method)
+	}
+	if s.RebalanceOnStart {
+		parts = append(parts, "ha-rebalance-on-start=1")
+	}
+	return strings.Join(parts, ",")
+}
+
+func crsBoolStr(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}

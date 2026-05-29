@@ -775,6 +775,8 @@ type RollingUpdateJob struct {
 	AutoUpgrade       bool               `json:"auto_upgrade"`
 	DrsWasEnabled     bool               `json:"drs_was_enabled"`
 	NotifyChannelID   pgtype.UUID        `json:"notify_channel_id"`
+	NativeCrsPaused   bool               `json:"native_crs_paused"`
+	SavedCrsConfig    string             `json:"saved_crs_config"`
 }
 
 type RollingUpdateNode struct {
