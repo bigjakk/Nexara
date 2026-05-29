@@ -260,6 +260,10 @@ Click **Evaluate Now** to trigger an immediate DRS evaluation. In manual mode, t
 
 The DRS History tab shows all past evaluations, including which migrations were recommended and executed.
 
+### Native CRS Coexistence (Proxmox VE 9.2+)
+
+Proxmox VE 9.2 added a native dynamic load balancer to its Cluster Resource Scheduler (CRS). When a cluster has it enabled (`crs: ha=dynamic, ha-auto-rebalance=1` in the datacenter options), Nexara detects it and **disables its own automatic migrations** so the two balancers don't fight — Advisory mode still works as a read-only second opinion, and a banner on the DRS tab explains the state. You can manage the native CRS dynamic options (threshold, hold duration, margin, method) from **Cluster → Datacenter Options → CRS**.
+
 ---
 
 ## Storage Management
@@ -505,6 +509,8 @@ Each node goes through these steps:
 3. **Rebooting** — reboots the node if kernel updates were applied
 4. **Health Check** — waits for the node to come back online and healthy
 5. **Restoring** — migrates VMs back to the node
+
+> **Native CRS:** if the cluster runs Proxmox VE 9.2's native CRS dynamic balancer with auto-rebalance enabled, Nexara pauses `ha-auto-rebalance` for the duration of the job — so the balancer can't move guests back onto a node being drained — and restores it when the job finishes or fails.
 
 ### Managing Jobs
 

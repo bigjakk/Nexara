@@ -5,7 +5,7 @@
 - **Docker** 20.10+ and **Docker Compose** v2+
 - **2 CPU cores** and **2 GB RAM** minimum (4 GB recommended)
 - **10 GB disk** for the application and database
-- A **Proxmox VE** cluster (7.x or 8.x) with an API token
+- A **Proxmox VE** cluster (7.x, 8.x, or 9.x — including 9.2) with an API token
 - Ports **80** and **443** available (or configure alternatives)
 
 ## Quick Install

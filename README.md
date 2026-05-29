@@ -102,6 +102,7 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 - **Syslog** — real-time system log viewer with service filtering
 - **Network** — create, edit, delete interfaces; apply/revert config
 - **Power** — shutdown, reboot with confirmation dialogs
+- **Maintenance** — per-node HA enter/exit and cluster-wide HA arm/disarm (PVE 9.2+), with maintenance indicators in the tree and node views
 
 ### Consoles
 - **VNC** — browser-based graphical console (noVNC)
@@ -120,8 +121,8 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 <td>
 
 ### Automation
-- **DRS** — automatic workload balancing with affinity rules
-- **Rolling updates** — drain/upgrade/reboot/restore pipeline
+- **DRS** — automatic workload balancing with affinity rules; coexists with Proxmox 9.2's native CRS dynamic balancer (defers automatic moves to it)
+- **Rolling updates** — drain/upgrade/reboot/restore pipeline (pauses native CRS auto-rebalance while running)
 - **Alert engine** — threshold alerts, escalation chains, 7 notification channels (SMTP, Slack, Discord, Teams, Telegram, Webhook, PagerDuty)
 - **CVE scanning** — automated vulnerability scanning
 - **Scheduled tasks** — cron-based snapshots, backups, reboots
@@ -277,7 +278,7 @@ nexara.example.com {
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Go 1.24, Fiber v2, sqlc + pgx, gorilla/websocket |
+| Backend | Go 1.25, Fiber v2, sqlc + pgx, gorilla/websocket |
 | Frontend | React 19, TypeScript 5, Vite 6, Shadcn/ui, TanStack Query/Table, Zustand, Recharts, xterm.js, noVNC, React Flow |
 | Database | PostgreSQL 16 + TimescaleDB |
 | Cache | Redis 7 (Valkey compatible) |
