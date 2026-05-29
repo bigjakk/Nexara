@@ -11,6 +11,7 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import {
   ContextMenu,
@@ -109,7 +110,14 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
           className="flex min-w-0 flex-1 items-center gap-1.5"
         >
           <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <StatusIcon status={node.status} />
+          {node.ha_state === "maintenance" ? (
+            <Wrench
+              aria-label="Maintenance"
+              className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-500"
+            />
+          ) : (
+            <StatusIcon status={node.status} />
+          )}
           <span className="truncate">{node.name}</span>
         </button>
       </div>
