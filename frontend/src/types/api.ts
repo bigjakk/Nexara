@@ -556,6 +556,7 @@ export interface NodeResponse {
   name: string;
   address: string;
   status: string;
+  ha_state: string;
   cpu_count: number;
   cpu_model: string;
   cpu_cores: number;

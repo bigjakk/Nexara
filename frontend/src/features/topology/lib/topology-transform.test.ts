@@ -36,6 +36,7 @@ function makeNode(overrides: Partial<NodeResponse> = {}): NodeResponse {
     name: "pve-node-1",
     address: "",
     status: "online",
+    ha_state: "",
     cpu_count: 16,
     cpu_model: "Intel Xeon E5-2680 v4",
     cpu_cores: 14,

@@ -86,6 +86,7 @@ type ProxmoxClient interface {
 	GetClusterResources(ctx context.Context, resourceType string) ([]proxmox.ClusterResource, error)
 	GetNodeTasks(ctx context.Context, node string, since int64, limit int) ([]proxmox.NodeTask, error)
 	GetVersion(ctx context.Context) (*proxmox.Version, error)
+	GetHAManagerStatus(ctx context.Context) (map[string]json.RawMessage, error)
 }
 
 // ClientFactory creates a ProxmoxClient from cluster credentials.
@@ -265,6 +266,17 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		)
 	}
 
+	// Node-level HA state (online/maintenance/fence/...) read live from the
+	// Proxmox HA manager each sync — never assumed from Nexara-initiated actions.
+	// Only present when HA is configured; best-effort.
+	nodeHAState := map[string]string{}
+	if mgr, haErr := client.GetHAManagerStatus(ctx); haErr == nil {
+		nodeHAState = parseNodeHAState(mgr)
+	} else {
+		s.logger.Debug("failed to get HA manager status for node maintenance state",
+			"cluster_id", cluster.ID, "error", haErr)
+	}
+
 	// Snapshot current VM statuses and node assignments so we can detect
 	// changes after sync (status transitions, VM migrations, additions/removals).
 	type vmSnapshot struct {
@@ -293,7 +305,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// DeleteStaleVMsForNodes call below.
 	syncedNodeIDs := make([]uuid.UUID, 0, len(nodes))
 	for _, node := range nodes {
-		nr, err := s.syncNode(ctx, client, cluster.ID, node, vmExtra)
+		nr, err := s.syncNode(ctx, client, cluster.ID, node, vmExtra, nodeHAState)
 		if err != nil {
 			s.logger.Warn("failed to sync node",
 				"cluster_id", cluster.ID,
@@ -426,7 +438,28 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 
 // syncNode syncs a single node and all its resources (VMs, containers, storage)
 // and returns collected metric snapshots.
-func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID, node proxmox.NodeListEntry, vmExtra map[int32]vmExtraFields) (*nodeCollectionResult, error) {
+// parseNodeHAState extracts per-node HA state (e.g. "online", "maintenance",
+// "fence") from the HA manager-status response. Returns an empty map when HA
+// isn't configured or the response shape is unexpected.
+func parseNodeHAState(raw map[string]json.RawMessage) map[string]string {
+	out := make(map[string]string)
+	ms, ok := raw["manager_status"]
+	if !ok {
+		return out
+	}
+	var parsed struct {
+		NodeStatus map[string]string `json:"node_status"`
+	}
+	if err := json.Unmarshal(ms, &parsed); err != nil {
+		return out
+	}
+	for n, st := range parsed.NodeStatus {
+		out[n] = st
+	}
+	return out
+}
+
+func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID, node proxmox.NodeListEntry, vmExtra map[int32]vmExtraFields, nodeHAState map[string]string) (*nodeCollectionResult, error) {
 	// Fetch detailed node status for PVE version, CPU info, and metrics.
 	var pveVersion string
 	var cpuCount int32
@@ -539,6 +572,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		SubscriptionLevel:  subLevel,
 		LoadAvg:            loadAvg,
 		IoWait:             ioWait,
+		HaState:            nodeHAState[node.Node],
 	})
 	if err != nil {
 		return nil, fmt.Errorf("upsert node %s: %w", node.Node, err)
@@ -791,7 +825,6 @@ func (s *Syncer) refreshOSType(ctx context.Context, client ProxmoxClient, dbVM d
 			"vmid", vmid, "kind", kind, "error", err)
 	}
 }
-
 
 func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clusterID, nodeID uuid.UUID, nodeName string, vmExtra map[int32]vmExtraFields) ([]vmMetricSnapshot, error) {
 	cts, err := client.GetContainers(ctx, nodeName)

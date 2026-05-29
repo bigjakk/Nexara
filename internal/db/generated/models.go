@@ -468,6 +468,7 @@ type Node struct {
 	SubscriptionLevel  string    `json:"subscription_level"`
 	LoadAvg            string    `json:"load_avg"`
 	IoWait             float64   `json:"io_wait"`
+	HaState            string    `json:"ha_state"`
 }
 
 type NodeDisk struct {

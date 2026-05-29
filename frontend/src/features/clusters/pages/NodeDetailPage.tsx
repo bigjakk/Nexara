@@ -135,6 +135,14 @@ export function NodeDetailPage() {
             <Badge variant={node.status === "online" ? "default" : "destructive"}>
               {node.status}
             </Badge>
+            {node.ha_state === "maintenance" && (
+              <Badge
+                variant="outline"
+                className="border-amber-500/50 text-amber-600 dark:text-amber-400"
+              >
+                Maintenance
+              </Badge>
+            )}
           </div>
           <p className="text-sm text-muted-foreground">
             Proxmox Node

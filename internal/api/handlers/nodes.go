@@ -108,6 +108,7 @@ type nodeResponse struct {
 	Name               string    `json:"name"`
 	Address            string    `json:"address"`
 	Status             string    `json:"status"`
+	HAState            string    `json:"ha_state"`
 	CPUCount           int32     `json:"cpu_count"`
 	CPUModel           string    `json:"cpu_model"`
 	CPUCores           int32     `json:"cpu_cores"`
@@ -141,6 +142,7 @@ func toNodeResponse(n db.Node) nodeResponse {
 		Name:               n.Name,
 		Address:            n.Address,
 		Status:             n.Status,
+		HAState:            n.HaState,
 		CPUCount:           n.CpuCount,
 		CPUModel:           n.CpuModel,
 		CPUCores:           n.CpuCores,

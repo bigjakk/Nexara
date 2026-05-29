@@ -295,7 +295,18 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                       {nodeEntries.map((n) => (
                         <TableRow key={n.id}>
                           <TableCell className="font-medium">{n.node ?? n.id.replace("lrm:", "")}</TableCell>
-                          <TableCell>{statusBadge(n.status.includes("active") ? "active" : n.status)}</TableCell>
+                          <TableCell>
+                            {n.status.includes("maintenance") ? (
+                              <Badge
+                                variant="outline"
+                                className="border-amber-500/50 text-amber-600 dark:text-amber-400"
+                              >
+                                Maintenance
+                              </Badge>
+                            ) : (
+                              statusBadge(n.status.includes("active") ? "active" : n.status)
+                            )}
+                          </TableCell>
                           <TableCell>{n.crm_state ?? (n.status.includes("active") ? "active" : n.state ?? "—")}</TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {n.timestamp ? new Date(n.timestamp * 1000).toLocaleString() : "—"}

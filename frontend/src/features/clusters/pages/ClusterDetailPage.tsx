@@ -154,15 +154,25 @@ export function ClusterDetailPage() {
                               </Link>
                             </TableCell>
                             <TableCell>
-                              <Badge
-                                variant={
-                                  node.status === "online"
-                                    ? "default"
-                                    : "destructive"
-                                }
-                              >
-                                {node.status}
-                              </Badge>
+                              <div className="flex items-center gap-1.5">
+                                <Badge
+                                  variant={
+                                    node.status === "online"
+                                      ? "default"
+                                      : "destructive"
+                                  }
+                                >
+                                  {node.status}
+                                </Badge>
+                                {node.ha_state === "maintenance" && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-amber-500/50 text-amber-600 dark:text-amber-400"
+                                  >
+                                    Maintenance
+                                  </Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell>
                               <MetricMiniBar

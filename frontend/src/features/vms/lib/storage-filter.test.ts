@@ -28,6 +28,7 @@ const node1: NodeResponse = {
   name: "pve1",
   address: "",
   status: "online",
+  ha_state: "",
   cpu_count: 0,
   cpu_model: "",
   cpu_cores: 0,
