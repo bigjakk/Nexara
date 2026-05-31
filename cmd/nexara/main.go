@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -176,15 +175,14 @@ func main() {
 	}
 
 	// ---- Embedded frontend (catch-all /*) ----
+	// Registered last, after the API and WS routes, so real routes match
+	// first. RegisterFrontend serves the SPA shell only for non-API paths;
+	// unmatched /api/* requests get a JSON 404 instead of the HTML shell.
 	distFS, err := fs.Sub(frontendDist, "dist")
 	if err != nil {
 		log.Fatalf("failed to load embedded frontend: %v", err)
 	}
-	srv.App().Use("/", filesystem.New(filesystem.Config{
-		Root:         http.FS(distFS),
-		Browse:       false,
-		NotFoundFile: "index.html", // SPA fallback
-	}))
+	srv.RegisterFrontend(distFS)
 
 	// ---- Collector goroutine ----
 	go runCollector(ctx, cfg, pool, rdb, srv.ProxmoxCache(), logger.With("component", "collector"))
