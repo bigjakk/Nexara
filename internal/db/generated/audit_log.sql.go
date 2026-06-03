@@ -519,11 +519,15 @@ SELECT
   u.display_name AS user_display_name,
   COALESCE(c.name, '') AS cluster_name,
   COALESCE(v.vmid, 0) AS resource_vmid,
-  COALESCE(v.name, '') AS resource_name
+  COALESCE(v.name, '') AS resource_name,
+  COALESCE(th.status, '') AS task_status,
+  COALESCE(th.exit_status, '') AS task_exit_status,
+  th.progress AS task_progress
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
+LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
 ORDER BY a.created_at DESC
 LIMIT 50
 `
@@ -543,6 +547,9 @@ type ListRecentAuditLogEnrichedRow struct {
 	ClusterName     string          `json:"cluster_name"`
 	ResourceVmid    int32           `json:"resource_vmid"`
 	ResourceName    string          `json:"resource_name"`
+	TaskStatus      string          `json:"task_status"`
+	TaskExitStatus  string          `json:"task_exit_status"`
+	TaskProgress    pgtype.Float8   `json:"task_progress"`
 }
 
 func (q *Queries) ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentAuditLogEnrichedRow, error) {
@@ -569,6 +576,9 @@ func (q *Queries) ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentA
 			&i.ClusterName,
 			&i.ResourceVmid,
 			&i.ResourceName,
+			&i.TaskStatus,
+			&i.TaskExitStatus,
+			&i.TaskProgress,
 		); err != nil {
 			return nil, err
 		}

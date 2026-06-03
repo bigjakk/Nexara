@@ -297,8 +297,8 @@ type Querier interface {
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
 	ListMobileDevicesByUser(ctx context.Context, userID uuid.UUID) ([]MobileDevice, error)
-	ListNodeAddresses(ctx context.Context, clusterID uuid.UUID) ([]ListNodeAddressesRow, error)
 	ListNodeDisksByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeDisk, error)
+	ListNodeEndpoints(ctx context.Context, clusterID uuid.UUID) ([]ListNodeEndpointsRow, error)
 	ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeNetworkInterface, error)
 	ListNodePCIDevicesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodePciDevice, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
@@ -328,6 +328,7 @@ type Querier interface {
 	ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpdateJobsParams) ([]RollingUpdateJob, error)
 	ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) ([]RollingUpdateNode, error)
 	ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUpdateJob, error)
+	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]TaskHistory, error)
 	ListSSHKnownHosts(ctx context.Context, clusterID uuid.UUID) ([]SshKnownHost, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
 	ListSettingsByScope(ctx context.Context, arg ListSettingsByScopeParams) ([]Setting, error)
@@ -353,6 +354,11 @@ type Querier interface {
 	MoveVMFolder(ctx context.Context, arg MoveVMFolderParams) (VmFolder, error)
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	PurgeOldNotificationDLQ(ctx context.Context) error
+	// ReconcileTaskHistory marks a still-running task terminal. Scoped to
+	// status='running' so it never clobbers rows already finalized by the
+	// migration orchestrator / DRS executor. :execrows lets the caller emit a
+	// task_update event only when a row actually flipped.
+	ReconcileTaskHistory(ctx context.Context, arg ReconcileTaskHistoryParams) (int64, error)
 	// Upserts a device by expo_push_token. The UPDATE branch only fires when the
 	// existing row's device_id matches the request — i.e. the same physical
 	// install is re-registering. If the device_id differs, the WHERE clause

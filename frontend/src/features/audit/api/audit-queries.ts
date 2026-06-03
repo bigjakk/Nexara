@@ -16,6 +16,11 @@ export interface AuditLogEntry {
   cluster_name: string;
   resource_vmid: number;
   resource_name: string;
+  // Server-authoritative task status for UPID-bearing entries (Nexara tasks).
+  // Absent for non-task or external entries.
+  task_status?: string;
+  task_exit_status?: string;
+  task_progress?: number;
 }
 
 export interface AuditLogResponse {

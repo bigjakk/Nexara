@@ -1723,9 +1723,9 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 //   - "completed"   the guest is unlocked (or no longer visible)
 //   - "timeout"     the 30-minute deadline elapsed while still locked
 //   - "interrupted" the shutdown context was cancelled (graceful container
-//                   restart in Swarm/K8s). The lock may still be in place;
-//                   the next scheduler leader will resume polling via the
-//                   stall detector in advanceDraining / advanceRestoring.
+//     restart in Swarm/K8s). The lock may still be in place;
+//     the next scheduler leader will resume polling via the
+//     stall detector in advanceDraining / advanceRestoring.
 func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.Client, guestType string, vmid int) string {
 	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Minute)
 	defer cancel()
@@ -1797,13 +1797,13 @@ func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.C
 //   - "failed"      the task finished with a non-OK exit status
 //   - "timeout"     the 30-minute deadline elapsed before the task stopped
 //   - "interrupted" the shutdown context was cancelled (graceful container
-//                   restart in Swarm/K8s) while the task was still running.
-//                   The task remains in flight on Proxmox; callers must NOT
-//                   mark the rolling-update node as failed — the next
-//                   scheduler leader will resume polling via the stall
-//                   detector in advanceDraining / advanceRestoring (which
-//                   re-checks guest state and re-attempts only what's still
-//                   pending).
+//     restart in Swarm/K8s) while the task was still running.
+//     The task remains in flight on Proxmox; callers must NOT
+//     mark the rolling-update node as failed — the next
+//     scheduler leader will resume polling via the stall
+//     detector in advanceDraining / advanceRestoring (which
+//     re-checks guest state and re-attempts only what's still
+//     pending).
 func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, node string, upid string) string {
 	// Detach from the scheduler tick so a tick rollover doesn't abandon
 	// in-flight Proxmox tasks, but root in shutdownCtx so SIGTERM cancels
@@ -1900,31 +1900,29 @@ func (o *Orchestrator) createClient(ctx context.Context, clusterID uuid.UUID) (*
 		if testErr == nil {
 			return client, nil
 		}
+		// Only a connectivity failure warrants failover — an auth/permission
+		// error would hit every member identically (same token), so return the
+		// primary client and let the caller surface it.
+		if !errors.Is(testErr, proxmox.ErrConnectionFailed) {
+			return client, nil
+		}
 		o.logger.Warn("primary API URL unreachable, trying failover nodes",
 			"cluster_id", clusterID, "url", cluster.ApiUrl, "error", testErr)
 	}
 
-	// Failover: try other node addresses.
-	nodeAddrs, _ := o.queries.ListNodeAddresses(ctx, clusterID)
-	for _, na := range nodeAddrs {
-		failoverURL := fmt.Sprintf("https://%s:8006", na.Address)
-		if failoverURL == cluster.ApiUrl {
-			continue
-		}
-		failClient, failErr := proxmox.NewClient(proxmox.ClientConfig{
-			BaseURL:        failoverURL,
-			TokenID:        cluster.TokenID,
-			TokenSecret:    tokenSecret,
-			TLSFingerprint: cluster.TlsFingerprint,
-			Timeout:        60 * time.Second,
-		})
+	// Failover: try other node endpoints. Each cluster member presents its own
+	// certificate, so every alternate is pinned to that node's own fingerprint
+	// rather than the cluster's primary one (which only matches the api_url
+	// node and would fail TLS verification everywhere else).
+	endpoints, _ := o.queries.ListNodeEndpoints(ctx, clusterID)
+	for _, t := range failoverTargets(cluster, tokenSecret, endpoints) {
+		failClient, failErr := proxmox.NewClient(t.config)
 		if failErr != nil {
 			continue
 		}
-		_, testErr := failClient.GetNodes(ctx)
-		if testErr == nil {
+		if _, testErr := failClient.GetNodes(ctx); testErr == nil {
 			o.logger.Info("failover to alternate node succeeded",
-				"cluster_id", clusterID, "node", na.Name, "url", failoverURL)
+				"cluster_id", clusterID, "node", t.name, "url", t.config.BaseURL)
 			return failClient, nil
 		}
 	}
@@ -1949,26 +1947,50 @@ func (o *Orchestrator) buildFailoverClients(ctx context.Context, clusterID uuid.
 	if err != nil {
 		return nil
 	}
-	nodeAddrs, _ := o.queries.ListNodeAddresses(ctx, clusterID)
+	endpoints, _ := o.queries.ListNodeEndpoints(ctx, clusterID)
 	var clients []*proxmox.Client
-	for _, na := range nodeAddrs {
-		failoverURL := fmt.Sprintf("https://%s:8006", na.Address)
-		if failoverURL == cluster.ApiUrl {
-			continue
-		}
-		c, cerr := proxmox.NewClient(proxmox.ClientConfig{
-			BaseURL:        failoverURL,
-			TokenID:        cluster.TokenID,
-			TokenSecret:    tokenSecret,
-			TLSFingerprint: cluster.TlsFingerprint,
-			Timeout:        60 * time.Second,
-		})
+	for _, t := range failoverTargets(cluster, tokenSecret, endpoints) {
+		c, cerr := proxmox.NewClient(t.config)
 		if cerr != nil {
 			continue
 		}
 		clients = append(clients, c)
 	}
 	return clients
+}
+
+// failoverTarget is an alternate cluster endpoint to try when the primary
+// api_url node is unreachable, paired with the node name for logging.
+type failoverTarget struct {
+	name   string
+	config proxmox.ClientConfig
+}
+
+// failoverTargets builds the client configs for every known cluster member
+// other than the primary api_url node. Each config reuses the primary's scheme
+// and port but is pinned to that node's own TLS fingerprint, since cluster
+// members present distinct certificates. Nodes with no recorded address or
+// fingerprint, and the primary endpoint itself, are skipped — a missing
+// fingerprint would otherwise downgrade TLS to system-CA verification.
+func failoverTargets(cluster db.Cluster, tokenSecret string, endpoints []db.ListNodeEndpointsRow) []failoverTarget {
+	primaryHost := proxmox.APIURLHost(cluster.ApiUrl)
+	var targets []failoverTarget
+	for _, ep := range endpoints {
+		if ep.Address == "" || ep.Address == primaryHost || ep.SslFingerprint == "" {
+			continue
+		}
+		targets = append(targets, failoverTarget{
+			name: ep.Name,
+			config: proxmox.ClientConfig{
+				BaseURL:        proxmox.FailoverBaseURL(cluster.ApiUrl, ep.Address),
+				TokenID:        cluster.TokenID,
+				TokenSecret:    tokenSecret,
+				TLSFingerprint: ep.SslFingerprint,
+				Timeout:        60 * time.Second,
+			},
+		})
+	}
+	return targets
 }
 
 // callWithRetryFailover invokes fn against the primary client. On
@@ -2041,4 +2063,3 @@ func (o *Orchestrator) auditLog(ctx context.Context, clusterID uuid.UUID, jobID 
 		o.logger.Warn("failed to insert rolling update audit log", "action", action, "error", err)
 	}
 }
-

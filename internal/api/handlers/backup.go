@@ -825,31 +825,25 @@ func (h *BackupHandler) TriggerBackup(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{
-		"vmid":    req.VMID,
-		"node":    req.Node,
-		"storage": req.Storage,
-		"mode":    req.Mode,
-		"upid":    upid,
-	})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "backup", req.VMID, "backup_triggered", details)
-
-	// Create task_history so backup appears in the Activity panel.
 	description := "Backup VMID " + req.VMID + " on " + req.Node
 	if req.Storage != "" {
 		description += " → " + req.Storage
 	}
-	uid, _ := c.Locals("user_id").(uuid.UUID)
-	_, _ = h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
-		ClusterID:   clusterID,
-		UserID:      uid,
-		Upid:        upid,
-		Description: description,
-		Status:      "running",
-		Node:        req.Node,
-		TaskType:    "vzdump",
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         req.Node,
+		ResourceType: "backup",
+		ResourceID:   req.VMID,
+		Action:       "backup_triggered",
+		UPID:         upid,
+		TaskType:     "vzdump",
+		Description:  description,
+		Extra: map[string]any{
+			"vmid":    req.VMID,
+			"storage": req.Storage,
+			"mode":    req.Mode,
+		},
 	})
-	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindTaskCreated, "task", upid, "vzdump")
 
 	return c.JSON(fiber.Map{"upid": upid})
 }
@@ -1032,25 +1026,16 @@ func (h *BackupHandler) RunBackupJob(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{
-		"job_id": jobID,
-		"upid":   upid,
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		ResourceType: "backup",
+		ResourceID:   jobID,
+		Action:       "backup_job_run",
+		UPID:         upid,
+		TaskType:     "vzdump",
+		Description:  "Run backup job " + jobID,
+		Extra:        map[string]any{"job_id": jobID},
 	})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "backup", jobID, "backup_job_run", details)
-
-	// Create task_history so it appears in the Activity panel.
-	description := "Run backup job " + jobID
-	uid, _ := c.Locals("user_id").(uuid.UUID)
-	_, _ = h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
-		ClusterID:   clusterID,
-		UserID:      uid,
-		Upid:        upid,
-		Description: description,
-		Status:      "running",
-		Node:        "",
-		TaskType:    "vzdump",
-	})
-	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindTaskCreated, "task", upid, "vzdump")
 
 	return c.JSON(fiber.Map{"upid": upid})
 }
@@ -1205,35 +1190,29 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{
-		"pbs_server_id":       req.PBSServerID,
-		"backup_type":         req.BackupType,
-		"backup_id":           req.BackupID,
-		"datastore":           req.Datastore,
-		"target_node":         req.TargetNode,
-		"vmid":                req.VMID,
-		"storage":             req.Storage,
-		"force":               req.Force,
-		"unique":              req.Unique,
-		"start_after_restore": req.StartAfterRestore,
-		"archive":             archive,
-		"upid":                upid,
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         req.TargetNode,
+		ResourceType: "backup",
+		ResourceID:   strconv.Itoa(req.VMID) + "/" + req.BackupType,
+		Action:       "backup_restored",
+		UPID:         upid,
+		TaskType:     "qmrestore",
+		Description:  "Restore " + req.BackupType + "/" + req.BackupID + " → VMID " + strconv.Itoa(req.VMID) + " on " + req.TargetNode,
+		Extra: map[string]any{
+			"pbs_server_id":       req.PBSServerID,
+			"backup_type":         req.BackupType,
+			"backup_id":           req.BackupID,
+			"datastore":           req.Datastore,
+			"target_node":         req.TargetNode,
+			"vmid":                req.VMID,
+			"storage":             req.Storage,
+			"force":               req.Force,
+			"unique":              req.Unique,
+			"start_after_restore": req.StartAfterRestore,
+			"archive":             archive,
+		},
 	})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "backup", strconv.Itoa(req.VMID)+"/"+req.BackupType, "backup_restored", details)
-
-	// Create task_history so restore appears in the Activity panel.
-	description := "Restore " + req.BackupType + "/" + req.BackupID + " → VMID " + strconv.Itoa(req.VMID) + " on " + req.TargetNode
-	uid, _ := c.Locals("user_id").(uuid.UUID)
-	_, _ = h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
-		ClusterID:   clusterID,
-		UserID:      uid,
-		Upid:        upid,
-		Description: description,
-		Status:      "running",
-		Node:        req.TargetNode,
-		TaskType:    "qmrestore",
-	})
-	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindTaskCreated, "task", upid, "qmrestore")
 
 	// If requested, wait for restore to finish then start the VM in the background.
 	if req.StartAfterRestore {

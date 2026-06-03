@@ -502,8 +502,13 @@ func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmo
 // (GET /cluster/ha/rules) which supports node-affinity and resource-affinity rules.
 // If that fails (PVE 8 or earlier), it falls back to the legacy HA resources + groups approach.
 func (e *Engine) importHARules(ctx context.Context, client *proxmox.Client, _ map[string][]Workload) []Rule {
-	// Try PVE 9+ HA rules API first.
-	if rules := e.importHARulesPVE9(ctx, client); rules != nil {
+	// Prefer the PVE 9+ rules API. It is authoritative whenever it responds —
+	// including when the cluster has zero rules defined — so we fall back to the
+	// deprecated groups API only when the rules endpoint is genuinely
+	// unavailable (PVE 8 or earlier). Falling back on an empty-but-available
+	// result would hit /cluster/ha/groups, which PVE 9 soft-disables with a
+	// "migrated to rules" 500 logged on every evaluation.
+	if rules, ok := e.importHARulesPVE9(ctx, client); ok {
 		return rules
 	}
 
@@ -511,13 +516,16 @@ func (e *Engine) importHARules(ctx context.Context, client *proxmox.Client, _ ma
 	return e.importHARulesLegacy(ctx, client)
 }
 
-// importHARulesPVE9 tries the PVE 9+ GET /cluster/ha/rules endpoint.
-// Returns nil if the endpoint is not available (PVE 8 or error).
-func (e *Engine) importHARulesPVE9(ctx context.Context, client *proxmox.Client) []Rule {
+// importHARulesPVE9 reads HA rules from the PVE 9+ GET /cluster/ha/rules
+// endpoint and translates node-affinity / resource-affinity rules into DRS
+// rules. The bool result reports whether the rules API was available (PVE 9+);
+// it is true even when the cluster has no rules defined, so the caller does not
+// fall back to the deprecated groups API.
+func (e *Engine) importHARulesPVE9(ctx context.Context, client *proxmox.Client) ([]Rule, bool) {
 	haRules, err := client.GetHARules(ctx)
 	if err != nil {
 		e.logger.Debug("PVE 9 HA rules API not available, falling back to legacy", "error", err)
-		return nil
+		return nil, false
 	}
 
 	var rules []Rule
@@ -568,7 +576,7 @@ func (e *Engine) importHARulesPVE9(ctx context.Context, client *proxmox.Client) 
 		}
 	}
 
-	return rules
+	return rules, true
 }
 
 // importHARulesLegacy uses the PVE 8 HA resources + groups API to derive pin rules
@@ -581,7 +589,15 @@ func (e *Engine) importHARulesLegacy(ctx context.Context, client *proxmox.Client
 	}
 	haGroups, err := client.GetHAGroups(ctx)
 	if err != nil {
-		e.logger.Warn("failed to fetch HA groups, skipping HA rule import", "error", err)
+		if proxmox.IsGroupsMigratedError(err) {
+			// PVE 9+: HA groups were replaced by rules (read via
+			// importHARulesPVE9). Reaching the legacy path means the rules API
+			// was momentarily unavailable; there are no groups to import, so
+			// skip quietly instead of warning on every evaluation.
+			e.logger.Debug("HA groups migrated to rules; no legacy groups to import", "error", err)
+		} else {
+			e.logger.Warn("failed to fetch HA groups, skipping HA rule import", "error", err)
+		}
 		return nil
 	}
 

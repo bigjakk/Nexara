@@ -44,6 +44,12 @@ type auditLogResponse struct {
 	ClusterName     string     `json:"cluster_name"`
 	ResourceVMID    int32      `json:"resource_vmid"`
 	ResourceName    string     `json:"resource_name"`
+	// Server-authoritative task status, populated only for entries backed by a
+	// task_history row (Nexara-dispatched tasks). nil for non-task or external
+	// entries — the client falls back to the entry's own details for those.
+	TaskStatus     *string  `json:"task_status,omitempty"`
+	TaskExitStatus *string  `json:"task_exit_status,omitempty"`
+	TaskProgress   *float64 `json:"task_progress,omitempty"`
 }
 
 type auditListResponse struct {
@@ -247,6 +253,17 @@ func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow) auditLogResponse 
 	if a.ClusterID.Valid {
 		s := uuid.UUID(a.ClusterID.Bytes).String()
 		resp.ClusterID = &s
+	}
+	// task_status is "" when no task_history row matched the entry's upid.
+	if a.TaskStatus != "" {
+		ts := a.TaskStatus
+		es := a.TaskExitStatus
+		resp.TaskStatus = &ts
+		resp.TaskExitStatus = &es
+	}
+	if a.TaskProgress.Valid {
+		p := a.TaskProgress.Float64
+		resp.TaskProgress = &p
 	}
 	return resp
 }

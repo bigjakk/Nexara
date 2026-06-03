@@ -152,25 +152,26 @@ func (q *Queries) GetNodeByClusterAndName(ctx context.Context, arg GetNodeByClus
 	return i, err
 }
 
-const listNodeAddresses = `-- name: ListNodeAddresses :many
-SELECT name, address FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name
+const listNodeEndpoints = `-- name: ListNodeEndpoints :many
+SELECT name, address, ssl_fingerprint FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name
 `
 
-type ListNodeAddressesRow struct {
-	Name    string `json:"name"`
-	Address string `json:"address"`
+type ListNodeEndpointsRow struct {
+	Name           string `json:"name"`
+	Address        string `json:"address"`
+	SslFingerprint string `json:"ssl_fingerprint"`
 }
 
-func (q *Queries) ListNodeAddresses(ctx context.Context, clusterID uuid.UUID) ([]ListNodeAddressesRow, error) {
-	rows, err := q.db.Query(ctx, listNodeAddresses, clusterID)
+func (q *Queries) ListNodeEndpoints(ctx context.Context, clusterID uuid.UUID) ([]ListNodeEndpointsRow, error) {
+	rows, err := q.db.Query(ctx, listNodeEndpoints, clusterID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListNodeAddressesRow{}
+	items := []ListNodeEndpointsRow{}
 	for rows.Next() {
-		var i ListNodeAddressesRow
-		if err := rows.Scan(&i.Name, &i.Address); err != nil {
+		var i ListNodeEndpointsRow
+		if err := rows.Scan(&i.Name, &i.Address, &i.SslFingerprint); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -730,8 +730,18 @@ func (h *VMHandler) MoveDisk(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "disk_move", detailsJSON)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       "disk_move",
+		UPID:         upid,
+		TaskType:     "qmmove",
+		Description:  "Move disk " + req.Disk + " → " + req.Storage,
+		Extra:        map[string]any{"vmid": vm.Vmid},
+	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_move")
 
 	return c.JSON(vmActionResponse{
@@ -1864,23 +1874,19 @@ func (h *VMHandler) MigrateVM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid, "target": req.Target})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "migrate", detailsJSON)
-	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindMigrationUpdate, "vm", vm.ID.String(), "migrate")
-
-	// Track in activity panel.
-	description := "Migrate VM " + strconv.Itoa(int(vm.Vmid)) + " → " + req.Target
-	uid, _ := c.Locals("user_id").(uuid.UUID)
-	_, _ = h.queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
-		ClusterID:   cluster.ID,
-		UserID:      uid,
-		Upid:        upid,
-		Description: description,
-		Status:      "running",
-		Node:        node.Name,
-		TaskType:    "qmigrate",
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       "migrate",
+		UPID:         upid,
+		TaskType:     "qmigrate",
+		Description:  "Migrate VM " + strconv.Itoa(int(vm.Vmid)) + " → " + req.Target,
+		Extra:        map[string]any{"vmid": vm.Vmid, "target": req.Target},
 	})
-	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindTaskCreated, "task", upid, "qmigrate")
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindMigrationUpdate, "vm", vm.ID.String(), "migrate")
 
 	return c.JSON(vmActionResponse{
 		UPID:   upid,

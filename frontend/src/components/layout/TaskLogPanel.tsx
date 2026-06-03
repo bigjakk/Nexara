@@ -19,6 +19,7 @@ import {
   useTaskStatus,
   useTaskLog,
 } from "@/features/vms/api/vm-queries";
+import { deriveTaskStatus, parseDetails } from "./task-status";
 
 function formatRelativeTime(iso: string): string {
   const ago = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -79,37 +80,15 @@ const SEVERITY_LABELS: Record<Severity, string> = {
   error: "error",
 };
 
-interface ParsedDetails {
-  upid?: string;
-  node?: string;
-  vmid?: number;
-  [key: string]: unknown;
-}
-
-function parseDetails(detailsStr: string): ParsedDetails {
-  try {
-    const parsed: unknown = JSON.parse(detailsStr);
-    if (parsed && typeof parsed === "object") {
-      return parsed as ParsedDetails;
-    }
-  } catch {
-    // ignore
-  }
-  return {};
-}
-
 function getClusterIdFromEntry(entry: AuditLogEntry): string {
   return entry.cluster_id ?? "";
 }
 
-function isRecentEntry(entry: AuditLogEntry): boolean {
-  const tenMinAgo = Date.now() - 10 * 60 * 1000;
-  return new Date(entry.created_at).getTime() > tenMinAgo;
-}
-
 /**
- * Polls Proxmox for a UPID's live status (running/stopped).
- * Only active for recent entries with UPIDs.
+ * Polls Proxmox for a running task's live status to drive the progress bar.
+ * Mounted only for entries the server reports as running, and useTaskStatus
+ * stops polling once the task is stopped — so the working set is tiny and
+ * self-emptying. No entry-age gate: status correctness comes from the server.
  */
 function ActiveTaskPoller({
   entry,
@@ -122,10 +101,7 @@ function ActiveTaskPoller({
   const clusterId = getClusterIdFromEntry(entry);
   const upid = details.upid ?? null;
 
-  const { data: task } = useTaskStatus(
-    clusterId,
-    upid && isRecentEntry(entry) ? upid : null,
-  );
+  const { data: task } = useTaskStatus(clusterId, upid);
 
   const prevRef = useRef<string | null>(null);
   useEffect(() => {
@@ -159,14 +135,15 @@ function ActivityRow({
   const hasUpid = !!details.upid;
   const clusterId = getClusterIdFromEntry(entry);
 
-  const isRunning = hasUpid && taskStatus?.status === "running";
-  const isStopped = hasUpid && taskStatus?.status === "stopped";
-  const isOk =
-    isStopped &&
-    (taskStatus.exitStatus === "" ||
-      taskStatus.exitStatus === "OK" ||
-      taskStatus.exitStatus.startsWith("WARNINGS"));
-  const isFailed = isStopped && !isOk;
+  const status = deriveTaskStatus(entry, details, taskStatus);
+  const isRunning = status === "running";
+  const isOk = status === "ok";
+  const isFailed = status === "failed";
+  const progress = isRunning ? taskStatus?.progress : undefined;
+  const exitStatusText =
+    taskStatus?.exitStatus ||
+    entry.task_exit_status ||
+    (typeof details["status"] === "string" ? details["status"] : "");
 
   // Derive severity — task failure overrides to error
   let severity = deriveSeverity(entry.action, entry.details);
@@ -215,10 +192,7 @@ function ActivityRow({
             {isFailed && (
               <XCircle className="h-3.5 w-3.5 text-red-500" />
             )}
-            {!hasUpid && (
-              <Activity className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-            {hasUpid && !taskStatus && (
+            {status === "none" && (
               <Activity className="h-3.5 w-3.5 text-muted-foreground" />
             )}
           </div>
@@ -242,20 +216,20 @@ function ActivityRow({
                 — {resourceLabel}
               </span>
             )}
-            {isRunning && taskStatus.progress != null && (
+            {isRunning && progress != null && (
               <div className="flex items-center gap-1.5">
                 <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full bg-blue-500 transition-all duration-500"
-                    style={{ width: `${String(Math.round(taskStatus.progress * 100))}%` }}
+                    style={{ width: `${String(Math.round(progress * 100))}%` }}
                   />
                 </div>
                 <span className="text-[10px] tabular-nums text-blue-500">
-                  {Math.round(taskStatus.progress * 100)}%
+                  {Math.round(progress * 100)}%
                 </span>
               </div>
             )}
-            {isRunning && (taskStatus.progress == null) && (
+            {isRunning && progress == null && (
               <span className="text-xs text-blue-500">{t("running").toLowerCase()}</span>
             )}
           </div>
@@ -283,11 +257,11 @@ function ActivityRow({
               </span>
               <span className="text-muted-foreground">Time</span>
               <span>{formatTimestamp(entry.created_at)}</span>
-              {isFailed && (
+              {isFailed && exitStatusText !== "" && (
                 <>
                   <span className="text-muted-foreground">Exit Status</span>
                   <span className="text-red-500">
-                    {taskStatus.exitStatus}
+                    {exitStatusText}
                   </span>
                 </>
               )}
@@ -391,24 +365,18 @@ export function TaskLogPanel() {
     [],
   );
 
-  // Count running/failed from polled statuses
-  const runningCount = Object.values(taskStatuses).filter(
-    (s) => s.status === "running",
-  ).length;
-  const failedCount = Object.values(taskStatuses).filter(
-    (s) =>
-      s.status === "stopped" &&
-      s.exitStatus !== "" &&
-      s.exitStatus !== "OK" &&
-      !s.exitStatus.startsWith("WARNINGS"),
-  ).length;
+  // Header counts come from the server-authoritative task_history status.
+  const runningCount =
+    entries?.filter((e) => e.task_status === "running").length ?? 0;
+  const failedCount =
+    entries?.filter((e) => e.task_status === "failed").length ?? 0;
 
-  // Recent entries that have UPIDs and are within last 10 minutes
-  const recentWithUpids =
-    entries?.filter((e) => {
-      const d = parseDetails(e.details);
-      return d.upid && isRecentEntry(e);
-    }) ?? [];
+  // Live-poll only tasks the server reports as running — for the progress bar
+  // and to flip to done between reconcile ticks. No entry-age gate.
+  const runningWithUpids =
+    entries?.filter(
+      (e) => e.task_status === "running" && !!parseDetails(e.details).upid,
+    ) ?? [];
 
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(
     null,
@@ -439,8 +407,8 @@ export function TaskLogPanel() {
 
   return (
     <div className="flex flex-col border-t bg-background">
-      {/* Invisible pollers for recent UPID-bearing entries */}
-      {recentWithUpids.map((e) => (
+      {/* Invisible progress pollers for running tasks */}
+      {runningWithUpids.map((e) => (
         <ActiveTaskPoller
           key={e.id}
           entry={e}

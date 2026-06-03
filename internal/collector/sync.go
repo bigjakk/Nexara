@@ -43,6 +43,9 @@ type SyncQueries interface {
 	UpsertTaskSyncState(ctx context.Context, arg db.UpsertTaskSyncStateParams) error
 	ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error)
 	ExistsAuditLogByUPID(ctx context.Context, upid string) (bool, error)
+	// Task reconcile
+	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.TaskHistory, error)
+	ReconcileTaskHistory(ctx context.Context, arg db.ReconcileTaskHistoryParams) (int64, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg db.GetVMByClusterAndVmidParams) (db.Vm, error)
 	// Node queries
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.Node, error)
@@ -85,6 +88,7 @@ type ProxmoxClient interface {
 	GetClusterStatus(ctx context.Context) ([]proxmox.ClusterStatusEntry, error)
 	GetClusterResources(ctx context.Context, resourceType string) ([]proxmox.ClusterResource, error)
 	GetNodeTasks(ctx context.Context, node string, since int64, limit int) ([]proxmox.NodeTask, error)
+	GetTaskStatus(ctx context.Context, node string, upid string) (*proxmox.TaskStatus, error)
 	GetVersion(ctx context.Context) (*proxmox.Version, error)
 	GetHAManagerStatus(ctx context.Context) (map[string]json.RawMessage, error)
 }
@@ -193,6 +197,66 @@ func (s *Syncer) proxmoxClient(ctx context.Context, cluster db.Cluster) (Proxmox
 	return client, nil
 }
 
+// failoverCluster attempts to reach the cluster through an alternate member
+// after the primary api_url endpoint fails. It is a last resort, invoked only
+// when the initial GetNodes call returns a connectivity error: the configured
+// endpoint pins to one node, so when that node is down (commonly because it is
+// being rebooted during a rolling upgrade) the collector would otherwise lose
+// the entire cluster and mark every node offline.
+//
+// It walks the nodes recorded by the last successful sync, builds a throwaway
+// client for each alternate endpoint — pinned to that node's own TLS
+// fingerprint, since each cluster member presents a distinct certificate — and
+// returns the first that responds together with its node list. Members without
+// a recorded fingerprint are skipped rather than connecting unpinned (which
+// would silently downgrade to system-CA verification). ok is false when the
+// failure is not a connectivity error or no alternate endpoint answers, in
+// which case the caller surfaces the original error.
+func (s *Syncer) failoverCluster(ctx context.Context, cluster db.Cluster, primaryErr error) (ProxmoxClient, []proxmox.NodeListEntry, bool) {
+	if s.clientFactory == nil || !errors.Is(primaryErr, proxmox.ErrConnectionFailed) {
+		return nil, nil, false
+	}
+
+	nodes, err := s.queries.ListNodesByCluster(ctx, cluster.ID)
+	if err != nil || len(nodes) == 0 {
+		return nil, nil, false
+	}
+
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, s.encryptionKey)
+	if err != nil {
+		return nil, nil, false
+	}
+
+	primaryHost := proxmox.APIURLHost(cluster.ApiUrl)
+	for _, n := range nodes {
+		// Skip nodes without a known address, the primary endpoint itself
+		// (already tried — it is the source of primaryErr), and any node whose
+		// certificate fingerprint we haven't recorded: connecting unpinned
+		// would downgrade TLS to system-CA verification, so fail closed.
+		if n.Address == "" || n.Address == primaryHost || n.SslFingerprint == "" {
+			continue
+		}
+		failoverURL := proxmox.FailoverBaseURL(cluster.ApiUrl, n.Address)
+		failClient, ferr := s.clientFactory(failoverURL, cluster.TokenID, tokenSecret, n.SslFingerprint)
+		if ferr != nil {
+			continue
+		}
+		entries, ferr := failClient.GetNodes(ctx)
+		if ferr != nil {
+			continue
+		}
+		s.logger.Warn("collector: primary endpoint unreachable, synced via failover member",
+			"cluster_id", cluster.ID,
+			"primary_url", cluster.ApiUrl,
+			"failover_node", n.Name,
+			"failover_url", failoverURL,
+		)
+		return failClient, entries, true
+	}
+
+	return nil, nil, false
+}
+
 // pbsProxmoxClient returns a PBSProxmoxClient for the given PBS server,
 // preferring the cache. Mirrors proxmoxClient's logic.
 func (s *Syncer) pbsProxmoxClient(ctx context.Context, server db.PbsServer) (PBSProxmoxClient, error) {
@@ -230,7 +294,16 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 
 	nodes, err := client.GetNodes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("sync cluster %s: get nodes: %w", cluster.ID, err)
+		// The configured api_url targets a single cluster member. If that node
+		// is unreachable — e.g. it is mid-reboot during a rolling upgrade — fail
+		// over to another member so we keep visibility into the whole cluster
+		// instead of marking every node offline. Only connectivity failures are
+		// retried; auth/permission errors surface unchanged.
+		failClient, failNodes, ok := s.failoverCluster(ctx, cluster, err)
+		if !ok {
+			return nil, fmt.Errorf("sync cluster %s: get nodes: %w", cluster.ID, err)
+		}
+		client, nodes = failClient, failNodes
 	}
 
 	// Capture the PVE version once per sync cycle. Used by frontend feature gates
@@ -424,6 +497,12 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// Ingest completed Proxmox tasks into the audit log (deduplicating
 	// against tasks that Nexara itself initiated).
 	s.syncTasks(ctx, client, cluster)
+
+	// Reconcile Nexara-dispatched tasks still marked "running": poll each UPID
+	// and flip to completed/failed. Kept separate from syncTasks because
+	// GetNodeTasks(since=…) filters by start-time and would never re-list a long
+	// task after it finishes (watermark blind spot).
+	s.reconcileRunningTasks(ctx, client, cluster)
 
 	// Only notify the frontend when inventory data actually changed
 	// (VM status transitions, VMs added/removed). This avoids triggering

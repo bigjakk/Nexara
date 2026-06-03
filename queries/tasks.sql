@@ -33,4 +33,17 @@ LIMIT 1;
 
 -- name: DeleteCompletedTasks :exec
 DELETE FROM task_history
-WHERE status != 'running' OR started_at < NOW() - INTERVAL '1 hour';
+WHERE status != 'running' AND COALESCE(finished_at, started_at) < NOW() - INTERVAL '24 hours';
+
+-- name: ListRunningTaskHistoryByCluster :many
+SELECT * FROM task_history
+WHERE cluster_id = $1 AND status = 'running';
+
+-- ReconcileTaskHistory marks a still-running task terminal. Scoped to
+-- status='running' so it never clobbers rows already finalized by the
+-- migration orchestrator / DRS executor. :execrows lets the caller emit a
+-- task_update event only when a row actually flipped.
+-- name: ReconcileTaskHistory :execrows
+UPDATE task_history
+SET status = $2, exit_status = $3, finished_at = $4, updated_at = now()
+WHERE upid = $1 AND status = 'running';

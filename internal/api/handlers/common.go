@@ -80,6 +80,58 @@ func AuditLog(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clu
 	}
 }
 
+// TrackTaskParams describes a dispatched Proxmox task to record.
+type TrackTaskParams struct {
+	ClusterID    uuid.UUID
+	Node         string
+	ResourceType string         // "vm", "container", "node", "storage", "pbs", ...
+	ResourceID   string         // internal resource id (or vmid as string)
+	ResourceName string         // optional display name
+	Action       string         // audit action, e.g. "disk_move", "migrate", "backup"
+	UPID         string         // Proxmox task UPID
+	TaskType     string         // Proxmox task type, e.g. "qmmove", "qmigrate", "vzdump"
+	Description  string         // human-readable, shown in the activity / task list
+	Extra        map[string]any // optional extra detail fields merged into the audit JSON
+}
+
+// TrackTask is the single entry point for recording a dispatched Proxmox task.
+// Call it immediately after a pxClient call returns a UPID. It writes the audit
+// log entry (reusing AuditLog — which also handles API-key attribution, the
+// audit_entry WS event, and syslog forwarding), inserts the task_history row as
+// "running", and publishes a task_created event so the activity feed updates.
+//
+// This is the ONLY sanctioned way to record a task — handlers must not hand-roll
+// the audit / InsertTaskHistory / event trio. The collector reconciler keeps the
+// task_history.status accurate from "running" to completed/failed.
+func TrackTask(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p TrackTaskParams) {
+	details := map[string]any{"upid": p.UPID, "node": p.Node}
+	if p.ResourceName != "" {
+		details["resource_name"] = p.ResourceName
+	}
+	for k, v := range p.Extra {
+		details[k] = v
+	}
+	raw, _ := json.Marshal(details)
+
+	// Audit log + audit_entry event + syslog (AuditLog self-guards on user_id).
+	AuditLog(c, queries, eventPub, ClusterUUID(p.ClusterID), p.ResourceType, p.ResourceID, p.Action, raw)
+
+	uid, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return
+	}
+	_, _ = queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
+		ClusterID:   p.ClusterID,
+		UserID:      uid,
+		Upid:        p.UPID,
+		Description: p.Description,
+		Status:      "running",
+		Node:        p.Node,
+		TaskType:    p.TaskType,
+	})
+	eventPub.ClusterEvent(c.Context(), p.ClusterID.String(), events.KindTaskCreated, "task", p.UPID, p.TaskType)
+}
+
 // ClusterUUID is a convenience helper that converts a uuid.UUID to a valid pgtype.UUID.
 func ClusterUUID(id uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: id, Valid: true}

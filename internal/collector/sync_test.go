@@ -25,15 +25,19 @@ const testEncryptionKey = "0123456789abcdef0123456789abcdef0123456789abcdef01234
 // --- Mock DB ---
 
 type mockQueries struct {
-	nodes        map[string]db.Node // keyed by "clusterID:name"
-	vms          map[string]db.Vm   // keyed by "clusterID:vmid"
-	storagePools map[string]db.StoragePool
-	clusters     []db.Cluster
+	nodes          map[string]db.Node // keyed by "clusterID:name"
+	vms            map[string]db.Vm   // keyed by "clusterID:vmid"
+	storagePools   map[string]db.StoragePool
+	clusters       []db.Cluster
+	nodesByCluster []db.Node // returned by ListNodesByCluster (failover candidates)
 
 	upsertNodeCalls             []db.UpsertNodeParams
 	upsertVMCalls               []db.UpsertVMParams
 	upsertStorageCalls          []db.UpsertStoragePoolParams
 	deleteStaleVMsForNodesCalls []db.DeleteStaleVMsForNodesParams
+
+	runningTasks   []db.TaskHistory
+	reconcileCalls []db.ReconcileTaskHistoryParams
 }
 
 func newMockQueries() *mockQueries {
@@ -200,12 +204,21 @@ func (m *mockQueries) ExistsAuditLogByUPID(_ context.Context, _ string) (bool, e
 	return false, nil
 }
 
+func (m *mockQueries) ListRunningTaskHistoryByCluster(_ context.Context, _ uuid.UUID) ([]db.TaskHistory, error) {
+	return m.runningTasks, nil
+}
+
+func (m *mockQueries) ReconcileTaskHistory(_ context.Context, arg db.ReconcileTaskHistoryParams) (int64, error) {
+	m.reconcileCalls = append(m.reconcileCalls, arg)
+	return 1, nil
+}
+
 func (m *mockQueries) GetVMByClusterAndVmid(_ context.Context, _ db.GetVMByClusterAndVmidParams) (db.Vm, error) {
 	return db.Vm{}, fmt.Errorf("not found")
 }
 
 func (m *mockQueries) ListNodesByCluster(_ context.Context, _ uuid.UUID) ([]db.Node, error) {
-	return nil, nil
+	return m.nodesByCluster, nil
 }
 
 func (m *mockQueries) UpdateClusterPVEVersion(_ context.Context, _ db.UpdateClusterPVEVersionParams) error {

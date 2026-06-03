@@ -56,5 +56,5 @@ GROUP BY cluster_id;
 -- name: GetNodeAddressByName :one
 SELECT address FROM nodes WHERE cluster_id = $1 AND name = $2;
 
--- name: ListNodeAddresses :many
-SELECT name, address FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name;
+-- name: ListNodeEndpoints :many
+SELECT name, address, ssl_fingerprint FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name;

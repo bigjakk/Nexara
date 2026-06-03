@@ -14,7 +14,7 @@ import (
 
 const deleteCompletedTasks = `-- name: DeleteCompletedTasks :exec
 DELETE FROM task_history
-WHERE status != 'running' OR started_at < NOW() - INTERVAL '1 hour'
+WHERE status != 'running' AND COALESCE(finished_at, started_at) < NOW() - INTERVAL '24 hours'
 `
 
 func (q *Queries) DeleteCompletedTasks(ctx context.Context) error {
@@ -105,6 +105,46 @@ LIMIT $1
 
 func (q *Queries) ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error) {
 	rows, err := q.db.Query(ctx, listAllTaskHistory, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskHistory{}
+	for rows.Next() {
+		var i TaskHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.Upid,
+			&i.Description,
+			&i.Status,
+			&i.ExitStatus,
+			&i.Node,
+			&i.TaskType,
+			&i.Progress,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunningTaskHistoryByCluster = `-- name: ListRunningTaskHistoryByCluster :many
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+WHERE cluster_id = $1 AND status = 'running'
+`
+
+func (q *Queries) ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]TaskHistory, error) {
+	rows, err := q.db.Query(ctx, listRunningTaskHistoryByCluster, clusterID)
 	if err != nil {
 		return nil, err
 	}
@@ -230,6 +270,36 @@ func (q *Queries) ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHist
 		return nil, err
 	}
 	return items, nil
+}
+
+const reconcileTaskHistory = `-- name: ReconcileTaskHistory :execrows
+UPDATE task_history
+SET status = $2, exit_status = $3, finished_at = $4, updated_at = now()
+WHERE upid = $1 AND status = 'running'
+`
+
+type ReconcileTaskHistoryParams struct {
+	Upid       string             `json:"upid"`
+	Status     string             `json:"status"`
+	ExitStatus string             `json:"exit_status"`
+	FinishedAt pgtype.Timestamptz `json:"finished_at"`
+}
+
+// ReconcileTaskHistory marks a still-running task terminal. Scoped to
+// status='running' so it never clobbers rows already finalized by the
+// migration orchestrator / DRS executor. :execrows lets the caller emit a
+// task_update event only when a row actually flipped.
+func (q *Queries) ReconcileTaskHistory(ctx context.Context, arg ReconcileTaskHistoryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reconcileTaskHistory,
+		arg.Upid,
+		arg.Status,
+		arg.ExitStatus,
+		arg.FinishedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateTaskHistory = `-- name: UpdateTaskHistory :exec
