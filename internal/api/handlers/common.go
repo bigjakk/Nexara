@@ -4,6 +4,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -89,7 +90,7 @@ type TrackTaskParams struct {
 	ResourceName string         // optional display name
 	Action       string         // audit action, e.g. "disk_move", "migrate", "backup"
 	UPID         string         // Proxmox task UPID
-	TaskType     string         // Proxmox task type, e.g. "qmmove", "qmigrate", "vzdump"
+	TaskType     string         // Proxmox task type; if empty, derived from the UPID
 	Description  string         // human-readable, shown in the activity / task list
 	Extra        map[string]any // optional extra detail fields merged into the audit JSON
 }
@@ -120,6 +121,10 @@ func TrackTask(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p 
 	if !ok {
 		return
 	}
+	taskType := p.TaskType
+	if taskType == "" {
+		taskType = taskTypeFromUPID(p.UPID)
+	}
 	_, _ = queries.InsertTaskHistory(c.Context(), db.InsertTaskHistoryParams{
 		ClusterID:   p.ClusterID,
 		UserID:      uid,
@@ -127,9 +132,19 @@ func TrackTask(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p 
 		Description: p.Description,
 		Status:      "running",
 		Node:        p.Node,
-		TaskType:    p.TaskType,
+		TaskType:    taskType,
 	})
-	eventPub.ClusterEvent(c.Context(), p.ClusterID.String(), events.KindTaskCreated, "task", p.UPID, p.TaskType)
+	eventPub.ClusterEvent(c.Context(), p.ClusterID.String(), events.KindTaskCreated, "task", p.UPID, taskType)
+}
+
+// taskTypeFromUPID extracts the Proxmox worker type from a UPID.
+// Format: UPID:node:pid:pstart:starttime:TYPE:id:user: — TYPE is field 5.
+func taskTypeFromUPID(upid string) string {
+	parts := strings.Split(upid, ":")
+	if len(parts) >= 6 {
+		return parts[5]
+	}
+	return ""
 }
 
 // ClusterUUID is a convenience helper that converts a uuid.UUID to a valid pgtype.UUID.

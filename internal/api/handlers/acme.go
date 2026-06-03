@@ -77,8 +77,16 @@ func (h *ACMEHandler) CreateAccount(c *fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"name": req.Name, "contact": req.Contact})
-	h.auditLog(c, clusterID, "acme_account", req.Name, "created", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         extractNodeFromUPID(upid),
+		ResourceType: "acme_account",
+		ResourceID:   req.Name,
+		Action:       "created",
+		UPID:         upid,
+		Description:  "Create ACME account " + req.Name,
+		Extra:        map[string]any{"name": req.Name, "contact": req.Contact},
+	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_account", req.Name, "created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"upid": upid})
 }
@@ -421,8 +429,15 @@ func (h *ACMEHandler) OrderNodeCertificate(c *fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"node": node})
-	h.auditLog(c, clusterID, "certificate", node, "ordered", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         node,
+		ResourceType: "certificate",
+		ResourceID:   node,
+		Action:       "ordered",
+		UPID:         upid,
+		Description:  "Order certificate for " + node,
+	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "certificate", node, "ordered")
 	return c.JSON(fiber.Map{"upid": upid})
 }
@@ -449,8 +464,15 @@ func (h *ACMEHandler) RenewNodeCertificate(c *fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"node": node})
-	h.auditLog(c, clusterID, "certificate", node, "renewed", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         node,
+		ResourceType: "certificate",
+		ResourceID:   node,
+		Action:       "renewed",
+		UPID:         upid,
+		Description:  "Renew certificate for " + node,
+	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "certificate", node, "renewed")
 	return c.JSON(fiber.Map{"upid": upid})
 }
@@ -473,8 +495,15 @@ func (h *ACMEHandler) RevokeNodeCertificate(c *fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"node": node})
-	h.auditLog(c, clusterID, "certificate", node, "revoked", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         node,
+		ResourceType: "certificate",
+		ResourceID:   node,
+		Action:       "revoked",
+		UPID:         upid,
+		Description:  "Revoke certificate for " + node,
+	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "certificate", node, "revoked")
 	return c.JSON(fiber.Map{"upid": upid})
 }

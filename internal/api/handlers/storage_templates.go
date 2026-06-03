@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -98,13 +97,16 @@ func (h *StorageHandler) PullOCI(c *fiber.Ctx) error {
 		return mapTemplateError(err)
 	}
 
-	details, _ := json.Marshal(map[string]string{
-		"reference": req.Reference,
-		"filename":  req.FileName,
-		"storage":   pool.Storage,
-		"node":      node.Name,
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    pool.ClusterID,
+		Node:         node.Name,
+		ResourceType: "storage",
+		ResourceID:   pool.ID.String(),
+		Action:       "pull_oci",
+		UPID:         upid,
+		Description:  "Pull OCI image " + req.Reference,
+		Extra:        map[string]any{"reference": req.Reference, "filename": req.FileName, "storage": pool.Storage},
 	})
-	h.auditLogDetails(c, pool.ClusterID, pool.ID.String(), "pull_oci", details)
 
 	return c.JSON(templateTaskResponse{UPID: upid, Status: "dispatched"})
 }
@@ -157,14 +159,16 @@ func (h *StorageHandler) DownloadURL(c *fiber.Ctx) error {
 		return mapTemplateError(err)
 	}
 
-	details, _ := json.Marshal(map[string]string{
-		"url":      req.URL,
-		"content":  req.Content,
-		"filename": req.Filename,
-		"storage":  pool.Storage,
-		"node":     node.Name,
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    pool.ClusterID,
+		Node:         node.Name,
+		ResourceType: "storage",
+		ResourceID:   pool.ID.String(),
+		Action:       "download_url",
+		UPID:         upid,
+		Description:  "Download " + req.URL,
+		Extra:        map[string]any{"url": req.URL, "content": req.Content, "filename": req.Filename, "storage": pool.Storage},
 	})
-	h.auditLogDetails(c, pool.ClusterID, pool.ID.String(), "download_url", details)
 
 	return c.JSON(templateTaskResponse{UPID: upid, Status: "dispatched"})
 }
@@ -251,12 +255,16 @@ func (h *StorageHandler) DownloadAppliance(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	details, _ := json.Marshal(map[string]string{
-		"template": req.Template,
-		"storage":  pool.Storage,
-		"node":     node.Name,
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    pool.ClusterID,
+		Node:         node.Name,
+		ResourceType: "storage",
+		ResourceID:   pool.ID.String(),
+		Action:       "download_appliance",
+		UPID:         upid,
+		Description:  "Download appliance " + req.Template,
+		Extra:        map[string]any{"template": req.Template, "storage": pool.Storage},
 	})
-	h.auditLogDetails(c, pool.ClusterID, pool.ID.String(), "download_appliance", details)
 
 	return c.JSON(templateTaskResponse{UPID: upid, Status: "dispatched"})
 }

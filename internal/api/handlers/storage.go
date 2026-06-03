@@ -249,7 +249,16 @@ func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 				return mapProxmoxError(uploadErr)
 			}
 
-			h.auditLog(c, pool.ClusterID, pool.ID.String(), "upload")
+			TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+				ClusterID:    pool.ClusterID,
+				Node:         node.Name,
+				ResourceType: "storage",
+				ResourceID:   pool.ID.String(),
+				Action:       "upload",
+				UPID:         upid,
+				Description:  "Upload " + filename,
+				Extra:        map[string]any{"storage": pool.Storage, "filename": filename},
+			})
 
 			return c.JSON(uploadResponse{
 				UPID:   upid,
@@ -301,7 +310,16 @@ func (h *StorageHandler) DeleteContent(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, pool.ClusterID, pool.ID.String(), "delete_content")
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    pool.ClusterID,
+		Node:         node.Name,
+		ResourceType: "storage",
+		ResourceID:   pool.ID.String(),
+		Action:       "delete_content",
+		UPID:         upid,
+		Description:  "Delete " + volume,
+		Extra:        map[string]any{"storage": pool.Storage, "volume": volume},
+	})
 
 	return c.JSON(deleteContentResponse{
 		UPID:   upid,

@@ -217,8 +217,17 @@ func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
-	h.auditLog(c, cluster.ID, vm.ID.String(), req.Action, detailsJSON)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       req.Action,
+		UPID:         upid,
+		Description:  guestActionDesc(req.Action, vm),
+		Extra:        map[string]any{"vmid": vm.Vmid},
+	})
 
 	// Watch the task in the background and update the DB when it completes.
 	// The watcher publishes a vm_state_change event only after the DB is updated
@@ -229,6 +238,15 @@ func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
 		UPID:   upid,
 		Status: "dispatched",
 	})
+}
+
+// guestActionDesc builds a concise task description for a guest (VM/CT) action,
+// e.g. "clone zorin (103)". Shared by the VM and container handlers.
+func guestActionDesc(action string, vm db.Vm) string {
+	if vm.Name != "" {
+		return action + " " + vm.Name + " (" + strconv.Itoa(int(vm.Vmid)) + ")"
+	}
+	return action + " " + strconv.Itoa(int(vm.Vmid))
 }
 
 // CloneVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone.
@@ -271,8 +289,17 @@ func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "clone", detailsJSON)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       "clone",
+		UPID:         upid,
+		Description:  guestActionDesc("clone", vm),
+		Extra:        map[string]any{"vmid": vm.Vmid, "new_id": req.NewID},
+	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "clone")
 
 	return c.JSON(vmActionResponse{
@@ -320,8 +347,17 @@ func (h *VMHandler) ConvertToTemplate(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "convert-to-template", detailsJSON)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       "convert-to-template",
+		UPID:         upid,
+		Description:  guestActionDesc("convert-to-template", vm),
+		Extra:        map[string]any{"vmid": vm.Vmid},
+	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "convert-to-template")
 
 	return c.JSON(vmActionResponse{
@@ -383,11 +419,17 @@ func (h *VMHandler) CloneToTemplate(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{
-		"upid": cloneUpid, "node": node.Name, "vmid": vm.Vmid,
-		"new_id": req.NewID, "clone_to_template": true,
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       "clone-to-template",
+		UPID:         cloneUpid,
+		Description:  guestActionDesc("clone-to-template", vm),
+		Extra:        map[string]any{"vmid": vm.Vmid, "new_id": req.NewID, "clone_to_template": true},
 	})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "clone-to-template", detailsJSON)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "clone-to-template")
 
 	// Step 2: Background goroutine polls clone task then converts clone to template
@@ -493,8 +535,17 @@ func (h *VMHandler) DestroyVM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "destroy", detailsJSON)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       "destroy",
+		UPID:         upid,
+		Description:  guestActionDesc("destroy", vm),
+		Extra:        map[string]any{"vmid": vm.Vmid},
+	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "vm", vm.ID.String(), "destroy")
 
 	return c.JSON(vmActionResponse{
@@ -1101,8 +1152,17 @@ func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "snapshot_create", detailsJSON)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       "snapshot_create",
+		UPID:         upid,
+		Description:  guestActionDesc("snapshot_create", vm),
+		Extra:        map[string]any{"vmid": vm.Vmid, "snap_name": req.SnapName},
+	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_create")
 
 	return c.JSON(vmActionResponse{
@@ -1141,8 +1201,17 @@ func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "snapshot_delete", detailsJSON)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       "snapshot_delete",
+		UPID:         upid,
+		Description:  guestActionDesc("snapshot_delete", vm),
+		Extra:        map[string]any{"vmid": vm.Vmid, "snap_name": snapName},
+	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_delete")
 
 	return c.JSON(vmActionResponse{
@@ -1181,8 +1250,17 @@ func (h *VMHandler) RollbackSnapshot(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": node.Name, "vmid": vm.Vmid})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "snapshot_rollback", detailsJSON)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    cluster.ID,
+		Node:         node.Name,
+		ResourceType: "vm",
+		ResourceID:   vm.ID.String(),
+		ResourceName: vm.Name,
+		Action:       "snapshot_rollback",
+		UPID:         upid,
+		Description:  guestActionDesc("snapshot_rollback", vm),
+		Extra:        map[string]any{"vmid": vm.Vmid, "snap_name": snapName},
+	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "snapshot_rollback")
 
 	return c.JSON(vmActionResponse{
@@ -1324,8 +1402,17 @@ func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	detailsJSON, _ := json.Marshal(map[string]any{"upid": upid, "node": req.Node, "vmid": req.VMID})
-	h.auditLog(c, clusterID, strconv.Itoa(req.VMID), "create", detailsJSON)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         req.Node,
+		ResourceType: "vm",
+		ResourceID:   strconv.Itoa(req.VMID),
+		ResourceName: req.Name,
+		Action:       "create",
+		UPID:         upid,
+		Description:  "create VM " + strconv.Itoa(req.VMID),
+		Extra:        map[string]any{"vmid": req.VMID},
+	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "vm", strconv.Itoa(req.VMID), "create")
 
 	return c.JSON(vmActionResponse{

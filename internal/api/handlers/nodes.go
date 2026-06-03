@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -613,6 +614,22 @@ func (h *NodeHandler) EvacuateNode(c *fiber.Ctx) error {
 		}
 		if migrateErr != nil {
 			m.Error = migrateErr.Error()
+		} else {
+			rtype := "vm"
+			if guest.Type == "lxc" {
+				rtype = "container"
+			}
+			TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+				ClusterID:    clusterID,
+				Node:         nodeName,
+				ResourceType: rtype,
+				ResourceID:   strconv.Itoa(guest.VMID),
+				ResourceName: guest.Name,
+				Action:       "migrate",
+				UPID:         upid,
+				Description:  "Evacuate " + guest.Name + " → " + target,
+				Extra:        map[string]any{"vmid": guest.VMID, "target": target, "evacuate": true},
+			})
 		}
 		migrations = append(migrations, m)
 

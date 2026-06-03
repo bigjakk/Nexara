@@ -177,8 +177,16 @@ func (h *ReplicationHandler) TriggerSync(c *fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]string{"id": jobID, "node": node})
-	h.auditLog(c, clusterID, "replication", jobID, "triggered", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         node,
+		ResourceType: "replication",
+		ResourceID:   jobID,
+		Action:       "triggered",
+		UPID:         upid,
+		Description:  "Replication " + jobID,
+		Extra:        map[string]any{"id": jobID},
+	})
 	return c.JSON(fiber.Map{"upid": upid})
 }
 

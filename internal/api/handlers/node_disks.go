@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/gofiber/fiber/v2"
@@ -143,8 +142,16 @@ func (h *NodeHandler) CreateZFSPool(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to create ZFS pool: %v", err))
 	}
-	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "create_zfs_pool", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "create_zfs_pool",
+		UPID:         upid,
+		Description:  "Create ZFS pool " + req.Name,
+		Extra:        map[string]any{"name": req.Name, "raidlevel": req.RaidLevel},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
@@ -171,8 +178,16 @@ func (h *NodeHandler) DeleteZFSPool(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy ZFS pool: %v", err))
 	}
-	details, _ := json.Marshal(map[string]string{"node": nodeName, "pool": poolName})
-	h.auditLog(c, clusterID, nodeName, "delete_zfs_pool", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "delete_zfs_pool",
+		UPID:         upid,
+		Description:  "Delete ZFS pool " + poolName,
+		Extra:        map[string]any{"pool": poolName},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
@@ -232,8 +247,16 @@ func (h *NodeHandler) CreateLVM(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create LVM volume group")
 	}
-	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "create_lvm", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "create_lvm",
+		UPID:         upid,
+		Description:  "Create LVM " + req.Name,
+		Extra:        map[string]any{"name": req.Name, "device": req.Device},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
@@ -260,8 +283,16 @@ func (h *NodeHandler) DeleteLVM(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy LVM volume group: %v", err))
 	}
-	details, _ := json.Marshal(map[string]string{"node": nodeName, "vg": vgName})
-	h.auditLog(c, clusterID, nodeName, "delete_lvm", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "delete_lvm",
+		UPID:         upid,
+		Description:  "Delete LVM " + vgName,
+		Extra:        map[string]any{"vg": vgName},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
@@ -321,8 +352,16 @@ func (h *NodeHandler) CreateLVMThin(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create LVM thin pool")
 	}
-	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "create_lvmthin", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "create_lvmthin",
+		UPID:         upid,
+		Description:  "Create LVM-thin " + req.Name,
+		Extra:        map[string]any{"name": req.Name, "device": req.Device},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
@@ -353,8 +392,16 @@ func (h *NodeHandler) DeleteLVMThin(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to destroy LVM-Thin pool: %v", err))
 	}
-	details, _ := json.Marshal(map[string]string{"node": nodeName, "pool": poolName, "vg": volumeGroup})
-	h.auditLog(c, clusterID, nodeName, "delete_lvmthin", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "delete_lvmthin",
+		UPID:         upid,
+		Description:  "Delete LVM-thin " + poolName,
+		Extra:        map[string]any{"pool": poolName, "vg": volumeGroup},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
@@ -416,8 +463,16 @@ func (h *NodeHandler) CreateDirectory(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create directory")
 	}
-	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "create_directory", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "create_directory",
+		UPID:         upid,
+		Description:  "Create directory " + req.Name,
+		Extra:        map[string]any{"name": req.Name, "device": req.Device, "filesystem": req.Filesystem},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
@@ -451,8 +506,16 @@ func (h *NodeHandler) InitializeGPT(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to initialize disk with GPT")
 	}
-	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "initialize_gpt", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "initialize_gpt",
+		UPID:         upid,
+		Description:  "Initialize GPT on " + req.Disk,
+		Extra:        map[string]any{"disk": req.Disk},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
@@ -480,7 +543,15 @@ func (h *NodeHandler) WipeDisk(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to wipe disk")
 	}
-	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "wipe_disk", details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "wipe_disk",
+		UPID:         upid,
+		Description:  "Wipe disk " + req.Disk,
+		Extra:        map[string]any{"disk": req.Disk},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }

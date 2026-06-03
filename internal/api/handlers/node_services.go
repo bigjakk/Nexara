@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -59,8 +58,16 @@ func (h *NodeHandler) ServiceAction(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to "+action+" service "+service)
 	}
-	details, _ := json.Marshal(map[string]string{"service": service, "action": action})
-	h.auditLog(c, clusterID, nodeName, "service_"+action, details)
+	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
+		ClusterID:    clusterID,
+		Node:         nodeName,
+		ResourceType: "node",
+		ResourceID:   nodeName,
+		Action:       "service_" + action,
+		UPID:         upid,
+		Description:  action + " service " + service + " on " + nodeName,
+		Extra:        map[string]any{"service": service, "action": action},
+	})
 	return c.JSON(fiber.Map{"status": "ok", "upid": upid})
 }
 
