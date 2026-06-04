@@ -486,7 +486,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		eventPub = events.NewPublisher(rdb, logger.With("component", "events"))
 	}
 
-	sched := scheduler.New(ctx, queries, cfg.EncryptionKey, logger, eventPub)
+	sched := scheduler.New(ctx, queries, cfg.EncryptionKey, cfg.TaskHistoryRetention, logger, eventPub)
 	sched.SetProxmoxCache(cache)
 
 	runWithLeaderRetry(ctx, pool, "scheduler", logger, func(ctx context.Context) {
@@ -498,6 +498,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 			"alert_interval", "60s",
 			"report_interval", "60s",
 			"report_retention_interval", "24h",
+			"task_retention_interval", "1h",
 			"rolling_update_interval", "15s",
 		)
 
@@ -514,6 +515,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		sched.RunAlertEvaluation(ctx)
 		sched.RunReportGeneration(ctx)
 		sched.RunReportRetention(ctx)
+		sched.RunTaskRetention(ctx)
 		sched.RunRollingUpdates(ctx)
 
 		taskTicker := time.NewTicker(60 * time.Second)
@@ -537,6 +539,9 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		reportRetentionTicker := time.NewTicker(24 * time.Hour)
 		defer reportRetentionTicker.Stop()
 
+		taskRetentionTicker := time.NewTicker(1 * time.Hour)
+		defer taskRetentionTicker.Stop()
+
 		rollingTicker := time.NewTicker(15 * time.Second)
 		defer rollingTicker.Stop()
 
@@ -556,6 +561,8 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 				sched.RunReportGeneration(ctx)
 			case <-reportRetentionTicker.C:
 				sched.RunReportRetention(ctx)
+			case <-taskRetentionTicker.C:
+				sched.RunTaskRetention(ctx)
 			case <-rollingTicker.C:
 				sched.RunRollingUpdates(ctx)
 			case <-ctx.Done():

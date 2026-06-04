@@ -78,7 +78,13 @@ type Querier interface {
 	DeleteCVEScan(ctx context.Context, id uuid.UUID) error
 	DeleteCluster(ctx context.Context, id uuid.UUID) error
 	DeleteClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) error
-	DeleteCompletedTasks(ctx context.Context) error
+	// DeleteCompletedTasks removes terminal task_history rows whose finish (or
+	// start, if never finalized) predates the caller-supplied cutoff. Never deletes
+	// a still-running row — the status guard keeps long disk-moves/migrations in the
+	// source of truth. Cutoff is computed in Go (now - retention) so the window is
+	// configurable (TASK_HISTORY_RETENTION); shared by the automatic scheduler sweep
+	// and the manual Clear-Completed endpoint.
+	DeleteCompletedTasks(ctx context.Context, cutoff time.Time) error
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error

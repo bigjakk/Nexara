@@ -276,7 +276,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 	}
 	if d.hasDB() {
 		s.metricsHandler = handlers.NewMetricsHandler(d.queries)
-		s.taskHandler = handlers.NewTaskHandler(d.queries, d.eventPub)
+		s.taskHandler = handlers.NewTaskHandler(d.queries, d.eventPub, d.cfg.TaskHistoryRetention)
 		s.scheduleHandler = handlers.NewScheduleHandler(d.queries, d.eventPub)
 		s.auditHandler = handlers.NewAuditHandler(d.queries, d.eventPub)
 		s.vmFoldersHandler = handlers.NewVMFoldersHandler(d.queries, d.eventPub)

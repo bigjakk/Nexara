@@ -14,13 +14,16 @@ import (
 
 // TaskHandler handles task history CRUD operations.
 type TaskHandler struct {
-	queries  *db.Queries
-	eventPub *events.Publisher
+	queries   *db.Queries
+	eventPub  *events.Publisher
+	retention time.Duration
 }
 
-// NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(queries *db.Queries, eventPub *events.Publisher) *TaskHandler {
-	return &TaskHandler{queries: queries, eventPub: eventPub}
+// NewTaskHandler creates a new TaskHandler. retention is the task-history
+// window (TASK_HISTORY_RETENTION) honored by ClearCompleted, matching the
+// automatic scheduler sweep.
+func NewTaskHandler(queries *db.Queries, eventPub *events.Publisher, retention time.Duration) *TaskHandler {
+	return &TaskHandler{queries: queries, eventPub: eventPub, retention: retention}
 }
 
 type createTaskRequest struct {
@@ -212,7 +215,7 @@ func (h *TaskHandler) ClearCompleted(c *fiber.Ctx) error {
 		return err
 	}
 
-	if err := h.queries.DeleteCompletedTasks(c.Context()); err != nil {
+	if err := h.queries.DeleteCompletedTasks(c.Context(), time.Now().Add(-h.retention)); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to clear tasks")
 	}
 

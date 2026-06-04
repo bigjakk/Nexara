@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -14,11 +15,17 @@ import (
 
 const deleteCompletedTasks = `-- name: DeleteCompletedTasks :exec
 DELETE FROM task_history
-WHERE status != 'running' AND COALESCE(finished_at, started_at) < NOW() - INTERVAL '24 hours'
+WHERE status != 'running' AND COALESCE(finished_at, started_at) < $1::timestamptz
 `
 
-func (q *Queries) DeleteCompletedTasks(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteCompletedTasks)
+// DeleteCompletedTasks removes terminal task_history rows whose finish (or
+// start, if never finalized) predates the caller-supplied cutoff. Never deletes
+// a still-running row — the status guard keeps long disk-moves/migrations in the
+// source of truth. Cutoff is computed in Go (now - retention) so the window is
+// configurable (TASK_HISTORY_RETENTION); shared by the automatic scheduler sweep
+// and the manual Clear-Completed endpoint.
+func (q *Queries) DeleteCompletedTasks(ctx context.Context, cutoff time.Time) error {
+	_, err := q.db.Exec(ctx, deleteCompletedTasks, cutoff)
 	return err
 }
 

@@ -25,6 +25,7 @@ import (
 type Scheduler struct {
 	queries       *db.Queries
 	encryptionKey string
+	taskRetention time.Duration
 	logger        *slog.Logger
 	drsEngine     *drs.Engine
 	drsExecutor   *drs.Executor
@@ -41,7 +42,7 @@ type Scheduler struct {
 // cancelled on SIGTERM; it's threaded into the DRS executor and rolling
 // orchestrator so detached goroutines they spawn (poll loops, SSH upgrades)
 // abort cleanly on graceful shutdown instead of orphaning past the process.
-func New(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
+func New(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, taskRetention time.Duration, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
 	if shutdownCtx == nil {
 		shutdownCtx = context.Background()
 	}
@@ -54,6 +55,7 @@ func New(shutdownCtx context.Context, queries *db.Queries, encryptionKey string,
 	return &Scheduler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
+		taskRetention: taskRetention,
 		logger:        logger,
 		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
 		drsExecutor:   drs.NewExecutor(shutdownCtx, queries, logger.With("component", "drs-executor"), eventPub),
@@ -252,6 +254,24 @@ func (s *Scheduler) RunReportRetention(ctx context.Context) {
 		return
 	}
 	s.logger.Debug("report retention complete")
+}
+
+// RunTaskRetention deletes terminal task_history rows older than the configured
+// TASK_HISTORY_RETENTION window. Mirrors RunReportRetention; the underlying
+// delete is guarded on status != 'running', so in-flight tasks (long disk
+// moves, migrations) are never removed. Without this tick, completed/failed
+// task rows would accumulate forever — ClearCompleted is manual-only.
+func (s *Scheduler) RunTaskRetention(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("task retention panicked", "panic", r)
+		}
+	}()
+	if err := s.queries.DeleteCompletedTasks(ctx, time.Now().Add(-s.taskRetention)); err != nil {
+		s.logger.Warn("task retention failed", "error", err)
+		return
+	}
+	s.logger.Debug("task retention complete")
 }
 
 // RunCVEScanning runs CVE scans for clusters based on their schedule configuration.
