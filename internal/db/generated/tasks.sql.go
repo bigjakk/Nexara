@@ -50,7 +50,7 @@ func (q *Queries) DeleteCompletedTasks(ctx context.Context, cutoff time.Time) er
 }
 
 const getTaskByUpid = `-- name: GetTaskByUpid :one
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
 WHERE upid = $1
 LIMIT 1
 `
@@ -73,6 +73,7 @@ func (q *Queries) GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, 
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Source,
 	)
 	return i, err
 }
@@ -80,9 +81,9 @@ func (q *Queries) GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, 
 const insertExternalTaskHistory = `-- name: InsertExternalTaskHistory :exec
 INSERT INTO task_history (
     cluster_id, user_id, upid, description, status, exit_status,
-    node, task_type, started_at, finished_at
+    node, task_type, started_at, finished_at, source
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'proxmox')
 ON CONFLICT (upid) DO NOTHING
 `
 
@@ -124,7 +125,7 @@ const insertTaskHistory = `-- name: InsertTaskHistory :one
 INSERT INTO task_history (cluster_id, user_id, upid, description, status, node, task_type)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (upid) DO NOTHING
-RETURNING id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at
+RETURNING id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source
 `
 
 type InsertTaskHistoryParams struct {
@@ -163,12 +164,13 @@ func (q *Queries) InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryPa
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Source,
 	)
 	return i, err
 }
 
 const listAllTaskHistory = `-- name: ListAllTaskHistory :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
 ORDER BY started_at DESC
 LIMIT $1
 `
@@ -197,6 +199,7 @@ func (q *Queries) ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHi
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -209,7 +212,7 @@ func (q *Queries) ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHi
 }
 
 const listRunningTaskHistoryByCluster = `-- name: ListRunningTaskHistoryByCluster :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
 WHERE cluster_id = $1 AND status = 'running'
 `
 
@@ -237,6 +240,7 @@ func (q *Queries) ListRunningTaskHistoryByCluster(ctx context.Context, clusterID
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -249,7 +253,7 @@ func (q *Queries) ListRunningTaskHistoryByCluster(ctx context.Context, clusterID
 }
 
 const listTaskHistory = `-- name: ListTaskHistory :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
 WHERE user_id = $1
 ORDER BY started_at DESC
 LIMIT $2
@@ -284,6 +288,7 @@ func (q *Queries) ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -296,7 +301,7 @@ func (q *Queries) ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams
 }
 
 const listTaskHistoryByCluster = `-- name: ListTaskHistoryByCluster :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
 WHERE cluster_id = $1
 ORDER BY started_at DESC
 LIMIT $2
@@ -331,6 +336,7 @@ func (q *Queries) ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHist
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -343,7 +349,7 @@ func (q *Queries) ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHist
 }
 
 const listTaskHistoryFiltered = `-- name: ListTaskHistoryFiltered :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
 WHERE ($3::uuid IS NULL OR cluster_id = $3)
   AND ($4::text   IS NULL OR status     = $4)
 ORDER BY started_at DESC
@@ -389,6 +395,7 @@ func (q *Queries) ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHisto
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}

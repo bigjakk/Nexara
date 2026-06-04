@@ -52,6 +52,7 @@ type taskResponse struct {
 	ExitStatus  string   `json:"exit_status"`
 	Node        string   `json:"node"`
 	TaskType    string   `json:"task_type"`
+	Source      string   `json:"source"`
 	Progress    *float64 `json:"progress"`
 	StartedAt   string   `json:"started_at"`
 	FinishedAt  *string  `json:"finished_at,omitempty"`
@@ -67,6 +68,7 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 		ExitStatus:  t.ExitStatus,
 		Node:        t.Node,
 		TaskType:    t.TaskType,
+		Source:      t.Source,
 		StartedAt:   t.StartedAt.Format(time.RFC3339Nano),
 	}
 	if t.Progress.Valid {

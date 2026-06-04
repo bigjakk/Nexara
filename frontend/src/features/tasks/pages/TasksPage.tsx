@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   XCircle,
   Activity,
+  Monitor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -141,6 +142,12 @@ function TaskRow({
         <td className="px-4 py-2 font-mono text-xs">{task.task_type || "—"}</td>
         <td className="px-4 py-2">
           <div className="flex items-center gap-2">
+            {task.source === "proxmox" && (
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-orange-600 dark:text-orange-400">
+                <Monitor className="h-2.5 w-2.5" />
+                PVE
+              </span>
+            )}
             <span>{task.description || task.upid}</span>
             {display === "running" && progress != null && (
               <div className="flex items-center gap-1.5">

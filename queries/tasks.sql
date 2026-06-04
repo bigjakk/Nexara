@@ -12,9 +12,9 @@ RETURNING *;
 -- name: InsertExternalTaskHistory :exec
 INSERT INTO task_history (
     cluster_id, user_id, upid, description, status, exit_status,
-    node, task_type, started_at, finished_at
+    node, task_type, started_at, finished_at, source
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'proxmox')
 ON CONFLICT (upid) DO NOTHING;
 
 -- name: UpdateTaskHistory :exec

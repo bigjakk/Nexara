@@ -1,0 +1,1 @@
+ALTER TABLE task_history DROP COLUMN IF EXISTS source;

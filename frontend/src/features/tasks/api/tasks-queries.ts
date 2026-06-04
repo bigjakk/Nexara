@@ -11,6 +11,7 @@ export interface TaskRecord {
   exit_status: string;
   node: string;
   task_type: string;
+  source: string;
   progress: number | null;
   started_at: string;
   finished_at: string | null;
