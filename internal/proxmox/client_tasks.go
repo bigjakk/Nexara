@@ -42,7 +42,10 @@ func (c *Client) GetNodeTasks(ctx context.Context, node string, since int64, lim
 	if limit <= 0 {
 		limit = 500
 	}
-	path := "/nodes/" + url.PathEscape(node) + "/tasks?limit=" + strconv.Itoa(limit) + "&since=" + strconv.FormatInt(since, 10) + "&start=0"
+	// source=all returns both active (running) and archived (finished) tasks;
+	// PVE's default is archive-only, which would hide in-progress tasks the
+	// collector ingests for live status tracking.
+	path := "/nodes/" + url.PathEscape(node) + "/tasks?limit=" + strconv.Itoa(limit) + "&since=" + strconv.FormatInt(since, 10) + "&start=0&source=all"
 	var tasks []NodeTask
 	if err := c.do(ctx, path, &tasks); err != nil {
 		return nil, fmt.Errorf("get tasks on %s: %w", node, err)

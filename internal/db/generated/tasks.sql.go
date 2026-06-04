@@ -77,6 +77,49 @@ func (q *Queries) GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, 
 	return i, err
 }
 
+const insertExternalTaskHistory = `-- name: InsertExternalTaskHistory :exec
+INSERT INTO task_history (
+    cluster_id, user_id, upid, description, status, exit_status,
+    node, task_type, started_at, finished_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (upid) DO NOTHING
+`
+
+type InsertExternalTaskHistoryParams struct {
+	ClusterID   uuid.UUID          `json:"cluster_id"`
+	UserID      uuid.UUID          `json:"user_id"`
+	Upid        string             `json:"upid"`
+	Description string             `json:"description"`
+	Status      string             `json:"status"`
+	ExitStatus  string             `json:"exit_status"`
+	Node        string             `json:"node"`
+	TaskType    string             `json:"task_type"`
+	StartedAt   time.Time          `json:"started_at"`
+	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
+}
+
+// InsertExternalTaskHistory records a PVE-native (non-Nexara) task discovered by
+// the collector. Unlike InsertTaskHistory it sets started_at/finished_at/
+// exit_status explicitly, so a task already finished when first seen is stored
+// fully-formed (and a still-running one as status='running'). Attributed to the
+// system user; ON CONFLICT keeps it idempotent across sync ticks.
+func (q *Queries) InsertExternalTaskHistory(ctx context.Context, arg InsertExternalTaskHistoryParams) error {
+	_, err := q.db.Exec(ctx, insertExternalTaskHistory,
+		arg.ClusterID,
+		arg.UserID,
+		arg.Upid,
+		arg.Description,
+		arg.Status,
+		arg.ExitStatus,
+		arg.Node,
+		arg.TaskType,
+		arg.StartedAt,
+		arg.FinishedAt,
+	)
+	return err
+}
+
 const insertTaskHistory = `-- name: InsertTaskHistory :one
 INSERT INTO task_history (cluster_id, user_id, upid, description, status, node, task_type)
 VALUES ($1, $2, $3, $4, $5, $6, $7)

@@ -15,8 +15,9 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// syncTasks fetches completed tasks from all nodes in a cluster and ingests
-// external (non-Nexara) tasks into the audit log.
+// syncTasks fetches active + finished tasks from every node in a cluster and
+// records external (non-Nexara) tasks. Running→done transitions are owned by
+// the separate reconcileRunningTasks pass, not by re-ingestion here.
 func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db.Cluster) {
 	// Load high-water mark (default: 24h ago on first run).
 	since, err := s.queries.GetTaskSyncState(ctx, cluster.ID)
@@ -74,20 +75,21 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 	}
 }
 
-// ingestTask processes a single Proxmox task and inserts it into the audit log
-// if it wasn't initiated by Nexara.
+// ingestTask records a single external (non-Nexara) Proxmox task: a task_history
+// row (status from the task — running or classified terminal — so the reconciler
+// and the Tasks page see it) plus an audit_log entry (so the activity feed shows
+// it), attributed to the system user. Nexara-initiated tasks and tasks already
+// seen on a prior tick are skipped.
 func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName string, task proxmox.NodeTask) error {
 	// Skip noisy task types.
 	if skipTaskTypes[task.Type] {
 		return nil
 	}
 
-	// Skip tasks that are still running (Status is empty string).
-	if task.Status == "" {
-		return nil
-	}
-
-	// Dedup layer 1: skip if UPID exists in task_history (Nexara-initiated).
+	// Dedup layer 1: skip if UPID exists in task_history. Catches Nexara-
+	// dispatched tasks (already tracked at dispatch) AND external tasks ingested
+	// on a prior tick — once a task_history row exists, the collector reconciler
+	// owns its running→done transition, so re-ingesting would be redundant.
 	exists, err := s.queries.ExistsTaskHistoryByUPID(ctx, task.UPID)
 	if err != nil {
 		return fmt.Errorf("check task_history UPID: %w", err)
@@ -128,6 +130,43 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		}
 	}
 
+	// Record the task in task_history so the collector reconciler tracks its
+	// running→done lifecycle and the activity feed + Tasks page show live,
+	// server-authoritative status — exactly like a Nexara-dispatched task.
+	// Running tasks (Status == "") are stored as "running"; tasks already
+	// finished when first seen are stored fully-formed.
+	taskStatus := "running"
+	var taskExit string
+	var finishedAt pgtype.Timestamptz
+	if task.Status != "" {
+		taskStatus, taskExit = classifyTaskExit(task.Status)
+		endTime := task.EndTime
+		if endTime == 0 {
+			endTime = task.StartTime
+		}
+		finishedAt = pgtype.Timestamptz{Time: time.Unix(endTime, 0), Valid: true}
+	}
+	taskDescription := mapping.Action
+	if resourceName != "" {
+		taskDescription += " " + resourceName
+	} else if task.ID != "" {
+		taskDescription += " " + task.ID
+	}
+	if err := s.queries.InsertExternalTaskHistory(ctx, db.InsertExternalTaskHistoryParams{
+		ClusterID:   cluster.ID,
+		UserID:      auth.SystemUserID,
+		Upid:        task.UPID,
+		Description: taskDescription,
+		Status:      taskStatus,
+		ExitStatus:  taskExit,
+		Node:        nodeName,
+		TaskType:    task.Type,
+		StartedAt:   time.Unix(task.StartTime, 0),
+		FinishedAt:  finishedAt,
+	}); err != nil {
+		return fmt.Errorf("insert external task_history: %w", err)
+	}
+
 	// Build details JSON.
 	detailMap := map[string]interface{}{
 		"upid":         task.UPID,
@@ -161,12 +200,15 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		return fmt.Errorf("insert audit log: %w", err)
 	}
 
-	// Publish event for real-time WS updates.
+	// Publish events for real-time WS updates: KindTaskCreated drives the Tasks
+	// page + activity feed; KindAuditEntry drives the audit-log page + feed. The
+	// reconciler later fires KindTaskUpdate when a running task finishes.
 	if s.eventPub != nil {
+		s.eventPub.ClusterEvent(ctx, cluster.ID.String(),
+			events.KindTaskCreated, "task", task.UPID, task.Type)
 		s.eventPub.ClusterEvent(ctx, cluster.ID.String(),
 			events.KindAuditEntry, mapping.ResourceType, resourceID, mapping.Action)
 	}
 
 	return nil
 }
-

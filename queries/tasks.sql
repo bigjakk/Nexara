@@ -4,6 +4,19 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (upid) DO NOTHING
 RETURNING *;
 
+-- InsertExternalTaskHistory records a PVE-native (non-Nexara) task discovered by
+-- the collector. Unlike InsertTaskHistory it sets started_at/finished_at/
+-- exit_status explicitly, so a task already finished when first seen is stored
+-- fully-formed (and a still-running one as status='running'). Attributed to the
+-- system user; ON CONFLICT keeps it idempotent across sync ticks.
+-- name: InsertExternalTaskHistory :exec
+INSERT INTO task_history (
+    cluster_id, user_id, upid, description, status, exit_status,
+    node, task_type, started_at, finished_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (upid) DO NOTHING;
+
 -- name: UpdateTaskHistory :exec
 UPDATE task_history
 SET status = $2, exit_status = $3, progress = $4, finished_at = $5

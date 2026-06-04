@@ -245,6 +245,12 @@ type Querier interface {
 	InsertCVEScanVuln(ctx context.Context, arg InsertCVEScanVulnParams) (CveScanVuln, error)
 	InsertDRSHistory(ctx context.Context, arg InsertDRSHistoryParams) (DrsHistory, error)
 	InsertDRSRule(ctx context.Context, arg InsertDRSRuleParams) (DrsRule, error)
+	// InsertExternalTaskHistory records a PVE-native (non-Nexara) task discovered by
+	// the collector. Unlike InsertTaskHistory it sets started_at/finished_at/
+	// exit_status explicitly, so a task already finished when first seen is stored
+	// fully-formed (and a still-running one as status='running'). Attributed to the
+	// system user; ON CONFLICT keeps it idempotent across sync ticks.
+	InsertExternalTaskHistory(ctx context.Context, arg InsertExternalTaskHistoryParams) error
 	// Maintenance Windows
 	InsertMaintenanceWindow(ctx context.Context, arg InsertMaintenanceWindowParams) (MaintenanceWindow, error)
 	// Notification Channels

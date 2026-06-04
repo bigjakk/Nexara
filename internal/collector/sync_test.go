@@ -38,6 +38,9 @@ type mockQueries struct {
 
 	runningTasks   []db.TaskHistory
 	reconcileCalls []db.ReconcileTaskHistoryParams
+
+	existingTaskUPIDs map[string]bool // ExistsTaskHistoryByUPID returns true for these
+	externalTaskCalls []db.InsertExternalTaskHistoryParams
 }
 
 func newMockQueries() *mockQueries {
@@ -196,12 +199,17 @@ func (m *mockQueries) UpsertTaskSyncState(_ context.Context, _ db.UpsertTaskSync
 	return nil
 }
 
-func (m *mockQueries) ExistsTaskHistoryByUPID(_ context.Context, _ string) (bool, error) {
-	return false, nil
+func (m *mockQueries) ExistsTaskHistoryByUPID(_ context.Context, upid string) (bool, error) {
+	return m.existingTaskUPIDs[upid], nil
 }
 
 func (m *mockQueries) ExistsAuditLogByUPID(_ context.Context, _ string) (bool, error) {
 	return false, nil
+}
+
+func (m *mockQueries) InsertExternalTaskHistory(_ context.Context, arg db.InsertExternalTaskHistoryParams) error {
+	m.externalTaskCalls = append(m.externalTaskCalls, arg)
+	return nil
 }
 
 func (m *mockQueries) ListRunningTaskHistoryByCluster(_ context.Context, _ uuid.UUID) ([]db.TaskHistory, error) {
