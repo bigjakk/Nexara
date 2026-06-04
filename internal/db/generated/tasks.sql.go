@@ -13,6 +13,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countTaskHistoryFiltered = `-- name: CountTaskHistoryFiltered :one
+SELECT count(*) FROM task_history
+WHERE ($1::uuid IS NULL OR cluster_id = $1)
+  AND ($2::text   IS NULL OR status     = $2)
+`
+
+type CountTaskHistoryFilteredParams struct {
+	ClusterID pgtype.UUID `json:"cluster_id"`
+	Status    pgtype.Text `json:"status"`
+}
+
+// CountTaskHistoryFiltered returns the total matching the same filters, for the
+// Tasks page pagination. Mirrors CountAuditLog.
+func (q *Queries) CountTaskHistoryFiltered(ctx context.Context, arg CountTaskHistoryFilteredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTaskHistoryFiltered, arg.ClusterID, arg.Status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteCompletedTasks = `-- name: DeleteCompletedTasks :exec
 DELETE FROM task_history
 WHERE status != 'running' AND COALESCE(finished_at, started_at) < $1::timestamptz
@@ -246,6 +266,64 @@ type ListTaskHistoryByClusterParams struct {
 
 func (q *Queries) ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHistoryByClusterParams) ([]TaskHistory, error) {
 	rows, err := q.db.Query(ctx, listTaskHistoryByCluster, arg.ClusterID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskHistory{}
+	for rows.Next() {
+		var i TaskHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.UserID,
+			&i.Upid,
+			&i.Description,
+			&i.Status,
+			&i.ExitStatus,
+			&i.Node,
+			&i.TaskType,
+			&i.Progress,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskHistoryFiltered = `-- name: ListTaskHistoryFiltered :many
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at FROM task_history
+WHERE ($3::uuid IS NULL OR cluster_id = $3)
+  AND ($4::text   IS NULL OR status     = $4)
+ORDER BY started_at DESC
+LIMIT $1 OFFSET $2
+`
+
+type ListTaskHistoryFilteredParams struct {
+	Limit     int32       `json:"limit"`
+	Offset    int32       `json:"offset"`
+	ClusterID pgtype.UUID `json:"cluster_id"`
+	Status    pgtype.Text `json:"status"`
+}
+
+// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status
+// filters with offset pagination. Mirrors ListAuditLogFiltered. NULL narg = no
+// filter on that column.
+func (q *Queries) ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]TaskHistory, error) {
+	rows, err := q.db.Query(ctx, listTaskHistoryFiltered,
+		arg.Limit,
+		arg.Offset,
+		arg.ClusterID,
+		arg.Status,
+	)
 	if err != nil {
 		return nil, err
 	}

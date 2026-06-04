@@ -53,3 +53,20 @@ WHERE cluster_id = $1 AND status = 'running';
 UPDATE task_history
 SET status = $2, exit_status = $3, finished_at = $4, updated_at = now()
 WHERE upid = $1 AND status = 'running';
+
+-- ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status
+-- filters with offset pagination. Mirrors ListAuditLogFiltered. NULL narg = no
+-- filter on that column.
+-- name: ListTaskHistoryFiltered :many
+SELECT * FROM task_history
+WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
+  AND (sqlc.narg('status')::text   IS NULL OR status     = sqlc.narg('status'))
+ORDER BY started_at DESC
+LIMIT $1 OFFSET $2;
+
+-- CountTaskHistoryFiltered returns the total matching the same filters, for the
+-- Tasks page pagination. Mirrors CountAuditLog.
+-- name: CountTaskHistoryFiltered :one
+SELECT count(*) FROM task_history
+WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
+  AND (sqlc.narg('status')::text   IS NULL OR status     = sqlc.narg('status'));

@@ -10,6 +10,7 @@ import (
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
 // TaskHandler handles task history CRUD operations.
@@ -78,26 +79,91 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 	return resp
 }
 
-// List returns task history for all users (includes DRS/system tasks).
+type taskListResponse struct {
+	Items []taskResponse `json:"items"`
+	Total int64          `json:"total"`
+}
+
+// validTaskStatuses bounds the ?status= filter to the known task_history states
+// so a typo surfaces as a 400 rather than silently returning an empty page.
+var validTaskStatuses = map[string]bool{
+	"running": true, "completed": true, "failed": true, "stopped": true,
+}
+
+// List returns task history with optional cluster_id + status filters and offset
+// pagination (mirrors AuditHandler.List). Includes DRS/system tasks. Status is
+// served from the reconciled task_history row, so the client need not poll
+// Proxmox per entry.
 func (h *TaskHandler) List(c *fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "task")
 	if err != nil {
 		return err
 	}
 
-	tasks, err := h.queries.ListAllTaskHistory(c.Context(), 100)
+	limit := c.QueryInt("limit", 50)
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := c.QueryInt("offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
+
+	listP := db.ListTaskHistoryFilteredParams{
+		Limit:  safeconv.Int32(limit),
+		Offset: safeconv.Int32(offset),
+	}
+	var countP db.CountTaskHistoryFilteredParams
+
+	// Optional cluster filter — the caller must have view:task on it.
+	if cid := c.Query("cluster_id"); cid != "" {
+		clusterID, err := uuid.Parse(cid)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id filter")
+		}
+		if !access.PermitsCluster(clusterID) {
+			return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
+		}
+		v := pgtype.UUID{Bytes: clusterID, Valid: true}
+		listP.ClusterID = v
+		countP.ClusterID = v
+	}
+
+	if status := c.Query("status"); status != "" {
+		if !validTaskStatuses[status] {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid status filter")
+		}
+		v := pgtype.Text{String: status, Valid: true}
+		listP.Status = v
+		countP.Status = v
+	}
+
+	total, err := h.queries.CountTaskHistoryFiltered(c.Context(), countP)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to count tasks")
+	}
+
+	tasks, err := h.queries.ListTaskHistoryFiltered(c.Context(), listP)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list tasks")
 	}
 
-	result := make([]taskResponse, 0, len(tasks))
+	resp := taskListResponse{
+		Items: make([]taskResponse, 0, len(tasks)),
+		Total: total,
+	}
 	for _, t := range tasks {
+		// Per-row guard for the unfiltered case: a user without global view:task
+		// only sees rows for clusters they can access.
 		if !access.PermitsCluster(t.ClusterID) {
 			continue
 		}
-		result = append(result, mapTaskHistory(t))
+		resp.Items = append(resp.Items, mapTaskHistory(t))
 	}
-	return c.JSON(result)
+	return c.JSON(resp)
 }
 
 // Create creates a new task history record.

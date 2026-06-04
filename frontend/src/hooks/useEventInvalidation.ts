@@ -52,7 +52,7 @@ export function useEventInvalidation(clusterIds: string[]): void {
       switch (event.kind) {
         case "task_created":
         case "task_update":
-          scheduleInvalidation(["recent-activity"]);
+          scheduleInvalidation(["recent-activity"], ["tasks"]);
           break;
 
         case "audit_entry":

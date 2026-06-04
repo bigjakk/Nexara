@@ -9,6 +9,7 @@ import {
   ShieldAlert,
   Bell,
   FileText,
+  ListChecks,
   TerminalSquare,
   ScrollText,
   PanelLeftClose,
@@ -48,6 +49,7 @@ const navItems: NavItem[] = [
   { labelKey: "reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
   { labelKey: "security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },
   { labelKey: "events", to: "/events", icon: ScrollText, requiredPermission: "view:audit" },
+  { labelKey: "tasks", to: "/tasks", icon: ListChecks, requiredPermission: "view:task" },
   { labelKey: "settings", to: "/settings/appearance", icon: Settings },
   { labelKey: "admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
 ];

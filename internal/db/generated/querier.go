@@ -49,6 +49,9 @@ type Querier interface {
 	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
 	CountNotificationDLQByState(ctx context.Context) (CountNotificationDLQByStateRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
+	// CountTaskHistoryFiltered returns the total matching the same filters, for the
+	// Tasks page pagination. Mirrors CountAuditLog.
+	CountTaskHistoryFiltered(ctx context.Context, arg CountTaskHistoryFilteredParams) (int64, error)
 	// Counts every login-capable row in users, including deactivated accounts.
 	// Excludes only the well-known system actor seeded by 000013_system_user —
 	// that row exists for audit/task attribution and is not a real account, so
@@ -342,6 +345,10 @@ type Querier interface {
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
 	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
 	ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHistoryByClusterParams) ([]TaskHistory, error)
+	// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status
+	// filters with offset pagination. Mirrors ListAuditLogFiltered. NULL narg = no
+	// filter on that column.
+	ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]TaskHistory, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
