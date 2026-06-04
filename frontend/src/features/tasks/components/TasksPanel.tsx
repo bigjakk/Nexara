@@ -262,7 +262,9 @@ function TaskRow({
   );
 }
 
-export function TasksPage() {
+/** TasksPanel renders the full task-history table (filters + pagination +
+ *  expandable rows). Hosted as the "Tasks" tab of the Events page. */
+export function TasksPanel() {
   const [page, setPage] = useState(0);
   const [clusterFilter, setClusterFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -284,9 +286,7 @@ export function TasksPage() {
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
 
   return (
-    <div className="space-y-4 p-6">
-      <h1 className="text-2xl font-bold">Tasks</h1>
-
+    <div className="space-y-4">
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
         <select

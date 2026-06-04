@@ -133,11 +133,6 @@ const TopologyPage = lazy(() =>
     default: m.TopologyPage,
   })),
 );
-const TasksPage = lazy(() =>
-  import("@/features/tasks/pages/TasksPage").then((m) => ({
-    default: m.TasksPage,
-  })),
-);
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
@@ -214,14 +209,6 @@ const router = createBrowserRouter([
           {
             path: "events",
             element: <LazyPage><EventsPage /></LazyPage>,
-          },
-          {
-            path: "tasks",
-            element: (
-              <RequirePermission action="view" resource="task">
-                <LazyPage><TasksPage /></LazyPage>
-              </RequirePermission>
-            ),
           },
           {
             path: "console",
