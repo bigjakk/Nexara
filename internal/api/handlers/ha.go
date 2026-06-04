@@ -136,7 +136,7 @@ func (h *HAHandler) ArmHA(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]any{"action": "arm-ha"})
-	h.auditLog(c, clusterID, "ha", clusterID.String(), "arm_ha", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha", clusterID.String(), "arm_ha", details)
 	h.publishHA(c, clusterID, clusterID.String(), "arm_ha")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -171,13 +171,9 @@ func (h *HAHandler) DisarmHA(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]any{"action": "disarm-ha", "resource_mode": req.ResourceMode})
-	h.auditLog(c, clusterID, "ha", clusterID.String(), "disarm_ha", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha", clusterID.String(), "disarm_ha", details)
 	h.publishHA(c, clusterID, clusterID.String(), "disarm_ha")
 	return c.JSON(fiber.Map{"status": "ok"})
-}
-
-func (h *HAHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }
 
 func (h *HAHandler) publishHA(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string) {
@@ -252,7 +248,7 @@ func (h *HAHandler) CreateResource(c *fiber.Ctx) error {
 		detailMap["failback"] = *req.Failback
 	}
 	details, _ := json.Marshal(detailMap)
-	h.auditLog(c, clusterID, "ha_resource", req.SID, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_resource", req.SID, "created", details)
 	h.publishHA(c, clusterID, req.SID, "resource_created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -328,7 +324,7 @@ func (h *HAHandler) UpdateResource(c *fiber.Ctx) error {
 		detailMap["failback"] = *req.Failback
 	}
 	details, _ := json.Marshal(detailMap)
-	h.auditLog(c, clusterID, "ha_resource", sid, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_resource", sid, "updated", details)
 	h.publishHA(c, clusterID, sid, "resource_updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -381,7 +377,7 @@ func (h *HAHandler) DeleteResource(c *fiber.Ctx) error {
 		}
 	}
 	details, _ := json.Marshal(detailMap)
-	h.auditLog(c, clusterID, "ha_resource", sid, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_resource", sid, "deleted", details)
 	h.publishHA(c, clusterID, sid, "resource_deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -458,7 +454,7 @@ func (h *HAHandler) CreateGroup(c *fiber.Ctx) error {
 		detailMap["comment"] = req.Comment
 	}
 	details, _ := json.Marshal(detailMap)
-	h.auditLog(c, clusterID, "ha_group", req.Group, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_group", req.Group, "created", details)
 	h.publishHA(c, clusterID, req.Group, "group_created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -504,7 +500,7 @@ func (h *HAHandler) UpdateGroup(c *fiber.Ctx) error {
 		detailMap["comment"] = *req.Comment
 	}
 	details, _ := json.Marshal(detailMap)
-	h.auditLog(c, clusterID, "ha_group", group, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_group", group, "updated", details)
 	h.publishHA(c, clusterID, group, "group_updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -547,7 +543,7 @@ func (h *HAHandler) DeleteGroup(c *fiber.Ctx) error {
 		}
 	}
 	details, _ := json.Marshal(detailMap)
-	h.auditLog(c, clusterID, "ha_group", group, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_group", group, "deleted", details)
 	h.publishHA(c, clusterID, group, "group_deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -627,7 +623,7 @@ func (h *HAHandler) CreateRule(c *fiber.Ctx) error {
 		detailMap["comment"] = req.Comment
 	}
 	details, _ := json.Marshal(detailMap)
-	h.auditLog(c, clusterID, "ha_rule", req.Rule, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", req.Rule, "created", details)
 	h.publishHA(c, clusterID, req.Rule, "rule_created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -685,7 +681,7 @@ func (h *HAHandler) UpdateRule(c *fiber.Ctx) error {
 		detailMap["disable"] = *req.Disable
 	}
 	details, _ := json.Marshal(detailMap)
-	h.auditLog(c, clusterID, "ha_rule", rule, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", rule, "updated", details)
 	h.publishHA(c, clusterID, rule, "rule_updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -738,7 +734,7 @@ func (h *HAHandler) DeleteRule(c *fiber.Ctx) error {
 		}
 	}
 	details, _ := json.Marshal(detailMap)
-	h.auditLog(c, clusterID, "ha_rule", rule, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", rule, "deleted", details)
 	h.publishHA(c, clusterID, rule, "rule_deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }

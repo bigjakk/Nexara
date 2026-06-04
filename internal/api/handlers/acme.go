@@ -27,10 +27,6 @@ func (h *ACMEHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*p
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
-func (h *ACMEHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 // --- ACME Accounts ---
 
 // ListAccounts handles GET /clusters/:cluster_id/acme/accounts.
@@ -134,7 +130,7 @@ func (h *ACMEHandler) UpdateAccount(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
-	h.auditLog(c, clusterID, "acme_account", name, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_account", name, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_account", name, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -157,7 +153,7 @@ func (h *ACMEHandler) DeleteAccount(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
-	h.auditLog(c, clusterID, "acme_account", name, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_account", name, "deleted", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_account", name, "deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -208,7 +204,7 @@ func (h *ACMEHandler) CreatePlugin(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": req.ID, "type": req.Type})
-	h.auditLog(c, clusterID, "acme_plugin", req.ID, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_plugin", req.ID, "created", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_plugin", req.ID, "created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -235,7 +231,7 @@ func (h *ACMEHandler) UpdatePlugin(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": pluginID})
-	h.auditLog(c, clusterID, "acme_plugin", pluginID, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_plugin", pluginID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_plugin", pluginID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -258,7 +254,7 @@ func (h *ACMEHandler) DeletePlugin(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": pluginID})
-	h.auditLog(c, clusterID, "acme_plugin", pluginID, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_plugin", pluginID, "deleted", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindACMEChange, "acme_plugin", pluginID, "deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -377,7 +373,7 @@ func (h *ACMEHandler) SetNodeACMEConfig(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"node": node})
-	h.auditLog(c, clusterID, "acme_config", node, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_config", node, "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

@@ -397,7 +397,7 @@ func (h *CephHandler) CreatePool(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, clusterID, "ceph_pool", req.Name, "create")
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ceph_pool", req.Name, "create", nil)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"status": "created",
@@ -429,7 +429,7 @@ func (h *CephHandler) DeletePool(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, clusterID, "ceph_pool", poolName, "delete")
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ceph_pool", poolName, "delete", nil)
 
 	return c.JSON(fiber.Map{
 		"status": "deleted",
@@ -548,9 +548,4 @@ func (h *CephHandler) resolveClusterNode(c *fiber.Ctx) (*proxmox.Client, string,
 // createProxmoxClient creates a Proxmox client for the given cluster.
 func (h *CephHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
-}
-
-// auditLog writes an audit log entry.
-func (h *CephHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, nil)
 }

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/url"
 	"time"
 
@@ -17,11 +16,6 @@ import (
 type TaskHandler struct {
 	queries  *db.Queries
 	eventPub *events.Publisher
-}
-
-// auditLog writes an audit log entry for task operations.
-func (h *TaskHandler) auditLog(c *fiber.Ctx, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, clusterID, resourceType, resourceID, action, details)
 }
 
 // NewTaskHandler creates a new TaskHandler.
@@ -222,7 +216,7 @@ func (h *TaskHandler) ClearCompleted(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to clear tasks")
 	}
 
-	h.auditLog(c, pgtype.UUID{}, "task", "all", "clear_completed", nil)
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "task", "all", "clear_completed", nil)
 	h.eventPub.SystemEvent(c.Context(), events.KindTaskUpdate, "clear_completed")
 
 	return c.JSON(fiber.Map{"status": "ok"})

@@ -148,10 +148,12 @@ func (e *Executor) Execute(ctx context.Context, client *proxmox.Client, clusterI
 			ExecutedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		})
 
-		// Update task_history with final status.
-		_ = e.queries.UpdateTaskHistory(ctx, db.UpdateTaskHistoryParams{
+		// Finalize the task_history row. ReconcileTaskHistory is guarded on
+		// status='running', so it won't clobber a row the collector reconciler
+		// already finalized; status is "completed"/"failed" from waitForTask.
+		_, _ = e.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 			Upid:       upid,
-			Status:     "stopped",
+			Status:     status,
 			ExitStatus: exitStatus,
 			FinishedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		})

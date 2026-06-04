@@ -45,11 +45,6 @@ func NewDRSHandler(shutdownCtx context.Context, queries *db.Queries, encryptionK
 	}
 }
 
-// auditLog writes an audit log entry. Failures are logged but don't fail the request.
-func (h *DRSHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 // --- Request / Response types ---
 
 type drsConfigRequest struct {
@@ -297,7 +292,7 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"mode": req.Mode, "imbalance_threshold": req.ImbalanceThreshold})
-	h.auditLog(c, clusterID, "drs", cfg.ID.String(), "config_update", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs", cfg.ID.String(), "config_update", details)
 
 	return c.JSON(toDRSConfigResponse(cfg))
 }
@@ -363,7 +358,7 @@ func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"rule_type": req.RuleType, "vm_ids": req.VMIDs, "node_names": req.NodeNames})
-	h.auditLog(c, clusterID, "drs_rule", rule.ID.String(), "rule_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs_rule", rule.ID.String(), "rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(toDRSRuleResponse(rule))
 }
@@ -387,7 +382,7 @@ func (h *DRSHandler) DeleteRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete DRS rule")
 	}
 
-	h.auditLog(c, clusterID, "drs_rule", ruleID.String(), "rule_deleted", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs_rule", ruleID.String(), "rule_deleted", nil)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -412,7 +407,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 	// don't run or record anything — tell the user why.
 	if result != nil && result.BlockedByNativeCRS {
 		details, _ := json.Marshal(map[string]any{"reason": result.BlockReason})
-		h.auditLog(c, clusterID, "drs", clusterID.String(), "evaluate_blocked_native_crs", details)
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs", clusterID.String(), "evaluate_blocked_native_crs", details)
 		return c.JSON(fiber.Map{
 			"blocked":         true,
 			"block_reason":    result.BlockReason,
@@ -517,7 +512,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"recommendation_count": len(resp)})
-	h.auditLog(c, clusterID, "drs", clusterID.String(), "evaluate_triggered", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs", clusterID.String(), "evaluate_triggered", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindDRSAction, "drs", clusterID.String(), "evaluate_triggered")
 
 	return c.JSON(fiber.Map{
@@ -720,7 +715,7 @@ func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
 	}
 
 	haDetails, _ := json.Marshal(map[string]interface{}{"rule_name": req.RuleName, "rule_type": req.RuleType, "vm_ids": req.VMIDs, "ha_type": haRuleType})
-	h.auditLog(c, clusterID, "ha_rule", req.RuleName, "ha_rule_created", haDetails)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", req.RuleName, "ha_rule_created", haDetails)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok", "rule_name": req.RuleName})
 }
@@ -749,7 +744,7 @@ func (h *DRSHandler) DeleteHARule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to delete HA rule: %v", err))
 	}
 
-	h.auditLog(c, clusterID, "ha_rule", ruleName, "ha_rule_deleted", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", ruleName, "ha_rule_deleted", nil)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

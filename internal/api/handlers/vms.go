@@ -734,7 +734,7 @@ func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, vm.ID.String(), "disk_resize", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "disk_resize", nil)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_resize")
 
 	return c.JSON(vmActionResponse{
@@ -859,7 +859,7 @@ func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, vm.ID.String(), "disk_attach", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "disk_attach", nil)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_attach")
 
 	return c.JSON(vmActionResponse{
@@ -901,7 +901,7 @@ func (h *VMHandler) DetachDisk(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, vm.ID.String(), "disk_detach", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "disk_detach", nil)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_detach")
 
 	return c.JSON(vmActionResponse{
@@ -1050,11 +1050,6 @@ func parseSizeToBytes(s string) float64 {
 	default:
 		return -1
 	}
-}
-
-// auditLog writes an audit log entry and publishes an audit_entry event.
-func (h *VMHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", resourceID, action, details)
 }
 
 // --- Snapshot handlers ---
@@ -1488,7 +1483,7 @@ func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
 	}
 
 	configDetails, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
-	h.auditLog(c, cluster.ID, vm.ID.String(), "config_update", configDetails)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), "config_update", configDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "config_update")
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -1914,7 +1909,7 @@ func (h *VMHandler) ChangeMedia(c *fiber.Ctx) error {
 		"device": cdromKey,
 		"volid":  req.Volid,
 	})
-	h.auditLog(c, cluster.ID, vm.ID.String(), action, mediaDetails)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "vm", vm.ID.String(), action, mediaDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), action)
 
 	return c.JSON(fiber.Map{"status": "ok", "device": cdromKey})
@@ -2106,7 +2101,7 @@ func (h *VMHandler) SetVMPool(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"old_pool": oldPool, "new_pool": newPool})
-	h.auditLog(c, clusterID, vmID.String(), "set_pool", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", vmID.String(), "set_pool", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindVMStateChange, "vm", vmID.String(), "set_pool")
 
 	return c.JSON(fiber.Map{"pool": newPool})

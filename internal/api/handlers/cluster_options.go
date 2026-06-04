@@ -27,10 +27,6 @@ func (h *ClusterOptionsHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
-func (h *ClusterOptionsHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 // GetOptions handles GET /clusters/:cluster_id/options.
 func (h *ClusterOptionsHandler) GetOptions(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -72,7 +68,7 @@ func (h *ClusterOptionsHandler) UpdateOptions(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"action": "update_options"})
-	h.auditLog(c, clusterID, "cluster_options", clusterID.String(), "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -121,7 +117,7 @@ func (h *ClusterOptionsHandler) UpdateDescription(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"action": "update_description"})
-	h.auditLog(c, clusterID, "cluster_options", clusterID.String(), "description_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "description_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -178,7 +174,7 @@ func (h *ClusterOptionsHandler) UpdateTags(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"action": "update_tags"})
-	h.auditLog(c, clusterID, "cluster_options", clusterID.String(), "tags_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster_options", clusterID.String(), "tags_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

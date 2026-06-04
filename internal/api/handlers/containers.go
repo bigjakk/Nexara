@@ -897,7 +897,7 @@ func (h *ContainerHandler) ResizeDisk(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, cluster.ID, ct.ID.String(), "disk_resize", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "container", ct.ID.String(), "disk_resize", nil)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "disk_resize")
 
 	return c.JSON(vmActionResponse{
@@ -1000,7 +1000,7 @@ func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
 	}
 
 	configDetails, _ := json.Marshal(map[string]interface{}{"fields": req.Fields})
-	h.auditLog(c, cluster.ID, ct.ID.String(), "config_update", configDetails)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "container", ct.ID.String(), "config_update", configDetails)
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "config_update")
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -1009,9 +1009,4 @@ func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
 // createProxmoxClient creates a Proxmox client for the given cluster.
 func (h *ContainerHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
-}
-
-// auditLog writes an audit log entry and publishes an audit_entry event.
-func (h *ContainerHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "container", resourceID, action, details)
 }

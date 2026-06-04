@@ -41,10 +41,6 @@ func NewClusterHandler(queries *db.Queries, encryptionKey string, eventPub *even
 	}
 }
 
-func (h *ClusterHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 type createClusterRequest struct {
 	Name                string `json:"name"`
 	APIURL              string `json:"api_url"`
@@ -189,7 +185,7 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"name": cluster.Name})
-	h.auditLog(c, cluster.ID, "cluster", cluster.ID.String(), "cluster_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "cluster", cluster.ID.String(), "cluster_created", details)
 
 	testResult := testClusterConnectivity(req.APIURL, req.TokenID, req.TokenSecret, req.TLSFingerprint)
 
@@ -204,11 +200,11 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 				Name:           entry.Name,
 				Status:         "unknown",
 				CpuCount:       0,
-				MemTotal:        0,
-				DiskTotal:       0,
+				MemTotal:       0,
+				DiskTotal:      0,
 				PveVersion:     "",
 				SslFingerprint: "",
-				Uptime:          0,
+				Uptime:         0,
 			})
 			if nodeErr == nil && entry.IP != "" {
 				_ = h.queries.UpdateNodeAddress(c.Context(), db.UpdateNodeAddressParams{
@@ -375,7 +371,7 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 	}
 
 	updateDetails, _ := json.Marshal(map[string]string{"name": cluster.Name})
-	h.auditLog(c, cluster.ID, "cluster", cluster.ID.String(), "cluster_updated", updateDetails)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "cluster", cluster.ID.String(), "cluster_updated", updateDetails)
 
 	// Determine the token secret for connectivity test.
 	var tokenSecret string
@@ -422,7 +418,7 @@ func (h *ClusterHandler) Delete(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
 	}
 
-	h.auditLog(c, id, "cluster", id.String(), "cluster_deleted", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_deleted", nil)
 
 	if err := h.queries.DeleteCluster(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete cluster")
@@ -561,4 +557,3 @@ func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
 		SelfSigned:  untrusted,
 	})
 }
-

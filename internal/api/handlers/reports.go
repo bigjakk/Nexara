@@ -44,10 +44,6 @@ func NewReportHandler(queries *db.Queries, encryptionKey string, eventPub *event
 	}
 }
 
-func (h *ReportHandler) auditLogGlobal(c *fiber.Ctx, resourceType, resourceID, action string) {
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, resourceType, resourceID, action, nil)
-}
-
 // --- Response types ---
 
 type reportScheduleResponse struct {
@@ -254,7 +250,7 @@ func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create schedule")
 	}
 
-	h.auditLogGlobal(c, "report_schedule", schedule.ID.String(), "created")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "report_schedule", schedule.ID.String(), "created", nil)
 	return c.Status(fiber.StatusCreated).JSON(toReportScheduleResponse(schedule))
 }
 
@@ -408,7 +404,7 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update schedule")
 	}
 
-	h.auditLogGlobal(c, "report_schedule", id.String(), "updated")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "report_schedule", id.String(), "updated", nil)
 	return c.JSON(toReportScheduleResponse(updated))
 }
 
@@ -432,7 +428,7 @@ func (h *ReportHandler) DeleteSchedule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete schedule")
 	}
 
-	h.auditLogGlobal(c, "report_schedule", id.String(), "deleted")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "report_schedule", id.String(), "deleted", nil)
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
@@ -545,7 +541,7 @@ func (h *ReportHandler) GenerateReport(c *fiber.Ctx) error {
 		h.eventPub.SystemEvent(c.Context(), events.KindReportGenerated, "completed")
 	}
 
-	h.auditLogGlobal(c, "report", run.ID.String(), "generated")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "report", run.ID.String(), "generated", nil)
 	return c.Status(fiber.StatusCreated).JSON(toRunResponse(completed))
 }
 

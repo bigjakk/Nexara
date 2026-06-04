@@ -89,10 +89,6 @@ func toScheduleResponse(t db.ScheduledTask) scheduleResponse {
 	return r
 }
 
-func (h *ScheduleHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 var validScheduleActions = map[string]bool{
 	"snapshot": true,
 	"reboot":   true,
@@ -154,7 +150,7 @@ func (h *ScheduleHandler) Create(c *fiber.Ctx) error {
 		"resource_id":   req.ResourceID,
 		"schedule":      req.Schedule,
 	})
-	h.auditLog(c, clusterID, "schedule", task.ID.String(), "schedule_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "schedule", task.ID.String(), "schedule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(toScheduleResponse(task))
 }
@@ -222,7 +218,7 @@ func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
 	details, _ := json.Marshal(map[string]string{
 		"schedule": req.Schedule,
 	})
-	h.auditLog(c, clusterID, "schedule", taskID.String(), "schedule_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "schedule", taskID.String(), "schedule_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -246,7 +242,7 @@ func (h *ScheduleHandler) Delete(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete schedule")
 	}
 
-	h.auditLog(c, clusterID, "schedule", taskID.String(), "schedule_deleted", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "schedule", taskID.String(), "schedule_deleted", nil)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

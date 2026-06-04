@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/gofiber/fiber/v2"
 )
 
 // ListNodeFirewallRules handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules.
@@ -84,7 +84,7 @@ func (h *NodeHandler) CreateNodeFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create node firewall rule")
 	}
 	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "create_firewall_rule", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "create_firewall_rule", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -113,7 +113,7 @@ func (h *NodeHandler) UpdateNodeFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update node firewall rule")
 	}
 	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "update_firewall_rule", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "update_firewall_rule", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -137,7 +137,7 @@ func (h *NodeHandler) DeleteNodeFirewallRule(c *fiber.Ctx) error {
 	if err := pxClient.DeleteNodeFirewallRule(c.Context(), nodeName, pos); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete node firewall rule")
 	}
-	h.auditLog(c, clusterID, nodeName, "delete_firewall_rule", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "delete_firewall_rule", nil)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

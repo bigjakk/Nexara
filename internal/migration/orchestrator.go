@@ -446,11 +446,13 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 
 	// Wait for live migration to complete.
 	if err := o.waitForTask(ctx, client, job.SourceNode, upid); err != nil {
-		// Update task history.
+		// Finalize the task history row as failed. ReconcileTaskHistory is
+		// guarded on status='running', so it won't clobber a row the collector
+		// reconciler already finalized.
 		now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
-		_ = o.queries.UpdateTaskHistory(ctx, db.UpdateTaskHistoryParams{
+		_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 			Upid:       upid,
-			Status:     "stopped",
+			Status:     "failed",
 			ExitStatus: err.Error(),
 			FinishedAt: now,
 		})
@@ -458,11 +460,11 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 		return
 	}
 
-	// Mark live migration task as complete.
+	// Mark live migration task as complete (guarded on status='running').
 	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
-	_ = o.queries.UpdateTaskHistory(ctx, db.UpdateTaskHistoryParams{
+	_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 		Upid:       upid,
-		Status:     "stopped",
+		Status:     "completed",
 		ExitStatus: "OK",
 		FinishedAt: now,
 	})
@@ -770,10 +772,15 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 			// Task completed — update both migration job and task history.
 			now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 
-			// Update task history record.
-			_ = o.queries.UpdateTaskHistory(ctx, db.UpdateTaskHistoryParams{
+			// Update task history record (guarded on status='running' so it
+			// won't clobber a row the collector reconciler already finalized).
+			taskStatus := "completed"
+			if !proxmox.TaskSucceeded(status.ExitStatus) {
+				taskStatus = "failed"
+			}
+			_, _ = o.queries.ReconcileTaskHistory(ctx, db.ReconcileTaskHistoryParams{
 				Upid:       upid,
-				Status:     "stopped",
+				Status:     taskStatus,
 				ExitStatus: status.ExitStatus,
 				FinishedAt: now,
 			})

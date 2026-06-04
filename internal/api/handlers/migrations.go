@@ -150,10 +150,6 @@ func toMigrationJobResponse(j db.MigrationJob) migrationJobResponse {
 	return r
 }
 
-func (h *MigrationHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 // --- Handlers ---
 
 var validMigrationTypes = map[string]bool{
@@ -301,7 +297,7 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 	}); err == nil {
 		resourceID = vm.ID.String()
 	}
-	h.auditLog(c, srcClusterID, resourceType, resourceID, "migrate_created", detailsJSON)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(srcClusterID), resourceType, resourceID, "migrate_created", detailsJSON)
 
 	return c.Status(fiber.StatusCreated).JSON(toMigrationJobResponse(job))
 }
@@ -451,7 +447,7 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 	}); err == nil {
 		resourceID = vm.ID.String()
 	}
-	h.auditLog(c, job.SourceClusterID, "vm", resourceID, "migrate_started", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(job.SourceClusterID), "vm", resourceID, "migrate_started", nil)
 
 	return c.JSON(fiber.Map{
 		"status":  "started",
@@ -493,7 +489,7 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 	}); err == nil {
 		resourceIDCancel = vm.ID.String()
 	}
-	h.auditLog(c, job.SourceClusterID, "vm", resourceIDCancel, "migrate_cancelled", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(job.SourceClusterID), "vm", resourceIDCancel, "migrate_cancelled", nil)
 
 	return c.JSON(fiber.Map{"status": "cancelled"})
 }

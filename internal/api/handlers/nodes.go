@@ -89,18 +89,13 @@ func (h *NodeHandler) SetNodeMaintenance(c *fiber.Ctx) error {
 		action = "node_maintenance_enter"
 	}
 	details, _ := json.Marshal(map[string]any{"enable": req.Enable})
-	h.auditLog(c, clusterID, nodeName, action, details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, action, details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster ID.
 func (h *NodeHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
-}
-
-// auditLog records an audit log entry for a mutating node operation.
-func (h *NodeHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", resourceID, action, details)
 }
 
 type nodeResponse struct {
@@ -393,7 +388,7 @@ func (h *NodeHandler) SetNodeDNS(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to set node DNS configuration")
 	}
 	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "set_dns", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "set_dns", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -445,7 +440,7 @@ func (h *NodeHandler) SetNodeTimezone(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to set node timezone")
 	}
 	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, nodeName, "set_timezone", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "set_timezone", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -465,7 +460,7 @@ func (h *NodeHandler) ShutdownNode(c *fiber.Ctx) error {
 	if err := pxClient.ShutdownNode(c.Context(), nodeName); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to shutdown node")
 	}
-	h.auditLog(c, clusterID, nodeName, "shutdown", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "shutdown", nil)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -485,7 +480,7 @@ func (h *NodeHandler) RebootNode(c *fiber.Ctx) error {
 	if err := pxClient.RebootNode(c.Context(), nodeName); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to reboot node")
 	}
-	h.auditLog(c, clusterID, nodeName, "reboot", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "reboot", nil)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -638,6 +633,6 @@ func (h *NodeHandler) EvacuateNode(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(migrations)
-	h.auditLog(c, clusterID, nodeName, "evacuate", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "node", nodeName, "evacuate", details)
 	return c.JSON(fiber.Map{"status": "ok", "migrations": migrations})
 }

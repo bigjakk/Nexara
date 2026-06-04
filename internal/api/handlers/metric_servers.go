@@ -27,10 +27,6 @@ func (h *MetricServerHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.U
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
-func (h *MetricServerHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 // ListServers handles GET /clusters/:cluster_id/metric-servers.
 func (h *MetricServerHandler) ListServers(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -75,7 +71,7 @@ func (h *MetricServerHandler) CreateServer(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to create metric server")
 	}
 	details, _ := json.Marshal(map[string]string{"id": req.ID, "type": req.Type})
-	h.auditLog(c, clusterID, "metric_server", req.ID, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", req.ID, "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -122,7 +118,7 @@ func (h *MetricServerHandler) UpdateServer(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to update metric server")
 	}
 	details, _ := json.Marshal(map[string]string{"id": serverID})
-	h.auditLog(c, clusterID, "metric_server", serverID, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", serverID, "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -144,6 +140,6 @@ func (h *MetricServerHandler) DeleteServer(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete metric server")
 	}
 	details, _ := json.Marshal(map[string]string{"id": serverID})
-	h.auditLog(c, clusterID, "metric_server", serverID, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "metric_server", serverID, "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }

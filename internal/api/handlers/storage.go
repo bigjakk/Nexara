@@ -411,7 +411,7 @@ func (h *StorageHandler) Create(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"storage": req.Storage, "type": req.Type})
-	h.auditLogDetails(c, clusterID, req.Storage, "create", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", req.Storage, "create", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"status":  "created",
@@ -459,7 +459,7 @@ func (h *StorageHandler) Update(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, pool.ClusterID, pool.ID.String(), "update")
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(pool.ClusterID), "storage", pool.ID.String(), "update", nil)
 
 	return c.JSON(fiber.Map{
 		"status":  "updated",
@@ -493,7 +493,7 @@ func (h *StorageHandler) Delete(c *fiber.Ctx) error {
 		Storage:   pool.Storage,
 	})
 
-	h.auditLog(c, pool.ClusterID, pool.ID.String(), "delete")
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(pool.ClusterID), "storage", pool.ID.String(), "delete", nil)
 
 	return c.JSON(fiber.Map{
 		"status":  "deleted",
@@ -539,14 +539,4 @@ func (h *StorageHandler) resolveStorage(c *fiber.Ctx) (db.StoragePool, *proxmox.
 // Uses 30-minute timeout for large ISO uploads.
 func (h *StorageHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 30*time.Minute)
-}
-
-// auditLog writes an audit log entry. Failures are logged but don't fail the request.
-func (h *StorageHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", resourceID, action, nil)
-}
-
-// auditLogDetails writes an audit log entry with details. Resource type is always "storage".
-func (h *StorageHandler) auditLogDetails(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", resourceID, action, details)
 }

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -52,15 +51,6 @@ func NewCVEHandler(pool *pgxpool.Pool, queries *db.Queries, encryptionKey string
 		registry:      registry,
 		engine:        scanner.NewEngine(queries, encryptionKey, slog.Default().With("component", "cve-engine"), registry),
 	}
-}
-
-// auditLog wraps the package-level AuditLog. resourceType is parameterised
-// for symmetry with sibling handlers even though every current caller passes
-// "cve_scan".
-//
-//nolint:unparam // resourceType retained for handler consistency
-func (h *CVEHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
 }
 
 // --- Response types ---
@@ -284,7 +274,7 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 	// Debian-tracker cache survives across API-triggered scans.
 	eng := h.engine
 
-	h.auditLog(c, clusterID, "cve_scan", scan.ID.String(), "cve_scan_triggered", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cve_scan", scan.ID.String(), "cve_scan_triggered", nil)
 
 	// Use a detached context for the background goroutine (Fiber recycles its context)
 	bgCtx := context.Background() //nolint:gosec // G118: intentionally detached from request scope for background scan
@@ -445,7 +435,7 @@ func (h *CVEHandler) DeleteScan(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete scan")
 	}
 
-	h.auditLog(c, clusterID, "cve_scan", scanID.String(), "cve_scan_deleted", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cve_scan", scanID.String(), "cve_scan_deleted", nil)
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
@@ -594,7 +584,7 @@ func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update schedule")
 	}
 
-	h.auditLog(c, clusterID, "cve_scan", clusterID.String(), "cve_scan_schedule_updated", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cve_scan", clusterID.String(), "cve_scan_schedule_updated", nil)
 
 	return c.JSON(cveScanScheduleResponse{
 		ClusterID:     schedule.ClusterID,
@@ -810,7 +800,7 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 		}
 	}
 
-	h.auditLog(c, clusterID, "cve_scan", clusterID.String(), "cve_notify_config_updated", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cve_scan", clusterID.String(), "cve_notify_config_updated", nil)
 
 	resp := cveNotifyConfigResponse{
 		ClusterID:      cfg.ClusterID,

@@ -81,11 +81,6 @@ func toPBSResponse(p db.PbsServer) pbsResponse {
 	return resp
 }
 
-// auditLog writes an audit log entry. Failures are logged but don't fail the request.
-func (h *PBSHandler) auditLog(c *fiber.Ctx, resourceType, resourceID, action string, details json.RawMessage, clusterID pgtype.UUID) {
-	AuditLog(c, h.queries, h.eventPub, clusterID, resourceType, resourceID, action, details)
-}
-
 // Create handles POST /api/v1/pbs-servers.
 func (h *PBSHandler) Create(c *fiber.Ctx) error {
 	var req createPBSRequest
@@ -149,8 +144,9 @@ func (h *PBSHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create PBS server")
 	}
 
-	h.auditLog(c, "pbs_server", pbs.ID.String(), "pbs_created",
-		json.RawMessage(`{"name":"`+pbs.Name+`"}`), pbs.ClusterID)
+	AuditLog(c, h.queries, h.eventPub,
+		pbs.ClusterID, "pbs_server", pbs.ID.String(), "pbs_created",
+		json.RawMessage(`{"name":"`+pbs.Name+`"}`))
 
 	return c.Status(fiber.StatusCreated).JSON(toPBSResponse(pbs))
 }
@@ -326,8 +322,9 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPBS, pbs.ID)
 	}
 
-	h.auditLog(c, "pbs_server", pbs.ID.String(), "pbs_updated",
-		json.RawMessage(`{"name":"`+pbs.Name+`"}`), pbs.ClusterID)
+	AuditLog(c, h.queries, h.eventPub,
+		pbs.ClusterID, "pbs_server", pbs.ID.String(), "pbs_updated",
+		json.RawMessage(`{"name":"`+pbs.Name+`"}`))
 
 	return c.JSON(toPBSResponse(pbs))
 }
@@ -355,8 +352,9 @@ func (h *PBSHandler) Delete(c *fiber.Ctx) error {
 		return err
 	}
 
-	h.auditLog(c, "pbs_server", id.String(), "pbs_deleted",
-		json.RawMessage(`{"name":"`+existing.Name+`"}`), existing.ClusterID)
+	AuditLog(c, h.queries, h.eventPub,
+		existing.ClusterID, "pbs_server", id.String(), "pbs_deleted",
+		json.RawMessage(`{"name":"`+existing.Name+`"}`))
 
 	if err := h.queries.DeletePBSServer(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete PBS server")

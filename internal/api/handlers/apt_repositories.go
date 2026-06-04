@@ -30,10 +30,6 @@ func (h *AptRepositoryHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
-func (h *AptRepositoryHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "apt_repository", resourceID, action, details)
-}
-
 // ListRepositories handles GET /clusters/:cluster_id/nodes/:node/apt/repositories.
 func (h *AptRepositoryHandler) ListRepositories(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -107,7 +103,7 @@ func (h *AptRepositoryHandler) ToggleRepository(c *fiber.Ctx) error {
 		"index":   req.Index,
 		"enabled": req.Enabled,
 	})
-	h.auditLog(c, clusterID, nodeName, action, details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "apt_repository", nodeName, action, details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindAptRepoChange, "apt_repository", nodeName, action)
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -148,7 +144,7 @@ func (h *AptRepositoryHandler) AddStandardRepository(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName, "handle": req.Handle})
-	h.auditLog(c, clusterID, nodeName, "added_standard_repo", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "apt_repository", nodeName, "added_standard_repo", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindAptRepoChange, "apt_repository", nodeName, "added_standard_repo")
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})

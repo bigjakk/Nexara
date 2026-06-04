@@ -27,10 +27,6 @@ func (h *PoolHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*p
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
-func (h *PoolHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 // ListPools handles GET /clusters/:cluster_id/pools.
 func (h *PoolHandler) ListPools(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -75,7 +71,7 @@ func (h *PoolHandler) CreatePool(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to create resource pool")
 	}
 	details, _ := json.Marshal(map[string]string{"poolid": req.PoolID})
-	h.auditLog(c, clusterID, "pool", req.PoolID, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pool", req.PoolID, "created", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindPoolChange, "pool", req.PoolID, "created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -129,7 +125,7 @@ func (h *PoolHandler) UpdatePool(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to update resource pool")
 	}
 	details, _ := json.Marshal(map[string]string{"poolid": poolID})
-	h.auditLog(c, clusterID, "pool", poolID, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pool", poolID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindPoolChange, "pool", poolID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -155,7 +151,7 @@ func (h *PoolHandler) DeletePool(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete resource pool")
 	}
 	details, _ := json.Marshal(map[string]string{"poolid": poolID})
-	h.auditLog(c, clusterID, "pool", poolID, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pool", poolID, "deleted", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindPoolChange, "pool", poolID, "deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }

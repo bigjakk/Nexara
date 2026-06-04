@@ -35,14 +35,6 @@ func NewAlertHandler(queries *db.Queries, encryptionKey string, eventPub *events
 	}
 }
 
-func (h *AlertHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, nil)
-}
-
-func (h *AlertHandler) auditLogGlobal(c *fiber.Ctx, resourceType, resourceID, action string) {
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, resourceType, resourceID, action, nil)
-}
-
 // --- Response types ---
 
 type alertRuleResponse struct {
@@ -518,9 +510,9 @@ func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
 
 	if clusterID.Valid {
 		cid, _ := uuid.FromBytes(clusterID.Bytes[:])
-		h.auditLog(c, cid, "alert_rule", rule.ID.String(), "alert_rule_created")
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(cid), "alert_rule", rule.ID.String(), "alert_rule_created", nil)
 	} else {
-		h.auditLogGlobal(c, "alert_rule", rule.ID.String(), "alert_rule_created")
+		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert_rule", rule.ID.String(), "alert_rule_created", nil)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(toAlertRuleResponse(rule))
@@ -712,7 +704,7 @@ func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update alert rule")
 	}
 
-	h.auditLogGlobal(c, "alert_rule", id.String(), "alert_rule_updated")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert_rule", id.String(), "alert_rule_updated", nil)
 
 	return c.JSON(toAlertRuleResponse(rule))
 }
@@ -741,7 +733,7 @@ func (h *AlertHandler) DeleteRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete alert rule")
 	}
 
-	h.auditLogGlobal(c, "alert_rule", id.String(), "alert_rule_deleted")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert_rule", id.String(), "alert_rule_deleted", nil)
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
@@ -892,7 +884,7 @@ func (h *AlertHandler) AcknowledgeAlert(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to acknowledge alert")
 	}
 
-	h.auditLogGlobal(c, "alert", id.String(), "alert_acknowledged")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert", id.String(), "alert_acknowledged", nil)
 
 	if h.eventPub != nil {
 		clusterID := ""
@@ -938,7 +930,7 @@ func (h *AlertHandler) ResolveAlert(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to resolve alert")
 	}
 
-	h.auditLogGlobal(c, "alert", id.String(), "alert_resolved")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert", id.String(), "alert_resolved", nil)
 
 	if h.eventPub != nil {
 		clusterID := ""
@@ -1073,7 +1065,7 @@ func (h *AlertHandler) CreateChannel(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create channel")
 	}
 
-	h.auditLogGlobal(c, "notification_channel", ch.ID.String(), "channel_created")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "notification_channel", ch.ID.String(), "channel_created", nil)
 
 	return c.Status(fiber.StatusCreated).JSON(toNotificationChannelResponse(ch))
 }
@@ -1156,7 +1148,7 @@ func (h *AlertHandler) UpdateChannel(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update channel")
 	}
 
-	h.auditLogGlobal(c, "notification_channel", id.String(), "channel_updated")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "notification_channel", id.String(), "channel_updated", nil)
 
 	return c.JSON(toNotificationChannelResponse(ch))
 }
@@ -1180,7 +1172,7 @@ func (h *AlertHandler) DeleteChannel(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete channel")
 	}
 
-	h.auditLogGlobal(c, "notification_channel", id.String(), "channel_deleted")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "notification_channel", id.String(), "channel_deleted", nil)
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
@@ -1241,7 +1233,7 @@ func (h *AlertHandler) TestChannel(c *fiber.Ctx) error {
 		})
 	}
 
-	h.auditLogGlobal(c, "notification_channel", id.String(), "channel_tested")
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "notification_channel", id.String(), "channel_tested", nil)
 
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -1340,7 +1332,7 @@ func (h *AlertHandler) CreateMaintenanceWindow(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create maintenance window")
 	}
 
-	h.auditLog(c, clusterID, "maintenance_window", window.ID.String(), "maintenance_window_created")
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "maintenance_window", window.ID.String(), "maintenance_window_created", nil)
 
 	return c.Status(fiber.StatusCreated).JSON(toMaintenanceWindowResponse(window))
 }
@@ -1421,7 +1413,7 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update maintenance window")
 	}
 
-	h.auditLog(c, existing.ClusterID, "maintenance_window", id.String(), "maintenance_window_updated")
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(existing.ClusterID), "maintenance_window", id.String(), "maintenance_window_updated", nil)
 
 	return c.JSON(toMaintenanceWindowResponse(window))
 }
@@ -1455,7 +1447,7 @@ func (h *AlertHandler) DeleteMaintenanceWindow(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete maintenance window")
 	}
 
-	h.auditLog(c, existing.ClusterID, "maintenance_window", id.String(), "maintenance_window_deleted")
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(existing.ClusterID), "maintenance_window", id.String(), "maintenance_window_deleted", nil)
 
 	return c.SendStatus(fiber.StatusNoContent)
 }

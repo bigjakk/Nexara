@@ -34,11 +34,6 @@ func (h *NetworkHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) 
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
-// auditLog records an audit log entry for a mutating network/firewall/SDN operation.
-func (h *NetworkHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 // --- Network Interface Endpoints ---
 
 // ListNetworkInterfaces handles GET /clusters/:cluster_id/networks.
@@ -143,7 +138,7 @@ func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": req.Iface, "type": req.Type})
-	h.auditLog(c, clusterID, "network", fmt.Sprintf("%s/%s", nodeName, req.Iface), "interface_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("%s/%s", nodeName, req.Iface), "interface_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -183,7 +178,7 @@ func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": ifaceName, "type": req.Type})
-	h.auditLog(c, clusterID, "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -214,7 +209,7 @@ func (h *NetworkHandler) DeleteNetworkInterface(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": ifaceName})
-	h.auditLog(c, clusterID, "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -244,7 +239,7 @@ func (h *NetworkHandler) ApplyNetworkConfig(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName})
-	h.auditLog(c, clusterID, "network", nodeName, "network_applied", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", nodeName, "network_applied", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -274,7 +269,7 @@ func (h *NetworkHandler) RevertNetworkConfig(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": nodeName})
-	h.auditLog(c, clusterID, "network", nodeName, "network_reverted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", nodeName, "network_reverted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -333,7 +328,7 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"action": req.Action, "type": req.Type})
-	h.auditLog(c, clusterID, "network", "cluster", "firewall_rule_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", "cluster", "firewall_rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -368,7 +363,7 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"position": pos, "action": req.Action, "type": req.Type})
-	h.auditLog(c, clusterID, "network", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -398,7 +393,7 @@ func (h *NetworkHandler) DeleteClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"position": pos})
-	h.auditLog(c, clusterID, "network", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("cluster/rule/%d", pos), "firewall_rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -498,7 +493,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "action": req.Action, "type": req.Type})
-	h.auditLog(c, clusterID, "network", fmt.Sprintf("vm/%d", vmid), "firewall_rule_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("vm/%d", vmid), "firewall_rule_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -543,7 +538,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos, "action": req.Action, "type": req.Type})
-	h.auditLog(c, clusterID, "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -583,7 +578,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]interface{}{"vmid": vmid, "node": nodeName, "position": pos})
-	h.auditLog(c, clusterID, "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("vm/%d/rule/%d", vmid, pos), "firewall_rule_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -638,7 +633,7 @@ func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(req)
-	h.auditLog(c, clusterID, "network", "cluster/options", "firewall_options_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", "cluster/options", "firewall_options_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -722,7 +717,7 @@ func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"zone": req.Zone, "type": req.Type})
-	h.auditLog(c, clusterID, "sdn", req.Zone, "sdn_zone_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.Zone, "sdn_zone_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -757,7 +752,7 @@ func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"zone": zone})
-	h.auditLog(c, clusterID, "sdn", zone, "sdn_zone_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", zone, "sdn_zone_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -787,7 +782,7 @@ func (h *NetworkHandler) DeleteSDNZone(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"zone": zone})
-	h.auditLog(c, clusterID, "sdn", zone, "sdn_zone_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", zone, "sdn_zone_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -821,7 +816,7 @@ func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": req.VNet, "zone": req.Zone})
-	h.auditLog(c, clusterID, "sdn", req.VNet, "sdn_vnet_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.VNet, "sdn_vnet_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -856,7 +851,7 @@ func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet})
-	h.auditLog(c, clusterID, "sdn", vnet, "sdn_vnet_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", vnet, "sdn_vnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -886,7 +881,7 @@ func (h *NetworkHandler) DeleteSDNVNet(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet})
-	h.auditLog(c, clusterID, "sdn", vnet, "sdn_vnet_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", vnet, "sdn_vnet_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -956,7 +951,7 @@ func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": req.Subnet})
-	h.auditLog(c, clusterID, "sdn", fmt.Sprintf("%s/%s", vnet, req.Subnet), "sdn_subnet_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", fmt.Sprintf("%s/%s", vnet, req.Subnet), "sdn_subnet_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -992,7 +987,7 @@ func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
-	h.auditLog(c, clusterID, "sdn", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -1023,7 +1018,7 @@ func (h *NetworkHandler) DeleteSDNSubnet(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"vnet": vnet, "subnet": subnet})
-	h.auditLog(c, clusterID, "sdn", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", fmt.Sprintf("%s/%s", vnet, subnet), "sdn_subnet_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -1047,7 +1042,7 @@ func (h *NetworkHandler) ApplySDN(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	h.auditLog(c, clusterID, "sdn", "cluster", "sdn_applied", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", "cluster", "sdn_applied", nil)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -1098,7 +1093,7 @@ func (h *NetworkHandler) CreateSDNController(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"controller": req.Controller, "type": req.Type})
-	h.auditLog(c, clusterID, "sdn", req.Controller, "sdn_controller_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.Controller, "sdn_controller_created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1127,7 +1122,7 @@ func (h *NetworkHandler) UpdateSDNController(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"controller": controller})
-	h.auditLog(c, clusterID, "sdn", controller, "sdn_controller_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", controller, "sdn_controller_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1152,7 +1147,7 @@ func (h *NetworkHandler) DeleteSDNController(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"controller": controller})
-	h.auditLog(c, clusterID, "sdn", controller, "sdn_controller_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", controller, "sdn_controller_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1202,7 +1197,7 @@ func (h *NetworkHandler) CreateSDNIPAM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"ipam": req.IPAM, "type": req.Type})
-	h.auditLog(c, clusterID, "sdn", req.IPAM, "sdn_ipam_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.IPAM, "sdn_ipam_created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1231,7 +1226,7 @@ func (h *NetworkHandler) UpdateSDNIPAM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"ipam": ipam})
-	h.auditLog(c, clusterID, "sdn", ipam, "sdn_ipam_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", ipam, "sdn_ipam_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1256,7 +1251,7 @@ func (h *NetworkHandler) DeleteSDNIPAM(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"ipam": ipam})
-	h.auditLog(c, clusterID, "sdn", ipam, "sdn_ipam_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", ipam, "sdn_ipam_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1306,7 +1301,7 @@ func (h *NetworkHandler) CreateSDNDNS(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"dns": req.DNS, "type": req.Type})
-	h.auditLog(c, clusterID, "sdn", req.DNS, "sdn_dns_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", req.DNS, "sdn_dns_created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1335,7 +1330,7 @@ func (h *NetworkHandler) UpdateSDNDNS(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"dns": dns})
-	h.auditLog(c, clusterID, "sdn", dns, "sdn_dns_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", dns, "sdn_dns_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1360,7 +1355,7 @@ func (h *NetworkHandler) DeleteSDNDNS(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"dns": dns})
-	h.auditLog(c, clusterID, "sdn", dns, "sdn_dns_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "sdn", dns, "sdn_dns_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1462,7 +1457,7 @@ func (h *NetworkHandler) CreateTemplate(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "template_id": tmpl.ID.String()})
-	h.auditLog(c, uuid.Nil, "firewall_template", tmpl.ID.String(), "template_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(uuid.Nil), "firewall_template", tmpl.ID.String(), "template_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(toTemplateResponse(tmpl))
 }
@@ -1505,7 +1500,7 @@ func (h *NetworkHandler) UpdateTemplate(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "template_id": templateID.String()})
-	h.auditLog(c, uuid.Nil, "firewall_template", templateID.String(), "template_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(uuid.Nil), "firewall_template", templateID.String(), "template_updated", details)
 
 	return c.JSON(toTemplateResponse(tmpl))
 }
@@ -1526,7 +1521,7 @@ func (h *NetworkHandler) DeleteTemplate(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"template_id": templateID.String()})
-	h.auditLog(c, uuid.Nil, "firewall_template", templateID.String(), "template_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(uuid.Nil), "firewall_template", templateID.String(), "template_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -1578,7 +1573,7 @@ func (h *NetworkHandler) ApplyTemplate(c *fiber.Ctx) error {
 		"applied":       applied,
 		"total":         len(rules),
 	})
-	h.auditLog(c, clusterID, "firewall_template", templateID.String(), "template_applied", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_template", templateID.String(), "template_applied", details)
 
 	return c.JSON(fiber.Map{
 		"status":  "ok",
@@ -1633,7 +1628,7 @@ func (h *NetworkHandler) CreateFirewallAlias(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to create firewall alias")
 	}
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "cidr": req.CIDR})
-	h.auditLog(c, clusterID, "firewall_alias", req.Name, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", req.Name, "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1659,7 +1654,7 @@ func (h *NetworkHandler) UpdateFirewallAlias(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to update firewall alias")
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
-	h.auditLog(c, clusterID, "firewall_alias", name, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", name, "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1681,7 +1676,7 @@ func (h *NetworkHandler) DeleteFirewallAlias(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete firewall alias")
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
-	h.auditLog(c, clusterID, "firewall_alias", name, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_alias", name, "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1734,7 +1729,7 @@ func (h *NetworkHandler) CreateFirewallIPSet(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to create IP set")
 	}
 	details, _ := json.Marshal(map[string]string{"name": req.Name})
-	h.auditLog(c, clusterID, "firewall_ipset", req.Name, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset", req.Name, "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1756,7 +1751,7 @@ func (h *NetworkHandler) DeleteFirewallIPSet(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete IP set")
 	}
 	details, _ := json.Marshal(map[string]string{"name": name})
-	h.auditLog(c, clusterID, "firewall_ipset", name, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset", name, "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1806,7 +1801,7 @@ func (h *NetworkHandler) AddFirewallIPSetEntry(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to add IP set entry")
 	}
 	details, _ := json.Marshal(map[string]string{"set": name, "cidr": req.CIDR})
-	h.auditLog(c, clusterID, "firewall_ipset_entry", name+"/"+req.CIDR, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", name+"/"+req.CIDR, "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1829,7 +1824,7 @@ func (h *NetworkHandler) DeleteFirewallIPSetEntry(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete IP set entry")
 	}
 	details, _ := json.Marshal(map[string]string{"set": name, "cidr": cidr})
-	h.auditLog(c, clusterID, "firewall_ipset_entry", name+"/"+cidr, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_ipset_entry", name+"/"+cidr, "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1879,7 +1874,7 @@ func (h *NetworkHandler) CreateSecurityGroup(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to create security group")
 	}
 	details, _ := json.Marshal(map[string]string{"group": req.Group})
-	h.auditLog(c, clusterID, "firewall_security_group", req.Group, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group", req.Group, "created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1901,7 +1896,7 @@ func (h *NetworkHandler) DeleteSecurityGroup(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete security group")
 	}
 	details, _ := json.Marshal(map[string]string{"group": group})
-	h.auditLog(c, clusterID, "firewall_security_group", group, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group", group, "deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1948,7 +1943,7 @@ func (h *NetworkHandler) CreateSecurityGroupRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to create security group rule")
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "action": req.Action})
-	h.auditLog(c, clusterID, "firewall_security_group_rule", group, "rule_created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", group, "rule_created", details)
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
 
@@ -1978,7 +1973,7 @@ func (h *NetworkHandler) UpdateSecurityGroupRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to update security group rule")
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})
-	h.auditLog(c, clusterID, "firewall_security_group_rule", group, "rule_updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", group, "rule_updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -2004,7 +1999,7 @@ func (h *NetworkHandler) DeleteSecurityGroupRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to delete security group rule")
 	}
 	details, _ := json.Marshal(map[string]string{"group": group, "pos": strconv.Itoa(pos)})
-	h.auditLog(c, clusterID, "firewall_security_group_rule", group, "rule_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "firewall_security_group_rule", group, "rule_deleted", details)
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 

@@ -28,10 +28,6 @@ func (h *ReplicationHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UU
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
-func (h *ReplicationHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceType, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), resourceType, resourceID, action, details)
-}
-
 // ListJobs handles GET /clusters/:cluster_id/replication.
 func (h *ReplicationHandler) ListJobs(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -79,7 +75,7 @@ func (h *ReplicationHandler) CreateJob(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": req.ID, "target": req.Target})
-	h.auditLog(c, clusterID, "replication", req.ID, "created", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "replication", req.ID, "created", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindReplicationChange, "replication", req.ID, "created")
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
 }
@@ -127,7 +123,7 @@ func (h *ReplicationHandler) UpdateJob(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": jobID})
-	h.auditLog(c, clusterID, "replication", jobID, "updated", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "replication", jobID, "updated", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindReplicationChange, "replication", jobID, "updated")
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -150,7 +146,7 @@ func (h *ReplicationHandler) DeleteJob(c *fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	details, _ := json.Marshal(map[string]string{"id": jobID})
-	h.auditLog(c, clusterID, "replication", jobID, "deleted", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "replication", jobID, "deleted", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindReplicationChange, "replication", jobID, "deleted")
 	return c.JSON(fiber.Map{"status": "ok"})
 }

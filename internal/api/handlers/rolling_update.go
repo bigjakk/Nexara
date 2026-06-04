@@ -152,10 +152,6 @@ func toRollingNodeResponse(n db.RollingUpdateNode) rollingUpdateNodeResponse {
 	}
 }
 
-func (h *RollingUpdateHandler) auditLog(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string, details json.RawMessage) {
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", resourceID, action, details)
-}
-
 // ListJobs returns rolling update jobs for a cluster.
 func (h *RollingUpdateHandler) ListJobs(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -368,7 +364,7 @@ func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
 		}
 	}
 
-	h.auditLog(c, clusterID, job.ID.String(), "rolling_update_created", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", job.ID.String(), "rolling_update_created", nil)
 
 	return c.Status(fiber.StatusCreated).JSON(toJobResponse(job))
 }
@@ -423,7 +419,7 @@ func (h *RollingUpdateHandler) StartJob(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to start job")
 	}
 
-	h.auditLog(c, clusterID, jobID.String(), "rolling_update_started", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", jobID.String(), "rolling_update_started", nil)
 
 	if h.eventPub != nil {
 		h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindRollingUpdate, "rolling_update", jobID.String(), "started")
@@ -466,7 +462,7 @@ func (h *RollingUpdateHandler) CancelJob(c *fiber.Ctx) error {
 		})
 	}
 
-	h.auditLog(c, clusterID, jobID.String(), "rolling_update_cancelled", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", jobID.String(), "rolling_update_cancelled", nil)
 
 	if h.eventPub != nil {
 		h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindRollingUpdate, "rolling_update", jobID.String(), "cancelled")
@@ -494,7 +490,7 @@ func (h *RollingUpdateHandler) PauseJob(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to pause job")
 	}
 
-	h.auditLog(c, clusterID, jobID.String(), "rolling_update_paused", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", jobID.String(), "rolling_update_paused", nil)
 
 	if h.eventPub != nil {
 		h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindRollingUpdate, "rolling_update", jobID.String(), "paused")
@@ -522,7 +518,7 @@ func (h *RollingUpdateHandler) ResumeJob(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to resume job")
 	}
 
-	h.auditLog(c, clusterID, jobID.String(), "rolling_update_resumed", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", jobID.String(), "rolling_update_resumed", nil)
 
 	if h.eventPub != nil {
 		h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindRollingUpdate, "rolling_update", jobID.String(), "resumed")
@@ -598,7 +594,7 @@ func (h *RollingUpdateHandler) ConfirmUpgrade(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": node.NodeName})
-	h.auditLog(c, clusterID, jobID.String(), "node_upgrade_confirmed", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", jobID.String(), "node_upgrade_confirmed", details)
 
 	return c.JSON(fiber.Map{"status": "confirmed"})
 }
@@ -640,7 +636,7 @@ func (h *RollingUpdateHandler) SkipNode(c *fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": node.NodeName})
-	h.auditLog(c, clusterID, jobID.String(), "node_skipped", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", jobID.String(), "node_skipped", details)
 
 	return c.JSON(fiber.Map{"status": "skipped"})
 }
@@ -823,7 +819,7 @@ func (h *RollingUpdateHandler) UpsertSSHCredentials(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to save SSH credentials")
 	}
 
-	h.auditLog(c, clusterID, clusterID.String(), "ssh_credentials_updated", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", clusterID.String(), "ssh_credentials_updated", nil)
 
 	return c.JSON(sshCredentialResponse{
 		ClusterID: creds.ClusterID.String(),
@@ -850,7 +846,7 @@ func (h *RollingUpdateHandler) DeleteSSHCredentials(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete SSH credentials")
 	}
 
-	h.auditLog(c, clusterID, clusterID.String(), "ssh_credentials_deleted", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", clusterID.String(), "ssh_credentials_deleted", nil)
 
 	return c.JSON(fiber.Map{"status": "deleted"})
 }
@@ -1097,7 +1093,7 @@ func (h *RollingUpdateHandler) PinSSHHostKey(c *fiber.Ctx) error {
 		"fingerprint": scannedFP,
 		"node_name":   req.NodeName,
 	})
-	h.auditLog(c, clusterID, row.ID.String(), "ssh_host_key_pinned", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", row.ID.String(), "ssh_host_key_pinned", details)
 
 	resp := sshKnownHostResponse{
 		ID:          row.ID.String(),
@@ -1135,7 +1131,7 @@ func (h *RollingUpdateHandler) DeleteSSHKnownHost(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete pinned host key")
 	}
 
-	h.auditLog(c, clusterID, id.String(), "ssh_host_key_unpinned", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", id.String(), "ssh_host_key_unpinned", nil)
 	return c.JSON(fiber.Map{"status": "deleted"})
 }
 
