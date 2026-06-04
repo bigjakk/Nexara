@@ -27,7 +27,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:qmsnapshot:100:run", Type: "qmsnapshot",
 			ID: "100", Status: "", StartTime: start.Unix(),
 		}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task); err != nil {
+		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 {
@@ -65,7 +65,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:vzdump:101:done", Type: "vzdump",
 			ID: "101", Status: "OK", StartTime: start.Unix(), EndTime: end.Unix(),
 		}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task); err != nil {
+		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 {
@@ -87,7 +87,7 @@ func TestIngestTask_External(t *testing.T) {
 			UPID: "UPID:pve1:qmigrate:102:fail", Type: "qmigrate",
 			ID: "102", Status: "migration aborted", StartTime: start.Unix(), EndTime: start.Add(time.Second).Unix(),
 		}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task); err != nil {
+		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 1 || q.externalTaskCalls[0].Status != "failed" {
@@ -102,7 +102,7 @@ func TestIngestTask_External(t *testing.T) {
 		q := newMockQueries()
 		s := &Syncer{queries: q, logger: testLogger()}
 		task := proxmox.NodeTask{UPID: "UPID:pve1:vncproxy:x", Type: "vncproxy", Status: ""}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task); err != nil {
+		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 0 {
@@ -110,12 +110,37 @@ func TestIngestTask_External(t *testing.T) {
 		}
 	})
 
+	t.Run("seenTaskUPIDs unions task_history + audit_log existence", func(t *testing.T) {
+		q := newMockQueries()
+		q.existingTaskUPIDs = map[string]bool{"a": true, "b": true}
+		q.existingAuditUPIDs = map[string]bool{"b": true, "c": true}
+		s := &Syncer{queries: q, logger: testLogger()}
+
+		seen, err := s.seenTaskUPIDs(context.Background(), cluster, []string{"a", "b", "c", "d"})
+		if err != nil {
+			t.Fatalf("seenTaskUPIDs: %v", err)
+		}
+		for _, want := range []string{"a", "b", "c"} { // union of {a,b} ∪ {b,c}
+			if !seen[want] {
+				t.Errorf("expected %q in seen set", want)
+			}
+		}
+		if seen["d"] {
+			t.Error("d is in neither set and must not be marked seen")
+		}
+
+		empty, err := s.seenTaskUPIDs(context.Background(), cluster, nil)
+		if err != nil || len(empty) != 0 {
+			t.Fatalf("empty input: got len %d, err %v", len(empty), err)
+		}
+	})
+
 	t.Run("already-tracked UPID is deduped", func(t *testing.T) {
 		q := newMockQueries()
-		q.existingTaskUPIDs = map[string]bool{"UPID:pve1:qmstart:103": true}
 		s := &Syncer{queries: q, logger: testLogger()}
 		task := proxmox.NodeTask{UPID: "UPID:pve1:qmstart:103", Type: "qmstart", ID: "103", Status: "OK", StartTime: start.Unix()}
-		if err := s.ingestTask(context.Background(), cluster, "pve1", task); err != nil {
+		seen := map[string]bool{"UPID:pve1:qmstart:103": true}
+		if err := s.ingestTask(context.Background(), cluster, "pve1", task, seen); err != nil {
 			t.Fatalf("ingestTask: %v", err)
 		}
 		if len(q.externalTaskCalls) != 0 {

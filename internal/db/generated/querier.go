@@ -126,16 +126,6 @@ type Querier interface {
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	DeleteVMFolder(ctx context.Context, id uuid.UUID) error
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
-	// Cross-source UPID lookup: returns true if ANY audit_log row references
-	// this UPID, regardless of whether it was written by the Nexara handler
-	// (source='nexara') or previously ingested from Proxmox
-	// (source='proxmox'). Used by collector/task_ingest.go to skip
-	// ingesting tasks Nexara already audited — without that, the user sees
-	// duplicate activity rows when they trigger an action through the UI
-	// (one from the handler, one from the post-hoc proxmox task ingest).
-	// Backed by idx_audit_log_upid (migration 000060).
-	ExistsAuditLogByUPID(ctx context.Context, upid string) (bool, error)
-	ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error)
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error)
@@ -302,6 +292,16 @@ type Querier interface {
 	ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error)
 	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
+	ListExistingAuditLogUPIDs(ctx context.Context, upids []string) ([]string, error)
+	// ListExistingTaskHistoryUPIDs and ListExistingAuditLogUPIDs are the batch
+	// dedup the collector ingest uses: given a node's candidate UPIDs, return the
+	// subset already recorded, so ingestTask skips them without a per-task SELECT
+	// (the security review flagged the old 2×N point lookups). Together they cover
+	// the original two dedup layers — task_history (Nexara-dispatched or
+	// already-ingested external) and audit_log (any source: a UI action Nexara
+	// already audited, or a legacy external task ingested before task_history rows
+	// existed). Backed by idx_task_history_upid and idx_audit_log_upid.
+	ListExistingTaskHistoryUPIDs(ctx context.Context, upids []string) ([]string, error)
 	ListFirewallTemplates(ctx context.Context) ([]FirewallTemplate, error)
 	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
 	ListGlobalSettings(ctx context.Context) ([]Setting, error)

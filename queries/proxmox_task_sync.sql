@@ -6,16 +6,17 @@ INSERT INTO proxmox_task_sync_state (cluster_id, last_synced_at)
 VALUES ($1, $2)
 ON CONFLICT (cluster_id) DO UPDATE SET last_synced_at = $2;
 
--- name: ExistsTaskHistoryByUPID :one
-SELECT EXISTS(SELECT 1 FROM task_history WHERE upid = $1) AS exists;
+-- ListExistingTaskHistoryUPIDs and ListExistingAuditLogUPIDs are the batch
+-- dedup the collector ingest uses: given a node's candidate UPIDs, return the
+-- subset already recorded, so ingestTask skips them without a per-task SELECT
+-- (the security review flagged the old 2×N point lookups). Together they cover
+-- the original two dedup layers — task_history (Nexara-dispatched or
+-- already-ingested external) and audit_log (any source: a UI action Nexara
+-- already audited, or a legacy external task ingested before task_history rows
+-- existed). Backed by idx_task_history_upid and idx_audit_log_upid.
 
--- name: ExistsAuditLogByUPID :one
--- Cross-source UPID lookup: returns true if ANY audit_log row references
--- this UPID, regardless of whether it was written by the Nexara handler
--- (source='nexara') or previously ingested from Proxmox
--- (source='proxmox'). Used by collector/task_ingest.go to skip
--- ingesting tasks Nexara already audited — without that, the user sees
--- duplicate activity rows when they trigger an action through the UI
--- (one from the handler, one from the post-hoc proxmox task ingest).
--- Backed by idx_audit_log_upid (migration 000060).
-SELECT EXISTS(SELECT 1 FROM audit_log WHERE details->>'upid' = sqlc.arg('upid')::text) AS exists;
+-- name: ListExistingTaskHistoryUPIDs :many
+SELECT upid FROM task_history WHERE upid = ANY(sqlc.arg('upids')::text[]);
+
+-- name: ListExistingAuditLogUPIDs :many
+SELECT (details->>'upid')::text AS upid FROM audit_log WHERE details->>'upid' = ANY(sqlc.arg('upids')::text[]);

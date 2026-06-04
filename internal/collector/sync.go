@@ -41,8 +41,8 @@ type SyncQueries interface {
 	// Task sync
 	GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (int64, error)
 	UpsertTaskSyncState(ctx context.Context, arg db.UpsertTaskSyncStateParams) error
-	ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error)
-	ExistsAuditLogByUPID(ctx context.Context, upid string) (bool, error)
+	ListExistingTaskHistoryUPIDs(ctx context.Context, upids []string) ([]string, error)
+	ListExistingAuditLogUPIDs(ctx context.Context, upids []string) ([]string, error)
 	InsertExternalTaskHistory(ctx context.Context, arg db.InsertExternalTaskHistoryParams) error
 	// Task reconcile
 	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.TaskHistory, error)

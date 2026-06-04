@@ -11,36 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const existsAuditLogByUPID = `-- name: ExistsAuditLogByUPID :one
-SELECT EXISTS(SELECT 1 FROM audit_log WHERE details->>'upid' = $1::text) AS exists
-`
-
-// Cross-source UPID lookup: returns true if ANY audit_log row references
-// this UPID, regardless of whether it was written by the Nexara handler
-// (source='nexara') or previously ingested from Proxmox
-// (source='proxmox'). Used by collector/task_ingest.go to skip
-// ingesting tasks Nexara already audited — without that, the user sees
-// duplicate activity rows when they trigger an action through the UI
-// (one from the handler, one from the post-hoc proxmox task ingest).
-// Backed by idx_audit_log_upid (migration 000060).
-func (q *Queries) ExistsAuditLogByUPID(ctx context.Context, upid string) (bool, error) {
-	row := q.db.QueryRow(ctx, existsAuditLogByUPID, upid)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
-const existsTaskHistoryByUPID = `-- name: ExistsTaskHistoryByUPID :one
-SELECT EXISTS(SELECT 1 FROM task_history WHERE upid = $1) AS exists
-`
-
-func (q *Queries) ExistsTaskHistoryByUPID(ctx context.Context, upid string) (bool, error) {
-	row := q.db.QueryRow(ctx, existsTaskHistoryByUPID, upid)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const getTaskSyncState = `-- name: GetTaskSyncState :one
 SELECT last_synced_at FROM proxmox_task_sync_state WHERE cluster_id = $1
 `
@@ -50,6 +20,63 @@ func (q *Queries) GetTaskSyncState(ctx context.Context, clusterID uuid.UUID) (in
 	var last_synced_at int64
 	err := row.Scan(&last_synced_at)
 	return last_synced_at, err
+}
+
+const listExistingAuditLogUPIDs = `-- name: ListExistingAuditLogUPIDs :many
+SELECT (details->>'upid')::text AS upid FROM audit_log WHERE details->>'upid' = ANY($1::text[])
+`
+
+func (q *Queries) ListExistingAuditLogUPIDs(ctx context.Context, upids []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listExistingAuditLogUPIDs, upids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var upid string
+		if err := rows.Scan(&upid); err != nil {
+			return nil, err
+		}
+		items = append(items, upid)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExistingTaskHistoryUPIDs = `-- name: ListExistingTaskHistoryUPIDs :many
+
+SELECT upid FROM task_history WHERE upid = ANY($1::text[])
+`
+
+// ListExistingTaskHistoryUPIDs and ListExistingAuditLogUPIDs are the batch
+// dedup the collector ingest uses: given a node's candidate UPIDs, return the
+// subset already recorded, so ingestTask skips them without a per-task SELECT
+// (the security review flagged the old 2×N point lookups). Together they cover
+// the original two dedup layers — task_history (Nexara-dispatched or
+// already-ingested external) and audit_log (any source: a UI action Nexara
+// already audited, or a legacy external task ingested before task_history rows
+// existed). Backed by idx_task_history_upid and idx_audit_log_upid.
+func (q *Queries) ListExistingTaskHistoryUPIDs(ctx context.Context, upids []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listExistingTaskHistoryUPIDs, upids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var upid string
+		if err := rows.Scan(&upid); err != nil {
+			return nil, err
+		}
+		items = append(items, upid)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertTaskSyncState = `-- name: UpsertTaskSyncState :exec

@@ -46,12 +46,24 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 			continue
 		}
 
+		// Resolve which UPIDs are already recorded in one batch per node (two
+		// indexed lookups) instead of a per-task SELECT pair.
+		candidates := make([]string, 0, len(tasks))
+		for _, task := range tasks {
+			if !skipTaskTypes[task.Type] {
+				candidates = append(candidates, task.UPID)
+			}
+		}
+		seen, dedupErr := s.seenTaskUPIDs(ctx, cluster, candidates)
+
 		for _, task := range tasks {
 			if task.StartTime > maxStartTime {
 				maxStartTime = task.StartTime
 			}
-
-			if err := s.ingestTask(ctx, cluster, node.Node, task); err != nil {
+			if dedupErr != nil {
+				continue // can't dedup safely this tick; skip to avoid duplicate rows
+			}
+			if err := s.ingestTask(ctx, cluster, node.Node, task, seen); err != nil {
 				s.logger.Warn("task sync: failed to ingest task",
 					"cluster_id", cluster.ID,
 					"upid", task.UPID,
@@ -75,35 +87,54 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 	}
 }
 
+// seenTaskUPIDs returns the subset of the candidate UPIDs already recorded — in
+// task_history (Nexara-dispatched or a prior external ingest) or audit_log (any
+// source) — so ingestTask can skip them. Two indexed batch lookups replace the
+// old per-task 2×N point SELECTs. Returns an error if either lookup fails so the
+// caller can skip ingestion rather than risk duplicate rows from a partial set.
+func (s *Syncer) seenTaskUPIDs(ctx context.Context, cluster db.Cluster, upids []string) (map[string]bool, error) {
+	seen := make(map[string]bool, len(upids))
+	if len(upids) == 0 {
+		return seen, nil
+	}
+	thUPIDs, err := s.queries.ListExistingTaskHistoryUPIDs(ctx, upids)
+	if err != nil {
+		s.logger.Warn("task sync: batch task_history UPID check failed",
+			"cluster_id", cluster.ID, "error", err)
+		return seen, err
+	}
+	for _, u := range thUPIDs {
+		seen[u] = true
+	}
+	alUPIDs, err := s.queries.ListExistingAuditLogUPIDs(ctx, upids)
+	if err != nil {
+		s.logger.Warn("task sync: batch audit_log UPID check failed",
+			"cluster_id", cluster.ID, "error", err)
+		return seen, err
+	}
+	for _, u := range alUPIDs {
+		seen[u] = true
+	}
+	return seen, nil
+}
+
 // ingestTask records a single external (non-Nexara) Proxmox task: a task_history
 // row (status from the task — running or classified terminal — so the reconciler
 // and the Tasks page see it) plus an audit_log entry (so the activity feed shows
 // it), attributed to the system user. Nexara-initiated tasks and tasks already
 // seen on a prior tick are skipped.
-func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName string, task proxmox.NodeTask) error {
+func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName string, task proxmox.NodeTask, seen map[string]bool) error {
 	// Skip noisy task types.
 	if skipTaskTypes[task.Type] {
 		return nil
 	}
 
-	// Dedup layer 1: skip if UPID exists in task_history. Catches Nexara-
-	// dispatched tasks (already tracked at dispatch) AND external tasks ingested
-	// on a prior tick — once a task_history row exists, the collector reconciler
-	// owns its running→done transition, so re-ingesting would be redundant.
-	exists, err := s.queries.ExistsTaskHistoryByUPID(ctx, task.UPID)
-	if err != nil {
-		return fmt.Errorf("check task_history UPID: %w", err)
-	}
-	if exists {
-		return nil
-	}
-
-	// Dedup layer 2: skip if UPID was already ingested into audit_log.
-	alreadyIngested, err := s.queries.ExistsAuditLogByUPID(ctx, task.UPID)
-	if err != nil {
-		return fmt.Errorf("check audit_log UPID: %w", err)
-	}
-	if alreadyIngested {
+	// Dedup: skip if already recorded (task_history — Nexara-dispatched or a
+	// prior external ingest — or audit_log, any source). The seen set is
+	// resolved once per node in syncTasks via two batch lookups; once a
+	// task_history row exists, the collector reconciler owns its running→done
+	// transition, so re-ingesting would be redundant.
+	if seen[task.UPID] {
 		return nil
 	}
 
