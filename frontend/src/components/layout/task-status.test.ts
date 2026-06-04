@@ -16,21 +16,53 @@ describe("isOkExit", () => {
 describe("deriveTaskStatus precedence", () => {
   const noDetails = {};
 
-  it("prefers the live poll over server/details", () => {
-    // live poll says running, even though server says completed
+  it("lets a terminal server status win over a stale poll (regression)", () => {
+    // Regression: a poller's leftover "running" must NOT override a completed
+    // server status — this was the "stuck on running after finish" bug.
     expect(
       deriveTaskStatus({ task_status: "completed" }, noDetails, {
         status: "running",
         exitStatus: "",
       }),
-    ).toBe("running");
-    // live poll says stopped+error, even though server still says running
+    ).toBe("ok");
+    expect(
+      deriveTaskStatus({ task_status: "failed" }, noDetails, {
+        status: "running",
+        exitStatus: "",
+      }),
+    ).toBe("failed");
+  });
+
+  it("uses the live poll to flip a still-running task to done sooner", () => {
+    // server still says running, but the poll knows it stopped — flip early
     expect(
       deriveTaskStatus({ task_status: "running" }, noDetails, {
         status: "stopped",
         exitStatus: "error",
       }),
     ).toBe("failed");
+    expect(
+      deriveTaskStatus({ task_status: "running" }, noDetails, {
+        status: "stopped",
+        exitStatus: "OK",
+      }),
+    ).toBe("ok");
+    expect(
+      deriveTaskStatus({ task_status: "running" }, noDetails, {
+        status: "running",
+        exitStatus: "",
+      }),
+    ).toBe("running");
+  });
+
+  it("uses the live poll as a fallback when there is no server status", () => {
+    // ingested external task with no task_history row
+    expect(
+      deriveTaskStatus({}, { upid: "UPID:x" }, { status: "stopped", exitStatus: "OK" }),
+    ).toBe("ok");
+    expect(
+      deriveTaskStatus({}, { upid: "UPID:x" }, { status: "running", exitStatus: "" }),
+    ).toBe("running");
   });
 
   it("falls back to server task_status when not polling", () => {

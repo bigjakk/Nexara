@@ -28,11 +28,19 @@ export function isOkExit(exitStatus: string): boolean {
 }
 
 /**
- * Resolves an activity row's task status, preferring the most live source:
- *   1. live poll (present only for currently-running tasks we still poll)
- *   2. server-authoritative task_history status (Nexara-dispatched tasks)
- *   3. status carried in the audit details (ingested, already-finished
- *      external Proxmox tasks)
+ * Resolves an activity row's task status. The server-authoritative
+ * task_history status (entry.task_status) is the source of truth and wins
+ * outright once it is terminal — a stale "running" left in a poller's cache
+ * must never override a completed/failed server status (that was the
+ * "stuck on running after the task finished" bug).
+ *
+ * The live poll is consulted only to make a *still-running* task flip to done
+ * sooner than the next reconcile tick, and as a fallback for ingested external
+ * Proxmox tasks that have no task_history row. Precedence:
+ *   1. server task_history status, when terminal (completed / failed / stopped)
+ *   2. live poll, while the server still reports running (flip-to-done early)
+ *   3. live poll / status carried in the audit details, for entries with no
+ *      task_history status (ingested external tasks)
  *   4. none (non-task audit entries)
  */
 export function deriveTaskStatus(
@@ -40,14 +48,7 @@ export function deriveTaskStatus(
   details: ParsedDetails,
   polled: { status: string; exitStatus: string } | undefined,
 ): DerivedTaskStatus {
-  if (polled) {
-    if (polled.status === "running") return "running";
-    if (polled.status === "stopped")
-      return isOkExit(polled.exitStatus) ? "ok" : "failed";
-  }
   switch (entry.task_status) {
-    case "running":
-      return "running";
     case "completed":
       return "ok";
     case "failed":
@@ -56,8 +57,23 @@ export function deriveTaskStatus(
       // Some writers (migration orchestrator, DRS) persist the raw Proxmox
       // "stopped" state rather than completed/failed; classify by exit status.
       return isOkExit(entry.task_exit_status ?? "") ? "ok" : "failed";
+    case "running":
+      // Server still reports running; a live poll may know it finished sooner.
+      if (polled) {
+        if (polled.status === "running") return "running";
+        if (polled.status === "stopped")
+          return isOkExit(polled.exitStatus) ? "ok" : "failed";
+      }
+      return "running";
     default:
       break;
+  }
+  // No task_history status (ingested external Proxmox task): use the live poll,
+  // then the finished status carried in the audit details.
+  if (polled) {
+    if (polled.status === "running") return "running";
+    if (polled.status === "stopped")
+      return isOkExit(polled.exitStatus) ? "ok" : "failed";
   }
   if (
     details.upid &&
