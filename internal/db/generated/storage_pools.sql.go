@@ -13,16 +13,23 @@ import (
 )
 
 const deleteStaleStoragePools = `-- name: DeleteStaleStoragePools :execrows
-DELETE FROM storage_pools WHERE cluster_id = $1 AND last_seen_at < $2
+DELETE FROM storage_pools
+WHERE cluster_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
 `
 
 type DeleteStaleStoragePoolsParams struct {
-	ClusterID  uuid.UUID `json:"cluster_id"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	GraceSeconds int32     `json:"grace_seconds"`
 }
 
+// Grace-windowed, DB-clock prune (see DeleteStaleVMsForNodes in vms.sql): only
+// removes pools unseen for longer than the grace window, with the cutoff driven
+// from now() so the app and DB clocks aren't mixed. Avoids churning pool rows —
+// and the spurious inventory-change events that churn emits — on a momentary
+// non-observation.
 func (q *Queries) DeleteStaleStoragePools(ctx context.Context, arg DeleteStaleStoragePoolsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteStaleStoragePools, arg.ClusterID, arg.LastSeenAt)
+	result, err := q.db.Exec(ctx, deleteStaleStoragePools, arg.ClusterID, arg.GraceSeconds)
 	if err != nil {
 		return 0, err
 	}

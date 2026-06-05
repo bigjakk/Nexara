@@ -18,4 +18,8 @@ RETURNING *;
 SELECT * FROM node_disks WHERE node_id = $1 ORDER BY dev_path;
 
 -- name: DeleteStaleNodeDisks :exec
-DELETE FROM node_disks WHERE node_id = $1 AND last_seen_at < $2;
+-- Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
+-- a momentary non-observation no longer churns physical-disk rows.
+DELETE FROM node_disks
+WHERE node_id = $1
+  AND last_seen_at < now() - make_interval(secs => @grace_seconds::int);

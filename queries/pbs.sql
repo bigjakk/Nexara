@@ -59,16 +59,24 @@ WHERE pbs_server_id = $1
 ORDER BY job_id;
 
 -- name: DeleteStalePBSSnapshots :exec
+-- Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
+-- a momentary non-observation no longer churns PBS inventory rows, and the
+-- cutoff is driven from now() so the app and DB clocks aren't mixed.
 DELETE FROM pbs_snapshots
-WHERE pbs_server_id = $1 AND last_seen_at < $2;
+WHERE pbs_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => @grace_seconds::int);
 
 -- name: DeleteStalePBSSyncJobs :exec
+-- Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 DELETE FROM pbs_sync_jobs
-WHERE pbs_server_id = $1 AND last_seen_at < $2;
+WHERE pbs_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => @grace_seconds::int);
 
 -- name: DeleteStalePBSVerifyJobs :exec
+-- Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 DELETE FROM pbs_verify_jobs
-WHERE pbs_server_id = $1 AND last_seen_at < $2;
+WHERE pbs_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => @grace_seconds::int);
 
 -- name: ListPBSSnapshotsByBackupID :many
 SELECT * FROM pbs_snapshots

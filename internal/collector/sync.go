@@ -20,6 +20,23 @@ import (
 	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
+// staleVMGrace is how long a guest must go unseen on an otherwise-healthy node
+// before the collector prunes its vms row. It absorbs momentary non-observation
+// (most importantly the cutover instant of a live migration, when Proxmox lists
+// the guest on neither source nor destination) so a single missed sync doesn't
+// delete and re-insert the row — that churn mints a fresh vms.id, which folder
+// membership and other natural-key state are deliberately decoupled from, but
+// avoiding the churn altogether also keeps metrics/inventory continuous.
+const staleVMGrace = 5 * time.Minute
+
+// staleInventoryGrace is the equivalent unseen-grace for the non-guest
+// inventory pruned each sync — storage pools, node hardware (disks, NICs,
+// PCI devices), and PBS snapshots/sync/verify jobs. Same rationale as
+// staleVMGrace: prune on the DB clock only after the grace window, so a
+// momentary non-observation (or app/DB clock skew) doesn't churn rows — and,
+// for storage pools, doesn't emit spurious inventory-change events.
+const staleInventoryGrace = 5 * time.Minute
+
 // SyncQueries defines the database operations needed by the Syncer.
 // This interface enables testing with mock implementations.
 type SyncQueries interface {
@@ -462,16 +479,19 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		}
 	}
 
-	// Prune VMs/CTs that no longer exist on Proxmox. We restrict the
-	// delete to nodes whose VM+container fetch succeeded this cycle so a
-	// transient Proxmox API failure on one node doesn't briefly wipe its
-	// inventory. VMs on nodes that failed to sync are left intact and will
-	// be pruned the next time that node syncs cleanly.
+	// Prune VMs/CTs that no longer exist on Proxmox. Two guards keep this from
+	// churning rows for guests that still exist: we restrict the delete to nodes
+	// whose VM+container fetch succeeded this cycle (so a transient per-node API
+	// failure won't wipe that node's inventory), and the query only deletes
+	// guests unseen for longer than staleVMGrace (so a momentary non-observation
+	// — e.g. a live migration's cutover instant — won't delete+reinsert the row
+	// and mint a fresh vms.id). VMs on nodes that failed to sync are left intact
+	// and reconciled on the next clean cycle.
 	if len(syncedNodeIDs) > 0 {
 		if err := s.queries.DeleteStaleVMsForNodes(ctx, db.DeleteStaleVMsForNodesParams{
-			ClusterID:  cluster.ID,
-			LastSeenAt: now,
-			NodeIds:    syncedNodeIDs,
+			ClusterID:    cluster.ID,
+			GraceSeconds: int32(staleVMGrace.Seconds()),
+			NodeIds:      syncedNodeIDs,
 		}); err != nil {
 			s.logger.Warn("failed to prune stale VMs",
 				"cluster_id", cluster.ID,
@@ -484,8 +504,8 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// share removed at the datacenter level). Flag inventory change when
 	// rows are actually deleted so the frontend refreshes the UI.
 	if removed, err := s.queries.DeleteStaleStoragePools(ctx, db.DeleteStaleStoragePoolsParams{
-		ClusterID:  cluster.ID,
-		LastSeenAt: now,
+		ClusterID:    cluster.ID,
+		GraceSeconds: int32(staleInventoryGrace.Seconds()),
 	}); err != nil {
 		s.logger.Warn("failed to prune stale storage pools",
 			"cluster_id", cluster.ID,
@@ -686,7 +706,6 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	}
 
 	// Sync physical disks.
-	syncStart := time.Now()
 	if disks, err := client.GetNodeDisks(ctx, node.Node); err != nil {
 		s.logger.Warn("failed to sync node disks", "node", node.Node, "error", err)
 	} else {
@@ -708,7 +727,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				s.logger.Warn("failed to upsert node disk", "node", node.Node, "dev", d.DevPath, "error", err)
 			}
 		}
-		_ = s.queries.DeleteStaleNodeDisks(ctx, db.DeleteStaleNodeDisksParams{NodeID: dbNode.ID, LastSeenAt: syncStart})
+		_ = s.queries.DeleteStaleNodeDisks(ctx, db.DeleteStaleNodeDisksParams{NodeID: dbNode.ID, GraceSeconds: int32(staleInventoryGrace.Seconds())})
 	}
 
 	// Sync network interfaces.
@@ -735,7 +754,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				s.logger.Warn("failed to upsert network interface", "node", node.Node, "iface", iface.Iface, "error", err)
 			}
 		}
-		_ = s.queries.DeleteStaleNodeNetworkInterfaces(ctx, db.DeleteStaleNodeNetworkInterfacesParams{NodeID: dbNode.ID, LastSeenAt: syncStart})
+		_ = s.queries.DeleteStaleNodeNetworkInterfaces(ctx, db.DeleteStaleNodeNetworkInterfacesParams{NodeID: dbNode.ID, GraceSeconds: int32(staleInventoryGrace.Seconds())})
 	}
 
 	// Sync PCI devices.
@@ -759,7 +778,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				s.logger.Warn("failed to upsert PCI device", "node", node.Node, "pci", d.ID, "error", err)
 			}
 		}
-		_ = s.queries.DeleteStaleNodePCIDevices(ctx, db.DeleteStaleNodePCIDevicesParams{NodeID: dbNode.ID, LastSeenAt: syncStart})
+		_ = s.queries.DeleteStaleNodePCIDevices(ctx, db.DeleteStaleNodePCIDevicesParams{NodeID: dbNode.ID, GraceSeconds: int32(staleInventoryGrace.Seconds())})
 	}
 
 	// Sum VM/CT disk and network I/O into the node metric snapshot.
@@ -1251,20 +1270,20 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 
 	// Prune stale inventory.
 	if err := s.queries.DeleteStalePBSSnapshots(ctx, db.DeleteStalePBSSnapshotsParams{
-		PbsServerID: server.ID,
-		LastSeenAt:  now,
+		PbsServerID:  server.ID,
+		GraceSeconds: int32(staleInventoryGrace.Seconds()),
 	}); err != nil {
 		s.logger.Warn("failed to prune stale PBS snapshots", "pbs_id", server.ID, "error", err)
 	}
 	if err := s.queries.DeleteStalePBSSyncJobs(ctx, db.DeleteStalePBSSyncJobsParams{
-		PbsServerID: server.ID,
-		LastSeenAt:  now,
+		PbsServerID:  server.ID,
+		GraceSeconds: int32(staleInventoryGrace.Seconds()),
 	}); err != nil {
 		s.logger.Warn("failed to prune stale PBS sync jobs", "pbs_id", server.ID, "error", err)
 	}
 	if err := s.queries.DeleteStalePBSVerifyJobs(ctx, db.DeleteStalePBSVerifyJobsParams{
-		PbsServerID: server.ID,
-		LastSeenAt:  now,
+		PbsServerID:  server.ID,
+		GraceSeconds: int32(staleInventoryGrace.Seconds()),
 	}); err != nil {
 		s.logger.Warn("failed to prune stale PBS verify jobs", "pbs_id", server.ID, "error", err)
 	}

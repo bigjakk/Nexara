@@ -336,7 +336,10 @@ func (h *VMFoldersHandler) AssignVM(c *fiber.Ctx) error {
 	}
 
 	if req.FolderID == nil {
-		if err := h.queries.UnassignVMFromFolder(c.Context(), vmID); err != nil {
+		if err := h.queries.UnassignVMFromFolder(c.Context(), db.UnassignVMFromFolderParams{
+			ClusterID: clusterID,
+			Vmid:      vm.Vmid,
+		}); err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to unassign VM")
 		}
 		details, _ := json.Marshal(map[string]any{"vmid": vm.Vmid, "folder_id": nil})
@@ -348,8 +351,9 @@ func (h *VMFoldersHandler) AssignVM(c *fiber.Ctx) error {
 		return err
 	}
 	if err := h.queries.AssignVMToFolder(c.Context(), db.AssignVMToFolderParams{
-		VmID:     vmID,
-		FolderID: *req.FolderID,
+		ClusterID: clusterID,
+		Vmid:      vm.Vmid,
+		FolderID:  *req.FolderID,
 	}); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to assign VM")
 	}

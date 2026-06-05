@@ -958,9 +958,10 @@ type VmFolder struct {
 }
 
 type VmFolderMembership struct {
-	VmID      uuid.UUID `json:"vm_id"`
 	FolderID  uuid.UUID `json:"folder_id"`
 	UpdatedAt time.Time `json:"updated_at"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
 }
 
 type VmMetric struct {

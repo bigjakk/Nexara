@@ -21,4 +21,7 @@ RETURNING *;
 SELECT * FROM node_network_interfaces WHERE node_id = $1 ORDER BY iface;
 
 -- name: DeleteStaleNodeNetworkInterfaces :exec
-DELETE FROM node_network_interfaces WHERE node_id = $1 AND last_seen_at < $2;
+-- Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
+DELETE FROM node_network_interfaces
+WHERE node_id = $1
+  AND last_seen_at < now() - make_interval(secs => @grace_seconds::int);

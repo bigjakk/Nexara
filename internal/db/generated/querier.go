@@ -109,17 +109,38 @@ type Querier interface {
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
 	DeleteSetting(ctx context.Context, arg DeleteSettingParams) error
 	DeleteSettingByID(ctx context.Context, id uuid.UUID) error
+	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
+	// a momentary non-observation no longer churns physical-disk rows.
 	DeleteStaleNodeDisks(ctx context.Context, arg DeleteStaleNodeDisksParams) error
+	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 	DeleteStaleNodeNetworkInterfaces(ctx context.Context, arg DeleteStaleNodeNetworkInterfacesParams) error
+	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 	DeleteStaleNodePCIDevices(ctx context.Context, arg DeleteStaleNodePCIDevicesParams) error
+	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
+	// a momentary non-observation no longer churns PBS inventory rows, and the
+	// cutoff is driven from now() so the app and DB clocks aren't mixed.
 	DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error
+	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
+	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
+	// Grace-windowed, DB-clock prune (see DeleteStaleVMsForNodes in vms.sql): only
+	// removes pools unseen for longer than the grace window, with the cutoff driven
+	// from now() so the app and DB clocks aren't mixed. Avoids churning pool rows —
+	// and the spurious inventory-change events that churn emits — on a momentary
+	// non-observation.
 	DeleteStaleStoragePools(ctx context.Context, arg DeleteStaleStoragePoolsParams) (int64, error)
 	DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) error
-	// Prunes VMs only on nodes that synced successfully this cycle. Used by
-	// the collector so a transient per-node Proxmox API failure doesn't
-	// briefly wipe that node's inventory.
+	// Prunes VMs only on nodes that synced successfully this cycle, and only once a
+	// VM has been unseen for longer than the grace window. Both guards matter:
+	//   * node scoping stops a transient per-node Proxmox API failure from wiping
+	//     that node's inventory;
+	//   * the grace window (evaluated entirely on the DB clock via now()) stops a
+	//     momentary non-observation — e.g. the cutover instant of a live migration,
+	//     when Proxmox briefly lists the guest on neither source nor destination —
+	//     from deleting and re-inserting the row. That churn would mint a fresh
+	//     vms.id and, before migration 000068, silently dropped folder memberships.
+	//     Driving both sides from now() also avoids mixing the app and DB clocks.
 	DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMsForNodesParams) error
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
@@ -215,7 +236,6 @@ type Querier interface {
 	GetVM(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	GetVMFolder(ctx context.Context, id uuid.UUID) (VmFolder, error)
-	GetVMFolderMembership(ctx context.Context, vmID uuid.UUID) (VmFolderMembership, error)
 	GetVMIODailyRate(ctx context.Context, arg GetVMIODailyRateParams) ([]GetVMIODailyRateRow, error)
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
@@ -360,7 +380,11 @@ type Querier interface {
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersWithRoles(ctx context.Context) ([]ListUsersWithRolesRow, error)
-	ListVMFolderMembershipsByCluster(ctx context.Context, clusterID uuid.UUID) ([]VmFolderMembership, error)
+	// Membership is keyed on the stable Proxmox identity (cluster_id, vmid); join
+	// back to vms to return each VM's current internal id so the API contract (and
+	// the frontend, which maps by vm.id) is unchanged. Memberships whose VMID isn't
+	// currently present in vms are naturally dropped by the join.
+	ListVMFolderMembershipsByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMFolderMembershipsByClusterRow, error)
 	ListVMFoldersByCluster(ctx context.Context, clusterID uuid.UUID) ([]VmFolder, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
@@ -430,7 +454,7 @@ type Querier interface {
 	TouchMobileDevice(ctx context.Context, id uuid.UUID) error
 	TouchRollingUpdateNode(ctx context.Context, id uuid.UUID) error
 	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error
-	UnassignVMFromFolder(ctx context.Context, vmID uuid.UUID) error
+	UnassignVMFromFolder(ctx context.Context, arg UnassignVMFromFolderParams) error
 	UpdateAPIKeyLastUsed(ctx context.Context, arg UpdateAPIKeyLastUsedParams) error
 	UpdateAlertEscalation(ctx context.Context, arg UpdateAlertEscalationParams) error
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)

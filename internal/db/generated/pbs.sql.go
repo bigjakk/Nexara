@@ -14,46 +14,54 @@ import (
 
 const deleteStalePBSSnapshots = `-- name: DeleteStalePBSSnapshots :exec
 DELETE FROM pbs_snapshots
-WHERE pbs_server_id = $1 AND last_seen_at < $2
+WHERE pbs_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
 `
 
 type DeleteStalePBSSnapshotsParams struct {
-	PbsServerID uuid.UUID `json:"pbs_server_id"`
-	LastSeenAt  time.Time `json:"last_seen_at"`
+	PbsServerID  uuid.UUID `json:"pbs_server_id"`
+	GraceSeconds int32     `json:"grace_seconds"`
 }
 
+// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
+// a momentary non-observation no longer churns PBS inventory rows, and the
+// cutoff is driven from now() so the app and DB clocks aren't mixed.
 func (q *Queries) DeleteStalePBSSnapshots(ctx context.Context, arg DeleteStalePBSSnapshotsParams) error {
-	_, err := q.db.Exec(ctx, deleteStalePBSSnapshots, arg.PbsServerID, arg.LastSeenAt)
+	_, err := q.db.Exec(ctx, deleteStalePBSSnapshots, arg.PbsServerID, arg.GraceSeconds)
 	return err
 }
 
 const deleteStalePBSSyncJobs = `-- name: DeleteStalePBSSyncJobs :exec
 DELETE FROM pbs_sync_jobs
-WHERE pbs_server_id = $1 AND last_seen_at < $2
+WHERE pbs_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
 `
 
 type DeleteStalePBSSyncJobsParams struct {
-	PbsServerID uuid.UUID `json:"pbs_server_id"`
-	LastSeenAt  time.Time `json:"last_seen_at"`
+	PbsServerID  uuid.UUID `json:"pbs_server_id"`
+	GraceSeconds int32     `json:"grace_seconds"`
 }
 
+// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 func (q *Queries) DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error {
-	_, err := q.db.Exec(ctx, deleteStalePBSSyncJobs, arg.PbsServerID, arg.LastSeenAt)
+	_, err := q.db.Exec(ctx, deleteStalePBSSyncJobs, arg.PbsServerID, arg.GraceSeconds)
 	return err
 }
 
 const deleteStalePBSVerifyJobs = `-- name: DeleteStalePBSVerifyJobs :exec
 DELETE FROM pbs_verify_jobs
-WHERE pbs_server_id = $1 AND last_seen_at < $2
+WHERE pbs_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
 `
 
 type DeleteStalePBSVerifyJobsParams struct {
-	PbsServerID uuid.UUID `json:"pbs_server_id"`
-	LastSeenAt  time.Time `json:"last_seen_at"`
+	PbsServerID  uuid.UUID `json:"pbs_server_id"`
+	GraceSeconds int32     `json:"grace_seconds"`
 }
 
+// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 func (q *Queries) DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error {
-	_, err := q.db.Exec(ctx, deleteStalePBSVerifyJobs, arg.PbsServerID, arg.LastSeenAt)
+	_, err := q.db.Exec(ctx, deleteStalePBSVerifyJobs, arg.PbsServerID, arg.GraceSeconds)
 	return err
 }
 

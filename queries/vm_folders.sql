@@ -30,22 +30,21 @@ RETURNING id, cluster_id, parent_id, name, created_at, updated_at;
 DELETE FROM vm_folders WHERE id = $1;
 
 -- name: ListVMFolderMembershipsByCluster :many
-SELECT m.vm_id, m.folder_id, m.updated_at
+-- Membership is keyed on the stable Proxmox identity (cluster_id, vmid); join
+-- back to vms to return each VM's current internal id so the API contract (and
+-- the frontend, which maps by vm.id) is unchanged. Memberships whose VMID isn't
+-- currently present in vms are naturally dropped by the join.
+SELECT v.id AS vm_id, m.folder_id, m.updated_at
 FROM vm_folder_memberships m
-JOIN vm_folders f ON f.id = m.folder_id
-WHERE f.cluster_id = $1;
-
--- name: GetVMFolderMembership :one
-SELECT vm_id, folder_id, updated_at
-FROM vm_folder_memberships
-WHERE vm_id = $1;
+JOIN vms v ON v.cluster_id = m.cluster_id AND v.vmid = m.vmid
+WHERE m.cluster_id = $1;
 
 -- name: AssignVMToFolder :exec
-INSERT INTO vm_folder_memberships (vm_id, folder_id)
-VALUES ($1, $2)
-ON CONFLICT (vm_id) DO UPDATE
+INSERT INTO vm_folder_memberships (cluster_id, vmid, folder_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, vmid) DO UPDATE
 SET folder_id = EXCLUDED.folder_id,
     updated_at = NOW();
 
 -- name: UnassignVMFromFolder :exec
-DELETE FROM vm_folder_memberships WHERE vm_id = $1;
+DELETE FROM vm_folder_memberships WHERE cluster_id = $1 AND vmid = $2;

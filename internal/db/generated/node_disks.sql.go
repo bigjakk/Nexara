@@ -7,22 +7,25 @@ package db
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
 
 const deleteStaleNodeDisks = `-- name: DeleteStaleNodeDisks :exec
-DELETE FROM node_disks WHERE node_id = $1 AND last_seen_at < $2
+DELETE FROM node_disks
+WHERE node_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
 `
 
 type DeleteStaleNodeDisksParams struct {
-	NodeID     uuid.UUID `json:"node_id"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	NodeID       uuid.UUID `json:"node_id"`
+	GraceSeconds int32     `json:"grace_seconds"`
 }
 
+// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql):
+// a momentary non-observation no longer churns physical-disk rows.
 func (q *Queries) DeleteStaleNodeDisks(ctx context.Context, arg DeleteStaleNodeDisksParams) error {
-	_, err := q.db.Exec(ctx, deleteStaleNodeDisks, arg.NodeID, arg.LastSeenAt)
+	_, err := q.db.Exec(ctx, deleteStaleNodeDisks, arg.NodeID, arg.GraceSeconds)
 	return err
 }
 

@@ -7,26 +7,28 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const assignVMToFolder = `-- name: AssignVMToFolder :exec
-INSERT INTO vm_folder_memberships (vm_id, folder_id)
-VALUES ($1, $2)
-ON CONFLICT (vm_id) DO UPDATE
+INSERT INTO vm_folder_memberships (cluster_id, vmid, folder_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (cluster_id, vmid) DO UPDATE
 SET folder_id = EXCLUDED.folder_id,
     updated_at = NOW()
 `
 
 type AssignVMToFolderParams struct {
-	VmID     uuid.UUID `json:"vm_id"`
-	FolderID uuid.UUID `json:"folder_id"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+	FolderID  uuid.UUID `json:"folder_id"`
 }
 
 func (q *Queries) AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) error {
-	_, err := q.db.Exec(ctx, assignVMToFolder, arg.VmID, arg.FolderID)
+	_, err := q.db.Exec(ctx, assignVMToFolder, arg.ClusterID, arg.Vmid, arg.FolderID)
 	return err
 }
 
@@ -85,35 +87,32 @@ func (q *Queries) GetVMFolder(ctx context.Context, id uuid.UUID) (VmFolder, erro
 	return i, err
 }
 
-const getVMFolderMembership = `-- name: GetVMFolderMembership :one
-SELECT vm_id, folder_id, updated_at
-FROM vm_folder_memberships
-WHERE vm_id = $1
+const listVMFolderMembershipsByCluster = `-- name: ListVMFolderMembershipsByCluster :many
+SELECT v.id AS vm_id, m.folder_id, m.updated_at
+FROM vm_folder_memberships m
+JOIN vms v ON v.cluster_id = m.cluster_id AND v.vmid = m.vmid
+WHERE m.cluster_id = $1
 `
 
-func (q *Queries) GetVMFolderMembership(ctx context.Context, vmID uuid.UUID) (VmFolderMembership, error) {
-	row := q.db.QueryRow(ctx, getVMFolderMembership, vmID)
-	var i VmFolderMembership
-	err := row.Scan(&i.VmID, &i.FolderID, &i.UpdatedAt)
-	return i, err
+type ListVMFolderMembershipsByClusterRow struct {
+	VmID      uuid.UUID `json:"vm_id"`
+	FolderID  uuid.UUID `json:"folder_id"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
-const listVMFolderMembershipsByCluster = `-- name: ListVMFolderMembershipsByCluster :many
-SELECT m.vm_id, m.folder_id, m.updated_at
-FROM vm_folder_memberships m
-JOIN vm_folders f ON f.id = m.folder_id
-WHERE f.cluster_id = $1
-`
-
-func (q *Queries) ListVMFolderMembershipsByCluster(ctx context.Context, clusterID uuid.UUID) ([]VmFolderMembership, error) {
+// Membership is keyed on the stable Proxmox identity (cluster_id, vmid); join
+// back to vms to return each VM's current internal id so the API contract (and
+// the frontend, which maps by vm.id) is unchanged. Memberships whose VMID isn't
+// currently present in vms are naturally dropped by the join.
+func (q *Queries) ListVMFolderMembershipsByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMFolderMembershipsByClusterRow, error) {
 	rows, err := q.db.Query(ctx, listVMFolderMembershipsByCluster, clusterID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []VmFolderMembership{}
+	items := []ListVMFolderMembershipsByClusterRow{}
 	for rows.Next() {
-		var i VmFolderMembership
+		var i ListVMFolderMembershipsByClusterRow
 		if err := rows.Scan(&i.VmID, &i.FolderID, &i.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -212,10 +211,15 @@ func (q *Queries) RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) 
 }
 
 const unassignVMFromFolder = `-- name: UnassignVMFromFolder :exec
-DELETE FROM vm_folder_memberships WHERE vm_id = $1
+DELETE FROM vm_folder_memberships WHERE cluster_id = $1 AND vmid = $2
 `
 
-func (q *Queries) UnassignVMFromFolder(ctx context.Context, vmID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, unassignVMFromFolder, vmID)
+type UnassignVMFromFolderParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+}
+
+func (q *Queries) UnassignVMFromFolder(ctx context.Context, arg UnassignVMFromFolderParams) error {
+	_, err := q.db.Exec(ctx, unassignVMFromFolder, arg.ClusterID, arg.Vmid)
 	return err
 }

@@ -7,22 +7,24 @@ package db
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
 
 const deleteStaleNodePCIDevices = `-- name: DeleteStaleNodePCIDevices :exec
-DELETE FROM node_pci_devices WHERE node_id = $1 AND last_seen_at < $2
+DELETE FROM node_pci_devices
+WHERE node_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
 `
 
 type DeleteStaleNodePCIDevicesParams struct {
-	NodeID     uuid.UUID `json:"node_id"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	NodeID       uuid.UUID `json:"node_id"`
+	GraceSeconds int32     `json:"grace_seconds"`
 }
 
+// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 func (q *Queries) DeleteStaleNodePCIDevices(ctx context.Context, arg DeleteStaleNodePCIDevicesParams) error {
-	_, err := q.db.Exec(ctx, deleteStaleNodePCIDevices, arg.NodeID, arg.LastSeenAt)
+	_, err := q.db.Exec(ctx, deleteStaleNodePCIDevices, arg.NodeID, arg.GraceSeconds)
 	return err
 }
 

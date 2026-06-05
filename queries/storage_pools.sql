@@ -29,4 +29,11 @@ DELETE FROM storage_pools WHERE id = $1;
 DELETE FROM storage_pools WHERE cluster_id = $1 AND storage = $2;
 
 -- name: DeleteStaleStoragePools :execrows
-DELETE FROM storage_pools WHERE cluster_id = $1 AND last_seen_at < $2;
+-- Grace-windowed, DB-clock prune (see DeleteStaleVMsForNodes in vms.sql): only
+-- removes pools unseen for longer than the grace window, with the cutoff driven
+-- from now() so the app and DB clocks aren't mixed. Avoids churning pool rows —
+-- and the spurious inventory-change events that churn emits — on a momentary
+-- non-observation.
+DELETE FROM storage_pools
+WHERE cluster_id = $1
+  AND last_seen_at < now() - make_interval(secs => @grace_seconds::int);

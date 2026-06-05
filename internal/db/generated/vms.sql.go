@@ -29,21 +29,28 @@ func (q *Queries) DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) 
 const deleteStaleVMsForNodes = `-- name: DeleteStaleVMsForNodes :exec
 DELETE FROM vms
 WHERE cluster_id = $1
-  AND last_seen_at < $2
+  AND last_seen_at < now() - make_interval(secs => $2::int)
   AND node_id = ANY($3::uuid[])
 `
 
 type DeleteStaleVMsForNodesParams struct {
-	ClusterID  uuid.UUID   `json:"cluster_id"`
-	LastSeenAt time.Time   `json:"last_seen_at"`
-	NodeIds    []uuid.UUID `json:"node_ids"`
+	ClusterID    uuid.UUID   `json:"cluster_id"`
+	GraceSeconds int32       `json:"grace_seconds"`
+	NodeIds      []uuid.UUID `json:"node_ids"`
 }
 
-// Prunes VMs only on nodes that synced successfully this cycle. Used by
-// the collector so a transient per-node Proxmox API failure doesn't
-// briefly wipe that node's inventory.
+// Prunes VMs only on nodes that synced successfully this cycle, and only once a
+// VM has been unseen for longer than the grace window. Both guards matter:
+//   - node scoping stops a transient per-node Proxmox API failure from wiping
+//     that node's inventory;
+//   - the grace window (evaluated entirely on the DB clock via now()) stops a
+//     momentary non-observation — e.g. the cutover instant of a live migration,
+//     when Proxmox briefly lists the guest on neither source nor destination —
+//     from deleting and re-inserting the row. That churn would mint a fresh
+//     vms.id and, before migration 000068, silently dropped folder memberships.
+//     Driving both sides from now() also avoids mixing the app and DB clocks.
 func (q *Queries) DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMsForNodesParams) error {
-	_, err := q.db.Exec(ctx, deleteStaleVMsForNodes, arg.ClusterID, arg.LastSeenAt, arg.NodeIds)
+	_, err := q.db.Exec(ctx, deleteStaleVMsForNodes, arg.ClusterID, arg.GraceSeconds, arg.NodeIds)
 	return err
 }
 

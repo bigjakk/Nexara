@@ -18,4 +18,7 @@ RETURNING *;
 SELECT * FROM node_pci_devices WHERE node_id = $1 ORDER BY pci_id;
 
 -- name: DeleteStaleNodePCIDevices :exec
-DELETE FROM node_pci_devices WHERE node_id = $1 AND last_seen_at < $2;
+-- Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
+DELETE FROM node_pci_devices
+WHERE node_id = $1
+  AND last_seen_at < now() - make_interval(secs => @grace_seconds::int);
