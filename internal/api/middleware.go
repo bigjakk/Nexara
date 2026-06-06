@@ -20,6 +20,30 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
+// contentSecurityPolicy is the default CSP for the SPA shell + API responses.
+// JSX auto-escaping is otherwise the only XSS control, so this is the second
+// line of defense. Notes on the directives:
+//   - script-src 'self': the Vite production build emits only external module
+//     scripts (no inline, no eval).
+//   - style-src 'unsafe-inline': Tailwind/shadcn (Radix), Recharts, and React
+//     Flow inject inline styles — required, and low-risk for styles.
+//   - connect-src ws: wss': the floating console (xterm) and noVNC open
+//     same-origin WebSockets; ws: covers the dev (http) origin.
+//   - worker-src/img-src blob': noVNC/xterm renderers and canvas-to-blob.
+// Handlers that serve downloadable HTML (reports, settings export) set their
+// own stricter CSP via c.Set after this middleware, which overrides it.
+const contentSecurityPolicy = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob:; " +
+	"font-src 'self'; " +
+	"connect-src 'self' ws: wss:; " +
+	"worker-src 'self' blob:; " +
+	"frame-ancestors 'none'; " +
+	"base-uri 'self'; " +
+	"form-action 'self'; " +
+	"object-src 'none'"
+
 func (s *Server) setupMiddleware() {
 	// Recover from panics.
 	s.app.Use(recover.New())
@@ -30,6 +54,7 @@ func (s *Server) setupMiddleware() {
 		c.Set("X-Frame-Options", "DENY")
 		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		c.Set("Content-Security-Policy", contentSecurityPolicy)
 		return c.Next()
 	})
 
