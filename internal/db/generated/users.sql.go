@@ -40,10 +40,10 @@ RETURNING id, email, password_hash, display_name, is_active, totp_secret, create
 
 type CreateUserParams struct {
 	Email        string      `json:"email"`
-	PasswordHash string      `json:"password_hash"`
+	PasswordHash string      `json:"-"`
 	DisplayName  string      `json:"display_name"`
 	IsActive     bool        `json:"is_active"`
-	TotpSecret   pgtype.Text `json:"totp_secret"`
+	TotpSecret   pgtype.Text `json:"-"`
 	Role         string      `json:"role"`
 }
 
@@ -166,7 +166,7 @@ UPDATE users SET password_hash = $2 WHERE id = $1
 
 type UpdatePasswordParams struct {
 	ID           uuid.UUID `json:"id"`
-	PasswordHash string    `json:"password_hash"`
+	PasswordHash string    `json:"-"`
 }
 
 func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error {
@@ -188,10 +188,10 @@ RETURNING id, email, password_hash, display_name, is_active, totp_secret, create
 type UpdateUserParams struct {
 	ID           uuid.UUID   `json:"id"`
 	Email        string      `json:"email"`
-	PasswordHash string      `json:"password_hash"`
+	PasswordHash string      `json:"-"`
 	DisplayName  string      `json:"display_name"`
 	IsActive     bool        `json:"is_active"`
-	TotpSecret   pgtype.Text `json:"totp_secret"`
+	TotpSecret   pgtype.Text `json:"-"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {

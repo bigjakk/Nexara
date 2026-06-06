@@ -70,8 +70,8 @@ type UpsertClusterSSHCredentialsParams struct {
 	Username            string    `json:"username"`
 	Port                int32     `json:"port"`
 	AuthType            string    `json:"auth_type"`
-	EncryptedPassword   string    `json:"encrypted_password"`
-	EncryptedPrivateKey string    `json:"encrypted_private_key"`
+	EncryptedPassword   string    `json:"-"`
+	EncryptedPrivateKey string    `json:"-"`
 }
 
 func (q *Queries) UpsertClusterSSHCredentials(ctx context.Context, arg UpsertClusterSSHCredentialsParams) (ClusterSshCredential, error) {

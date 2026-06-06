@@ -37,7 +37,7 @@ type CreateLDAPConfigParams struct {
 	StartTls              bool            `json:"start_tls"`
 	SkipTlsVerify         bool            `json:"skip_tls_verify"`
 	BindDn                string          `json:"bind_dn"`
-	BindPasswordEncrypted string          `json:"bind_password_encrypted"`
+	BindPasswordEncrypted string          `json:"-"`
 	SearchBaseDn          string          `json:"search_base_dn"`
 	UserFilter            string          `json:"user_filter"`
 	UsernameAttribute     string          `json:"username_attribute"`
@@ -374,7 +374,7 @@ type UpdateLDAPConfigParams struct {
 	StartTls              bool            `json:"start_tls"`
 	SkipTlsVerify         bool            `json:"skip_tls_verify"`
 	BindDn                string          `json:"bind_dn"`
-	BindPasswordEncrypted string          `json:"bind_password_encrypted"`
+	BindPasswordEncrypted string          `json:"-"`
 	SearchBaseDn          string          `json:"search_base_dn"`
 	UserFilter            string          `json:"user_filter"`
 	UsernameAttribute     string          `json:"username_attribute"`

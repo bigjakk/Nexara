@@ -21,7 +21,7 @@ type CreateClusterParams struct {
 	Name                 string `json:"name"`
 	ApiUrl               string `json:"api_url"`
 	TokenID              string `json:"token_id"`
-	TokenSecretEncrypted string `json:"token_secret_encrypted"`
+	TokenSecretEncrypted string `json:"-"`
 	TlsFingerprint       string `json:"tls_fingerprint"`
 	SyncIntervalSeconds  int32  `json:"sync_interval_seconds"`
 	IsActive             bool   `json:"is_active"`
@@ -176,7 +176,7 @@ type UpdateClusterParams struct {
 	Name                 string    `json:"name"`
 	ApiUrl               string    `json:"api_url"`
 	TokenID              string    `json:"token_id"`
-	TokenSecretEncrypted string    `json:"token_secret_encrypted"`
+	TokenSecretEncrypted string    `json:"-"`
 	TlsFingerprint       string    `json:"tls_fingerprint"`
 	SyncIntervalSeconds  int32     `json:"sync_interval_seconds"`
 	IsActive             bool      `json:"is_active"`

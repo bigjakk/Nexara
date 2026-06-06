@@ -31,7 +31,7 @@ type CreateOIDCConfigParams struct {
 	Enabled               bool            `json:"enabled"`
 	IssuerUrl             string          `json:"issuer_url"`
 	ClientID              string          `json:"client_id"`
-	ClientSecretEncrypted string          `json:"client_secret_encrypted"`
+	ClientSecretEncrypted string          `json:"-"`
 	RedirectUri           string          `json:"redirect_uri"`
 	Scopes                []string        `json:"scopes"`
 	EmailClaim            string          `json:"email_claim"`
@@ -294,7 +294,7 @@ type UpdateOIDCConfigParams struct {
 	Enabled               bool            `json:"enabled"`
 	IssuerUrl             string          `json:"issuer_url"`
 	ClientID              string          `json:"client_id"`
-	ClientSecretEncrypted string          `json:"client_secret_encrypted"`
+	ClientSecretEncrypted string          `json:"-"`
 	RedirectUri           string          `json:"redirect_uri"`
 	Scopes                []string        `json:"scopes"`
 	EmailClaim            string          `json:"email_claim"`

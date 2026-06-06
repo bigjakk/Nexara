@@ -167,7 +167,7 @@ type Cluster struct {
 	Name                 string    `json:"name"`
 	ApiUrl               string    `json:"api_url"`
 	TokenID              string    `json:"token_id"`
-	TokenSecretEncrypted string    `json:"token_secret_encrypted"`
+	TokenSecretEncrypted string    `json:"-"`
 	TlsFingerprint       string    `json:"tls_fingerprint"`
 	SyncIntervalSeconds  int32     `json:"sync_interval_seconds"`
 	IsActive             bool      `json:"is_active"`
@@ -182,8 +182,8 @@ type ClusterSshCredential struct {
 	Username            string    `json:"username"`
 	Port                int32     `json:"port"`
 	AuthType            string    `json:"auth_type"`
-	EncryptedPassword   string    `json:"encrypted_password"`
-	EncryptedPrivateKey string    `json:"encrypted_private_key"`
+	EncryptedPassword   string    `json:"-"`
+	EncryptedPrivateKey string    `json:"-"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -362,7 +362,7 @@ type LdapConfig struct {
 	StartTls              bool               `json:"start_tls"`
 	SkipTlsVerify         bool               `json:"skip_tls_verify"`
 	BindDn                string             `json:"bind_dn"`
-	BindPasswordEncrypted string             `json:"bind_password_encrypted"`
+	BindPasswordEncrypted string             `json:"-"`
 	SearchBaseDn          string             `json:"search_base_dn"`
 	UserFilter            string             `json:"user_filter"`
 	UsernameAttribute     string             `json:"username_attribute"`
@@ -573,7 +573,7 @@ type NotificationChannel struct {
 	ID              uuid.UUID `json:"id"`
 	Name            string    `json:"name"`
 	ChannelType     string    `json:"channel_type"`
-	ConfigEncrypted string    `json:"config_encrypted"`
+	ConfigEncrypted string    `json:"-"`
 	Enabled         bool      `json:"enabled"`
 	CreatedBy       uuid.UUID `json:"created_by"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -603,7 +603,7 @@ type OidcConfig struct {
 	Enabled               bool            `json:"enabled"`
 	IssuerUrl             string          `json:"issuer_url"`
 	ClientID              string          `json:"client_id"`
-	ClientSecretEncrypted string          `json:"client_secret_encrypted"`
+	ClientSecretEncrypted string          `json:"-"`
 	RedirectUri           string          `json:"redirect_uri"`
 	Scopes                []string        `json:"scopes"`
 	EmailClaim            string          `json:"email_claim"`
@@ -640,7 +640,7 @@ type PbsServer struct {
 	Name                 string      `json:"name"`
 	ApiUrl               string      `json:"api_url"`
 	TokenID              string      `json:"token_id"`
-	TokenSecretEncrypted string      `json:"token_secret_encrypted"`
+	TokenSecretEncrypted string      `json:"-"`
 	ClusterID            pgtype.UUID `json:"cluster_id"`
 	CreatedAt            time.Time   `json:"created_at"`
 	UpdatedAt            time.Time   `json:"updated_at"`
@@ -906,10 +906,10 @@ type TotpRecoveryCode struct {
 type User struct {
 	ID           uuid.UUID   `json:"id"`
 	Email        string      `json:"email"`
-	PasswordHash string      `json:"password_hash"`
+	PasswordHash string      `json:"-"`
 	DisplayName  string      `json:"display_name"`
 	IsActive     bool        `json:"is_active"`
-	TotpSecret   pgtype.Text `json:"totp_secret"`
+	TotpSecret   pgtype.Text `json:"-"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 	Role         string      `json:"role"`

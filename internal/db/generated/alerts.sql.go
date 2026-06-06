@@ -610,7 +610,7 @@ RETURNING id, name, channel_type, config_encrypted, enabled, created_by, created
 type InsertNotificationChannelParams struct {
 	Name            string    `json:"name"`
 	ChannelType     string    `json:"channel_type"`
-	ConfigEncrypted string    `json:"config_encrypted"`
+	ConfigEncrypted string    `json:"-"`
 	Enabled         bool      `json:"enabled"`
 	CreatedBy       uuid.UUID `json:"created_by"`
 }
@@ -1410,7 +1410,7 @@ type UpdateNotificationChannelParams struct {
 	ID              uuid.UUID `json:"id"`
 	Name            string    `json:"name"`
 	ChannelType     string    `json:"channel_type"`
-	ConfigEncrypted string    `json:"config_encrypted"`
+	ConfigEncrypted string    `json:"-"`
 	Enabled         bool      `json:"enabled"`
 }
 

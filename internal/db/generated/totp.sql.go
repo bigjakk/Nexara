@@ -56,7 +56,7 @@ SELECT id, totp_secret FROM users WHERE id = $1
 
 type GetUserTOTPSecretRow struct {
 	ID         uuid.UUID   `json:"id"`
-	TotpSecret pgtype.Text `json:"totp_secret"`
+	TotpSecret pgtype.Text `json:"-"`
 }
 
 func (q *Queries) GetUserTOTPSecret(ctx context.Context, id uuid.UUID) (GetUserTOTPSecretRow, error) {
@@ -115,7 +115,7 @@ UPDATE users SET totp_secret = $2 WHERE id = $1
 
 type SetTOTPSecretParams struct {
 	ID         uuid.UUID   `json:"id"`
-	TotpSecret pgtype.Text `json:"totp_secret"`
+	TotpSecret pgtype.Text `json:"-"`
 }
 
 func (q *Queries) SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error {

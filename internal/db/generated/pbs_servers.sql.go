@@ -22,7 +22,7 @@ type CreatePBSServerParams struct {
 	Name                 string      `json:"name"`
 	ApiUrl               string      `json:"api_url"`
 	TokenID              string      `json:"token_id"`
-	TokenSecretEncrypted string      `json:"token_secret_encrypted"`
+	TokenSecretEncrypted string      `json:"-"`
 	ClusterID            pgtype.UUID `json:"cluster_id"`
 	TlsFingerprint       string      `json:"tls_fingerprint"`
 }
@@ -200,7 +200,7 @@ type UpdatePBSServerParams struct {
 	Name                 string      `json:"name"`
 	ApiUrl               string      `json:"api_url"`
 	TokenID              string      `json:"token_id"`
-	TokenSecretEncrypted string      `json:"token_secret_encrypted"`
+	TokenSecretEncrypted string      `json:"-"`
 	ClusterID            pgtype.UUID `json:"cluster_id"`
 	TlsFingerprint       string      `json:"tls_fingerprint"`
 }

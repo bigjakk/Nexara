@@ -26,3 +26,24 @@ sql:
             go_type:
               import: "encoding/json"
               type: "RawMessage"
+          # Defense-in-depth: tag encrypted/secret columns json:"-" so a stray
+          # c.JSON(row) can never serialize ciphertext or hashes. Handlers map
+          # through redacting DTOs today; this guards against future regressions.
+          - column: "clusters.token_secret_encrypted"
+            go_struct_tag: 'json:"-"'
+          - column: "pbs_servers.token_secret_encrypted"
+            go_struct_tag: 'json:"-"'
+          - column: "cluster_ssh_credentials.encrypted_password"
+            go_struct_tag: 'json:"-"'
+          - column: "cluster_ssh_credentials.encrypted_private_key"
+            go_struct_tag: 'json:"-"'
+          - column: "ldap_configs.bind_password_encrypted"
+            go_struct_tag: 'json:"-"'
+          - column: "notification_channels.config_encrypted"
+            go_struct_tag: 'json:"-"'
+          - column: "oidc_configs.client_secret_encrypted"
+            go_struct_tag: 'json:"-"'
+          - column: "users.password_hash"
+            go_struct_tag: 'json:"-"'
+          - column: "users.totp_secret"
+            go_struct_tag: 'json:"-"'
