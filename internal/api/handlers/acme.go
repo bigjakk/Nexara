@@ -177,6 +177,11 @@ func (h *ACMEHandler) ListPlugins(c *fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
+	// The dns-01 plugin "data" field holds the DNS provider's API credentials.
+	// Never return it on a view-gated read; expose only whether it's configured.
+	for i := range plugins {
+		plugins[i].Data = ""
+	}
 	return c.JSON(plugins)
 }
 
