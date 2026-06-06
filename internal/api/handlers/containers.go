@@ -283,7 +283,7 @@ func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
 		ResourceName: ct.Name,
 		Action:       "migrate",
 		UPID:         upid,
-		Description:  guestActionDesc("migrate", ct),
+		Description:  guestActionDesc("migrate", ct) + " → " + req.Target,
 		Extra:        map[string]any{"vmid": ct.Vmid, "target": req.Target},
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindMigrationUpdate, "container", ct.ID.String(), "migrate")
