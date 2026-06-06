@@ -35,6 +35,8 @@ import {
   useExecuteMigration,
   useMigrationJob,
 } from "@/features/migrations/api/migration-queries";
+import { useVMConfig, useContainerConfig } from "../api/vm-queries";
+import { parseDisk } from "../lib/vm-config-parsers";
 import type { TaskLogLine } from "../api/vm-queries";
 import type {
   CreateMigrationRequest,
@@ -73,6 +75,7 @@ interface MigrateJobDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   clusterId: string;
+  resourceId: string;
   vmid: number;
   vmName: string;
   kind: ResourceKind;
@@ -84,6 +87,7 @@ export function MigrateJobDialog({
   open,
   onOpenChange,
   clusterId,
+  resourceId,
   vmid,
   vmName,
   kind,
@@ -132,6 +136,46 @@ export function MigrateJobDialog({
     migrationType === "cross-cluster" ? targetClusterId : "",
     migrationType === "cross-cluster" ? targetNode : "",
   );
+
+  // For storage/both modes, fetch the guest config so we can exclude the
+  // storage(s) its disks already sit on. A storage migration moves EVERY disk
+  // to the chosen target, and Proxmox rejects moving a disk onto the storage it
+  // already lives on, so any currently-used storage is an invalid target —
+  // including each one when a guest's disks span multiple storages.
+  const needsDiskPlacement =
+    migrationType === "intra-cluster" &&
+    (migrationMode === "storage" || migrationMode === "both");
+  const { data: vmConfig } = useVMConfig(
+    needsDiskPlacement && kind !== "ct" ? clusterId : "",
+    needsDiskPlacement && kind !== "ct" ? resourceId : "",
+  );
+  const { data: ctConfig } = useContainerConfig(
+    needsDiskPlacement && kind === "ct" ? clusterId : "",
+    needsDiskPlacement && kind === "ct" ? resourceId : "",
+  );
+  const guestConfig = kind === "ct" ? ctConfig : vmConfig;
+
+  // Storages currently holding one of the guest's movable disks. Mirrors the
+  // backend's discoverDisks set: QEMU scsi/virtio/sata/ide (skipping cdrom and
+  // cloudinit drives); LXC rootfs/mp*. efidisk is intentionally excluded — the
+  // backend never moves it.
+  const currentDiskStorages = useMemo(() => {
+    const set = new Set<string>();
+    if (!guestConfig) return set;
+    const qemuDiskPrefixes = ["scsi", "virtio", "sata", "ide"];
+    for (const [key, val] of Object.entries(guestConfig)) {
+      if (typeof val !== "string") continue;
+      if (kind === "ct") {
+        if (key !== "rootfs" && !key.startsWith("mp")) continue;
+      } else {
+        if (!qemuDiskPrefixes.some((p) => key.startsWith(p))) continue;
+        if (val.includes("media=cdrom") || val.includes("cloudinit")) continue;
+      }
+      const { storage } = parseDisk(val);
+      if (storage) set.add(storage);
+    }
+    return set;
+  }, [guestConfig, kind]);
 
   const queryClient = useQueryClient();
   // Mutation hooks
@@ -306,6 +350,15 @@ export function MigrateJobDialog({
         new Map(targetStorageList.map((s) => [s.storage, s])).values(),
       )
     : [];
+
+  // Valid storage-migration targets: active+enabled, content-compatible, and
+  // NOT already holding one of the guest's disks (a same-storage move fails).
+  const eligibleTargetStorage = uniqueTargetStorage.filter((s) => {
+    if (!s.active || !s.enabled) return false;
+    if (currentDiskStorages.has(s.storage)) return false;
+    const contentType = vmType === "lxc" ? "rootdir" : "images";
+    return s.content.includes(contentType);
+  });
 
   const isFormValid = (() => {
     if (migrationType === "cross-cluster") {
@@ -485,22 +538,36 @@ export function MigrateJobDialog({
                       <SelectValue placeholder="Select target storage" />
                     </SelectTrigger>
                     <SelectContent>
-                      {uniqueTargetStorage
-                        .filter((s) => {
-                          if (!s.active || !s.enabled) return false;
-                          const contentType = vmType === "lxc" ? "rootdir" : "images";
-                          return s.content.includes(contentType);
-                        })
-                        .map((s) => (
-                          <SelectItem key={s.storage} value={s.storage}>
-                            {s.storage} ({s.type})
-                          </SelectItem>
-                        ))}
+                      {eligibleTargetStorage.map((s) => (
+                        <SelectItem key={s.storage} value={s.storage}>
+                          {s.storage} ({s.type})
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-[11px] text-muted-foreground">
-                    All VM disks will be moved to this storage
-                  </p>
+                  {currentDiskStorages.size > 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      All disks move to this storage. The guest&apos;s current
+                      storage{currentDiskStorages.size > 1 ? "s" : ""} (
+                      {Array.from(currentDiskStorages).join(", ")}){" "}
+                      {currentDiskStorages.size > 1 ? "are" : "is"} excluded —
+                      Proxmox can&apos;t move a disk onto the storage it already
+                      lives on.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      All VM disks will be moved to this storage
+                    </p>
+                  )}
+                  {guestConfig &&
+                    targetStorageList !== undefined &&
+                    eligibleTargetStorage.length === 0 && (
+                      <p className="text-[11px] text-destructive">
+                        No eligible target storage — every compatible storage
+                        either already holds one of this guest&apos;s disks or
+                        is unavailable.
+                      </p>
+                    )}
                 </div>
               )}
 

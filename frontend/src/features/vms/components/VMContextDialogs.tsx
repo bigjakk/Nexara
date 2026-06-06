@@ -43,6 +43,7 @@ export function VMContextDialogs() {
         open={openDialog === "migrate"}
         onOpenChange={(open) => { if (!open) closeDialog(); }}
         clusterId={target.clusterId}
+        resourceId={target.resourceId}
         vmid={target.vmid}
         vmName={target.name}
         kind={target.kind}

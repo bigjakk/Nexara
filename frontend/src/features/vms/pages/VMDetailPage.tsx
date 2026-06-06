@@ -343,6 +343,7 @@ export function VMDetailPage() {
         open={migrateOpen}
         onOpenChange={setMigrateOpen}
         clusterId={clusterId}
+        resourceId={vmId}
         vmid={vm.vmid}
         vmName={vm.name}
         kind={kind}
