@@ -91,6 +91,47 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 }
 
+func TestLoad_TaskHistoryRetention(t *testing.T) {
+	t.Run("defaults to 24h", func(t *testing.T) {
+		setRequiredEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.TaskHistoryRetention != 24*time.Hour {
+			t.Errorf("TaskHistoryRetention = %v, want 24h", cfg.TaskHistoryRetention)
+		}
+	})
+
+	t.Run("honors a positive override", func(t *testing.T) {
+		setRequiredEnv(t)
+		t.Setenv("TASK_HISTORY_RETENTION", "168h")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.TaskHistoryRetention != 168*time.Hour {
+			t.Errorf("TaskHistoryRetention = %v, want 168h", cfg.TaskHistoryRetention)
+		}
+	})
+
+	// Zero or negative would make the sweep delete all finished task history each
+	// tick; validate() must clamp it back to the safe default.
+	for _, v := range []string{"0", "0s", "-1h"} {
+		t.Run("clamps non-positive "+v, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("TASK_HISTORY_RETENTION", v)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if cfg.TaskHistoryRetention != 24*time.Hour {
+				t.Errorf("TaskHistoryRetention = %v, want clamp to 24h", cfg.TaskHistoryRetention)
+			}
+		})
+	}
+}
+
 func TestLoad_MissingDatabaseURL(t *testing.T) {
 	// Only set some required vars, omit DATABASE_URL.
 	t.Setenv("JWT_SECRET", "test")

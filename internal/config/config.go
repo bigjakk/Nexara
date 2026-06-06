@@ -122,5 +122,13 @@ func (c *Config) validate() error {
 	if _, err := hex.DecodeString(c.EncryptionKey); err != nil || len(c.EncryptionKey) != 64 {
 		return fmt.Errorf("ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes). Generate with: openssl rand -hex 32")
 	}
+	// A non-positive retention would make the hourly sweep's cutoff (now-retention)
+	// land at or after now, deleting every finished task_history row each tick.
+	// Warn and clamp to the default rather than silently wiping task history.
+	if c.TaskHistoryRetention <= 0 {
+		slog.Warn("TASK_HISTORY_RETENTION must be positive — clamping to 24h to avoid purging all finished task history",
+			"configured", c.TaskHistoryRetention)
+		c.TaskHistoryRetention = 24 * time.Hour
+	}
 	return nil
 }
