@@ -324,7 +324,7 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	if err := pxClient.CreateClusterFirewallRule(c.Context(), req); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create firewall rule: "+err.Error())
+		return mapProxmoxError(err)
 	}
 
 	details, _ := json.Marshal(map[string]string{"action": req.Action, "type": req.Type})
