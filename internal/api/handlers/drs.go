@@ -400,7 +400,8 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 	engine := drs.NewEngine(h.queries, h.encryptionKey, slog.Default())
 	result, err := engine.Evaluate(c.Context(), clusterID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		slog.Error("DRS evaluate failed", "cluster_id", clusterID, "error", err)
+		return fiber.NewError(fiber.StatusInternalServerError, "DRS evaluation failed")
 	}
 
 	// If Proxmox's native CRS auto-rebalance suppressed automatic migrations,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -74,7 +75,10 @@ func (h *NodeHandler) SetNodeMaintenance(c *fiber.Ctx) error {
 
 	result, err := rolling.RunNodeCommand(ctx, h.queries, h.encryptionKey, clusterID, nodeName, nodeMaintenanceCommand(req.Enable, nodeName))
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, err.Error())
+		// Engine errors embed node IPs / SSH host-key / decrypt detail — log
+		// server-side, return a generic message.
+		slog.Error("node maintenance command failed", "cluster_id", clusterID, "node", nodeName, "error", err)
+		return fiber.NewError(fiber.StatusBadGateway, "Node command failed")
 	}
 	if result.ExitCode != 0 {
 		msg := strings.TrimSpace(result.Stderr)
