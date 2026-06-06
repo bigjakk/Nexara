@@ -4,6 +4,9 @@
 	reverse_proxy nexara:8080
 }
 
+# Redirect plain HTTP to HTTPS so credentials (incl. the refresh cookie) never
+# traverse cleartext. Production proxies (operator-provided) should do the same
+# and additionally emit HSTS.
 :80 {
-	reverse_proxy nexara:8080
+	redir https://{host}{uri} permanent
 }
