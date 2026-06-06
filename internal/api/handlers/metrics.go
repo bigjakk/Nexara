@@ -105,6 +105,9 @@ func (h *MetricsHandler) GetClusterHistorical(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
 	}
+	if err := requireClusterPerm(c, "view", "cluster", clusterID); err != nil {
+		return err
+	}
 
 	rangeParam := c.Query("range", "1h")
 	duration, ok := rangeDurations[rangeParam]
@@ -148,9 +151,22 @@ func (h *MetricsHandler) GetClusterHistorical(c *fiber.Ctx) error {
 
 // GetVMHistorical handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics.
 func (h *MetricsHandler) GetVMHistorical(c *fiber.Ctx) error {
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
 	vmID, err := uuid.Parse(c.Params("vm_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
+		return err
+	}
+	// The metric query keys on vm_id alone, so verify the VM actually belongs to
+	// the authorized cluster — otherwise a user with view on cluster X could read
+	// a VM that lives in cluster Y by passing its id.
+	if vm, vErr := h.queries.GetVM(c.Context(), vmID); vErr != nil || vm.ClusterID != clusterID {
+		return fiber.NewError(fiber.StatusNotFound, "VM not found")
 	}
 
 	rangeParam := c.Query("range", "1h")
@@ -195,9 +211,20 @@ func (h *MetricsHandler) GetVMHistorical(c *fiber.Ctx) error {
 
 // GetNodeHistorical handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics.
 func (h *MetricsHandler) GetNodeHistorical(c *fiber.Ctx) error {
+	clusterID, err := uuid.Parse(c.Params("cluster_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
+	}
 	nodeID, err := uuid.Parse(c.Params("node_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid node ID")
+	}
+	if err := requireClusterPerm(c, "view", "node", clusterID); err != nil {
+		return err
+	}
+	// Verify the node belongs to the authorized cluster (query keys on node_id).
+	if node, nErr := h.queries.GetNode(c.Context(), nodeID); nErr != nil || node.ClusterID != clusterID {
+		return fiber.NewError(fiber.StatusNotFound, "Node not found")
 	}
 
 	rangeParam := c.Query("range", "1h")
