@@ -55,6 +55,11 @@ func (s *Server) setupMiddleware() {
 		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		c.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		c.Set("Content-Security-Policy", contentSecurityPolicy)
+		// HSTS is opt-in (HSTS_MAX_AGE > 0) — pinning HTTPS over a self-signed or
+		// plain-HTTP origin would make cert errors unbypassable.
+		if s.config.HSTSMaxAge > 0 {
+			c.Set("Strict-Transport-Security", "max-age="+strconv.Itoa(s.config.HSTSMaxAge)+"; includeSubDomains")
+		}
 		return c.Next()
 	})
 

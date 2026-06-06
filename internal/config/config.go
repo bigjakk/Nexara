@@ -72,6 +72,12 @@ type Config struct {
 	//                      reverse proxy where scheme detection is unreliable
 	//   never            — never Secure; explicit opt-in for plain-HTTP lab use
 	SecureCookies string `envconfig:"SECURE_COOKIES" default:"auto"`
+	// HSTSMaxAge enables the Strict-Transport-Security header (in seconds) when
+	// > 0. Off by default — enabling it over a self-signed/plain-HTTP origin
+	// would pin HTTPS and make cert errors unbypassable. Set it (e.g. 31536000)
+	// only for an HTTPS deployment with a trusted certificate. HSTS is otherwise
+	// best emitted at the TLS-terminating reverse proxy.
+	HSTSMaxAge int `envconfig:"HSTS_MAX_AGE" default:"0"`
 }
 
 // NewMetricsTicker creates a time.Ticker using the configured metrics collection interval.
