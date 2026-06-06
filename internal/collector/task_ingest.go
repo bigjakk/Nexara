@@ -35,6 +35,7 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 	}
 
 	var maxStartTime int64
+	dedupFailed := false
 	for _, node := range nodes {
 		tasks, err := client.GetNodeTasks(ctx, node.Node, since, 500)
 		if err != nil {
@@ -55,13 +56,19 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 			}
 		}
 		seen, dedupErr := s.seenTaskUPIDs(ctx, cluster, candidates)
+		if dedupErr != nil {
+			// Can't dedup this node's tasks safely this tick. Skip ingestion and
+			// hold the cluster watermark back (below) so these tasks are retried
+			// next tick instead of being skipped past forever by the since-filter.
+			// A later successful tick re-lists them and seenTaskUPIDs skips any we
+			// already recorded (InsertExternalTaskHistory is ON CONFLICT DO NOTHING).
+			dedupFailed = true
+			continue
+		}
 
 		for _, task := range tasks {
 			if task.StartTime > maxStartTime {
 				maxStartTime = task.StartTime
-			}
-			if dedupErr != nil {
-				continue // can't dedup safely this tick; skip to avoid duplicate rows
 			}
 			if err := s.ingestTask(ctx, cluster, node.Node, task, seen); err != nil {
 				s.logger.Warn("task sync: failed to ingest task",
@@ -73,8 +80,11 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 		}
 	}
 
-	// Update high-water mark if we processed any tasks.
-	if maxStartTime > since {
+	// Advance the high-water mark only when every node deduped cleanly. If any
+	// node's dedup failed we processed a partial set, so leaving `since` where it
+	// is forces a full retry next tick rather than silently skipping the tasks we
+	// could not ingest.
+	if !dedupFailed && maxStartTime > since {
 		if err := s.queries.UpsertTaskSyncState(ctx, db.UpsertTaskSyncStateParams{
 			ClusterID:    cluster.ID,
 			LastSyncedAt: maxStartTime,

@@ -39,9 +39,11 @@ type mockQueries struct {
 	runningTasks   []db.TaskHistory
 	reconcileCalls []db.ReconcileTaskHistoryParams
 
-	existingTaskUPIDs  map[string]bool // ListExistingTaskHistoryUPIDs echoes these back
-	existingAuditUPIDs map[string]bool // ListExistingAuditLogUPIDs echoes these back
-	externalTaskCalls  []db.InsertExternalTaskHistoryParams
+	existingTaskUPIDs   map[string]bool // ListExistingTaskHistoryUPIDs echoes these back
+	existingAuditUPIDs  map[string]bool // ListExistingAuditLogUPIDs echoes these back
+	externalTaskCalls   []db.InsertExternalTaskHistoryParams
+	taskHistUPIDErr     error // when set, ListExistingTaskHistoryUPIDs fails (dedup error)
+	upsertTaskSyncCalls []db.UpsertTaskSyncStateParams
 }
 
 func newMockQueries() *mockQueries {
@@ -196,11 +198,15 @@ func (m *mockQueries) GetTaskSyncState(_ context.Context, _ uuid.UUID) (int64, e
 	return 0, errors.New("no sync state")
 }
 
-func (m *mockQueries) UpsertTaskSyncState(_ context.Context, _ db.UpsertTaskSyncStateParams) error {
+func (m *mockQueries) UpsertTaskSyncState(_ context.Context, arg db.UpsertTaskSyncStateParams) error {
+	m.upsertTaskSyncCalls = append(m.upsertTaskSyncCalls, arg)
 	return nil
 }
 
 func (m *mockQueries) ListExistingTaskHistoryUPIDs(_ context.Context, upids []string) ([]string, error) {
+	if m.taskHistUPIDErr != nil {
+		return nil, m.taskHistUPIDErr
+	}
 	var out []string
 	for _, u := range upids {
 		if m.existingTaskUPIDs[u] {

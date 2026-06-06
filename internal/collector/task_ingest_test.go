@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -145,6 +146,65 @@ func TestIngestTask_External(t *testing.T) {
 		}
 		if len(q.externalTaskCalls) != 0 {
 			t.Fatalf("expected dedup (no insert) for an already-tracked UPID, got %d", len(q.externalTaskCalls))
+		}
+	})
+}
+
+// ingestSyncFakeClient implements just the two ProxmoxClient methods syncTasks
+// touches (GetNodes, GetNodeTasks); the embedded interface stubs the rest.
+type ingestSyncFakeClient struct {
+	ProxmoxClient
+	nodes []proxmox.NodeListEntry
+	tasks map[string][]proxmox.NodeTask
+}
+
+func (f *ingestSyncFakeClient) GetNodes(context.Context) ([]proxmox.NodeListEntry, error) {
+	return f.nodes, nil
+}
+
+func (f *ingestSyncFakeClient) GetNodeTasks(_ context.Context, node string, _ int64, _ int) ([]proxmox.NodeTask, error) {
+	return f.tasks[node], nil
+}
+
+// TestSyncTasks_WatermarkGuard verifies the task-sync high-water mark advances
+// only when a tick deduped cleanly. A dedup failure must hold `since` back so
+// the un-ingested tasks are retried next tick, not skipped past forever by the
+// since-filter.
+func TestSyncTasks_WatermarkGuard(t *testing.T) {
+	cluster := db.Cluster{ID: uuid.New()}
+	taskStart := time.Now().Add(-time.Minute).Unix()
+	client := &ingestSyncFakeClient{
+		nodes: []proxmox.NodeListEntry{{Node: "pve1", Status: "online"}},
+		tasks: map[string][]proxmox.NodeTask{
+			"pve1": {{UPID: "UPID:pve1:qmsnapshot:100:run", Type: "qmsnapshot", ID: "100", Status: "", StartTime: taskStart}},
+		},
+	}
+
+	t.Run("clean tick ingests and advances the watermark", func(t *testing.T) {
+		q := newMockQueries()
+		s := &Syncer{queries: q, logger: testLogger()}
+		s.syncTasks(context.Background(), client, cluster)
+		if len(q.externalTaskCalls) != 1 {
+			t.Fatalf("expected 1 task ingested, got %d", len(q.externalTaskCalls))
+		}
+		if len(q.upsertTaskSyncCalls) != 1 {
+			t.Fatalf("expected the watermark to advance once, got %d upserts", len(q.upsertTaskSyncCalls))
+		}
+		if got := q.upsertTaskSyncCalls[0].LastSyncedAt; got != taskStart {
+			t.Errorf("watermark = %d, want %d", got, taskStart)
+		}
+	})
+
+	t.Run("dedup failure ingests nothing and holds the watermark", func(t *testing.T) {
+		q := newMockQueries()
+		q.taskHistUPIDErr = errors.New("db unavailable")
+		s := &Syncer{queries: q, logger: testLogger()}
+		s.syncTasks(context.Background(), client, cluster)
+		if len(q.externalTaskCalls) != 0 {
+			t.Fatalf("expected no ingestion when dedup fails, got %d", len(q.externalTaskCalls))
+		}
+		if len(q.upsertTaskSyncCalls) != 0 {
+			t.Fatalf("watermark must not advance when dedup fails, got %d upserts", len(q.upsertTaskSyncCalls))
 		}
 	})
 }
