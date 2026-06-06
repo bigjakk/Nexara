@@ -174,18 +174,17 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 	// Record the task in task_history so the collector reconciler tracks its
 	// running→done lifecycle and the activity feed + Tasks page show live,
 	// server-authoritative status — exactly like a Nexara-dispatched task.
-	// Running tasks (Status == "") are stored as "running"; tasks already
-	// finished when first seen are stored fully-formed.
+	// An end time is PVE's authoritative "finished" signal: with source=all the
+	// task list returns in-flight tasks with status="RUNNING" and no endtime, so
+	// a non-empty status is NOT a reliable finished marker (it would misfile a
+	// running task as failed). Store finished tasks fully-formed; everything else
+	// as "running" so the reconciler can flip it when it actually completes.
 	taskStatus := "running"
 	var taskExit string
 	var finishedAt pgtype.Timestamptz
-	if task.Status != "" {
+	if task.EndTime > 0 {
 		taskStatus, taskExit = classifyTaskExit(task.Status)
-		endTime := task.EndTime
-		if endTime == 0 {
-			endTime = task.StartTime
-		}
-		finishedAt = pgtype.Timestamptz{Time: time.Unix(endTime, 0), Valid: true}
+		finishedAt = pgtype.Timestamptz{Time: time.Unix(task.EndTime, 0), Valid: true}
 	}
 	taskDescription := mapping.Action
 	if resourceName != "" {

@@ -58,6 +58,35 @@ func TestIngestTask_External(t *testing.T) {
 		}
 	})
 
+	t.Run("running task reported as RUNNING is ingested as running, not failed", func(t *testing.T) {
+		// Regression: PVE source=all returns in-flight tasks with status="RUNNING"
+		// and no endtime. The old `Status != ""` check ran that through
+		// classifyTaskExit and stored status=failed/exit=RUNNING, and the
+		// reconciler (which only polls status='running' rows) never rescued it.
+		q := newMockQueries()
+		s := &Syncer{queries: q, logger: testLogger()}
+		task := proxmox.NodeTask{
+			UPID: "UPID:pve1:qmigrate:111:run", Type: "qmigrate",
+			ID: "111", Status: "RUNNING", StartTime: start.Unix(), EndTime: 0,
+		}
+		if err := s.ingestTask(context.Background(), cluster, "pve1", task, nil); err != nil {
+			t.Fatalf("ingestTask: %v", err)
+		}
+		if len(q.externalTaskCalls) != 1 {
+			t.Fatalf("expected 1 insert, got %d", len(q.externalTaskCalls))
+		}
+		got := q.externalTaskCalls[0]
+		if got.Status != "running" {
+			t.Errorf("status = %q, want running (RUNNING must not be classified as failed)", got.Status)
+		}
+		if got.ExitStatus != "" {
+			t.Errorf("exit_status = %q, want empty for a still-running task", got.ExitStatus)
+		}
+		if got.FinishedAt.Valid {
+			t.Error("finished_at should be null for a running task")
+		}
+	})
+
 	t.Run("finished OK task ingested as completed", func(t *testing.T) {
 		q := newMockQueries()
 		s := &Syncer{queries: q, logger: testLogger()}
