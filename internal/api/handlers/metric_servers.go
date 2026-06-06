@@ -44,6 +44,10 @@ func (h *MetricServerHandler) ListServers(c *fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to get metric servers")
 	}
+	// The InfluxDB token is a write-only credential — never return it on a read.
+	for i := range servers {
+		servers[i].Token = ""
+	}
 	return c.JSON(servers)
 }
 
@@ -92,6 +96,10 @@ func (h *MetricServerHandler) GetServer(c *fiber.Ctx) error {
 	server, err := pxClient.GetMetricServer(c.Context(), serverID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to get metric server")
+	}
+	// The InfluxDB token is a write-only credential — never return it on a read.
+	if server != nil {
+		server.Token = ""
 	}
 	return c.JSON(server)
 }
