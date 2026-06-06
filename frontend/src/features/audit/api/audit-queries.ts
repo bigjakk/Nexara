@@ -28,30 +28,6 @@ export interface AuditLogResponse {
   total: number;
 }
 
-interface AuditLogParams {
-  limit: number;
-  offset: number;
-  clusterId?: string | undefined;
-  resourceType?: string | undefined;
-}
-
-export function useAuditLog({ limit, offset, clusterId, resourceType }: AuditLogParams) {
-  const params = new URLSearchParams();
-  params.set("limit", String(limit));
-  params.set("offset", String(offset));
-  if (clusterId) params.set("cluster_id", clusterId);
-  if (resourceType) params.set("resource_type", resourceType);
-
-  return useQuery({
-    queryKey: ["audit-log", limit, offset, clusterId, resourceType],
-    queryFn: () =>
-      apiClient.get<AuditLogResponse>(
-        `/api/v1/audit-log?${params.toString()}`,
-      ),
-    refetchInterval: 120_000, // WS events handle immediate updates
-  });
-}
-
 export function useRecentActivity() {
   return useQuery({
     queryKey: ["recent-activity"],
