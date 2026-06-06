@@ -25,7 +25,7 @@ import { StatusIcon } from "@/components/StatusIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { classifyOS } from "@/lib/os-classify";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useClusterVMs } from "@/features/clusters/api/cluster-queries";
+import { useClusterVMs, useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import {
   useVMFolders,
   useDeleteVMFolder,
@@ -58,9 +58,14 @@ interface VMLeafProps {
 function VMLeaf({ vm, clusterId }: VMLeafProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  // Resolve the guest's node name from its node_id so context-menu actions that
+  // need it (Migrate's source_node, Console) work from the tree. The nodes query
+  // is shared/deduped across all leaves of this cluster by TanStack Query.
+  const { data: nodes } = useClusterNodes(clusterId);
   const kind = vm.type === "lxc" ? "lxc" : "qemu";
   const path = `/inventory/${kind}/${clusterId}/${vm.id}`;
   const active = location.pathname === path;
+  const currentNode = nodes?.find((n) => n.id === vm.node_id)?.name ?? "";
 
   return (
     <VMContextMenu
@@ -71,7 +76,7 @@ function VMLeaf({ vm, clusterId }: VMLeafProps) {
         name: vm.name,
         kind: vm.type === "lxc" ? "ct" : "vm",
         status: vm.status,
-        currentNode: "", // unknown in this perspective; context menu items that need it (Console) won't be visible for non-running anyway
+        currentNode,
         template: vm.template,
       }}
     >
