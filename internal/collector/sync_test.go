@@ -738,6 +738,12 @@ func TestSyncCluster_PartialNodeFailure(t *testing.T) {
 	if sawPve2 {
 		t.Error("prune call must exclude pve2 (VM fetch failed) — including it would wipe pve2's inventory on the next sync's frontend refetch")
 	}
+	// The grace window is what lets folder membership survive the brief vms-row
+	// churn of a live migration (DRS/rolling/HA) without the guest being pruned
+	// and re-discovered. Pin it so a regression that zeroes it can't slip by.
+	if prune.GraceSeconds != int32(staleVMGrace.Seconds()) {
+		t.Errorf("prune GraceSeconds = %d, want %d (staleVMGrace)", prune.GraceSeconds, int32(staleVMGrace.Seconds()))
+	}
 }
 
 func TestSyncCluster_DecryptFailure(t *testing.T) {
