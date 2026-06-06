@@ -70,9 +70,10 @@ logs/
 # Temporary
 tmp/
 
-# Plan docs
+# Plan / working design docs (kept local; not part of the repo)
 *-plan.md
 *-claude-code-plan.md
+TASK_TRACKING_RFC.md
 
 # Additional IDE / editor
 .fleet/
