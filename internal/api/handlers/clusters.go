@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"strings"
@@ -523,7 +524,8 @@ func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
 		MinVersion:         tls.VersionTLS12,
 	})
 	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("Failed to connect to %s: %s", u.Host, err.Error()))
+		slog.Warn("fingerprint fetch: TLS dial failed", "host", u.Host, "error", err)
+		return fiber.NewError(fiber.StatusBadGateway, fmt.Sprintf("Failed to connect to %s (connection or TLS handshake failed)", u.Host))
 	}
 	defer func() { _ = conn.Close() }()
 
