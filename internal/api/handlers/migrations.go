@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -402,7 +403,8 @@ func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
 	orch := h.newOrchestrator(c)
 	report, err := orch.RunPreFlight(c.Context(), jobID)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
+		slog.Error("migration pre-flight failed", "job_id", jobID, "error", err)
+		return fiber.NewError(fiber.StatusInternalServerError, "Pre-flight check failed")
 	}
 
 	return c.JSON(report)
