@@ -1,27 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
+import type {
+  AuditLogEntry,
+  AuditLogResponse,
+} from "@/features/audit/api/audit-queries";
 
-export interface AuditLogEntry {
-  id: string;
-  cluster_id: string | null;
-  user_id: string;
-  resource_type: string;
-  resource_id: string;
-  action: string;
-  details: string;
-  created_at: string;
-  source: string;
-  user_email: string;
-  user_display_name: string;
-  cluster_name: string;
-  resource_vmid: number;
-  resource_name: string;
-}
-
-export interface AuditLogResponse {
-  items: AuditLogEntry[];
-  total: number;
-}
+// Re-export the canonical audit entry/response types (owned by the audit
+// feature) so Events-tab consumers such as AuditLogPanel share one shape —
+// including the task_status/task_exit_status/task_progress fields the
+// /api/v1/audit-log endpoint returns — instead of a local copy that silently
+// drifted and omitted them.
+export type { AuditLogEntry, AuditLogResponse };
 
 export interface AuditUserRef {
   id: string;
