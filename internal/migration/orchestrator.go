@@ -308,12 +308,6 @@ func (o *Orchestrator) executeIntraCluster(ctx context.Context, client *proxmox.
 // Each disk move creates a real Proxmox task with its own UPID, so the task panel
 // shows real progress and logs — identical to moving a disk from the hardware tab.
 func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *proxmox.Client, job db.MigrationJob, jobID, _ uuid.UUID, mc *migrationContext) {
-	targetStorage := job.TargetStorage
-	if targetStorage == "" {
-		o.failJob(ctx, jobID, "target_storage is required for storage migration", mc)
-		return
-	}
-
 	disks, err := discoverDisks(ctx, client, job.SourceNode, int(job.Vmid), job.VmType)
 	if err != nil {
 		o.failJob(ctx, jobID, fmt.Sprintf("failed to discover disks: %v", err), mc)
@@ -325,26 +319,37 @@ func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *prox
 		return
 	}
 
-	o.logger.Info("starting storage migration", "job_id", jobID, "disks", len(disks), "target_storage", targetStorage)
+	// storage_map (keyed by disk key) selects a per-disk target; an empty map
+	// routes every disk to the single target_storage. Disks already on their
+	// target are skipped.
+	storageMap := map[string]string{}
+	_ = json.Unmarshal(job.StorageMap, &storageMap)
+	moves := resolveDiskTargets(disks, storageMap, job.TargetStorage)
+	if len(moves) == 0 {
+		o.failJob(ctx, jobID, "no disks to move — every selected disk is already on its target storage", mc)
+		return
+	}
+
+	o.logger.Info("starting storage migration", "job_id", jobID, "disks", len(moves))
 
 	// Use the first disk move's UPID as the migration job UPID (updated below).
 	var firstUpid string
 
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "migrating")
 
-	for i, disk := range disks {
+	for i, m := range moves {
 		var upid string
 		switch job.VmType {
 		case VMTypeQEMU:
 			upid, err = client.MoveDisk(ctx, job.SourceNode, int(job.Vmid), proxmox.DiskMoveParams{
-				Disk:    disk,
-				Storage: targetStorage,
+				Disk:    m.Disk,
+				Storage: m.Target,
 				Delete:  true,
 			})
 		case VMTypeLXC:
 			upid, err = client.MoveCTVolume(ctx, job.SourceNode, int(job.Vmid), proxmox.CTVolumeMoveParams{
-				Volume:  disk,
-				Storage: targetStorage,
+				Volume:  m.Disk,
+				Storage: m.Target,
 				Delete:  true,
 			})
 		default:
@@ -353,7 +358,7 @@ func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *prox
 		}
 
 		if err != nil {
-			o.failJob(ctx, jobID, fmt.Sprintf("failed to move disk %s: %v", disk, err), mc)
+			o.failJob(ctx, jobID, fmt.Sprintf("failed to move disk %s: %v", m.Disk, err), mc)
 			return
 		}
 
@@ -361,10 +366,10 @@ func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *prox
 			firstUpid = upid
 		}
 
-		o.recordDiskMove(ctx, mc, job.SourceNode, disk, targetStorage, upid, i+1, len(disks))
+		o.recordDiskMove(ctx, mc, job.SourceNode, m.Disk, m.Target, upid, i+1, len(moves))
 
 		// Update migration job progress and current UPID.
-		progress := float64(i) / float64(len(disks))
+		progress := float64(i) / float64(len(moves))
 		_ = o.queries.UpdateMigrationJobProgress(ctx, db.UpdateMigrationJobProgressParams{
 			ID:       jobID,
 			Progress: progress,
@@ -380,13 +385,13 @@ func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *prox
 			})
 		}
 
-		o.logger.Info("moving disk", "job_id", jobID, "disk", disk, "upid", upid)
+		o.logger.Info("moving disk", "job_id", jobID, "disk", m.Disk, "target", m.Target, "upid", upid)
 
 		// Poll this disk move task until completion.
 		// RunningTaskUpdater on the frontend also polls, but we need to
 		// wait here before starting the next disk.
 		if err := o.waitForTask(ctx, client, job.SourceNode, upid); err != nil {
-			o.failJob(ctx, jobID, fmt.Sprintf("disk %s move failed: %v", disk, err), mc)
+			o.failJob(ctx, jobID, fmt.Sprintf("disk %s move failed: %v", m.Disk, err), mc)
 			return
 		}
 	}
@@ -485,8 +490,15 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 		return
 	}
 
-	if len(disks) == 0 {
-		// No disks to move — that's fine, just complete.
+	// storage_map (keyed by disk key) selects per-disk targets; an empty map
+	// routes every disk to target_storage. After the live phase disks may
+	// already sit on their target (shared storage), so a no-op set means the
+	// migration is already done.
+	storageMap := map[string]string{}
+	_ = json.Unmarshal(job.StorageMap, &storageMap)
+	moves := resolveDiskTargets(disks, storageMap, job.TargetStorage)
+	if len(moves) == 0 {
+		// Nothing left to move — the live phase already finished the migration.
 		_ = o.queries.CompleteMigrationJob(ctx, db.CompleteMigrationJobParams{
 			ID:          jobID,
 			Status:      StatusCompleted,
@@ -497,35 +509,34 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 		return
 	}
 
-	targetStorage := job.TargetStorage
 	var lastDiskUpid string
-	for i, disk := range disks {
+	for i, m := range moves {
 		var diskUpid string
 		switch job.VmType {
 		case VMTypeQEMU:
 			diskUpid, err = client.MoveDisk(ctx, job.TargetNode, int(job.Vmid), proxmox.DiskMoveParams{
-				Disk:    disk,
-				Storage: targetStorage,
+				Disk:    m.Disk,
+				Storage: m.Target,
 				Delete:  true,
 			})
 		case VMTypeLXC:
 			diskUpid, err = client.MoveCTVolume(ctx, job.TargetNode, int(job.Vmid), proxmox.CTVolumeMoveParams{
-				Volume:  disk,
-				Storage: targetStorage,
+				Volume:  m.Disk,
+				Storage: m.Target,
 				Delete:  true,
 			})
 		}
 
 		if err != nil {
-			o.failJob(ctx, jobID, fmt.Sprintf("failed to move disk %s on target node: %v", disk, err), mc)
+			o.failJob(ctx, jobID, fmt.Sprintf("failed to move disk %s on target node: %v", m.Disk, err), mc)
 			return
 		}
 
 		lastDiskUpid = diskUpid
 
-		o.recordDiskMove(ctx, mc, job.TargetNode, disk, targetStorage, diskUpid, i+1, len(disks))
+		o.recordDiskMove(ctx, mc, job.TargetNode, m.Disk, m.Target, diskUpid, i+1, len(moves))
 
-		progress := 0.5 + (float64(i)/float64(len(disks)))*0.5
+		progress := 0.5 + (float64(i)/float64(len(moves)))*0.5
 		_ = o.queries.UpdateMigrationJobProgress(ctx, db.UpdateMigrationJobProgressParams{
 			ID:       jobID,
 			Progress: progress,
@@ -533,7 +544,7 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 		})
 
 		if waitErr := o.waitForTask(ctx, client, job.TargetNode, diskUpid); waitErr != nil {
-			o.failJob(ctx, jobID, fmt.Sprintf("disk %s move failed on target node: %v", disk, waitErr), mc)
+			o.failJob(ctx, jobID, fmt.Sprintf("disk %s move failed on target node: %v", m.Disk, waitErr), mc)
 			return
 		}
 	}
@@ -576,8 +587,57 @@ func (o *Orchestrator) waitForTask(ctx context.Context, client *proxmox.Client, 
 	}
 }
 
-// discoverDisks returns a list of movable disk/volume keys from a VM/CT config.
-func discoverDisks(ctx context.Context, client *proxmox.Client, node string, vmid int, vmType string) ([]string, error) {
+// movableDisk is a VM/CT disk/volume that storage migration can move, paired
+// with the storage it currently lives on.
+type movableDisk struct {
+	Key     string
+	Storage string
+}
+
+// diskMove is a resolved per-disk storage-migration target.
+type diskMove struct {
+	Disk   string
+	Target string
+}
+
+// volumeStorage extracts the storage name from a disk/volume config value such
+// as "local-lvm:vm-100-disk-0,size=32G" -> "local-lvm".
+func volumeStorage(val string) string {
+	first := val
+	if i := strings.IndexByte(first, ','); i >= 0 {
+		first = first[:i]
+	}
+	if i := strings.IndexByte(first, ':'); i >= 0 {
+		return first[:i]
+	}
+	return ""
+}
+
+// resolveDiskTargets decides where each discovered disk should move for a
+// storage migration. A non-empty storageMap (keyed by disk key) selects a
+// target per disk; disks absent from the map stay put ("keep in place"). An
+// empty storageMap routes every disk to the single fallback target. Disks
+// already on their resolved target are skipped — a same-storage move is a
+// no-op that Proxmox rejects.
+func resolveDiskTargets(disks []movableDisk, storageMap map[string]string, fallback string) []diskMove {
+	perDisk := len(storageMap) > 0
+	var moves []diskMove
+	for _, d := range disks {
+		target := fallback
+		if perDisk {
+			target = storageMap[d.Key]
+		}
+		if target == "" || target == d.Storage {
+			continue
+		}
+		moves = append(moves, diskMove{Disk: d.Key, Target: target})
+	}
+	return moves
+}
+
+// discoverDisks returns the movable disks/volumes of a VM/CT, each with the
+// storage it currently lives on.
+func discoverDisks(ctx context.Context, client *proxmox.Client, node string, vmid int, vmType string) ([]movableDisk, error) {
 	var cfg map[string]interface{}
 	var err error
 
@@ -593,7 +653,7 @@ func discoverDisks(ctx context.Context, client *proxmox.Client, node string, vmi
 		return nil, err
 	}
 
-	var disks []string
+	var disks []movableDisk
 
 	if vmType == VMTypeQEMU {
 		// QEMU disks: scsi*, virtio*, sata*, ide* (but not cdrom/cloudinit)
@@ -617,7 +677,7 @@ func discoverDisks(ctx context.Context, client *proxmox.Client, node string, vmi
 			if !strings.Contains(s, ":") {
 				continue
 			}
-			disks = append(disks, key)
+			disks = append(disks, movableDisk{Key: key, Storage: volumeStorage(s)})
 		}
 	} else {
 		// LXC volumes: rootfs, mp0, mp1, etc.
@@ -630,7 +690,7 @@ func discoverDisks(ctx context.Context, client *proxmox.Client, node string, vmi
 				if !strings.Contains(s, ":") {
 					continue
 				}
-				disks = append(disks, key)
+				disks = append(disks, movableDisk{Key: key, Storage: volumeStorage(s)})
 			}
 		}
 	}

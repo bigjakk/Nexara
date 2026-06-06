@@ -85,6 +85,24 @@ type createMigrationRequest struct {
 	TargetStorage   string          `json:"target_storage"`
 }
 
+// hasStorageMapEntries reports whether a storage_map JSON object has at least
+// one non-empty target — i.e. the caller selected a per-disk destination.
+func hasStorageMapEntries(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return false
+	}
+	for _, v := range m {
+		if v != "" {
+			return true
+		}
+	}
+	return false
+}
+
 type migrationJobResponse struct {
 	ID              uuid.UUID       `json:"id"`
 	SourceClusterID uuid.UUID       `json:"source_cluster_id"`
@@ -201,9 +219,12 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "migration_mode 'storage' and 'both' are only supported for intra-cluster migrations")
 	}
 
-	// Storage and both modes require target_storage.
-	if (req.MigrationMode == migration.ModeStorage || req.MigrationMode == migration.ModeBoth) && req.TargetStorage == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "target_storage is required for storage and both migration modes")
+	// Storage and both modes need a destination: either a single target_storage
+	// (move every disk there) or a per-disk storage_map (disk key -> storage).
+	if req.MigrationMode == migration.ModeStorage || req.MigrationMode == migration.ModeBoth {
+		if req.TargetStorage == "" && !hasStorageMapEntries(req.StorageMap) {
+			return fiber.NewError(fiber.StatusBadRequest, "target_storage or a per-disk storage_map is required for storage and both migration modes")
+		}
 	}
 
 	srcClusterID, err := uuid.Parse(req.SourceClusterID)

@@ -111,6 +111,9 @@ export function MigrateJobDialog({
   const [targetVmid, setTargetVmid] = useState("");
   const [storageMap, setStorageMap] = useState<Record<string, string>>({});
   const [networkMap, setNetworkMap] = useState<Record<string, string>>({});
+  // Per-disk storage targets (disk key -> target storage) for intra-cluster
+  // storage migration when disks span multiple storages. "" means keep in place.
+  const [diskTargets, setDiskTargets] = useState<Record<string, string>>({});
 
   // Data hooks
   const { data: clusters } = useClusters();
@@ -155,13 +158,13 @@ export function MigrateJobDialog({
   );
   const guestConfig = kind === "ct" ? ctConfig : vmConfig;
 
-  // Storages currently holding one of the guest's movable disks. Mirrors the
+  // The guest's movable disks with their current storage + size. Mirrors the
   // backend's discoverDisks set: QEMU scsi/virtio/sata/ide (skipping cdrom and
   // cloudinit drives); LXC rootfs/mp*. efidisk is intentionally excluded — the
   // backend never moves it.
-  const currentDiskStorages = useMemo(() => {
-    const set = new Set<string>();
-    if (!guestConfig) return set;
+  const guestDisks = useMemo(() => {
+    const out: { key: string; storage: string; size: string }[] = [];
+    if (!guestConfig) return out;
     const qemuDiskPrefixes = ["scsi", "virtio", "sata", "ide"];
     for (const [key, val] of Object.entries(guestConfig)) {
       if (typeof val !== "string") continue;
@@ -171,11 +174,21 @@ export function MigrateJobDialog({
         if (!qemuDiskPrefixes.some((p) => key.startsWith(p))) continue;
         if (val.includes("media=cdrom") || val.includes("cloudinit")) continue;
       }
-      const { storage } = parseDisk(val);
-      if (storage) set.add(storage);
+      const { storage, size } = parseDisk(val);
+      if (storage) out.push({ key, storage, size });
     }
-    return set;
+    out.sort((a, b) => a.key.localeCompare(b.key));
+    return out;
   }, [guestConfig, kind]);
+
+  const currentDiskStorages = useMemo(
+    () => new Set(guestDisks.map((d) => d.storage)),
+    [guestDisks],
+  );
+
+  // Per-disk targeting kicks in only when the guest's disks span more than one
+  // storage — otherwise the single Target Storage dropdown covers it.
+  const perDiskStorage = needsDiskPlacement && currentDiskStorages.size > 1;
 
   const queryClient = useQueryClient();
   // Mutation hooks
@@ -215,6 +228,7 @@ export function MigrateJobDialog({
     setTargetVmid("");
     setStorageMap({});
     setNetworkMap({});
+    setDiskTargets({});
   }
 
   function handleClose() {
@@ -228,6 +242,16 @@ export function MigrateJobDialog({
   function handleCreate() {
     const effectiveMode =
       migrationType === "intra-cluster" ? migrationMode : "live";
+    // Per-disk targets (disk key -> storage), dropping disks left in place.
+    const perDiskMap = Object.fromEntries(
+      Object.entries(diskTargets).filter(([, v]) => v !== ""),
+    );
+    const storageMapPayload =
+      migrationType === "cross-cluster"
+        ? storageMap
+        : perDiskStorage
+          ? perDiskMap
+          : {};
     const req: CreateMigrationRequest = {
       source_cluster_id: clusterId,
       target_cluster_id:
@@ -239,14 +263,15 @@ export function MigrateJobDialog({
       vm_type: vmType,
       migration_type: migrationType,
       migration_mode: effectiveMode,
-      storage_map: migrationType === "cross-cluster" ? storageMap : {},
+      storage_map: storageMapPayload,
       network_map: migrationType === "cross-cluster" ? networkMap : {},
       online,
       bwlimit_kib: bwlimit[0] ?? 0,
       delete_source: deleteSource,
       target_vmid: targetVmid ? parseInt(targetVmid, 10) : 0,
       target_storage:
-        effectiveMode === "storage" || effectiveMode === "both"
+        (effectiveMode === "storage" || effectiveMode === "both") &&
+        !perDiskStorage
           ? targetStorage
           : "",
     };
@@ -351,14 +376,21 @@ export function MigrateJobDialog({
       )
     : [];
 
-  // Valid storage-migration targets: active+enabled, content-compatible, and
-  // NOT already holding one of the guest's disks (a same-storage move fails).
-  const eligibleTargetStorage = uniqueTargetStorage.filter((s) => {
+  // Content-compatible, active+enabled storages. Used per-disk (each disk
+  // excludes only its OWN current storage).
+  const compatibleStorage = uniqueTargetStorage.filter((s) => {
     if (!s.active || !s.enabled) return false;
-    if (currentDiskStorages.has(s.storage)) return false;
     const contentType = vmType === "lxc" ? "rootdir" : "images";
     return s.content.includes(contentType);
   });
+
+  // Single-target list: also excludes every storage already holding a disk (a
+  // same-storage move fails). Used when all disks share one storage.
+  const eligibleTargetStorage = compatibleStorage.filter(
+    (s) => !currentDiskStorages.has(s.storage),
+  );
+
+  const hasPerDiskSelection = Object.values(diskTargets).some((v) => v !== "");
 
   const isFormValid = (() => {
     if (migrationType === "cross-cluster") {
@@ -366,10 +398,13 @@ export function MigrateJobDialog({
     }
     // Intra-cluster
     if (migrationMode === "storage") {
-      return targetStorage.length > 0;
+      return perDiskStorage ? hasPerDiskSelection : targetStorage.length > 0;
     }
     if (migrationMode === "both") {
-      return targetNode.length > 0 && targetStorage.length > 0;
+      return (
+        targetNode.length > 0 &&
+        (perDiskStorage ? hasPerDiskSelection : targetStorage.length > 0)
+      );
     }
     // Live mode
     return targetNode.length > 0;
@@ -530,7 +565,65 @@ export function MigrateJobDialog({
 
             {/* Target Storage (storage/both mode for intra-cluster) */}
             {migrationType === "intra-cluster" &&
-              (migrationMode === "storage" || migrationMode === "both") && (
+              (migrationMode === "storage" || migrationMode === "both") &&
+              (perDiskStorage ? (
+                <div className="space-y-2">
+                  <Label>Per-Disk Target Storage</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    This guest&apos;s disks span multiple storages. Pick a target
+                    per disk, or leave one on its current storage.
+                  </p>
+                  <div className="space-y-2 rounded-md border p-3">
+                    {guestDisks.map((d) => {
+                      const diskOptions = compatibleStorage.filter(
+                        (s) => s.storage !== d.storage,
+                      );
+                      return (
+                        <div
+                          key={d.key}
+                          className="grid grid-cols-[1fr_180px] items-center gap-2"
+                        >
+                          <div className="min-w-0 truncate">
+                            <span className="font-mono text-xs">{d.key}</span>
+                            <span className="ml-1.5 text-[11px] text-muted-foreground">
+                              {d.storage}
+                              {d.size ? ` · ${d.size}` : ""}
+                            </span>
+                          </div>
+                          <Select
+                            value={diskTargets[d.key] || "__keep__"}
+                            onValueChange={(v) => {
+                              setDiskTargets((prev) => ({
+                                ...prev,
+                                [d.key]: v === "__keep__" ? "" : v,
+                              }));
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__keep__">
+                                Keep on {d.storage}
+                              </SelectItem>
+                              {diskOptions.map((s) => (
+                                <SelectItem key={s.storage} value={s.storage}>
+                                  {s.storage} ({s.type})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {!hasPerDiskSelection && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Choose a new storage for at least one disk to migrate.
+                    </p>
+                  )}
+                </div>
+              ) : (
                 <div className="space-y-2">
                   <Label>Target Storage</Label>
                   <Select value={targetStorage} onValueChange={setTargetStorage}>
@@ -548,11 +641,9 @@ export function MigrateJobDialog({
                   {currentDiskStorages.size > 0 ? (
                     <p className="text-[11px] text-muted-foreground">
                       All disks move to this storage. The guest&apos;s current
-                      storage{currentDiskStorages.size > 1 ? "s" : ""} (
-                      {Array.from(currentDiskStorages).join(", ")}){" "}
-                      {currentDiskStorages.size > 1 ? "are" : "is"} excluded —
-                      Proxmox can&apos;t move a disk onto the storage it already
-                      lives on.
+                      storage ({Array.from(currentDiskStorages).join(", ")}) is
+                      excluded — Proxmox can&apos;t move a disk onto the storage
+                      it already lives on.
                     </p>
                   ) : (
                     <p className="text-[11px] text-muted-foreground">
@@ -569,7 +660,7 @@ export function MigrateJobDialog({
                       </p>
                     )}
                 </div>
-              )}
+              ))}
 
             {/* Storage Mapping (cross-cluster only) */}
             {migrationType === "cross-cluster" &&

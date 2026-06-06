@@ -80,6 +80,10 @@ vi.mock("../api/vm-queries", () => ({
     data: null,
     isLoading: false,
   }),
+  useContainerConfig: () => ({
+    data: null,
+    isLoading: false,
+  }),
   useSnapshots: () => ({
     data: [],
     isLoading: false,
