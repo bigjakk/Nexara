@@ -132,6 +132,44 @@ func TestLoad_TaskHistoryRetention(t *testing.T) {
 	}
 }
 
+func TestLoad_SecureCookies(t *testing.T) {
+	t.Run("defaults to auto", func(t *testing.T) {
+		setRequiredEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.SecureCookies != "auto" {
+			t.Errorf("SecureCookies = %q, want auto", cfg.SecureCookies)
+		}
+	})
+	for _, v := range []string{"always", "never", "AUTO", " Always "} {
+		t.Run("honors/normalizes "+v, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("SECURE_COOKIES", v)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			want := map[string]string{"always": "always", "never": "never", "AUTO": "auto", " Always ": "always"}[v]
+			if cfg.SecureCookies != want {
+				t.Errorf("SecureCookies(%q) = %q, want %q", v, cfg.SecureCookies, want)
+			}
+		})
+	}
+	t.Run("invalid falls back to auto", func(t *testing.T) {
+		setRequiredEnv(t)
+		t.Setenv("SECURE_COOKIES", "yes-please")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		if cfg.SecureCookies != "auto" {
+			t.Errorf("SecureCookies = %q, want clamp to auto", cfg.SecureCookies)
+		}
+	})
+}
+
 func TestLoad_MissingDatabaseURL(t *testing.T) {
 	// Only set some required vars, omit DATABASE_URL.
 	t.Setenv("JWT_SECRET", "test")

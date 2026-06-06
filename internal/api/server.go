@@ -146,6 +146,9 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 		d.eventPub = events.NewPublisher(rdb, slog.Default())
 	}
 
+	// Apply the refresh-cookie Secure policy (SECURE_COOKIES) once, before serving.
+	handlers.SetCookieSecureMode(cfg.SecureCookies)
+
 	s := &Server{config: cfg, db: pool, redis: rdb, queries: d.queries, eventPub: d.eventPub}
 
 	s.registerInfra(d)

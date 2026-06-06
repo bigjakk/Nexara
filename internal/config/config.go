@@ -65,6 +65,13 @@ type Config struct {
 	PprofEnabled     bool   `envconfig:"PPROF_ENABLED" default:"false"`
 	PprofPort        string `envconfig:"PPROF_PORT" default:"6060"`
 	ChangelogRepo    string `envconfig:"CHANGELOG_REPO" default:"bigjakk/Nexara"`
+	// SecureCookies controls the Secure flag on the refresh-token cookie:
+	//   auto   (default) — Secure when the request is HTTPS (honors
+	//                      X-Forwarded-Proto only from a TRUSTED_PROXIES upstream)
+	//   always           — always Secure; use for TLS deployments behind a
+	//                      reverse proxy where scheme detection is unreliable
+	//   never            — never Secure; explicit opt-in for plain-HTTP lab use
+	SecureCookies string `envconfig:"SECURE_COOKIES" default:"auto"`
 }
 
 // NewMetricsTicker creates a time.Ticker using the configured metrics collection interval.
@@ -129,6 +136,16 @@ func (c *Config) validate() error {
 		slog.Warn("TASK_HISTORY_RETENTION must be positive — clamping to 24h to avoid purging all finished task history",
 			"configured", c.TaskHistoryRetention)
 		c.TaskHistoryRetention = 24 * time.Hour
+	}
+	switch strings.ToLower(strings.TrimSpace(c.SecureCookies)) {
+	case "auto", "always", "never":
+		c.SecureCookies = strings.ToLower(strings.TrimSpace(c.SecureCookies))
+	default:
+		slog.Warn("SECURE_COOKIES must be auto|always|never — falling back to auto", "configured", c.SecureCookies)
+		c.SecureCookies = "auto"
+	}
+	if c.SecureCookies == "auto" && len(c.TrustedProxies) == 0 {
+		slog.Warn("SECURE_COOKIES=auto with no TRUSTED_PROXIES: behind a TLS-terminating proxy the refresh cookie will NOT get the Secure flag (scheme is detected as http). Set SECURE_COOKIES=always for HTTPS deployments, or set TRUSTED_PROXIES to the proxy so X-Forwarded-Proto is honored.")
 	}
 	return nil
 }
