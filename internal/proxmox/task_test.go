@@ -15,6 +15,7 @@ func TestTaskSucceeded(t *testing.T) {
 		{"OK with warnings", "OK (with warnings)", true},
 		{"OK prefix lowercase", "ok (warnings)", true},
 		{"WARNINGS", "WARNINGS", true},
+		{"WARNINGS with count", "WARNINGS: 2", true}, // the real PVE format
 		{"warnings lowercase", "warnings", true},
 		{"FAILED", "FAILED", false},
 		{"interrupted", "interrupted by signal", false},

@@ -7,6 +7,11 @@ describe("isOkExit", () => {
     expect(isOkExit("")).toBe(true);
     expect(isOkExit("OK")).toBe(true);
     expect(isOkExit("WARNINGS: 3")).toBe(true);
+    expect(isOkExit("OK (with warnings)")).toBe(true);
+  });
+  it("normalizes whitespace and case (matches proxmox.TaskSucceeded)", () => {
+    expect(isOkExit("  OK  ")).toBe(true);
+    expect(isOkExit("ok")).toBe(true);
   });
   it("treats anything else as failure", () => {
     expect(isOkExit("error: boom")).toBe(false);

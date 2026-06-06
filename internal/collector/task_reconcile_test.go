@@ -135,6 +135,8 @@ func TestClassifyTaskExit(t *testing.T) {
 		{"", "completed"},
 		{"OK", "completed"},
 		{"WARNINGS: 2", "completed"},
+		{"OK (with warnings)", "completed"}, // must agree with proxmox.TaskSucceeded
+		{"  OK  ", "completed"},             // trimmed/cased via the canonical helper
 		{"error: boom", "failed"},
 	}
 	for _, tc := range cases {

@@ -2,13 +2,13 @@ package collector
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // staleTaskGrace bounds how long a task_history row may stay "running" once
@@ -17,10 +17,11 @@ import (
 const staleTaskGrace = 24 * time.Hour
 
 // reconcileRunningTasks updates task_history rows still marked "running" by
-// polling each task's live status from Proxmox. The working set is tiny (only
-// in-flight Nexara-dispatched tasks), so one GetTaskStatus call per row per
-// sync tick is cheap. Finished tasks are flipped to completed/failed and a
-// task_update event is published so the activity feed refreshes.
+// polling each task's live status from Proxmox. The working set is small (every
+// running task on the cluster — Nexara-dispatched plus the external PVE-native
+// tasks ingested in Phase 4D), so one GetTaskStatus call per row per sync tick
+// is cheap. Finished tasks are flipped to completed/failed and a task_update
+// event is published so the activity feed refreshes.
 //
 // This is the source of truth that lets the UI stop polling Proxmox per entry.
 func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient, cluster db.Cluster) {
@@ -76,11 +77,13 @@ func (s *Syncer) finalizeTask(ctx context.Context, cluster db.Cluster, upid, sta
 	}
 }
 
-// classifyTaskExit maps a Proxmox task exitstatus to (status, exit_status).
-// "", "OK" and "WARNINGS: …" count as success; anything else is a failure.
-// Mirrors the success rule used by the task-detail UI.
+// classifyTaskExit maps a Proxmox task exitstatus to (status, exit_status),
+// delegating the success rule to proxmox.TaskSucceeded so the collector agrees
+// with the DRS/rolling/migration finalizers and the task-detail UI on every
+// exit status (including "WARNINGS: N", "OK (with warnings)" and whitespace/
+// case variants) — they all finalize the same status='running' row by UPID.
 func classifyTaskExit(exitStatus string) (status, exit string) {
-	if exitStatus == "" || exitStatus == "OK" || strings.HasPrefix(exitStatus, "WARNINGS") {
+	if proxmox.TaskSucceeded(exitStatus) {
 		return "completed", exitStatus
 	}
 	return "failed", exitStatus

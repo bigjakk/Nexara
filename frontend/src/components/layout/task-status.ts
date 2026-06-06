@@ -21,9 +21,13 @@ export function parseDetails(detailsStr: string): ParsedDetails {
 
 export type DerivedTaskStatus = "running" | "ok" | "failed" | "none";
 
+// isOkExit is the frontend mirror of Go's proxmox.TaskSucceeded — keep the two
+// in lockstep. Proxmox emits "OK", "OK (with warnings)" and "WARNINGS: N" for
+// successful tasks; everything else is a failure.
 export function isOkExit(exitStatus: string): boolean {
+  const s = exitStatus.trim().toUpperCase();
   return (
-    exitStatus === "" || exitStatus === "OK" || exitStatus.startsWith("WARNINGS")
+    s === "" || s === "OK" || s.startsWith("OK ") || s.startsWith("WARNINGS")
   );
 }
 
