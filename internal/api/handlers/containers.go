@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -416,6 +417,13 @@ func (h *ContainerHandler) CloneToTemplate(c *fiber.Ctx) error {
 
 // convertCloneToTemplate polls until the cloned CT appears then converts it to a template.
 func (h *ContainerHandler) convertCloneToTemplate(pxClient *proxmox.Client, node string, newVMID int, clusterID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("CT clone-to-template watcher panicked",
+				"vmid", newVMID, "cluster_id", clusterID, "panic", r)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 

@@ -456,6 +456,11 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 	// graceful shutdown aborts the migration cleanly. Slot is released on
 	// exit, including on panic.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("migration execution panicked", "job_id", jobID, "panic", r)
+			}
+		}()
 		defer func() { <-h.slots }()
 		orch.Execute(h.shutdownCtx, jobID, userID)
 	}()

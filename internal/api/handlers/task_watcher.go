@@ -65,6 +65,11 @@ func watchTaskAndUpdateStatus(
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("task watcher panicked", "upid", upid, "panic", r)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 

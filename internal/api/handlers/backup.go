@@ -1214,6 +1214,11 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 	// If requested, wait for restore to finish then start the VM in the background.
 	if req.StartAfterRestore {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("start-after-restore watcher panicked", "upid", upid, "panic", r)
+				}
+			}()
 			ctx := context.Background() //nolint:gosec // G118: intentionally detached; Fiber recycles request context
 			for i := 0; i < 600; i++ {  // up to 10 minutes
 				time.Sleep(2 * time.Second)

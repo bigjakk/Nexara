@@ -153,6 +153,12 @@ func (s *Scheduler) Run(ctx context.Context) {
 // RunDRS evaluates DRS for all enabled clusters, respecting each cluster's
 // configured evaluation interval (eval_interval_seconds).
 func (s *Scheduler) RunDRS(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("scheduler RunDRS panicked", "panic", r)
+		}
+	}()
+
 	configs, err := s.queries.ListEnabledDRSConfigs(ctx)
 	if err != nil {
 		s.logger.Error("failed to list enabled DRS configs", "error", err)
@@ -277,6 +283,12 @@ func (s *Scheduler) RunTaskRetention(ctx context.Context) {
 // RunCVEScanning runs CVE scans for clusters based on their schedule configuration.
 // Clusters with no schedule config default to enabled with a 24-hour interval.
 func (s *Scheduler) RunCVEScanning(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("scheduler RunCVEScanning panicked", "panic", r)
+		}
+	}()
+
 	clusters, err := s.queries.ListClusters(ctx)
 	if err != nil {
 		s.logger.Error("failed to list clusters for CVE scanning", "error", err)

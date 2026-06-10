@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -447,6 +448,13 @@ func (h *VMHandler) CloneToTemplate(c *fiber.Ctx) error {
 
 // convertCloneToTemplate polls a clone task and converts the result to a template.
 func (h *VMHandler) convertCloneToTemplate(pxClient *proxmox.Client, node string, newVMID int, vmType string, clusterID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("clone-to-template watcher panicked",
+				"vmid", newVMID, "cluster_id", clusterID, "panic", r)
+		}
+	}()
+
 	// Use a detached context with a generous timeout for the background operation
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
