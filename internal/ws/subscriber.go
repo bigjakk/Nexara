@@ -3,7 +3,9 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -24,8 +26,38 @@ func NewRedisSubscriber(client *redis.Client, hub *Hub, logger *slog.Logger) *Re
 	}
 }
 
-// Run starts the Redis pattern subscription. It blocks until ctx is cancelled.
+// Run starts the Redis pattern subscription. It blocks until ctx is
+// cancelled. If the pub/sub channel closes (Redis restart, a network drop
+// beyond go-redis's internal retries), the subscription is re-established
+// with backoff — without this, a single closure silently blacked out all
+// realtime events and metrics until process restart.
 func (s *RedisSubscriber) Run(ctx context.Context) {
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+
+	for {
+		started := time.Now()
+		if err := s.runOnce(ctx); err == nil {
+			return // clean ctx shutdown
+		}
+		if time.Since(started) > time.Minute {
+			// The previous subscription ran fine for a while — treat this
+			// closure as fresh rather than continuing to escalate.
+			backoff = time.Second
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		s.logger.Warn("Redis subscriber reconnecting", "backoff", backoff.String())
+		backoff = min(backoff*2, maxBackoff)
+	}
+}
+
+// runOnce subscribes and consumes until ctx is cancelled (returns nil) or
+// the pub/sub channel closes (returns an error so Run reconnects).
+func (s *RedisSubscriber) runOnce(ctx context.Context) error {
 	patterns := []string{"nexara:metrics:*", "nexara:alerts:*", "nexara:events:*"}
 	pubsub := s.client.PSubscribe(ctx, patterns...)
 	defer pubsub.Close()
@@ -37,11 +69,11 @@ func (s *RedisSubscriber) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			s.logger.Info("Redis subscriber stopping")
-			return
+			return nil
 		case msg, ok := <-ch:
 			if !ok {
 				s.logger.Warn("Redis pub/sub channel closed")
-				return
+				return errors.New("pub/sub channel closed")
 			}
 			s.handleMessage(msg)
 		}
