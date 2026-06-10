@@ -129,6 +129,7 @@ export function useEventInvalidation(clusterIds: string[]): void {
         case "pbs_change":
           scheduleInvalidation(
             ["pbs-servers"],
+            ["pbs-snapshots"],
             ["backup-coverage"],
             ["audit-log"],
             ["recent-activity"],
