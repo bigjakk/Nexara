@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -167,6 +168,7 @@ type Syncer struct {
 	healthMonitor    *HealthMonitor
 	eventPub         eventPublisher
 	logger           *slog.Logger
+	lastSyncErrorMu  sync.Mutex
 	lastSyncError    map[uuid.UUID]time.Time // rate-limit sync error reporting per cluster
 }
 
@@ -1421,46 +1423,86 @@ func (s *Syncer) SyncAll(ctx context.Context) []*ClusterMetricResult {
 		return nil
 	}
 
-	var results []*ClusterMetricResult
-	for _, cluster := range clusters {
-		s.logger.Info("syncing cluster", "cluster_id", cluster.ID, "name", cluster.Name)
-		result, err := s.SyncCluster(ctx, cluster)
-		if err != nil {
-			s.logger.Error("failed to sync cluster",
-				"cluster_id", cluster.ID,
-				"name", cluster.Name,
-				"error", err,
-			)
-			s.reportSyncError(ctx, cluster, err)
-			// Record failure for every known node so the health monitor
-			// can mark them offline after the threshold is reached.
-			if s.healthMonitor != nil {
-				if nodes, listErr := s.queries.ListNodesByCluster(ctx, cluster.ID); listErr == nil {
-					for _, n := range nodes {
-						s.healthMonitor.RecordFailure(ctx, cluster.ID, n.ID, n.Name)
+	// Sync clusters in parallel, each under its own deadline, so one
+	// unreachable endpoint can't stall the other clusters' metrics, events,
+	// and task ingest (a blackholed endpoint used to freeze the whole
+	// sequential pass for the full client timeout plus failover attempts).
+	results := make([]*ClusterMetricResult, len(clusters))
+	var wg sync.WaitGroup
+	for i, cluster := range clusters {
+		wg.Add(1)
+		go func(i int, cluster db.Cluster) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("cluster sync panicked",
+						"cluster_id", cluster.ID, "name", cluster.Name, "panic", r)
+				}
+			}()
+
+			syncCtx, cancel := context.WithTimeout(ctx, clusterSyncTimeout(cluster))
+			defer cancel()
+
+			s.logger.Info("syncing cluster", "cluster_id", cluster.ID, "name", cluster.Name)
+			result, err := s.SyncCluster(syncCtx, cluster)
+			if err != nil {
+				s.logger.Error("failed to sync cluster",
+					"cluster_id", cluster.ID,
+					"name", cluster.Name,
+					"error", err,
+				)
+				// Report with the parent ctx so a timed-out syncCtx doesn't
+				// also suppress the audit entry.
+				s.reportSyncError(ctx, cluster, err)
+				// Record failure for every known node so the health monitor
+				// can mark them offline after the threshold is reached.
+				if s.healthMonitor != nil {
+					if nodes, listErr := s.queries.ListNodesByCluster(ctx, cluster.ID); listErr == nil {
+						for _, n := range nodes {
+							s.healthMonitor.RecordFailure(ctx, cluster.ID, n.ID, n.Name)
+						}
 					}
 				}
+				return
 			}
-			continue
-		}
-		if result != nil {
-			results = append(results, result)
+			results[i] = result
+		}(i, cluster)
+	}
+	wg.Wait()
+
+	out := make([]*ClusterMetricResult, 0, len(results))
+	for _, r := range results {
+		if r != nil {
+			out = append(out, r)
 		}
 	}
+	return out
+}
 
-	return results
+// clusterSyncTimeout bounds a single cluster's sync pass. Generous — large
+// clusters legitimately take a while (per-node detail calls, task ingest) —
+// but finite, so a wedged TCP connection can't pin its goroutine forever.
+func clusterSyncTimeout(cluster db.Cluster) time.Duration {
+	timeout := 4 * time.Duration(cluster.SyncIntervalSeconds) * time.Second
+	if timeout < 2*time.Minute {
+		timeout = 2 * time.Minute
+	}
+	return timeout
 }
 
 // reportSyncError writes an audit log entry and publishes an event when a cluster sync fails.
 // Rate-limited to one report per cluster per 5 minutes to avoid flooding the audit log.
 func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncErr error) {
+	s.lastSyncErrorMu.Lock()
 	if s.lastSyncError == nil {
 		s.lastSyncError = make(map[uuid.UUID]time.Time)
 	}
 	if last, ok := s.lastSyncError[cluster.ID]; ok && time.Since(last) < 5*time.Minute {
+		s.lastSyncErrorMu.Unlock()
 		return
 	}
 	s.lastSyncError[cluster.ID] = time.Now()
+	s.lastSyncErrorMu.Unlock()
 
 	errMsg := syncErr.Error()
 
