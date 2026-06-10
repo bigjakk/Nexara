@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Toaster } from "sonner";
@@ -62,6 +62,7 @@ function getInitials(name: string): string {
 export function AppShell() {
   const { t } = useTranslation("navigation");
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logout, logoutAll } = useAuth();
   const wsConnect = useWebSocketStore((s) => s.connect);
   const wsDisconnect = useWebSocketStore((s) => s.disconnect);
@@ -225,7 +226,9 @@ export function AppShell() {
         </header>
         <Separator />
         <main className="flex-1 overflow-auto p-6">
-          <ErrorBoundary>
+          {/* Keyed by pathname so a crashed route doesn't hold every other
+              route hostage — navigation remounts a fresh boundary. */}
+          <ErrorBoundary key={location.pathname}>
             <Outlet />
           </ErrorBoundary>
         </main>
