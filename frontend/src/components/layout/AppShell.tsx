@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
+import { Toaster } from "sonner";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import {
   Info,
@@ -31,6 +32,7 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useBranding } from "@/features/settings/api/settings-queries";
 import { useBrandingStore } from "@/stores/branding-store";
 import { useChangelogStore } from "@/stores/changelog-store";
+import { useThemeStore } from "@/stores/theme-store";
 import {
   extractBaseVersion,
   getEntriesToShow,
@@ -147,6 +149,8 @@ export function AppShell() {
   );
   useEventInvalidation(clusterIds);
 
+  const themeMode = useThemeStore((s) => s.mode);
+
   const handleLogout = () => {
     void logout();
   };
@@ -229,6 +233,7 @@ export function AppShell() {
         <TaskProgressDialog />
       </div>
       <FloatingConsole />
+      <Toaster position="top-right" richColors closeButton theme={themeMode} />
       <ChangelogDialog
         open={changelogOpen}
         onOpenChange={handleChangelogOpenChange}
