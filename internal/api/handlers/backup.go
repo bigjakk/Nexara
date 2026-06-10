@@ -435,6 +435,9 @@ func (h *BackupHandler) GetDatastoreConfig(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+		return err
+	}
 
 	store := c.Params("store")
 	if store == "" {
