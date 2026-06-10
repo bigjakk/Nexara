@@ -1,21 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
+import { queryClient } from "./lib/query-client";
 import { useAuthStore } from "./stores/auth-store";
 import "./lib/i18n"; // Initialize i18next before render
 import "./index.css";
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 5 * 60_000, // 5 minutes — inventory data doesn't change rapidly
-      gcTime: 10 * 60_000,   // 10 minutes — keep cache longer to avoid refetches
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
 
 // Initialize auth state — calls /auth/refresh against the HttpOnly cookie
 // (or, on mobile, the body refresh_token) to validate the session before

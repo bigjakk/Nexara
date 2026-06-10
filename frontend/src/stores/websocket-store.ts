@@ -3,6 +3,7 @@ import {
   mintWSHubToken,
   wsAuthProtocols,
 } from "@/features/console/api/console-queries";
+import { queryClient } from "@/lib/query-client";
 import type {
   WsConnectionState,
   WsIncomingMessage,
@@ -21,6 +22,10 @@ interface WebSocketState {
   // Tracks the in-flight token mint so reconnect attempts that arrive
   // before the previous mint settles don't open a second WebSocket.
   pendingConnect: Promise<void> | null;
+  // True once any WS session completed its welcome handshake. Deliberately
+  // NOT reset by disconnect(): a later reconnect (or logout/login) still
+  // means events may have been missed while no socket was live.
+  everConnected: boolean;
 }
 
 interface WebSocketActions {
@@ -54,6 +59,7 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
     reconnectTimer: null,
     pingTimer: null,
     pendingConnect: null,
+    everConnected: false,
 
     connect: () => {
       const state = get();
@@ -143,6 +149,16 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
             const channels = Array.from(listeners.keys());
             if (channels.length > 0) {
               get().send({ type: "subscribe", channels });
+            }
+            // Catch up after a reconnect: events published while we were
+            // disconnected are gone for good (Redis pub/sub has no replay),
+            // so refetch what's on screen. Ordered after the resubscribe so
+            // nothing slips between the refetch and the live stream. First
+            // connect skips this — queries are freshly fetched anyway.
+            if (get().everConnected) {
+              void queryClient.invalidateQueries({ refetchType: "active" });
+            } else {
+              set({ everConnected: true });
             }
             return;
           }

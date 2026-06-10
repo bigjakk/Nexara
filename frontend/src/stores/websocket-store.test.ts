@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import * as consoleQueries from "@/features/console/api/console-queries";
+import { queryClient } from "@/lib/query-client";
 import { useWebSocketStore } from "./websocket-store";
 
 // Mock WebSocket
@@ -84,6 +85,7 @@ describe("websocket-store", () => {
       reconnectTimer: null,
       pingTimer: null,
       pendingConnect: null,
+      everConnected: false,
     });
   });
 
@@ -289,6 +291,31 @@ describe("websocket-store", () => {
     expect(MockWebSocket.instances).toHaveLength(1);
     expect(useWebSocketStore.getState().status).toBe("connected");
     expect(useWebSocketStore.getState().socket).not.toBeNull();
+  });
+
+  it("invalidates active queries on reconnect welcome, not on first welcome", async () => {
+    const invalidateSpy = vi
+      .spyOn(queryClient, "invalidateQueries")
+      .mockResolvedValue(undefined);
+
+    useWebSocketStore.getState().connect();
+    await flushPromises();
+    const first = getLastInstance();
+    first.simulateOpen();
+    first.simulateMessage({ type: "welcome", message: "connected" });
+    expect(invalidateSpy).not.toHaveBeenCalled();
+
+    // Drop and reconnect — events may have been missed in the gap.
+    first.simulateClose();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    const second = MockWebSocket.instances[1];
+    if (!second) throw new Error("expected reconnect socket");
+    second.simulateOpen();
+    second.simulateMessage({ type: "welcome", message: "connected" });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ refetchType: "active" });
+    invalidateSpy.mockRestore();
   });
 
   it("a socket the store no longer owns cannot run teardown on close", async () => {
