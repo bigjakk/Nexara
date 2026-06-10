@@ -31,7 +31,16 @@ export function StatusIcon({ status, className }: StatusIconProps) {
     );
   }
 
-  if (normalized === "paused" || normalized === "suspended" || normalized === "degraded") {
+  if (
+    normalized === "paused" ||
+    normalized === "suspended" ||
+    normalized === "degraded" ||
+    // Transient QEMU states — the guest is between steady states.
+    normalized === "prelaunch" ||
+    normalized === "postmigrate" ||
+    normalized === "shutdown" ||
+    normalized === "migrate"
+  ) {
     return (
       <Pause
         aria-label={normalized}
