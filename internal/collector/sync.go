@@ -67,6 +67,8 @@ type SyncQueries interface {
 	GetVMByClusterAndVmid(ctx context.Context, arg db.GetVMByClusterAndVmidParams) (db.Vm, error)
 	// Node queries
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.Node, error)
+	// Storage queries (inventory diff)
+	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.StoragePool, error)
 	// PBS queries
 	ListActivePBSServers(ctx context.Context) ([]db.PbsServer, error)
 	UpsertPBSSnapshot(ctx context.Context, arg db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error)
@@ -163,7 +165,7 @@ type Syncer struct {
 	pbsClientFactory PBSClientFactory
 	cache            *proxmox.ClientCache // nil-safe; tests may leave unset
 	healthMonitor    *HealthMonitor
-	eventPub         *events.Publisher
+	eventPub         eventPublisher
 	logger           *slog.Logger
 	lastSyncError    map[uuid.UUID]time.Time // rate-limit sync error reporting per cluster
 }
@@ -179,8 +181,16 @@ func NewSyncer(queries SyncQueries, encryptionKey string, logger *slog.Logger) *
 	}
 }
 
+// eventPublisher is the slice of events.Publisher the Syncer needs. An
+// interface so tests can record published events; *events.Publisher
+// satisfies it (and its methods are nil-receiver-safe).
+type eventPublisher interface {
+	ClusterEvent(ctx context.Context, clusterID, kind, resourceType, resourceID, action string)
+	SystemEvent(ctx context.Context, kind, action string)
+}
+
 // SetEventPublisher attaches an event publisher for status change notifications.
-func (s *Syncer) SetEventPublisher(pub *events.Publisher) {
+func (s *Syncer) SetEventPublisher(pub eventPublisher) {
 	s.eventPub = pub
 }
 
@@ -368,18 +378,53 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 			"cluster_id", cluster.ID, "error", haErr)
 	}
 
-	// Snapshot current VM statuses and node assignments so we can detect
-	// changes after sync (status transitions, VM migrations, additions/removals).
+	// Snapshot current VM, node, and storage state so we can detect changes
+	// after sync (status transitions, migrations, renames, node state flips,
+	// storage (de)activation) and tell the frontend. A nil map means that
+	// snapshot query failed — treated as "changed" after the sync, because a
+	// spurious refetch is cheap while a swallowed transition leaves the UI
+	// stale until the next unrelated event.
 	type vmSnapshot struct {
-		Status string
-		NodeID uuid.UUID
+		Status   string
+		NodeID   uuid.UUID
+		Name     string
+		Template bool
+		Pool     string
+		HAState  string
+		Tags     string
+	}
+	type nodeSnapshot struct {
+		Status  string
+		HAState string
 	}
 	var oldVMs map[int32]vmSnapshot
+	var oldNodes map[uuid.UUID]nodeSnapshot
+	var oldStorage map[uuid.UUID]bool
 	if s.eventPub != nil {
 		if rows, err := s.queries.ListVMStatusesByCluster(ctx, cluster.ID); err == nil {
 			oldVMs = make(map[int32]vmSnapshot, len(rows))
 			for _, r := range rows {
-				oldVMs[r.Vmid] = vmSnapshot{Status: r.Status, NodeID: r.NodeID}
+				oldVMs[r.Vmid] = vmSnapshot{
+					Status:   r.Status,
+					NodeID:   r.NodeID,
+					Name:     r.Name,
+					Template: r.Template,
+					Pool:     r.Pool,
+					HAState:  r.HaState,
+					Tags:     r.Tags,
+				}
+			}
+		}
+		if rows, err := s.queries.ListNodesByCluster(ctx, cluster.ID); err == nil {
+			oldNodes = make(map[uuid.UUID]nodeSnapshot, len(rows))
+			for _, r := range rows {
+				oldNodes[r.ID] = nodeSnapshot{Status: r.Status, HAState: r.HaState}
+			}
+		}
+		if rows, err := s.queries.ListStoragePoolsByCluster(ctx, cluster.ID); err == nil {
+			oldStorage = make(map[uuid.UUID]bool, len(rows))
+			for _, r := range rows {
+				oldStorage[r.ID] = r.Active
 			}
 		}
 	}
@@ -442,10 +487,14 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		}
 	}
 
-	// Check for VM changes (status, node assignment, additions/removals).
+	// Check for inventory changes: VM status/placement/identity, node state,
+	// and storage activation. Anything detected ORs into inventoryChanged,
+	// which publishes a single inventory_change at the end of the pass.
 	inventoryChanged := storageAdded
-	if s.eventPub != nil && oldVMs != nil {
-		if newRows, err := s.queries.ListVMStatusesByCluster(ctx, cluster.ID); err == nil {
+	if s.eventPub != nil {
+		if oldVMs == nil {
+			inventoryChanged = true
+		} else if newRows, err := s.queries.ListVMStatusesByCluster(ctx, cluster.ID); err == nil {
 			for _, r := range newRows {
 				old, existed := oldVMs[r.Vmid]
 				if !existed {
@@ -471,7 +520,57 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 					)
 					inventoryChanged = true
 				}
+				if old.Name != r.Name || old.Template != r.Template ||
+					old.Pool != r.Pool || old.HAState != r.HaState || old.Tags != r.Tags {
+					inventoryChanged = true
+				}
 			}
+		} else {
+			inventoryChanged = true
+		}
+
+		// Node status / HA-state transitions (offline, maintenance, …) and
+		// node additions/removals — previously invisible to the frontend.
+		if oldNodes == nil {
+			inventoryChanged = true
+		} else if newNodes, err := s.queries.ListNodesByCluster(ctx, cluster.ID); err == nil {
+			if len(newNodes) != len(oldNodes) {
+				inventoryChanged = true
+			}
+			for _, n := range newNodes {
+				old, existed := oldNodes[n.ID]
+				if !existed {
+					inventoryChanged = true
+					continue
+				}
+				if old.Status != n.Status || old.HAState != n.HaState {
+					s.logger.Info("node state changed during sync",
+						"node", n.Name,
+						"old_status", old.Status,
+						"new_status", n.Status,
+						"old_ha_state", old.HAState,
+						"new_ha_state", n.HaState,
+						"cluster_id", cluster.ID,
+					)
+					inventoryChanged = true
+				}
+			}
+		} else {
+			inventoryChanged = true
+		}
+
+		// Storage pools flipping active/inactive (additions are covered by
+		// storageAdded, removals by the prune row count below).
+		if oldStorage == nil {
+			inventoryChanged = true
+		} else if newPools, err := s.queries.ListStoragePoolsByCluster(ctx, cluster.ID); err == nil {
+			for _, p := range newPools {
+				if active, existed := oldStorage[p.ID]; existed && active != p.Active {
+					inventoryChanged = true
+				}
+			}
+		} else {
+			inventoryChanged = true
 		}
 	}
 

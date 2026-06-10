@@ -392,6 +392,10 @@ type Querier interface {
 	// currently present in vms are naturally dropped by the join.
 	ListVMFolderMembershipsByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMFolderMembershipsByClusterRow, error)
 	ListVMFoldersByCluster(ctx context.Context, clusterID uuid.UUID) ([]VmFolder, error)
+	// ListVMStatusesByCluster feeds the collector's pre/post-sync inventory diff.
+	// Every column here is compared across a sync pass to decide whether to
+	// publish an inventory_change event, so external edits (Proxmox UI, qm/pct)
+	// become visible to the frontend within one tick.
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)

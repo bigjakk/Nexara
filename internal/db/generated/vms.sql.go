@@ -278,16 +278,26 @@ func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UU
 }
 
 const listVMStatusesByCluster = `-- name: ListVMStatusesByCluster :many
-SELECT id, vmid, node_id, status FROM vms WHERE cluster_id = $1
+SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags
+FROM vms WHERE cluster_id = $1
 `
 
 type ListVMStatusesByClusterRow struct {
-	ID     uuid.UUID `json:"id"`
-	Vmid   int32     `json:"vmid"`
-	NodeID uuid.UUID `json:"node_id"`
-	Status string    `json:"status"`
+	ID       uuid.UUID `json:"id"`
+	Vmid     int32     `json:"vmid"`
+	NodeID   uuid.UUID `json:"node_id"`
+	Status   string    `json:"status"`
+	Name     string    `json:"name"`
+	Template bool      `json:"template"`
+	Pool     string    `json:"pool"`
+	HaState  string    `json:"ha_state"`
+	Tags     string    `json:"tags"`
 }
 
+// ListVMStatusesByCluster feeds the collector's pre/post-sync inventory diff.
+// Every column here is compared across a sync pass to decide whether to
+// publish an inventory_change event, so external edits (Proxmox UI, qm/pct)
+// become visible to the frontend within one tick.
 func (q *Queries) ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error) {
 	rows, err := q.db.Query(ctx, listVMStatusesByCluster, clusterID)
 	if err != nil {
@@ -302,6 +312,11 @@ func (q *Queries) ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UU
 			&i.Vmid,
 			&i.NodeID,
 			&i.Status,
+			&i.Name,
+			&i.Template,
+			&i.Pool,
+			&i.HaState,
+			&i.Tags,
 		); err != nil {
 			return nil, err
 		}

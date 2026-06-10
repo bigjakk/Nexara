@@ -44,8 +44,13 @@ UPDATE vms SET ostype = $2, updated_at = now() WHERE id = $1;
 -- name: SetVMConfigOSType :exec
 UPDATE vms SET config_ostype = $2, updated_at = now() WHERE id = $1;
 
+-- ListVMStatusesByCluster feeds the collector's pre/post-sync inventory diff.
+-- Every column here is compared across a sync pass to decide whether to
+-- publish an inventory_change event, so external edits (Proxmox UI, qm/pct)
+-- become visible to the frontend within one tick.
 -- name: ListVMStatusesByCluster :many
-SELECT id, vmid, node_id, status FROM vms WHERE cluster_id = $1;
+SELECT id, vmid, node_id, status, name, template, pool, ha_state, tags
+FROM vms WHERE cluster_id = $1;
 
 -- name: ListAllVMs :many
 SELECT v.*, c.name AS cluster_name

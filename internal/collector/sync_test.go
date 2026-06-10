@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -61,8 +63,14 @@ func (m *mockQueries) ListActiveClusters(_ context.Context) ([]db.Cluster, error
 
 func (m *mockQueries) UpsertNode(_ context.Context, arg db.UpsertNodeParams) (db.Node, error) {
 	m.upsertNodeCalls = append(m.upsertNodeCalls, arg)
+	key := arg.ClusterID.String() + ":" + arg.Name
+	// Like the real ON CONFLICT upsert, an existing row keeps its id.
+	id := uuid.New()
+	if existing, ok := m.nodes[key]; ok {
+		id = existing.ID
+	}
 	node := db.Node{
-		ID:             uuid.New(),
+		ID:             id,
 		ClusterID:      arg.ClusterID,
 		Name:           arg.Name,
 		Status:         arg.Status,
@@ -72,24 +80,34 @@ func (m *mockQueries) UpsertNode(_ context.Context, arg db.UpsertNodeParams) (db
 		PveVersion:     arg.PveVersion,
 		SslFingerprint: arg.SslFingerprint,
 		Uptime:         arg.Uptime,
+		HaState:        arg.HaState,
 	}
-	key := arg.ClusterID.String() + ":" + arg.Name
 	m.nodes[key] = node
 	return node, nil
 }
 
 func (m *mockQueries) UpsertVM(_ context.Context, arg db.UpsertVMParams) (db.Vm, error) {
 	m.upsertVMCalls = append(m.upsertVMCalls, arg)
+	key := fmt.Sprintf("%s:%d", arg.ClusterID.String(), arg.Vmid)
+	// Like the real ON CONFLICT (cluster_id, vmid) upsert, an existing row
+	// keeps its id across syncs.
+	id := uuid.New()
+	if existing, ok := m.vms[key]; ok {
+		id = existing.ID
+	}
 	vm := db.Vm{
-		ID:        uuid.New(),
+		ID:        id,
 		ClusterID: arg.ClusterID,
 		NodeID:    arg.NodeID,
 		Vmid:      arg.Vmid,
 		Name:      arg.Name,
 		Type:      arg.Type,
 		Status:    arg.Status,
+		Template:  arg.Template,
+		Tags:      arg.Tags,
+		HaState:   arg.HaState,
+		Pool:      arg.Pool,
 	}
-	key := fmt.Sprintf("%s:%d", arg.ClusterID.String(), arg.Vmid)
 	m.vms[key] = vm
 	return vm, nil
 }
@@ -137,8 +155,35 @@ func (m *mockQueries) GetNodeByClusterAndName(_ context.Context, arg db.GetNodeB
 	return node, nil
 }
 
-func (m *mockQueries) ListVMStatusesByCluster(_ context.Context, _ uuid.UUID) ([]db.ListVMStatusesByClusterRow, error) {
-	return nil, nil
+func (m *mockQueries) ListVMStatusesByCluster(_ context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error) {
+	var rows []db.ListVMStatusesByClusterRow
+	for _, vm := range m.vms {
+		if vm.ClusterID != clusterID {
+			continue
+		}
+		rows = append(rows, db.ListVMStatusesByClusterRow{
+			ID:       vm.ID,
+			Vmid:     vm.Vmid,
+			NodeID:   vm.NodeID,
+			Status:   vm.Status,
+			Name:     vm.Name,
+			Template: vm.Template,
+			Pool:     vm.Pool,
+			HaState:  vm.HaState,
+			Tags:     vm.Tags,
+		})
+	}
+	return rows, nil
+}
+
+func (m *mockQueries) ListStoragePoolsByCluster(_ context.Context, clusterID uuid.UUID) ([]db.StoragePool, error) {
+	var pools []db.StoragePool
+	for _, p := range m.storagePools {
+		if p.ClusterID == clusterID {
+			pools = append(pools, p)
+		}
+	}
+	return pools, nil
 }
 
 func (m *mockQueries) DeleteStaleVMs(_ context.Context, _ db.DeleteStaleVMsParams) error {
@@ -245,8 +290,19 @@ func (m *mockQueries) GetVMByClusterAndVmid(_ context.Context, _ db.GetVMByClust
 	return db.Vm{}, fmt.Errorf("not found")
 }
 
-func (m *mockQueries) ListNodesByCluster(_ context.Context, _ uuid.UUID) ([]db.Node, error) {
-	return m.nodesByCluster, nil
+func (m *mockQueries) ListNodesByCluster(_ context.Context, clusterID uuid.UUID) ([]db.Node, error) {
+	// Failover tests pin an explicit candidate list; otherwise derive from
+	// the stateful node map so pre/post-sync snapshots see upserts.
+	if m.nodesByCluster != nil {
+		return m.nodesByCluster, nil
+	}
+	var nodes []db.Node
+	for _, n := range m.nodes {
+		if n.ClusterID == clusterID {
+			nodes = append(nodes, n)
+		}
+	}
+	return nodes, nil
 }
 
 func (m *mockQueries) UpdateClusterPVEVersion(_ context.Context, _ db.UpdateClusterPVEVersionParams) error {
@@ -888,5 +944,155 @@ func TestSyncCluster_MetricSnapshots(t *testing.T) {
 	}
 	if result.VMMetrics[2].MemUsed != 536870912 {
 		t.Errorf("CT1 MemUsed = %d, want 536870912", result.VMMetrics[2].MemUsed)
+	}
+}
+
+// --- Inventory change event tests ---
+
+type mockEvent struct {
+	ClusterID    string
+	Kind         string
+	ResourceType string
+	ResourceID   string
+	Action       string
+}
+
+type mockEventPub struct {
+	mu     sync.Mutex
+	events []mockEvent
+}
+
+func (m *mockEventPub) ClusterEvent(_ context.Context, clusterID, kind, resourceType, resourceID, action string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, mockEvent{clusterID, kind, resourceType, resourceID, action})
+}
+
+func (m *mockEventPub) SystemEvent(_ context.Context, kind, action string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, mockEvent{Kind: kind, Action: action})
+}
+
+func (m *mockEventPub) countKind(kind string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, e := range m.events {
+		if e.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
+// newInventoryEventServer fakes a one-node PVE cluster with a single QEMU
+// guest whose reported node status, name, and status are parameterized.
+func newInventoryEventServer(t *testing.T, nodeStatus, vmName, vmStatus string) *httptest.Server {
+	t.Helper()
+	return newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.NodeListEntry{
+				{Node: "pve1", Status: nodeStatus, MaxCPU: 8, MaxMem: 17179869184, MaxDisk: 107374182400},
+			})
+		},
+		"/api2/json/nodes/pve1/status": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, proxmox.NodeStatus{Node: "pve1", CPUInfo: proxmox.CPUInfo{CPUs: 8}, Memory: proxmox.Memory{Total: 17179869184}, RootFS: proxmox.RootFS{Total: 107374182400}})
+		},
+		"/api2/json/nodes/pve1/qemu": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.VirtualMachine{
+				{VMID: 100, Name: vmName, Status: vmStatus, CPUs: 4, MaxMem: 4294967296},
+			})
+		},
+		"/api2/json/nodes/pve1/lxc": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.Container{})
+		},
+		"/api2/json/nodes/pve1/storage": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.StoragePool{})
+		},
+	})
+}
+
+func TestSyncCluster_InventoryChangeEvents(t *testing.T) {
+	const baseName = "web-server"
+
+	cases := []struct {
+		name           string
+		seededVMStatus string
+		seededVMName   string
+		seededNodeStat string
+		pveNodeStatus  string
+		pveVMName      string
+		pveVMStatus    string
+		pruneRemoved   int64
+		wantStateEvts  int
+		wantInvEvts    int
+	}{
+		{
+			name:           "no_changes_no_events",
+			seededVMStatus: "running", seededVMName: baseName, seededNodeStat: "online",
+			pveNodeStatus: "online", pveVMName: baseName, pveVMStatus: "running",
+			wantStateEvts: 0, wantInvEvts: 0,
+		},
+		{
+			name:           "status_change_publishes_both",
+			seededVMStatus: "running", seededVMName: baseName, seededNodeStat: "online",
+			pveNodeStatus: "online", pveVMName: baseName, pveVMStatus: "stopped",
+			wantStateEvts: 1, wantInvEvts: 1,
+		},
+		{
+			name:           "rename_publishes_inventory_only",
+			seededVMStatus: "running", seededVMName: "old-name", seededNodeStat: "online",
+			pveNodeStatus: "online", pveVMName: baseName, pveVMStatus: "running",
+			wantStateEvts: 0, wantInvEvts: 1,
+		},
+		{
+			name:           "node_status_change_publishes_inventory",
+			seededVMStatus: "running", seededVMName: baseName, seededNodeStat: "offline",
+			pveNodeStatus: "online", pveVMName: baseName, pveVMStatus: "running",
+			wantStateEvts: 0, wantInvEvts: 1,
+		},
+		{
+			name:           "stale_prune_publishes_inventory",
+			seededVMStatus: "running", seededVMName: baseName, seededNodeStat: "online",
+			pveNodeStatus: "online", pveVMName: baseName, pveVMStatus: "running",
+			pruneRemoved:  1,
+			wantStateEvts: 0, wantInvEvts: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newInventoryEventServer(t, tc.pveNodeStatus, tc.pveVMName, tc.pveVMStatus)
+			defer srv.Close()
+
+			mq := newMockQueries()
+			mq.deleteStaleVMsForNodesRemoved = tc.pruneRemoved
+			pub := &mockEventPub{}
+			syncer := newTestSyncer(mq)
+			syncer.SetEventPublisher(pub)
+			cluster := makeCluster(t, srv.URL)
+
+			// Seed pre-sync DB state: one node with one guest on it.
+			nodeID := uuid.New()
+			mq.nodes[cluster.ID.String()+":pve1"] = db.Node{
+				ID: nodeID, ClusterID: cluster.ID, Name: "pve1", Status: tc.seededNodeStat,
+			}
+			mq.vms[fmt.Sprintf("%s:%d", cluster.ID.String(), 100)] = db.Vm{
+				ID: uuid.New(), ClusterID: cluster.ID, NodeID: nodeID,
+				Vmid: 100, Name: tc.seededVMName, Type: "qemu", Status: tc.seededVMStatus,
+			}
+
+			if _, err := syncer.SyncCluster(context.Background(), cluster); err != nil {
+				t.Fatalf("SyncCluster: %v", err)
+			}
+
+			if got := pub.countKind(events.KindVMStateChange); got != tc.wantStateEvts {
+				t.Errorf("vm_state_change events = %d, want %d (events: %+v)", got, tc.wantStateEvts, pub.events)
+			}
+			if got := pub.countKind(events.KindInventoryChange); got != tc.wantInvEvts {
+				t.Errorf("inventory_change events = %d, want %d (events: %+v)", got, tc.wantInvEvts, pub.events)
+			}
+		})
 	}
 }
