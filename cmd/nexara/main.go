@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -507,16 +508,46 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 			logger.Warn("failed to cleanup stale DRS history", "error", err)
 		}
 
+		// Each engine ticks in its own goroutine so one long pass (a rolling
+		// drain or DRS migration can block ~30 min per task wait) cannot
+		// starve the others — most critically alert evaluation, which matters
+		// most during exactly those windows. The per-engine in-flight guard
+		// makes overlapping ticks skip, not queue. Panic recovery lives inside
+		// each Run* method.
+		engine := func(name string, run func(context.Context)) func() {
+			var inFlight atomic.Bool
+			return func() {
+				if !inFlight.CompareAndSwap(false, true) {
+					logger.Debug("scheduler tick skipped: previous run still in flight", "engine", name)
+					return
+				}
+				go func() {
+					defer inFlight.Store(false)
+					run(ctx)
+				}()
+			}
+		}
+
+		runTasks := engine("scheduled_tasks", sched.Run)
+		runDRS := engine("drs", sched.RunDRS)
+		runKEV := engine("kev_refresh", sched.RunKEVRefresh)
+		runCVE := engine("cve_scanning", sched.RunCVEScanning)
+		runAlerts := engine("alert_evaluation", sched.RunAlertEvaluation)
+		runReports := engine("report_generation", sched.RunReportGeneration)
+		runReportRetention := engine("report_retention", sched.RunReportRetention)
+		runTaskRetention := engine("task_retention", sched.RunTaskRetention)
+		runRolling := engine("rolling_updates", sched.RunRollingUpdates)
+
 		// Run initial checks immediately.
-		sched.Run(ctx)
-		sched.RunDRS(ctx)
-		sched.RunKEVRefresh(ctx)
-		sched.RunCVEScanning(ctx)
-		sched.RunAlertEvaluation(ctx)
-		sched.RunReportGeneration(ctx)
-		sched.RunReportRetention(ctx)
-		sched.RunTaskRetention(ctx)
-		sched.RunRollingUpdates(ctx)
+		runTasks()
+		runDRS()
+		runKEV()
+		runCVE()
+		runAlerts()
+		runReports()
+		runReportRetention()
+		runTaskRetention()
+		runRolling()
 
 		taskTicker := time.NewTicker(60 * time.Second)
 		defer taskTicker.Stop()
@@ -548,23 +579,23 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		for {
 			select {
 			case <-taskTicker.C:
-				sched.Run(ctx)
+				runTasks()
 			case <-drsTicker.C:
-				sched.RunDRS(ctx)
+				runDRS()
 			case <-cveTicker.C:
-				sched.RunCVEScanning(ctx)
+				runCVE()
 			case <-kevTicker.C:
-				sched.RunKEVRefresh(ctx)
+				runKEV()
 			case <-alertTicker.C:
-				sched.RunAlertEvaluation(ctx)
+				runAlerts()
 			case <-reportTicker.C:
-				sched.RunReportGeneration(ctx)
+				runReports()
 			case <-reportRetentionTicker.C:
-				sched.RunReportRetention(ctx)
+				runReportRetention()
 			case <-taskRetentionTicker.C:
-				sched.RunTaskRetention(ctx)
+				runTaskRetention()
 			case <-rollingTicker.C:
-				sched.RunRollingUpdates(ctx)
+				runRolling()
 			case <-ctx.Done():
 				logger.Info("scheduler stopped")
 				return
