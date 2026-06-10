@@ -259,9 +259,16 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 			return nil
 		}
 
-		// Check deduplication cooldown.
+		// Check deduplication cooldown, measured from when the previous
+		// alert resolved — measuring from creation would let an alert that
+		// stayed active longer than the cooldown re-fire the instant it
+		// resolves.
 		if err == nil && existing.State == "resolved" {
-			if time.Since(existing.CreatedAt) < time.Duration(rule.CooldownSeconds)*time.Second {
+			since := existing.CreatedAt
+			if existing.ResolvedAt.Valid {
+				since = existing.ResolvedAt.Time
+			}
+			if time.Since(since) < time.Duration(rule.CooldownSeconds)*time.Second {
 				return nil // Within cooldown — suppress.
 			}
 		}
