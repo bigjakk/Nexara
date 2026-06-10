@@ -16,30 +16,53 @@ export function useEventInvalidation(clusterIds: string[]): void {
   const unsubscribe = useWebSocketStore((s) => s.unsubscribe);
 
   // Accumulate query keys to invalidate, then flush after debounce.
-  const pendingKeys = useRef<Set<string>>(new Set());
+  // Prefix keys match hierarchically (TanStack default); exact keys match
+  // only the literal key — used where a prefix would fan out too far.
+  const pendingPrefixKeys = useRef<Set<string>>(new Set());
+  const pendingExactKeys = useRef<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = useCallback(() => {
-    const keys = Array.from(pendingKeys.current);
-    pendingKeys.current.clear();
+    const prefixKeys = Array.from(pendingPrefixKeys.current);
+    const exactKeys = Array.from(pendingExactKeys.current);
+    pendingPrefixKeys.current.clear();
+    pendingExactKeys.current.clear();
     timerRef.current = null;
 
-    for (const serialized of keys) {
+    for (const serialized of prefixKeys) {
       const key = JSON.parse(serialized) as string[];
       void queryClient.invalidateQueries({ queryKey: key });
     }
+    for (const serialized of exactKeys) {
+      const key = JSON.parse(serialized) as string[];
+      void queryClient.invalidateQueries({ queryKey: key, exact: true });
+    }
   }, [queryClient]);
+
+  const armFlush = useCallback(() => {
+    if (timerRef.current === null) {
+      timerRef.current = setTimeout(flush, DEBOUNCE_MS);
+    }
+  }, [flush]);
 
   const scheduleInvalidation = useCallback(
     (...queryKeys: string[][]) => {
       for (const key of queryKeys) {
-        pendingKeys.current.add(JSON.stringify(key));
+        pendingPrefixKeys.current.add(JSON.stringify(key));
       }
-      if (timerRef.current === null) {
-        timerRef.current = setTimeout(flush, DEBOUNCE_MS);
-      }
+      armFlush();
     },
-    [flush],
+    [armFlush],
+  );
+
+  const scheduleExactInvalidation = useCallback(
+    (...queryKeys: string[][]) => {
+      for (const key of queryKeys) {
+        pendingExactKeys.current.add(JSON.stringify(key));
+      }
+      armFlush();
+    },
+    [armFlush],
   );
 
   const handleEvent = useCallback(
@@ -70,13 +93,21 @@ export function useEventInvalidation(clusterIds: string[]): void {
 
         case "inventory_change":
           if (cid) {
+            // Exact-match the clusters list and this cluster's detail row;
+            // scoped prefixes for the affected collections. A bare
+            // ["clusters"] prefix here used to refetch every cluster-scoped
+            // query in the whole app on any VM change anywhere.
+            scheduleExactInvalidation(["clusters"], ["clusters", cid]);
             scheduleInvalidation(
-              ["clusters"],
               ["clusters", cid, "nodes"],
               ["clusters", cid, "vms"],
               ["clusters", cid, "vmids"],
               ["clusters", cid, "containers"],
               ["clusters", cid, "storage"],
+              ["clusters", cid, "vm-folders"],
+              ["clusters", cid, "pools"],
+              ["clusters", cid, "ha"],
+              ["clusters", cid, "backup-jobs"],
             );
           }
           break;
@@ -171,7 +202,7 @@ export function useEventInvalidation(clusterIds: string[]): void {
           break;
       }
     },
-    [scheduleInvalidation],
+    [scheduleInvalidation, scheduleExactInvalidation],
   );
 
   useEffect(() => {
