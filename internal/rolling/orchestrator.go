@@ -1688,9 +1688,60 @@ func (o *Orchestrator) failJob(ctx context.Context, job db.RollingUpdateJob, rea
 	o.publishEvent(dbCtx, job.ClusterID, job.ID, "failed")
 	o.auditLog(dbCtx, job.ClusterID, job.ID, "rolling_update_failed", map[string]string{"reason": reason})
 	o.sendJobNotification(dbCtx, job, "failed", fmt.Sprintf("Rolling update failed: %s", reason))
-	// Re-enable DRS + native CRS if we paused them at the start.
+	// Re-enable DRS + native CRS if we paused them at the start, and any HA
+	// rules still disabled on nodes the failure abandoned mid-flight (normal
+	// completion restores them per node; this path never reached it).
 	o.restoreDRS(dbCtx, job)
 	o.restoreNativeCRS(dbCtx, job)
+	o.restoreAllNodeHAStates(dbCtx, job)
+}
+
+// CleanupCancelledJob releases everything a cancelled job may still hold:
+// the DRS pause, the native CRS pause, and HA rules disabled for in-flight
+// nodes. Cancelled jobs drop out of the running-jobs tick, so without an
+// explicit cleanup these stay leaked until another job on the same cluster
+// happens to complete — or forever.
+func (o *Orchestrator) CleanupCancelledJob(ctx context.Context, jobID uuid.UUID) {
+	job, err := o.queries.GetRollingUpdateJob(ctx, jobID)
+	if err != nil {
+		o.logger.Warn("rolling: cancelled-job cleanup could not load job",
+			"job_id", jobID, "error", err)
+		return
+	}
+	o.restoreDRS(ctx, job)
+	o.restoreNativeCRS(ctx, job)
+	o.restoreAllNodeHAStates(ctx, job)
+	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_cancel_cleanup", nil)
+}
+
+// restoreAllNodeHAStates re-enables every HA rule still recorded as disabled
+// on any of the job's nodes. The client is built lazily so jobs that never
+// disabled anything cost nothing.
+func (o *Orchestrator) restoreAllNodeHAStates(ctx context.Context, job db.RollingUpdateJob) {
+	nodes, err := o.queries.ListRollingUpdateNodes(ctx, job.ID)
+	if err != nil {
+		o.logger.Warn("rolling: failed to list nodes for HA-rule restore",
+			"job_id", job.ID, "error", err)
+		return
+	}
+	var client *proxmox.Client
+	for _, node := range nodes {
+		if len(node.DisabledHaRules) == 0 || string(node.DisabledHaRules) == "null" || string(node.DisabledHaRules) == "[]" {
+			continue
+		}
+		if client == nil {
+			c, clientErr := o.createClient(ctx, job.ClusterID)
+			if clientErr != nil {
+				o.logger.Error("rolling: failed to build client to restore HA rules — re-enable manually via Datacenter → HA",
+					"job_id", job.ID, "cluster_id", job.ClusterID, "error", clientErr)
+				o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_ha_restore_failed",
+					map[string]string{"error": clientErr.Error()})
+				return
+			}
+			client = c
+		}
+		o.restoreHAStates(ctx, client, node)
+	}
 }
 
 // cleanupCtxFor returns (ctx, no-op cancel) when ctx is still alive, or a

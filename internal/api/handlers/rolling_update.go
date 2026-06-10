@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -444,9 +445,13 @@ func (h *RollingUpdateHandler) CancelJob(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid job ID")
 	}
 
-	// Read the job first to check DRS state before cancelling.
 	job, err := h.queries.GetRollingUpdateJob(c.Context(), jobID)
 	if err != nil {
+		return fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
+	}
+	if job.ClusterID != clusterID {
+		// The permission check above covered the URL cluster; make sure the
+		// job actually belongs to it.
 		return fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
 	}
 
@@ -454,13 +459,21 @@ func (h *RollingUpdateHandler) CancelJob(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to cancel job")
 	}
 
-	// Re-enable DRS if it was disabled for this job.
-	if job.DrsWasEnabled {
-		_ = h.queries.SetDRSEnabled(c.Context(), db.SetDRSEnabledParams{
-			ClusterID: clusterID,
-			Enabled:   true,
-		})
-	}
+	// Release everything the job still holds — the DRS pause, the native CRS
+	// pause, and HA rules disabled for in-flight nodes. Cancelled jobs drop
+	// out of the orchestrator's running-jobs tick, so nothing else would ever
+	// restore these. Detached context: the restores call Proxmox and must
+	// outlive this request.
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("rolling-update cancel cleanup panicked", "job_id", jobID, "panic", r)
+			}
+		}()
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		h.orchestrator.CleanupCancelledJob(cleanupCtx, jobID)
+	}()
 
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "rolling_update", jobID.String(), "rolling_update_cancelled", nil)
 
