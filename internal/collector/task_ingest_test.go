@@ -183,8 +183,9 @@ func TestIngestTask_External(t *testing.T) {
 // touches (GetNodes, GetNodeTasks); the embedded interface stubs the rest.
 type ingestSyncFakeClient struct {
 	ProxmoxClient
-	nodes []proxmox.NodeListEntry
-	tasks map[string][]proxmox.NodeTask
+	nodes    []proxmox.NodeListEntry
+	tasks    map[string][]proxmox.NodeTask
+	taskErrs map[string]error // per-node GetNodeTasks failures
 }
 
 func (f *ingestSyncFakeClient) GetNodes(context.Context) ([]proxmox.NodeListEntry, error) {
@@ -192,6 +193,9 @@ func (f *ingestSyncFakeClient) GetNodes(context.Context) ([]proxmox.NodeListEntr
 }
 
 func (f *ingestSyncFakeClient) GetNodeTasks(_ context.Context, node string, _ int64, _ int) ([]proxmox.NodeTask, error) {
+	if err := f.taskErrs[node]; err != nil {
+		return nil, err
+	}
 	return f.tasks[node], nil
 }
 
@@ -234,6 +238,32 @@ func TestSyncTasks_WatermarkGuard(t *testing.T) {
 		}
 		if len(q.upsertTaskSyncCalls) != 0 {
 			t.Fatalf("watermark must not advance when dedup fails, got %d upserts", len(q.upsertTaskSyncCalls))
+		}
+	})
+
+	t.Run("per-node fetch failure ingests the healthy node but holds the watermark", func(t *testing.T) {
+		// pve1 lists a task; pve2's task fetch fails. The healthy node's tasks
+		// must still ingest, but the cluster watermark must NOT advance — it
+		// would skip past anything that started on pve2 before pve1's
+		// maxStartTime, and the since-filter would never re-list it.
+		twoNodeClient := &ingestSyncFakeClient{
+			nodes: []proxmox.NodeListEntry{
+				{Node: "pve1", Status: "online"},
+				{Node: "pve2", Status: "online"},
+			},
+			tasks: map[string][]proxmox.NodeTask{
+				"pve1": {{UPID: "UPID:pve1:qmsnapshot:100:run", Type: "qmsnapshot", ID: "100", Status: "", StartTime: taskStart}},
+			},
+			taskErrs: map[string]error{"pve2": errors.New("node unreachable")},
+		}
+		q := newMockQueries()
+		s := &Syncer{queries: q, logger: testLogger()}
+		s.syncTasks(context.Background(), twoNodeClient, cluster)
+		if len(q.externalTaskCalls) != 1 {
+			t.Fatalf("expected the healthy node's task to ingest, got %d", len(q.externalTaskCalls))
+		}
+		if len(q.upsertTaskSyncCalls) != 0 {
+			t.Fatalf("watermark must not advance when a node's task fetch fails, got %d upserts", len(q.upsertTaskSyncCalls))
 		}
 	})
 }

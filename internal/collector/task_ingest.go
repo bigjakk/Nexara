@@ -36,6 +36,7 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 
 	var maxStartTime int64
 	dedupFailed := false
+	fetchFailed := false
 	for _, node := range nodes {
 		tasks, err := client.GetNodeTasks(ctx, node.Node, since, 500)
 		if err != nil {
@@ -44,6 +45,11 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 				"node", node.Node,
 				"error", err,
 			)
+			// Hold the cluster watermark back (below): the healthy nodes'
+			// maxStartTime would otherwise advance `since` past tasks that
+			// started on THIS node before the new watermark, and the
+			// since-filter would skip them forever once the node recovers.
+			fetchFailed = true
 			continue
 		}
 
@@ -80,11 +86,12 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 		}
 	}
 
-	// Advance the high-water mark only when every node deduped cleanly. If any
-	// node's dedup failed we processed a partial set, so leaving `since` where it
-	// is forces a full retry next tick rather than silently skipping the tasks we
-	// could not ingest.
-	if !dedupFailed && maxStartTime > since {
+	// Advance the high-water mark only when every node was fetched AND deduped
+	// cleanly. If any node failed we processed a partial set, so leaving `since`
+	// where it is forces a full retry next tick rather than silently skipping
+	// the tasks we could not list or ingest (re-listing is cheap and idempotent:
+	// seenTaskUPIDs + ON CONFLICT DO NOTHING absorb the replays).
+	if !dedupFailed && !fetchFailed && maxStartTime > since {
 		if err := s.queries.UpsertTaskSyncState(ctx, db.UpsertTaskSyncStateParams{
 			ClusterID:    cluster.ID,
 			LastSyncedAt: maxStartTime,
