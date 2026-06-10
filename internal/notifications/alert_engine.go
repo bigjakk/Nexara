@@ -164,10 +164,9 @@ func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []
 
 // evaluateNodeRule evaluates a rule against a single node's metrics.
 func (e *Engine) evaluateNodeRule(ctx context.Context, rule db.AlertRule, nodeID uuid.UUID) error {
-	since := time.Now().Add(-time.Duration(rule.DurationSeconds) * time.Second)
 	metrics, err := e.queries.GetNodeRecentMetrics(ctx, db.GetNodeRecentMetricsParams{
 		NodeID: nodeID,
-		Time:   since,
+		Time:   time.Now().Add(-metricLookback(rule)),
 	})
 	if err != nil {
 		return fmt.Errorf("get node metrics: %w", err)
@@ -175,6 +174,25 @@ func (e *Engine) evaluateNodeRule(ctx context.Context, rule db.AlertRule, nodeID
 
 	if len(metrics) == 0 {
 		return nil // No data — can't evaluate.
+	}
+
+	// Trim the floored fetch back to the rule's own duration window
+	// (rows are ordered newest-first).
+	if rule.DurationSeconds == 0 {
+		metrics = metrics[:1]
+	} else {
+		cutoff := time.Now().Add(-time.Duration(rule.DurationSeconds) * time.Second)
+		n := 0
+		for _, m := range metrics {
+			if !m.Bucket.Before(cutoff) {
+				metrics[n] = m
+				n++
+			}
+		}
+		metrics = metrics[:n]
+		if len(metrics) == 0 {
+			return nil
+		}
 	}
 
 	// Check if ALL data points within the window satisfy the condition.
@@ -204,10 +222,9 @@ func (e *Engine) evaluateNodeRule(ctx context.Context, rule db.AlertRule, nodeID
 
 // evaluateVMRule evaluates a rule against a single VM's metrics.
 func (e *Engine) evaluateVMRule(ctx context.Context, rule db.AlertRule, vmID uuid.UUID) error {
-	since := time.Now().Add(-time.Duration(rule.DurationSeconds) * time.Second)
 	metrics, err := e.queries.GetVMRecentMetrics(ctx, db.GetVMRecentMetricsParams{
 		VmID: vmID,
-		Time: since,
+		Time: time.Now().Add(-metricLookback(rule)),
 	})
 	if err != nil {
 		return fmt.Errorf("get vm metrics: %w", err)
@@ -215,6 +232,25 @@ func (e *Engine) evaluateVMRule(ctx context.Context, rule db.AlertRule, vmID uui
 
 	if len(metrics) == 0 {
 		return nil
+	}
+
+	// Trim the floored fetch back to the rule's own duration window
+	// (rows are ordered newest-first).
+	if rule.DurationSeconds == 0 {
+		metrics = metrics[:1]
+	} else {
+		cutoff := time.Now().Add(-time.Duration(rule.DurationSeconds) * time.Second)
+		n := 0
+		for _, m := range metrics {
+			if !m.Bucket.Before(cutoff) {
+				metrics[n] = m
+				n++
+			}
+		}
+		metrics = metrics[:n]
+		if len(metrics) == 0 {
+			return nil
+		}
 	}
 
 	allMatch := true
@@ -238,6 +274,21 @@ func (e *Engine) evaluateVMRule(ctx context.Context, rule db.AlertRule, vmID uui
 
 	vmIDPg := pgtype.UUID{Bytes: vmID, Valid: true}
 	return e.handleRuleResult(ctx, rule, allMatch, latestValue, resourceName, pgtype.UUID{}, vmIDPg)
+}
+
+// metricLookback floors the metrics fetch window at two collection ticks.
+// The window used to be exactly duration_seconds wide, so a zero-duration
+// rule ("fire on the latest sample") queried time >= now() — a zero-width
+// window that matched nothing, meaning such rules never fired at all. The
+// evaluators trim the floored fetch back to the configured duration so
+// longer windows keep their sustained-condition semantics.
+func metricLookback(rule db.AlertRule) time.Duration {
+	const minLookback = 2 * time.Minute
+	lookback := time.Duration(rule.DurationSeconds) * time.Second
+	if lookback < minLookback {
+		return minLookback
+	}
+	return lookback
 }
 
 // handleRuleResult creates, transitions, or auto-resolves alerts based on evaluation.
