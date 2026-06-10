@@ -3,12 +3,14 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/crypto"
@@ -223,12 +225,19 @@ func (e *Engine) evaluateVMRule(ctx context.Context, rule db.AlertRule, vmID uui
 
 // handleRuleResult creates, transitions, or auto-resolves alerts based on evaluation.
 func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, conditionMet bool, value float64, resourceName string, nodeID, vmID pgtype.UUID) error {
-	// Find existing active alert for this rule + resource.
+	// Find existing active alert for this rule + resource. The scope params
+	// pass through as pgtype.UUID so an absent dimension reaches SQL as NULL
+	// (uuid.Nil would match nothing — see the query comment).
 	existing, err := e.queries.GetLatestAlertForRule(ctx, db.GetLatestAlertForRuleParams{
 		RuleID: rule.ID,
-		NodeID: uuidFromPgtype(nodeID),
-		VmID:   uuidFromPgtype(vmID),
+		NodeID: nodeID,
+		VmID:   vmID,
 	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// A transient lookup failure must not be treated as "no existing
+		// alert" — that would insert a duplicate row every tick.
+		return fmt.Errorf("lookup existing alert: %w", err)
+	}
 	hasExisting := err == nil && (existing.State == "pending" || existing.State == "firing")
 
 	if conditionMet {

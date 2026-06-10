@@ -200,11 +200,17 @@ LIMIT 1
 `
 
 type GetLatestAlertForRuleParams struct {
-	RuleID uuid.UUID `json:"rule_id"`
-	NodeID uuid.UUID `json:"node_id"`
-	VmID   uuid.UUID `json:"vm_id"`
+	RuleID uuid.UUID   `json:"rule_id"`
+	NodeID pgtype.UUID `json:"node_id"`
+	VmID   pgtype.UUID `json:"vm_id"`
 }
 
+// GetLatestAlertForRule backs the engine's dedup/transition/resolve logic.
+// The scope params MUST be sqlc.narg (nullable pgtype.UUID): with plain @
+// params sqlc generates non-nullable uuid.UUID, and pgx encodes uuid.Nil as
+// the zero UUID — never SQL NULL — so the IS NULL disjunct can never fire
+// and the lookup matches nothing (alerts then re-insert every tick and
+// never transition or auto-resolve).
 func (q *Queries) GetLatestAlertForRule(ctx context.Context, arg GetLatestAlertForRuleParams) (AlertHistory, error) {
 	row := q.db.QueryRow(ctx, getLatestAlertForRule, arg.RuleID, arg.NodeID, arg.VmID)
 	var i AlertHistory
@@ -891,11 +897,11 @@ LIMIT $5 OFFSET $4
 `
 
 type ListAlertHistoryFilteredParams struct {
-	State     string    `json:"state"`
-	Severity  string    `json:"severity"`
-	ClusterID uuid.UUID `json:"cluster_id"`
-	OffsetVal int32     `json:"offset_val"`
-	LimitVal  int32     `json:"limit_val"`
+	State     string      `json:"state"`
+	Severity  string      `json:"severity"`
+	ClusterID pgtype.UUID `json:"cluster_id"`
+	OffsetVal int32       `json:"offset_val"`
+	LimitVal  int32       `json:"limit_val"`
 }
 
 func (q *Queries) ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHistoryFilteredParams) ([]AlertHistory, error) {

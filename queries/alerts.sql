@@ -61,7 +61,7 @@ LIMIT $2 OFFSET $3;
 SELECT * FROM alert_history
 WHERE (@state::text = '' OR state = @state::text)
   AND (@severity::text = '' OR severity = @severity::text)
-  AND (@cluster_id::uuid IS NULL OR cluster_id = @cluster_id)
+  AND (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
 ORDER BY created_at DESC
 LIMIT @limit_val OFFSET @offset_val;
 
@@ -103,11 +103,17 @@ UPDATE alert_history
 SET state = 'resolved', resolved_at = now()
 WHERE id = $1 AND state IN ('pending', 'firing');
 
+-- GetLatestAlertForRule backs the engine's dedup/transition/resolve logic.
+-- The scope params MUST be sqlc.narg (nullable pgtype.UUID): with plain @
+-- params sqlc generates non-nullable uuid.UUID, and pgx encodes uuid.Nil as
+-- the zero UUID — never SQL NULL — so the IS NULL disjunct can never fire
+-- and the lookup matches nothing (alerts then re-insert every tick and
+-- never transition or auto-resolve).
 -- name: GetLatestAlertForRule :one
 SELECT * FROM alert_history
 WHERE rule_id = @rule_id
-  AND (@node_id::uuid IS NULL OR node_id = @node_id)
-  AND (@vm_id::uuid IS NULL OR vm_id = @vm_id)
+  AND (sqlc.narg('node_id')::uuid IS NULL OR node_id = sqlc.narg('node_id'))
+  AND (sqlc.narg('vm_id')::uuid IS NULL OR vm_id = sqlc.narg('vm_id'))
 ORDER BY created_at DESC
 LIMIT 1;
 

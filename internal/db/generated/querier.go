@@ -181,6 +181,12 @@ type Querier interface {
 	GetKEVEntry(ctx context.Context, cveID string) (KevCache, error)
 	GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, error)
 	GetLastDRSMigrationForVM(ctx context.Context, arg GetLastDRSMigrationForVMParams) (DrsHistory, error)
+	// GetLatestAlertForRule backs the engine's dedup/transition/resolve logic.
+	// The scope params MUST be sqlc.narg (nullable pgtype.UUID): with plain @
+	// params sqlc generates non-nullable uuid.UUID, and pgx encodes uuid.Nil as
+	// the zero UUID — never SQL NULL — so the IS NULL disjunct can never fire
+	// and the lookup matches nothing (alerts then re-insert every tick and
+	// never transition or auto-resolve).
 	GetLatestAlertForRule(ctx context.Context, arg GetLatestAlertForRuleParams) (AlertHistory, error)
 	GetLatestCVEScan(ctx context.Context, clusterID uuid.UUID) (CveScan, error)
 	GetLatestCephClusterMetrics(ctx context.Context, clusterID uuid.UUID) (CephClusterMetric, error)

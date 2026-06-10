@@ -769,16 +769,19 @@ func (h *AlertHandler) ListAlerts(c *fiber.Ctx) error {
 	}
 	clusterIDStr := c.Query("cluster_id")
 
-	var clusterID uuid.UUID
+	// No cluster filter must reach SQL as NULL (match all, RBAC-trimmed per
+	// row below) — a zero uuid.UUID would instead match cluster_id = '0000…'
+	// and return nothing.
+	var clusterID pgtype.UUID
 	if clusterIDStr != "" {
-		var parseErr error
-		clusterID, parseErr = uuid.Parse(clusterIDStr)
+		parsed, parseErr := uuid.Parse(clusterIDStr)
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
 		}
-		if !access.PermitsCluster(clusterID) {
+		if !access.PermitsCluster(parsed) {
 			return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
 		}
+		clusterID = pgtype.UUID{Bytes: parsed, Valid: true}
 	}
 
 	alerts, err := h.queries.ListAlertHistoryFiltered(c.Context(), db.ListAlertHistoryFilteredParams{
