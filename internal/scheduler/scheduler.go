@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
@@ -421,29 +422,96 @@ func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client,
 		VMState:     params.VMState,
 	}
 
+	var upid string
+	var err error
 	switch task.ResourceType {
 	case "vm":
-		_, err := client.CreateVMSnapshot(ctx, task.Node, mustAtoi(task.ResourceID), sp)
-		return err
+		upid, err = client.CreateVMSnapshot(ctx, task.Node, mustAtoi(task.ResourceID), sp)
 	case "ct":
-		_, err := client.CreateCTSnapshot(ctx, task.Node, mustAtoi(task.ResourceID), sp)
-		return err
+		upid, err = client.CreateCTSnapshot(ctx, task.Node, mustAtoi(task.ResourceID), sp)
 	default:
 		return fmt.Errorf("unsupported resource type for snapshot: %s", task.ResourceType)
 	}
+	if err != nil {
+		return err
+	}
+	s.trackTask(ctx, task, upid, "scheduled_snapshot",
+		fmt.Sprintf("Scheduled snapshot %s — %s %s", snapName, task.ResourceType, task.ResourceID))
+	return nil
 }
 
 func (s *Scheduler) executeReboot(ctx context.Context, client *proxmox.Client, task db.ScheduledTask) error {
 	vmid := mustAtoi(task.ResourceID)
+	var upid string
+	var err error
 	switch task.ResourceType {
 	case "vm":
-		_, err := client.RebootVM(ctx, task.Node, vmid)
-		return err
+		upid, err = client.RebootVM(ctx, task.Node, vmid)
 	case "ct":
-		_, err := client.RebootCT(ctx, task.Node, vmid)
-		return err
+		upid, err = client.RebootCT(ctx, task.Node, vmid)
 	default:
 		return fmt.Errorf("unsupported resource type for reboot: %s", task.ResourceType)
+	}
+	if err != nil {
+		return err
+	}
+	s.trackTask(ctx, task, upid, "scheduled_reboot",
+		fmt.Sprintf("Scheduled reboot — %s %s", task.ResourceType, task.ResourceID))
+	return nil
+}
+
+// trackTask records a UPID-producing scheduled action the same way the DRS
+// executor records its migrations: a task_history row (status running — the
+// collector reconciler owns the running→done flip), a task_created event,
+// and an audit entry attributed to the system user. Previously the UPID was
+// discarded, so the action was invisible until the collector re-ingested it
+// as an external "proxmox" task mis-attributed to the API token user.
+//
+// If the task_history insert fails, the event and audit row are skipped on
+// purpose: an audit row containing the UPID would make the external-task
+// ingest dedup skip it, and the task would then never appear anywhere. With
+// nothing recorded, the next collector tick ingests it as external — a
+// degraded but visible fallback.
+func (s *Scheduler) trackTask(ctx context.Context, task db.ScheduledTask, upid, taskType, description string) {
+	if upid == "" {
+		return
+	}
+	if _, err := s.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
+		ClusterID:   task.ClusterID,
+		UserID:      auth.SystemUserID,
+		Upid:        upid,
+		Description: description,
+		Status:      "running",
+		Node:        task.Node,
+		TaskType:    taskType,
+	}); err != nil {
+		s.logger.Warn("failed to insert task history for scheduled task",
+			"task_id", task.ID, "upid", upid, "error", err)
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{
+		"upid":        upid,
+		"schedule_id": task.ID.String(),
+		"node":        task.Node,
+	})
+	if err := s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: task.ClusterID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+		ResourceType: task.ResourceType,
+		ResourceID:   task.ResourceID,
+		Action:       taskType,
+		Details:      details,
+	}); err != nil {
+		s.logger.Warn("failed to insert audit log for scheduled task",
+			"task_id", task.ID, "upid", upid, "error", err)
+	}
+
+	if s.eventPub != nil {
+		s.eventPub.ClusterEvent(ctx, task.ClusterID.String(),
+			events.KindTaskCreated, "task", upid, taskType)
+		s.eventPub.ClusterEvent(ctx, task.ClusterID.String(),
+			events.KindAuditEntry, task.ResourceType, task.ResourceID, taskType)
 	}
 }
 
