@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -70,6 +71,9 @@ type SyncQueries interface {
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.Node, error)
 	// Storage queries (inventory diff)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.StoragePool, error)
+	// Fast resource sync
+	UpdateNodeStatusFast(ctx context.Context, arg db.UpdateNodeStatusFastParams) (int64, error)
+	DeleteVMsAbsentFromCluster(ctx context.Context, arg db.DeleteVMsAbsentFromClusterParams) (int64, error)
 	// PBS queries
 	ListActivePBSServers(ctx context.Context) ([]db.PbsServer, error)
 	UpsertPBSSnapshot(ctx context.Context, arg db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error)
@@ -170,6 +174,7 @@ type Syncer struct {
 	logger           *slog.Logger
 	lastSyncErrorMu  sync.Mutex
 	lastSyncError    map[uuid.UUID]time.Time // rate-limit sync error reporting per cluster
+	fastSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllResources
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.

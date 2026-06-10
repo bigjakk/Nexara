@@ -344,6 +344,7 @@ type ClusterResource struct {
 	HAState    string  `json:"hastate,omitempty"`
 	Lock       string  `json:"lock,omitempty"`
 	Pool       string  `json:"pool,omitempty"`
+	Tags       string  `json:"tags,omitempty"`
 	Storage    string  `json:"storage,omitempty"`
 	PluginType string  `json:"plugintype,omitempty"`
 }

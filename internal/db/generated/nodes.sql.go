@@ -254,6 +254,29 @@ func (q *Queries) UpdateNodeAddress(ctx context.Context, arg UpdateNodeAddressPa
 	return err
 }
 
+const updateNodeStatusFast = `-- name: UpdateNodeStatusFast :execrows
+UPDATE nodes SET status = $3, updated_at = now()
+WHERE cluster_id = $1 AND name = $2 AND status IS DISTINCT FROM $3
+`
+
+type UpdateNodeStatusFastParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Name      string    `json:"name"`
+	Status    string    `json:"status"`
+}
+
+// UpdateNodeStatusFast flips just the status column, and only when it actually
+// differs — the fast resource-sync loop calls this per node every few seconds
+// and uses the row count as its "changed" signal, so unchanged nodes must cost
+// zero writes and report zero rows.
+func (q *Queries) UpdateNodeStatusFast(ctx context.Context, arg UpdateNodeStatusFastParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateNodeStatusFast, arg.ClusterID, arg.Name, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertNode = `-- name: UpsertNode :one
 INSERT INTO nodes (cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime,
                    cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version,

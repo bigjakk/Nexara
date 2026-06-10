@@ -46,7 +46,13 @@ type Config struct {
 	// empty and "*" so the operator can see what posture they're running.
 	CORSAllowOrigins       string        `envconfig:"CORS_ALLOW_ORIGINS"`
 	MetricsCollectInterval time.Duration `envconfig:"METRICS_COLLECT_INTERVAL" default:"30s"`
-	TaskHistoryRetention   time.Duration `envconfig:"TASK_HISTORY_RETENTION" default:"24h"`
+	// ResourceSyncInterval drives the fast inventory loop: one cheap
+	// GET /cluster/resources per cluster per tick, so guest add/remove/move,
+	// status flips, renames, and node status converge in seconds. Floored at
+	// 2s in the collector; 0 disables the fast loop entirely (the slow
+	// MetricsCollectInterval pass then owns all freshness, as before).
+	ResourceSyncInterval time.Duration `envconfig:"RESOURCE_SYNC_INTERVAL" default:"5s"`
+	TaskHistoryRetention time.Duration `envconfig:"TASK_HISTORY_RETENTION" default:"24h"`
 	WSPort                 int           `envconfig:"WS_PORT" default:"8081"`
 	WSPingInterval         time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
 	WSPongTimeout          time.Duration `envconfig:"WS_PONG_TIMEOUT" default:"30s"`

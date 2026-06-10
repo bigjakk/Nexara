@@ -146,6 +146,15 @@ type Querier interface {
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	DeleteVMFolder(ctx context.Context, id uuid.UUID) error
+	// DeleteVMsAbsentFromCluster removes guests that are no longer present in the
+	// cluster configuration. The fast resource-sync loop feeds this from
+	// GET /cluster/resources, which is config-authoritative: a guest stays listed
+	// there throughout live migrations and HA recovery and disappears only when it
+	// is actually destroyed — so unlike the per-node listing path there is no
+	// transient-blip churn risk and no grace window is needed. An empty vmid list
+	// is valid (a genuinely empty cluster prunes everything); callers must verify
+	// the resources payload was well-formed before treating it as authoritative.
+	DeleteVMsAbsentFromCluster(ctx context.Context, arg DeleteVMsAbsentFromClusterParams) (int64, error)
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) error
@@ -498,6 +507,11 @@ type Querier interface {
 	UpdateMigrationJobProgress(ctx context.Context, arg UpdateMigrationJobProgressParams) error
 	UpdateMigrationJobStatus(ctx context.Context, arg UpdateMigrationJobStatusParams) error
 	UpdateNodeAddress(ctx context.Context, arg UpdateNodeAddressParams) error
+	// UpdateNodeStatusFast flips just the status column, and only when it actually
+	// differs — the fast resource-sync loop calls this per node every few seconds
+	// and uses the row count as its "changed" signal, so unchanged nodes must cost
+	// zero writes and report zero rows.
+	UpdateNodeStatusFast(ctx context.Context, arg UpdateNodeStatusFastParams) (int64, error)
 	UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (NotificationChannel, error)
 	UpdateNotificationDLQState(ctx context.Context, arg UpdateNotificationDLQStateParams) error
 	UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error)

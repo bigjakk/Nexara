@@ -446,10 +446,40 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 	mc := collector.NewMetricCollector(pool, publisher, logger)
 
 	runWithLeaderRetry(ctx, pool, "collector", logger, func(ctx context.Context) {
-		logger.Info("collector started", "metrics_interval", cfg.MetricsCollectInterval)
+		logger.Info("collector started",
+			"metrics_interval", cfg.MetricsCollectInterval,
+			"resource_sync_interval", cfg.ResourceSyncInterval)
 
 		ticker := cfg.NewMetricsTicker()
 		defer ticker.Stop()
+
+		// Fast inventory loop: one GET /cluster/resources per cluster per
+		// tick, so the tree converges in seconds while the heavy per-node
+		// enrichment stays on the slow ticker below. Tied to the leader ctx,
+		// so losing leadership stops it with the rest of the collector.
+		if cfg.ResourceSyncInterval > 0 {
+			fastInterval := cfg.ResourceSyncInterval
+			if fastInterval < 2*time.Second {
+				fastInterval = 2 * time.Second
+			}
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("fast resource sync loop panicked", "panic", r)
+					}
+				}()
+				fastTicker := time.NewTicker(fastInterval)
+				defer fastTicker.Stop()
+				for {
+					select {
+					case <-fastTicker.C:
+						syncer.SyncAllResources(ctx)
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+		}
 
 		// Run initial sync immediately.
 		results := syncer.SyncAll(ctx)

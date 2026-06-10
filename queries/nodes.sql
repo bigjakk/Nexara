@@ -58,3 +58,11 @@ SELECT address FROM nodes WHERE cluster_id = $1 AND name = $2;
 
 -- name: ListNodeEndpoints :many
 SELECT name, address, ssl_fingerprint FROM nodes WHERE cluster_id = $1 AND address != '' ORDER BY name;
+
+-- UpdateNodeStatusFast flips just the status column, and only when it actually
+-- differs — the fast resource-sync loop calls this per node every few seconds
+-- and uses the row count as its "changed" signal, so unchanged nodes must cost
+-- zero writes and report zero rows.
+-- name: UpdateNodeStatusFast :execrows
+UPDATE nodes SET status = $3, updated_at = now()
+WHERE cluster_id = $1 AND name = $2 AND status IS DISTINCT FROM $3;

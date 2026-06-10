@@ -38,6 +38,8 @@ type mockQueries struct {
 	upsertStorageCalls          []db.UpsertStoragePoolParams
 	deleteStaleVMsForNodesCalls   []db.DeleteStaleVMsForNodesParams
 	deleteStaleVMsForNodesRemoved int64
+	nodeStatusFastCalls           []db.UpdateNodeStatusFastParams
+	deleteAbsentCalls             []db.DeleteVMsAbsentFromClusterParams
 
 	runningTasks   []db.TaskHistory
 	reconcileCalls []db.ReconcileTaskHistoryParams
@@ -188,6 +190,35 @@ func (m *mockQueries) ListStoragePoolsByCluster(_ context.Context, clusterID uui
 
 func (m *mockQueries) DeleteStaleVMs(_ context.Context, _ db.DeleteStaleVMsParams) error {
 	return nil
+}
+
+func (m *mockQueries) UpdateNodeStatusFast(_ context.Context, arg db.UpdateNodeStatusFastParams) (int64, error) {
+	m.nodeStatusFastCalls = append(m.nodeStatusFastCalls, arg)
+	// Mirror the real rowcount-guarded UPDATE against the stateful node map.
+	key := arg.ClusterID.String() + ":" + arg.Name
+	node, ok := m.nodes[key]
+	if !ok || node.Status == arg.Status {
+		return 0, nil
+	}
+	node.Status = arg.Status
+	m.nodes[key] = node
+	return 1, nil
+}
+
+func (m *mockQueries) DeleteVMsAbsentFromCluster(_ context.Context, arg db.DeleteVMsAbsentFromClusterParams) (int64, error) {
+	m.deleteAbsentCalls = append(m.deleteAbsentCalls, arg)
+	keep := make(map[int32]bool, len(arg.Vmids))
+	for _, id := range arg.Vmids {
+		keep[id] = true
+	}
+	var removed int64
+	for k, vm := range m.vms {
+		if vm.ClusterID == arg.ClusterID && !keep[vm.Vmid] {
+			delete(m.vms, k)
+			removed++
+		}
+	}
+	return removed, nil
 }
 
 func (m *mockQueries) DeleteStaleVMsForNodes(_ context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error) {

@@ -80,3 +80,16 @@ DELETE FROM vms
 WHERE cluster_id = $1
   AND last_seen_at < now() - make_interval(secs => @grace_seconds::int)
   AND node_id = ANY(@node_ids::uuid[]);
+
+-- DeleteVMsAbsentFromCluster removes guests that are no longer present in the
+-- cluster configuration. The fast resource-sync loop feeds this from
+-- GET /cluster/resources, which is config-authoritative: a guest stays listed
+-- there throughout live migrations and HA recovery and disappears only when it
+-- is actually destroyed — so unlike the per-node listing path there is no
+-- transient-blip churn risk and no grace window is needed. An empty vmid list
+-- is valid (a genuinely empty cluster prunes everything); callers must verify
+-- the resources payload was well-formed before treating it as authoritative.
+-- name: DeleteVMsAbsentFromCluster :execrows
+DELETE FROM vms
+WHERE cluster_id = $1
+  AND NOT (vmid = ANY(@vmids::int[]));
