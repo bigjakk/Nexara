@@ -50,7 +50,7 @@ type SyncQueries interface {
 	DeleteStaleStoragePools(ctx context.Context, arg db.DeleteStaleStoragePoolsParams) (int64, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
-	DeleteStaleVMsForNodes(ctx context.Context, arg db.DeleteStaleVMsForNodesParams) error
+	DeleteStaleVMsForNodes(ctx context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error)
 	UpdateNodeAddress(ctx context.Context, arg db.UpdateNodeAddressParams) error
 	// Audit
 	InsertAuditLog(ctx context.Context, arg db.InsertAuditLogParams) error
@@ -472,10 +472,6 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 					inventoryChanged = true
 				}
 			}
-			// Detect VMs removed.
-			if len(newRows) != len(oldVMs) {
-				inventoryChanged = true
-			}
 		}
 	}
 
@@ -488,7 +484,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// and mint a fresh vms.id). VMs on nodes that failed to sync are left intact
 	// and reconciled on the next clean cycle.
 	if len(syncedNodeIDs) > 0 {
-		if err := s.queries.DeleteStaleVMsForNodes(ctx, db.DeleteStaleVMsForNodesParams{
+		if removed, err := s.queries.DeleteStaleVMsForNodes(ctx, db.DeleteStaleVMsForNodesParams{
 			ClusterID:    cluster.ID,
 			GraceSeconds: int32(staleVMGrace.Seconds()),
 			NodeIds:      syncedNodeIDs,
@@ -497,6 +493,8 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 				"cluster_id", cluster.ID,
 				"error", err,
 			)
+		} else if removed > 0 {
+			inventoryChanged = true
 		}
 	}
 

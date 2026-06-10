@@ -34,7 +34,8 @@ type mockQueries struct {
 	upsertNodeCalls             []db.UpsertNodeParams
 	upsertVMCalls               []db.UpsertVMParams
 	upsertStorageCalls          []db.UpsertStoragePoolParams
-	deleteStaleVMsForNodesCalls []db.DeleteStaleVMsForNodesParams
+	deleteStaleVMsForNodesCalls   []db.DeleteStaleVMsForNodesParams
+	deleteStaleVMsForNodesRemoved int64
 
 	runningTasks   []db.TaskHistory
 	reconcileCalls []db.ReconcileTaskHistoryParams
@@ -144,9 +145,9 @@ func (m *mockQueries) DeleteStaleVMs(_ context.Context, _ db.DeleteStaleVMsParam
 	return nil
 }
 
-func (m *mockQueries) DeleteStaleVMsForNodes(_ context.Context, arg db.DeleteStaleVMsForNodesParams) error {
+func (m *mockQueries) DeleteStaleVMsForNodes(_ context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error) {
 	m.deleteStaleVMsForNodesCalls = append(m.deleteStaleVMsForNodesCalls, arg)
-	return nil
+	return m.deleteStaleVMsForNodesRemoved, nil
 }
 
 func (m *mockQueries) DeleteStaleStoragePools(_ context.Context, _ db.DeleteStaleStoragePoolsParams) (int64, error) {

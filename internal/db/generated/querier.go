@@ -141,7 +141,7 @@ type Querier interface {
 	//     from deleting and re-inserting the row. That churn would mint a fresh
 	//     vms.id and, before migration 000068, silently dropped folder memberships.
 	//     Driving both sides from now() also avoids mixing the app and DB clocks.
-	DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMsForNodesParams) error
+	DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMsForNodesParams) (int64, error)
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error

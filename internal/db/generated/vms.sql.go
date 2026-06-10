@@ -26,7 +26,7 @@ func (q *Queries) DeleteStaleVMs(ctx context.Context, arg DeleteStaleVMsParams) 
 	return err
 }
 
-const deleteStaleVMsForNodes = `-- name: DeleteStaleVMsForNodes :exec
+const deleteStaleVMsForNodes = `-- name: DeleteStaleVMsForNodes :execrows
 DELETE FROM vms
 WHERE cluster_id = $1
   AND last_seen_at < now() - make_interval(secs => $2::int)
@@ -49,9 +49,12 @@ type DeleteStaleVMsForNodesParams struct {
 //     from deleting and re-inserting the row. That churn would mint a fresh
 //     vms.id and, before migration 000068, silently dropped folder memberships.
 //     Driving both sides from now() also avoids mixing the app and DB clocks.
-func (q *Queries) DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMsForNodesParams) error {
-	_, err := q.db.Exec(ctx, deleteStaleVMsForNodes, arg.ClusterID, arg.GraceSeconds, arg.NodeIds)
-	return err
+func (q *Queries) DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMsForNodesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteStaleVMsForNodes, arg.ClusterID, arg.GraceSeconds, arg.NodeIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getContainer = `-- name: GetContainer :one

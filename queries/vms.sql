@@ -60,7 +60,7 @@ UPDATE vms SET pool = $2 WHERE id = $1;
 -- name: DeleteStaleVMs :exec
 DELETE FROM vms WHERE cluster_id = $1 AND last_seen_at < $2;
 
--- name: DeleteStaleVMsForNodes :exec
+-- name: DeleteStaleVMsForNodes :execrows
 -- Prunes VMs only on nodes that synced successfully this cycle, and only once a
 -- VM has been unseen for longer than the grace window. Both guards matter:
 --   * node scoping stops a transient per-node Proxmox API failure from wiping
