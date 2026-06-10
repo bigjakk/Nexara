@@ -257,4 +257,62 @@ describe("websocket-store", () => {
     expect(MockWebSocket.instances).toHaveLength(1);
     expect(mintSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("connect→disconnect→connect during a slow mint opens only one socket", async () => {
+    // The StrictMode double-mount race: attempt 1's mint is still in
+    // flight when disconnect()+connect() install attempt 2. When attempt
+    // 1's mint finally resolves it must notice it was superseded and bail
+    // instead of opening a duplicate socket whose callbacks fight the
+    // live connection's state.
+    let resolveFirst: (v: { token: string; expires_in: number }) => void =
+      () => undefined;
+    mintSpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+
+    useWebSocketStore.getState().connect(); // attempt 1 — mint hangs
+    useWebSocketStore.getState().disconnect();
+    useWebSocketStore.getState().connect(); // attempt 2 — fast mock mint
+    await flushPromises();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    const live = getLastInstance();
+    live.simulateOpen();
+    expect(useWebSocketStore.getState().status).toBe("connected");
+
+    // Attempt 1's stale mint resolves — no second socket, live state intact.
+    resolveFirst({ token: "stale-token", expires_in: 60 });
+    await flushPromises();
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(useWebSocketStore.getState().status).toBe("connected");
+    expect(useWebSocketStore.getState().socket).not.toBeNull();
+  });
+
+  it("a socket the store no longer owns cannot run teardown on close", async () => {
+    useWebSocketStore.getState().connect();
+    await flushPromises();
+    const first = getLastInstance();
+    first.simulateOpen();
+    expect(useWebSocketStore.getState().status).toBe("connected");
+
+    // Server reaps the connection: legit teardown + scheduled reconnect.
+    first.simulateClose();
+    expect(useWebSocketStore.getState().status).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    const second = MockWebSocket.instances[1];
+    if (!second) throw new Error("expected reconnect socket");
+    second.simulateOpen();
+    expect(useWebSocketStore.getState().status).toBe("connected");
+
+    // A late close event from the dead first socket must not null the new
+    // connection or schedule another reconnect.
+    first.simulateClose();
+    expect(useWebSocketStore.getState().status).toBe("connected");
+    expect(useWebSocketStore.getState().socket).not.toBeNull();
+  });
 });

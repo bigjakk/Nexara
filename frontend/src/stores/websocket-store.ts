@@ -66,7 +66,11 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
       // so we guard with `pendingConnect` (cleared only when THIS specific
       // promise settles, never when a later connect() has installed a
       // newer one) and re-check status before AND after creating the socket.
-      const pending: Promise<void> = (async () => {
+      // Declared before the async body so the closure can compare itself
+      // against the store's current pendingConnect; nothing reads it until
+      // after the first await, by which point the assignment has run.
+      let pending: Promise<void> | null = null;
+      pending = (async () => {
         let token: string;
         try {
           const minted = await mintWSHubToken();
@@ -74,9 +78,10 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
         } catch {
           // Mint failed (network, 401, etc.). Drop to reconnecting so the
           // backoff kicks in; if auth is broken the apiClient's refresh
-          // path will surface the failure first.
+          // path will surface the failure first. A superseded attempt
+          // (newer pendingConnect installed) must not schedule anything.
           const s = get();
-          if (s.status !== "disconnected") {
+          if (s.status !== "disconnected" && s.pendingConnect === pending) {
             const attempts = s.reconnectAttempts;
             const delay = getReconnectDelay(attempts);
             set({ status: "reconnecting", reconnectAttempts: attempts + 1 });
@@ -90,15 +95,21 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
         }
 
         // The user may have called disconnect() while the mint was in
-        // flight. Don't open a socket if they did.
-        if (get().status === "disconnected") return;
+        // flight — or a newer connect() may have superseded this attempt
+        // (disconnect()+connect() during a slow mint). Opening a socket in
+        // either case would orphan a duplicate connection whose callbacks
+        // then fight the live one's state.
+        if (get().status === "disconnected" || get().pendingConnect !== pending) {
+          return;
+        }
 
         const ws = new WebSocket(buildHubWsUrl(), wsAuthProtocols(token));
 
         ws.onopen = () => {
           // disconnect() may have fired between `new WebSocket()` and the
-          // open event. If so, close immediately and skip the bookkeeping.
-          if (get().status === "disconnected") {
+          // open event, or the store may no longer own this socket. Close
+          // and skip the bookkeeping.
+          if (get().status === "disconnected" || get().socket !== ws) {
             ws.close();
             return;
           }
@@ -115,6 +126,10 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
         };
 
         ws.onmessage = (event: MessageEvent) => {
+          // Ignore frames from a socket the store no longer owns — a stale
+          // duplicate would otherwise double-fire every listener.
+          if (get().socket !== ws) return;
+
           let msg: WsIncomingMessage;
           try {
             msg = JSON.parse(String(event.data)) as WsIncomingMessage;
@@ -144,6 +159,11 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
         };
 
         ws.onclose = () => {
+          // Only the socket the store currently owns may run teardown — an
+          // orphaned socket closing must not null the live connection's
+          // state or schedule a competing reconnect loop.
+          if (get().socket !== ws) return;
+
           const cur = get();
           if (cur.pingTimer) {
             clearInterval(cur.pingTimer);
@@ -169,8 +189,8 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
 
         // disconnect() between `new WebSocket()` and here would have only
         // seen socket: null; the freshly-created `ws` would orphan with no
-        // close path. Re-check and clean up if status flipped underneath.
-        if (get().status === "disconnected") {
+        // close path. Re-check and clean up if anything flipped underneath.
+        if (get().status === "disconnected" || get().pendingConnect !== pending) {
           ws.close();
           return;
         }
