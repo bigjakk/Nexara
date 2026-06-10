@@ -187,11 +187,17 @@ type Querier interface {
 	GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, error)
 	GetLastDRSMigrationForVM(ctx context.Context, arg GetLastDRSMigrationForVMParams) (DrsHistory, error)
 	// GetLatestAlertForRule backs the engine's dedup/transition/resolve logic.
-	// The scope params MUST be sqlc.narg (nullable pgtype.UUID): with plain @
-	// params sqlc generates non-nullable uuid.UUID, and pgx encodes uuid.Nil as
+	// The node param MUST be sqlc.narg (nullable pgtype.UUID): with a plain @
+	// param sqlc generates non-nullable uuid.UUID, and pgx encodes uuid.Nil as
 	// the zero UUID — never SQL NULL — so the IS NULL disjunct can never fire
 	// and the lookup matches nothing (alerts then re-insert every tick and
 	// never transition or auto-resolve).
+	//
+	// The node dimension exists because cluster-scoped rules evaluate once per
+	// node. There is deliberately NO vm dimension: a vm-scoped rule targets
+	// exactly one guest, so rule_id alone identifies its alert stream — and
+	// alert_history.vm_id is a vms-row UUID that churns with the collector,
+	// which would break dedup across a churn boundary.
 	GetLatestAlertForRule(ctx context.Context, arg GetLatestAlertForRuleParams) (AlertHistory, error)
 	GetLatestCVEScan(ctx context.Context, clusterID uuid.UUID) (CveScan, error)
 	GetLatestCephClusterMetrics(ctx context.Context, clusterID uuid.UUID) (CephClusterMetric, error)

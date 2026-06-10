@@ -50,7 +50,7 @@ type alertRuleResponse struct {
 	ScopeType       string          `json:"scope_type"`
 	ClusterID       string          `json:"cluster_id,omitempty"`
 	NodeID          string          `json:"node_id,omitempty"`
-	VMID            string          `json:"vm_id,omitempty"`
+	VMVmid          int32           `json:"vm_vmid,omitempty"`
 	CooldownSeconds int32           `json:"cooldown_seconds"`
 	EscalationChain json.RawMessage `json:"escalation_chain"`
 	MessageTemplate string          `json:"message_template"`
@@ -86,9 +86,8 @@ func toAlertRuleResponse(r db.AlertRule) alertRuleResponse {
 		id, _ := uuid.FromBytes(r.NodeID.Bytes[:])
 		resp.NodeID = id.String()
 	}
-	if r.VmID.Valid {
-		id, _ := uuid.FromBytes(r.VmID.Bytes[:])
-		resp.VMID = id.String()
+	if r.VmVmid.Valid {
+		resp.VMVmid = r.VmVmid.Int32
 	}
 	return resp
 }
@@ -267,7 +266,7 @@ type createAlertRuleRequest struct {
 	ScopeType       string          `json:"scope_type"`
 	ClusterID       string          `json:"cluster_id"`
 	NodeID          string          `json:"node_id"`
-	VMID            string          `json:"vm_id"`
+	VMVmid          *int32          `json:"vm_vmid"`
 	CooldownSeconds *int32          `json:"cooldown_seconds"`
 	EscalationChain json.RawMessage `json:"escalation_chain"`
 	MessageTemplate string          `json:"message_template"`
@@ -453,7 +452,8 @@ func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "message_template must be <= 4096 characters")
 	}
 
-	var clusterID, nodeID, vmID pgtype.UUID
+	var clusterID, nodeID pgtype.UUID
+	var vmVmid pgtype.Int4
 	if req.ClusterID != "" {
 		cid, err := uuid.Parse(req.ClusterID)
 		if err != nil {
@@ -476,12 +476,17 @@ func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
 		}
 		nodeID = pgtype.UUID{Bytes: nid, Valid: true}
 	}
-	if req.VMID != "" {
-		vid, err := uuid.Parse(req.VMID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid vm_id")
+	if req.VMVmid != nil {
+		// VM scope keys on the stable (cluster_id, vmid) identity. The guest
+		// is allowed to not exist yet — the rule binds to the inventory slot
+		// and the engine starts evaluating when the VMID appears.
+		if *req.VMVmid <= 0 {
+			return fiber.NewError(fiber.StatusBadRequest, "vm_vmid must be a positive Proxmox VMID")
 		}
-		vmID = pgtype.UUID{Bytes: vid, Valid: true}
+		if !clusterID.Valid {
+			return fiber.NewError(fiber.StatusBadRequest, "vm_vmid requires cluster_id")
+		}
+		vmVmid = pgtype.Int4{Int32: *req.VMVmid, Valid: true}
 	}
 
 	userID, _ := c.Locals("user_id").(uuid.UUID)
@@ -498,7 +503,7 @@ func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
 		ScopeType:       req.ScopeType,
 		ClusterID:       clusterID,
 		NodeID:          nodeID,
-		VmID:            vmID,
+		VmVmid:          vmVmid,
 		CooldownSeconds: cooldownSeconds,
 		EscalationChain: escalationChain,
 		CreatedBy:       userID,
@@ -673,13 +678,12 @@ func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
 		}
 		nodeID = pgtype.UUID{Bytes: nid, Valid: true}
 	}
-	vmID := existing.VmID
-	if req.VMID != "" {
-		vid, parseErr := uuid.Parse(req.VMID)
-		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid vm_id")
+	vmVmid := existing.VmVmid
+	if req.VMVmid != nil {
+		if *req.VMVmid <= 0 {
+			return fiber.NewError(fiber.StatusBadRequest, "vm_vmid must be a positive Proxmox VMID")
 		}
-		vmID = pgtype.UUID{Bytes: vid, Valid: true}
+		vmVmid = pgtype.Int4{Int32: *req.VMVmid, Valid: true}
 	}
 
 	rule, err := h.queries.UpdateAlertRule(c.Context(), db.UpdateAlertRuleParams{
@@ -695,7 +699,7 @@ func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
 		ScopeType:       scopeType,
 		ClusterID:       clusterID,
 		NodeID:          nodeID,
-		VmID:            vmID,
+		VmVmid:          vmVmid,
 		CooldownSeconds: cooldownSeconds,
 		EscalationChain: escalationChain,
 		MessageTemplate: messageTemplate,

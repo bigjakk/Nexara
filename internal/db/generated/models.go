@@ -50,13 +50,13 @@ type AlertRule struct {
 	ScopeType       string          `json:"scope_type"`
 	ClusterID       pgtype.UUID     `json:"cluster_id"`
 	NodeID          pgtype.UUID     `json:"node_id"`
-	VmID            pgtype.UUID     `json:"vm_id"`
 	CooldownSeconds int32           `json:"cooldown_seconds"`
 	EscalationChain json.RawMessage `json:"escalation_chain"`
 	CreatedBy       uuid.UUID       `json:"created_by"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 	MessageTemplate string          `json:"message_template"`
+	VmVmid          pgtype.Int4     `json:"vm_vmid"`
 }
 
 type ApiKey struct {

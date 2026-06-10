@@ -328,7 +328,9 @@ export interface AlertRule {
   scope_type: "cluster" | "node" | "vm";
   cluster_id?: string;
   node_id?: string;
-  vm_id?: string;
+  // Stable Proxmox VMID — vm-scoped rules key on (cluster_id, vm_vmid), not
+  // the churn-prone vms-row UUID.
+  vm_vmid?: number;
   cooldown_seconds: number;
   escalation_chain: EscalationStep[];
   message_template: string;

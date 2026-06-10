@@ -110,14 +110,31 @@ func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []
 		return e.evaluateNodeRule(ctx, rule, nodeID)
 
 	case "vm":
-		if !rule.VmID.Valid {
-			return fmt.Errorf("vm rule %s has no vm_id", rule.ID)
+		if !rule.VmVmid.Valid {
+			return fmt.Errorf("vm rule %s has no vmid", rule.ID)
 		}
-		vmID := uuidFromPgtype(rule.VmID)
+		if !rule.ClusterID.Valid {
+			return fmt.Errorf("vm rule %s has no cluster_id", rule.ID)
+		}
 		if e.isInMaintenanceWindow(rule.ClusterID, pgtype.UUID{}, windows) {
 			return nil
 		}
-		return e.evaluateVMRule(ctx, rule, vmID)
+		// Resolve the live vms row from the stable (cluster_id, vmid)
+		// identity at evaluation time — the row's UUID is minted anew when
+		// the collector churns it, which is exactly why the rule no longer
+		// stores it (a CASCADE on vms.id used to delete the rule outright).
+		vm, err := e.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
+			ClusterID: uuidFromPgtype(rule.ClusterID),
+			Vmid:      rule.VmVmid.Int32,
+		})
+		if err != nil {
+			// Guest not currently in inventory (churn window, or genuinely
+			// gone) — nothing to evaluate this tick; the rule survives.
+			e.logger.Debug("vm rule target not in inventory",
+				"rule_id", rule.ID, "vmid", rule.VmVmid.Int32)
+			return nil
+		}
+		return e.evaluateVMRule(ctx, rule, vm.ID)
 
 	case "cluster":
 		if !rule.ClusterID.Valid {
@@ -225,13 +242,14 @@ func (e *Engine) evaluateVMRule(ctx context.Context, rule db.AlertRule, vmID uui
 
 // handleRuleResult creates, transitions, or auto-resolves alerts based on evaluation.
 func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, conditionMet bool, value float64, resourceName string, nodeID, vmID pgtype.UUID) error {
-	// Find existing active alert for this rule + resource. The scope params
-	// pass through as pgtype.UUID so an absent dimension reaches SQL as NULL
-	// (uuid.Nil would match nothing — see the query comment).
+	// Find the existing active alert for this rule (+node for cluster-scoped
+	// rules, which evaluate per node). The node param passes through as
+	// pgtype.UUID so an absent dimension reaches SQL as NULL (uuid.Nil would
+	// match nothing — see the query comment). vm_id is deliberately not a
+	// dedup dimension: it churns with the collector.
 	existing, err := e.queries.GetLatestAlertForRule(ctx, db.GetLatestAlertForRuleParams{
 		RuleID: rule.ID,
 		NodeID: nodeID,
-		VmID:   vmID,
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		// A transient lookup failure must not be treated as "no existing

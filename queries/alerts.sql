@@ -2,7 +2,7 @@
 
 -- name: InsertAlertRule :one
 INSERT INTO alert_rules (name, description, enabled, severity, metric, operator, threshold,
-    duration_seconds, scope_type, cluster_id, node_id, vm_id, cooldown_seconds, escalation_chain, created_by, message_template)
+    duration_seconds, scope_type, cluster_id, node_id, vm_vmid, cooldown_seconds, escalation_chain, created_by, message_template)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 RETURNING *;
 
@@ -27,7 +27,7 @@ SELECT * FROM alert_rules WHERE enabled = true;
 UPDATE alert_rules
 SET name = $2, description = $3, enabled = $4, severity = $5, metric = $6,
     operator = $7, threshold = $8, duration_seconds = $9, scope_type = $10,
-    cluster_id = $11, node_id = $12, vm_id = $13, cooldown_seconds = $14,
+    cluster_id = $11, node_id = $12, vm_vmid = $13, cooldown_seconds = $14,
     escalation_chain = $15, message_template = $16, updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -104,16 +104,21 @@ SET state = 'resolved', resolved_at = now()
 WHERE id = $1 AND state IN ('pending', 'firing');
 
 -- GetLatestAlertForRule backs the engine's dedup/transition/resolve logic.
--- The scope params MUST be sqlc.narg (nullable pgtype.UUID): with plain @
--- params sqlc generates non-nullable uuid.UUID, and pgx encodes uuid.Nil as
+-- The node param MUST be sqlc.narg (nullable pgtype.UUID): with a plain @
+-- param sqlc generates non-nullable uuid.UUID, and pgx encodes uuid.Nil as
 -- the zero UUID — never SQL NULL — so the IS NULL disjunct can never fire
 -- and the lookup matches nothing (alerts then re-insert every tick and
 -- never transition or auto-resolve).
+--
+-- The node dimension exists because cluster-scoped rules evaluate once per
+-- node. There is deliberately NO vm dimension: a vm-scoped rule targets
+-- exactly one guest, so rule_id alone identifies its alert stream — and
+-- alert_history.vm_id is a vms-row UUID that churns with the collector,
+-- which would break dedup across a churn boundary.
 -- name: GetLatestAlertForRule :one
 SELECT * FROM alert_history
 WHERE rule_id = @rule_id
   AND (sqlc.narg('node_id')::uuid IS NULL OR node_id = sqlc.narg('node_id'))
-  AND (sqlc.narg('vm_id')::uuid IS NULL OR vm_id = sqlc.narg('vm_id'))
 ORDER BY created_at DESC
 LIMIT 1;
 
