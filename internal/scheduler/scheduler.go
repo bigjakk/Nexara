@@ -290,6 +290,14 @@ func (s *Scheduler) RunCVEScanning(ctx context.Context) {
 		}
 	}()
 
+	// Self-heal scans stuck in running/pending by a crash or restart —
+	// they block manual triggers and post-rolling-update rescans.
+	if swept, err := s.queries.FailStaleCVEScans(ctx); err != nil {
+		s.logger.Warn("failed to sweep stale CVE scans", "error", err)
+	} else if swept > 0 {
+		s.logger.Info("swept stale CVE scans", "count", swept)
+	}
+
 	clusters, err := s.queries.ListClusters(ctx)
 	if err != nil {
 		s.logger.Error("failed to list clusters for CVE scanning", "error", err)

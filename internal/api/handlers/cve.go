@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -254,10 +255,21 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 		return err
 	}
 
-	// Prevent concurrent scans on the same cluster
+	// Prevent concurrent scans on the same cluster — but only while the
+	// in-flight scan is plausibly alive. A panic or restart mid-scan leaves
+	// the row in running/pending forever; without the age cutoff that
+	// phantom row blocked every future manual trigger.
 	latestScan, err := h.queries.GetLatestCVEScan(c.Context(), clusterID)
 	if err == nil && (latestScan.Status == "running" || latestScan.Status == "pending") {
-		return fiber.NewError(fiber.StatusConflict, "A scan is already in progress for this cluster")
+		if time.Since(latestScan.StartedAt) < 2*time.Hour {
+			return fiber.NewError(fiber.StatusConflict, "A scan is already in progress for this cluster")
+		}
+		_ = h.queries.UpdateCVEScanStatus(c.Context(), db.UpdateCVEScanStatusParams{
+			ID:           latestScan.ID,
+			Status:       "failed",
+			ErrorMessage: pgtype.Text{String: "scan abandoned (interrupted by restart or stuck >2h)", Valid: true},
+			CompletedAt:  pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		})
 	}
 
 	// Create scan record upfront so the frontend can see it immediately
@@ -284,6 +296,15 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("CVE scan panicked", "cluster_id", clusterID, "scan_id", scan.ID, "panic", r)
+				// Without this the row stays "running" forever and blocks
+				// future manual scans via the concurrency guard above.
+				_ = h.queries.UpdateCVEScanStatus(bgCtx, db.UpdateCVEScanStatusParams{
+					ID:           scan.ID,
+					Status:       "failed",
+					ErrorMessage: pgtype.Text{String: fmt.Sprintf("scan panicked: %v", r), Valid: true},
+					CompletedAt:  pgtype.Timestamptz{Time: time.Now(), Valid: true},
+				})
+				h.eventPub.ClusterEvent(bgCtx, clusterID.String(), events.KindCVEScan, "cve_scan", scan.ID.String(), "failed")
 			}
 		}()
 

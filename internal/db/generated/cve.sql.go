@@ -31,6 +31,27 @@ func (q *Queries) DeleteCVEScan(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const failStaleCVEScans = `-- name: FailStaleCVEScans :execrows
+UPDATE cve_scans
+SET status = 'failed',
+    error_message = 'scan abandoned (interrupted by restart or stuck >2h)',
+    completed_at = now()
+WHERE status IN ('running', 'pending')
+  AND started_at < now() - interval '2 hours'
+`
+
+// FailStaleCVEScans abandons scans stuck in running/pending — a panic, hard
+// crash, or restart mid-scan otherwise leaves the row blocking every future
+// manual trigger forever (the 409 concurrent-scan guard keys off the latest
+// scan row) and suppressing post-rolling-update rescans.
+func (q *Queries) FailStaleCVEScans(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, failStaleCVEScans)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getCVECacheAge = `-- name: GetCVECacheAge :one
 SELECT MIN(fetched_at) AS oldest_fetch FROM cve_cache
 `

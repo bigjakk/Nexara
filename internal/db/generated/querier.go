@@ -149,6 +149,11 @@ type Querier interface {
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) error
+	// FailStaleCVEScans abandons scans stuck in running/pending — a panic, hard
+	// crash, or restart mid-scan otherwise leaves the row blocking every future
+	// manual trigger forever (the 409 concurrent-scan guard keys off the latest
+	// scan row) and suppressing post-rolling-update rescans.
+	FailStaleCVEScans(ctx context.Context) (int64, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error)
 	GetAPIKeyByID(ctx context.Context, id uuid.UUID) (ApiKey, error)
 	GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error)

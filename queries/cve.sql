@@ -241,3 +241,15 @@ FROM cve_scan_vulns
 WHERE scan_id = $1 AND ssvc_label = ANY($2::text[])
 ORDER BY risk_score DESC, cve_id;
 
+
+-- FailStaleCVEScans abandons scans stuck in running/pending — a panic, hard
+-- crash, or restart mid-scan otherwise leaves the row blocking every future
+-- manual trigger forever (the 409 concurrent-scan guard keys off the latest
+-- scan row) and suppressing post-rolling-update rescans.
+-- name: FailStaleCVEScans :execrows
+UPDATE cve_scans
+SET status = 'failed',
+    error_message = 'scan abandoned (interrupted by restart or stuck >2h)',
+    completed_at = now()
+WHERE status IN ('running', 'pending')
+  AND started_at < now() - interval '2 hours';
