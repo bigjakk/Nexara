@@ -5,7 +5,10 @@ import {
   Network, CircuitBoard, Globe, Trash2, RotateCcw, Check,
   Pencil, Cog, FileText, Play, Square, RotateCw,
   Plus, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  Server,
 } from "lucide-react";
+import { StatusBadge } from "@/features/inventory/components/StatusBadge";
+import { DetailChip } from "@/components/DetailChip";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -124,29 +127,39 @@ export function NodeDetailPage() {
     <div className="space-y-6 p-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" asChild className="-ml-2">
-              <Link to={`/clusters/${clusterId}`}>
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
-            </Button>
-            <h1 className="text-2xl font-bold tracking-tight">{node.name}</h1>
-            <Badge variant={node.status === "online" ? "default" : "destructive"}>
-              {node.status}
-            </Badge>
-            {node.ha_state === "maintenance" && (
-              <Badge
-                variant="outline"
-                className="border-amber-500/50 text-amber-600 dark:text-amber-400"
-              >
-                Maintenance
-              </Badge>
-            )}
+        <div className="flex items-start gap-3">
+          <Button variant="ghost" size="sm" asChild className="-ml-2 mt-1.5">
+            <Link to={`/clusters/${clusterId}`}>
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-500/10">
+            <Server className="h-6 w-6 text-sky-500" />
           </div>
-          <p className="text-sm text-muted-foreground">
-            Proxmox Node
-          </p>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold tracking-tight">{node.name}</h1>
+              <StatusBadge status={node.status} />
+              {node.ha_state === "maintenance" && (
+                <Badge
+                  variant="outline"
+                  className="border-amber-500/50 text-amber-600 dark:text-amber-400"
+                >
+                  Maintenance
+                </Badge>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <DetailChip>Proxmox node</DetailChip>
+              {node.pve_version !== "" && (
+                <DetailChip>
+                  PVE {node.pve_version.replace(/^pve-manager\/([^/]+).*$/, "$1")}
+                </DetailChip>
+              )}
+              <DetailChip>{node.cpu_count} vCPU</DetailChip>
+              <DetailChip>{formatBytes(node.mem_total)} RAM</DetailChip>
+            </div>
+          </div>
         </div>
         {node.status === "online" && (
           <div className="flex items-center gap-2">

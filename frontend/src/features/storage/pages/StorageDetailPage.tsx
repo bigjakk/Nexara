@@ -146,8 +146,10 @@ export function StorageDetailPage() {
             <ChevronLeft className="h-4 w-4" />
             All Pools
           </button>
-          <Database className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-semibold">{pool.storage}</h1>
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/10">
+            <Database className="h-6 w-6 text-amber-500" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight">{pool.storage}</h1>
           <Badge variant="outline">{pool.type}</Badge>
           {pool.shared ? (
             <Badge variant="secondary">shared</Badge>

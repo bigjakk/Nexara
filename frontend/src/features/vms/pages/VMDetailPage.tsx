@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Monitor, Terminal, Pencil, Check, X } from "lucide-react";
+import { ArrowLeft, Monitor, Terminal, Pencil, Check, X, Container, Server } from "lucide-react";
+import { OSIcon } from "@/components/OSIcon";
+import { DetailChip } from "@/components/DetailChip";
+import { classifyOS } from "@/lib/os-classify";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -140,13 +143,28 @@ export function VMDetailPage() {
       )}
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
+        <div className="flex items-start gap-3">
+          <Button variant="ghost" size="sm" asChild className="-ml-2 mt-1.5">
+            <Link to="/inventory">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
+            {classifyOS(vm.ostype) !== "unknown" ||
+            classifyOS(vm.config_ostype) !== "unknown" ? (
+              <OSIcon
+                ostype={vm.ostype}
+                configOstype={vm.config_ostype}
+                className="h-6 w-6"
+              />
+            ) : kind === "ct" ? (
+              <Container className="h-6 w-6 text-muted-foreground" />
+            ) : (
+              <Monitor className="h-6 w-6 text-muted-foreground" />
+            )}
+          </div>
+          <div className="space-y-1.5">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" asChild className="-ml-2">
-              <Link to="/inventory">
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
-            </Button>
             {renaming ? (
               <InlineRename
                 inputRef={renameInputRef}
@@ -186,10 +204,20 @@ export function VMDetailPage() {
               <Badge variant="secondary">Template</Badge>
             )}
           </div>
-          <p className="text-sm text-muted-foreground">
-            {kind === "ct" ? "Container" : "Virtual Machine"} &middot; VMID{" "}
-            {String(vm.vmid)}
-          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <DetailChip>{kind === "ct" ? "CT · LXC" : "VM · QEMU"}</DetailChip>
+            <DetailChip>VMID {String(vm.vmid)}</DetailChip>
+            {nodeName !== "" && (
+              <Link to={`/clusters/${clusterId}/nodes/${vm.node_id}`}>
+                <DetailChip className="transition-colors hover:border-muted-foreground/40 hover:text-foreground">
+                  <Server className="h-3 w-3" />
+                  {nodeName}
+                </DetailChip>
+              </Link>
+            )}
+            {vm.ha_state !== "" && <DetailChip>HA · {vm.ha_state}</DetailChip>}
+          </div>
+          </div>
         </div>
       </div>
 

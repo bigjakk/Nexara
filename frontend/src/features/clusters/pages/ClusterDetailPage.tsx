@@ -11,7 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Terminal } from "lucide-react";
+import { ArrowLeft, Terminal, Layers } from "lucide-react";
+import { DetailChip } from "@/components/DetailChip";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
 import { Button } from "@/components/ui/button";
 import { useConsoleStore } from "@/stores/console-store";
@@ -73,27 +74,35 @@ export function ClusterDetailPage() {
         </div>
       ) : (
         <>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0">
-              {isLoading ? (
-                <Skeleton className="h-7 w-48" />
-              ) : (
-                <>
-                  <CardTitle className="text-xl">
+          {isLoading ? (
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-11 w-11 rounded-xl" />
+              <Skeleton className="h-7 w-48" />
+            </div>
+          ) : (
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10">
+                <Layers className="h-6 w-6 text-emerald-500" />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-bold tracking-tight">
                     {cluster?.name ?? ""}
-                  </CardTitle>
+                  </h1>
                   <ClusterStatusBadge status={cluster?.status ?? "unknown"} />
-                </>
-              )}
-            </CardHeader>
-            {cluster != null && (
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  {cluster.api_url}
-                </p>
-              </CardContent>
-            )}
-          </Card>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <DetailChip>Proxmox cluster</DetailChip>
+                  {cluster != null && cluster.pve_version !== "" && (
+                    <DetailChip>PVE {cluster.pve_version}</DetailChip>
+                  )}
+                  {cluster != null && (
+                    <DetailChip className="font-mono">{cluster.api_url}</DetailChip>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           <Tabs defaultValue={tabParam || "nodes"} {...(tabParam ? { value: tabParam } : {})}>
             <TabsList>
