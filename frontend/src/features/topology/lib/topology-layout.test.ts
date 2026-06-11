@@ -32,6 +32,7 @@ describe("applyHierarchicalLayout", () => {
         status: "online",
         nodeCount: 0,
         vmCount: 0,
+        pveVersion: "",
         clusterId: "1",
       } satisfies ClusterNodeData),
     ];
@@ -52,6 +53,7 @@ describe("applyHierarchicalLayout", () => {
         status: "online",
         nodeCount: 1,
         vmCount: 0,
+        pveVersion: "",
         clusterId: "1",
       } satisfies ClusterNodeData),
       makeFlowNode("host-1", "hostNode", {
@@ -63,6 +65,7 @@ describe("applyHierarchicalLayout", () => {
         pveVersion: "8.0",
         clusterId: "1",
         nodeId: "1",
+        guests: [],
       } satisfies HostNodeData),
     ];
     const edges: Edge[] = [
@@ -89,6 +92,7 @@ describe("applyHierarchicalLayout", () => {
         status: "online",
         nodeCount: 1,
         vmCount: 0,
+        pveVersion: "",
         clusterId: "1",
       } satisfies ClusterNodeData),
       makeFlowNode("host-1", "hostNode", {
@@ -100,6 +104,7 @@ describe("applyHierarchicalLayout", () => {
         pveVersion: "8.0",
         clusterId: "1",
         nodeId: "1",
+        guests: [],
       } satisfies HostNodeData),
     ];
     const edges: Edge[] = [
@@ -126,6 +131,7 @@ describe("applyHierarchicalLayout", () => {
         status: "online",
         nodeCount: 2,
         vmCount: 0,
+        pveVersion: "",
         clusterId: "1",
       } satisfies ClusterNodeData),
       makeFlowNode("host-1", "hostNode", {
@@ -137,6 +143,7 @@ describe("applyHierarchicalLayout", () => {
         pveVersion: "8.0",
         clusterId: "1",
         nodeId: "h1",
+        guests: [],
       } satisfies HostNodeData),
       makeFlowNode("host-2", "hostNode", {
         kind: "host",
@@ -147,6 +154,7 @@ describe("applyHierarchicalLayout", () => {
         pveVersion: "8.0",
         clusterId: "1",
         nodeId: "h2",
+        guests: [],
       } satisfies HostNodeData),
     ];
     const edges: Edge[] = [
@@ -175,6 +183,7 @@ describe("applyHierarchicalLayout", () => {
         status: "online",
         nodeCount: 1,
         vmCount: 1,
+        pveVersion: "",
         clusterId: "1",
       } satisfies ClusterNodeData),
       makeFlowNode("host-1", "hostNode", {
@@ -186,6 +195,7 @@ describe("applyHierarchicalLayout", () => {
         pveVersion: "8.0",
         clusterId: "1",
         nodeId: "h1",
+        guests: [],
       } satisfies HostNodeData),
       makeFlowNode("guest-1", "guestNode", {
         kind: "guest",

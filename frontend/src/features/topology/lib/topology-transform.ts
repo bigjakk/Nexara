@@ -15,8 +15,18 @@ export interface ClusterNodeData {
   status: string;
   nodeCount: number;
   vmCount: number;
+  pveVersion: string;
   clusterId: string;
   [key: string]: unknown;
+}
+
+/** Compact per-guest entry rendered as a status square inside its host card. */
+export interface HostGuest {
+  vmId: string;
+  vmid: number;
+  name: string;
+  type: "qemu" | "lxc";
+  status: string;
 }
 
 export interface HostNodeData {
@@ -28,6 +38,10 @@ export interface HostNodeData {
   pveVersion: string;
   clusterId: string;
   nodeId: string;
+  guests: HostGuest[];
+  /** Injected live metrics (0-100); undefined until the first WS message. */
+  cpuPercent?: number;
+  memPercent?: number;
   [key: string]: unknown;
 }
 
@@ -54,6 +68,10 @@ export interface StorageNodeData {
   shared: boolean;
   active: boolean;
   clusterId: string;
+  /** DB row id used by the storage detail route. For shared pools (one row
+   * per node) this is the first-seen row — the detail page resolves any of
+   * a shared pool's row ids within the cluster. */
+  storageId: string;
   [key: string]: unknown;
 }
 
@@ -115,6 +133,7 @@ export function buildTopologyGraph(
         status: cluster.status,
         nodeCount: clusterNodes.length,
         vmCount: clusterVMs.length,
+        pveVersion: cluster.pve_version,
         clusterId: cluster.id,
       } satisfies ClusterNodeData,
     });
@@ -122,6 +141,17 @@ export function buildTopologyGraph(
     // Host nodes
     for (const node of clusterNodes) {
       const hostNodeId = `host-${node.id}`;
+
+      const hostGuests: HostGuest[] = clusterVMs
+        .filter((vm) => vm.node_id === node.id)
+        .sort((a, b) => a.vmid - b.vmid)
+        .map((vm) => ({
+          vmId: vm.id,
+          vmid: vm.vmid,
+          name: vm.name,
+          type: vm.type as "qemu" | "lxc",
+          status: vm.status,
+        }));
 
       nodes.push({
         id: hostNodeId,
@@ -136,6 +166,7 @@ export function buildTopologyGraph(
           pveVersion: node.pve_version,
           clusterId: cluster.id,
           nodeId: node.id,
+          guests: hostGuests,
         } satisfies HostNodeData,
       });
 
@@ -212,6 +243,7 @@ export function buildTopologyGraph(
             shared: sp.shared,
             active: sp.active,
             clusterId: cluster.id,
+            storageId: sp.id,
           } satisfies StorageNodeData,
         });
 
@@ -269,7 +301,8 @@ export function getGuestStatusColor(status: string): string {
     case "suspended":
       return "#f59e0b";
     case "stopped":
-      return "#ef4444";
+      // Neutral — a powered-off guest is not an error (matches the tree/badges).
+      return "#6b7280";
     default:
       return "#6b7280";
   }

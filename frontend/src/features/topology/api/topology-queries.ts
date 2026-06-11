@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
@@ -68,27 +69,34 @@ export function useTopologyData(): TopologyData {
     storageQueries.find((q) => q.error)?.error ??
     null;
 
-  const nodesByCluster = new Map<string, NodeResponse[]>();
-  const vmsByCluster = new Map<string, VMResponse[]>();
-  const storageByCluster = new Map<string, StorageResponse[]>();
+  // Keep `input` referentially stable across unrelated re-renders (live WS
+  // metric ticks re-render consumers every few seconds). Rebuild only when a
+  // query actually delivered fresh data — otherwise the topology graph would
+  // re-layout and reset node positions on every metric batch.
+  const dataStamp = [
+    clustersQuery.dataUpdatedAt,
+    ...nodeQueries.map((q) => q.dataUpdatedAt),
+    ...vmQueries.map((q) => q.dataUpdatedAt),
+    ...storageQueries.map((q) => q.dataUpdatedAt),
+  ].join(":");
 
-  for (let i = 0; i < clusters.length; i++) {
-    const cluster = clusters[i];
-    if (cluster) {
-      nodesByCluster.set(cluster.id, nodeQueries[i]?.data ?? []);
-      vmsByCluster.set(cluster.id, vmQueries[i]?.data ?? []);
-      storageByCluster.set(cluster.id, storageQueries[i]?.data ?? []);
+  const input = useMemo<TopologyInput>(() => {
+    const nodesByCluster = new Map<string, NodeResponse[]>();
+    const vmsByCluster = new Map<string, VMResponse[]>();
+    const storageByCluster = new Map<string, StorageResponse[]>();
+
+    for (let i = 0; i < clusters.length; i++) {
+      const cluster = clusters[i];
+      if (cluster) {
+        nodesByCluster.set(cluster.id, nodeQueries[i]?.data ?? []);
+        vmsByCluster.set(cluster.id, vmQueries[i]?.data ?? []);
+        storageByCluster.set(cluster.id, storageQueries[i]?.data ?? []);
+      }
     }
-  }
 
-  return {
-    input: {
-      clusters,
-      nodesByCluster,
-      vmsByCluster,
-      storageByCluster,
-    },
-    isLoading,
-    error,
-  };
+    return { clusters, nodesByCluster, vmsByCluster, storageByCluster };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataStamp]);
+
+  return { input, isLoading, error };
 }

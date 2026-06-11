@@ -282,8 +282,8 @@ describe("getGuestStatusColor", () => {
     expect(getGuestStatusColor("running")).toBe("#10b981");
   });
 
-  it("returns red for stopped", () => {
-    expect(getGuestStatusColor("stopped")).toBe("#ef4444");
+  it("returns neutral gray for stopped", () => {
+    expect(getGuestStatusColor("stopped")).toBe("#6b7280");
   });
 
   it("returns yellow for paused", () => {

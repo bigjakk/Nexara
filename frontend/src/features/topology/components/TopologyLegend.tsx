@@ -3,8 +3,8 @@ import { memo } from "react";
 const legendItems = [
   { color: "#10b981", label: "Online / Running" },
   { color: "#f59e0b", label: "Warning / Paused" },
-  { color: "#ef4444", label: "Offline / Stopped" },
-  { color: "#6b7280", label: "Unknown" },
+  { color: "#ef4444", label: "Offline" },
+  { color: "#6b7280", label: "Stopped / Unknown" },
 ];
 
 export const TopologyLegend = memo(function TopologyLegend() {

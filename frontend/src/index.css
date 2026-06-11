@@ -114,3 +114,25 @@
     transform: translateX(100%);
   }
 }
+
+/* React Flow (topology) — align canvas chrome with the app theme. */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-color: hsl(var(--foreground) / 0.08);
+  --xy-edge-stroke: hsl(var(--border));
+  --xy-controls-button-background-color: hsl(var(--card));
+  --xy-controls-button-background-color-hover: hsl(var(--accent));
+  --xy-controls-button-color: hsl(var(--foreground));
+  --xy-controls-button-border-color: hsl(var(--border));
+  --xy-minimap-background-color: hsl(var(--card));
+  --xy-minimap-mask-background-color: hsl(var(--background) / 0.65);
+}
+.react-flow__controls {
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+.react-flow__minimap {
+  border-radius: 0.5rem;
+  overflow: hidden;
+}

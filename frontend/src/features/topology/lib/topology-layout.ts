@@ -6,7 +6,7 @@ const HOST_WIDTH = 200;
 const GUEST_WIDTH = 160;
 const STORAGE_WIDTH = 160;
 
-const HOST_HEIGHT = 80;
+const HOST_HEIGHT = 150;
 const GUEST_HEIGHT = 60;
 const STORAGE_HEIGHT = 60;
 
