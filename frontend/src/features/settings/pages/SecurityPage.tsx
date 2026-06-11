@@ -156,7 +156,7 @@ export function SecurityPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-bold">Security Settings</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Security Settings</h1>
         <p className="text-muted-foreground">
           Manage two-factor authentication for your account
         </p>
@@ -183,13 +183,13 @@ export function SecurityPage() {
             <div className="space-y-4">
               <div className="flex items-center justify-between rounded-lg border p-4">
                 <div>
-                  <p className="font-medium text-green-600">2FA is enabled</p>
+                  <p className="font-medium text-emerald-600">2FA is enabled</p>
                   <p className="text-sm text-muted-foreground">
                     {status.recovery_codes_remaining} recovery code
                     {status.recovery_codes_remaining !== 1 ? "s" : ""} remaining
                   </p>
                 </div>
-                <ShieldCheck className="h-8 w-8 text-green-600" />
+                <ShieldCheck className="h-8 w-8 text-emerald-600" />
               </div>
 
               {status.recovery_codes_remaining < 3 && (
@@ -315,7 +315,7 @@ export function SecurityPage() {
 
       {/* Recovery Codes Display */}
       {setupStep === "recovery" && recoveryCodes.length > 0 && (
-        <Card className="border-green-200 dark:border-green-800">
+        <Card className="border-emerald-200 dark:border-emerald-800">
           <CardHeader>
             <CardTitle>Recovery Codes</CardTitle>
             <CardDescription>

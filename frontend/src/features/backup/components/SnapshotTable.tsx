@@ -207,7 +207,7 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                     </TableCell>
                     <TableCell>
                       {snap.verified ? (
-                        <Badge variant="default" className="bg-green-600">
+                        <Badge variant="default" className="bg-emerald-600">
                           Yes
                         </Badge>
                       ) : (

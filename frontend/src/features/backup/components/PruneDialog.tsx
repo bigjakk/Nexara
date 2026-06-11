@@ -176,7 +176,7 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
                     key={`${r["backup-type"]}-${r["backup-id"]}-${String(r["backup-time"])}`}
                     className={`flex items-center justify-between rounded px-2 py-1 text-xs ${
                       r.keep || r.protected
-                        ? "bg-green-500/10 text-green-700 dark:text-green-400"
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                         : "bg-red-500/10 text-red-700 dark:text-red-400"
                     }`}
                   >

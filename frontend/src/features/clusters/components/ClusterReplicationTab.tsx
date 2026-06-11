@@ -222,7 +222,7 @@ function CreateJobForm({ clusterId, onSuccess }: { clusterId: string; onSuccess:
       )}
 
       {createJob.isSuccess && (
-        <p className="text-sm text-green-600">Replication job created successfully.</p>
+        <p className="text-sm text-emerald-600">Replication job created successfully.</p>
       )}
 
       <Button type="submit" disabled={!selectedGuest || !target || createJob.isPending}>

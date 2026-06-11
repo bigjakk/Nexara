@@ -422,7 +422,7 @@ export function CreateCTDialog({
                     }}
                   />
                   {isDuplicate && (
-                    <p className="text-xs text-yellow-600 dark:text-yellow-500">
+                    <p className="text-xs text-amber-600 dark:text-amber-500">
                       VMID may already be in use
                     </p>
                   )}
@@ -545,8 +545,8 @@ export function CreateCTDialog({
                       </p>
                     )}
                     {selectedTemplate && looksLikeOCI(selectedTemplate) && (
-                      <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-2 text-xs">
-                        <p className="font-medium text-yellow-700 dark:text-yellow-400">
+                      <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs">
+                        <p className="font-medium text-amber-700 dark:text-amber-400">
                           OCI image (tech preview)
                         </p>
                         <p className="mt-1 text-muted-foreground">

@@ -309,7 +309,7 @@ function ErrorBanner({ path, message }: { path: string; message: string }) {
 
 function WarningBanner({ message }: { message: string }) {
   return (
-    <div className="flex items-start gap-2 rounded-md border border-yellow-500/50 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-700 dark:text-yellow-400">
+    <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
       <span>{message}</span>
     </div>

@@ -23,7 +23,7 @@ export function DatastoreCards({ datastores }: DatastoreCardsProps) {
           usedPct > 90
             ? "bg-destructive"
             : usedPct > 75
-              ? "bg-yellow-500"
+              ? "bg-amber-500"
               : "bg-primary";
 
         return (

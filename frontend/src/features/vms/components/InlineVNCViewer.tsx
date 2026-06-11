@@ -181,8 +181,8 @@ export function InlineVNCViewer({ clusterId, node, vmid, guestType }: InlineVNCV
       <div className="flex items-center gap-1 border-b bg-card px-2 py-1">
         <span className="mr-2 flex items-center gap-1.5 text-xs text-muted-foreground">
           <span className={`inline-block h-2 w-2 rounded-full ${
-            status === "connected" ? "bg-green-500" :
-            status === "connecting" ? "bg-yellow-500 animate-pulse" :
+            status === "connected" ? "bg-emerald-500" :
+            status === "connecting" ? "bg-amber-500 animate-pulse" :
             "bg-red-500"
           }`} />
           {statusLabel}

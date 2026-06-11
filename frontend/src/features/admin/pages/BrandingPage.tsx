@@ -100,7 +100,7 @@ export function BrandingPage() {
       <AdminNav />
       <div className="space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-bold">Branding</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Branding</h1>
         <p className="text-muted-foreground">
           Customize the appearance and branding of your Nexara instance.
         </p>

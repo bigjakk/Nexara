@@ -102,7 +102,7 @@ export function TaskProgressDialog() {
             {isActive && (
               <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
             )}
-            {isOk && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+            {isOk && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
             {isFailed && <XCircle className="h-4 w-4 text-red-500" />}
             {description}
           </DialogTitle>
@@ -118,7 +118,7 @@ export function TaskProgressDialog() {
                 isActive
                   ? "bg-blue-100 text-blue-700"
                   : isOk
-                    ? "bg-green-100 text-green-700"
+                    ? "bg-emerald-100 text-emerald-700"
                     : "bg-red-100 text-red-700"
               }
             >
@@ -152,7 +152,7 @@ export function TaskProgressDialog() {
 
           {/* Completion messages */}
           {isOk && (
-            <p className="text-sm text-green-600">
+            <p className="text-sm text-emerald-600">
               {t("taskCompletedSuccessfully")}
             </p>
           )}

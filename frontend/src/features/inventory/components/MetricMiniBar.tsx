@@ -7,8 +7,8 @@ interface MetricMiniBarProps {
 
 function getBarColor(value: number): string {
   if (value >= 90) return "bg-red-500";
-  if (value >= 75) return "bg-yellow-500";
-  return "bg-green-500";
+  if (value >= 75) return "bg-amber-500";
+  return "bg-emerald-500";
 }
 
 export function MetricMiniBar({ value, label }: MetricMiniBarProps) {

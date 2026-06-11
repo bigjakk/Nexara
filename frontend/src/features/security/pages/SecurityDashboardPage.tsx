@@ -120,7 +120,7 @@ export function SecurityDashboardPage() {
       <div className="space-y-6 p-6">
         <div className="flex items-center gap-3">
           <ShieldAlert className="h-6 w-6" />
-          <h1 className="text-2xl font-bold">{t("security")}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t("security")}</h1>
         </div>
         <RollingUpdateProgress
           clusterId={activeClusterId}
@@ -143,7 +143,7 @@ export function SecurityDashboardPage() {
       {/* Header */}
       <div className="flex items-center gap-3">
         <ShieldAlert className="h-6 w-6" />
-        <h1 className="text-2xl font-bold">{t("security")}</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{t("security")}</h1>
       </div>
 
       {/* Cluster selector */}

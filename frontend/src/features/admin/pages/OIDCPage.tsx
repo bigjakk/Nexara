@@ -279,7 +279,7 @@ export function OIDCPage() {
       <div className="space-y-6 p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">OIDC / SSO</h1>
+            <h1 className="text-2xl font-bold tracking-tight">OIDC / SSO</h1>
             <p className="text-muted-foreground">
               Configure OpenID Connect single sign-on with your identity provider
             </p>
@@ -631,7 +631,7 @@ export function OIDCPage() {
                 </Button>
                 {testResult && (
                   <div
-                    className={`mt-2 flex items-center gap-2 text-sm ${testResult.success ? "text-green-600" : "text-destructive"}`}
+                    className={`mt-2 flex items-center gap-2 text-sm ${testResult.success ? "text-emerald-600" : "text-destructive"}`}
                   >
                     {testResult.success ? (
                       <CheckCircle2 className="h-4 w-4" />

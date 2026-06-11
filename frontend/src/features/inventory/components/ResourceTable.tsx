@@ -302,7 +302,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8"
+          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
           onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
         >
           Name
@@ -337,7 +337,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8"
+          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
           onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
         >
           Cluster
@@ -351,7 +351,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8"
+          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
           onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
         >
           Node
@@ -365,7 +365,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8"
+          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
           onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
         >
           VMID
@@ -397,7 +397,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8"
+          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
           onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
         >
           CPU %
@@ -413,7 +413,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8"
+          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
           onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
         >
           Mem %
@@ -432,7 +432,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
           <Button
             variant="ghost"
             size="sm"
-            className="-ml-3 h-8"
+            className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
             onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
           >
             Network
@@ -459,7 +459,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
           <Button
             variant="ghost"
             size="sm"
-            className="-ml-3 h-8"
+            className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
             onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
           >
             Disk
@@ -483,7 +483,7 @@ function buildColumns(): ColumnDef<InventoryRow>[] {
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-3 h-8"
+          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
           onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
         >
           Uptime

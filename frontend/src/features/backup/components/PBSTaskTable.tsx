@@ -222,7 +222,7 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
                         </Badge>
                       )}
                       {!isRunning && isOk && (
-                        <Badge variant="default" className="bg-green-600">
+                        <Badge variant="default" className="bg-emerald-600">
                           OK
                         </Badge>
                       )}

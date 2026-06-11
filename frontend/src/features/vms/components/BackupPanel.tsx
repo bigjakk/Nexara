@@ -206,7 +206,7 @@ export function BackupPanel({ vmid, clusterId, nodeName, kind }: BackupPanelProp
                     </TableCell>
                     <TableCell>
                       {snap.verified ? (
-                        <Badge variant="default" className="bg-green-600">
+                        <Badge variant="default" className="bg-emerald-600">
                           Yes
                         </Badge>
                       ) : (
@@ -449,7 +449,7 @@ function BackupNowDialog({
                     const selected = backupStorage.find((s) => s.storage === effectiveStorage);
                     if (selected?.type === "pbs") {
                       return (
-                        <p className="flex items-center gap-1 text-xs text-green-600">
+                        <p className="flex items-center gap-1 text-xs text-emerald-600">
                           <Star className="h-3 w-3" />
                           PBS storage provides deduplication and incremental backups.
                         </p>

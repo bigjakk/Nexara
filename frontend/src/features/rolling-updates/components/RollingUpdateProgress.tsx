@@ -59,7 +59,7 @@ function StepIndicator({ node }: { node: RollingUpdateNode }) {
         } else if (node.step === "skipped") {
           color = "bg-muted";
         } else if (i < currentIdx) {
-          color = "bg-green-500";
+          color = "bg-emerald-500";
         } else if (i === currentIdx) {
           color = "bg-primary";
         }
@@ -171,7 +171,7 @@ function NodeRow({
               <p className="mb-1 text-xs font-medium text-muted-foreground">
                 Guests ({guests.length})
                 {guests.some((g) => g.passthrough) && (
-                  <span className="ml-2 text-yellow-500">
+                  <span className="ml-2 text-amber-500">
                     {guests.filter((g) => g.passthrough).length} with passthrough
                   </span>
                 )}
@@ -181,7 +181,7 @@ function NodeRow({
                   <Badge
                     key={g.vmid}
                     variant={g.passthrough ? "secondary" : "outline"}
-                    className={`text-xs ${g.passthrough ? "border-yellow-500/50" : ""}`}
+                    className={`text-xs ${g.passthrough ? "border-amber-500/50" : ""}`}
                   >
                     {g.type === "qemu" ? "VM" : "CT"} {g.vmid}
                     {g.name ? ` (${g.name})` : ""}
@@ -291,7 +291,7 @@ function HAWarningsCard({
         className="flex cursor-pointer items-center gap-2 px-4 py-3"
         onClick={() => { setExpanded(!expanded); }}
       >
-        <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-500" />
+        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
         <span className="text-sm font-medium">
           HA Warnings ({warnings.length})
         </span>
@@ -304,7 +304,7 @@ function HAWarningsCard({
           </Badge>
         )}
         {warnCount > 0 && (
-          <Badge variant="outline" className="border-yellow-500/50 text-xs text-yellow-500">
+          <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-500">
             {warnCount} warning{warnCount > 1 ? "s" : ""}
           </Badge>
         )}
@@ -326,13 +326,13 @@ function HAWarningsCard({
                 className={`flex items-start gap-2 rounded-md border p-3 text-sm ${
                   isError
                     ? "border-destructive/50 bg-destructive/10"
-                    : "border-yellow-500/50 bg-yellow-500/10"
+                    : "border-amber-500/50 bg-amber-500/10"
                 }`}
               >
                 {isError ? (
                   <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                 ) : (
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                 )}
                 <div>
                   <p>{w.message}</p>

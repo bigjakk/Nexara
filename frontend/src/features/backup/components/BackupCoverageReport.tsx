@@ -27,14 +27,14 @@ function CoverageBadge({ status }: { status: BackupCoverageEntry["coverage_statu
   switch (status) {
     case "recent":
       return (
-        <Badge variant="default" className="gap-1 bg-green-600">
+        <Badge variant="default" className="gap-1 bg-emerald-600">
           <ShieldCheck className="h-3 w-3" />
           Protected
         </Badge>
       );
     case "stale":
       return (
-        <Badge variant="default" className="gap-1 bg-yellow-600">
+        <Badge variant="default" className="gap-1 bg-amber-600">
           <ShieldAlert className="h-3 w-3" />
           Stale
         </Badge>
@@ -103,23 +103,23 @@ export function BackupCoverageReport() {
             <CardTitle className="text-xs text-muted-foreground">Total VMs</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{stats.total}</p>
+            <p className="text-2xl font-bold tracking-tight">{stats.total}</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-green-600">Protected (&lt;24h)</CardTitle>
+            <CardTitle className="text-xs text-emerald-600">Protected (&lt;24h)</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold text-green-600">{stats.recent}</p>
+            <p className="text-2xl font-bold tracking-tight text-emerald-600">{stats.recent}</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-yellow-600">Stale (&gt;24h)</CardTitle>
+            <CardTitle className="text-xs text-amber-600">Stale (&gt;24h)</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold text-yellow-600">{stats.stale}</p>
+            <p className="text-2xl font-bold tracking-tight text-amber-600">{stats.stale}</p>
           </CardContent>
         </Card>
         <Card>
@@ -127,7 +127,7 @@ export function BackupCoverageReport() {
             <CardTitle className="text-xs text-destructive">No Backup</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold text-destructive">{stats.none}</p>
+            <p className="text-2xl font-bold tracking-tight text-destructive">{stats.none}</p>
           </CardContent>
         </Card>
       </div>
@@ -183,7 +183,7 @@ export function BackupCoverageReport() {
                   entry.coverage_status === "none"
                     ? "bg-destructive/5"
                     : entry.coverage_status === "stale"
-                      ? "bg-yellow-500/5"
+                      ? "bg-amber-500/5"
                       : ""
                 }
               >
@@ -198,7 +198,7 @@ export function BackupCoverageReport() {
                 <TableCell>
                   <Badge
                     variant={entry.status === "running" ? "default" : "secondary"}
-                    className={entry.status === "running" ? "bg-green-600" : ""}
+                    className={entry.status === "running" ? "bg-emerald-600" : ""}
                   >
                     {entry.status}
                   </Badge>

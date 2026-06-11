@@ -56,7 +56,7 @@ function statusBadge(status: string) {
     case "active":
     case "started":
     case "online":
-      return <Badge className="bg-green-600 text-white">{status}</Badge>;
+      return <Badge className="bg-emerald-600 text-white">{status}</Badge>;
     case "stopped":
     case "disabled":
     case "offline":
@@ -550,7 +550,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                               onCheckedChange={(checked) => { handleQuickRuleDisable(r, !checked); }}
                             />
                           ) : (
-                            r.disable === 1 ? <Badge variant="secondary">Disabled</Badge> : <Badge className="bg-green-600 text-white">Enabled</Badge>
+                            r.disable === 1 ? <Badge variant="secondary">Disabled</Badge> : <Badge className="bg-emerald-600 text-white">Enabled</Badge>
                           )}
                         </TableCell>
                         {canManage("ha") && (
@@ -744,7 +744,7 @@ function ManagerCard({ entry }: { entry: HAStatusEntry | undefined }) {
       <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">HA Manager</CardTitle></CardHeader>
       <CardContent>
         <div className="flex items-center gap-2">
-          {isActive ? <CheckCircle2 className="h-5 w-5 text-green-500" /> : <XCircle className="h-5 w-5 text-destructive" />}
+          {isActive ? <CheckCircle2 className="h-5 w-5 text-emerald-500" /> : <XCircle className="h-5 w-5 text-destructive" />}
           <span className="text-lg font-semibold">{isActive ? "Active" : entry.status}</span>
         </div>
         {entry.node && <p className="mt-1 text-xs text-muted-foreground">Master node: {entry.node}</p>}
@@ -760,7 +760,7 @@ function QuorumCard({ entry }: { entry: HAStatusEntry | undefined }) {
       <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Quorum</CardTitle></CardHeader>
       <CardContent>
         <div className="flex items-center gap-2">
-          {hasQuorum ? <ShieldCheck className="h-5 w-5 text-green-500" /> : <AlertTriangle className="h-5 w-5 text-yellow-500" />}
+          {hasQuorum ? <ShieldCheck className="h-5 w-5 text-emerald-500" /> : <AlertTriangle className="h-5 w-5 text-amber-500" />}
           <span className="text-lg font-semibold">{hasQuorum ? "OK" : "No Quorum"}</span>
         </div>
         {!entry && <p className="mt-1 text-xs text-muted-foreground">No quorum data</p>}

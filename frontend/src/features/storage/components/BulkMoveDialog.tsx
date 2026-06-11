@@ -230,7 +230,7 @@ export function BulkMoveDialog({
                   <div key={idx} className="flex items-center gap-2 text-xs">
                     {job.status === "pending" && <Circle className="h-3 w-3 text-muted-foreground" />}
                     {job.status === "running" && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
-                    {job.status === "completed" && <CheckCircle2 className="h-3 w-3 text-green-500" />}
+                    {job.status === "completed" && <CheckCircle2 className="h-3 w-3 text-emerald-500" />}
                     {job.status === "failed" && <XCircle className="h-3 w-3 text-red-500" />}
                     <span className="font-mono">VM {job.vmid}</span>
                     <span className="text-muted-foreground">{job.diskKey}</span>

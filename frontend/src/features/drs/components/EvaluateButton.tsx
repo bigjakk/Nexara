@@ -17,16 +17,16 @@ function pct(v: number): string {
 /** Color class based on load percentage. */
 function loadColor(v: number): string {
   if (v >= 0.8) return "text-red-500";
-  if (v >= 0.6) return "text-yellow-500";
-  return "text-green-600 dark:text-green-400";
+  if (v >= 0.6) return "text-amber-500";
+  return "text-emerald-600 dark:text-emerald-400";
 }
 
 /** Simple horizontal bar showing load visually. */
 function LoadBar({ value, label }: { value: number; label: string }) {
   const widthPct = Math.min(value * 100, 100);
-  let barColor = "bg-green-500/70";
+  let barColor = "bg-emerald-500/70";
   if (value >= 0.8) barColor = "bg-red-500/70";
-  else if (value >= 0.6) barColor = "bg-yellow-500/70";
+  else if (value >= 0.6) barColor = "bg-amber-500/70";
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="w-10 text-muted-foreground">{label}</span>
@@ -141,19 +141,19 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
             <CardTitle className="flex items-center gap-2 text-sm">
               {isBalanced && (
                 <>
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                   Cluster Balanced
                 </>
               )}
               {isImbalancedNoMoves && (
                 <>
-                  <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
                   Imbalanced — No Beneficial Migrations
                 </>
               )}
               {isImbalancedWithMoves && (
                 <>
-                  <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
                   {results.length} Recommendation{results.length !== 1 ? "s" : ""}
                 </>
               )}

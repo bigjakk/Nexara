@@ -89,13 +89,13 @@ export function AlertRulesTable() {
                     disabled={updateMutation.isPending}
                   >
                     {rule.enabled ? (
-                      <ToggleRight className="h-5 w-5 text-green-500" />
+                      <ToggleRight className="h-5 w-5 text-emerald-500" />
                     ) : (
                       <ToggleLeft className="h-5 w-5 text-muted-foreground" />
                     )}
                   </Button>
                 ) : (
-                  <span className={rule.enabled ? "text-green-500" : "text-muted-foreground"}>
+                  <span className={rule.enabled ? "text-emerald-500" : "text-muted-foreground"}>
                     {rule.enabled ? "Yes" : "No"}
                   </span>
                 )}

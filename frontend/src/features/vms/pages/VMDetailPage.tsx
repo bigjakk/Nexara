@@ -169,7 +169,7 @@ export function VMDetailPage() {
               />
             ) : (
               <>
-                <h1 className="text-2xl font-bold">{vm.name}</h1>
+                <h1 className="text-2xl font-bold tracking-tight">{vm.name}</h1>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -604,7 +604,7 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
         <Button
           variant="ghost"
           size="sm"
-          className="h-5 w-5 p-0 text-green-600"
+          className="h-5 w-5 p-0 text-emerald-600"
           disabled={setPool.isPending}
           onClick={() => {
             setPool.mutate(selected, {
@@ -664,7 +664,7 @@ function InlineRename({
       <Button
         variant="ghost"
         size="sm"
-        className="h-7 w-7 p-0 text-green-600"
+        className="h-7 w-7 p-0 text-emerald-600"
         onClick={onConfirm}
         disabled={isPending}
       >

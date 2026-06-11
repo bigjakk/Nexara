@@ -470,7 +470,7 @@ function GeneralSection({
           <div
             className={
               feedback.kind === "success"
-                ? "mb-4 flex items-start gap-2 rounded-md border border-green-300 bg-green-50 p-3 text-sm text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200"
+                ? "mb-4 flex items-start gap-2 rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
                 : "mb-4 flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
             }
           >
@@ -939,7 +939,7 @@ function JoinInfoSection({
                         className="absolute right-2 top-2"
                         onClick={() => { copyToClipboard(buildJoinCommand(data)); }}
                       >
-                        {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                        {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
                       </Button>
                     </div>
                   </div>

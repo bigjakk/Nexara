@@ -12,7 +12,7 @@ export function StorageCapacityBar({ used, total }: StorageCapacityBarProps) {
     pct > 90
       ? "bg-destructive"
       : pct > 70
-        ? "bg-yellow-500"
+        ? "bg-amber-500"
         : "bg-primary";
 
   return (

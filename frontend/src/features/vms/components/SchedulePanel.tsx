@@ -214,7 +214,7 @@ function StatusIcon({ status }: { status: string | null }) {
   }
   if (status === "success") {
     return (
-      <span className="flex items-center gap-1 text-xs text-green-600">
+      <span className="flex items-center gap-1 text-xs text-emerald-600">
         <CheckCircle2 className="h-3 w-3" />
         Success
       </span>

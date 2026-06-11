@@ -56,7 +56,7 @@ export function DatastoreConfigCard({ pbsId, store }: DatastoreConfigCardProps) 
           {config["maintenance-mode"] && (
             <div>
               <span className="text-muted-foreground">Maintenance:</span>{" "}
-              <span className="text-yellow-600">{config["maintenance-mode"]}</span>
+              <span className="text-amber-600">{config["maintenance-mode"]}</span>
             </div>
           )}
           {pruneDefaults.length > 0 && (

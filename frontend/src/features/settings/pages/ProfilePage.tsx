@@ -215,7 +215,7 @@ export function ProfilePage() {
             <Label>Two-Factor Authentication</Label>
             <div>
               {profile.totp_enabled ? (
-                <Badge className="bg-green-600 hover:bg-green-700">Enabled</Badge>
+                <Badge className="bg-emerald-600 hover:bg-emerald-700">Enabled</Badge>
               ) : (
                 <Badge variant="outline">Not configured</Badge>
               )}
@@ -254,7 +254,7 @@ export function ProfilePage() {
                   )}
                 </Button>
                 {profileSaved && (
-                  <span className="flex items-center gap-1 text-sm text-green-600">
+                  <span className="flex items-center gap-1 text-sm text-emerald-600">
                     <Check className="h-4 w-4" />
                     Saved
                   </span>
@@ -364,7 +364,7 @@ export function ProfilePage() {
               <p className="text-sm text-destructive">{passwordError}</p>
             )}
             {passwordSuccess && (
-              <p className="flex items-center gap-1 text-sm text-green-600">
+              <p className="flex items-center gap-1 text-sm text-emerald-600">
                 <LogOut className="h-4 w-4" />
                 Password changed. Signing you out...
               </p>

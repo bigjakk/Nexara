@@ -50,13 +50,13 @@ function ConflictCard({ conflict }: { conflict: HAConflict }) {
       className={`flex items-start gap-2 rounded-md border p-3 text-sm ${
         isError
           ? "border-destructive/50 bg-destructive/10"
-          : "border-yellow-500/50 bg-yellow-500/10"
+          : "border-amber-500/50 bg-amber-500/10"
       }`}
     >
       {isError ? (
         <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
       ) : (
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
       )}
       <div>
         <p>{conflict.message}</p>
@@ -343,8 +343,8 @@ export function CreateRollingUpdateWizard({
               </div>
             ) : preflightReport !== null &&
               preflightReport.conflicts.length === 0 ? (
-              <div className="flex items-center gap-2 rounded-md border border-green-500/50 bg-green-500/10 p-4 text-sm">
-                <CheckCircle className="h-5 w-5 text-green-500" />
+              <div className="flex items-center gap-2 rounded-md border border-emerald-500/50 bg-emerald-500/10 p-4 text-sm">
+                <CheckCircle className="h-5 w-5 text-emerald-500" />
                 <p>No HA conflicts detected. Safe to proceed.</p>
               </div>
             ) : preflightReport !== null ? (
@@ -388,7 +388,7 @@ export function CreateRollingUpdateWizard({
                     </Button>
                   </div>
                   {haPolicy === "warn" && preflightReport.has_errors && (
-                    <p className="text-xs text-yellow-500">
+                    <p className="text-xs text-amber-500">
                       Hard constraints exist — migrations may fail at the
                       Proxmox level even with &quot;warn&quot; policy.
                     </p>

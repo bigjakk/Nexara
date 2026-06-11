@@ -236,9 +236,9 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             <Label htmlFor="include-containers">Include containers in balancing</Label>
           </div>
           {includeContainers && (
-            <div className="flex items-start gap-2 rounded-md border border-yellow-500/50 bg-yellow-500/10 p-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
-              <p className="text-xs text-yellow-600 dark:text-yellow-400">
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <p className="text-xs text-amber-600 dark:text-amber-400">
                 Container migration requires downtime. Unlike VMs which support live migration,
                 containers must be stopped, moved, and restarted. Only enable this if container
                 downtime during rebalancing is acceptable.
@@ -257,7 +257,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             {updateConfig.isPending ? "Saving..." : "Save Configuration"}
           </Button>
           {saveStatus === "saved" && (
-            <span className="text-sm text-green-600">Saved successfully</span>
+            <span className="text-sm text-emerald-600">Saved successfully</span>
           )}
           {saveStatus === "error" && (
             <span className="text-sm text-destructive">

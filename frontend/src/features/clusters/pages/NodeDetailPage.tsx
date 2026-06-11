@@ -131,7 +131,7 @@ export function NodeDetailPage() {
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
-            <h1 className="text-2xl font-bold">{node.name}</h1>
+            <h1 className="text-2xl font-bold tracking-tight">{node.name}</h1>
             <Badge variant={node.status === "online" ? "default" : "destructive"}>
               {node.status}
             </Badge>
@@ -408,7 +408,7 @@ function NetworkTab({ clusterId, nodeName }: { clusterId: string; nodeName: stri
                     <td className="px-3 py-2">
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { saveEdit(iface.iface, iface.type); }} disabled={updateIface.isPending}>
-                          <Check className="h-3.5 w-3.5 text-green-600" />
+                          <Check className="h-3.5 w-3.5 text-emerald-600" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditIface(null); }}>
                           <RotateCcw className="h-3.5 w-3.5" />

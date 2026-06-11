@@ -99,8 +99,8 @@ export function OCIPullDialog({ clusterId, storageId }: OCIPullDialogProps) {
           <DialogTitle>Pull from OCI Registry</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs">
-            <p className="font-medium text-yellow-700 dark:text-yellow-400">
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+            <p className="font-medium text-amber-700 dark:text-amber-400">
               Tech preview (Proxmox VE 9.1+)
             </p>
             <p className="mt-1 text-muted-foreground">

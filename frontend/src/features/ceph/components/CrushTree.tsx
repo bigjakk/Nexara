@@ -8,14 +8,14 @@ interface CrushTreeProps {
 
 function getOSDStatusColor(osd: CephOSD): string {
   if (osd.up === 0) return "text-destructive";
-  if (osd.in === 0) return "text-yellow-500";
-  return "text-green-500";
+  if (osd.in === 0) return "text-amber-500";
+  return "text-emerald-500";
 }
 
 function getOSDStatusDot(osd: CephOSD): string {
   if (osd.up === 0) return "bg-destructive";
-  if (osd.in === 0) return "bg-yellow-500";
-  return "bg-green-500";
+  if (osd.in === 0) return "bg-amber-500";
+  return "bg-emerald-500";
 }
 
 export function CrushTree({ osds, crushRules }: CrushTreeProps) {

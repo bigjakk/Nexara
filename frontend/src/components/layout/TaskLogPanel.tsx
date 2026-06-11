@@ -70,7 +70,7 @@ function deriveSeverity(action: string, details: string): Severity {
 
 const SEVERITY_STYLES: Record<Severity, string> = {
   info: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  warning: "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400",
+  warning: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
   error: "bg-red-500/15 text-red-600 dark:text-red-400",
 };
 

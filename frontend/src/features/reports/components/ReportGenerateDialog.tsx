@@ -134,7 +134,7 @@ export function ReportGenerateDialog() {
             <p className="text-sm text-destructive">{errorMessage}</p>
           )}
           {successMessage && (
-            <p className="text-sm text-green-600">{successMessage}</p>
+            <p className="text-sm text-emerald-600">{successMessage}</p>
           )}
           <Button
             onClick={handleGenerate}

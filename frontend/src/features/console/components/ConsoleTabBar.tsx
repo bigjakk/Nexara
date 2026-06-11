@@ -6,11 +6,11 @@ import type { ConsoleStatus } from "../types/console";
 function StatusIcon({ status }: { status: ConsoleStatus }) {
   switch (status) {
     case "connecting":
-      return <Loader2 className="h-3 w-3 animate-spin text-yellow-500" />;
+      return <Loader2 className="h-3 w-3 animate-spin text-amber-500" />;
     case "connected":
-      return <Terminal className="h-3 w-3 text-green-500" />;
+      return <Terminal className="h-3 w-3 text-emerald-500" />;
     case "reconnecting":
-      return <RotateCcw className="h-3 w-3 animate-spin text-yellow-500" />;
+      return <RotateCcw className="h-3 w-3 animate-spin text-amber-500" />;
     case "disconnected":
       return <Unplug className="h-3 w-3 text-muted-foreground" />;
     case "error":

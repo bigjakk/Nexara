@@ -80,10 +80,10 @@ export function ConvertToTemplateDialog({
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="rounded-md border border-yellow-500/50 bg-yellow-500/10 p-3">
+            <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
               <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600 dark:text-yellow-400" />
-                <div className="text-sm text-yellow-700 dark:text-yellow-300">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="text-sm text-amber-700 dark:text-amber-300">
                   <p className="font-medium">This action is irreversible</p>
                   <p className="mt-1">
                     Converting this {typeLabel} to a template will make it read-only.

@@ -15,8 +15,8 @@ export function SecurityPostureCard({ posture, onShowKEV }: SecurityPostureCardP
   const hasScans = posture.status !== "no_scans";
 
   const getScoreColor = (s: number) => {
-    if (s >= 90) return "text-green-500";
-    if (s >= 70) return "text-yellow-500";
+    if (s >= 90) return "text-emerald-500";
+    if (s >= 70) return "text-amber-500";
     if (s >= 40) return "text-orange-500";
     return "text-red-500";
   };

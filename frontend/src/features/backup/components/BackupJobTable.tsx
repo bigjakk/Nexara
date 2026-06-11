@@ -102,7 +102,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                     </TableCell>
                     <TableCell>
                       {isEnabled ? (
-                        <Badge variant="default" className="bg-green-600">
+                        <Badge variant="default" className="bg-emerald-600">
                           Yes
                         </Badge>
                       ) : (

@@ -63,13 +63,13 @@ function StatusIcon({ status }: { status: DisplayStatus }) {
   if (status === "running")
     return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />;
   if (status === "ok")
-    return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
+    return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
   return <XCircle className="h-3.5 w-3.5 text-red-500" />;
 }
 
 const STATUS_BADGE: Record<DisplayStatus, string> = {
   running: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  ok: "bg-green-500/15 text-green-600 dark:text-green-400",
+  ok: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
   failed: "bg-red-500/15 text-red-600 dark:text-red-400",
 };
 const STATUS_LABEL: Record<DisplayStatus, string> = {

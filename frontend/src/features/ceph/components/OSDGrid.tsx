@@ -6,8 +6,8 @@ interface OSDGridProps {
 
 function getOSDColor(osd: CephOSD): string {
   if (osd.up === 0) return "bg-destructive";
-  if (osd.in === 0) return "bg-yellow-500";
-  return "bg-green-500";
+  if (osd.in === 0) return "bg-amber-500";
+  return "bg-emerald-500";
 }
 
 function getOSDLabel(osd: CephOSD): string {
@@ -26,11 +26,11 @@ export function OSDGrid({ osds }: OSDGridProps) {
       <div className="flex items-center gap-4 text-sm text-muted-foreground">
         <span>{sorted.length} total</span>
         <span className="flex items-center gap-1">
-          <span className="inline-block h-3 w-3 rounded-sm bg-green-500" />
+          <span className="inline-block h-3 w-3 rounded-sm bg-emerald-500" />
           {upCount} up
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block h-3 w-3 rounded-sm bg-yellow-500" />
+          <span className="inline-block h-3 w-3 rounded-sm bg-amber-500" />
           {sorted.length - inCount} out
         </span>
         <span className="flex items-center gap-1">

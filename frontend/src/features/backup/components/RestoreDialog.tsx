@@ -185,8 +185,8 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
         ) : (
           <>
             {pbsStorage.length === 0 && (
-              <div className="flex items-start gap-2 rounded-md border border-yellow-500/50 bg-yellow-500/10 p-3 text-sm">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600" />
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 <span>
                   No PBS storage found on this PVE cluster. The PBS server must
                   be added as a storage in PVE (Datacenter &gt; Storage &gt; Add

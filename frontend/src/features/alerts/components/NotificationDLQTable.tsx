@@ -274,7 +274,7 @@ function DLQRow({
           </Badge>
           {feedback && (
             <span
-              className={`ml-2 text-xs ${feedback.success ? "text-green-600" : "text-red-600"}`}
+              className={`ml-2 text-xs ${feedback.success ? "text-emerald-600" : "text-red-600"}`}
             >
               {feedback.message}
             </span>

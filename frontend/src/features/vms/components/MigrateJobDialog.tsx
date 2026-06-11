@@ -57,16 +57,16 @@ import {
 type WizardStep = "config" | "preflight" | "progress";
 
 const severityIcon: Record<CheckSeverity, React.ReactNode> = {
-  pass: <CheckCircle2 className="h-4 w-4 text-green-500" />,
-  warn: <AlertTriangle className="h-4 w-4 text-yellow-500" />,
+  pass: <CheckCircle2 className="h-4 w-4 text-emerald-500" />,
+  warn: <AlertTriangle className="h-4 w-4 text-amber-500" />,
   fail: <XCircle className="h-4 w-4 text-red-500" />,
 };
 
 const statusColors: Record<string, string> = {
   pending: "bg-gray-100 text-gray-700",
   checking: "bg-blue-100 text-blue-700",
-  migrating: "bg-yellow-100 text-yellow-700",
-  completed: "bg-green-100 text-green-700",
+  migrating: "bg-amber-100 text-amber-700",
+  completed: "bg-emerald-100 text-emerald-700",
   failed: "bg-red-100 text-red-700",
   cancelled: "bg-gray-100 text-gray-500",
 };
@@ -955,7 +955,7 @@ function MigrationProgress({
       )}
 
       {job.status === "completed" && (
-        <p className="text-sm text-green-600">
+        <p className="text-sm text-emerald-600">
           {isStorageMode
             ? "Storage migration completed successfully."
             : "Migration completed successfully."}

@@ -259,7 +259,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-xs">
             <div className="flex items-center gap-2">
               {pinSummary.pinned === pinSummary.total ? (
-                <ShieldCheck className="h-4 w-4 text-green-500" />
+                <ShieldCheck className="h-4 w-4 text-emerald-500" />
               ) : (
                 <ShieldAlert className="h-4 w-4 text-amber-500" />
               )}
@@ -332,7 +332,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
         />
 
         {testState.kind === "success" && (
-          <div className="flex items-center gap-2 rounded-md border border-green-500/50 bg-green-500/10 p-2 text-xs text-green-600 dark:text-green-400">
+          <div className="flex items-center gap-2 rounded-md border border-emerald-500/50 bg-emerald-500/10 p-2 text-xs text-emerald-600 dark:text-emerald-400">
             <CheckCircle className="h-4 w-4 flex-shrink-0" />
             <div>
               SSH connection successful.
@@ -471,7 +471,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
         {knownHosts && knownHosts.length > 0 && (
           <div className="rounded-md border p-3">
             <div className="mb-2 flex items-center gap-2 text-xs font-medium">
-              <ShieldCheck className="h-4 w-4 text-green-600 dark:text-green-400" />
+              <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
               Pinned host keys
             </div>
             <div className="space-y-1.5">

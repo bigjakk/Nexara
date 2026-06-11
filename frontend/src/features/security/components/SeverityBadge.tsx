@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 const severityConfig = {
   critical: { label: "Critical", className: "bg-red-600 text-white" },
   high: { label: "High", className: "bg-orange-500 text-white" },
-  medium: { label: "Medium", className: "bg-yellow-500 text-black" },
+  medium: { label: "Medium", className: "bg-amber-500 text-black" },
   low: { label: "Low", className: "bg-blue-500 text-white" },
   unknown: { label: "Unknown", className: "bg-gray-500 text-white" },
 } as const;

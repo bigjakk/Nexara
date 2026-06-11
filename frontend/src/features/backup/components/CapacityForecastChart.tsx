@@ -155,8 +155,8 @@ export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartPro
           <ComposedChart data={chartData}>
             <defs>
               <linearGradient id={`fg-used-${store}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.3} />
+                <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
               </linearGradient>
               <linearGradient id={`fg-forecast-${store}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.2} />
@@ -198,7 +198,7 @@ export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartPro
             <Area
               type="monotone"
               dataKey="used"
-              stroke="#3b82f6"
+              stroke="#38bdf8"
               fill={`url(#fg-used-${store})`}
               strokeWidth={2}
               isAnimationActive={false}

@@ -1225,9 +1225,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
           )}
           {/* Pending NIC adds */}
           {Object.entries(pendingDeviceAdds).filter(([k]) => /^net\d+$/.test(k)).map(([key, val]) => (
-            <div key={key} className="mt-1 flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
-              <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
-              <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+            <div key={key} className="mt-1 flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950">
+              <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">{key}</span>
+              <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">{val}</span>
               <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
                 <Trash2 className="h-3 w-3" /> Cancel
               </Button>
@@ -1464,9 +1464,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
           <div className={diskEntries.length > 0 ? "mt-2 space-y-1.5" : "space-y-1.5"}>
             <p className="text-[10px] font-medium text-muted-foreground">New disks (created on save)</p>
             {pendingNewDisks.map((d) => (
-              <div key={d.key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
-                <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{d.key}</span>
-                <span className="text-[10px] text-green-600 dark:text-green-400">
+              <div key={d.key} className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950">
+                <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">{d.key}</span>
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
                   {d.storage}:{d.size}G &middot; {d.format}
                   {d.cache ? ` &middot; ${d.cache}` : ""}
                   {d.discard ? " &middot; discard" : ""}
@@ -1547,7 +1547,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
           <p className="mt-1 text-xs text-destructive">Resize failed: {resizeMutation.error.message}</p>
         )}
         {resizeMutation.isSuccess && (
-          <p className="mt-1 text-xs text-green-600 dark:text-green-500">Disk resized successfully.</p>
+          <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-500">Disk resized successfully.</p>
         )}
       </Section>
 
@@ -1583,9 +1583,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
               );
             })}
             {Object.entries(pendingDeviceAdds).filter(([k]) => /^usb\d+$/.test(k)).map(([key, val]) => (
-              <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
-                <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
-                <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+              <div key={key} className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950">
+                <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">{key}</span>
+                <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">{val}</span>
                 <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
                   <Trash2 className="h-3 w-3" /> Cancel
                 </Button>
@@ -1624,9 +1624,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
               );
             })}
             {Object.entries(pendingDeviceAdds).filter(([k]) => /^hostpci\d+$/.test(k)).map(([key, val]) => (
-              <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
-                <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
-                <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+              <div key={key} className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950">
+                <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">{key}</span>
+                <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">{val}</span>
                 <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
                   <Trash2 className="h-3 w-3" /> Cancel
                 </Button>
@@ -1663,9 +1663,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
               );
             })}
             {Object.entries(pendingDeviceAdds).filter(([k]) => /^serial\d+$/.test(k)).map(([key, val]) => (
-              <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
-                <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
-                <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+              <div key={key} className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950">
+                <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">{key}</span>
+                <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">{val}</span>
                 <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
                   <Trash2 className="h-3 w-3" /> Cancel
                 </Button>
@@ -1698,9 +1698,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
               <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-[10px]" onClick={() => { handleUndoRemoveDevice("rng0"); }}>Undo</Button>
             </div>
           ) : pendingDeviceAdds["rng0"] ? (
-            <div className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
-              <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">rng0</span>
-              <span className="truncate text-[10px] text-green-600 dark:text-green-400">{pendingDeviceAdds["rng0"]}</span>
+            <div className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950">
+              <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">rng0</span>
+              <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">{pendingDeviceAdds["rng0"]}</span>
               <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice("rng0"); }}>
                 <Trash2 className="h-3 w-3" /> Cancel
               </Button>
@@ -1736,9 +1736,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
               );
             })}
             {Object.entries(pendingDeviceAdds).filter(([k]) => /^virtiofs\d+$/.test(k)).map(([key, val]) => (
-              <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
-                <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
-                <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+              <div key={key} className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950">
+                <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">{key}</span>
+                <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">{val}</span>
                 <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
                   <Trash2 className="h-3 w-3" /> Cancel
                 </Button>
@@ -1757,9 +1757,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
             {Object.entries(pendingDeviceAdds)
               .filter(([k]) => !(/^(net|usb|hostpci|serial|virtiofs)\d+$/.test(k)) && k !== "rng0")
               .map(([key, val]) => (
-                <div key={key} className="flex items-center gap-2 rounded border border-green-300 bg-green-50 px-2 py-1 dark:border-green-800 dark:bg-green-950">
-                  <span className="font-mono text-xs font-medium text-green-700 dark:text-green-400">{key}</span>
-                  <span className="truncate text-[10px] text-green-600 dark:text-green-400">{val}</span>
+                <div key={key} className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-2 py-1 dark:border-emerald-800 dark:bg-emerald-950">
+                  <span className="font-mono text-xs font-medium text-emerald-700 dark:text-emerald-400">{key}</span>
+                  <span className="truncate text-[10px] text-emerald-600 dark:text-emerald-400">{val}</span>
                   <Button variant="ghost" size="sm" className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleCancelPendingDevice(key); }}>
                     <Trash2 className="h-3 w-3" /> Cancel
                   </Button>
@@ -1774,7 +1774,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
         <p className="text-xs text-destructive">{setConfigMutation.error.message}</p>
       )}
       {setConfigMutation.isSuccess && (
-        <p className="text-xs text-green-600 dark:text-green-500">
+        <p className="text-xs text-emerald-600 dark:text-emerald-500">
           Saved.{isRunning ? " Some changes need a restart." : ""}
         </p>
       )}

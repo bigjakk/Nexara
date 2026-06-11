@@ -76,7 +76,7 @@ export function ApplyTemplateDialog({
           </div>
 
           {apply.isSuccess && (
-            <p className="text-sm text-green-600">
+            <p className="text-sm text-emerald-600">
               Applied {apply.data.applied}/{apply.data.total} rules
               successfully.
             </p>

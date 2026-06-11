@@ -399,7 +399,7 @@ function MobileConsoleToolbar({
   const btnStyle: React.CSSProperties = {
     background: "rgba(34, 197, 94, 0.15)",
     border: "1px solid rgba(34, 197, 94, 0.4)",
-    color: "#22c55e",
+    color: "#10b981",
     padding: "6px 10px",
     borderRadius: 6,
     fontSize: 11,

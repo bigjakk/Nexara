@@ -85,7 +85,7 @@ function deriveSeverity(action: string, details: string): "info" | "warning" | "
 function severityBadge(severity: "info" | "warning" | "error") {
   const colors = {
     info: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-    warning: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
+    warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
     error: "bg-red-500/10 text-red-600 dark:text-red-400",
   };
   return (

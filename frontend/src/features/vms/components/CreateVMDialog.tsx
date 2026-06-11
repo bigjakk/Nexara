@@ -755,7 +755,7 @@ export function CreateVMDialog({
                     }}
                   />
                   {isDuplicate && (
-                    <p className="text-xs text-yellow-600 dark:text-yellow-500">
+                    <p className="text-xs text-amber-600 dark:text-amber-500">
                       VMID may already be in use
                     </p>
                   )}

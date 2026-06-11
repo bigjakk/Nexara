@@ -42,7 +42,7 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
           <Database className="h-4 w-4 text-foreground/50" />
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold">
+          <div className="text-2xl font-bold tracking-tight">
             {formatBytes(status.pgmap.bytes_used)}
           </div>
           <p className="text-xs text-foreground/60">
@@ -64,7 +64,7 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
           <Gauge className="h-4 w-4 text-foreground/50" />
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold">
+          <div className="text-2xl font-bold tracking-tight">
             {formatOps(
               status.pgmap.read_op_per_sec + status.pgmap.write_op_per_sec,
             )}
@@ -82,7 +82,7 @@ export function CephStatusCards({ status }: CephStatusCardsProps) {
           <HardDrive className="h-4 w-4 text-foreground/50" />
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold">
+          <div className="text-2xl font-bold tracking-tight">
             {formatBytes(
               status.pgmap.read_bytes_sec + status.pgmap.write_bytes_sec,
             )}

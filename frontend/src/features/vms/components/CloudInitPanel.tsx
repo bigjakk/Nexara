@@ -170,7 +170,7 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
         </p>
       )}
       {setConfigMutation.isSuccess && (
-        <p className="text-sm text-green-600 dark:text-green-500">
+        <p className="text-sm text-emerald-600 dark:text-emerald-500">
           Cloud-init configuration saved.
         </p>
       )}

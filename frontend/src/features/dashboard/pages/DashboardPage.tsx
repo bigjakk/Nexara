@@ -335,7 +335,7 @@ export function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">{t("dashboard")}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t("dashboard")}</h1>
           <ConnectionDot status={status} t={t} />
         </div>
         <div className="flex items-center gap-3">
@@ -452,8 +452,8 @@ function ClusterChart({
   }, [isLive, liveHistory, seedData, historicalQuery.data]);
 
   const chartConfigs = {
-    cpu: { titleKey: "cpuUsage", dataKey: "cpuPercent" as const, color: "#3b82f6" },
-    memory: { titleKey: "memoryUsage", dataKey: "memPercent" as const, color: "#8b5cf6" },
+    cpu: { titleKey: "cpuUsage", dataKey: "cpuPercent" as const, color: "#38bdf8" },
+    memory: { titleKey: "memoryUsage", dataKey: "memPercent" as const, color: "#a78bfa" },
     disk: { titleKey: "diskIoRead", dataKey: "diskReadBps" as const, color: "#f59e0b" },
     network: { titleKey: "networkIn", dataKey: "netInBps" as const, color: "#10b981" },
   };

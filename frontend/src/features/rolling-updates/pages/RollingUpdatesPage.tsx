@@ -54,7 +54,7 @@ export function RollingUpdatesPage() {
       <div className="space-y-6 p-6">
         <div className="flex items-center gap-3">
           <RefreshCw className="h-6 w-6" />
-          <h1 className="text-2xl font-bold">Rolling Update</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Rolling Update</h1>
         </div>
         <RollingUpdateProgress
           clusterId={activeClusterId}
@@ -72,7 +72,7 @@ export function RollingUpdatesPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <RefreshCw className="h-6 w-6" />
-          <h1 className="text-2xl font-bold">Rolling Updates</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Rolling Updates</h1>
         </div>
         {canManage && activeClusterId && (
           <CreateRollingUpdateWizard clusterId={activeClusterId} />

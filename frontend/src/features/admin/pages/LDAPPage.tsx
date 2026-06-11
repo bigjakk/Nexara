@@ -266,7 +266,7 @@ export function LDAPPage() {
       <div className="space-y-6 p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">LDAP / Active Directory</h1>
+            <h1 className="text-2xl font-bold tracking-tight">LDAP / Active Directory</h1>
             <p className="text-muted-foreground">
               Configure LDAP/AD authentication and group-to-role mapping
             </p>
@@ -683,7 +683,7 @@ export function LDAPPage() {
                 </div>
                 {testResult && (
                   <div
-                    className={`mt-2 flex items-center gap-2 text-sm ${testResult.success ? "text-green-600" : "text-destructive"}`}
+                    className={`mt-2 flex items-center gap-2 text-sm ${testResult.success ? "text-emerald-600" : "text-destructive"}`}
                   >
                     {testResult.success ? (
                       <CheckCircle2 className="h-4 w-4" />

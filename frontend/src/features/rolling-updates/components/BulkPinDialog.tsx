@@ -218,7 +218,7 @@ export function BulkPinDialog({
       return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
     }
     if (row.pinResult === "pinned") {
-      return <CheckCircle className="h-4 w-4 text-green-500" />;
+      return <CheckCircle className="h-4 w-4 text-emerald-500" />;
     }
     if (row.pinResult === "error") {
       return <XCircle className="h-4 w-4 text-destructive" />;
@@ -227,7 +227,7 @@ export function BulkPinDialog({
       case "scanning":
         return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
       case "already_pinned":
-        return <ShieldCheck className="h-4 w-4 text-green-500" />;
+        return <ShieldCheck className="h-4 w-4 text-emerald-500" />;
       case "pending":
         return <ShieldAlert className="h-4 w-4 text-amber-500" />;
       case "mismatch":

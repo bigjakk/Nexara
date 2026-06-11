@@ -18,7 +18,7 @@ export function EventsPage() {
     <div className="space-y-4 p-6">
       <div className="flex items-center gap-2">
         <Activity className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold">Events</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Events</h1>
       </div>
 
       <Tabs defaultValue="audit">

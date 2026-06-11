@@ -13,9 +13,9 @@ interface ScanHistoryTableProps {
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    completed: "bg-green-500/10 text-green-500",
+    completed: "bg-emerald-500/10 text-emerald-500",
     running: "bg-blue-500/10 text-blue-500",
-    pending: "bg-yellow-500/10 text-yellow-500",
+    pending: "bg-amber-500/10 text-amber-500",
     failed: "bg-red-500/10 text-red-500",
   };
 
@@ -74,9 +74,9 @@ function ExpandedScanRow({
                       className={cn(
                         "font-medium",
                         node.posture_score >= 90
-                          ? "text-green-500"
+                          ? "text-emerald-500"
                           : node.posture_score >= 70
-                            ? "text-yellow-500"
+                            ? "text-amber-500"
                             : "text-red-500",
                       )}
                     >

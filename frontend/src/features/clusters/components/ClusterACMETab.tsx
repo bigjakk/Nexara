@@ -334,7 +334,7 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
         <p className="text-sm text-destructive">{createPlugin.error.message}</p>
       )}
       {createPlugin.isSuccess && (
-        <p className="text-sm text-green-600">Plugin created successfully.</p>
+        <p className="text-sm text-emerald-600">Plugin created successfully.</p>
       )}
 
       <Button type="submit" disabled={!id || (type === "dns" && !api) || createPlugin.isPending}>

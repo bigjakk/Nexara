@@ -48,9 +48,9 @@ const actionConfig: Record<SSVCLabel, ActionConfig> = {
     label: "Track*",
     icon: Eye,
     description: "Next routine cycle",
-    cardClass: "border-yellow-500/40 bg-yellow-500/10",
-    iconClass: "text-yellow-500",
-    countClass: "text-yellow-700 dark:text-yellow-500",
+    cardClass: "border-amber-500/40 bg-amber-500/10",
+    iconClass: "text-amber-500",
+    countClass: "text-amber-700 dark:text-amber-500",
   },
   track: {
     label: "Track",
@@ -110,7 +110,7 @@ export function SSVCHistogram({
                   {cfg.label}
                 </span>
               </div>
-              <span className={cn("text-2xl font-bold", cfg.countClass)}>
+              <span className={cn("text-2xl font-bold tracking-tight", cfg.countClass)}>
                 {count}
               </span>
               <span className="text-[11px] text-muted-foreground">

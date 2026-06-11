@@ -29,7 +29,7 @@ export function TimeRangeSelector({ value, onChange }: TimeRangeSelectorProps) {
             data-testid={`range-${range}`}
           >
             {range === "live" && (
-              <span className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-green-400" />
+              <span className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
             )}
             {labels[range]}
           </Button>

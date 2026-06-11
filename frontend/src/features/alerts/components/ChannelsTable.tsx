@@ -105,7 +105,7 @@ export function ChannelsTable() {
                 </Badge>
                 {testResults[ch.id] != null && (
                   <span
-                    className={`ml-2 text-xs ${testResults[ch.id]?.success ? "text-green-600" : "text-red-600"}`}
+                    className={`ml-2 text-xs ${testResults[ch.id]?.success ? "text-emerald-600" : "text-red-600"}`}
                   >
                     {testResults[ch.id]?.message}
                   </span>

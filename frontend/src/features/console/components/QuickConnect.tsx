@@ -152,7 +152,7 @@ export function QuickConnect() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span
-                            className={`inline-block h-2 w-2 rounded-full ${isRunning ? "bg-green-500" : vm.status === "suspended" ? "bg-yellow-500" : "bg-gray-400"}`}
+                            className={`inline-block h-2 w-2 rounded-full ${isRunning ? "bg-emerald-500" : vm.status === "suspended" ? "bg-amber-500" : "bg-gray-400"}`}
                           />
                           <span className="truncate text-sm font-medium">
                             {vm.name}

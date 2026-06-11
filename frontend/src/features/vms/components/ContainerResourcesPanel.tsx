@@ -491,7 +491,7 @@ function RootFSRow({
           </span>
         )}
         {resizeMutation.isSuccess && (
-          <span className="text-xs text-green-600">Resized</span>
+          <span className="text-xs text-emerald-600">Resized</span>
         )}
       </div>
     </div>
@@ -988,7 +988,7 @@ export function ContainerResourcesPanel({
     <div className="space-y-3">
       {/* Warning banner for running container */}
       {isRunning && (
-        <div className="flex items-center gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-2 text-sm text-yellow-700 dark:text-yellow-400">
+        <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-sm text-amber-700 dark:text-amber-400">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           Some changes (CPU, memory) take effect immediately on a running
           container. Others may require a restart.
@@ -1005,7 +1005,7 @@ export function ContainerResourcesPanel({
             </Badge>
           )}
           {setConfigMutation.isSuccess && (
-            <span className="text-xs text-green-600">Saved</span>
+            <span className="text-xs text-emerald-600">Saved</span>
           )}
           {setConfigMutation.isError && (
             <span className="text-xs text-destructive">
@@ -1172,7 +1172,7 @@ export function ContainerResourcesPanel({
             .map(([key, nic]) => (
               <div key={key} className="relative">
                 <div className="absolute -left-1 -top-1 z-10">
-                  <Badge className="bg-green-600 text-[10px]">new</Badge>
+                  <Badge className="bg-emerald-600 text-[10px]">new</Badge>
                 </div>
                 <NICRow
                   deviceKey={key}

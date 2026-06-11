@@ -43,7 +43,7 @@ function NodePackageRow({ clusterId, nodeName }: { clusterId: string; nodeName: 
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         ) : count === 0 ? (
           <Badge variant="outline" className="gap-1">
-            <CheckCircle className="h-3 w-3 text-green-500" />
+            <CheckCircle className="h-3 w-3 text-emerald-500" />
             Up to date
           </Badge>
         ) : (

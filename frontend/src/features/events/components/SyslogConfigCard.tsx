@@ -80,7 +80,7 @@ export function SyslogConfigCard() {
           <Settings2 className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium">Syslog Forwarding</span>
           {config.enabled && (
-            <span className="inline-flex items-center rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
+            <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
               Active
             </span>
           )}
@@ -187,7 +187,7 @@ export function SyslogConfigCard() {
 
             {/* Status feedback */}
             {saveMutation.isSuccess && (
-              <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+              <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="h-3 w-3" />
                 Saved
               </span>
@@ -199,7 +199,7 @@ export function SyslogConfigCard() {
               </span>
             )}
             {testMutation.isSuccess && (
-              <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+              <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="h-3 w-3" />
                 Test message sent
               </span>

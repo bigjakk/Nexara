@@ -459,7 +459,7 @@ export function BulkMigrateDialog({
                   {j.error ? (
                     <XCircle className="h-4 w-4 shrink-0 text-red-500" />
                   ) : j.preflightPassed ? (
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
                   ) : (
                     <XCircle className="h-4 w-4 shrink-0 text-red-500" />
                   )}
@@ -971,8 +971,8 @@ function ConfigStep({
 const statusColors: Record<string, string> = {
   pending: "bg-gray-100 text-gray-700",
   checking: "bg-blue-100 text-blue-700",
-  migrating: "bg-yellow-100 text-yellow-700",
-  completed: "bg-green-100 text-green-700",
+  migrating: "bg-amber-100 text-amber-700",
+  completed: "bg-emerald-100 text-emerald-700",
   failed: "bg-red-100 text-red-700",
   cancelled: "bg-gray-100 text-gray-500",
 };

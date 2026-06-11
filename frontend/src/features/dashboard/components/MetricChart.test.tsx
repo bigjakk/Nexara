@@ -44,7 +44,7 @@ describe("MetricChart", () => {
         title="CPU Usage"
         data={sampleData}
         dataKey="cpuPercent"
-        color="#3b82f6"
+        color="#38bdf8"
       />,
     );
 
@@ -57,7 +57,7 @@ describe("MetricChart", () => {
         title="CPU Usage"
         data={[]}
         dataKey="cpuPercent"
-        color="#3b82f6"
+        color="#38bdf8"
       />,
     );
 
@@ -70,7 +70,7 @@ describe("MetricChart", () => {
         title="Memory Usage"
         data={sampleData}
         dataKey="memPercent"
-        color="#8b5cf6"
+        color="#a78bfa"
       />,
     );
 
