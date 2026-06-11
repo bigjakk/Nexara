@@ -80,11 +80,17 @@ function isInventoryRoute(pathname: string): boolean {
   );
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  /** Drawer mode (mobile nav sheet): always expanded, fills its container,
+   * no collapse toggle or resize handle. */
+  drawer?: boolean;
+}
+
+export function Sidebar({ drawer = false }: SidebarProps) {
   const { t } = useTranslation("navigation");
   const { hasPermission } = useAuth();
   const {
-    collapsed,
+    collapsed: collapsedPref,
     toggleCollapsed,
     treeVisible,
     setTreeVisible,
@@ -92,6 +98,7 @@ export function Sidebar() {
     setWidth,
     setPerspective,
   } = useSidebarStore();
+  const collapsed = drawer ? false : collapsedPref;
   const { appTitle, logoUrl } = useBrandingStore();
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
@@ -169,11 +176,12 @@ export function Sidebar() {
     <TooltipProvider delayDuration={0}>
       <aside
         className={cn(
-          "relative flex h-full shrink-0 flex-col border-r bg-card",
+          "relative flex h-full shrink-0 flex-col bg-card",
+          drawer ? "w-full" : "border-r",
           collapsed ? "w-12" : "",
           collapsed ? "transition-all duration-200" : "",
         )}
-        style={collapsed ? undefined : { width: `${String(width)}px` }}
+        style={drawer || collapsed ? undefined : { width: `${String(width)}px` }}
       >
         {/* Header */}
         <div className="flex h-14 shrink-0 items-center border-b px-2">
@@ -190,19 +198,21 @@ export function Sidebar() {
               )}
             </>
           )}
-          <button
-            onClick={toggleCollapsed}
-            className={cn(
-              "rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors",
-              collapsed ? "mx-auto" : "ml-auto",
-            )}
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
-            )}
-          </button>
+          {!drawer && (
+            <button
+              onClick={toggleCollapsed}
+              className={cn(
+                "rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors",
+                collapsed ? "mx-auto" : "ml-auto",
+              )}
+            >
+              {collapsed ? (
+                <PanelLeftOpen className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </button>
+          )}
         </div>
 
         {/* Nav items */}
@@ -312,7 +322,7 @@ export function Sidebar() {
           ))}
         </nav>
         {/* Resize handle */}
-        {!collapsed && (
+        {!drawer && !collapsed && (
           <div
             onMouseDown={handleMouseDown}
             className="absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-primary/20 active:bg-primary/30 transition-colors"

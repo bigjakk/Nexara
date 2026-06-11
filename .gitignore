@@ -104,3 +104,4 @@ yarn-debug.log*
 
 # Local compose overrides
 docker-compose.local.yml
+.playwright-mcp/

@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Monitor,
+  MoreVertical,
 } from "lucide-react";
 import {
   Table,
@@ -48,6 +49,7 @@ import {
 } from "@/stores/vm-context-menu-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useConsoleStore } from "@/stores/console-store";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { VMAction } from "@/features/vms/types/vm";
 import { applyFilter } from "../lib/search-parser";
 import {
@@ -253,34 +255,67 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
 
 const columnHelper = createColumnHelper<InventoryRow>();
 
-function buildColumns(): ColumnDef<InventoryRow>[] {
+function buildColumns(
+  isMobile: boolean,
+  openMenu: (target: VMContextTarget, x: number, y: number) => void,
+): ColumnDef<InventoryRow>[] {
+  const selectColumn = columnHelper.display({
+    id: "select",
+    header: ({ table }) => (
+      <Checkbox
+        checked={
+          table.getIsAllPageRowsSelected() ||
+          (table.getIsSomePageRowsSelected() && "indeterminate")
+        }
+        onCheckedChange={(value) => {
+          table.toggleAllPageRowsSelected(Boolean(value));
+        }}
+        aria-label="Select all"
+      />
+    ),
+    cell: ({ row }) => (
+      <Checkbox
+        checked={row.getIsSelected()}
+        onCheckedChange={(value) => {
+          row.toggleSelected(Boolean(value));
+        }}
+        aria-label="Select row"
+      />
+    ),
+    enableSorting: false,
+    enableHiding: false,
+  });
+
+  // Touch replacement for right-click: a per-row kebab opening the same
+  // actions menu. It swaps in for the bulk-select column below md.
+  const actionsColumn = columnHelper.display({
+    id: "actions",
+    header: () => null,
+    cell: ({ row }) => {
+      const target = toContextTarget(row.original);
+      if (!target) return null;
+      return (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          aria-label={`Actions for ${target.name}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            openMenu(target, rect.left, rect.bottom + 4);
+          }}
+        >
+          <MoreVertical className="h-4 w-4" />
+        </Button>
+      );
+    },
+    enableSorting: false,
+    enableHiding: false,
+  });
+
   return [
-    columnHelper.display({
-      id: "select",
-      header: ({ table }) => (
-        <Checkbox
-          checked={
-            table.getIsAllPageRowsSelected() ||
-            (table.getIsSomePageRowsSelected() && "indeterminate")
-          }
-          onCheckedChange={(value) => {
-            table.toggleAllPageRowsSelected(Boolean(value));
-          }}
-          aria-label="Select all"
-        />
-      ),
-      cell: ({ row }) => (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={(value) => {
-            row.toggleSelected(Boolean(value));
-          }}
-          aria-label="Select row"
-        />
-      ),
-      enableSorting: false,
-      enableHiding: false,
-    }),
+    isMobile ? actionsColumn : selectColumn,
     columnHelper.accessor("type", {
       header: "Type",
       cell: ({ row, getValue }) => {
@@ -532,11 +567,22 @@ interface ResourceTableProps {
 }
 
 export function ResourceTable({ data }: ResourceTableProps) {
-  const columns = useMemo(() => buildColumns(), []);
+  const isMobile = useIsMobile();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [query, setQuery] = useState<ParsedQuery>({ filters: [], freeText: "" });
   const [contextMenu, setContextMenu] = useState<MenuState | null>(null);
+
+  const openRowMenu = useCallback(
+    (target: VMContextTarget, x: number, y: number) => {
+      setContextMenu({ target, x, y });
+    },
+    [],
+  );
+  const columns = useMemo(
+    () => buildColumns(isMobile, openRowMenu),
+    [isMobile, openRowMenu],
+  );
 
   const savedVisibility = useMemo(() => {
     const saved = loadColumnVisibility();
@@ -653,7 +699,7 @@ export function ResourceTable({ data }: ResourceTableProps) {
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
           {String(filteredData.length)} resource{filteredData.length !== 1 ? "s" : ""} total
           {data.length !== filteredData.length && ` (${String(data.length)} unfiltered)`}

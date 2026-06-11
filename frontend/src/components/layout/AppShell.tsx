@@ -9,6 +9,7 @@ import {
   Key,
   LogOut,
   LogOutIcon,
+  Menu,
   ShieldCheck,
   Sparkles,
   User,
@@ -25,7 +26,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useEventInvalidation } from "@/hooks/useEventInvalidation";
 import { useWebSocketStore } from "@/stores/websocket-store";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
@@ -151,6 +154,15 @@ export function AppShell() {
   );
   useEventInvalidation(clusterIds);
 
+  const isMobile = useIsMobile();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Close the nav drawer after any navigation and when leaving the mobile
+  // layout (resize/rotation) — otherwise it would reopen stale later.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location, isMobile]);
+
   const themeMode = useThemeStore((s) => s.mode);
 
   const handleLogout = () => {
@@ -162,25 +174,45 @@ export function AppShell() {
   };
 
   return (
-    <div className="flex h-screen">
-      <Sidebar />
+    <div className="flex h-screen supports-[height:100dvh]:h-dvh">
+      {isMobile ? (
+        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+          <SheetContent side="left" className="w-72 p-0">
+            <SheetTitle className="sr-only">Navigation</SheetTitle>
+            <Sidebar drawer />
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Sidebar />
+      )}
       <div className="app-canvas flex flex-1 flex-col overflow-hidden transition-all duration-200">
-        <header className="flex h-14 items-center border-b bg-card/70 px-4 backdrop-blur-md">
-          <div className="flex flex-1 items-center justify-center">
+        <header className="flex h-14 items-center gap-2 border-b bg-card/70 px-3 backdrop-blur-md md:px-4">
+          {isMobile && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              aria-label="Open navigation"
+              onClick={() => { setMobileNavOpen(true); }}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+          )}
+          <div className="flex min-w-0 flex-1 items-center justify-center">
             <SearchBar />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
           <CreateResourceMenu />
           <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="gap-2">
+              <Button variant="ghost" className="gap-2 px-2 md:px-4">
                 <Avatar className="h-7 w-7">
                   <AvatarFallback className="text-xs">
                     {user ? getInitials(user.display_name) : "?"}
                   </AvatarFallback>
                 </Avatar>
-                <span className="text-sm">
+                <span className="hidden text-sm sm:inline">
                   {user?.display_name ?? "User"}
                 </span>
               </Button>
@@ -226,7 +258,7 @@ export function AppShell() {
           </div>
         </header>
         <Separator />
-        <main className="flex-1 overflow-auto p-6">
+        <main className="flex-1 overflow-auto p-4 md:p-6">
           {/* Keyed by pathname so a crashed route doesn't hold every other
               route hostage — navigation remounts a fresh boundary. */}
           <ErrorBoundary key={location.pathname}>

@@ -19,9 +19,11 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Pencil, Trash2 } from "lucide-react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 export function ClustersListPage() {
   const { data: clusters, isLoading, error } = useClusters();
+  const isMobile = useIsMobile();
   const [editCluster, setEditCluster] = useState<ClusterResponse | null>(null);
   const [deleteCluster, setDeleteCluster] = useState<ClusterResponse | null>(null);
 
@@ -73,7 +75,72 @@ export function ClustersListPage() {
         </div>
       )}
 
-      {!isLoading && clusters !== undefined && clusters.length > 0 && (
+      {!isLoading && clusters !== undefined && clusters.length > 0 && isMobile && (
+        <div className="space-y-3">
+          {clusters.map((cluster, i) => {
+            const nodes = nodeQueries[i]?.data;
+            const vms = vmQueries[i]?.data;
+            const vmCount = vms?.filter((v) => v.type === "qemu").length;
+
+            return (
+              <div key={cluster.id} className="rounded-lg border bg-card p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      to={`/clusters/${cluster.id}`}
+                      className="font-medium text-primary hover:underline"
+                    >
+                      {cluster.name}
+                    </Link>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {cluster.api_url}
+                    </p>
+                  </div>
+                  <ClusterStatusBadge status={cluster.status} />
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                  <div className="flex gap-4 text-sm text-muted-foreground">
+                    <span>
+                      <span className="font-medium text-foreground">
+                        {nodes !== undefined ? nodes.length : "—"}
+                      </span>{" "}
+                      nodes
+                    </span>
+                    <span>
+                      <span className="font-medium text-foreground">
+                        {vmCount !== undefined ? vmCount : "—"}
+                      </span>{" "}
+                      VMs
+                    </span>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      aria-label={`Edit ${cluster.name}`}
+                      onClick={() => { setEditCluster(cluster); }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      aria-label={`Delete ${cluster.name}`}
+                      onClick={() => { setDeleteCluster(cluster); }}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!isLoading && clusters !== undefined && clusters.length > 0 && !isMobile && (
         <div className="rounded-lg border">
           <Table>
             <TableHeader>

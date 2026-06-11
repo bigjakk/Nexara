@@ -57,7 +57,7 @@ export function CreateResourceMenu() {
         <DropdownMenuTrigger asChild>
           <Button variant="outline" size="sm" className="gap-1.5">
             <Plus className="h-4 w-4" />
-            Create
+            <span className="hidden sm:inline">Create</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

@@ -327,7 +327,7 @@ export function SearchBar() {
     <>
       <button
         onClick={() => { setOpen(true); }}
-        className="flex h-9 w-64 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+        className="flex h-9 w-full max-w-64 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
       >
         <Search className="h-4 w-4" />
         <span className="flex-1 text-left">Search or jump to…</span>
@@ -337,7 +337,7 @@ export function SearchBar() {
       </button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="top-[16%] translate-y-0 overflow-hidden p-0 sm:max-w-[560px]">
+        <DialogContent className="top-[16%] max-w-[calc(100%-1.5rem)] translate-y-0 overflow-hidden p-0 sm:max-w-[560px]">
           <DialogTitle className="sr-only">Command palette</DialogTitle>
           <Command
             shouldFilter={false}
@@ -496,7 +496,7 @@ export function SearchBar() {
                 </>
               )}
             </CommandList>
-            <div className="flex items-center gap-3 border-t px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="hidden items-center gap-3 border-t px-3 py-2 text-[11px] text-muted-foreground sm:flex">
               <span className="flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> navigate</span>
               <span className="flex items-center gap-1"><Kbd>↵</Kbd> select</span>
               {inPicker && <span className="flex items-center gap-1"><Kbd>⌫</Kbd> back</span>}
