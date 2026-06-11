@@ -8,9 +8,13 @@ describe("StatsOverview", () => {
     renderWithProviders(
       <StatsOverview
         totalNodes={5}
+        totalNodesOnline={5}
         totalVMs={20}
+        totalVMsRunning={15}
         totalContainers={10}
+        totalContainersRunning={8}
         totalStorageBytes={1099511627776}
+        totalStorageUsedBytes={549755813888}
         isLoading={false}
       />,
     );
@@ -21,13 +25,38 @@ describe("StatsOverview", () => {
     expect(screen.getByText("1.0 TB")).toBeInTheDocument();
   });
 
+  it("renders status sublines", () => {
+    renderWithProviders(
+      <StatsOverview
+        totalNodes={5}
+        totalNodesOnline={4}
+        totalVMs={20}
+        totalVMsRunning={15}
+        totalContainers={10}
+        totalContainersRunning={8}
+        totalStorageBytes={1099511627776}
+        totalStorageUsedBytes={549755813888}
+        isLoading={false}
+      />,
+    );
+
+    expect(screen.getByText("4/5 online")).toBeInTheDocument();
+    expect(screen.getByText("15 running · 5 stopped")).toBeInTheDocument();
+    expect(screen.getByText("8 running")).toBeInTheDocument();
+    expect(screen.getByText("50% used")).toBeInTheDocument();
+  });
+
   it("shows skeletons when loading", () => {
     renderWithProviders(
       <StatsOverview
         totalNodes={0}
+        totalNodesOnline={0}
         totalVMs={0}
+        totalVMsRunning={0}
         totalContainers={0}
+        totalContainersRunning={0}
         totalStorageBytes={0}
+        totalStorageUsedBytes={0}
         isLoading={true}
       />,
     );
@@ -40,9 +69,13 @@ describe("StatsOverview", () => {
     renderWithProviders(
       <StatsOverview
         totalNodes={0}
+        totalNodesOnline={0}
         totalVMs={0}
+        totalVMsRunning={0}
         totalContainers={0}
+        totalContainersRunning={0}
         totalStorageBytes={0}
+        totalStorageUsedBytes={0}
         isLoading={false}
       />,
     );

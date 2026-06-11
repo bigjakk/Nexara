@@ -235,9 +235,13 @@ export function DashboardPage() {
           return (
             <StatsOverview
               totalNodes={data.totalNodes}
+              totalNodesOnline={data.totalNodesOnline}
               totalVMs={data.totalVMs}
+              totalVMsRunning={data.totalVMsRunning}
               totalContainers={data.totalContainers}
+              totalContainersRunning={data.totalContainersRunning}
               totalStorageBytes={data.totalStorageBytes}
+              totalStorageUsedBytes={data.totalStorageUsedBytes}
               isLoading={isLoading}
             />
           );
@@ -246,7 +250,11 @@ export function DashboardPage() {
           return (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {data.clusters.map((s) => (
-                <ClusterCard key={s.cluster.id} summary={s} />
+                <ClusterCard
+                  key={s.cluster.id}
+                  summary={s}
+                  metrics={liveMetrics.get(s.cluster.id)}
+                />
               ))}
             </div>
           );
@@ -394,9 +402,13 @@ export function DashboardPage() {
           {isLoading && !data && (
             <StatsOverview
               totalNodes={0}
+              totalNodesOnline={0}
               totalVMs={0}
+              totalVMsRunning={0}
               totalContainers={0}
+              totalContainersRunning={0}
               totalStorageBytes={0}
+              totalStorageUsedBytes={0}
               isLoading={true}
             />
           )}

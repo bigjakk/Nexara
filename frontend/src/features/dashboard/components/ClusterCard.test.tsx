@@ -19,9 +19,13 @@ const mockSummary: ClusterSummary = {
     updated_at: "2024-01-01T00:00:00Z",
   },
   nodeCount: 3,
+  nodesOnline: 3,
   vmCount: 12,
+  vmsRunning: 10,
   containerCount: 5,
+  containersRunning: 4,
   storageTotalBytes: 5497558138880,
+  storageUsedBytes: 2748779069440,
 };
 
 describe("ClusterCard", () => {
@@ -56,12 +60,40 @@ describe("ClusterCard", () => {
     const single: ClusterSummary = {
       ...mockSummary,
       nodeCount: 1,
+      nodesOnline: 1,
       vmCount: 1,
+      vmsRunning: 1,
       containerCount: 1,
+      containersRunning: 1,
     };
     renderWithProviders(<ClusterCard summary={single} />);
     expect(screen.getByText("1 node")).toBeInTheDocument();
     expect(screen.getByText("1 VM")).toBeInTheDocument();
     expect(screen.getByText("1 CT")).toBeInTheDocument();
+  });
+
+  it("shows storage utilization from REST data", () => {
+    renderWithProviders(<ClusterCard summary={mockSummary} />);
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
+
+  it("shows placeholders for CPU/memory until live metrics arrive", () => {
+    renderWithProviders(<ClusterCard summary={mockSummary} />);
+    expect(screen.getAllByText("—")).toHaveLength(2);
+  });
+
+  it("renders a PVE version chip when version is known", () => {
+    const versioned: ClusterSummary = {
+      ...mockSummary,
+      cluster: { ...mockSummary.cluster, pve_version: "8.4.1" },
+    };
+    renderWithProviders(<ClusterCard summary={versioned} />);
+    expect(screen.getByText("PVE 8.4.1")).toBeInTheDocument();
+  });
+
+  it("renders one status dot per node", () => {
+    renderWithProviders(<ClusterCard summary={mockSummary} />);
+    const dots = screen.getByTestId("node-dots");
+    expect(dots.querySelectorAll("span")).toHaveLength(3);
   });
 });

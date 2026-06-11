@@ -73,5 +73,10 @@
   "removeWidget": "Remove Widget",
   "editLayout": "Edit Layout",
   "network": "Network",
-  "disk": "Disk"
+  "disk": "Disk",
+  "storage": "Storage",
+  "statOnline": "{{online}}/{{total}} online",
+  "statRunningStopped": "{{running}} running · {{stopped}} stopped",
+  "statRunning": "{{running}} running",
+  "statUsedPercent": "{{percent}}% used"
 }
