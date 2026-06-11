@@ -43,7 +43,7 @@ function PoolLeaf({
       }}
       className={cn(
         "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-        isActive && "bg-accent text-accent-foreground",
+        isActive && "bg-primary/10 text-foreground",
       )}
     >
       <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -181,7 +181,7 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
           <div
             className={cn(
               "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-              isClusterActive && "bg-accent text-accent-foreground",
+              isClusterActive && "bg-primary/10 text-foreground",
             )}
           >
             <button

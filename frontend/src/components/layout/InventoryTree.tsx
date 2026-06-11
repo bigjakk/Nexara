@@ -107,7 +107,7 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
           <div
             className={cn(
               "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-              isActive && "bg-accent text-accent-foreground",
+              isActive && "bg-primary/10 text-foreground",
             )}
           >
             <button
@@ -129,7 +129,6 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
               onClick={() => { void navigate(`/clusters/${clusterId}/nodes/${node.id}`); }}
               className="flex min-w-0 flex-1 items-center gap-1.5"
             >
-              <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               {node.ha_state === "maintenance" ? (
                 <Wrench
                   aria-label="Maintenance"
@@ -138,6 +137,7 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
               ) : (
                 <StatusIcon status={node.status} />
               )}
+              <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span className="truncate">{node.name}</span>
             </button>
           </div>
@@ -178,11 +178,11 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
                     onClick={() => { void navigate(vmPath); }}
                     className={cn(
                       "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-                      vmActive && "bg-accent text-accent-foreground",
+                      vmActive && "bg-primary/10 text-foreground",
                     )}
                   >
-                    <VMIcon type={vm.type} template={vm.template} />
                     <StatusIcon status={vm.status} />
+                    <VMIcon type={vm.type} template={vm.template} />
                     {(classifyOS(vm.ostype) !== "unknown" ||
                       classifyOS(vm.config_ostype) !== "unknown") && (
                       <OSIcon ostype={vm.ostype} configOstype={vm.config_ostype} />
@@ -265,7 +265,7 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
             <div
               className={cn(
                 "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-                isActive && "bg-accent text-accent-foreground",
+                isActive && "bg-primary/10 text-foreground",
               )}
             >
               <button
@@ -283,8 +283,8 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
                 onClick={() => { void navigate(`/clusters/${cluster.id}`); }}
                 className="flex min-w-0 flex-1 items-center gap-1.5"
               >
-                <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
                 <StatusIcon status={cluster.status === "degraded" ? "degraded" : cluster.status} />
+                <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
                 <span className="truncate font-medium">{cluster.name}</span>
               </button>
 
@@ -390,7 +390,7 @@ export function InventoryTree() {
   return (
     <div className="space-y-1 py-1">
       <div className="flex items-center justify-between px-2 pb-1">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
           {t("datacenter")}
         </span>
         <AddClusterDialog

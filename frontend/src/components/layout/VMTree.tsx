@@ -84,11 +84,11 @@ function VMLeaf({ vm, clusterId }: VMLeafProps) {
         onClick={() => { void navigate(path); }}
         className={cn(
           "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-          active && "bg-accent text-accent-foreground",
+          active && "bg-primary/10 text-foreground",
         )}
       >
-        <VMIcon type={vm.type} template={vm.template} />
         <StatusIcon status={vm.status} />
+        <VMIcon type={vm.type} template={vm.template} />
         {(classifyOS(vm.ostype) !== "unknown" ||
           classifyOS(vm.config_ostype) !== "unknown") && (
           <OSIcon ostype={vm.ostype} configOstype={vm.config_ostype} />
@@ -397,7 +397,7 @@ function VMClusterBranch({
           <div
             className={cn(
               "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
-              isActive && "bg-accent text-accent-foreground",
+              isActive && "bg-primary/10 text-foreground",
             )}
           >
             <button
@@ -415,10 +415,10 @@ function VMClusterBranch({
               onClick={() => { void navigate(`/clusters/${cluster.id}`); }}
               className="flex min-w-0 flex-1 items-center gap-1.5"
             >
-              <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
               <StatusIcon
                 status={cluster.status === "degraded" ? "degraded" : cluster.status}
               />
+              <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
               <span className="truncate font-medium">{cluster.name}</span>
             </button>
           </div>

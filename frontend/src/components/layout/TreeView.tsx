@@ -39,7 +39,7 @@ function PerspectiveToggle() {
               className={cn(
                 "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
                 perspective === value
-                  ? "bg-accent text-accent-foreground"
+                  ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
               )}
             >

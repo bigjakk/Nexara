@@ -8,7 +8,7 @@ import { StatusIcon } from "@/components/StatusIcon";
 const statusConfig: Record<string, { label: string; className: string }> = {
   running: { label: "Running", className: "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400" },
   online: { label: "Online", className: "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400" },
-  stopped: { label: "Stopped", className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
+  stopped: { label: "Stopped", className: "border-muted-foreground/30 bg-muted text-muted-foreground" },
   offline: { label: "Offline", className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
   paused: { label: "Paused", className: "border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400" },
   suspended: { label: "Suspended", className: "border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400" },
