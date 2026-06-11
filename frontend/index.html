@@ -11,7 +11,38 @@
          Must be an external file — the backend CSP (script-src 'self')
          blocks inline scripts. -->
     <script src="/theme-init.js"></script>
-    <div id="root"></div>
+    <!-- Boot fallback: React replaces #root's children on mount. If the
+         entry module never executes (browser too old to parse the bundle,
+         download failure), the message fades in after 8s instead of leaving
+         a silent white screen. CSS-only — must not depend on JS. -->
+    <style>
+      @keyframes nexara-boot-fallback-reveal {
+        to {
+          opacity: 1;
+        }
+      }
+      #boot-fallback {
+        opacity: 0;
+        animation: nexara-boot-fallback-reveal 0.5s ease 8s forwards;
+        font-family: system-ui, sans-serif;
+        max-width: 28rem;
+        margin: 20vh auto 0;
+        padding: 0 1.5rem;
+        text-align: center;
+        color: #888;
+      }
+    </style>
+    <div id="root">
+      <div id="boot-fallback">
+        <p style="font-size: 1.1rem; color: #aaa">Nexara is taking unusually long to load.</p>
+        <p>
+          If this message doesn't go away, your browser may be too old to run
+          Nexara — try updating it, or use a current version of Chrome,
+          Firefox, Edge, or Safari.
+        </p>
+        <noscript>Nexara requires JavaScript, which is disabled in this browser.</noscript>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

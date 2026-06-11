@@ -10,7 +10,14 @@ export default defineConfig({
     },
   },
   build: {
-    target: "es2022",
+    // Browser floor, NOT a bare "es2022"+: esbuild only transpiles syntax
+    // down to the target, so anything newer (class static blocks, logical
+    // assignment) makes older mobile browsers throw SyntaxError before the
+    // app boots — a silent white screen. Self-hosted users check dashboards
+    // from old phone browsers, so keep this as low as possible. The hard
+    // floor is top-level await (used by noVNC's WebCodecs probe), which
+    // cannot be transpiled away: Chrome/Edge/Firefox 89, Safari 15.
+    target: ["chrome89", "edge89", "firefox89", "safari15"],
     rollupOptions: {
       output: {
         manualChunks: {
