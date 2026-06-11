@@ -34,7 +34,6 @@ import {
 import { useSidebarStore } from "@/stores/sidebar-store";
 import { useDragAutoScroll } from "@/hooks/useDragAutoScroll";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
-import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
 import { CreateFolderDialog } from "@/features/vms/components/CreateFolderDialog";
 import { RenameFolderDialog } from "@/features/vms/components/RenameFolderDialog";
 import { buildFolderTree, type FolderNode } from "@/features/vms/lib/folder-tree";
@@ -152,7 +151,7 @@ function FolderBranch({
 
   return (
     <div className="border-l border-border pl-3 ml-3">
-      <ContextMenu>
+      <ContextMenu modal={false}>
         <ContextMenuTrigger asChild>
           <div
             onDragOver={handleDragOver}
@@ -391,7 +390,7 @@ function VMClusterBranch({
   }, [vms, folderData]);
 
   return (
-    <ContextMenu>
+    <ContextMenu modal={false}>
       <ContextMenuTrigger asChild>
         <div>
           <div
@@ -528,7 +527,6 @@ export function VMTree() {
         />
       ))}
 
-      <VMContextDialogs />
 
       {createCtx && (
         <CreateFolderDialog

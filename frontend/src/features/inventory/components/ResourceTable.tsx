@@ -40,7 +40,6 @@ import { MetricMiniBar } from "./MetricMiniBar";
 import { SearchBar } from "./SearchBar";
 import { ColumnToggle } from "./ColumnToggle";
 import { BulkActionToolbar } from "./BulkActionToolbar";
-import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
 import { lifecycleActions, managementActions } from "@/features/vms/lib/vm-action-defs";
 import { useVMAction } from "@/features/vms/api/vm-queries";
 import {
@@ -687,7 +686,6 @@ export function ResourceTable({ data }: ResourceTableProps) {
         <RowContextMenu menu={contextMenu} onClose={handleCloseMenu} />
       )}
 
-      <VMContextDialogs />
     </div>
   );
 }

@@ -46,6 +46,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { ChangelogDialog } from "./ChangelogDialog";
 import { AboutDialog } from "./AboutDialog";
 import { FloatingConsole } from "@/features/console/components/FloatingConsole";
+import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
 import { SearchBar } from "./SearchBar";
 import { CreateResourceMenu } from "./CreateResourceMenu";
 
@@ -234,6 +235,7 @@ export function AppShell() {
         </main>
         <TaskLogPanel />
         <TaskProgressDialog />
+        <VMContextDialogs />
       </div>
       <FloatingConsole />
       <Toaster position="top-right" richColors closeButton theme={themeMode} />

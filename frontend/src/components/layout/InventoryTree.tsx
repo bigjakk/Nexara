@@ -43,7 +43,6 @@ import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDial
 import { EditClusterDialog } from "@/features/clusters/components/EditClusterDialog";
 import { DeleteClusterDialog } from "@/features/clusters/components/DeleteClusterDialog";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
-import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
 import { CreateVMDialog } from "@/features/vms/components/CreateVMDialog";
 import { CreateCTDialog } from "@/features/vms/components/CreateCTDialog";
 import { Button } from "@/components/ui/button";
@@ -102,7 +101,7 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
 
   return (
     <div className="border-l border-border pl-3 ml-3">
-      <ContextMenu>
+      <ContextMenu modal={false}>
         <ContextMenuTrigger asChild>
           <div
             className={cn(
@@ -259,7 +258,7 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
 
   return (
     <>
-      <ContextMenu>
+      <ContextMenu modal={false}>
         <ContextMenuTrigger asChild>
           <div>
             <div
@@ -418,7 +417,6 @@ export function InventoryTree() {
         <ClusterBranch key={cluster.id} cluster={cluster} />
       ))}
 
-      <VMContextDialogs />
     </div>
   );
 }

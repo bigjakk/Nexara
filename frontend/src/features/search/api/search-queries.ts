@@ -10,6 +10,7 @@ export interface SearchResult {
   cluster_id: string;
   cluster_name: string;
   vmid?: number;
+  template?: boolean;
   [key: string]: unknown;
 }
 

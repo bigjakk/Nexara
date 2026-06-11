@@ -176,7 +176,7 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
 
   return (
     <div>
-      <ContextMenu>
+      <ContextMenu modal={false}>
         <ContextMenuTrigger asChild>
           <div
             className={cn(

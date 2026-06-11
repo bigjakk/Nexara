@@ -21,9 +21,12 @@ import type { VMAction } from "../types/vm";
 interface VMContextMenuProps {
   target: VMContextTarget;
   children: ReactNode;
+  /** Called when any menu action is chosen — lets hosts (e.g. the command
+   * palette) close themselves before the action's dialog opens. */
+  onAction?: (() => void) | undefined;
 }
 
-export function VMContextMenu({ target, children }: VMContextMenuProps) {
+export function VMContextMenu({ target, children, onAction }: VMContextMenuProps) {
   const { openClone, openCloneToTemplate, openDeploy, openMigrate, openDestroy, openConvertToTemplate, openConfirmAction, openMoveToFolder } =
     useVMContextMenuStore();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
@@ -43,6 +46,7 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
   );
 
   function handleLifecycleAction(action: VMAction, needsConfirm: boolean, label: string) {
+    onAction?.();
     if (needsConfirm) {
       openConfirmAction(target, action, label);
     } else {
@@ -68,6 +72,7 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
   }
 
   function handleManagementAction(action: "clone" | "clone-to-template" | "deploy" | "migrate" | "convert-to-template" | "destroy") {
+    onAction?.();
     if (action === "clone") openClone(target);
     if (action === "clone-to-template") openCloneToTemplate(target);
     if (action === "deploy") openDeploy(target);
@@ -77,6 +82,7 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
   }
 
   function handleOpenConsole() {
+    onAction?.();
     const type = target.kind === "ct" ? "ct_vnc" as const : "vm_vnc" as const;
     const labelPrefix = target.kind === "ct" ? "CT" : "VNC";
     addTab({
@@ -92,7 +98,7 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
   }
 
   return (
-    <ContextMenu>
+    <ContextMenu modal={false}>
       <ContextMenuTrigger asChild>
         {children}
       </ContextMenuTrigger>
@@ -122,7 +128,7 @@ export function VMContextMenu({ target, children }: VMContextMenuProps) {
         )}
 
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => { openMoveToFolder(target); }}>
+        <ContextMenuItem onClick={() => { onAction?.(); openMoveToFolder(target); }}>
           <span className="mr-2"><FolderInput className="h-4 w-4" /></span>
           Move to folder…
         </ContextMenuItem>
