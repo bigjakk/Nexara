@@ -171,7 +171,7 @@ function ActivityRow({
   return (
     <>
       <tr
-        className="cursor-pointer border-b hover:bg-muted/20"
+        className="cursor-pointer border-b transition-colors hover:bg-muted/30"
         onClick={onToggle}
         onDoubleClick={(e) => {
           e.stopPropagation();
@@ -179,22 +179,34 @@ function ActivityRow({
         }}
       >
         <td className="px-2 py-1">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <ChevronRight
               className={`h-3 w-3 text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`}
             />
-            {isRunning && (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
-            )}
-            {isOk && (
-              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-            )}
-            {isFailed && (
-              <XCircle className="h-3.5 w-3.5 text-red-500" />
-            )}
-            {status === "none" && (
-              <Activity className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
+            <span
+              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${
+                isRunning
+                  ? "bg-blue-500/10"
+                  : isOk
+                    ? "bg-emerald-500/10"
+                    : isFailed
+                      ? "bg-red-500/10"
+                      : "bg-muted"
+              }`}
+            >
+              {isRunning && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+              )}
+              {isOk && (
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+              )}
+              {isFailed && (
+                <XCircle className="h-3.5 w-3.5 text-red-500" />
+              )}
+              {status === "none" && (
+                <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+            </span>
           </div>
         </td>
         <td className="px-2 py-1">
@@ -210,7 +222,7 @@ function ActivityRow({
                 PVE
               </span>
             )}
-            <span>{formatAction(entry.action)}</span>
+            <span className="font-medium">{formatAction(entry.action)}</span>
             {resourceLabel && (
               <span className="text-muted-foreground">
                 — {resourceLabel}
@@ -237,7 +249,7 @@ function ActivityRow({
         <td className="px-2 py-1 text-muted-foreground">
           {entry.cluster_name || "—"}
         </td>
-        <td className="px-2 py-1 text-right text-muted-foreground">
+        <td className="px-2 py-1 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
           {formatRelativeTime(entry.created_at)}
         </td>
       </tr>
@@ -406,7 +418,7 @@ export function TaskLogPanel() {
   }, []);
 
   return (
-    <div className="flex flex-col border-t bg-background">
+    <div className="flex flex-col border-t bg-card">
       {/* Invisible progress pollers for running tasks */}
       {runningWithUpids.map((e) => (
         <ActiveTaskPoller
@@ -463,12 +475,12 @@ export function TaskLogPanel() {
           {entries && entries.length > 0 && (
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b bg-muted/30 text-left">
-                  <th className="w-12 px-2 py-1" />
-                  <th className="w-14 px-2 py-1 font-medium">Level</th>
-                  <th className="px-2 py-1 font-medium">Action</th>
-                  <th className="px-2 py-1 font-medium">Cluster</th>
-                  <th className="w-24 px-2 py-1 text-right font-medium">
+                <tr className="border-b text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <th className="w-12 px-2 py-1.5" />
+                  <th className="w-14 px-2 py-1.5 font-medium">Level</th>
+                  <th className="px-2 py-1.5 font-medium">Action</th>
+                  <th className="px-2 py-1.5 font-medium">Cluster</th>
+                  <th className="w-24 px-2 py-1.5 text-right font-medium">
                     Time
                   </th>
                 </tr>
