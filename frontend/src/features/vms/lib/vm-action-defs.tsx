@@ -47,7 +47,7 @@ export const lifecycleActions: ActionConfig[] = [
     label: "Shutdown",
     icon: <Power className="h-4 w-4" />,
     variant: "outline",
-    needsConfirm: false,
+    needsConfirm: true,
     showWhen: (s) => s === "running",
   },
   {

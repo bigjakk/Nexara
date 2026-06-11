@@ -37,6 +37,10 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
   const actionMutation = useVMAction();
   const destroyMutation = useDestroyVM();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmBulk, setConfirmBulk] = useState<{
+    action: "stop" | "shutdown";
+    label: string;
+  } | null>(null);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [progress, setProgress] = useState<{
     done: number;
@@ -138,7 +142,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
               className="gap-1"
               disabled={isBusy || vmCtRows.length === 0}
               onClick={() => {
-                void executeBulkAction("stop");
+                setConfirmBulk({ action: "stop", label: "Stop" });
               }}
             >
               <Square className="h-3 w-3" />
@@ -150,7 +154,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
               className="gap-1"
               disabled={isBusy || vmCtRows.length === 0}
               onClick={() => {
-                void executeBulkAction("shutdown");
+                setConfirmBulk({ action: "shutdown", label: "Shutdown" });
               }}
             >
               <PowerOff className="h-3 w-3" />
@@ -207,6 +211,46 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
           Clear
         </Button>
       </div>
+
+      <Dialog
+        open={confirmBulk !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmBulk(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Bulk {confirmBulk?.label}</DialogTitle>
+            <DialogDescription>
+              This will {confirmBulk?.label.toLowerCase()}{" "}
+              {String(vmCtRows.length)} resource
+              {vmCtRows.length !== 1 ? "s" : ""}. Running guests may lose
+              unsaved data.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setConfirmBulk(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const pending = confirmBulk;
+                setConfirmBulk(null);
+                if (pending) void executeBulkAction(pending.action);
+              }}
+            >
+              {confirmBulk?.label} {String(vmCtRows.length)} resource
+              {vmCtRows.length !== 1 ? "s" : ""}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent>
