@@ -163,8 +163,8 @@ export function AppShell() {
   return (
     <div className="flex h-screen">
       <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden transition-all duration-200">
-        <header className="flex h-14 items-center border-b bg-card px-4">
+      <div className="app-canvas flex flex-1 flex-col overflow-hidden transition-all duration-200">
+        <header className="flex h-14 items-center border-b bg-card/70 px-4 backdrop-blur-md">
           <div className="flex flex-1 items-center justify-center">
             <SearchBar />
           </div>

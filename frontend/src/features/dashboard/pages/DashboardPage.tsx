@@ -243,6 +243,7 @@ export function DashboardPage() {
               totalStorageBytes={data.totalStorageBytes}
               totalStorageUsedBytes={data.totalStorageUsedBytes}
               isLoading={isLoading}
+              metrics={liveMetrics}
             />
           );
 

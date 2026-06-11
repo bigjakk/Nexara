@@ -20,8 +20,8 @@ describe("StatsOverview", () => {
     );
 
     expect(screen.getByText("5")).toBeInTheDocument();
-    expect(screen.getByText("20")).toBeInTheDocument();
-    expect(screen.getByText("10")).toBeInTheDocument();
+    expect(screen.getByText("23")).toBeInTheDocument();
+    expect(screen.getByText("/30")).toBeInTheDocument();
     expect(screen.getByText("1.0 TB")).toBeInTheDocument();
   });
 
@@ -41,9 +41,27 @@ describe("StatsOverview", () => {
     );
 
     expect(screen.getByText("4/5 online")).toBeInTheDocument();
-    expect(screen.getByText("15 running · 5 stopped")).toBeInTheDocument();
-    expect(screen.getByText("8 running")).toBeInTheDocument();
+    expect(screen.getByText("20 VMs · 10 CTs")).toBeInTheDocument();
     expect(screen.getByText("50% used")).toBeInTheDocument();
+  });
+
+  it("shows a placeholder on the CPU card until live metrics arrive", () => {
+    renderWithProviders(
+      <StatsOverview
+        totalNodes={5}
+        totalNodesOnline={5}
+        totalVMs={20}
+        totalVMsRunning={15}
+        totalContainers={10}
+        totalContainersRunning={8}
+        totalStorageBytes={1099511627776}
+        totalStorageUsedBytes={549755813888}
+        isLoading={false}
+      />,
+    );
+
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for data...")).toBeInTheDocument();
   });
 
   it("shows skeletons when loading", () => {
@@ -81,8 +99,8 @@ describe("StatsOverview", () => {
     );
 
     expect(screen.getByText("Nodes")).toBeInTheDocument();
-    expect(screen.getByText("Virtual Machines")).toBeInTheDocument();
-    expect(screen.getByText("Containers")).toBeInTheDocument();
+    expect(screen.getByText("Guests")).toBeInTheDocument();
+    expect(screen.getByText("Datacenter CPU")).toBeInTheDocument();
     expect(screen.getByText("Total Storage")).toBeInTheDocument();
   });
 });

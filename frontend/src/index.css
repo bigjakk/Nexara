@@ -82,3 +82,35 @@
     color: hsl(var(--foreground));
   }
 }
+
+@layer components {
+  /* Subtle dot-grid canvas with an accent aurora bleeding from behind the
+     topbar. Sits on the app shell's content column; cards are opaque on top. */
+  .app-canvas {
+    background-image:
+      radial-gradient(
+        720px 320px at 50% -140px,
+        hsl(var(--primary) / 0.09),
+        transparent 70%
+      ),
+      radial-gradient(circle, hsl(var(--foreground) / 0.038) 1px, transparent 1px);
+    background-size:
+      100% 100%,
+      22px 22px;
+  }
+  .dark .app-canvas {
+    background-image:
+      radial-gradient(
+        720px 320px at 50% -140px,
+        hsl(var(--primary) / 0.17),
+        transparent 70%
+      ),
+      radial-gradient(circle, hsl(var(--foreground) / 0.045) 1px, transparent 1px);
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
