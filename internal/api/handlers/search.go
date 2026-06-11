@@ -31,6 +31,7 @@ type searchResult struct {
 	ClusterID   string `json:"cluster_id"`
 	ClusterName string `json:"cluster_name"`
 	VMID        int    `json:"vmid,omitempty"`
+	Template    bool   `json:"template,omitempty"`
 }
 
 // GlobalSearch handles GET /api/v1/search?q=...
@@ -89,6 +90,7 @@ func (h *SearchHandler) GlobalSearch(c *fiber.Ctx) error {
 					ClusterID:   vm.ClusterID.String(),
 					ClusterName: vm.ClusterName,
 					VMID:        int(vm.Vmid),
+					Template:    vm.Template,
 				})
 			}
 			if len(results) > 100 {
