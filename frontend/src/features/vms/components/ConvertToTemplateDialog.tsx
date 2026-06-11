@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CopyableName } from "@/components/CopyableName";
 import { AlertTriangle } from "lucide-react";
 import { useConvertToTemplate } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
@@ -64,7 +65,7 @@ export function ConvertToTemplateDialog({
         <DialogHeader>
           <DialogTitle>Convert to Template</DialogTitle>
           <DialogDescription>
-            Convert <strong>{resourceName}</strong> to a template.
+            Convert <CopyableName name={resourceName} /> to a template.
           </DialogDescription>
         </DialogHeader>
 
@@ -95,7 +96,7 @@ export function ConvertToTemplateDialog({
 
             <div className="space-y-2">
               <Label htmlFor="confirm-name">
-                Type <strong>{resourceName}</strong> to confirm
+                Type <CopyableName name={resourceName} /> to confirm
               </Label>
               <Input
                 id="confirm-name"

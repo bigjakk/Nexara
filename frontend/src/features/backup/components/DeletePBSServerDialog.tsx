@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { CopyableName } from "@/components/CopyableName";
 import { useDeletePBSServer } from "../api/backup-queries";
 import type { PBSServer } from "../types/backup";
 
@@ -46,8 +47,8 @@ export function DeletePBSServerDialog({
         <DialogHeader>
           <DialogTitle>Delete PBS Server</DialogTitle>
           <DialogDescription>
-            This will permanently remove <strong>{server.name}</strong> and
-            all associated backup data (snapshots, sync jobs, verify jobs,
+            This will permanently remove <CopyableName name={server.name} />{" "}
+            and all associated backup data (snapshots, sync jobs, verify jobs,
             metrics). Type the server name to confirm.
           </DialogDescription>
         </DialogHeader>

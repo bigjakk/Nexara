@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CopyableName } from "@/components/CopyableName";
 import { useDeleteStorage } from "../api/storage-queries";
 
 interface DeleteStorageDialogProps {
@@ -81,9 +82,8 @@ export function DeleteStorageDialog({
         <div className="space-y-4 pt-2">
           <p className="text-sm text-muted-foreground">
             This will permanently remove the storage pool{" "}
-            <strong className="text-foreground">{storageName}</strong> from
-            the Proxmox cluster configuration. Any data on this storage will
-            become inaccessible.
+            <CopyableName name={storageName} /> from the Proxmox cluster
+            configuration. Any data on this storage will become inaccessible.
           </p>
 
           <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">
@@ -97,7 +97,7 @@ export function DeleteStorageDialog({
 
           <div className="space-y-1.5">
             <Label htmlFor="confirm-name">
-              Type <strong>{storageName}</strong> to confirm
+              Type <CopyableName name={storageName} /> to confirm
             </Label>
             <Input
               id="confirm-name"

@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CopyableName } from "@/components/CopyableName";
 import { useDestroyVM } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
@@ -67,8 +68,8 @@ export function DestroyDialog({
           </DialogTitle>
           <DialogDescription>
             This will permanently destroy{" "}
-            <strong>{resourceName}</strong> and all its data. This action cannot
-            be undone.
+            <CopyableName name={resourceName} /> and all its data. This action
+            cannot be undone.
           </DialogDescription>
         </DialogHeader>
 
@@ -86,7 +87,7 @@ export function DestroyDialog({
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="destroy-confirm">
-                Type <strong>{resourceName}</strong> to confirm
+                Type <CopyableName name={resourceName} /> to confirm
               </Label>
               <Input
                 id="destroy-confirm"

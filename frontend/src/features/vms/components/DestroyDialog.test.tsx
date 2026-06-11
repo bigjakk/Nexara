@@ -36,4 +36,20 @@ describe("DestroyDialog", () => {
     const destroyBtn = screen.getByRole("button", { name: /^destroy$/i });
     expect(destroyBtn).toBeEnabled();
   });
+
+  it("copies the resource name when its chip is clicked", async () => {
+    Object.defineProperty(window, "isSecureContext", {
+      value: true,
+      configurable: true,
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<DestroyDialog {...defaultProps} />);
+
+    // The name appears in both the description and the confirm label.
+    const [chip] = screen.getAllByRole("button", { name: "my-test-vm" });
+    if (!chip) throw new Error("expected a copyable name chip");
+    await user.click(chip);
+
+    expect(await window.navigator.clipboard.readText()).toBe("my-test-vm");
+  });
 });

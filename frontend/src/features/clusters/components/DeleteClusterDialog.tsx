@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { CopyableName } from "@/components/CopyableName";
 import type { ClusterResponse } from "@/types/api";
 
 interface DeleteClusterDialogProps {
@@ -36,7 +37,7 @@ export function DeleteClusterDialog({ cluster, open, onOpenChange }: DeleteClust
         <DialogHeader>
           <DialogTitle>Delete Cluster</DialogTitle>
           <DialogDescription>
-            This will permanently remove <strong>{cluster.name}</strong> and all associated data (nodes, VMs, metrics).
+            This will permanently remove <CopyableName name={cluster.name} /> and all associated data (nodes, VMs, metrics).
             Type the cluster name to confirm.
           </DialogDescription>
         </DialogHeader>
