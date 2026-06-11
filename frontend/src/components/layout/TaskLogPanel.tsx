@@ -215,7 +215,7 @@ function ActivityRow({
           </span>
         </td>
         <td className="px-2 py-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             {entry.source === "proxmox" && (
               <span className="inline-flex items-center gap-0.5 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-orange-600 dark:text-orange-400">
                 <Monitor className="h-2.5 w-2.5" />
@@ -246,7 +246,7 @@ function ActivityRow({
             )}
           </div>
         </td>
-        <td className="px-2 py-1 text-muted-foreground">
+        <td className="hidden px-2 py-1 text-muted-foreground md:table-cell">
           {entry.cluster_name || "—"}
         </td>
         <td className="px-2 py-1 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
@@ -263,6 +263,8 @@ function ActivityRow({
               <span>
                 {entry.resource_type} / {entry.resource_id}
               </span>
+              <span className="text-muted-foreground">Cluster</span>
+              <span>{entry.cluster_name || "—"}</span>
               <span className="text-muted-foreground">User</span>
               <span>
                 {entry.user_display_name || entry.user_email}
@@ -479,7 +481,7 @@ export function TaskLogPanel() {
                   <th className="w-12 px-2 py-1.5" />
                   <th className="w-14 px-2 py-1.5 font-medium">Level</th>
                   <th className="px-2 py-1.5 font-medium">Action</th>
-                  <th className="px-2 py-1.5 font-medium">Cluster</th>
+                  <th className="hidden px-2 py-1.5 font-medium md:table-cell">Cluster</th>
                   <th className="w-24 px-2 py-1.5 text-right font-medium">
                     Time
                   </th>
