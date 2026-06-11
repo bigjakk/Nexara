@@ -1,8 +1,8 @@
 import { memo } from "react";
 
 const legendItems = [
-  { color: "#22c55e", label: "Online / Running" },
-  { color: "#eab308", label: "Warning / Paused" },
+  { color: "#10b981", label: "Online / Running" },
+  { color: "#f59e0b", label: "Warning / Paused" },
   { color: "#ef4444", label: "Offline / Stopped" },
   { color: "#6b7280", label: "Unknown" },
 ];

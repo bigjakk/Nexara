@@ -38,7 +38,7 @@ function ConnectionDot({ status, t }: { status: string; t: (key: string) => stri
   const isConnected = status === "connected";
   return (
     <span
-      className={`inline-block h-2 w-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
+      className={`inline-block h-2 w-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-red-500"}`}
       title={isConnected ? t("liveConnected") : t("disconnected")}
       data-testid="connection-dot"
     />

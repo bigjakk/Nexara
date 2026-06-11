@@ -261,7 +261,7 @@ describe("buildTopologyGraph", () => {
 
 describe("getStatusColor", () => {
   it("returns green for online", () => {
-    expect(getStatusColor("online")).toBe("#22c55e");
+    expect(getStatusColor("online")).toBe("#10b981");
   });
 
   it("returns red for offline", () => {
@@ -269,7 +269,7 @@ describe("getStatusColor", () => {
   });
 
   it("returns yellow for warning", () => {
-    expect(getStatusColor("warning")).toBe("#eab308");
+    expect(getStatusColor("warning")).toBe("#f59e0b");
   });
 
   it("returns gray for unknown status", () => {
@@ -279,7 +279,7 @@ describe("getStatusColor", () => {
 
 describe("getGuestStatusColor", () => {
   it("returns green for running", () => {
-    expect(getGuestStatusColor("running")).toBe("#22c55e");
+    expect(getGuestStatusColor("running")).toBe("#10b981");
   });
 
   it("returns red for stopped", () => {
@@ -287,7 +287,7 @@ describe("getGuestStatusColor", () => {
   });
 
   it("returns yellow for paused", () => {
-    expect(getGuestStatusColor("paused")).toBe("#eab308");
+    expect(getGuestStatusColor("paused")).toBe("#f59e0b");
   });
 });
 

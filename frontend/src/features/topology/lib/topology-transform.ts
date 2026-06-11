@@ -222,7 +222,7 @@ export function buildTopologyGraph(
             source: clusterNodeId,
             target: storageNodeId,
             type: "smoothstep",
-            style: { stroke: sp.active ? "#22c55e" : "#6b7280", strokeDasharray: "5,5" },
+            style: { stroke: sp.active ? "#10b981" : "#6b7280", strokeDasharray: "5,5" },
           });
         } else {
           // Connect local storage to its host node
@@ -232,7 +232,7 @@ export function buildTopologyGraph(
             source: parentHostId,
             target: storageNodeId,
             type: "smoothstep",
-            style: { stroke: sp.active ? "#22c55e" : "#6b7280", strokeDasharray: "5,5" },
+            style: { stroke: sp.active ? "#10b981" : "#6b7280", strokeDasharray: "5,5" },
           });
         }
       }
@@ -246,11 +246,11 @@ export function getStatusColor(status: string): string {
   switch (status.toLowerCase()) {
     case "online":
     case "running":
-      return "#22c55e"; // green-500
+      return "#10b981"; // emerald-500
     case "paused":
     case "suspended":
     case "warning":
-      return "#eab308"; // yellow-500
+      return "#f59e0b"; // amber-500
     case "offline":
     case "stopped":
     case "error":
@@ -264,10 +264,10 @@ export function getStatusColor(status: string): string {
 export function getGuestStatusColor(status: string): string {
   switch (status.toLowerCase()) {
     case "running":
-      return "#22c55e";
+      return "#10b981";
     case "paused":
     case "suspended":
-      return "#eab308";
+      return "#f59e0b";
     case "stopped":
       return "#ef4444";
     default:

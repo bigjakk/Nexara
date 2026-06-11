@@ -9,7 +9,7 @@ export const StorageNode = memo(function StorageNode({ data }: NodeProps) {
   const d = data as StorageNodeData;
   const usedPercent = d.total > 0 ? (d.used / d.total) * 100 : 0;
   const barColor =
-    usedPercent > 90 ? "bg-red-500" : usedPercent > 70 ? "bg-yellow-500" : "bg-green-500";
+    usedPercent > 90 ? "bg-red-500" : usedPercent > 70 ? "bg-amber-500" : "bg-emerald-500";
 
   return (
     <div className="rounded border bg-card px-2.5 py-2 shadow-sm min-w-[140px] cursor-pointer">
