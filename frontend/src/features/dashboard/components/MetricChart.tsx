@@ -30,6 +30,33 @@ function getTimestampFormatter(timeRange?: TimeRange): (ts: number) => string {
   return formatTimestamp;
 }
 
+function ChartHeader({
+  title,
+  color,
+  currentValue,
+}: {
+  title: string;
+  color: string;
+  currentValue?: string | undefined;
+}) {
+  return (
+    <CardHeader className="flex-row items-center gap-2 space-y-0 p-4 pb-2">
+      <span
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      <CardTitle className="truncate text-xs font-medium text-muted-foreground">
+        {title}
+      </CardTitle>
+      {currentValue !== undefined && (
+        <span className="ml-auto shrink-0 text-base font-semibold tabular-nums tracking-tight">
+          {currentValue}
+        </span>
+      )}
+    </CardHeader>
+  );
+}
+
 export function MetricChart({
   title,
   data,
@@ -57,9 +84,7 @@ export function MetricChart({
   if (data.length === 0) {
     return (
       <Card className="flex h-full flex-col">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        </CardHeader>
+        <ChartHeader title={title} color={color} />
         <CardContent className="flex flex-1 items-center justify-center">
           <div className="text-sm text-muted-foreground">
             Waiting for data...
@@ -69,41 +94,53 @@ export function MetricChart({
     );
   }
 
+  const lastPoint = data[data.length - 1];
+  const currentValue =
+    lastPoint !== undefined ? formatter(lastPoint[dataKey]) : undefined;
+
   return (
     <Card className="flex h-full flex-col">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex-1 min-h-0">
+      <ChartHeader title={title} color={color} currentValue={currentValue} />
+      <CardContent className="min-h-0 flex-1 p-2 pt-0">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data}>
+          <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
             <defs>
               <linearGradient id={`gradient-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+                <stop offset="5%" stopColor={color} stopOpacity={0.25} />
                 <stop offset="95%" stopColor={color} stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+            <CartesianGrid
+              strokeDasharray="3 4"
+              className="stroke-border"
+              vertical={false}
+            />
             <XAxis
               dataKey="timestamp"
               tickFormatter={getTimestampFormatter(timeRange)}
-              className="text-xs"
-              tick={{ fontSize: 10 }}
+              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+              axisLine={false}
+              tickLine={false}
+              minTickGap={48}
+              tickMargin={6}
             />
             <YAxis
               tickFormatter={formatter}
-              className="text-xs"
-              tick={{ fontSize: 10 }}
-              width={60}
+              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+              axisLine={false}
+              tickLine={false}
+              width={52}
             />
             <Tooltip
               labelFormatter={tooltipLabelFormatter}
               formatter={tooltipValueFormatter}
+              cursor={{ stroke: "hsl(var(--muted-foreground))", strokeOpacity: 0.4 }}
               contentStyle={{
                 backgroundColor: "hsl(var(--popover))",
                 border: "1px solid hsl(var(--border))",
-                borderRadius: "6px",
+                borderRadius: "8px",
                 fontSize: "12px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
               }}
             />
             <Area
@@ -113,6 +150,7 @@ export function MetricChart({
               fill={`url(#gradient-${dataKey})`}
               strokeWidth={2}
               isAnimationActive={false}
+              activeDot={{ r: 3, strokeWidth: 0 }}
             />
           </AreaChart>
         </ResponsiveContainer>
