@@ -184,7 +184,7 @@ export function APIKeysPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">API Keys</h1>
           <p className="text-sm text-muted-foreground">
@@ -192,7 +192,7 @@ export function APIKeysPage() {
             Nexara API
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             onClick={() => {

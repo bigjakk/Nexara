@@ -113,7 +113,7 @@ export function ScanHistoryTable({
   }
 
   return (
-    <div className="rounded-lg border bg-card">
+    <div className="overflow-x-auto rounded-lg border bg-card">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left text-muted-foreground">
