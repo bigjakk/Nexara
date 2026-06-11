@@ -38,18 +38,38 @@ interface NavItem {
   requiredPermission?: string;
 }
 
-const navItems: NavItem[] = [
-  { labelKey: "dashboard", to: "/", icon: LayoutDashboard },
-  { labelKey: "inventory", to: "/inventory", icon: Package },
-  { labelKey: "topology", to: "/topology", icon: Network },
-  { labelKey: "console", to: "/console", icon: TerminalSquare },
-  { labelKey: "backup", to: "/backup", icon: Shield },
-  { labelKey: "alerts", to: "/alerts", icon: Bell, requiredPermission: "view:alert" },
-  { labelKey: "reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
-  { labelKey: "security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },
-  { labelKey: "events", to: "/events", icon: ScrollText, requiredPermission: "view:audit" },
-  { labelKey: "settings", to: "/settings/appearance", icon: Settings },
-  { labelKey: "admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
+interface NavSection {
+  labelKey: string;
+  items: NavItem[];
+}
+
+const navSections: NavSection[] = [
+  {
+    labelKey: "sectionOverview",
+    items: [
+      { labelKey: "dashboard", to: "/", icon: LayoutDashboard },
+      { labelKey: "inventory", to: "/inventory", icon: Package },
+      { labelKey: "topology", to: "/topology", icon: Network },
+      { labelKey: "console", to: "/console", icon: TerminalSquare },
+    ],
+  },
+  {
+    labelKey: "sectionOperations",
+    items: [
+      { labelKey: "backup", to: "/backup", icon: Shield },
+      { labelKey: "alerts", to: "/alerts", icon: Bell, requiredPermission: "view:alert" },
+      { labelKey: "reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
+      { labelKey: "security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },
+      { labelKey: "events", to: "/events", icon: ScrollText, requiredPermission: "view:audit" },
+    ],
+  },
+  {
+    labelKey: "sectionSystem",
+    items: [
+      { labelKey: "settings", to: "/settings/appearance", icon: Settings },
+      { labelKey: "admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
+    ],
+  },
 ];
 
 function isInventoryRoute(pathname: string): boolean {
@@ -101,11 +121,16 @@ export function Sidebar() {
     }
   }, [location.pathname, setTreeVisible, setPerspective]);
 
-  const visibleItems = navItems.filter((item) => {
-    if (!item.requiredPermission) return true;
-    const parts = item.requiredPermission.split(":");
-    return hasPermission(parts[0] ?? "", parts[1] ?? "");
-  });
+  const visibleSections = navSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        if (!item.requiredPermission) return true;
+        const parts = item.requiredPermission.split(":");
+        return hasPermission(parts[0] ?? "", parts[1] ?? "");
+      }),
+    }))
+    .filter((section) => section.items.length > 0);
 
   const showTree = !collapsed && treeVisible;
   const isResizing = useRef(false);
@@ -159,9 +184,9 @@ export function Sidebar() {
               ) : (
                 <Server className="ml-2 h-6 w-6 shrink-0 text-primary" />
               )}
-              <span className="ml-2 text-lg font-semibold">{appTitle}</span>
+              <span className="ml-2 text-lg font-semibold tracking-tight">{appTitle}</span>
               {appVersion && (
-                <span className="ml-1.5 self-end mb-0.5 text-[10px] text-muted-foreground">{appVersion}</span>
+                <span className="ml-2 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">{appVersion}</span>
               )}
             </>
           )}
@@ -181,83 +206,110 @@ export function Sidebar() {
         </div>
 
         {/* Nav items */}
-        <nav className="flex-1 space-y-1 overflow-y-auto p-2">
-          {visibleItems.map((item) => {
-            const label = t(item.labelKey);
-            // "Inventory" should be active for both /inventory/* and /clusters/*
-            const isInventoryItem = item.to === "/inventory";
-            const inventoryActive = isInventoryItem && isInventoryRoute(location.pathname);
-
-            if (collapsed) {
-              return (
-                <Tooltip key={item.to}>
-                  <TooltipTrigger asChild>
-                    <NavLink
-                      to={item.to}
-                      end={item.to === "/"}
-                      className={({ isActive }) =>
-                        cn(
-                          "flex items-center justify-center rounded-md p-2 transition-colors",
-                          isActive || inventoryActive
-                            ? "bg-accent text-accent-foreground"
-                            : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-                        )
-                      }
-                    >
-                      <item.icon className="h-4 w-4" />
-                    </NavLink>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    {label}
-                  </TooltipContent>
-                </Tooltip>
-              );
-            }
-
-            return (
-              <div key={item.to}>
-                <div className="flex items-center">
-                  <NavLink
-                    to={item.to}
-                    end={item.to === "/" || isInventoryItem}
-                    className={({ isActive }) =>
-                      cn(
-                        "flex flex-1 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                        isActive || inventoryActive
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground",
-                      )
-                    }
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {label}
-                  </NavLink>
-                  {isInventoryItem && (
-                    <button
-                      onClick={() => { setTreeVisible(!treeVisible); }}
-                      className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
-                    >
-                      {showTree ? (
-                        <ChevronDown className="h-3 w-3" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3" />
-                      )}
-                    </button>
+        <nav className="flex-1 overflow-y-auto p-2">
+          {visibleSections.map((section, sectionIndex) => (
+            <div key={section.labelKey}>
+              {collapsed ? (
+                sectionIndex > 0 && <div className="mx-1 my-2 border-t" />
+              ) : (
+                <div
+                  className={cn(
+                    "px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70",
+                    sectionIndex === 0 ? "pt-1" : "pt-4",
                   )}
+                >
+                  {t(section.labelKey)}
                 </div>
+              )}
+              <div className="space-y-0.5">
+                {section.items.map((item) => {
+                  const label = t(item.labelKey);
+                  // "Inventory" should be active for both /inventory/* and /clusters/*
+                  const isInventoryItem = item.to === "/inventory";
+                  const inventoryActive = isInventoryItem && isInventoryRoute(location.pathname);
 
-                {/* Render tree inline below Inventory — persists across routes */}
-                {isInventoryItem && showTree && (
-                  <div
-                    data-tree-scroller
-                    className="mt-1 max-h-[calc(100vh-20rem)] overflow-y-auto"
-                  >
-                    <TreeView />
-                  </div>
-                )}
+                  if (collapsed) {
+                    return (
+                      <Tooltip key={item.to}>
+                        <TooltipTrigger asChild>
+                          <NavLink
+                            to={item.to}
+                            end={item.to === "/"}
+                            className={({ isActive }) =>
+                              cn(
+                                "flex items-center justify-center rounded-md p-2 transition-colors",
+                                isActive || inventoryActive
+                                  ? "bg-primary/10 text-primary"
+                                  : "text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground",
+                              )
+                            }
+                          >
+                            <item.icon className="h-4 w-4" />
+                          </NavLink>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          {label}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  }
+
+                  return (
+                    <div key={item.to}>
+                      <div className="flex items-center">
+                        <NavLink
+                          to={item.to}
+                          end={item.to === "/" || isInventoryItem}
+                          className={({ isActive }) =>
+                            cn(
+                              "flex flex-1 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                              isActive || inventoryActive
+                                ? "bg-primary/10 text-foreground shadow-[inset_2px_0_0_0_hsl(var(--primary))]"
+                                : "text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground",
+                            )
+                          }
+                        >
+                          {({ isActive }) => (
+                            <>
+                              <item.icon
+                                className={cn(
+                                  "h-4 w-4",
+                                  (isActive || inventoryActive) && "text-primary",
+                                )}
+                              />
+                              {label}
+                            </>
+                          )}
+                        </NavLink>
+                        {isInventoryItem && (
+                          <button
+                            onClick={() => { setTreeVisible(!treeVisible); }}
+                            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                          >
+                            {showTree ? (
+                              <ChevronDown className="h-3 w-3" />
+                            ) : (
+                              <ChevronRight className="h-3 w-3" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Render tree inline below Inventory — persists across routes */}
+                      {isInventoryItem && showTree && (
+                        <div
+                          data-tree-scroller
+                          className="mt-1 max-h-[calc(100vh-20rem)] overflow-y-auto"
+                        >
+                          <TreeView />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </nav>
         {/* Resize handle */}
         {!collapsed && (

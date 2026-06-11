@@ -11,5 +11,8 @@
   "auditLog": "Audit Log",
   "events": "Events",
   "settings": "Settings",
-  "admin": "Admin"
+  "admin": "Admin",
+  "sectionOverview": "Overview",
+  "sectionOperations": "Operations",
+  "sectionSystem": "System"
 }
