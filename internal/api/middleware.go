@@ -24,7 +24,9 @@ import (
 // JSX auto-escaping is otherwise the only XSS control, so this is the second
 // line of defense. Notes on the directives:
 //   - script-src 'self': the Vite production build emits only external module
-//     scripts (no inline, no eval).
+//     scripts (no inline, no eval). index.html must NOT carry inline scripts —
+//     they get silently blocked (console-only error). The pre-paint theme
+//     bootstrap lives in frontend/public/theme-init.js for exactly this reason.
 //   - style-src 'unsafe-inline': Tailwind/shadcn (Radix), Recharts, and React
 //     Flow inject inline styles — required, and low-risk for styles.
 //   - connect-src ws: wss': the floating console (xterm) and noVNC open

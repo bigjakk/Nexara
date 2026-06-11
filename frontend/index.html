@@ -7,11 +7,10 @@
     <title>Nexara</title>
   </head>
   <body>
-    <script>
-      (function(){var t=localStorage.getItem("nexara-theme");
-      if(t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches))
-      document.documentElement.classList.add("dark")})();
-    </script>
+    <!-- Blocking on purpose: applies the dark class before first paint.
+         Must be an external file — the backend CSP (script-src 'self')
+         blocks inline scripts. -->
+    <script src="/theme-init.js"></script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
