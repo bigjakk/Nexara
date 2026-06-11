@@ -39,6 +39,26 @@ func (s *Server) RegisterFrontend(distFS fs.FS) {
 		if strings.HasPrefix(c.Path(), "/api/") {
 			return c.Next()
 		}
-		return spa(c)
+		if err := spa(c); err != nil {
+			return err
+		}
+		// Cache policy. The embedded FS has zero modtimes, so responses carry
+		// no validators (no Last-Modified/ETag) — without explicit headers,
+		// browsers fall back to heuristics and can pin a stale shell that
+		// references asset hashes deleted by the next upgrade (blank page on
+		// mobile until the user clears site data).
+		//   - /assets/* are content-hashed by Vite → cache forever. The
+		//     NotFoundFile fallback answers a *stale* asset hash with the HTML
+		//     shell, which must not be cached as the asset — hence the
+		//     content-type guard.
+		//   - Everything else (shell, theme-init.js, favicon) is re-fetched
+		//     every load so a new release takes effect immediately.
+		contentType := string(c.Response().Header.ContentType())
+		if strings.HasPrefix(c.Path(), "/assets/") && !strings.HasPrefix(contentType, "text/html") {
+			c.Set(fiber.HeaderCacheControl, "public, max-age=31536000, immutable")
+		} else {
+			c.Set(fiber.HeaderCacheControl, "no-cache")
+		}
+		return nil
 	})
 }

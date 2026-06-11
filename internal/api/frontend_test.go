@@ -111,6 +111,43 @@ func TestRegisterFrontend_StaticAssetServed(t *testing.T) {
 	}
 }
 
+// TestRegisterFrontend_CacheHeaders pins the SPA cache policy: content-hashed
+// assets are immutable, while the shell — and ANY path that falls back to it,
+// including a stale asset hash — must always revalidate. Without this, a
+// browser (mobile especially) heuristically caches the shell, which after an
+// upgrade references deleted asset hashes and renders a blank page.
+func TestRegisterFrontend_CacheHeaders(t *testing.T) {
+	s := newTestServer(t)
+	s.RegisterFrontend(spaTestFS())
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/assets/app-123.js", "public, max-age=31536000, immutable"},
+		{"/", "no-cache"},
+		{"/clusters/123/vms", "no-cache"}, // deep link → shell
+		// A no-longer-existing hash serves the HTML shell via NotFoundFile —
+		// it must NOT inherit the immutable policy or the wrong body gets
+		// cached under the asset URL for a year.
+		{"/assets/app-oldhash.js", "no-cache"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			resp, err := s.App().Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if got := resp.Header.Get("Cache-Control"); got != tc.want {
+				t.Errorf("Cache-Control = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestRegisterFrontend_RealAPIRouteUnchanged confirms a matching API route is
 // untouched by the frontend mount: it still returns its JSON 200.
 func TestRegisterFrontend_RealAPIRouteUnchanged(t *testing.T) {
