@@ -80,6 +80,16 @@ export const DEFAULT_VISIBLE_COLUMNS = [
   "uptime",
 ] as const;
 
+// Glanceable subset for phone widths (below md) — the Columns toggle can opt
+// more back in; persisted separately from the desktop layout.
+export const MOBILE_VISIBLE_COLUMNS = [
+  "type",
+  "name",
+  "status",
+  "cpuPercent",
+  "memPercent",
+] as const;
+
 export const ALL_DATA_COLUMNS = [
   "type",
   "name",

@@ -1,10 +1,16 @@
-import { DEFAULT_VISIBLE_COLUMNS } from "../types/inventory";
+import {
+  DEFAULT_VISIBLE_COLUMNS,
+  MOBILE_VISIBLE_COLUMNS,
+} from "../types/inventory";
 
+// Mobile and desktop persist independently: a curated phone layout must not
+// overwrite the user's desktop column choices (and vice versa).
 const STORAGE_KEY = "nexara:inventory:columns";
+const STORAGE_KEY_MOBILE = "nexara:inventory:columns:mobile";
 
-export function loadColumnVisibility(): Record<string, boolean> {
+export function loadColumnVisibility(mobile = false): Record<string, boolean> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(mobile ? STORAGE_KEY_MOBILE : STORAGE_KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return {};
@@ -14,17 +20,27 @@ export function loadColumnVisibility(): Record<string, boolean> {
   }
 }
 
-export function saveColumnVisibility(visibility: Record<string, boolean>): void {
+export function saveColumnVisibility(
+  visibility: Record<string, boolean>,
+  mobile = false,
+): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(visibility));
+    localStorage.setItem(
+      mobile ? STORAGE_KEY_MOBILE : STORAGE_KEY,
+      JSON.stringify(visibility),
+    );
   } catch {
     // localStorage may be unavailable in some environments
   }
 }
 
-export function getDefaultColumnVisibility(): Record<string, boolean> {
+export function getDefaultColumnVisibility(
+  mobile = false,
+): Record<string, boolean> {
   const visibility: Record<string, boolean> = {};
-  const defaults = new Set<string>(DEFAULT_VISIBLE_COLUMNS);
+  const defaults = new Set<string>(
+    mobile ? MOBILE_VISIBLE_COLUMNS : DEFAULT_VISIBLE_COLUMNS,
+  );
 
   // Hide columns not in defaults
   const allColumns = [

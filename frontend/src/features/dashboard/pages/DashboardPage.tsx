@@ -8,6 +8,7 @@ import type { ClusterSummary } from "../api/dashboard-queries";
 import { useHistoricalMetrics, useSeedMetrics } from "../api/historical-queries";
 import { useDashboardMetrics } from "@/hooks/useMetrics";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { StatsOverview } from "../components/StatsOverview";
 import { ClusterCard } from "../components/ClusterCard";
 import { EmptyState } from "@/components/EmptyState";
@@ -49,6 +50,13 @@ export function DashboardPage() {
   const { t } = useTranslation("dashboard");
   const [timeRange, setTimeRange] = useState<TimeRange>("live");
   const [editMode, setEditMode] = useState(false);
+  const isMobile = useIsMobile();
+
+  // Grid drag/resize is a precision-pointer interaction — leave edit mode
+  // when shrinking to the mobile layout (the Customize button hides too).
+  useEffect(() => {
+    if (isMobile) setEditMode(false);
+  }, [isMobile]);
   const { data, isLoading, error } = useDashboardData();
   const { status } = useWebSocket();
   const upsertSetting = useUpsertSetting();
@@ -347,24 +355,26 @@ export function DashboardPage() {
             onDelete={handlePresetDelete}
             onReset={handleReset}
           />
-          <Button
-            size="sm"
-            variant={editMode ? "default" : "outline"}
-            className="gap-1"
-            onClick={toggleEditMode}
-          >
-            {editMode ? (
-              <>
-                <Lock className="h-4 w-4" />
-                {t("lock")}
-              </>
-            ) : (
-              <>
-                <LayoutGrid className="h-4 w-4" />
-                {t("customize")}
-              </>
-            )}
-          </Button>
+          {!isMobile && (
+            <Button
+              size="sm"
+              variant={editMode ? "default" : "outline"}
+              className="gap-1"
+              onClick={toggleEditMode}
+            >
+              {editMode ? (
+                <>
+                  <Lock className="h-4 w-4" />
+                  {t("lock")}
+                </>
+              ) : (
+                <>
+                  <LayoutGrid className="h-4 w-4" />
+                  {t("customize")}
+                </>
+              )}
+            </Button>
+          )}
           <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
           <RefreshRateSelector />
           <AddClusterDialog />

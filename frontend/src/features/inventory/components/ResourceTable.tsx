@@ -12,6 +12,7 @@ import {
   type ColumnDef,
   type VisibilityState,
   type RowSelectionState,
+  type OnChangeFn,
 } from "@tanstack/react-table";
 import { Link } from "react-router-dom";
 import {
@@ -585,17 +586,31 @@ export function ResourceTable({ data }: ResourceTableProps) {
   );
 
   const savedVisibility = useMemo(() => {
-    const saved = loadColumnVisibility();
-    const defaults = getDefaultColumnVisibility();
+    const saved = loadColumnVisibility(isMobile);
+    const defaults = getDefaultColumnVisibility(isMobile);
     return { ...defaults, ...saved };
-  }, []);
+  }, [isMobile]);
 
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(savedVisibility);
 
-  // Persist column visibility changes
+  // Swap to the form factor's own column set when crossing the breakpoint —
+  // mobile and desktop layouts persist independently.
   useEffect(() => {
-    saveColumnVisibility(columnVisibility);
-  }, [columnVisibility]);
+    setColumnVisibility(savedVisibility);
+  }, [savedVisibility]);
+
+  // Persist only user-driven changes (ColumnToggle): the breakpoint swap
+  // above must not write one form factor's layout into the other's key.
+  const handleColumnVisibilityChange = useCallback<OnChangeFn<VisibilityState>>(
+    (updater) => {
+      setColumnVisibility((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        saveColumnVisibility(next, isMobile);
+        return next;
+      });
+    },
+    [isMobile],
+  );
 
   const filteredData = useMemo(
     () => applyFilter(data, query),
@@ -620,7 +635,7 @@ export function ResourceTable({ data }: ResourceTableProps) {
     },
     getRowId: (row) => row.key,
     onSortingChange: setSorting,
-    onColumnVisibilityChange: setColumnVisibility,
+    onColumnVisibilityChange: handleColumnVisibilityChange,
     onRowSelectionChange: setRowSelection,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
