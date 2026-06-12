@@ -727,11 +727,6 @@ func (s *Scheduler) RunRollingUpdates(ctx context.Context) {
 	s.rollingOrch.Tick(ctx)
 }
 
-// RollingOrchestrator returns the rolling update orchestrator for use by API handlers.
-func (s *Scheduler) RollingOrchestrator() *rolling.Orchestrator {
-	return s.rollingOrch
-}
-
 // mustAtoi converts a string to int, returning 0 on failure.
 func mustAtoi(s string) int {
 	var n int

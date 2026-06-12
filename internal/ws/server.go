@@ -136,11 +136,6 @@ func (s *Server) Shutdown() error {
 	return s.app.Shutdown()
 }
 
-// App returns the underlying Fiber app (for testing).
-func (s *Server) App() *fiber.App {
-	return s.app
-}
-
 // RegisterRoutes mounts WebSocket routes onto an external Fiber app.
 // Used by the unified binary to serve WS on the same port as the API.
 func (s *Server) RegisterRoutes(app *fiber.App) {

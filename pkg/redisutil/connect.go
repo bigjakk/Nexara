@@ -9,24 +9,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// ConnectWithRetry attempts to connect to Redis, retrying with exponential
-// backoff. Blocks until Redis is reachable or maxAttempts is exhausted.
-//
-// Most callers in long-running services should prefer NewClientLazy + a
-// background WaitUntilReady probe, so the rest of the process can come up
-// (and serve healthchecks) while transient orchestrator DNS gaps resolve.
-func ConnectWithRetry(ctx context.Context, redisURL string, logger *slog.Logger) (*redis.Client, error) {
-	client, err := NewClientLazy(redisURL)
-	if err != nil {
-		return nil, err
-	}
-	if err := WaitUntilReady(ctx, client, logger); err != nil {
-		client.Close()
-		return nil, err
-	}
-	return client, nil
-}
-
 // NewClientLazy parses the URL and constructs a *redis.Client without
 // dialing. The first command on the returned client will dial; until then
 // no network I/O happens.

@@ -27,26 +27,6 @@ func (h *PoolHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*p
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
-// ListPools handles GET /clusters/:cluster_id/pools.
-func (h *PoolHandler) ListPools(c *fiber.Ctx) error {
-	clusterID, err := clusterIDFromParam(c)
-	if err != nil {
-		return err
-	}
-	if err := requireClusterPerm(c, "view", "pool", clusterID); err != nil {
-		return err
-	}
-	pxClient, err := h.createProxmoxClient(c, clusterID)
-	if err != nil {
-		return err
-	}
-	pools, err := pxClient.GetResourcePools(c.Context())
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadGateway, "Failed to get resource pools")
-	}
-	return c.JSON(pools)
-}
-
 // CreatePool handles POST /clusters/:cluster_id/pools.
 func (h *PoolHandler) CreatePool(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
