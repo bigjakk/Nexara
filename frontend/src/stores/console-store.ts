@@ -140,7 +140,14 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
               tab.kind === "ct"
                 ? `/api/v1/clusters/${tab.clusterID}/containers/${tab.resourceId}`
                 : `/api/v1/clusters/${tab.clusterID}/vms/${tab.resourceId}`;
-            const vm = await apiClient.get<{ node_id: string }>(vmEndpoint);
+            const vm = await apiClient.get<{ node_id: string; status?: string }>(vmEndpoint);
+
+            // Guest is powered off — park instead of reconnect-looping against
+            // a dead guest. useGuestPowerSync resumes the tab when it starts.
+            if ((vm.status ?? "").toLowerCase() === "stopped") {
+              get().updateTabStatus(id, "guest-stopped");
+              return;
+            }
 
             const nodesEndpoint = `/api/v1/clusters/${tab.clusterID}/nodes`;
             const nodes = await apiClient.get<Array<{ id: string; name: string }>>(nodesEndpoint);

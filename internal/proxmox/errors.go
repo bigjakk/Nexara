@@ -37,3 +37,11 @@ func (e *APIError) Error() string {
 func IsGroupsMigratedError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "migrated to rules")
 }
+
+// IsGuestNotRunningError reports whether err is the Proxmox response for a
+// console-proxy call (vncproxy/termproxy) against a guest that is not running,
+// e.g. "VM 105 not running" or "CT 105 not running".
+func IsGuestNotRunningError(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && strings.Contains(apiErr.Message, "not running")
+}

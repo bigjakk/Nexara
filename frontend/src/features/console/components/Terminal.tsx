@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import type { ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
+import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import {
   mintConsoleToken,
   wsAuthProtocols,
@@ -49,7 +50,9 @@ function buildConsoleWsUrl(
   return `${protocol}//${host}/ws/console?${params.toString()}`;
 }
 
-const MAX_AUTO_RETRIES = 3;
+// Retry budget for transient drops (see VNCViewer for the rationale —
+// migrations need the window; stopped guests park instead of retrying).
+const MAX_AUTO_RETRIES = 5;
 
 export function Terminal({ tab, visible, accessToken }: TerminalProps) {
   const { id: tabId, clusterID, node, type, vmid, reconnectKey } = tab;
@@ -62,6 +65,9 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
   const retryCountRef = useRef(0);
   const intentionalCloseRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Park dead tabs while the guest is off; auto-resume when it powers on.
+  useGuestPowerSync(tab);
 
   const handleResize = useCallback(() => {
     if (fitAddonRef.current && termRef.current && visible) {
@@ -118,7 +124,19 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
     let resizeDisposable: { dispose: () => void } | null = null;
     let observer: ResizeObserver | null = null;
 
+    const tabIsParked = () =>
+      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
+      "guest-stopped";
+
     const connect = async () => {
+      // Remounted while parked on a stopped guest — don't reopen a
+      // connection that's known to fail; useGuestPowerSync resumes the tab
+      // when the guest powers on.
+      if (tabIsParked()) {
+        term.writeln("[Guest is powered off — the console will connect when it powers on]");
+        return;
+      }
+
       // Acquire the WS upgrade token. Desktop callers omit accessToken and
       // mint a short-lived scoped JWT; mobile passes its pre-minted token
       // through the prop.
@@ -161,6 +179,7 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
           try {
             const parsed = JSON.parse(event.data) as {
               type: string;
+              code?: string;
               message?: string;
             };
             if (parsed.type === "connected") {
@@ -177,8 +196,18 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
               return;
             }
             if (parsed.type === "error") {
-              term.writeln(`\r\nError: ${parsed.message ?? "unknown error"}`);
-              updateTabStatus(tabId, "error");
+              if (parsed.code === "guest_not_running") {
+                // Backend confirmed the guest is powered off \u2014 park with a
+                // fresh retry budget for when it comes back.
+                retryCountRef.current = 0;
+                term.writeln(
+                  "\r\n[Guest is powered off \u2014 the console will connect when it powers on]",
+                );
+                updateTabStatus(tabId, "guest-stopped");
+              } else {
+                term.writeln(`\r\nError: ${parsed.message ?? "unknown error"}`);
+                updateTabStatus(tabId, "error");
+              }
               return;
             }
           } catch {
@@ -192,6 +221,7 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
 
       ws.onclose = () => {
         if (intentionalCloseRef.current) return;
+        if (tabIsParked()) return; // guest is off \u2014 wait for power-on instead
 
         if (retryCountRef.current < MAX_AUTO_RETRIES) {
           const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
@@ -210,7 +240,7 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
       };
 
       ws.onerror = () => {
-        if (!intentionalCloseRef.current) {
+        if (!intentionalCloseRef.current && !tabIsParked()) {
           updateTabStatus(tabId, "error");
         }
       };

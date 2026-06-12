@@ -1,4 +1,4 @@
-import { X, Terminal, Loader2, AlertCircle, Unplug, RotateCcw } from "lucide-react";
+import { X, Terminal, Loader2, AlertCircle, Unplug, RotateCcw, PowerOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConsoleStore } from "@/stores/console-store";
 import type { ConsoleStatus } from "../types/console";
@@ -15,6 +15,8 @@ function StatusIcon({ status }: { status: ConsoleStatus }) {
       return <Unplug className="h-3 w-3 text-muted-foreground" />;
     case "error":
       return <AlertCircle className="h-3 w-3 text-destructive" />;
+    case "guest-stopped":
+      return <PowerOff className="h-3 w-3 text-muted-foreground" />;
   }
 }
 

@@ -227,13 +227,16 @@ export function VMDetailPage() {
 
       {/* Console + Actions */}
       <div className="flex flex-wrap items-center gap-2">
+        {/* Consoles open regardless of power state (iLO-style): a stopped
+            guest parks as "powered off" with a Start button and connects
+            automatically on power-on. Only templates can't be consoled. */}
         {kind === "vm" && (
           <Button
             variant="outline"
             size="sm"
             className="gap-1.5"
             onClick={() => { openConsole("vnc"); }}
-            disabled={normalizedStatus !== "running"}
+            disabled={vm.template}
           >
             <Monitor className="h-4 w-4" />
             VNC Console
@@ -245,7 +248,7 @@ export function VMDetailPage() {
             size="sm"
             className="gap-1.5"
             onClick={() => { openConsole("terminal"); }}
-            disabled={normalizedStatus !== "running"}
+            disabled={vm.template}
           >
             <Terminal className="h-4 w-4" />
             Attach

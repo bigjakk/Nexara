@@ -1,5 +1,12 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useConsoleStore } from "./console-store";
+import { apiClient } from "@/lib/api-client";
+
+vi.mock("@/lib/api-client", () => ({
+  apiClient: { get: vi.fn() },
+}));
+
+const mockedGet = vi.mocked(apiClient.get);
 
 describe("console-store", () => {
   beforeEach(() => {
@@ -128,5 +135,77 @@ describe("console-store", () => {
     expect(tab?.vmid).toBe(100);
     expect(tab?.type).toBe("vm_serial");
     expect(tab?.id).toBe(id);
+  });
+
+  describe("resolveAndReconnect", () => {
+    function addVmTab() {
+      return useConsoleStore.getState().addTab({
+        clusterID: "c1",
+        node: "n1",
+        vmid: 100,
+        type: "vm_vnc",
+        label: "VNC: test-vm",
+        resourceId: "vm-uuid-1",
+        kind: "vm",
+      });
+    }
+
+    beforeEach(() => {
+      mockedGet.mockReset();
+    });
+
+    it("parks the tab as guest-stopped when the guest is powered off", async () => {
+      const id = addVmTab();
+      mockedGet.mockResolvedValueOnce({ node_id: "node-uuid-1", status: "stopped" });
+
+      await useConsoleStore.getState().resolveAndReconnect(id);
+
+      const tab = useConsoleStore.getState().tabs[0];
+      expect(tab?.status).toBe("guest-stopped");
+      expect(tab?.reconnectKey).toBe(0); // no reconnect attempt scheduled
+      expect(mockedGet).toHaveBeenCalledTimes(1); // node lookup skipped
+    });
+
+    it("reconnects to the new node after a migration (guest running)", async () => {
+      const id = addVmTab();
+      mockedGet
+        .mockResolvedValueOnce({ node_id: "node-uuid-2", status: "running" })
+        .mockResolvedValueOnce([
+          { id: "node-uuid-1", name: "n1" },
+          { id: "node-uuid-2", name: "n2" },
+        ]);
+
+      await useConsoleStore.getState().resolveAndReconnect(id);
+
+      const tab = useConsoleStore.getState().tabs[0];
+      expect(tab?.node).toBe("n2");
+      expect(tab?.status).toBe("connecting");
+      expect(tab?.reconnectKey).toBe(1);
+    });
+
+    it("reconnects on the same node when the guest is running and unmoved", async () => {
+      const id = addVmTab();
+      mockedGet
+        .mockResolvedValueOnce({ node_id: "node-uuid-1", status: "running" })
+        .mockResolvedValueOnce([{ id: "node-uuid-1", name: "n1" }]);
+
+      await useConsoleStore.getState().resolveAndReconnect(id);
+
+      const tab = useConsoleStore.getState().tabs[0];
+      expect(tab?.node).toBe("n1");
+      expect(tab?.status).toBe("connecting");
+      expect(tab?.reconnectKey).toBe(1);
+    });
+
+    it("falls back to a plain reconnect when the status lookup fails", async () => {
+      const id = addVmTab();
+      mockedGet.mockRejectedValueOnce(new Error("network down"));
+
+      await useConsoleStore.getState().resolveAndReconnect(id);
+
+      const tab = useConsoleStore.getState().tabs[0];
+      expect(tab?.status).toBe("connecting");
+      expect(tab?.reconnectKey).toBe(1);
+    });
   });
 });

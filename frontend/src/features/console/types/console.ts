@@ -1,6 +1,13 @@
 export type ConsoleType = "node_shell" | "vm_serial" | "ct_attach" | "vm_vnc" | "ct_vnc";
 
-export type ConsoleStatus = "connecting" | "connected" | "disconnected" | "reconnecting" | "error";
+export type ConsoleStatus =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "reconnecting"
+  | "error"
+  /** Guest is powered off — parked until it powers back on (no auto-retries). */
+  | "guest-stopped";
 
 export type ConsoleResourceKind = "vm" | "ct";
 

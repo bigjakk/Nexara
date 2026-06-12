@@ -157,7 +157,13 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 	}
 	if err != nil {
 		logger.Error("proxy request failed", "error", err)
-		h.writeError(conn, "failed to create console session")
+		if proxmox.IsGuestNotRunningError(err) {
+			// Tell the browser the guest is powered off so it can park the
+			// console instead of reconnect-looping against a dead guest.
+			h.writeErrorCode(conn, "guest_not_running", "guest is not running")
+		} else {
+			h.writeError(conn, "failed to create console session")
+		}
 		return
 	}
 
@@ -280,6 +286,15 @@ func (h *ConsoleHandler) HandleConsole(conn *fiberWs.Conn) {
 // writeError sends a JSON error message to the browser and closes the connection.
 func (h *ConsoleHandler) writeError(conn *fiberWs.Conn, msg string) {
 	errMsg := fmt.Sprintf(`{"type":"error","message":%q}`, msg)
+	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(errMsg))
+	_ = conn.WriteMessage(fiberWs.CloseMessage,
+		fiberWs.FormatCloseMessage(fiberWs.CloseInternalServerErr, msg))
+}
+
+// writeErrorCode is writeError with a machine-readable code the frontend can
+// branch on (e.g. "guest_not_running").
+func (h *ConsoleHandler) writeErrorCode(conn *fiberWs.Conn, code, msg string) {
+	errMsg := fmt.Sprintf(`{"type":"error","code":%q,"message":%q}`, code, msg)
 	_ = conn.WriteMessage(fiberWs.TextMessage, []byte(errMsg))
 	_ = conn.WriteMessage(fiberWs.CloseMessage,
 		fiberWs.FormatCloseMessage(fiberWs.CloseInternalServerErr, msg))
