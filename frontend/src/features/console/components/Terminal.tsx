@@ -3,7 +3,7 @@ import { Terminal as XTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import type { ConsoleTab } from "../types/console";
+import { MAX_CONSOLE_AUTO_RETRIES, type ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import {
@@ -49,10 +49,6 @@ function buildConsoleWsUrl(
   }
   return `${protocol}//${host}/ws/console?${params.toString()}`;
 }
-
-// Retry budget for transient drops (see VNCViewer for the rationale —
-// migrations need the window; stopped guests park instead of retrying).
-const MAX_AUTO_RETRIES = 5;
 
 export function Terminal({ tab, visible, accessToken }: TerminalProps) {
   const { id: tabId, clusterID, node, type, vmid, reconnectKey } = tab;
@@ -223,7 +219,7 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
         if (intentionalCloseRef.current) return;
         if (tabIsParked()) return; // guest is off \u2014 wait for power-on instead
 
-        if (retryCountRef.current < MAX_AUTO_RETRIES) {
+        if (retryCountRef.current < MAX_CONSOLE_AUTO_RETRIES) {
           const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
           retryCountRef.current++;
           updateTabStatus(tabId, "reconnecting");

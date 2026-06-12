@@ -9,13 +9,18 @@ import {
   Unplug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ConsoleStatus, ConsoleTab } from "../types/console";
+import {
+  MAX_CONSOLE_AUTO_RETRIES,
+  type ConsoleStatus,
+  type ConsoleTab,
+} from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMAction } from "@/features/vms/api/vm-queries";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import { VNCToolbar } from "./VNCToolbar";
 import {
+  buildVncWsUrl,
   mintConsoleToken,
   wsAuthProtocols,
 } from "../api/console-queries";
@@ -64,35 +69,6 @@ export function typeTextIntoVnc(rfb: RFB, text: string) {
     rfb.sendKey(keysym, null, false); // key up
   }
 }
-
-function buildVncWsUrl(
-  clusterID: string,
-  node: string,
-  vmid: number | undefined,
-  guestType: string | undefined,
-): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const host = window.location.host;
-  // Token is delivered via Sec-WebSocket-Protocol (subprotocol); the URL
-  // only carries scope-validation params.
-  const params = new URLSearchParams({
-    cluster_id: clusterID,
-    node,
-  });
-  if (vmid !== undefined) {
-    params.set("vmid", String(vmid));
-  }
-  if (guestType) {
-    params.set("type", guestType);
-  }
-  return `${protocol}//${host}/ws/vnc?${params.toString()}`;
-}
-
-// Retry budget for transient drops. Live migrations need the longest window:
-// the guest keeps running but its node changes, and resolveAndReconnect only
-// finds the new node once the collector has synced it. Stopped guests no
-// longer burn retries — they park as "guest-stopped" instead.
-const MAX_AUTO_RETRIES = 5;
 
 export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
   const { id: tabId, clusterID, node, vmid, reconnectKey } = tab;
@@ -153,7 +129,7 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
     const scheduleRetry = () => {
       if (intentionalCloseRef.current || retryScheduledRef.current) return;
       if (tabIsParked()) return; // guest is off — wait for power-on instead
-      if (retryCountRef.current < MAX_AUTO_RETRIES) {
+      if (retryCountRef.current < MAX_CONSOLE_AUTO_RETRIES) {
         const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
         retryCountRef.current++;
         retryScheduledRef.current = true;

@@ -1,19 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactElement } from "react";
+import { waitFor } from "@testing-library/react";
+// useGuestPowerSync → useVM needs a QueryClientProvider.
+import { renderWithProviders } from "@/test/test-utils";
 import { Terminal } from "./Terminal";
 import type { ConsoleTab } from "../types/console";
-
-// useGuestPowerSync → useVM needs a QueryClientProvider.
-function renderWithClient(ui: ReactElement) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
-  });
-  return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
-  );
-}
 
 // Mock the console-token mint endpoint. The Terminal now mints a scoped JWT
 // before opening the WS (security review fix #1) — desktop callers never
@@ -111,12 +101,12 @@ const testTab: ConsoleTab = {
 
 describe("Terminal", () => {
   it("renders a terminal container", () => {
-    const { container } = renderWithClient(<Terminal tab={testTab} visible={true} />);
+    const { container } = renderWithProviders(<Terminal tab={testTab} visible={true} />);
     expect(container.querySelector("div")).toBeTruthy();
   });
 
   it("creates a WebSocket connection after minting a scoped token", async () => {
-    renderWithClient(<Terminal tab={testTab} visible={true} />);
+    renderWithProviders(<Terminal tab={testTab} visible={true} />);
     // Mint resolves on the microtask queue; wait for the WS to be created.
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(1);
@@ -134,7 +124,7 @@ describe("Terminal", () => {
   });
 
   it("uses the override accessToken instead of minting when provided (mobile path)", async () => {
-    renderWithClient(
+    renderWithProviders(
       <Terminal
         tab={testTab}
         visible={true}
@@ -153,13 +143,13 @@ describe("Terminal", () => {
   });
 
   it("hides terminal when not visible", () => {
-    const { container } = renderWithClient(<Terminal tab={testTab} visible={false} />);
+    const { container } = renderWithProviders(<Terminal tab={testTab} visible={false} />);
     const div = container.firstChild as HTMLElement;
     expect(div.style.display).toBe("none");
   });
 
   it("shows terminal when visible", () => {
-    const { container } = renderWithClient(<Terminal tab={testTab} visible={true} />);
+    const { container } = renderWithProviders(<Terminal tab={testTab} visible={true} />);
     const div = container.firstChild as HTMLElement;
     expect(div.style.display).toBe("block");
   });

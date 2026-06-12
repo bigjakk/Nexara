@@ -96,6 +96,35 @@ export function wsAuthProtocols(token: string): [string, string] {
   return ["nexara.token", "nexara.token." + token];
 }
 
+/**
+ * Build the /ws/vnc upgrade URL. The token rides in Sec-WebSocket-Protocol
+ * (see wsAuthProtocols) — the URL only carries the scope-validation params
+ * the backend matches against the JWT's ConsoleScope.
+ *
+ * Shared by every VNC surface (floating console, detail-page preview) so
+ * the scope params can't drift between them.
+ */
+export function buildVncWsUrl(
+  clusterID: string,
+  node: string,
+  vmid?: number,
+  guestType?: string,
+): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const host = window.location.host;
+  const params = new URLSearchParams({
+    cluster_id: clusterID,
+    node,
+  });
+  if (vmid !== undefined) {
+    params.set("vmid", String(vmid));
+  }
+  if (guestType) {
+    params.set("type", guestType);
+  }
+  return `${protocol}//${host}/ws/vnc?${params.toString()}`;
+}
+
 export interface ISOImage {
   volid: string;
   storage: string;
