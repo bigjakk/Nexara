@@ -9,6 +9,8 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { useConsoleStore } from "@/stores/console-store";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { cn } from "@/lib/utils";
 import { ConsoleTabBar } from "./ConsoleTabBar";
 import { QuickConnect } from "./QuickConnect";
 import { VNCViewer } from "./VNCViewer";
@@ -30,6 +32,7 @@ function TitleBar({
   const setWindowMode = useConsoleStore((s) => s.setWindowMode);
   const tabs = useConsoleStore((s) => s.tabs);
   const activeTabId = useConsoleStore((s) => s.activeTabId);
+  const isMobile = useIsMobile();
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
 
@@ -39,7 +42,10 @@ function TitleBar({
 
   return (
     <div
-      className="flex h-8 shrink-0 cursor-grab items-center gap-2 border-b bg-muted/50 px-2 select-none active:cursor-grabbing"
+      className={cn(
+        "flex shrink-0 items-center gap-2 border-b bg-muted/50 px-2 select-none",
+        isMobile ? "h-10" : "h-8 cursor-grab active:cursor-grabbing",
+      )}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -50,31 +56,40 @@ function TitleBar({
         {activeTab?.label ?? "Console"}
       </span>
 
-      {/* Window controls */}
+      {/* Window controls — touch-sized on mobile; maximize is meaningless
+          there (the console is always a full-screen takeover) */}
       <div className="flex items-center gap-1">
         <button
-          className="flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
+          className={cn(
+            "flex items-center justify-center rounded hover:bg-accent",
+            isMobile ? "h-8 w-8" : "h-6 w-6",
+          )}
           onClick={(e) => { e.stopPropagation(); setWindowMode("minimized"); }}
           title="Minimize"
         >
           <Minus className="h-3.5 w-3.5" />
         </button>
+        {!isMobile && (
+          <button
+            className="flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
+            onClick={(e) => {
+              e.stopPropagation();
+              setWindowMode(windowMode === "maximized" ? "floating" : "maximized");
+            }}
+            title={windowMode === "maximized" ? "Restore" : "Maximize"}
+          >
+            {windowMode === "maximized" ? (
+              <Minimize2 className="h-3.5 w-3.5" />
+            ) : (
+              <Maximize2 className="h-3.5 w-3.5" />
+            )}
+          </button>
+        )}
         <button
-          className="flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
-          onClick={(e) => {
-            e.stopPropagation();
-            setWindowMode(windowMode === "maximized" ? "floating" : "maximized");
-          }}
-          title={windowMode === "maximized" ? "Restore" : "Maximize"}
-        >
-          {windowMode === "maximized" ? (
-            <Minimize2 className="h-3.5 w-3.5" />
-          ) : (
-            <Maximize2 className="h-3.5 w-3.5" />
+          className={cn(
+            "flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive",
+            isMobile ? "h-8 w-8" : "h-6 w-6",
           )}
-        </button>
-        <button
-          className="flex h-6 w-6 items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive"
           onClick={(e) => { e.stopPropagation(); setWindowMode("hidden"); }}
           title="Close"
         >
@@ -99,6 +114,7 @@ const resizeCorners: { dir: ResizeDir; className: string }[] = [
  * Renders as a PiP preview when minimized.
  */
 export function FloatingConsole() {
+  const isMobile = useIsMobile();
   const windowMode = useConsoleStore((s) => s.windowMode);
   const windowPosition = useConsoleStore((s) => s.windowPosition);
   const windowSize = useConsoleStore((s) => s.windowSize);
@@ -116,7 +132,7 @@ export function FloatingConsole() {
 
   const handleDragDown = useCallback(
     (e: React.PointerEvent) => {
-      if (windowMode !== "floating") return;
+      if (isMobile || windowMode !== "floating") return;
       if ((e.target as HTMLElement).closest("button")) return;
       e.preventDefault();
       dragRef.current = {
@@ -126,7 +142,7 @@ export function FloatingConsole() {
       };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
-    [windowMode, windowPosition],
+    [isMobile, windowMode, windowPosition],
   );
 
   const handleDragMove = useCallback(
@@ -239,7 +255,7 @@ export function FloatingConsole() {
   // --- Minimized: PiP preview ---
   if (isMinimized) {
     const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
-    const pipWidth = 320;
+    const pipWidth = isMobile ? Math.min(320, window.innerWidth - 32) : 320;
     const pipHeight = 200;
 
     return createPortal(
@@ -272,8 +288,16 @@ export function FloatingConsole() {
             ),
           )}
 
-          {/* Top-right controls — visible on hover */}
-          <div className="absolute right-2 top-2 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+          {/* Top-right controls — hover-revealed on desktop, always visible
+              on touch (there is no hover to reveal them with) */}
+          <div
+            className={cn(
+              "absolute right-2 top-2 flex gap-2",
+              isMobile
+                ? "opacity-100"
+                : "opacity-0 transition-opacity group-hover:opacity-100",
+            )}
+          >
             <button
               className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-white/25 hover:text-white"
               onClick={showConsole}
@@ -309,21 +333,29 @@ export function FloatingConsole() {
   }
 
   // --- Floating or Maximized ---
-  const style: React.CSSProperties = isMaximized
-    ? { position: "fixed", inset: 16, zIndex: 40 }
-    : {
-        position: "fixed",
-        left: windowPosition.x,
-        top: windowPosition.y,
-        width: windowSize.width,
-        height: windowSize.height,
-        zIndex: 40,
-      };
+  // Mobile is always a full-screen takeover: a draggable/resizable window
+  // is a precision-pointer UX, and at phone widths it would cover the app
+  // anyway. The stored floating position/size only applies on desktop.
+  const style: React.CSSProperties = isMobile
+    ? { position: "fixed", inset: 0, zIndex: 50 }
+    : isMaximized
+      ? { position: "fixed", inset: 16, zIndex: 40 }
+      : {
+          position: "fixed",
+          left: windowPosition.x,
+          top: windowPosition.y,
+          width: windowSize.width,
+          height: windowSize.height,
+          zIndex: 40,
+        };
 
   return createPortal(
     <div
       style={style}
-      className="flex flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
+      className={cn(
+        "flex flex-col overflow-hidden bg-background shadow-2xl",
+        !isMobile && "rounded-lg border",
+      )}
     >
       <TitleBar
         onPointerDown={handleDragDown}
@@ -367,8 +399,8 @@ export function FloatingConsole() {
         )}
       </div>
 
-      {/* Resize handles on all 4 corners (floating mode only) */}
-      {!isMaximized && resizeCorners.map((corner) => (
+      {/* Resize handles on all 4 corners (desktop floating mode only) */}
+      {!isMobile && !isMaximized && resizeCorners.map((corner) => (
         <div
           key={corner.dir}
           className={corner.className}
