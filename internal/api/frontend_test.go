@@ -16,8 +16,9 @@ const indexHTMLMarker = "<!doctype html><title>nexara-spa-shell</title>"
 
 func spaTestFS() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":        {Data: []byte(indexHTMLMarker)},
-		"assets/app-123.js": {Data: []byte("console.log('app')")},
+		"index.html":           {Data: []byte(indexHTMLMarker)},
+		"assets/app-123.js":    {Data: []byte("console.log('app')")},
+		"manifest.webmanifest": {Data: []byte(`{"name":"Nexara"}`)},
 	}
 }
 
@@ -145,6 +146,31 @@ func TestRegisterFrontend_CacheHeaders(t *testing.T) {
 				t.Errorf("Cache-Control = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestRegisterFrontend_ManifestContentType pins the PWA manifest's MIME type:
+// Go's mime table doesn't know .webmanifest, and the octet-stream fallback is
+// refused by browsers under X-Content-Type-Options: nosniff.
+func TestRegisterFrontend_ManifestContentType(t *testing.T) {
+	s := newTestServer(t)
+	s.RegisterFrontend(spaTestFS())
+
+	req := httptest.NewRequest(http.MethodGet, "/manifest.webmanifest", nil)
+	resp, err := s.App().Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/manifest+json") {
+		t.Errorf("Content-Type = %q, want application/manifest+json", ct)
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", got)
 	}
 }
 

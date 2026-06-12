@@ -59,6 +59,12 @@ func (s *Server) RegisterFrontend(distFS fs.FS) {
 		} else {
 			c.Set(fiber.HeaderCacheControl, "no-cache")
 		}
+		// The Go mime table doesn't know .webmanifest, so the PWA manifest
+		// falls back to application/octet-stream — which browsers refuse
+		// under X-Content-Type-Options: nosniff.
+		if strings.HasSuffix(c.Path(), ".webmanifest") {
+			c.Set(fiber.HeaderContentType, "application/manifest+json")
+		}
 		return nil
 	})
 }
