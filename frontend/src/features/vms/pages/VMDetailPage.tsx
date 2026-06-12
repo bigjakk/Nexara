@@ -15,6 +15,7 @@ import { useVMHistoricalMetrics } from "@/features/dashboard/api/historical-quer
 import { useConsoleStore } from "@/stores/console-store";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useVM, useSetResourceConfig, useGuestAgentInfo, useResourcePools, useSetVMPool } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
 import { VMConsolePreview } from "../components/VMConsolePreview";
@@ -44,6 +45,7 @@ export function VMDetailPage() {
     kind: string;
   }>();
   const kind: ResourceKind = rawKind === "ct" || rawKind === "lxc" ? "ct" : "vm";
+  const isMobile = useIsMobile();
   const { data: vm, isLoading, error } = useVM(clusterId, vmId, kind);
 
   const clusterMetrics = useClusterMetrics(clusterId);
@@ -130,8 +132,10 @@ export function VMDetailPage() {
 
   return (
     <div className="relative space-y-6 p-6">
-      {/* Floating live console preview — absolute so it doesn't stretch the header row */}
-      {kind === "vm" && normalizedStatus === "running" && nodeName !== "" && (
+      {/* Floating live console preview — absolute so it doesn't stretch the
+          header row. Desktop-only: at phone widths it would sit on top of
+          the header; the VNC Console button stays as the mobile entry. */}
+      {!isMobile && kind === "vm" && normalizedStatus === "running" && nodeName !== "" && (
         <div className="absolute right-6 top-6 z-10">
           <VMConsolePreview
             clusterId={clusterId}
@@ -143,7 +147,7 @@ export function VMDetailPage() {
       )}
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+        <div className="flex min-w-0 items-start gap-3">
           <Button variant="ghost" size="sm" asChild className="-ml-2 mt-1.5">
             <Link to="/inventory">
               <ArrowLeft className="h-4 w-4" />
@@ -163,8 +167,8 @@ export function VMDetailPage() {
               <Monitor className="h-6 w-6 text-muted-foreground" />
             )}
           </div>
-          <div className="space-y-1.5">
-          <div className="flex items-center gap-3">
+          <div className="min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             {renaming ? (
               <InlineRename
                 inputRef={renameInputRef}
@@ -187,7 +191,7 @@ export function VMDetailPage() {
               />
             ) : (
               <>
-                <h1 className="text-2xl font-bold tracking-tight">{vm.name}</h1>
+                <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">{vm.name}</h1>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -222,7 +226,7 @@ export function VMDetailPage() {
       </div>
 
       {/* Console + Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {kind === "vm" && (
           <Button
             variant="outline"

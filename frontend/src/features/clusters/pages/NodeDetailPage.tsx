@@ -126,8 +126,8 @@ export function NodeDetailPage() {
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
           <Button variant="ghost" size="sm" asChild className="-ml-2 mt-1.5">
             <Link to={`/clusters/${clusterId}`}>
               <ArrowLeft className="h-4 w-4" />
@@ -136,9 +136,9 @@ export function NodeDetailPage() {
           <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-500/10">
             <Server className="h-6 w-6 text-sky-500" />
           </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold tracking-tight">{node.name}</h1>
+          <div className="min-w-0 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">{node.name}</h1>
               <StatusBadge status={node.status} />
               {node.ha_state === "maintenance" && (
                 <Badge
@@ -162,7 +162,7 @@ export function NodeDetailPage() {
           </div>
         </div>
         {node.status === "online" && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -193,7 +193,7 @@ export function NodeDetailPage() {
         {/* Summary Tab */}
         <TabsContent value="summary" className="mt-4 space-y-6">
           {/* Hardware Info Cards */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <HardwareSection
               icon={<Cpu className="h-4 w-4" />}
               title="Processor"
@@ -693,7 +693,7 @@ function ZFSPoolsSection({ clusterId, nodeName }: { clusterId: string; nodeName:
       </div>
       {showCreate && (
         <div className="rounded-lg border p-4 space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-xs">Pool Name</Label>
               <Input className="h-8 text-sm" value={zfsName} onChange={(e) => { setZfsName(e.target.value); }} placeholder="e.g. mypool" />
@@ -870,7 +870,7 @@ function LVMSection({ clusterId, nodeName }: { clusterId: string; nodeName: stri
       </div>
       {showCreate && (
         <div className="rounded-lg border p-4 space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-xs">Volume Group Name</Label>
               <Input className="h-8 text-sm" value={lvmName} onChange={(e) => { setLvmName(e.target.value); }} placeholder="e.g. myvg" />
@@ -1001,7 +1001,7 @@ function LVMThinSection({ clusterId, nodeName }: { clusterId: string; nodeName: 
       </div>
       {showCreate && (
         <div className="rounded-lg border p-4 space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-xs">Thin Pool Name</Label>
               <Input className="h-8 text-sm" value={thinName} onChange={(e) => { setThinName(e.target.value); }} placeholder="e.g. mythinpool" />
@@ -1129,7 +1129,7 @@ function DirectorySection({ clusterId, nodeName }: { clusterId: string; nodeName
       </div>
       {showCreate && (
         <div className="rounded-lg border p-4 space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-xs">Name</Label>
               <Input className="h-8 text-sm" value={dirName} onChange={(e) => { setDirName(e.target.value); }} placeholder="e.g. mydir" />
@@ -1585,7 +1585,7 @@ function HardwareSection({
         {items.map((item) => (
           <div key={item.label} className="flex justify-between gap-2 text-sm">
             <dt className="text-muted-foreground">{item.label}</dt>
-            <dd className="truncate font-medium text-right" title={item.value}>{item.value}</dd>
+            <dd className="min-w-0 truncate text-right font-medium" title={item.value}>{item.value}</dd>
           </div>
         ))}
       </dl>
@@ -1617,7 +1617,7 @@ function HardwareSectionWithAction({
         {items.map((item) => (
           <div key={item.label} className="flex justify-between gap-2 text-sm">
             <dt className="text-muted-foreground">{item.label}</dt>
-            <dd className="truncate font-medium text-right" title={item.value}>{item.value}</dd>
+            <dd className="min-w-0 truncate text-right font-medium" title={item.value}>{item.value}</dd>
           </div>
         ))}
       </dl>

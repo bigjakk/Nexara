@@ -84,9 +84,9 @@ export function ClusterDetailPage() {
               <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10">
                 <Layers className="h-6 w-6 text-emerald-500" />
               </div>
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-bold tracking-tight">
+              <div className="min-w-0 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">
                     {cluster?.name ?? ""}
                   </h1>
                   <ClusterStatusBadge status={cluster?.status ?? "unknown"} />
