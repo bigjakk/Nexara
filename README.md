@@ -11,7 +11,7 @@
     <br>
     <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.25-00ADD8.svg?logo=go&logoColor=white" alt="Go 1.25"></a>
     <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5-3178C6.svg?logo=typescript&logoColor=white" alt="TypeScript 5"></a>
-    <a href="https://reactnative.dev"><img src="https://img.shields.io/badge/Mobile-React%20Native-61DAFB.svg?logo=react&logoColor=white" alt="React Native"></a>
+    <a href="#features"><img src="https://img.shields.io/badge/UI-Responsive-38BDF8.svg?logo=tailwindcss&logoColor=white" alt="Responsive UI"></a>
     <a href="https://github.com/bigjakk/Nexara/issues"><img src="https://img.shields.io/github/issues/bigjakk/Nexara" alt="Open Issues"></a>
     <a href="https://github.com/bigjakk/Nexara/commits/master"><img src="https://img.shields.io/github/last-commit/bigjakk/Nexara" alt="Last Commit"></a>
   </p>
@@ -39,7 +39,16 @@ Manage multiple Proxmox clusters from a single pane of glass. Real-time dashboar
     <td><img src="docs/screenshots/security-dashboard.png" alt="Security Dashboard"></td>
     <td><img src="docs/screenshots/rbac.png" alt="RBAC Management"></td>
   </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/ceph-storage.png" alt="Ceph Storage Dashboard"></td>
+  </tr>
 </table>
+<p align="center"><em>Fully responsive — the whole app works on phones and tablets, not just desktop</em></p>
+<p align="center">
+  <img src="docs/screenshots/mobile.png" alt="Mobile dashboard" width="232">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/screenshots/mobile-nav.png" alt="Mobile navigation" width="232">
+</p>
 </details>
 
 ---
@@ -105,6 +114,7 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 - **Maintenance** — per-node HA enter/exit and cluster-wide HA arm/disarm (PVE 9.2+), with maintenance indicators in the tree and node views
 
 ### Consoles
+- **Floating console** — detachable, draggable iLO/iDRAC-style window with power controls, keyboard macros, screenshots, and virtual-media (ISO) mounting
 - **VNC** — browser-based graphical console (noVNC)
 - **Serial** — xterm.js terminal for headless systems
 - **Node shell** — direct Proxmox node access
@@ -154,6 +164,7 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 <td>
 
 ### User Experience
+- **Responsive design** — full functionality on phones and tablets, not just desktop
 - **Topology map** — interactive React Flow infrastructure view
 - **Global search** — find anything instantly
 - **Theming** — dark/light mode, 9 accent colors
