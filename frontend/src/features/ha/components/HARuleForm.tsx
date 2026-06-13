@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/select";
 import {
   useCreateHARule,
+  useCreateHAResource,
+  useHAGroups,
   useHAResources,
   useUpdateHARule,
   type HARuleEntry,
@@ -20,6 +22,9 @@ import type { VMResponse } from "@/types/api";
 import type { NodeResponse } from "@/types/api";
 
 type RuleType = "node-affinity" | "resource-affinity";
+
+/** Requested-state options offered when inline-adding a resource to HA management. */
+const HA_STATES = ["started", "stopped", "disabled", "ignored"] as const;
 
 function vmToSID(vm: VMResponse): string {
   return `${vm.type === "lxc" ? "ct" : "vm"}:${String(vm.vmid)}`;
@@ -72,7 +77,7 @@ function describeHARuleError(err: unknown): { title: string; hint?: string } {
   if (unmanaged?.[1]) {
     return {
       title: `Some selected resources aren't HA-managed yet: ${unmanaged[1].trim()}`,
-      hint: "Add them as HA Resources (Resources tab) before referencing them in a rule.",
+      hint: "Tick \"Add to HA management\" above, or add them on the Resources tab first.",
     };
   }
   return { title: raw || "Operation failed" };
@@ -81,7 +86,9 @@ function describeHARuleError(err: unknown): { title: string; hint?: string } {
 export function HARuleForm(props: Props) {
   const createMut = useCreateHARule(props.clusterId);
   const updateMut = useUpdateHARule(props.clusterId);
+  const createResourceMut = useCreateHAResource(props.clusterId);
   const haResourcesQuery = useHAResources(props.clusterId);
+  const groupsQuery = useHAGroups(props.clusterId);
 
   const managedSIDs = useMemo(() => {
     const set = new Set<string>();
@@ -107,6 +114,17 @@ export function HARuleForm(props: Props) {
   );
   const [comment, setComment] = useState(initial?.comment ?? "");
   const [disable, setDisable] = useState<boolean>(initial?.disable === 1);
+
+  // Inline HA-management of selected resources Proxmox doesn't track yet.
+  // When enabled, those resources are created (with the settings below) before
+  // the rule itself, so Proxmox no longer rejects the rule as "unmanaged".
+  const [autoManage, setAutoManage] = useState(true);
+  const [resState, setResState] = useState<string>("started");
+  const [resGroup, setResGroup] = useState<string>("__none__");
+  const [resMaxRestart, setResMaxRestart] = useState<string>("1");
+  const [resMaxRelocate, setResMaxRelocate] = useState<string>("1");
+  const [resFailback, setResFailback] = useState<boolean>(true);
+  const [submitError, setSubmitError] = useState<{ title: string; hint?: string } | null>(null);
 
   useEffect(() => {
     if (props.mode === "edit") {
@@ -144,14 +162,43 @@ export function HARuleForm(props: Props) {
     setNodePriorities(next);
   };
 
-  const handleSubmit = (e: React.SyntheticEvent) => {
+  // Pre-flight: which selected SIDs aren't yet HA-managed?
+  const unmanagedSelected = useMemo(() => {
+    if (!haResourcesQuery.isSuccess) return [] as string[];
+    const out: string[] = [];
+    for (const sid of selectedSIDs) {
+      if (!managedSIDs.has(sid)) out.push(sid);
+    }
+    return out;
+  }, [selectedSIDs, managedSIDs, haResourcesQuery.isSuccess]);
+
+  const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     const resources = Array.from(selectedSIDs).join(",");
     const nodesStr = serializeNodes(nodePriorities);
 
-    if (props.mode === "create") {
-      createMut.mutate(
-        {
+    try {
+      // Bring any not-yet-managed selections under HA first, so Proxmox accepts
+      // the rule. Sequential — concurrent writes contend on the HA config lock.
+      if (autoManage && unmanagedSelected.length > 0) {
+        const maxRestartNum = Number.parseInt(resMaxRestart, 10);
+        const maxRelocateNum = Number.parseInt(resMaxRelocate, 10);
+        const groupValue = resGroup === "__none__" ? "" : resGroup;
+        for (const sid of unmanagedSelected) {
+          await createResourceMut.mutateAsync({
+            sid,
+            state: resState,
+            ...(groupValue ? { group: groupValue } : {}),
+            ...(Number.isFinite(maxRestartNum) ? { max_restart: maxRestartNum } : {}),
+            ...(Number.isFinite(maxRelocateNum) ? { max_relocate: maxRelocateNum } : {}),
+            failback: resFailback ? 1 : 0,
+          });
+        }
+      }
+
+      if (props.mode === "create") {
+        await createMut.mutateAsync({
           rule: name,
           type,
           resources,
@@ -162,12 +209,9 @@ export function HARuleForm(props: Props) {
             affinity,
           }),
           ...(comment ? { comment } : {}),
-        },
-        { onSuccess: props.onSuccess },
-      );
-    } else {
-      updateMut.mutate(
-        {
+        });
+      } else {
+        await updateMut.mutateAsync({
           rule: props.rule.rule,
           type,
           resources,
@@ -179,29 +223,21 @@ export function HARuleForm(props: Props) {
           }),
           comment,
           disable: disable ? 1 : 0,
-        },
-        { onSuccess: props.onSuccess },
-      );
+        });
+      }
+      props.onSuccess();
+    } catch (err) {
+      setSubmitError(describeHARuleError(err));
     }
   };
 
-  const isPending = props.mode === "create" ? createMut.isPending : updateMut.isPending;
-  const mutError = props.mode === "create" ? createMut.error : updateMut.error;
+  const isPending = createResourceMut.isPending || createMut.isPending || updateMut.isPending;
+  const groups = groupsQuery.data ?? [];
   const submitDisabled = isPending || !name || selectedSIDs.size === 0 ||
     (type === "node-affinity" && nodePriorities.size === 0);
 
-  // Pre-flight: which selected SIDs aren't yet HA-managed?
-  const unmanagedSelected = useMemo(() => {
-    if (!haResourcesQuery.isSuccess) return [] as string[];
-    const out: string[] = [];
-    for (const sid of selectedSIDs) {
-      if (!managedSIDs.has(sid)) out.push(sid);
-    }
-    return out;
-  }, [selectedSIDs, managedSIDs, haResourcesQuery.isSuccess]);
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
       <div className="space-y-2">
         <Label>Rule Name</Label>
         <Input
@@ -256,16 +292,98 @@ export function HARuleForm(props: Props) {
           <p className="text-xs text-muted-foreground">{selectedSIDs.size} selected</p>
         )}
         {unmanagedSelected.length > 0 && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-            <div>
+          <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/60">
+            <div className="flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
               <div>
-                {unmanagedSelected.join(", ")} {unmanagedSelected.length === 1 ? "is" : "are"} not yet HA-managed.
-              </div>
-              <div className="mt-0.5 text-amber-800 dark:text-amber-300">
-                Add {unmanagedSelected.length === 1 ? "it" : "them"} as HA Resources first — Proxmox will reject the rule otherwise.
+                <span className="font-mono">{unmanagedSelected.join(", ")}</span>{" "}
+                {unmanagedSelected.length === 1 ? "is" : "are"} not yet HA-managed. Proxmox won't accept
+                the rule until {unmanagedSelected.length === 1 ? "it is" : "they are"} added to HA management.
               </div>
             </div>
+
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-amber-900 dark:text-amber-100">
+              <Checkbox
+                checked={autoManage}
+                onCheckedChange={(c) => { setAutoManage(c === true); }}
+              />
+              <span>
+                Add {unmanagedSelected.length === 1 ? "it" : "them"} to HA management with the settings below
+              </span>
+            </label>
+
+            {autoManage && (
+              <div className="space-y-3 rounded-md border bg-background p-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Requested State</Label>
+                    <Select value={resState} onValueChange={setResState}>
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {HA_STATES.map((s) => (
+                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Group</Label>
+                    <Select value={resGroup} onValueChange={setResGroup}>
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder="— None —" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">— None —</SelectItem>
+                        {groups.map((g) => (
+                          <SelectItem key={g.group} value={g.group}>{g.group}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="auto-max-restart" className="text-xs">Max Restart</Label>
+                    <Input
+                      id="auto-max-restart"
+                      type="number"
+                      min="0"
+                      max="10"
+                      className="h-8"
+                      value={resMaxRestart}
+                      onChange={(e) => { setResMaxRestart(e.target.value); }}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="auto-max-relocate" className="text-xs">Max Relocate</Label>
+                    <Input
+                      id="auto-max-relocate"
+                      type="number"
+                      min="0"
+                      max="10"
+                      className="h-8"
+                      value={resMaxRelocate}
+                      onChange={(e) => { setResMaxRelocate(e.target.value); }}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <Label htmlFor="auto-failback" className="cursor-pointer text-sm">Failback</Label>
+                    <p className="text-xs text-muted-foreground">Move back to a higher-priority node when available.</p>
+                  </div>
+                  <Switch id="auto-failback" checked={resFailback} onCheckedChange={setResFailback} />
+                </div>
+
+                <p className="text-[11px] text-muted-foreground">
+                  Applied to {unmanagedSelected.length === 1 ? "this resource" : `all ${String(unmanagedSelected.length)} resources`} added here. Adjust individually later on the Resources tab.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -363,18 +481,15 @@ export function HARuleForm(props: Props) {
         </div>
       )}
 
-      {mutError && (() => {
-        const { title, hint } = describeHARuleError(mutError);
-        return (
-          <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
-            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-            <div>
-              <div>{title}</div>
-              {hint && <div className="mt-1 text-xs opacity-90">{hint}</div>}
-            </div>
+      {submitError && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
+          <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <div>
+            <div>{submitError.title}</div>
+            {submitError.hint && <div className="mt-1 text-xs opacity-90">{submitError.hint}</div>}
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       <Button type="submit" disabled={submitDisabled}>
         {isPending ? "Saving..." : props.mode === "create" ? "Create" : "Save"}
