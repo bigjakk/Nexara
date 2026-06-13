@@ -72,6 +72,7 @@ tmp/
 
 # Plan / working design docs (kept local; not part of the repo)
 *-plan.md
+*_PLAN.md
 *-claude-code-plan.md
 TASK_TRACKING_RFC.md
 
