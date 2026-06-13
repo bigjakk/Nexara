@@ -6,7 +6,7 @@ on:
       - "v*"
 
 env:
-  REGISTRY: gitea.crjlab.net
+  REGISTRY: ${{ vars.REGISTRY }}
   OWNER: bigjakk
   REPO: nexara
 

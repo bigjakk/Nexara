@@ -6,7 +6,7 @@ import (
 )
 
 // APIURLHost returns the host (without port) of a Proxmox api_url such as
-// "https://192.168.3.168:8006/". It returns "" when the URL cannot be parsed,
+// "https://192.168.1.10:8006/". It returns "" when the URL cannot be parsed,
 // which callers use to harmlessly disable primary-endpoint de-duplication
 // during failover.
 func APIURLHost(apiURL string) string {
