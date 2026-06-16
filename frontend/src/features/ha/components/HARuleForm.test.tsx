@@ -93,6 +93,52 @@ describe("HARuleForm", () => {
     expect(screen.queryByLabelText(/Strict/i)).not.toBeInTheDocument();
   });
 
+  it("flags an invalid rule name (with spaces) before submit and disables Create", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <HARuleForm
+        mode="create"
+        clusterId="c1"
+        allVMs={vms}
+        allNodes={nodes}
+        onSuccess={() => undefined}
+      />,
+    );
+
+    const nameInput = screen.getByPlaceholderText("my-rule");
+    await user.type(nameInput, "test rule");
+
+    expect(screen.getByText(/no spaces/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+
+    // A valid name clears the error.
+    await user.clear(nameInput);
+    await user.type(nameInput, "test-rule");
+    expect(screen.queryByText(/no spaces/i)).not.toBeInTheDocument();
+  });
+
+  it("filters the resource list via the search box", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <HARuleForm
+        mode="create"
+        clusterId="c1"
+        allVMs={vms}
+        allNodes={nodes}
+        onSuccess={() => undefined}
+      />,
+    );
+
+    // Both VMs are visible initially.
+    expect(screen.getByText("web-1")).toBeInTheDocument();
+    expect(screen.getByText("db-1")).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText(/Search by name or ID/i), "web");
+
+    expect(screen.getByText("web-1")).toBeInTheDocument();
+    expect(screen.queryByText("db-1")).not.toBeInTheDocument();
+  });
+
   it("locks rule name and type in edit mode", () => {
     renderWithProviders(
       <HARuleForm

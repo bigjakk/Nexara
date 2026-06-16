@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,6 +28,23 @@ const HA_STATES = ["started", "stopped", "disabled", "ignored"] as const;
 
 function vmToSID(vm: VMResponse): string {
   return `${vm.type === "lxc" ? "ct" : "vm"}:${String(vm.vmid)}`;
+}
+
+/**
+ * Proxmox `pve-configid` format: must start with a letter, then one or more
+ * letters/digits/hyphen/underscore (so at least 2 chars) — no spaces or other
+ * punctuation. Proxmox otherwise rejects the rule with
+ * "invalid configuration ID '<name>'"; we mirror the rule client-side to flag
+ * it before submit instead of after a round-trip.
+ */
+const CONFIG_ID_RE = /^[A-Za-z][A-Za-z0-9_-]+$/;
+
+function validateRuleName(name: string): string | null {
+  if (!name) return null; // empty is covered by the required attr + disabled submit
+  if (!CONFIG_ID_RE.test(name)) {
+    return "Use letters, numbers, hyphens, and underscores only — no spaces. Must start with a letter and be at least 2 characters.";
+  }
+  return null;
 }
 
 interface CommonProps {
@@ -125,6 +142,7 @@ export function HARuleForm(props: Props) {
   const [resMaxRelocate, setResMaxRelocate] = useState<string>("1");
   const [resFailback, setResFailback] = useState<boolean>(true);
   const [submitError, setSubmitError] = useState<{ title: string; hint?: string } | null>(null);
+  const [vmFilter, setVmFilter] = useState("");
 
   useEffect(() => {
     if (props.mode === "edit") {
@@ -161,6 +179,25 @@ export function HARuleForm(props: Props) {
     next.set(nodeName, priority);
     setNodePriorities(next);
   };
+
+  // Validate the rule name against Proxmox's config-ID format up front (create
+  // mode only — in edit mode the name is locked and already accepted).
+  const nameError = useMemo(
+    () => (props.mode === "create" ? validateRuleName(name) : null),
+    [name, props.mode],
+  );
+
+  // Filter the resource list by SID / name / vmid for the search box.
+  const filteredVMs = useMemo(() => {
+    const q = vmFilter.trim().toLowerCase();
+    if (!q) return props.allVMs;
+    return props.allVMs.filter(
+      (vm) =>
+        vmToSID(vm).toLowerCase().includes(q) ||
+        vm.name.toLowerCase().includes(q) ||
+        String(vm.vmid).includes(q),
+    );
+  }, [props.allVMs, vmFilter]);
 
   // Pre-flight: which selected SIDs aren't yet HA-managed?
   const unmanagedSelected = useMemo(() => {
@@ -233,7 +270,7 @@ export function HARuleForm(props: Props) {
 
   const isPending = createResourceMut.isPending || createMut.isPending || updateMut.isPending;
   const groups = groupsQuery.data ?? [];
-  const submitDisabled = isPending || !name || selectedSIDs.size === 0 ||
+  const submitDisabled = isPending || !name || nameError !== null || selectedSIDs.size === 0 ||
     (type === "node-affinity" && nodePriorities.size === 0);
 
   return (
@@ -246,7 +283,10 @@ export function HARuleForm(props: Props) {
           required
           disabled={props.mode === "edit"}
           placeholder="my-rule"
+          aria-invalid={nameError !== null}
+          className={nameError ? "border-destructive focus-visible:ring-destructive" : undefined}
         />
+        {nameError && <p className="text-xs text-destructive">{nameError}</p>}
       </div>
 
       <div className="space-y-2">
@@ -264,11 +304,25 @@ export function HARuleForm(props: Props) {
 
       <div className="space-y-2">
         <Label>Resources</Label>
+        {props.allVMs.length > 0 && (
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by name or ID…"
+              value={vmFilter}
+              onChange={(e) => { setVmFilter(e.target.value); }}
+              className="h-8 pl-8"
+            />
+          </div>
+        )}
         <div className="max-h-40 overflow-y-auto rounded-md border p-2 space-y-1">
           {props.allVMs.length === 0 && (
             <p className="text-sm text-muted-foreground">No VMs/CTs found</p>
           )}
-          {props.allVMs.map((vm) => {
+          {props.allVMs.length > 0 && filteredVMs.length === 0 && (
+            <p className="text-sm text-muted-foreground">No VMs/CTs match “{vmFilter}”</p>
+          )}
+          {filteredVMs.map((vm) => {
             const sid = vmToSID(vm);
             const isManaged = managedSIDs.has(sid);
             return (
