@@ -1,3 +1,7 @@
+import type { CephHealthCheckItem } from "@/types/api";
+
+export type { CephHealthCheckItem };
+
 export interface CephStatus {
   health: CephHealth;
   pgmap: CephPGMap;
@@ -7,6 +11,8 @@ export interface CephStatus {
 
 export interface CephHealth {
   status: string;
+  /** Per-issue detail explaining the status (empty when healthy). */
+  checks: CephHealthCheckItem[];
 }
 
 export interface CephPGMap {

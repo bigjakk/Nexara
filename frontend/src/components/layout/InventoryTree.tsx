@@ -21,11 +21,21 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import {
+  cephHealthLabel,
+  cephSeverity,
+  isProblem,
+  severityDotClass,
+} from "@/features/ceph/lib/ceph-health";
 import { StatusIcon } from "@/components/StatusIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { classifyOS } from "@/lib/os-classify";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useClusterNodes, useClusterVMs, useSetNodeMaintenance } from "@/features/clusters/api/cluster-queries";
+import {
+  useClusterNodes,
+  useClusterVMs,
+  useSetNodeMaintenance,
+} from "@/features/clusters/api/cluster-queries";
 import { useSSHCredentials } from "@/features/rolling-updates/api/rolling-update-queries";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -56,7 +66,9 @@ import type { ClusterResponse, NodeResponse, VMResponse } from "@/types/api";
 
 function VMIcon({ type, template }: { type: string; template?: boolean }) {
   if (template) {
-    return <FileBox className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
+    return (
+      <FileBox className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+    );
   }
   if (type === "lxc") {
     return <Container className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
@@ -77,7 +89,8 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
   const nodeKey = `node:${clusterId}:${node.id}`;
   const isExpanded = expandedNodes.has(nodeKey);
   const nodeVMs = vms.filter((vm) => vm.node_id === node.id);
-  const isActive = location.pathname === `/clusters/${clusterId}/nodes/${node.id}`;
+  const isActive =
+    location.pathname === `/clusters/${clusterId}/nodes/${node.id}`;
   const { canManage } = useAuth();
   const { data: sshCreds } = useSSHCredentials(clusterId);
   const maintenance = useSetNodeMaintenance(clusterId, node.name);
@@ -87,7 +100,9 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
 
   // Auto-expand if a child VM is active
   useEffect(() => {
-    const match = location.pathname.match(/^\/inventory\/(qemu|lxc)\/([^/]+)\/([^/]+)$/);
+    const match = location.pathname.match(
+      /^\/inventory\/(qemu|lxc)\/([^/]+)\/([^/]+)$/,
+    );
     if (match) {
       const [, , pathClusterId, pathVmId] = match;
       if (pathClusterId === clusterId) {
@@ -125,7 +140,9 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
               />
             </button>
             <button
-              onClick={() => { void navigate(`/clusters/${clusterId}/nodes/${node.id}`); }}
+              onClick={() => {
+                void navigate(`/clusters/${clusterId}/nodes/${node.id}`);
+              }}
               className="flex min-w-0 flex-1 items-center gap-1.5"
             >
               {node.ha_state === "maintenance" ? (
@@ -143,7 +160,11 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
         </ContextMenuTrigger>
         {canMaintenance && (
           <ContextMenuContent className="w-48">
-            <ContextMenuItem onClick={() => { setMaintOpen(true); }}>
+            <ContextMenuItem
+              onClick={() => {
+                setMaintOpen(true);
+              }}
+            >
               <Wrench className="mr-2 h-3.5 w-3.5" />
               {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
             </ContextMenuItem>
@@ -174,7 +195,9 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
                   }}
                 >
                   <button
-                    onClick={() => { void navigate(vmPath); }}
+                    onClick={() => {
+                      void navigate(vmPath);
+                    }}
                     className={cn(
                       "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
                       vmActive && "bg-primary/10 text-foreground",
@@ -184,9 +207,17 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
                     <VMIcon type={vm.type} template={vm.template} />
                     {(classifyOS(vm.ostype) !== "unknown" ||
                       classifyOS(vm.config_ostype) !== "unknown") && (
-                      <OSIcon ostype={vm.ostype} configOstype={vm.config_ostype} />
+                      <OSIcon
+                        ostype={vm.ostype}
+                        configOstype={vm.config_ostype}
+                      />
                     )}
-                    <span className={cn("truncate", vm.template && "text-amber-700 dark:text-amber-400")}>
+                    <span
+                      className={cn(
+                        "truncate",
+                        vm.template && "text-amber-700 dark:text-amber-400",
+                      )}
+                    >
                       {vm.vmid} {vm.name}
                     </span>
                   </button>
@@ -213,7 +244,9 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => { maintenance.mutate(!inMaintenance); }}
+              onClick={() => {
+                maintenance.mutate(!inMaintenance);
+              }}
               disabled={maintenance.isPending}
             >
               {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
@@ -250,7 +283,9 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
   useEffect(() => {
     if (
       location.pathname.startsWith(`/clusters/${cluster.id}/`) ||
-      location.pathname.match(new RegExp(`^/inventory/(qemu|lxc)/${cluster.id}/`))
+      location.pathname.match(
+        new RegExp(`^/inventory/(qemu|lxc)/${cluster.id}/`),
+      )
     ) {
       expandNode(clusterKey);
     }
@@ -268,7 +303,9 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
               )}
             >
               <button
-                onClick={() => { toggleNode(clusterKey); }}
+                onClick={() => {
+                  toggleNode(clusterKey);
+                }}
                 className="shrink-0"
               >
                 <ChevronRight
@@ -279,12 +316,30 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
                 />
               </button>
               <button
-                onClick={() => { void navigate(`/clusters/${cluster.id}`); }}
+                onClick={() => {
+                  void navigate(`/clusters/${cluster.id}`);
+                }}
                 className="flex min-w-0 flex-1 items-center gap-1.5"
               >
-                <StatusIcon status={cluster.status === "degraded" ? "degraded" : cluster.status} />
+                <StatusIcon
+                  status={
+                    cluster.status === "degraded" ? "degraded" : cluster.status
+                  }
+                />
                 <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
                 <span className="truncate font-medium">{cluster.name}</span>
+                {cluster.ceph_health &&
+                  isProblem(cephSeverity(cluster.ceph_health.status)) && (
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 shrink-0 rounded-full",
+                        severityDotClass[
+                          cephSeverity(cluster.ceph_health.status)
+                        ],
+                      )}
+                      title={`Ceph storage: ${cephHealthLabel(cluster.ceph_health.status)}`}
+                    />
+                  )}
               </button>
 
               <DropdownMenu>
@@ -294,12 +349,18 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-32">
-                  <DropdownMenuItem onClick={() => { setEditOpen(true); }}>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setEditOpen(true);
+                    }}
+                  >
                     <Pencil className="mr-2 h-3.5 w-3.5" />
                     Edit
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onClick={() => { setDeleteOpen(true); }}
+                    onClick={() => {
+                      setDeleteOpen(true);
+                    }}
                     className="text-destructive focus:text-destructive"
                   >
                     <Trash2 className="mr-2 h-3.5 w-3.5" />
@@ -327,21 +388,35 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-40">
-          <ContextMenuItem onClick={() => { setCreateVMOpen(true); }}>
+          <ContextMenuItem
+            onClick={() => {
+              setCreateVMOpen(true);
+            }}
+          >
             <Monitor className="mr-2 h-3.5 w-3.5" />
             Create VM
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => { setCreateCTOpen(true); }}>
+          <ContextMenuItem
+            onClick={() => {
+              setCreateCTOpen(true);
+            }}
+          >
             <Container className="mr-2 h-3.5 w-3.5" />
             Create CT
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => { setEditOpen(true); }}>
+          <ContextMenuItem
+            onClick={() => {
+              setEditOpen(true);
+            }}
+          >
             <Pencil className="mr-2 h-3.5 w-3.5" />
             Edit
           </ContextMenuItem>
           <ContextMenuItem
-            onClick={() => { setDeleteOpen(true); }}
+            onClick={() => {
+              setDeleteOpen(true);
+            }}
             className="text-destructive focus:text-destructive"
           >
             <Trash2 className="mr-2 h-3.5 w-3.5" />
@@ -410,13 +485,14 @@ export function InventoryTree() {
       )}
 
       {clusters?.length === 0 && (
-        <p className="px-2 text-xs text-muted-foreground">{t("noClustersAdded")}</p>
+        <p className="px-2 text-xs text-muted-foreground">
+          {t("noClustersAdded")}
+        </p>
       )}
 
       {clusters?.map((cluster) => (
         <ClusterBranch key={cluster.id} cluster={cluster} />
       ))}
-
     </div>
   );
 }

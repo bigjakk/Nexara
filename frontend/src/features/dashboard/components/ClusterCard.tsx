@@ -2,6 +2,8 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Card } from "@/components/ui/card";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
+import { CephHealthBadge } from "@/features/ceph/components/CephHealthBadge";
+import { cephSeverity, isProblem } from "@/features/ceph/lib/ceph-health";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ClusterResponse } from "@/types/api";
@@ -31,8 +33,7 @@ function UtilBar({
   percent: number | null;
   barClass: string;
 }) {
-  const clamped =
-    percent === null ? null : Math.min(100, Math.max(0, percent));
+  const clamped = percent === null ? null : Math.min(100, Math.max(0, percent));
   const fillClass =
     clamped === null
       ? barClass
@@ -81,9 +82,7 @@ export function ClusterCard({ summary, metrics }: ClusterCardProps) {
   const cpuPercent = metrics ? metrics.cpuPercent : null;
   const memPercent = metrics ? metrics.memPercent : null;
   const storagePercent =
-    storageTotalBytes > 0
-      ? (storageUsedBytes / storageTotalBytes) * 100
-      : null;
+    storageTotalBytes > 0 ? (storageUsedBytes / storageTotalBytes) * 100 : null;
 
   const dotCount = Math.min(nodeCount, 8);
 
@@ -110,7 +109,11 @@ export function ClusterCard({ summary, metrics }: ClusterCardProps) {
             PVE {cluster.pve_version}
           </span>
         )}
-        <div className="ml-auto shrink-0">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {cluster.ceph_health &&
+            isProblem(cephSeverity(cluster.ceph_health.status)) && (
+              <CephHealthBadge status={cluster.ceph_health.status} />
+            )}
           <ClusterStatusBadge status={cluster.status} />
         </div>
       </div>

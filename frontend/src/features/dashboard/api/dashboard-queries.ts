@@ -1,4 +1,9 @@
-import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useQueries,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type {
   ClusterResponse,
@@ -14,6 +19,9 @@ export function useClusters() {
   return useQuery({
     queryKey: ["clusters"],
     queryFn: () => apiClient.get<ClusterResponse[]>("/api/v1/clusters"),
+    // Refresh periodically so cluster status and Ceph health surfaced in the
+    // header/dashboard/sidebar stay current without a manual reload.
+    refetchInterval: 30_000,
   });
 }
 
@@ -51,9 +59,7 @@ export function useDashboardData() {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.get<NodeResponse[]>(
-          `/api/v1/clusters/${cluster.id}/nodes`,
-        ),
+        apiClient.get<NodeResponse[]>(`/api/v1/clusters/${cluster.id}/nodes`),
       enabled: clusters.length > 0,
     })),
   });

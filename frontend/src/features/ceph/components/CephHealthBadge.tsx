@@ -1,40 +1,33 @@
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { cephHealthLabel, cephSeverity } from "../lib/ceph-health";
 
 interface CephHealthBadgeProps {
   status: string;
+  className?: string;
 }
 
-export function CephHealthBadge({ status }: CephHealthBadgeProps) {
-  const variant = getHealthVariant(status);
-  const label = getHealthLabel(status);
+export function CephHealthBadge({ status, className }: CephHealthBadgeProps) {
+  const severity = cephSeverity(status);
+  const label = cephHealthLabel(status);
 
-  return <Badge variant={variant}>{label}</Badge>;
-}
+  // Warning gets an explicit amber treatment instead of the muted "secondary"
+  // variant so it reads as a real warning at a glance.
+  const variant =
+    severity === "ok"
+      ? "default"
+      : severity === "err"
+        ? "destructive"
+        : "outline";
 
-function getHealthVariant(
-  status: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  switch (status) {
-    case "HEALTH_OK":
-      return "default";
-    case "HEALTH_WARN":
-      return "secondary";
-    case "HEALTH_ERR":
-      return "destructive";
-    default:
-      return "outline";
-  }
-}
+  const warnClass =
+    severity === "warn"
+      ? "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400"
+      : undefined;
 
-function getHealthLabel(status: string): string {
-  switch (status) {
-    case "HEALTH_OK":
-      return "Healthy";
-    case "HEALTH_WARN":
-      return "Warning";
-    case "HEALTH_ERR":
-      return "Error";
-    default:
-      return status || "Unknown";
-  }
+  return (
+    <Badge variant={variant} className={cn(warnClass, className)}>
+      {label}
+    </Badge>
+  );
 }

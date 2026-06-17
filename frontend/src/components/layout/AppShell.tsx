@@ -52,6 +52,7 @@ import { FloatingConsole } from "@/features/console/components/FloatingConsole";
 import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
 import { SearchBar } from "./SearchBar";
 import { CreateResourceMenu } from "./CreateResourceMenu";
+import { GlobalHealthIndicator } from "./GlobalHealthIndicator";
 
 function getInitials(name: string): string {
   return name
@@ -76,7 +77,9 @@ export function AppShell() {
 
   useEffect(() => {
     wsConnect();
-    return () => { wsDisconnect(); };
+    return () => {
+      wsDisconnect();
+    };
   }, [wsConnect, wsDisconnect]);
 
   // Load branding settings on mount
@@ -105,7 +108,9 @@ export function AppShell() {
   const lastSeenVersion = useChangelogStore((s) => s.lastSeenVersion);
   const setLastSeenVersion = useChangelogStore((s) => s.setLastSeenVersion);
   const [changelogOpen, setChangelogOpen] = useState(false);
-  const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>([]);
+  const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>(
+    [],
+  );
   const [aboutOpen, setAboutOpen] = useState(false);
   const changelogQuery = useChangelog();
 
@@ -116,7 +121,11 @@ export function AppShell() {
     if (!base) return; // dev / unknown — no popup
     if (base === lastSeenVersion) return;
 
-    const entries = getEntriesToShow(base, lastSeenVersion, changelogQuery.data);
+    const entries = getEntriesToShow(
+      base,
+      lastSeenVersion,
+      changelogQuery.data,
+    );
     if (entries.length === 0) {
       // If GitHub returned no data at all (fetch failed or no releases yet),
       // don't advance — try again on the next page load when the cache
@@ -193,7 +202,9 @@ export function AppShell() {
               size="icon"
               className="shrink-0"
               aria-label="Open navigation"
-              onClick={() => { setMobileNavOpen(true); }}
+              onClick={() => {
+                setMobileNavOpen(true);
+              }}
             >
               <Menu className="h-5 w-5" />
             </Button>
@@ -202,59 +213,76 @@ export function AppShell() {
             <SearchBar />
           </div>
           <div className="flex shrink-0 items-center gap-2">
-          <CreateResourceMenu />
-          <ThemeToggle />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="gap-2 px-2 md:px-4">
-                <Avatar className="h-7 w-7">
-                  <AvatarFallback className="text-xs">
-                    {user ? getInitials(user.display_name) : "?"}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="hidden text-sm sm:inline">
-                  {user?.display_name ?? "User"}
-                </span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <div className="px-2 py-1.5">
-                <p className="text-sm font-medium">{user?.display_name}</p>
-                <p className="text-xs text-muted-foreground">{user?.email}</p>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => { void navigate("/settings/profile"); }}>
-                <User className="mr-2 h-4 w-4" />
-                {t("profile", { ns: "common" })}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { void navigate("/settings/security"); }}>
-                <ShieldCheck className="mr-2 h-4 w-4" />
-                {t("security")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { void navigate("/settings/api-keys"); }}>
-                <Key className="mr-2 h-4 w-4" />
-                API Keys
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleShowChangelog}>
-                <Sparkles className="mr-2 h-4 w-4" />
-                What&apos;s New
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { setAboutOpen(true); }}>
-                <Info className="mr-2 h-4 w-4" />
-                About
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout}>
-                <LogOut className="mr-2 h-4 w-4" />
-                {t("signOut", { ns: "common" })}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleLogoutAll}>
-                <LogOutIcon className="mr-2 h-4 w-4" />
-                {t("signOutAllDevices", { ns: "common" })}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            <GlobalHealthIndicator />
+            <CreateResourceMenu />
+            <ThemeToggle />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="gap-2 px-2 md:px-4">
+                  <Avatar className="h-7 w-7">
+                    <AvatarFallback className="text-xs">
+                      {user ? getInitials(user.display_name) : "?"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="hidden text-sm sm:inline">
+                    {user?.display_name ?? "User"}
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <div className="px-2 py-1.5">
+                  <p className="text-sm font-medium">{user?.display_name}</p>
+                  <p className="text-xs text-muted-foreground">{user?.email}</p>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => {
+                    void navigate("/settings/profile");
+                  }}
+                >
+                  <User className="mr-2 h-4 w-4" />
+                  {t("profile", { ns: "common" })}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    void navigate("/settings/security");
+                  }}
+                >
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {t("security")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    void navigate("/settings/api-keys");
+                  }}
+                >
+                  <Key className="mr-2 h-4 w-4" />
+                  API Keys
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleShowChangelog}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  What&apos;s New
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setAboutOpen(true);
+                  }}
+                >
+                  <Info className="mr-2 h-4 w-4" />
+                  About
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  {t("signOut", { ns: "common" })}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogoutAll}>
+                  <LogOutIcon className="mr-2 h-4 w-4" />
+                  {t("signOutAllDevices", { ns: "common" })}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
         <Separator />

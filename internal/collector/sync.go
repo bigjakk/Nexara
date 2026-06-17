@@ -1137,10 +1137,19 @@ func (s *Syncer) syncCeph(ctx context.Context, client ProxmoxClient, clusterID u
 		return nil
 	}
 
+	// Encode the per-issue health checks (the reasons behind the status) so the
+	// API/UI can explain *why* the cluster is in HEALTH_WARN/HEALTH_ERR.
+	healthChecks, err := json.Marshal(status.Health.NormalizedChecks())
+	if err != nil {
+		s.logger.Warn("failed to encode ceph health checks", "cluster_id", clusterID, "error", err)
+		healthChecks = nil
+	}
+
 	result := &cephCollectionResult{
 		CephCluster: &cephClusterMetricSnapshot{
 			ClusterID:    clusterID,
 			HealthStatus: status.Health.Status,
+			HealthChecks: healthChecks,
 			OSDsTotal:    status.OSDMap.NumOSDs,
 			OSDsUp:       status.OSDMap.NumUpOSDs,
 			OSDsIn:       status.OSDMap.NumInOSDs,

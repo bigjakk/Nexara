@@ -5,6 +5,16 @@ WHERE cluster_id = $1
 ORDER BY time DESC
 LIMIT 1;
 
+-- GetLatestCephHealthPerCluster returns the most recent Ceph health (status +
+-- per-issue checks) for every cluster reporting within the freshness window, so
+-- the clusters list can surface health app-wide without per-cluster live calls.
+-- name: GetLatestCephHealthPerCluster :many
+SELECT DISTINCT ON (cluster_id)
+    cluster_id, health_status, health_checks
+FROM ceph_cluster_metrics
+WHERE time > now() - interval '15 minutes'
+ORDER BY cluster_id, time DESC;
+
 -- name: GetCephClusterMetricsHistory :many
 SELECT *
 FROM ceph_cluster_metrics

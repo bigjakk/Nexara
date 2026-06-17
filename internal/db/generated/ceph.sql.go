@@ -113,7 +113,7 @@ func (q *Queries) GetCephClusterMetrics5m(ctx context.Context, arg GetCephCluste
 }
 
 const getCephClusterMetricsHistory = `-- name: GetCephClusterMetricsHistory :many
-SELECT time, cluster_id, health_status, osds_total, osds_up, osds_in, pgs_total, bytes_used, bytes_avail, bytes_total, read_ops_sec, write_ops_sec, read_bytes_sec, write_bytes_sec
+SELECT time, cluster_id, health_status, osds_total, osds_up, osds_in, pgs_total, bytes_used, bytes_avail, bytes_total, read_ops_sec, write_ops_sec, read_bytes_sec, write_bytes_sec, health_checks
 FROM ceph_cluster_metrics
 WHERE cluster_id = $1
   AND time >= $2
@@ -151,6 +151,7 @@ func (q *Queries) GetCephClusterMetricsHistory(ctx context.Context, arg GetCephC
 			&i.WriteOpsSec,
 			&i.ReadBytesSec,
 			&i.WriteBytesSec,
+			&i.HealthChecks,
 		); err != nil {
 			return nil, err
 		}
@@ -163,7 +164,7 @@ func (q *Queries) GetCephClusterMetricsHistory(ctx context.Context, arg GetCephC
 }
 
 const getLatestCephClusterMetrics = `-- name: GetLatestCephClusterMetrics :one
-SELECT time, cluster_id, health_status, osds_total, osds_up, osds_in, pgs_total, bytes_used, bytes_avail, bytes_total, read_ops_sec, write_ops_sec, read_bytes_sec, write_bytes_sec
+SELECT time, cluster_id, health_status, osds_total, osds_up, osds_in, pgs_total, bytes_used, bytes_avail, bytes_total, read_ops_sec, write_ops_sec, read_bytes_sec, write_bytes_sec, health_checks
 FROM ceph_cluster_metrics
 WHERE cluster_id = $1
 ORDER BY time DESC
@@ -188,8 +189,46 @@ func (q *Queries) GetLatestCephClusterMetrics(ctx context.Context, clusterID uui
 		&i.WriteOpsSec,
 		&i.ReadBytesSec,
 		&i.WriteBytesSec,
+		&i.HealthChecks,
 	)
 	return i, err
+}
+
+const getLatestCephHealthPerCluster = `-- name: GetLatestCephHealthPerCluster :many
+SELECT DISTINCT ON (cluster_id)
+    cluster_id, health_status, health_checks
+FROM ceph_cluster_metrics
+WHERE time > now() - interval '15 minutes'
+ORDER BY cluster_id, time DESC
+`
+
+type GetLatestCephHealthPerClusterRow struct {
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	HealthStatus string    `json:"health_status"`
+	HealthChecks []byte    `json:"health_checks"`
+}
+
+// GetLatestCephHealthPerCluster returns the most recent Ceph health (status +
+// per-issue checks) for every cluster reporting within the freshness window, so
+// the clusters list can surface health app-wide without per-cluster live calls.
+func (q *Queries) GetLatestCephHealthPerCluster(ctx context.Context) ([]GetLatestCephHealthPerClusterRow, error) {
+	rows, err := q.db.Query(ctx, getLatestCephHealthPerCluster)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetLatestCephHealthPerClusterRow{}
+	for rows.Next() {
+		var i GetLatestCephHealthPerClusterRow
+		if err := rows.Scan(&i.ClusterID, &i.HealthStatus, &i.HealthChecks); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getLatestCephOSDMetrics = `-- name: GetLatestCephOSDMetrics :many

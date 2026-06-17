@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -82,8 +83,18 @@ func batchInsertPBSDatastoreMetrics(ctx context.Context, copier CopyFromer, ts t
 
 // --- Ceph batch inserts ---
 
+// healthChecksValue prepares the JSON-encoded Ceph health checks for the jsonb
+// column: a nil/empty payload becomes SQL NULL, otherwise the raw JSON is passed
+// through (json.RawMessage so pgx's jsonb codec stores it verbatim).
+func healthChecksValue(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return json.RawMessage(b)
+}
+
 var cephClusterMetricColumns = []string{
-	"time", "cluster_id", "health_status",
+	"time", "cluster_id", "health_status", "health_checks",
 	"osds_total", "osds_up", "osds_in", "pgs_total",
 	"bytes_used", "bytes_avail", "bytes_total",
 	"read_ops_sec", "write_ops_sec", "read_bytes_sec", "write_bytes_sec",
@@ -109,7 +120,7 @@ func batchInsertCephClusterMetrics(ctx context.Context, copier CopyFromer, ts ti
 	src := pgx.CopyFromSlice(len(snapshots), func(i int) ([]any, error) {
 		s := snapshots[i]
 		return []any{
-			ts, s.ClusterID, s.HealthStatus,
+			ts, s.ClusterID, s.HealthStatus, healthChecksValue(s.HealthChecks),
 			s.OSDsTotal, s.OSDsUp, s.OSDsIn, s.PGsTotal,
 			s.BytesUsed, s.BytesAvail, s.BytesTotal,
 			s.ReadOpsSec, s.WriteOpsSec, s.ReadBytesSec, s.WritBytesSec,

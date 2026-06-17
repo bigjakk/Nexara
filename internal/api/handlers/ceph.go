@@ -33,7 +33,8 @@ type cephStatusResponse struct {
 }
 
 type cephHealthResponse struct {
-	Status string `json:"status"`
+	Status string                        `json:"status"`
+	Checks []proxmox.CephHealthCheckItem `json:"checks"`
 }
 
 type cephPGMapResponse struct {
@@ -139,7 +140,10 @@ func (h *CephHandler) GetStatus(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(cephStatusResponse{
-		Health: cephHealthResponse{Status: status.Health.Status},
+		Health: cephHealthResponse{
+			Status: status.Health.Status,
+			Checks: status.Health.NormalizedChecks(),
+		},
 		PGMap: cephPGMapResponse{
 			BytesUsed:    status.PGMap.BytesUsed,
 			BytesAvail:   status.PGMap.BytesAvail,
@@ -439,6 +443,50 @@ func (h *CephHandler) DeletePool(c *fiber.Ctx) error {
 
 // --- Database metric endpoints ---
 
+// cephClusterMetricResponse mirrors a ceph_cluster_metrics sample for the
+// history endpoint. It deliberately omits the per-sample health_checks JSONB:
+// only the latest health needs reasons, so sending checks for every historical
+// row (up to 7 days of samples) would bloat the response for no consumer.
+type cephClusterMetricResponse struct {
+	Time          time.Time `json:"time"`
+	ClusterID     uuid.UUID `json:"cluster_id"`
+	HealthStatus  string    `json:"health_status"`
+	OSDsTotal     int32     `json:"osds_total"`
+	OSDsUp        int32     `json:"osds_up"`
+	OSDsIn        int32     `json:"osds_in"`
+	PGsTotal      int32     `json:"pgs_total"`
+	BytesUsed     int64     `json:"bytes_used"`
+	BytesAvail    int64     `json:"bytes_avail"`
+	BytesTotal    int64     `json:"bytes_total"`
+	ReadOpsSec    int64     `json:"read_ops_sec"`
+	WriteOpsSec   int64     `json:"write_ops_sec"`
+	ReadBytesSec  int64     `json:"read_bytes_sec"`
+	WriteBytesSec int64     `json:"write_bytes_sec"`
+}
+
+func toCephClusterMetricResponses(rows []db.CephClusterMetric) []cephClusterMetricResponse {
+	out := make([]cephClusterMetricResponse, len(rows))
+	for i, m := range rows {
+		out[i] = cephClusterMetricResponse{
+			Time:          m.Time,
+			ClusterID:     m.ClusterID,
+			HealthStatus:  m.HealthStatus,
+			OSDsTotal:     m.OsdsTotal,
+			OSDsUp:        m.OsdsUp,
+			OSDsIn:        m.OsdsIn,
+			PGsTotal:      m.PgsTotal,
+			BytesUsed:     m.BytesUsed,
+			BytesAvail:    m.BytesAvail,
+			BytesTotal:    m.BytesTotal,
+			ReadOpsSec:    m.ReadOpsSec,
+			WriteOpsSec:   m.WriteOpsSec,
+			ReadBytesSec:  m.ReadBytesSec,
+			WriteBytesSec: m.WriteBytesSec,
+		}
+	}
+	return out
+}
+
 // GetHistorical handles GET /api/v1/clusters/:cluster_id/ceph/metrics
 func (h *CephHandler) GetHistorical(c *fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -475,7 +523,7 @@ func (h *CephHandler) GetHistorical(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get ceph metrics")
 	}
 
-	return c.JSON(metrics)
+	return c.JSON(toCephClusterMetricResponses(metrics))
 }
 
 // GetOSDMetrics handles GET /api/v1/clusters/:cluster_id/ceph/osds/metrics

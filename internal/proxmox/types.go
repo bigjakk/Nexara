@@ -3,6 +3,7 @@ package proxmox
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -611,6 +612,64 @@ type CephStatus struct {
 // CephHealth represents the Ceph health summary.
 type CephHealth struct {
 	Status string `json:"status"`
+	// Checks is Ceph's per-issue health detail keyed by check id
+	// (e.g. "MON_DISK_LOW", "OSD_NEARFULL"). Proxmox returns this map on
+	// HEALTH_WARN/HEALTH_ERR; it explains *why* the cluster is unhealthy.
+	Checks map[string]CephHealthCheck `json:"checks,omitempty"`
+}
+
+// CephHealthCheck is a single entry from Ceph's health.checks map.
+type CephHealthCheck struct {
+	Severity string                 `json:"severity"`
+	Summary  CephHealthCheckSummary `json:"summary"`
+}
+
+// CephHealthCheckSummary holds the human-readable summary for a health check.
+type CephHealthCheckSummary struct {
+	Message string `json:"message"`
+	Count   int64  `json:"count,omitempty"`
+}
+
+// CephHealthCheckItem is a normalized, ordered health check suitable for
+// persistence and API/UI consumption (the raw checks map is unordered and
+// keyed by id, which is awkward to render).
+type CephHealthCheckItem struct {
+	Type     string `json:"type"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+}
+
+// NormalizedChecks flattens the checks map into a stable, ordered slice:
+// errors first, then warnings, then alphabetically by type. Always returns a
+// non-nil slice so callers can serialize it directly (empty -> []).
+func (h CephHealth) NormalizedChecks() []CephHealthCheckItem {
+	items := make([]CephHealthCheckItem, 0, len(h.Checks))
+	for typ, c := range h.Checks {
+		items = append(items, CephHealthCheckItem{
+			Type:     typ,
+			Severity: c.Severity,
+			Message:  c.Summary.Message,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if ri, rj := cephSeverityRank(items[i].Severity), cephSeverityRank(items[j].Severity); ri != rj {
+			return ri < rj
+		}
+		return items[i].Type < items[j].Type
+	})
+	return items
+}
+
+// cephSeverityRank orders severities most-severe first.
+func cephSeverityRank(severity string) int {
+	switch strings.ToUpper(severity) {
+	case "HEALTH_ERR":
+		return 0
+	case "HEALTH_WARN":
+		return 1
+	default:
+		return 2
+	}
 }
 
 // CephPGMap represents Ceph placement group statistics.

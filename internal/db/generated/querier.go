@@ -210,6 +210,10 @@ type Querier interface {
 	GetLatestAlertForRule(ctx context.Context, arg GetLatestAlertForRuleParams) (AlertHistory, error)
 	GetLatestCVEScan(ctx context.Context, clusterID uuid.UUID) (CveScan, error)
 	GetLatestCephClusterMetrics(ctx context.Context, clusterID uuid.UUID) (CephClusterMetric, error)
+	// GetLatestCephHealthPerCluster returns the most recent Ceph health (status +
+	// per-issue checks) for every cluster reporting within the freshness window, so
+	// the clusters list can surface health app-wide without per-cluster live calls.
+	GetLatestCephHealthPerCluster(ctx context.Context) ([]GetLatestCephHealthPerClusterRow, error)
 	GetLatestCephOSDMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephOsdMetric, error)
 	GetLatestCephPoolMetrics(ctx context.Context, clusterID uuid.UUID) ([]CephPoolMetric, error)
 	GetLatestPBSDatastoreMetrics(ctx context.Context, pbsServerID uuid.UUID) ([]PbsDatastoreMetric, error)

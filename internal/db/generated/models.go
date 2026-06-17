@@ -99,6 +99,7 @@ type CephClusterMetric struct {
 	WriteOpsSec   int64     `json:"write_ops_sec"`
 	ReadBytesSec  int64     `json:"read_bytes_sec"`
 	WriteBytesSec int64     `json:"write_bytes_sec"`
+	HealthChecks  []byte    `json:"health_checks"`
 }
 
 type CephClusterMetrics1h struct {

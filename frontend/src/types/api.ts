@@ -538,6 +538,19 @@ export interface UpdateClusterResponse {
   connectivity: ConnectivityResult;
 }
 
+/** A single Ceph health check (the reason behind a HEALTH_WARN/HEALTH_ERR). */
+export interface CephHealthCheckItem {
+  type: string;
+  severity: string;
+  message: string;
+}
+
+/** Latest Ceph health for a cluster, attached to the cluster list/detail. */
+export interface CephHealthSummary {
+  status: string;
+  checks: CephHealthCheckItem[];
+}
+
 export interface ClusterResponse {
   id: string;
   name: string;
@@ -550,6 +563,8 @@ export interface ClusterResponse {
   pve_version: string;
   created_at: string;
   updated_at: string;
+  /** Latest Ceph health; absent/null when the cluster has no recent Ceph metrics. */
+  ceph_health?: CephHealthSummary | null;
 }
 
 export interface NodeResponse {

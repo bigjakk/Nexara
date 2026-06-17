@@ -48,6 +48,9 @@ type nodeCollectionResult struct {
 type cephClusterMetricSnapshot struct {
 	ClusterID    uuid.UUID
 	HealthStatus string
+	// HealthChecks is the JSON-encoded []proxmox.CephHealthCheckItem explaining
+	// the current status (empty array when healthy).
+	HealthChecks []byte
 	OSDsTotal    int
 	OSDsUp       int
 	OSDsIn       int

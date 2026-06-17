@@ -78,6 +78,30 @@ type clusterResponse struct {
 	PVEVersion          string    `json:"pve_version"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// CephHealth carries the cluster's latest Ceph health (status + reasons) so
+	// the UI can surface storage health app-wide. Nil when the cluster has no
+	// recent Ceph metrics (no Ceph, or not reporting).
+	CephHealth *cephHealthSummary `json:"ceph_health,omitempty"`
+}
+
+// cephHealthSummary is the per-cluster Ceph health attached to a cluster
+// response, sourced from the most recent persisted ceph_cluster_metrics row.
+type cephHealthSummary struct {
+	Status string                        `json:"status"`
+	Checks []proxmox.CephHealthCheckItem `json:"checks"`
+}
+
+// buildCephHealthSummary turns a persisted status + JSON checks payload into a
+// response summary. Returns nil when there is no usable status.
+func buildCephHealthSummary(status string, checksJSON []byte) *cephHealthSummary {
+	if status == "" || status == "HEALTH_UNKNOWN" {
+		return nil
+	}
+	s := &cephHealthSummary{Status: status, Checks: []proxmox.CephHealthCheckItem{}}
+	if len(checksJSON) > 0 {
+		_ = json.Unmarshal(checksJSON, &s.Checks)
+	}
+	return s
 }
 
 type connectivityResult struct {
@@ -243,12 +267,25 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 		}
 	}
 
+	// Attach the latest Ceph health per cluster so storage health surfaces
+	// app-wide (header, dashboard, sidebar) without per-cluster live calls.
+	cephMap := make(map[uuid.UUID]*cephHealthSummary)
+	if rows, chErr := h.queries.GetLatestCephHealthPerCluster(c.Context()); chErr == nil {
+		for _, r := range rows {
+			if s := buildCephHealthSummary(r.HealthStatus, r.HealthChecks); s != nil {
+				cephMap[r.ClusterID] = s
+			}
+		}
+	}
+
 	resp := make([]clusterResponse, 0, len(clusters))
 	for _, cl := range clusters {
 		if !access.PermitsCluster(cl.ID) {
 			continue
 		}
-		resp = append(resp, toClusterResponse(cl, nsiMap[cl.ID]))
+		cr := toClusterResponse(cl, nsiMap[cl.ID])
+		cr.CephHealth = cephMap[cl.ID]
+		resp = append(resp, cr)
 	}
 
 	return c.JSON(resp)
@@ -282,7 +319,11 @@ func (h *ClusterHandler) Get(c *fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(toClusterResponse(cluster, nsi))
+	cr := toClusterResponse(cluster, nsi)
+	if m, chErr := h.queries.GetLatestCephClusterMetrics(c.Context(), id); chErr == nil {
+		cr.CephHealth = buildCephHealthSummary(m.HealthStatus, m.HealthChecks)
+	}
+	return c.JSON(cr)
 }
 
 // Update handles PUT /api/v1/clusters/:id.
