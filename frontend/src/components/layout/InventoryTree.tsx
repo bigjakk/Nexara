@@ -353,7 +353,7 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="shrink-0 rounded p-0.5 opacity-0 hover:bg-accent group-hover:opacity-100">
+                  <button className="shrink-0 rounded p-0.5 opacity-0 hover:bg-accent group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100">
                     <MoreVertical className="h-3 w-3" />
                   </button>
                 </DropdownMenuTrigger>

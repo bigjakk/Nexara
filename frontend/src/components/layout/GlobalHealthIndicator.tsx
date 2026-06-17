@@ -176,7 +176,7 @@ export function GlobalHealthIndicator() {
                     {issue.detail}
                   </p>
                 </Link>
-                <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/issue:opacity-100">
+                <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/issue:opacity-100 pointer-coarse:opacity-100">
                   <button
                     type="button"
                     aria-label={`Mute ${issue.summary} alerts`}

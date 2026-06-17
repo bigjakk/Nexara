@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import plugin from "tailwindcss/plugin";
 
 export default {
   darkMode: "class",
@@ -71,5 +72,11 @@ export default {
   plugins: [
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require("tailwindcss-animate"),
+    // Touch / coarse-pointer devices have no hover, so hover-reveal action
+    // buttons (health-pill mute/dismiss, sidebar kebab) need an explicit
+    // "show on coarse pointer" variant.
+    plugin((api) => {
+      api.addVariant("pointer-coarse", "@media (pointer: coarse)");
+    }),
   ],
 } satisfies Config;
