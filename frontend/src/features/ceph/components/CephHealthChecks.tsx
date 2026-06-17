@@ -16,19 +16,28 @@ export function CephHealthChecks({ checks, className }: CephHealthChecksProps) {
       {checks.map((c) => {
         const sev = cephSeverity(c.severity);
         return (
-          <li key={c.type} className="flex items-start gap-2 text-xs">
-            <span
-              className={cn(
-                "mt-1 h-1.5 w-1.5 shrink-0 rounded-full",
-                severityDotClass[sev],
-              )}
-            />
-            <span className="min-w-0">
-              <span className="font-medium">{c.message}</span>
-              <span className="ml-1 font-mono text-[10px] text-muted-foreground">
-                {c.type}
+          <li key={c.type} className="text-xs">
+            <div className="flex items-start gap-2">
+              <span
+                className={cn(
+                  "mt-1 h-1.5 w-1.5 shrink-0 rounded-full",
+                  severityDotClass[sev],
+                )}
+              />
+              <span className="min-w-0">
+                <span className="font-medium">{c.message}</span>
+                <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                  {c.type}
+                </span>
               </span>
-            </span>
+            </div>
+            {c.detail.length > 0 && (
+              <ul className="ml-3.5 mt-1 space-y-0.5 border-l border-border pl-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                {c.detail.map((d, i) => (
+                  <li key={`${c.type}:${String(i)}`}>{d}</li>
+                ))}
+              </ul>
+            )}
           </li>
         );
       })}

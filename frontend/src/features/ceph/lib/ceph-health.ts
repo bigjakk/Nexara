@@ -2,6 +2,8 @@
 // colors, and for aggregating health across clusters. Keeping this in one place
 // keeps the badge, dashboard card, sidebar dot, and global indicator consistent.
 
+import type { HealthSeverity } from "@/types/api";
+
 export type CephSeverity = "ok" | "warn" | "err" | "unknown";
 
 /** Maps a Ceph status string (HEALTH_OK/WARN/ERR) to a severity bucket. */
@@ -64,3 +66,12 @@ export const severityTextClass: Record<CephSeverity, string> = {
   unknown: "text-muted-foreground",
   ok: "text-emerald-600 dark:text-emerald-400",
 };
+
+/** Worst severity across a set of health issues; "ok" when there are none. */
+export function worstIssueSeverity(
+  issues: { severity: HealthSeverity }[],
+): CephSeverity {
+  if (issues.some((i) => i.severity === "err")) return "err";
+  if (issues.some((i) => i.severity === "warn")) return "warn";
+  return "ok";
+}

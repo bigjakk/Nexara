@@ -543,12 +543,21 @@ export interface CephHealthCheckItem {
   type: string;
   severity: string;
   message: string;
+  /** Per-daemon/per-resource specifics shown under the summary (e.g. which OSDs). */
+  detail: string[];
 }
 
-/** Latest Ceph health for a cluster, attached to the cluster list/detail. */
-export interface CephHealthSummary {
-  status: string;
-  checks: CephHealthCheckItem[];
+export type HealthSeverity = "err" | "warn";
+
+/** One infrastructure-health problem attached to a cluster (server-computed). */
+export interface HealthIssue {
+  type: string;
+  severity: HealthSeverity;
+  scope: "cluster" | "node" | "storage" | "guest";
+  /** Affected resource name; "" for cluster-scoped issues. */
+  target: string;
+  summary: string;
+  detail: string;
 }
 
 export interface ClusterResponse {
@@ -563,8 +572,8 @@ export interface ClusterResponse {
   pve_version: string;
   created_at: string;
   updated_at: string;
-  /** Latest Ceph health; absent/null when the cluster has no recent Ceph metrics. */
-  ceph_health?: CephHealthSummary | null;
+  /** Current health problems (Ceph, HA, disks, storage, failed tasks, …); absent when healthy. */
+  issues?: HealthIssue[];
 }
 
 export interface NodeResponse {

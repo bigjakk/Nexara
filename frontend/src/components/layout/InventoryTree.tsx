@@ -22,11 +22,12 @@ import {
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import {
-  cephHealthLabel,
-  cephSeverity,
-  isProblem,
   severityDotClass,
+  worstIssueSeverity,
 } from "@/features/ceph/lib/ceph-health";
+import { visibleClusterIssues } from "@/lib/health-issues";
+import { useHealthDismissStore } from "@/stores/health-dismiss-store";
+import { useHealthMuteStore } from "@/stores/health-mute-store";
 import { StatusIcon } from "@/components/StatusIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { classifyOS } from "@/lib/os-classify";
@@ -268,6 +269,17 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
   const clusterKey = `cluster:${cluster.id}`;
   const isExpanded = expandedNodes.has(clusterKey);
+  // Respect dismissed/muted so the sidebar dot matches the health pill.
+  const dismissed = useHealthDismissStore((s) => s.dismissed);
+  const mutedTypes = useHealthMuteStore((s) => s.mutedTypes);
+  const clusterVisibleIssues = visibleClusterIssues(
+    cluster.id,
+    cluster.issues ?? [],
+    new Set(dismissed),
+    new Set(mutedTypes),
+  );
+  const clusterWorst = worstIssueSeverity(clusterVisibleIssues);
+  const clusterIssueCount = clusterVisibleIssues.length;
   const isActive = location.pathname === `/clusters/${cluster.id}`;
 
   const [editOpen, setEditOpen] = useState(false);
@@ -328,18 +340,15 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
                 />
                 <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
                 <span className="truncate font-medium">{cluster.name}</span>
-                {cluster.ceph_health &&
-                  isProblem(cephSeverity(cluster.ceph_health.status)) && (
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 shrink-0 rounded-full",
-                        severityDotClass[
-                          cephSeverity(cluster.ceph_health.status)
-                        ],
-                      )}
-                      title={`Ceph storage: ${cephHealthLabel(cluster.ceph_health.status)}`}
-                    />
-                  )}
+                {clusterWorst !== "ok" && (
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                      severityDotClass[clusterWorst],
+                    )}
+                    title={`${String(clusterIssueCount)} health issue${clusterIssueCount === 1 ? "" : "s"}`}
+                  />
+                )}
               </button>
 
               <DropdownMenu>

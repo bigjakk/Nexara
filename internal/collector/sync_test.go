@@ -36,6 +36,8 @@ type mockQueries struct {
 	upsertNodeCalls             []db.UpsertNodeParams
 	upsertVMCalls               []db.UpsertVMParams
 	upsertStorageCalls          []db.UpsertStoragePoolParams
+	replicationUpserts          []db.UpsertReplicationJobParams
+	deleteStaleReplicationCalls int
 	deleteStaleVMsForNodesCalls   []db.DeleteStaleVMsForNodesParams
 	deleteStaleVMsForNodesRemoved int64
 	nodeStatusFastCalls           []db.UpdateNodeStatusFastParams
@@ -231,6 +233,20 @@ func (m *mockQueries) DeleteStaleStoragePools(_ context.Context, _ db.DeleteStal
 }
 
 func (m *mockQueries) UpdateNodeAddress(_ context.Context, _ db.UpdateNodeAddressParams) error {
+	return nil
+}
+
+func (m *mockQueries) UpdateClusterQuorate(_ context.Context, _ db.UpdateClusterQuorateParams) error {
+	return nil
+}
+
+func (m *mockQueries) UpsertReplicationJob(_ context.Context, arg db.UpsertReplicationJobParams) error {
+	m.replicationUpserts = append(m.replicationUpserts, arg)
+	return nil
+}
+
+func (m *mockQueries) DeleteStaleReplicationJobs(_ context.Context, _ uuid.UUID) error {
+	m.deleteStaleReplicationCalls++
 	return nil
 }
 

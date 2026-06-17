@@ -2,9 +2,9 @@
 INSERT INTO nodes (cluster_id, name, status, cpu_count, mem_total, disk_total, pve_version, ssl_fingerprint, uptime,
                    cpu_model, cpu_cores, cpu_sockets, cpu_threads, cpu_mhz, kernel_version,
                    swap_total, swap_used, swap_free, dns_servers, dns_search, timezone,
-                   subscription_status, subscription_level, load_avg, io_wait, ha_state, last_seen_at)
+                   subscription_status, subscription_level, load_avg, io_wait, ha_state, rootfs_used, last_seen_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, now())
+        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, now())
 ON CONFLICT (cluster_id, name) DO UPDATE SET
     status = EXCLUDED.status,
     cpu_count = EXCLUDED.cpu_count,
@@ -30,6 +30,7 @@ ON CONFLICT (cluster_id, name) DO UPDATE SET
     load_avg = EXCLUDED.load_avg,
     io_wait = EXCLUDED.io_wait,
     ha_state = EXCLUDED.ha_state,
+    rootfs_used = EXCLUDED.rootfs_used,
     last_seen_at = now()
 RETURNING *;
 

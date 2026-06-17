@@ -622,6 +622,9 @@ type CephHealth struct {
 type CephHealthCheck struct {
 	Severity string                 `json:"severity"`
 	Summary  CephHealthCheckSummary `json:"summary"`
+	// Detail holds the per-daemon/per-resource specifics (e.g. which mons/osds
+	// are affected) that Proxmox shows under the summary when expanded.
+	Detail []CephHealthCheckDetail `json:"detail,omitempty"`
 }
 
 // CephHealthCheckSummary holds the human-readable summary for a health check.
@@ -630,13 +633,19 @@ type CephHealthCheckSummary struct {
 	Count   int64  `json:"count,omitempty"`
 }
 
+// CephHealthCheckDetail is one specific detail line under a health check.
+type CephHealthCheckDetail struct {
+	Message string `json:"message"`
+}
+
 // CephHealthCheckItem is a normalized, ordered health check suitable for
 // persistence and API/UI consumption (the raw checks map is unordered and
 // keyed by id, which is awkward to render).
 type CephHealthCheckItem struct {
-	Type     string `json:"type"`
-	Severity string `json:"severity"`
-	Message  string `json:"message"`
+	Type     string   `json:"type"`
+	Severity string   `json:"severity"`
+	Message  string   `json:"message"`
+	Detail   []string `json:"detail"`
 }
 
 // NormalizedChecks flattens the checks map into a stable, ordered slice:
@@ -645,10 +654,17 @@ type CephHealthCheckItem struct {
 func (h CephHealth) NormalizedChecks() []CephHealthCheckItem {
 	items := make([]CephHealthCheckItem, 0, len(h.Checks))
 	for typ, c := range h.Checks {
+		detail := make([]string, 0, len(c.Detail))
+		for _, d := range c.Detail {
+			if d.Message != "" {
+				detail = append(detail, d.Message)
+			}
+		}
 		items = append(items, CephHealthCheckItem{
 			Type:     typ,
 			Severity: c.Severity,
 			Message:  c.Summary.Message,
+			Detail:   detail,
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {

@@ -29,3 +29,6 @@ SELECT * FROM clusters WHERE is_active = true ORDER BY created_at;
 
 -- name: UpdateClusterPVEVersion :exec
 UPDATE clusters SET pve_version = $2 WHERE id = $1;
+
+-- name: UpdateClusterQuorate :exec
+UPDATE clusters SET quorate = $2 WHERE id = $1;

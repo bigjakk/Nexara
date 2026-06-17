@@ -78,30 +78,10 @@ type clusterResponse struct {
 	PVEVersion          string    `json:"pve_version"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
-	// CephHealth carries the cluster's latest Ceph health (status + reasons) so
-	// the UI can surface storage health app-wide. Nil when the cluster has no
-	// recent Ceph metrics (no Ceph, or not reporting).
-	CephHealth *cephHealthSummary `json:"ceph_health,omitempty"`
-}
-
-// cephHealthSummary is the per-cluster Ceph health attached to a cluster
-// response, sourced from the most recent persisted ceph_cluster_metrics row.
-type cephHealthSummary struct {
-	Status string                        `json:"status"`
-	Checks []proxmox.CephHealthCheckItem `json:"checks"`
-}
-
-// buildCephHealthSummary turns a persisted status + JSON checks payload into a
-// response summary. Returns nil when there is no usable status.
-func buildCephHealthSummary(status string, checksJSON []byte) *cephHealthSummary {
-	if status == "" || status == "HEALTH_UNKNOWN" {
-		return nil
-	}
-	s := &cephHealthSummary{Status: status, Checks: []proxmox.CephHealthCheckItem{}}
-	if len(checksJSON) > 0 {
-		_ = json.Unmarshal(checksJSON, &s.Checks)
-	}
-	return s
+	// Issues is the cluster's current infrastructure-health problems (Ceph, HA,
+	// disks, storage, failed tasks, …), computed server-side so the UI can
+	// surface them app-wide. Empty/omitted when the cluster is healthy.
+	Issues []healthIssueResponse `json:"issues,omitempty"`
 }
 
 type connectivityResult struct {
@@ -267,16 +247,10 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 		}
 	}
 
-	// Attach the latest Ceph health per cluster so storage health surfaces
-	// app-wide (header, dashboard, sidebar) without per-cluster live calls.
-	cephMap := make(map[uuid.UUID]*cephHealthSummary)
-	if rows, chErr := h.queries.GetLatestCephHealthPerCluster(c.Context()); chErr == nil {
-		for _, r := range rows {
-			if s := buildCephHealthSummary(r.HealthStatus, r.HealthChecks); s != nil {
-				cephMap[r.ClusterID] = s
-			}
-		}
-	}
+	// Attach current health issues per cluster (Ceph, HA, disks, storage, failed
+	// tasks, …) so they surface app-wide (header, dashboard, sidebar) without
+	// per-cluster live calls.
+	issuesMap := buildAllClusterIssues(c.Context(), h.queries)
 
 	resp := make([]clusterResponse, 0, len(clusters))
 	for _, cl := range clusters {
@@ -284,7 +258,7 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 			continue
 		}
 		cr := toClusterResponse(cl, nsiMap[cl.ID])
-		cr.CephHealth = cephMap[cl.ID]
+		cr.Issues = issuesMap[cl.ID]
 		resp = append(resp, cr)
 	}
 
@@ -320,9 +294,7 @@ func (h *ClusterHandler) Get(c *fiber.Ctx) error {
 	}
 
 	cr := toClusterResponse(cluster, nsi)
-	if m, chErr := h.queries.GetLatestCephClusterMetrics(c.Context(), id); chErr == nil {
-		cr.CephHealth = buildCephHealthSummary(m.HealthStatus, m.HealthChecks)
-	}
+	cr.Issues = buildAllClusterIssues(c.Context(), h.queries)[id]
 	return c.JSON(cr)
 }
 

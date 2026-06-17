@@ -54,6 +54,9 @@ type SyncQueries interface {
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
 	DeleteStaleVMsForNodes(ctx context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error)
 	UpdateNodeAddress(ctx context.Context, arg db.UpdateNodeAddressParams) error
+	UpdateClusterQuorate(ctx context.Context, arg db.UpdateClusterQuorateParams) error
+	UpsertReplicationJob(ctx context.Context, arg db.UpsertReplicationJobParams) error
+	DeleteStaleReplicationJobs(ctx context.Context, clusterID uuid.UUID) error
 	// Audit
 	InsertAuditLog(ctx context.Context, arg db.InsertAuditLogParams) error
 	InsertAuditLogWithSource(ctx context.Context, arg db.InsertAuditLogWithSourceParams) error
@@ -481,8 +484,11 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 		}
 	}
 
-	// Update node addresses from corosync cluster status.
+	// Update node addresses + quorum status from corosync cluster status.
 	s.syncNodeAddresses(ctx, client, cluster.ID)
+
+	// Collect storage-replication job status.
+	s.syncReplication(ctx, client, cluster.ID)
 
 	// Sync Ceph data once per cluster using the first online node.
 	if len(nodes) > 0 {
@@ -669,6 +675,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	var cpuCount int32
 	var memTotal int64
 	var diskTotal int64
+	var rootfsUsed int64
 	var cpuUsage float64
 	var memUsed int64
 	var cpuModel string
@@ -697,6 +704,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		cpuCount = safeconv.Int32(status.CPUInfo.CPUs)
 		memTotal = status.Memory.Total
 		diskTotal = status.RootFS.Total
+		rootfsUsed = status.RootFS.Used
 		cpuUsage = status.CPU
 		memUsed = status.Memory.Used
 		cpuModel = status.CPUInfo.Model
@@ -777,6 +785,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		LoadAvg:            loadAvg,
 		IoWait:             ioWait,
 		HaState:            nodeHAState[node.Node],
+		RootfsUsed:         rootfsUsed,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("upsert node %s: %w", node.Node, err)
@@ -939,6 +948,7 @@ func (s *Syncer) syncVMs(ctx context.Context, client ProxmoxClient, clusterID, n
 			Tags:      vm.Tags,
 			HaState:   extra.HAState,
 			Pool:      extra.Pool,
+			LockState: vm.Lock,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upsert VM %d on %s: %w", vm.VMID, nodeName, err)
@@ -1053,6 +1063,7 @@ func (s *Syncer) syncContainers(ctx context.Context, client ProxmoxClient, clust
 			Tags:      ct.Tags,
 			HaState:   extra.HAState,
 			Pool:      extra.Pool,
+			LockState: "",
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upsert container %d on %s: %w", ct.VMID, nodeName, err)
@@ -1418,6 +1429,13 @@ func (s *Syncer) syncNodeAddresses(ctx context.Context, client ProxmoxClient, cl
 	}
 
 	for _, entry := range entries {
+		if entry.Type == "cluster" {
+			_ = s.queries.UpdateClusterQuorate(ctx, db.UpdateClusterQuorateParams{
+				ID:      clusterID,
+				Quorate: entry.Quorate == 1,
+			})
+			continue
+		}
 		if entry.Type != "node" || entry.IP == "" {
 			continue
 		}
@@ -1427,6 +1445,38 @@ func (s *Syncer) syncNodeAddresses(ctx context.Context, client ProxmoxClient, cl
 			Address:   entry.IP,
 		})
 	}
+}
+
+// syncReplication collects storage-replication job status so failing jobs can
+// surface in the health indicator. A runtime type assertion keeps the
+// collector's ProxmoxClient interface (and its test fakes) unchanged.
+func (s *Syncer) syncReplication(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID) {
+	rc, ok := client.(interface {
+		GetReplicationJobs(context.Context) ([]proxmox.ReplicationJob, error)
+	})
+	if !ok {
+		return
+	}
+	jobs, err := rc.GetReplicationJobs(ctx)
+	if err != nil {
+		s.logger.Debug("failed to get replication jobs", "cluster_id", clusterID, "error", err)
+		return
+	}
+	for _, j := range jobs {
+		if upErr := s.queries.UpsertReplicationJob(ctx, db.UpsertReplicationJobParams{
+			ClusterID: clusterID,
+			JobID:     j.ID,
+			Guest:     safeconv.Int32(j.Guest),
+			Node:      j.Source,
+			Target:    j.Target,
+			FailCount: safeconv.Int32(j.FailCount),
+			Error:     j.Error,
+		}); upErr != nil {
+			s.logger.Debug("failed to upsert replication job",
+				"cluster_id", clusterID, "job", j.ID, "error", upErr)
+		}
+	}
+	_ = s.queries.DeleteStaleReplicationJobs(ctx, clusterID)
 }
 
 // SyncAll syncs all active clusters and returns collected metric results.

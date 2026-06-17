@@ -85,7 +85,7 @@ func (q *Queries) DeleteVMsAbsentFromCluster(ctx context.Context, arg DeleteVMsA
 }
 
 const getContainer = `-- name: GetContainer :one
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype FROM vms WHERE id = $1 AND type = 'lxc'
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype, lock_state FROM vms WHERE id = $1 AND type = 'lxc'
 `
 
 func (q *Queries) GetContainer(ctx context.Context, id uuid.UUID) (Vm, error) {
@@ -112,12 +112,13 @@ func (q *Queries) GetContainer(ctx context.Context, id uuid.UUID) (Vm, error) {
 		&i.UpdatedAt,
 		&i.Ostype,
 		&i.ConfigOstype,
+		&i.LockState,
 	)
 	return i, err
 }
 
 const getVM = `-- name: GetVM :one
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype FROM vms WHERE id = $1
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype, lock_state FROM vms WHERE id = $1
 `
 
 func (q *Queries) GetVM(ctx context.Context, id uuid.UUID) (Vm, error) {
@@ -144,12 +145,13 @@ func (q *Queries) GetVM(ctx context.Context, id uuid.UUID) (Vm, error) {
 		&i.UpdatedAt,
 		&i.Ostype,
 		&i.ConfigOstype,
+		&i.LockState,
 	)
 	return i, err
 }
 
 const getVMByClusterAndVmid = `-- name: GetVMByClusterAndVmid :one
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype FROM vms WHERE cluster_id = $1 AND vmid = $2
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype, lock_state FROM vms WHERE cluster_id = $1 AND vmid = $2
 `
 
 type GetVMByClusterAndVmidParams struct {
@@ -181,12 +183,13 @@ func (q *Queries) GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterA
 		&i.UpdatedAt,
 		&i.Ostype,
 		&i.ConfigOstype,
+		&i.LockState,
 	)
 	return i, err
 }
 
 const listAllVMs = `-- name: ListAllVMs :many
-SELECT v.id, v.cluster_id, v.node_id, v.vmid, v.name, v.type, v.status, v.cpu_count, v.mem_total, v.disk_total, v.uptime, v.template, v.tags, v.ha_state, v.pool, v.last_seen_at, v.created_at, v.updated_at, v.ostype, v.config_ostype, c.name AS cluster_name
+SELECT v.id, v.cluster_id, v.node_id, v.vmid, v.name, v.type, v.status, v.cpu_count, v.mem_total, v.disk_total, v.uptime, v.template, v.tags, v.ha_state, v.pool, v.last_seen_at, v.created_at, v.updated_at, v.ostype, v.config_ostype, v.lock_state, c.name AS cluster_name
 FROM vms v
 JOIN clusters c ON c.id = v.cluster_id
 WHERE v.template = false
@@ -214,6 +217,7 @@ type ListAllVMsRow struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 	Ostype       string    `json:"ostype"`
 	ConfigOstype string    `json:"config_ostype"`
+	LockState    string    `json:"lock_state"`
 	ClusterName  string    `json:"cluster_name"`
 }
 
@@ -247,6 +251,7 @@ func (q *Queries) ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error) {
 			&i.UpdatedAt,
 			&i.Ostype,
 			&i.ConfigOstype,
+			&i.LockState,
 			&i.ClusterName,
 		); err != nil {
 			return nil, err
@@ -260,7 +265,7 @@ func (q *Queries) ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error) {
 }
 
 const listContainersByCluster = `-- name: ListContainersByCluster :many
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype, lock_state FROM vms WHERE cluster_id = $1 AND type = 'lxc' ORDER BY vmid
 `
 
 func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error) {
@@ -293,6 +298,7 @@ func (q *Queries) ListContainersByCluster(ctx context.Context, clusterID uuid.UU
 			&i.UpdatedAt,
 			&i.Ostype,
 			&i.ConfigOstype,
+			&i.LockState,
 		); err != nil {
 			return nil, err
 		}
@@ -356,7 +362,7 @@ func (q *Queries) ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UU
 }
 
 const listVMsByCluster = `-- name: ListVMsByCluster :many
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype FROM vms WHERE cluster_id = $1 ORDER BY vmid
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype, lock_state FROM vms WHERE cluster_id = $1 ORDER BY vmid
 `
 
 func (q *Queries) ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error) {
@@ -389,6 +395,7 @@ func (q *Queries) ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]
 			&i.UpdatedAt,
 			&i.Ostype,
 			&i.ConfigOstype,
+			&i.LockState,
 		); err != nil {
 			return nil, err
 		}
@@ -401,7 +408,7 @@ func (q *Queries) ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]
 }
 
 const listVMsByNode = `-- name: ListVMsByNode :many
-SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype FROM vms WHERE node_id = $1 ORDER BY vmid
+SELECT id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype, lock_state FROM vms WHERE node_id = $1 ORDER BY vmid
 `
 
 func (q *Queries) ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error) {
@@ -434,6 +441,7 @@ func (q *Queries) ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, er
 			&i.UpdatedAt,
 			&i.Ostype,
 			&i.ConfigOstype,
+			&i.LockState,
 		); err != nil {
 			return nil, err
 		}
@@ -502,8 +510,8 @@ func (q *Queries) UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) 
 }
 
 const upsertVM = `-- name: UpsertVM :one
-INSERT INTO vms (cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
+INSERT INTO vms (cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, lock_state, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
 ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     node_id = EXCLUDED.node_id,
     name = EXCLUDED.name,
@@ -517,8 +525,9 @@ ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     tags = EXCLUDED.tags,
     ha_state = EXCLUDED.ha_state,
     pool = EXCLUDED.pool,
+    lock_state = EXCLUDED.lock_state,
     last_seen_at = now()
-RETURNING id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype
+RETURNING id, cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at, created_at, updated_at, ostype, config_ostype, lock_state
 `
 
 type UpsertVMParams struct {
@@ -536,6 +545,7 @@ type UpsertVMParams struct {
 	Tags      string    `json:"tags"`
 	HaState   string    `json:"ha_state"`
 	Pool      string    `json:"pool"`
+	LockState string    `json:"lock_state"`
 }
 
 func (q *Queries) UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error) {
@@ -554,6 +564,7 @@ func (q *Queries) UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error) 
 		arg.Tags,
 		arg.HaState,
 		arg.Pool,
+		arg.LockState,
 	)
 	var i Vm
 	err := row.Scan(
@@ -577,6 +588,7 @@ func (q *Queries) UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error) 
 		&i.UpdatedAt,
 		&i.Ostype,
 		&i.ConfigOstype,
+		&i.LockState,
 	)
 	return i, err
 }

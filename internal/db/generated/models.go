@@ -175,6 +175,7 @@ type Cluster struct {
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 	PveVersion           string    `json:"pve_version"`
+	Quorate              bool      `json:"quorate"`
 }
 
 type ClusterSshCredential struct {
@@ -470,6 +471,7 @@ type Node struct {
 	LoadAvg            string    `json:"load_avg"`
 	IoWait             float64   `json:"io_wait"`
 	HaState            string    `json:"ha_state"`
+	RootfsUsed         int64     `json:"rootfs_used"`
 }
 
 type NodeDisk struct {
@@ -704,6 +706,17 @@ type Permission struct {
 type ProxmoxTaskSyncState struct {
 	ClusterID    uuid.UUID `json:"cluster_id"`
 	LastSyncedAt int64     `json:"last_synced_at"`
+}
+
+type ReplicationJob struct {
+	ClusterID  uuid.UUID `json:"cluster_id"`
+	JobID      string    `json:"job_id"`
+	Guest      int32     `json:"guest"`
+	Node       string    `json:"node"`
+	Target     string    `json:"target"`
+	FailCount  int32     `json:"fail_count"`
+	Error      string    `json:"error"`
+	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
 type ReportRun struct {
@@ -947,6 +960,7 @@ type Vm struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 	Ostype       string    `json:"ostype"`
 	ConfigOstype string    `json:"config_ostype"`
+	LockState    string    `json:"lock_state"`
 }
 
 type VmFolder struct {

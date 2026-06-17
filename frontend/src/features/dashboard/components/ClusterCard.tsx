@@ -2,8 +2,11 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Card } from "@/components/ui/card";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
-import { CephHealthBadge } from "@/features/ceph/components/CephHealthBadge";
-import { cephSeverity, isProblem } from "@/features/ceph/lib/ceph-health";
+import { Badge } from "@/components/ui/badge";
+import { worstIssueSeverity } from "@/features/ceph/lib/ceph-health";
+import { visibleClusterIssues } from "@/lib/health-issues";
+import { useHealthDismissStore } from "@/stores/health-dismiss-store";
+import { useHealthMuteStore } from "@/stores/health-mute-store";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ClusterResponse } from "@/types/api";
@@ -69,6 +72,8 @@ function UtilBar({
 export function ClusterCard({ summary, metrics }: ClusterCardProps) {
   const navigate = useNavigate();
   const { t } = useTranslation("dashboard");
+  const dismissed = useHealthDismissStore((s) => s.dismissed);
+  const mutedTypes = useHealthMuteStore((s) => s.mutedTypes);
   const {
     cluster,
     nodeCount,
@@ -85,6 +90,14 @@ export function ClusterCard({ summary, metrics }: ClusterCardProps) {
     storageTotalBytes > 0 ? (storageUsedBytes / storageTotalBytes) * 100 : null;
 
   const dotCount = Math.min(nodeCount, 8);
+  // Respect dismissed/muted so the badge matches what the health pill shows.
+  const issues = visibleClusterIssues(
+    cluster.id,
+    cluster.issues ?? [],
+    new Set(dismissed),
+    new Set(mutedTypes),
+  );
+  const worstSeverity = worstIssueSeverity(issues);
 
   return (
     <Card
@@ -110,10 +123,17 @@ export function ClusterCard({ summary, metrics }: ClusterCardProps) {
           </span>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {cluster.ceph_health &&
-            isProblem(cephSeverity(cluster.ceph_health.status)) && (
-              <CephHealthBadge status={cluster.ceph_health.status} />
-            )}
+          {issues.length > 0 && (
+            <Badge
+              variant={worstSeverity === "err" ? "destructive" : "outline"}
+              className={cn(
+                worstSeverity === "warn" &&
+                  "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-400",
+              )}
+            >
+              {issues.length} issue{issues.length === 1 ? "" : "s"}
+            </Badge>
+          )}
           <ClusterStatusBadge status={cluster.status} />
         </div>
       </div>

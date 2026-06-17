@@ -1,6 +1,6 @@
 -- name: UpsertVM :one
-INSERT INTO vms (cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
+INSERT INTO vms (cluster_id, node_id, vmid, name, type, status, cpu_count, mem_total, disk_total, uptime, template, tags, ha_state, pool, lock_state, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
 ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     node_id = EXCLUDED.node_id,
     name = EXCLUDED.name,
@@ -14,6 +14,7 @@ ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     tags = EXCLUDED.tags,
     ha_state = EXCLUDED.ha_state,
     pool = EXCLUDED.pool,
+    lock_state = EXCLUDED.lock_state,
     last_seen_at = now()
 RETURNING *;
 

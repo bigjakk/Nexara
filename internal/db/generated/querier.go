@@ -124,6 +124,9 @@ type Querier interface {
 	DeleteStalePBSSyncJobs(ctx context.Context, arg DeleteStalePBSSyncJobsParams) error
 	// Grace-windowed, DB-clock prune (mirrors DeleteStaleVMsForNodes in vms.sql).
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg DeleteStalePBSVerifyJobsParams) error
+	// DeleteStaleReplicationJobs prunes jobs no longer reported by Proxmox (their
+	// last_seen_at falls behind once they stop being upserted each sync).
+	DeleteStaleReplicationJobs(ctx context.Context, clusterID uuid.UUID) error
 	// Grace-windowed, DB-clock prune (see DeleteStaleVMsForNodes in vms.sql): only
 	// removes pools unseen for longer than the grace window, with the cutoff driven
 	// from now() so the app and DB clocks aren't mixed. Avoids churning pool rows —
@@ -352,9 +355,24 @@ type Querier interface {
 	// already audited, or a legacy external task ingested before task_history rows
 	// existed). Backed by idx_task_history_upid and idx_audit_log_upid.
 	ListExistingTaskHistoryUPIDs(ctx context.Context, upids []string) ([]string, error)
+	// Physical disks whose SMART overall-health assessment reports failure. A
+	// deny-list (LIKE 'FAIL%') rather than an allow-list, so an unexpected benign
+	// string (controller-specific, OLD-AGE, …) can't raise a false hardware alert.
+	ListFailedDisks(ctx context.Context) ([]ListFailedDisksRow, error)
+	// Replication jobs currently in an error state. Proxmox resets fail_count to 0
+	// on the next successful run, so gating on fail_count (not the possibly-stale
+	// error string) matches "in error state" as the PVE GUI shows it.
+	ListFailedReplication(ctx context.Context) ([]ListFailedReplicationRow, error)
 	ListFirewallTemplates(ctx context.Context) ([]FirewallTemplate, error)
 	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
 	ListGlobalSettings(ctx context.Context) ([]Setting, error)
+	// Guests whose HA resource state is "error" (needs manual intervention).
+	ListHAErrorGuests(ctx context.Context) ([]ListHAErrorGuestsRow, error)
+	// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).
+	ListIOErrorGuests(ctx context.Context) ([]ListIOErrorGuestsRow, error)
+	// Storage that is enabled but not currently active (unreachable). Shared pools
+	// appear once per node, so de-duplicate by (cluster_id, storage).
+	ListInactiveStorage(ctx context.Context) ([]ListInactiveStorageRow, error)
 	ListKEVCVEIDs(ctx context.Context) ([]string, error)
 	ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error)
 	ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
@@ -364,9 +382,15 @@ type Querier interface {
 	ListMobileDevicesByUser(ctx context.Context, userID uuid.UUID) ([]MobileDevice, error)
 	ListNodeDisksByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeDisk, error)
 	ListNodeEndpoints(ctx context.Context, clusterID uuid.UUID) ([]ListNodeEndpointsRow, error)
+	// Health-aggregator queries: each returns ONLY problem rows across all clusters,
+	// so the clusters list can attach a generic issues[] without per-cluster calls.
+	// Offline nodes and HA-fenced nodes.
+	ListNodeHealthProblems(ctx context.Context) ([]ListNodeHealthProblemsRow, error)
 	ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeNetworkInterface, error)
 	ListNodePCIDevicesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodePciDevice, error)
 	ListNodesByCluster(ctx context.Context, clusterID uuid.UUID) ([]Node, error)
+	// Active clusters that have lost quorum.
+	ListNonQuorateClusters(ctx context.Context) ([]uuid.UUID, error)
 	ListNotificationChannels(ctx context.Context) ([]NotificationChannel, error)
 	// channel_id is optional. Pass NULL via sqlc.narg to match all channels;
 	// otherwise filter to the given channel.
@@ -382,6 +406,8 @@ type Querier interface {
 	ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsVerifyJob, error)
 	ListPermissions(ctx context.Context) ([]Permission, error)
 	ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentAuditLogEnrichedRow, error)
+	// Failed tasks in the last 24h, grouped by type so we surface a count, not spam.
+	ListRecentFailedTasksByType(ctx context.Context) ([]ListRecentFailedTasksByTypeRow, error)
 	ListRecoveryCodes(ctx context.Context, userID uuid.UUID) ([]ListRecoveryCodesRow, error)
 	ListReportRuns(ctx context.Context, arg ListReportRunsParams) ([]ReportRun, error)
 	ListReportRunsByCluster(ctx context.Context, arg ListReportRunsByClusterParams) ([]ReportRun, error)
@@ -392,11 +418,15 @@ type Querier interface {
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpdateJobsParams) ([]RollingUpdateJob, error)
 	ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) ([]RollingUpdateNode, error)
+	// Nodes whose root filesystem is at or above 85% usage.
+	ListRootfsFullNodes(ctx context.Context) ([]ListRootfsFullNodesRow, error)
 	ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUpdateJob, error)
 	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]TaskHistory, error)
 	ListSSHKnownHosts(ctx context.Context, clusterID uuid.UUID) ([]SshKnownHost, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
 	ListSettingsByScope(ctx context.Context, arg ListSettingsByScopeParams) ([]Setting, error)
+	// Active storage at or above 85% usage. De-duplicate shared pools.
+	ListStorageNearFull(ctx context.Context) ([]ListStorageNearFullRow, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
 	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
@@ -500,6 +530,7 @@ type Querier interface {
 	UpdateCVEScanTotalNodes(ctx context.Context, arg UpdateCVEScanTotalNodesParams) error
 	UpdateCluster(ctx context.Context, arg UpdateClusterParams) (Cluster, error)
 	UpdateClusterPVEVersion(ctx context.Context, arg UpdateClusterPVEVersionParams) error
+	UpdateClusterQuorate(ctx context.Context, arg UpdateClusterQuorateParams) error
 	UpdateDRSHistoryStatus(ctx context.Context, arg UpdateDRSHistoryStatusParams) error
 	UpdateDRSRule(ctx context.Context, arg UpdateDRSRuleParams) error
 	UpdateFirewallTemplate(ctx context.Context, arg UpdateFirewallTemplateParams) (FirewallTemplate, error)
@@ -558,6 +589,9 @@ type Querier interface {
 	UpsertPBSSnapshot(ctx context.Context, arg UpsertPBSSnapshotParams) (PbsSnapshot, error)
 	UpsertPBSSyncJob(ctx context.Context, arg UpsertPBSSyncJobParams) (PbsSyncJob, error)
 	UpsertPBSVerifyJob(ctx context.Context, arg UpsertPBSVerifyJobParams) (PbsVerifyJob, error)
+	// Storage-replication job status, collected per cluster from /cluster/replication
+	// so failing jobs can surface in the health indicator.
+	UpsertReplicationJob(ctx context.Context, arg UpsertReplicationJobParams) error
 	UpsertSSHKnownHost(ctx context.Context, arg UpsertSSHKnownHostParams) (SshKnownHost, error)
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error)
 	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (UpsertStoragePoolRow, error)
