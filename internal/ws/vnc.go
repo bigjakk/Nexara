@@ -16,7 +16,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 
-	fiberWs "github.com/gofiber/contrib/websocket"
+	fiberWs "github.com/gofiber/contrib/v3/websocket"
 	"github.com/google/uuid"
 )
 

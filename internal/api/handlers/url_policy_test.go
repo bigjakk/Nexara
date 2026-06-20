@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 func httpRequest(method, path string) *http.Request {
@@ -186,7 +186,7 @@ func TestEnforceURLAddressPolicy_DNSFailureIsAllowed(t *testing.T) {
 
 func TestRenderAddressPolicyError_HardReject(t *testing.T) {
 	app := fiber.New()
-	app.Get("/test", func(c *fiber.Ctx) error {
+	app.Get("/test", func(c fiber.Ctx) error {
 		err := &addressPolicyError{
 			HardReject: true,
 			IP:         "169.254.169.254",
@@ -206,7 +206,7 @@ func TestRenderAddressPolicyError_HardReject(t *testing.T) {
 
 func TestRenderAddressPolicyError_PrivateConfirm(t *testing.T) {
 	app := fiber.New()
-	app.Get("/test", func(c *fiber.Ctx) error {
+	app.Get("/test", func(c fiber.Ctx) error {
 		err := &addressPolicyError{
 			HardReject: false,
 			IP:         "10.0.0.1",
@@ -233,7 +233,7 @@ func TestRenderAddressPolicyError_PrivateConfirm(t *testing.T) {
 
 func TestRenderAddressPolicyError_NonPolicyFallsBack(t *testing.T) {
 	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
-	app.Get("/test", func(c *fiber.Ctx) error {
+	app.Get("/test", func(c fiber.Ctx) error {
 		return renderAddressPolicyError(c, errors.New("plain error"))
 	})
 

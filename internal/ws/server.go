@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/contrib/websocket"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/contrib/v3/websocket"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/auth"
@@ -34,7 +34,7 @@ type Server struct {
 	// over rbacEngine.HasPermission. Never set in production builds.
 	testPermissionChecker PermissionChecker
 	// allowedOrigins is the WebSocket upgrade Origin allow-list. nil or
-	// empty preserves the gofiber/contrib/websocket default of allowing
+	// empty preserves the gofiber/contrib/v3/websocket default of allowing
 	// all origins (the historical behaviour, suitable for dev/lab
 	// homelabs); a non-empty list enforces an exact-match check at
 	// upgrade time, rejecting cross-origin upgrades with HTTP 403.
@@ -100,9 +100,9 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 		s.logger.Warn("ws server: WS_ALLOWED_ORIGINS not set — accepting WebSocket upgrades from any origin (set this in production for CSRF defence-in-depth)")
 	}
 
-	app := fiber.New(fiber.Config{
-		DisableStartupMessage: true,
-	})
+	// Fiber v3 moved DisableStartupMessage from fiber.Config to ListenConfig
+	// (set in Listen / RegisterRoutes' host app), so New takes no config here.
+	app := fiber.New()
 
 	app.Get("/healthz", s.healthz)
 
@@ -128,7 +128,7 @@ func NewServer(hub *Hub, jwtSvc *auth.JWTService, logger *slog.Logger, pingInter
 func (s *Server) Listen(port int) error {
 	addr := fmt.Sprintf(":%d", port)
 	s.logger.Info("WebSocket server listening", "addr", addr)
-	return s.app.Listen(addr)
+	return s.app.Listen(addr, fiber.ListenConfig{DisableStartupMessage: true})
 }
 
 // Shutdown gracefully shuts down the server.
@@ -191,7 +191,7 @@ func wsConfigWithSubprotocol(allowedOrigins []string) websocket.Config {
 // ParseAllowedOrigins splits a comma-separated origin string (typically
 // the WS_ALLOWED_ORIGINS env var) into a list of origin entries. Whitespace
 // is trimmed around each entry, empty entries are dropped, and a literal
-// `*` short-circuits to nil — the gofiber/contrib/websocket convention for
+// `*` short-circuits to nil — the gofiber/contrib/v3/websocket convention for
 // "allow all origins" — so operators can keep their dev configs explicit
 // without needing a separate "no allow-list" toggle.
 //
@@ -215,7 +215,7 @@ func ParseAllowedOrigins(raw string) []string {
 }
 
 // healthz returns a 200 OK for health checks.
-func (s *Server) healthz(c *fiber.Ctx) error {
+func (s *Server) healthz(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -243,7 +243,7 @@ func (s *Server) healthz(c *fiber.Ctx) error {
 // run the underlying RBAC check before issuing the scoped JWT, so this
 // middleware is the single chokepoint that enforces "WS upgrades are
 // authenticated only by short-lived single-purpose tokens".
-func (s *Server) authMiddleware(c *fiber.Ctx) error {
+func (s *Server) authMiddleware(c fiber.Ctx) error {
 	if !websocket.IsWebSocketUpgrade(c) {
 		return fiber.ErrUpgradeRequired
 	}
@@ -344,8 +344,10 @@ func (s *Server) authMiddleware(c *fiber.Ctx) error {
 // Joins all values with `,` and delegates to tokenFromSubprotocol.
 // Defence-in-depth — well-behaved browsers send a single line, but
 // custom clients can split.
-func tokenFromSubprotocolHeader(c *fiber.Ctx) string {
-	values := c.Context().Request.Header.PeekAll("Sec-WebSocket-Protocol")
+func tokenFromSubprotocolHeader(c fiber.Ctx) string {
+	// Fiber v3: c.Context() now returns the Go context.Context; the underlying
+	// fasthttp.RequestCtx (for raw header access) is c.RequestCtx().
+	values := c.RequestCtx().Request.Header.PeekAll("Sec-WebSocket-Protocol")
 	if len(values) == 0 {
 		return ""
 	}
@@ -412,7 +414,7 @@ func isValidJWTSegment(s string) bool {
 // validateConsoleScope verifies that a scoped console token is being used on
 // the correct path (/ws/console or /ws/vnc) and that all query parameters
 // match the scope embedded in the token. Any mismatch is a hard reject.
-func validateConsoleScope(c *fiber.Ctx, scope *auth.ConsoleScope) error {
+func validateConsoleScope(c fiber.Ctx, scope *auth.ConsoleScope) error {
 	return validateConsoleScopeFields(
 		c.Path(),
 		c.Query("cluster_id"),

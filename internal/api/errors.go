@@ -3,7 +3,7 @@ package api
 import (
 	"errors"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // ErrorResponse is the standard error envelope returned by all API endpoints.
@@ -14,7 +14,7 @@ type ErrorResponse struct {
 }
 
 // errorHandler is the custom Fiber error handler that returns JSON error envelopes.
-func errorHandler(c *fiber.Ctx, err error) error {
+func errorHandler(c fiber.Ctx, err error) error {
 	code := fiber.StatusInternalServerError
 	message := "Internal Server Error"
 

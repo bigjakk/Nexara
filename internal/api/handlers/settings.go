@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -56,7 +56,7 @@ func toSettingResponse(s db.Setting) settingResponse {
 
 // ListSettings returns settings filtered by scope.
 // GET /api/v1/settings?scope=global|user
-func (h *SettingsHandler) ListSettings(c *fiber.Ctx) error {
+func (h *SettingsHandler) ListSettings(c fiber.Ctx) error {
 	scope := c.Query("scope", "global")
 	if scope != "global" && scope != "user" && scope != "cluster" {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid scope: must be global, user, or cluster")
@@ -91,7 +91,7 @@ func (h *SettingsHandler) ListSettings(c *fiber.Ctx) error {
 
 // GetSetting returns a single setting by key.
 // GET /api/v1/settings/:key?scope=global|user
-func (h *SettingsHandler) GetSetting(c *fiber.Ctx) error {
+func (h *SettingsHandler) GetSetting(c fiber.Ctx) error {
 	key := c.Params("key")
 	if key == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Key is required")
@@ -127,7 +127,7 @@ type upsertSettingRequest struct {
 
 // UpsertSetting creates or updates a setting.
 // PUT /api/v1/settings/:key
-func (h *SettingsHandler) UpsertSetting(c *fiber.Ctx) error {
+func (h *SettingsHandler) UpsertSetting(c fiber.Ctx) error {
 	key := c.Params("key")
 	if key == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Key is required")
@@ -139,7 +139,7 @@ func (h *SettingsHandler) UpsertSetting(c *fiber.Ctx) error {
 	}
 
 	var req upsertSettingRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -196,7 +196,7 @@ func (h *SettingsHandler) UpsertSetting(c *fiber.Ctx) error {
 
 // DeleteSetting deletes a setting by key.
 // DELETE /api/v1/settings/:key?scope=global|user
-func (h *SettingsHandler) DeleteSetting(c *fiber.Ctx) error {
+func (h *SettingsHandler) DeleteSetting(c fiber.Ctx) error {
 	key := c.Params("key")
 	if key == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Key is required")
@@ -233,7 +233,7 @@ func (h *SettingsHandler) DeleteSetting(c *fiber.Ctx) error {
 
 // UploadLogo handles logo file upload for branding.
 // POST /api/v1/settings/branding/logo
-func (h *SettingsHandler) UploadLogo(c *fiber.Ctx) error {
+func (h *SettingsHandler) UploadLogo(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "settings"); err != nil {
 		return err
 	}
@@ -317,13 +317,13 @@ func (h *SettingsHandler) UploadLogo(c *fiber.Ctx) error {
 
 // ServeLogo serves the uploaded logo file.
 // GET /api/v1/settings/branding/logo-file
-func (h *SettingsHandler) ServeLogo(c *fiber.Ctx) error {
+func (h *SettingsHandler) ServeLogo(c fiber.Ctx) error {
 	return h.serveBrandingFile(c, "logo")
 }
 
 // UploadFavicon handles favicon file upload for branding.
 // POST /api/v1/settings/branding/favicon
-func (h *SettingsHandler) UploadFavicon(c *fiber.Ctx) error {
+func (h *SettingsHandler) UploadFavicon(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "settings"); err != nil {
 		return err
 	}
@@ -396,7 +396,7 @@ func (h *SettingsHandler) UploadFavicon(c *fiber.Ctx) error {
 
 // ServeFavicon serves the uploaded favicon file.
 // GET /api/v1/settings/branding/favicon-file
-func (h *SettingsHandler) ServeFavicon(c *fiber.Ctx) error {
+func (h *SettingsHandler) ServeFavicon(c fiber.Ctx) error {
 	return h.serveBrandingFile(c, "favicon")
 }
 
@@ -405,7 +405,7 @@ func (h *SettingsHandler) ServeFavicon(c *fiber.Ctx) error {
 // nosniff, and a default-src 'none' CSP that neutralises any script that
 // slipped past the upload validator. This is the second layer of defence —
 // the upload validator is the first.
-func (h *SettingsHandler) serveBrandingFile(c *fiber.Ctx, prefix string) error {
+func (h *SettingsHandler) serveBrandingFile(c fiber.Ctx, prefix string) error {
 	brandingDir := filepath.Join(h.dataDir, "branding")
 	entries, err := os.ReadDir(brandingDir)
 	if err != nil {
@@ -475,7 +475,7 @@ func brandingContentType(ext string) (string, bool) {
 
 // GetBranding returns all global branding settings (public, no auth for logo/favicon serving).
 // GET /api/v1/settings/branding
-func (h *SettingsHandler) GetBranding(c *fiber.Ctx) error {
+func (h *SettingsHandler) GetBranding(c fiber.Ctx) error {
 	settings, err := h.queries.ListGlobalSettings(c.Context())
 	if err != nil {
 		return fmt.Errorf("list global settings: %w", err)

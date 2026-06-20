@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/netguard"
 )
@@ -175,7 +175,7 @@ func isPrivateOrReservedIP(ip net.IP) bool {
 // response. Hard rejections are 400; confirm-required cases are 422 with a
 // stable error code so the frontend can show a "this is a private address —
 // proceed?" dialog.
-func renderAddressPolicyError(c *fiber.Ctx, err error) error {
+func renderAddressPolicyError(c fiber.Ctx, err error) error {
 	var pErr *addressPolicyError
 	if !errors.As(err, &pErr) {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())

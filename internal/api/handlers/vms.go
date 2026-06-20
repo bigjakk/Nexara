@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -120,7 +120,7 @@ type taskStatusResponse struct {
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/vms.
-func (h *VMHandler) ListByCluster(c *fiber.Ctx) error {
+func (h *VMHandler) ListByCluster(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func (h *VMHandler) ListByCluster(c *fiber.Ctx) error {
 }
 
 // GetVM handles GET /api/v1/clusters/:cluster_id/vms/:vm_id.
-func (h *VMHandler) GetVM(c *fiber.Ctx) error {
+func (h *VMHandler) GetVM(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -169,7 +169,7 @@ func (h *VMHandler) GetVM(c *fiber.Ctx) error {
 }
 
 // PerformAction handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/status.
-func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
+func (h *VMHandler) PerformAction(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -184,7 +184,7 @@ func (h *VMHandler) PerformAction(c *fiber.Ctx) error {
 	}
 
 	var req vmActionRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -251,7 +251,7 @@ func guestActionDesc(action string, vm db.Vm) string {
 }
 
 // CloneVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone.
-func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
+func (h *VMHandler) CloneVM(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -266,7 +266,7 @@ func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
 	}
 
 	var req vmCloneRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -311,7 +311,7 @@ func (h *VMHandler) CloneVM(c *fiber.Ctx) error {
 
 // ConvertToTemplate handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/convert-to-template.
 // This converts a stopped VM to a template. The operation is irreversible in Proxmox.
-func (h *VMHandler) ConvertToTemplate(c *fiber.Ctx) error {
+func (h *VMHandler) ConvertToTemplate(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -369,7 +369,7 @@ func (h *VMHandler) ConvertToTemplate(c *fiber.Ctx) error {
 
 // CloneToTemplate handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone-to-template.
 // This clones a VM/CT and then automatically converts the clone to a template.
-func (h *VMHandler) CloneToTemplate(c *fiber.Ctx) error {
+func (h *VMHandler) CloneToTemplate(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -384,7 +384,7 @@ func (h *VMHandler) CloneToTemplate(c *fiber.Ctx) error {
 	}
 
 	var req vmCloneRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -438,7 +438,7 @@ func (h *VMHandler) CloneToTemplate(c *fiber.Ctx) error {
 	if req.Target != "" {
 		targetNode = req.Target
 	}
-	go h.convertCloneToTemplate(pxClient, targetNode, req.NewID, vm.Type, cluster.ID.String())
+	go h.convertCloneToTemplate(pxClient, targetNode, req.NewID, vm.Type, cluster.ID.String()) //nolint:gosec // G118: intentionally detached — clone→template conversion must outlive the request (Fiber recycles the request context)
 
 	return c.JSON(vmActionResponse{
 		UPID:   cloneUpid,
@@ -519,7 +519,7 @@ func (h *VMHandler) convertCloneToTemplate(pxClient *proxmox.Client, node string
 }
 
 // DestroyVM handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id.
-func (h *VMHandler) DestroyVM(c *fiber.Ctx) error {
+func (h *VMHandler) DestroyVM(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -563,7 +563,7 @@ func (h *VMHandler) DestroyVM(c *fiber.Ctx) error {
 }
 
 // GetTaskStatus handles GET /api/v1/clusters/:cluster_id/tasks/:upid.
-func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
+func (h *VMHandler) GetTaskStatus(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -650,7 +650,7 @@ func (h *VMHandler) GetTaskStatus(c *fiber.Ctx) error {
 }
 
 // GetTaskLog returns the log lines for a Proxmox task.
-func (h *VMHandler) GetTaskLog(c *fiber.Ctx) error {
+func (h *VMHandler) GetTaskLog(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -707,7 +707,7 @@ type diskMoveRequest struct {
 }
 
 // ResizeDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize.
-func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
+func (h *VMHandler) ResizeDisk(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -722,7 +722,7 @@ func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
 	}
 
 	var req diskResizeRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -752,7 +752,7 @@ func (h *VMHandler) ResizeDisk(c *fiber.Ctx) error {
 }
 
 // MoveDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/move.
-func (h *VMHandler) MoveDisk(c *fiber.Ctx) error {
+func (h *VMHandler) MoveDisk(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -767,7 +767,7 @@ func (h *VMHandler) MoveDisk(c *fiber.Ctx) error {
 	}
 
 	var req diskMoveRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -824,7 +824,7 @@ type diskDetachRequest struct {
 }
 
 // AttachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/attach.
-func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
+func (h *VMHandler) AttachDisk(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -839,7 +839,7 @@ func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
 	}
 
 	var req diskAttachRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -877,7 +877,7 @@ func (h *VMHandler) AttachDisk(c *fiber.Ctx) error {
 }
 
 // DetachDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/detach.
-func (h *VMHandler) DetachDisk(c *fiber.Ctx) error {
+func (h *VMHandler) DetachDisk(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -892,7 +892,7 @@ func (h *VMHandler) DetachDisk(c *fiber.Ctx) error {
 	}
 
 	var req diskDetachRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -919,7 +919,7 @@ func (h *VMHandler) DetachDisk(c *fiber.Ctx) error {
 }
 
 // resolveVM loads the VM, its node, the cluster, and creates a Proxmox client.
-func (h *VMHandler) resolveVM(c *fiber.Ctx, clusterID, vmID uuid.UUID) (db.Vm, db.Node, db.Cluster, *proxmox.Client, error) {
+func (h *VMHandler) resolveVM(c fiber.Ctx, clusterID, vmID uuid.UUID) (db.Vm, db.Node, db.Cluster, *proxmox.Client, error) {
 	var zeroVM db.Vm
 	var zeroNode db.Node
 	var zeroCluster db.Cluster
@@ -958,7 +958,7 @@ func (h *VMHandler) resolveVM(c *fiber.Ctx, clusterID, vmID uuid.UUID) (db.Vm, d
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster.
-func (h *VMHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *VMHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
@@ -1077,7 +1077,7 @@ type snapshotResponse struct {
 }
 
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
-func (h *VMHandler) ListSnapshots(c *fiber.Ctx) error {
+func (h *VMHandler) ListSnapshots(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1119,7 +1119,7 @@ func (h *VMHandler) ListSnapshots(c *fiber.Ctx) error {
 }
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
-func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
+func (h *VMHandler) CreateSnapshot(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1134,7 +1134,7 @@ func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
 	}
 
 	var req snapshotRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.SnapName == "" {
@@ -1175,7 +1175,7 @@ func (h *VMHandler) CreateSnapshot(c *fiber.Ctx) error {
 }
 
 // DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name.
-func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
+func (h *VMHandler) DeleteSnapshot(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1224,7 +1224,7 @@ func (h *VMHandler) DeleteSnapshot(c *fiber.Ctx) error {
 }
 
 // RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback.
-func (h *VMHandler) RollbackSnapshot(c *fiber.Ctx) error {
+func (h *VMHandler) RollbackSnapshot(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1330,7 +1330,7 @@ type createVMRequest struct {
 }
 
 // CreateVM handles POST /api/v1/clusters/:cluster_id/vms.
-func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
+func (h *VMHandler) CreateVM(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1340,7 +1340,7 @@ func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
 	}
 
 	var req createVMRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -1427,7 +1427,7 @@ func (h *VMHandler) CreateVM(c *fiber.Ctx) error {
 // --- VM Config handlers (Cloud-Init) ---
 
 // GetVMConfig handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/config.
-func (h *VMHandler) GetVMConfig(c *fiber.Ctx) error {
+func (h *VMHandler) GetVMConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1459,7 +1459,7 @@ type setVMConfigRequest struct {
 }
 
 // SetVMConfig handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/config.
-func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
+func (h *VMHandler) SetVMConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1474,7 +1474,7 @@ func (h *VMHandler) SetVMConfig(c *fiber.Ctx) error {
 	}
 
 	var req setVMConfigRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if len(req.Fields) == 0 {
@@ -1505,7 +1505,7 @@ type machineTypeResponse struct {
 }
 
 // ListMachineTypes handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/machine-types.
-func (h *VMHandler) ListMachineTypes(c *fiber.Ctx) error {
+func (h *VMHandler) ListMachineTypes(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1549,7 +1549,7 @@ type cpuModelResponse struct {
 }
 
 // ListCPUModels handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/cpu-models.
-func (h *VMHandler) ListCPUModels(c *fiber.Ctx) error {
+func (h *VMHandler) ListCPUModels(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1600,7 +1600,7 @@ type resourcePoolResponse struct {
 }
 
 // ListResourcePools handles GET /api/v1/clusters/:cluster_id/pools.
-func (h *VMHandler) ListResourcePools(c *fiber.Ctx) error {
+func (h *VMHandler) ListResourcePools(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1640,7 +1640,7 @@ type networkBridgeResponse struct {
 }
 
 // ListBridges handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/bridges.
-func (h *VMHandler) ListBridges(c *fiber.Ctx) error {
+func (h *VMHandler) ListBridges(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1688,7 +1688,7 @@ type guestAgentResponse struct {
 }
 
 // GetGuestAgentInfo handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/agent.
-func (h *VMHandler) GetGuestAgentInfo(c *fiber.Ctx) error {
+func (h *VMHandler) GetGuestAgentInfo(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1773,7 +1773,7 @@ type isoResponse struct {
 }
 
 // ListNodeISOs aggregates ISO images from all ISO-capable storage pools on a node.
-func (h *VMHandler) ListNodeISOs(c *fiber.Ctx) error {
+func (h *VMHandler) ListNodeISOs(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1839,7 +1839,7 @@ type changeMediaRequest struct {
 // ChangeMedia mounts or ejects a CD-ROM ISO on a VM.
 // It detects the existing CD-ROM device from the VM config and uses POST for
 // immediate hotplug (no reboot required).
-func (h *VMHandler) ChangeMedia(c *fiber.Ctx) error {
+func (h *VMHandler) ChangeMedia(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1854,7 +1854,7 @@ func (h *VMHandler) ChangeMedia(c *fiber.Ctx) error {
 	}
 
 	var req changeMediaRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Volid == "" {
@@ -1929,7 +1929,7 @@ type vmMigrateRequest struct {
 }
 
 // MigrateVM handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/migrate.
-func (h *VMHandler) MigrateVM(c *fiber.Ctx) error {
+func (h *VMHandler) MigrateVM(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1944,7 +1944,7 @@ func (h *VMHandler) MigrateVM(c *fiber.Ctx) error {
 	}
 
 	var req vmMigrateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Target == "" {
@@ -1985,7 +1985,7 @@ func (h *VMHandler) MigrateVM(c *fiber.Ctx) error {
 }
 
 // ListNodeUSBDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/usb.
-func (h *VMHandler) ListNodeUSBDevices(c *fiber.Ctx) error {
+func (h *VMHandler) ListNodeUSBDevices(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -2013,7 +2013,7 @@ func (h *VMHandler) ListNodeUSBDevices(c *fiber.Ctx) error {
 }
 
 // ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/pci.
-func (h *VMHandler) ListNodePCIDevices(c *fiber.Ctx) error {
+func (h *VMHandler) ListNodePCIDevices(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -2042,7 +2042,7 @@ func (h *VMHandler) ListNodePCIDevices(c *fiber.Ctx) error {
 
 // SetVMPool handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/pool.
 // Moves a VM/CT into a pool (or removes from current pool if pool is empty).
-func (h *VMHandler) SetVMPool(c *fiber.Ctx) error {
+func (h *VMHandler) SetVMPool(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -2059,7 +2059,7 @@ func (h *VMHandler) SetVMPool(c *fiber.Ctx) error {
 	var body struct {
 		Pool string `json:"pool"`
 	}
-	if err := c.BodyParser(&body); err != nil {
+	if err := c.Bind().Body(&body); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 

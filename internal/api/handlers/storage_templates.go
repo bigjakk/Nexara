@@ -3,7 +3,7 @@ package handlers
 import (
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
@@ -58,7 +58,7 @@ type applianceResponse struct {
 
 // PullOCI handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/oci-pull.
 // Triggers an async skopeo-backed pull on Proxmox. Requires PVE 9.1+ on the node.
-func (h *StorageHandler) PullOCI(c *fiber.Ctx) error {
+func (h *StorageHandler) PullOCI(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func (h *StorageHandler) PullOCI(c *fiber.Ctx) error {
 	}
 
 	var req pullOCIRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Reference == "" {
@@ -113,7 +113,7 @@ func (h *StorageHandler) PullOCI(c *fiber.Ctx) error {
 
 // DownloadURL handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/download-url.
 // Triggers an async download of an arbitrary URL into the storage as iso, vztmpl, or import.
-func (h *StorageHandler) DownloadURL(c *fiber.Ctx) error {
+func (h *StorageHandler) DownloadURL(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -133,7 +133,7 @@ func (h *StorageHandler) DownloadURL(c *fiber.Ctx) error {
 	}
 
 	var req downloadURLRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -176,7 +176,7 @@ func (h *StorageHandler) DownloadURL(c *fiber.Ctx) error {
 // ListAppliances handles GET /api/v1/clusters/:cluster_id/appliances.
 // Returns the official Proxmox appliance catalog (Debian/Ubuntu/Alpine/Turnkey/...).
 // Cluster-scoped because the catalog is identical across nodes; we pick any online node.
-func (h *StorageHandler) ListAppliances(c *fiber.Ctx) error {
+func (h *StorageHandler) ListAppliances(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -219,7 +219,7 @@ func (h *StorageHandler) ListAppliances(c *fiber.Ctx) error {
 
 // DownloadAppliance handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/appliances.
 // Downloads a Proxmox-catalog appliance template into the named storage.
-func (h *StorageHandler) DownloadAppliance(c *fiber.Ctx) error {
+func (h *StorageHandler) DownloadAppliance(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -243,7 +243,7 @@ func (h *StorageHandler) DownloadAppliance(c *fiber.Ctx) error {
 	}
 
 	var req downloadApplianceRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Template == "" {
@@ -273,7 +273,7 @@ func (h *StorageHandler) DownloadAppliance(c *fiber.Ctx) error {
 
 // resolveOnlineNode picks the first online node in a cluster for endpoints that
 // need a node but the data isn't node-specific (e.g. /aplinfo, /version).
-func (h *StorageHandler) resolveOnlineNode(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, string, error) {
+func (h *StorageHandler) resolveOnlineNode(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, string, error) {
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return nil, "", err

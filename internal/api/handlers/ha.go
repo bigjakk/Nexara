@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -18,7 +18,7 @@ import (
 // decodePathParam returns the path param URL-decoded, falling back to the raw
 // value if the input is malformed. Audit logs and Proxmox SID paths both want
 // the literal value (e.g. "vm:109"), not "vm%3A109".
-func decodePathParam(c *fiber.Ctx, name string) string {
+func decodePathParam(c fiber.Ctx, name string) string {
 	raw := c.Params(name)
 	if decoded, err := url.PathUnescape(raw); err == nil {
 		return decoded
@@ -98,13 +98,13 @@ func NewHAHandler(queries *db.Queries, encryptionKey string, eventPub *events.Pu
 	return &HAHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
-func (h *HAHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *HAHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // requireArmDisarmSupport rejects Arm/Disarm HA on clusters older than PVE 9.2.
 // Best-effort: if the cached version can't be read, defer to Proxmox to reject.
-func (h *HAHandler) requireArmDisarmSupport(c *fiber.Ctx, clusterID uuid.UUID) error {
+func (h *HAHandler) requireArmDisarmSupport(c fiber.Ctx, clusterID uuid.UUID) error {
 	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
 	if err != nil {
 		return nil
@@ -117,7 +117,7 @@ func (h *HAHandler) requireArmDisarmSupport(c *fiber.Ctx, clusterID uuid.UUID) e
 
 // ArmHA handles POST /clusters/:cluster_id/ha/arm — re-arms the HA stack
 // cluster-wide after a disarm window.
-func (h *HAHandler) ArmHA(c *fiber.Ctx) error {
+func (h *HAHandler) ArmHA(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func (h *HAHandler) ArmHA(c *fiber.Ctx) error {
 
 // DisarmHA handles POST /clusters/:cluster_id/ha/disarm — disarms the HA stack
 // cluster-wide for planned maintenance. Body: {"resource_mode": "freeze"|"ignore"}.
-func (h *HAHandler) DisarmHA(c *fiber.Ctx) error {
+func (h *HAHandler) DisarmHA(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -157,7 +157,7 @@ func (h *HAHandler) DisarmHA(c *fiber.Ctx) error {
 	var req struct {
 		ResourceMode string `json:"resource_mode"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.ResourceMode != "freeze" && req.ResourceMode != "ignore" {
@@ -176,14 +176,14 @@ func (h *HAHandler) DisarmHA(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
-func (h *HAHandler) publishHA(c *fiber.Ctx, clusterID uuid.UUID, resourceID, action string) {
+func (h *HAHandler) publishHA(c fiber.Ctx, clusterID uuid.UUID, resourceID, action string) {
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindHAChange, "ha", resourceID, action)
 }
 
 // --- HA Resources ---
 
 // ListResources handles GET /clusters/:cluster_id/ha/resources.
-func (h *HAHandler) ListResources(c *fiber.Ctx) error {
+func (h *HAHandler) ListResources(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -203,7 +203,7 @@ func (h *HAHandler) ListResources(c *fiber.Ctx) error {
 }
 
 // CreateResource handles POST /clusters/:cluster_id/ha/resources.
-func (h *HAHandler) CreateResource(c *fiber.Ctx) error {
+func (h *HAHandler) CreateResource(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func (h *HAHandler) CreateResource(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.CreateHAResourceParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.SID == "" {
@@ -254,7 +254,7 @@ func (h *HAHandler) CreateResource(c *fiber.Ctx) error {
 }
 
 // GetResource handles GET /clusters/:cluster_id/ha/resources/:sid.
-func (h *HAHandler) GetResource(c *fiber.Ctx) error {
+func (h *HAHandler) GetResource(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -278,7 +278,7 @@ func (h *HAHandler) GetResource(c *fiber.Ctx) error {
 }
 
 // UpdateResource handles PUT /clusters/:cluster_id/ha/resources/:sid.
-func (h *HAHandler) UpdateResource(c *fiber.Ctx) error {
+func (h *HAHandler) UpdateResource(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -291,7 +291,7 @@ func (h *HAHandler) UpdateResource(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "SID is required")
 	}
 	var req proxmox.UpdateHAResourceParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -330,7 +330,7 @@ func (h *HAHandler) UpdateResource(c *fiber.Ctx) error {
 }
 
 // DeleteResource handles DELETE /clusters/:cluster_id/ha/resources/:sid.
-func (h *HAHandler) DeleteResource(c *fiber.Ctx) error {
+func (h *HAHandler) DeleteResource(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -390,7 +390,7 @@ const haGroupsMigratedMsg = "HA Groups were migrated to HA Rules in Proxmox VE 9
 
 // ListGroups handles GET /clusters/:cluster_id/ha/groups.
 // On PVE 9.x where groups have been migrated to rules, returns an empty array.
-func (h *HAHandler) ListGroups(c *fiber.Ctx) error {
+func (h *HAHandler) ListGroups(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -415,7 +415,7 @@ func (h *HAHandler) ListGroups(c *fiber.Ctx) error {
 }
 
 // CreateGroup handles POST /clusters/:cluster_id/ha/groups.
-func (h *HAHandler) CreateGroup(c *fiber.Ctx) error {
+func (h *HAHandler) CreateGroup(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -424,7 +424,7 @@ func (h *HAHandler) CreateGroup(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.CreateHAGroupParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Group == "" {
@@ -460,7 +460,7 @@ func (h *HAHandler) CreateGroup(c *fiber.Ctx) error {
 }
 
 // UpdateGroup handles PUT /clusters/:cluster_id/ha/groups/:group.
-func (h *HAHandler) UpdateGroup(c *fiber.Ctx) error {
+func (h *HAHandler) UpdateGroup(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -473,7 +473,7 @@ func (h *HAHandler) UpdateGroup(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Group name is required")
 	}
 	var req proxmox.UpdateHAGroupParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -506,7 +506,7 @@ func (h *HAHandler) UpdateGroup(c *fiber.Ctx) error {
 }
 
 // DeleteGroup handles DELETE /clusters/:cluster_id/ha/groups/:group.
-func (h *HAHandler) DeleteGroup(c *fiber.Ctx) error {
+func (h *HAHandler) DeleteGroup(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -551,7 +551,7 @@ func (h *HAHandler) DeleteGroup(c *fiber.Ctx) error {
 // --- HA Rules (PVE 8.3+) ---
 
 // ListRules handles GET /clusters/:cluster_id/ha/rules.
-func (h *HAHandler) ListRules(c *fiber.Ctx) error {
+func (h *HAHandler) ListRules(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -575,7 +575,7 @@ func (h *HAHandler) ListRules(c *fiber.Ctx) error {
 }
 
 // CreateRule handles POST /clusters/:cluster_id/ha/rules.
-func (h *HAHandler) CreateRule(c *fiber.Ctx) error {
+func (h *HAHandler) CreateRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -587,7 +587,7 @@ func (h *HAHandler) CreateRule(c *fiber.Ctx) error {
 		Type string `json:"type"` // "node-affinity" or "resource-affinity"
 		proxmox.CreateHARuleParams
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Rule == "" {
@@ -629,7 +629,7 @@ func (h *HAHandler) CreateRule(c *fiber.Ctx) error {
 }
 
 // UpdateRule handles PUT /clusters/:cluster_id/ha/rules/:rule.
-func (h *HAHandler) UpdateRule(c *fiber.Ctx) error {
+func (h *HAHandler) UpdateRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -645,7 +645,7 @@ func (h *HAHandler) UpdateRule(c *fiber.Ctx) error {
 		Type string `json:"type"`
 		proxmox.UpdateHARuleParams
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Type == "" {
@@ -687,7 +687,7 @@ func (h *HAHandler) UpdateRule(c *fiber.Ctx) error {
 }
 
 // DeleteRule handles DELETE /clusters/:cluster_id/ha/rules/:rule.
-func (h *HAHandler) DeleteRule(c *fiber.Ctx) error {
+func (h *HAHandler) DeleteRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -742,7 +742,7 @@ func (h *HAHandler) DeleteRule(c *fiber.Ctx) error {
 // --- HA Status ---
 
 // GetStatus handles GET /clusters/:cluster_id/ha/status.
-func (h *HAHandler) GetStatus(c *fiber.Ctx) error {
+func (h *HAHandler) GetStatus(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -762,7 +762,7 @@ func (h *HAHandler) GetStatus(c *fiber.Ctx) error {
 }
 
 // GetManagerStatus handles GET /clusters/:cluster_id/ha/manager-status.
-func (h *HAHandler) GetManagerStatus(c *fiber.Ctx) error {
+func (h *HAHandler) GetManagerStatus(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err

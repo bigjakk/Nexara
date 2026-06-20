@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -30,14 +30,14 @@ func NewNetworkHandler(queries *db.Queries, encryptionKey string, eventPub *even
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster ID.
-func (h *NetworkHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *NetworkHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // --- Network Interface Endpoints ---
 
 // ListNetworkInterfaces handles GET /clusters/:cluster_id/networks.
-func (h *NetworkHandler) ListNetworkInterfaces(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListNetworkInterfaces(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -77,7 +77,7 @@ func (h *NetworkHandler) ListNetworkInterfaces(c *fiber.Ctx) error {
 }
 
 // ListNodeNetworkInterfaces handles GET /clusters/:cluster_id/networks/:node_name.
-func (h *NetworkHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListNodeNetworkInterfaces(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -105,7 +105,7 @@ func (h *NetworkHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
 }
 
 // CreateNetworkInterface handles POST /clusters/:cluster_id/networks/:node_name.
-func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateNetworkInterface(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -120,7 +120,7 @@ func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.CreateNetworkInterfaceParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -144,7 +144,7 @@ func (h *NetworkHandler) CreateNetworkInterface(c *fiber.Ctx) error {
 }
 
 // UpdateNetworkInterface handles PUT /clusters/:cluster_id/networks/:node_name/:iface.
-func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -160,7 +160,7 @@ func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.UpdateNetworkInterfaceParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -184,7 +184,7 @@ func (h *NetworkHandler) UpdateNetworkInterface(c *fiber.Ctx) error {
 }
 
 // DeleteNetworkInterface handles DELETE /clusters/:cluster_id/networks/:node_name/:iface.
-func (h *NetworkHandler) DeleteNetworkInterface(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteNetworkInterface(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -215,7 +215,7 @@ func (h *NetworkHandler) DeleteNetworkInterface(c *fiber.Ctx) error {
 }
 
 // ApplyNetworkConfig handles POST /clusters/:cluster_id/networks/:node_name/apply.
-func (h *NetworkHandler) ApplyNetworkConfig(c *fiber.Ctx) error {
+func (h *NetworkHandler) ApplyNetworkConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -245,7 +245,7 @@ func (h *NetworkHandler) ApplyNetworkConfig(c *fiber.Ctx) error {
 }
 
 // RevertNetworkConfig handles POST /clusters/:cluster_id/networks/:node_name/revert.
-func (h *NetworkHandler) RevertNetworkConfig(c *fiber.Ctx) error {
+func (h *NetworkHandler) RevertNetworkConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -277,7 +277,7 @@ func (h *NetworkHandler) RevertNetworkConfig(c *fiber.Ctx) error {
 // --- Cluster Firewall Endpoints ---
 
 // ListClusterFirewallRules handles GET /clusters/:cluster_id/firewall/rules.
-func (h *NetworkHandler) ListClusterFirewallRules(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListClusterFirewallRules(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -300,7 +300,7 @@ func (h *NetworkHandler) ListClusterFirewallRules(c *fiber.Ctx) error {
 }
 
 // CreateClusterFirewallRule handles POST /clusters/:cluster_id/firewall/rules.
-func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateClusterFirewallRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -310,7 +310,7 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.FirewallRuleParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -334,7 +334,7 @@ func (h *NetworkHandler) CreateClusterFirewallRule(c *fiber.Ctx) error {
 }
 
 // UpdateClusterFirewallRule handles PUT /clusters/:cluster_id/firewall/rules/:pos.
-func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateClusterFirewallRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -349,7 +349,7 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.FirewallRuleParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -369,7 +369,7 @@ func (h *NetworkHandler) UpdateClusterFirewallRule(c *fiber.Ctx) error {
 }
 
 // DeleteClusterFirewallRule handles DELETE /clusters/:cluster_id/firewall/rules/:pos.
-func (h *NetworkHandler) DeleteClusterFirewallRule(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteClusterFirewallRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -401,7 +401,7 @@ func (h *NetworkHandler) DeleteClusterFirewallRule(c *fiber.Ctx) error {
 // --- VM Firewall Endpoints ---
 
 // resolveVMNode looks up the node name for a VM in the database.
-func (h *NetworkHandler) resolveVMNode(c *fiber.Ctx, clusterID uuid.UUID, vmid int32) (string, error) {
+func (h *NetworkHandler) resolveVMNode(c fiber.Ctx, clusterID uuid.UUID, vmid int32) (string, error) {
 	vm, err := h.queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
 		ClusterID: clusterID,
 		Vmid:      vmid,
@@ -422,7 +422,7 @@ func (h *NetworkHandler) resolveVMNode(c *fiber.Ctx, clusterID uuid.UUID, vmid i
 }
 
 // ListVMFirewallRules handles GET /clusters/:cluster_id/vms/:vm_id/firewall/rules.
-func (h *NetworkHandler) ListVMFirewallRules(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListVMFirewallRules(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -455,7 +455,7 @@ func (h *NetworkHandler) ListVMFirewallRules(c *fiber.Ctx) error {
 }
 
 // CreateVMFirewallRule handles POST /clusters/:cluster_id/vms/:vm_id/firewall/rules.
-func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateVMFirewallRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -470,7 +470,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.FirewallRuleParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -499,7 +499,7 @@ func (h *NetworkHandler) CreateVMFirewallRule(c *fiber.Ctx) error {
 }
 
 // UpdateVMFirewallRule handles PUT /clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos.
-func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateVMFirewallRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -519,7 +519,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.FirewallRuleParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -544,7 +544,7 @@ func (h *NetworkHandler) UpdateVMFirewallRule(c *fiber.Ctx) error {
 }
 
 // DeleteVMFirewallRule handles DELETE /clusters/:cluster_id/vms/:vm_id/firewall/rules/:pos.
-func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteVMFirewallRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -586,7 +586,7 @@ func (h *NetworkHandler) DeleteVMFirewallRule(c *fiber.Ctx) error {
 // --- Firewall Options Endpoints ---
 
 // GetFirewallOptions handles GET /clusters/:cluster_id/firewall/options.
-func (h *NetworkHandler) GetFirewallOptions(c *fiber.Ctx) error {
+func (h *NetworkHandler) GetFirewallOptions(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -609,7 +609,7 @@ func (h *NetworkHandler) GetFirewallOptions(c *fiber.Ctx) error {
 }
 
 // SetFirewallOptions handles PUT /clusters/:cluster_id/firewall/options.
-func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
+func (h *NetworkHandler) SetFirewallOptions(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -619,7 +619,7 @@ func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.FirewallOptions
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -641,7 +641,7 @@ func (h *NetworkHandler) SetFirewallOptions(c *fiber.Ctx) error {
 // --- SDN Endpoints ---
 
 // ListSDNZones handles GET /clusters/:cluster_id/sdn/zones.
-func (h *NetworkHandler) ListSDNZones(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListSDNZones(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -664,7 +664,7 @@ func (h *NetworkHandler) ListSDNZones(c *fiber.Ctx) error {
 }
 
 // ListSDNVNets handles GET /clusters/:cluster_id/sdn/vnets.
-func (h *NetworkHandler) ListSDNVNets(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListSDNVNets(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -689,7 +689,7 @@ func (h *NetworkHandler) ListSDNVNets(c *fiber.Ctx) error {
 // --- SDN CRUD Endpoints ---
 
 // CreateSDNZone handles POST /clusters/:cluster_id/sdn/zones.
-func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateSDNZone(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -699,7 +699,7 @@ func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.CreateSDNZoneParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -723,7 +723,7 @@ func (h *NetworkHandler) CreateSDNZone(c *fiber.Ctx) error {
 }
 
 // UpdateSDNZone handles PUT /clusters/:cluster_id/sdn/zones/:zone.
-func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateSDNZone(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -738,7 +738,7 @@ func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.UpdateSDNZoneParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -758,7 +758,7 @@ func (h *NetworkHandler) UpdateSDNZone(c *fiber.Ctx) error {
 }
 
 // DeleteSDNZone handles DELETE /clusters/:cluster_id/sdn/zones/:zone.
-func (h *NetworkHandler) DeleteSDNZone(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteSDNZone(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -788,7 +788,7 @@ func (h *NetworkHandler) DeleteSDNZone(c *fiber.Ctx) error {
 }
 
 // CreateSDNVNet handles POST /clusters/:cluster_id/sdn/vnets.
-func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateSDNVNet(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -798,7 +798,7 @@ func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.CreateSDNVNetParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -822,7 +822,7 @@ func (h *NetworkHandler) CreateSDNVNet(c *fiber.Ctx) error {
 }
 
 // UpdateSDNVNet handles PUT /clusters/:cluster_id/sdn/vnets/:vnet.
-func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateSDNVNet(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -837,7 +837,7 @@ func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.UpdateSDNVNetParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -857,7 +857,7 @@ func (h *NetworkHandler) UpdateSDNVNet(c *fiber.Ctx) error {
 }
 
 // DeleteSDNVNet handles DELETE /clusters/:cluster_id/sdn/vnets/:vnet.
-func (h *NetworkHandler) DeleteSDNVNet(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteSDNVNet(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -887,7 +887,7 @@ func (h *NetworkHandler) DeleteSDNVNet(c *fiber.Ctx) error {
 }
 
 // ListSDNSubnets handles GET /clusters/:cluster_id/sdn/vnets/:vnet/subnets.
-func (h *NetworkHandler) ListSDNSubnets(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListSDNSubnets(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -915,7 +915,7 @@ func (h *NetworkHandler) ListSDNSubnets(c *fiber.Ctx) error {
 }
 
 // CreateSDNSubnet handles POST /clusters/:cluster_id/sdn/vnets/:vnet/subnets.
-func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateSDNSubnet(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -930,7 +930,7 @@ func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.CreateSDNSubnetParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -957,7 +957,7 @@ func (h *NetworkHandler) CreateSDNSubnet(c *fiber.Ctx) error {
 }
 
 // UpdateSDNSubnet handles PUT /clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet.
-func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateSDNSubnet(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -973,7 +973,7 @@ func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
 	}
 
 	var req proxmox.UpdateSDNSubnetParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -993,7 +993,7 @@ func (h *NetworkHandler) UpdateSDNSubnet(c *fiber.Ctx) error {
 }
 
 // DeleteSDNSubnet handles DELETE /clusters/:cluster_id/sdn/vnets/:vnet/subnets/:subnet.
-func (h *NetworkHandler) DeleteSDNSubnet(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteSDNSubnet(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1024,7 +1024,7 @@ func (h *NetworkHandler) DeleteSDNSubnet(c *fiber.Ctx) error {
 }
 
 // ApplySDN handles PUT /clusters/:cluster_id/sdn/apply.
-func (h *NetworkHandler) ApplySDN(c *fiber.Ctx) error {
+func (h *NetworkHandler) ApplySDN(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1050,7 +1050,7 @@ func (h *NetworkHandler) ApplySDN(c *fiber.Ctx) error {
 // --- SDN Controller Endpoints ---
 
 // ListSDNControllers handles GET /clusters/:cluster_id/sdn/controllers.
-func (h *NetworkHandler) ListSDNControllers(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListSDNControllers(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1070,7 +1070,7 @@ func (h *NetworkHandler) ListSDNControllers(c *fiber.Ctx) error {
 }
 
 // CreateSDNController handles POST /clusters/:cluster_id/sdn/controllers.
-func (h *NetworkHandler) CreateSDNController(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateSDNController(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1079,7 +1079,7 @@ func (h *NetworkHandler) CreateSDNController(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.CreateSDNControllerParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Controller == "" || req.Type == "" {
@@ -1098,7 +1098,7 @@ func (h *NetworkHandler) CreateSDNController(c *fiber.Ctx) error {
 }
 
 // UpdateSDNController handles PUT /clusters/:cluster_id/sdn/controllers/:controller.
-func (h *NetworkHandler) UpdateSDNController(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateSDNController(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1111,7 +1111,7 @@ func (h *NetworkHandler) UpdateSDNController(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "controller is required")
 	}
 	var req proxmox.UpdateSDNControllerParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1127,7 +1127,7 @@ func (h *NetworkHandler) UpdateSDNController(c *fiber.Ctx) error {
 }
 
 // DeleteSDNController handles DELETE /clusters/:cluster_id/sdn/controllers/:controller.
-func (h *NetworkHandler) DeleteSDNController(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteSDNController(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1154,7 +1154,7 @@ func (h *NetworkHandler) DeleteSDNController(c *fiber.Ctx) error {
 // --- SDN IPAM Endpoints ---
 
 // ListSDNIPAMs handles GET /clusters/:cluster_id/sdn/ipams.
-func (h *NetworkHandler) ListSDNIPAMs(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListSDNIPAMs(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1174,7 +1174,7 @@ func (h *NetworkHandler) ListSDNIPAMs(c *fiber.Ctx) error {
 }
 
 // CreateSDNIPAM handles POST /clusters/:cluster_id/sdn/ipams.
-func (h *NetworkHandler) CreateSDNIPAM(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateSDNIPAM(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1183,7 +1183,7 @@ func (h *NetworkHandler) CreateSDNIPAM(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.CreateSDNIPAMParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.IPAM == "" || req.Type == "" {
@@ -1202,7 +1202,7 @@ func (h *NetworkHandler) CreateSDNIPAM(c *fiber.Ctx) error {
 }
 
 // UpdateSDNIPAM handles PUT /clusters/:cluster_id/sdn/ipams/:ipam.
-func (h *NetworkHandler) UpdateSDNIPAM(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateSDNIPAM(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1215,7 +1215,7 @@ func (h *NetworkHandler) UpdateSDNIPAM(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "ipam is required")
 	}
 	var req proxmox.UpdateSDNIPAMParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1231,7 +1231,7 @@ func (h *NetworkHandler) UpdateSDNIPAM(c *fiber.Ctx) error {
 }
 
 // DeleteSDNIPAM handles DELETE /clusters/:cluster_id/sdn/ipams/:ipam.
-func (h *NetworkHandler) DeleteSDNIPAM(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteSDNIPAM(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1258,7 +1258,7 @@ func (h *NetworkHandler) DeleteSDNIPAM(c *fiber.Ctx) error {
 // --- SDN DNS Endpoints ---
 
 // ListSDNDNS handles GET /clusters/:cluster_id/sdn/dns.
-func (h *NetworkHandler) ListSDNDNS(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListSDNDNS(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1278,7 +1278,7 @@ func (h *NetworkHandler) ListSDNDNS(c *fiber.Ctx) error {
 }
 
 // CreateSDNDNS handles POST /clusters/:cluster_id/sdn/dns.
-func (h *NetworkHandler) CreateSDNDNS(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateSDNDNS(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1287,7 +1287,7 @@ func (h *NetworkHandler) CreateSDNDNS(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.CreateSDNDNSParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.DNS == "" || req.Type == "" {
@@ -1306,7 +1306,7 @@ func (h *NetworkHandler) CreateSDNDNS(c *fiber.Ctx) error {
 }
 
 // UpdateSDNDNS handles PUT /clusters/:cluster_id/sdn/dns/:dns.
-func (h *NetworkHandler) UpdateSDNDNS(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateSDNDNS(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1319,7 +1319,7 @@ func (h *NetworkHandler) UpdateSDNDNS(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "dns is required")
 	}
 	var req proxmox.UpdateSDNDNSParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1335,7 +1335,7 @@ func (h *NetworkHandler) UpdateSDNDNS(c *fiber.Ctx) error {
 }
 
 // DeleteSDNDNS handles DELETE /clusters/:cluster_id/sdn/dns/:dns.
-func (h *NetworkHandler) DeleteSDNDNS(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteSDNDNS(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1388,7 +1388,7 @@ type createTemplateRequest struct {
 }
 
 // ListTemplates handles GET /api/v1/firewall-templates.
-func (h *NetworkHandler) ListTemplates(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListTemplates(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
@@ -1407,7 +1407,7 @@ func (h *NetworkHandler) ListTemplates(c *fiber.Ctx) error {
 }
 
 // GetTemplate handles GET /api/v1/firewall-templates/:id.
-func (h *NetworkHandler) GetTemplate(c *fiber.Ctx) error {
+func (h *NetworkHandler) GetTemplate(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "network"); err != nil {
 		return err
 	}
@@ -1429,13 +1429,13 @@ func (h *NetworkHandler) GetTemplate(c *fiber.Ctx) error {
 }
 
 // CreateTemplate handles POST /api/v1/firewall-templates.
-func (h *NetworkHandler) CreateTemplate(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateTemplate(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
 
 	var req createTemplateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -1463,7 +1463,7 @@ func (h *NetworkHandler) CreateTemplate(c *fiber.Ctx) error {
 }
 
 // UpdateTemplate handles PUT /api/v1/firewall-templates/:id.
-func (h *NetworkHandler) UpdateTemplate(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateTemplate(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "network"); err != nil {
 		return err
 	}
@@ -1474,7 +1474,7 @@ func (h *NetworkHandler) UpdateTemplate(c *fiber.Ctx) error {
 	}
 
 	var req createTemplateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -1506,7 +1506,7 @@ func (h *NetworkHandler) UpdateTemplate(c *fiber.Ctx) error {
 }
 
 // DeleteTemplate handles DELETE /api/v1/firewall-templates/:id.
-func (h *NetworkHandler) DeleteTemplate(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteTemplate(c fiber.Ctx) error {
 	if err := requirePerm(c, "delete", "network"); err != nil {
 		return err
 	}
@@ -1527,7 +1527,7 @@ func (h *NetworkHandler) DeleteTemplate(c *fiber.Ctx) error {
 }
 
 // ApplyTemplate handles POST /clusters/:cluster_id/firewall-templates/:id/apply.
-func (h *NetworkHandler) ApplyTemplate(c *fiber.Ctx) error {
+func (h *NetworkHandler) ApplyTemplate(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1585,7 +1585,7 @@ func (h *NetworkHandler) ApplyTemplate(c *fiber.Ctx) error {
 // --- Firewall Aliases ---
 
 // ListFirewallAliases handles GET /clusters/:cluster_id/firewall/aliases.
-func (h *NetworkHandler) ListFirewallAliases(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListFirewallAliases(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1605,7 +1605,7 @@ func (h *NetworkHandler) ListFirewallAliases(c *fiber.Ctx) error {
 }
 
 // CreateFirewallAlias handles POST /clusters/:cluster_id/firewall/aliases.
-func (h *NetworkHandler) CreateFirewallAlias(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateFirewallAlias(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1614,7 +1614,7 @@ func (h *NetworkHandler) CreateFirewallAlias(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.FirewallAliasParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Name == "" || req.CIDR == "" {
@@ -1633,7 +1633,7 @@ func (h *NetworkHandler) CreateFirewallAlias(c *fiber.Ctx) error {
 }
 
 // UpdateFirewallAlias handles PUT /clusters/:cluster_id/firewall/aliases/:name.
-func (h *NetworkHandler) UpdateFirewallAlias(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateFirewallAlias(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1643,7 +1643,7 @@ func (h *NetworkHandler) UpdateFirewallAlias(c *fiber.Ctx) error {
 	}
 	name := c.Params("name")
 	var req proxmox.FirewallAliasParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1659,7 +1659,7 @@ func (h *NetworkHandler) UpdateFirewallAlias(c *fiber.Ctx) error {
 }
 
 // DeleteFirewallAlias handles DELETE /clusters/:cluster_id/firewall/aliases/:name.
-func (h *NetworkHandler) DeleteFirewallAlias(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteFirewallAlias(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1683,7 +1683,7 @@ func (h *NetworkHandler) DeleteFirewallAlias(c *fiber.Ctx) error {
 // --- Firewall IP Sets ---
 
 // ListFirewallIPSets handles GET /clusters/:cluster_id/firewall/ipset.
-func (h *NetworkHandler) ListFirewallIPSets(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListFirewallIPSets(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1703,7 +1703,7 @@ func (h *NetworkHandler) ListFirewallIPSets(c *fiber.Ctx) error {
 }
 
 // CreateFirewallIPSet handles POST /clusters/:cluster_id/firewall/ipset.
-func (h *NetworkHandler) CreateFirewallIPSet(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateFirewallIPSet(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1715,7 +1715,7 @@ func (h *NetworkHandler) CreateFirewallIPSet(c *fiber.Ctx) error {
 		Name    string `json:"name"`
 		Comment string `json:"comment"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Name == "" {
@@ -1734,7 +1734,7 @@ func (h *NetworkHandler) CreateFirewallIPSet(c *fiber.Ctx) error {
 }
 
 // DeleteFirewallIPSet handles DELETE /clusters/:cluster_id/firewall/ipset/:name.
-func (h *NetworkHandler) DeleteFirewallIPSet(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteFirewallIPSet(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1756,7 +1756,7 @@ func (h *NetworkHandler) DeleteFirewallIPSet(c *fiber.Ctx) error {
 }
 
 // ListFirewallIPSetEntries handles GET /clusters/:cluster_id/firewall/ipset/:name/entries.
-func (h *NetworkHandler) ListFirewallIPSetEntries(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListFirewallIPSetEntries(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1777,7 +1777,7 @@ func (h *NetworkHandler) ListFirewallIPSetEntries(c *fiber.Ctx) error {
 }
 
 // AddFirewallIPSetEntry handles POST /clusters/:cluster_id/firewall/ipset/:name/entries.
-func (h *NetworkHandler) AddFirewallIPSetEntry(c *fiber.Ctx) error {
+func (h *NetworkHandler) AddFirewallIPSetEntry(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1787,7 +1787,7 @@ func (h *NetworkHandler) AddFirewallIPSetEntry(c *fiber.Ctx) error {
 	}
 	name := c.Params("name")
 	var req proxmox.FirewallIPSetEntryParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.CIDR == "" {
@@ -1806,7 +1806,7 @@ func (h *NetworkHandler) AddFirewallIPSetEntry(c *fiber.Ctx) error {
 }
 
 // DeleteFirewallIPSetEntry handles DELETE /clusters/:cluster_id/firewall/ipset/:name/entries/:cidr.
-func (h *NetworkHandler) DeleteFirewallIPSetEntry(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteFirewallIPSetEntry(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1831,7 +1831,7 @@ func (h *NetworkHandler) DeleteFirewallIPSetEntry(c *fiber.Ctx) error {
 // --- Firewall Security Groups ---
 
 // ListSecurityGroups handles GET /clusters/:cluster_id/firewall/groups.
-func (h *NetworkHandler) ListSecurityGroups(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListSecurityGroups(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1851,7 +1851,7 @@ func (h *NetworkHandler) ListSecurityGroups(c *fiber.Ctx) error {
 }
 
 // CreateSecurityGroup handles POST /clusters/:cluster_id/firewall/groups.
-func (h *NetworkHandler) CreateSecurityGroup(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateSecurityGroup(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1860,7 +1860,7 @@ func (h *NetworkHandler) CreateSecurityGroup(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.FirewallSecurityGroupParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Group == "" {
@@ -1879,7 +1879,7 @@ func (h *NetworkHandler) CreateSecurityGroup(c *fiber.Ctx) error {
 }
 
 // DeleteSecurityGroup handles DELETE /clusters/:cluster_id/firewall/groups/:group.
-func (h *NetworkHandler) DeleteSecurityGroup(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteSecurityGroup(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1901,7 +1901,7 @@ func (h *NetworkHandler) DeleteSecurityGroup(c *fiber.Ctx) error {
 }
 
 // ListSecurityGroupRules handles GET /clusters/:cluster_id/firewall/groups/:group/rules.
-func (h *NetworkHandler) ListSecurityGroupRules(c *fiber.Ctx) error {
+func (h *NetworkHandler) ListSecurityGroupRules(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1922,7 +1922,7 @@ func (h *NetworkHandler) ListSecurityGroupRules(c *fiber.Ctx) error {
 }
 
 // CreateSecurityGroupRule handles POST /clusters/:cluster_id/firewall/groups/:group/rules.
-func (h *NetworkHandler) CreateSecurityGroupRule(c *fiber.Ctx) error {
+func (h *NetworkHandler) CreateSecurityGroupRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1932,7 +1932,7 @@ func (h *NetworkHandler) CreateSecurityGroupRule(c *fiber.Ctx) error {
 	}
 	group := c.Params("group")
 	var req proxmox.FirewallRuleParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1948,7 +1948,7 @@ func (h *NetworkHandler) CreateSecurityGroupRule(c *fiber.Ctx) error {
 }
 
 // UpdateSecurityGroupRule handles PUT /clusters/:cluster_id/firewall/groups/:group/rules/:pos.
-func (h *NetworkHandler) UpdateSecurityGroupRule(c *fiber.Ctx) error {
+func (h *NetworkHandler) UpdateSecurityGroupRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1962,7 +1962,7 @@ func (h *NetworkHandler) UpdateSecurityGroupRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid position")
 	}
 	var req proxmox.FirewallRuleParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1978,7 +1978,7 @@ func (h *NetworkHandler) UpdateSecurityGroupRule(c *fiber.Ctx) error {
 }
 
 // DeleteSecurityGroupRule handles DELETE /clusters/:cluster_id/firewall/groups/:group/rules/:pos.
-func (h *NetworkHandler) DeleteSecurityGroupRule(c *fiber.Ctx) error {
+func (h *NetworkHandler) DeleteSecurityGroupRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -2006,7 +2006,7 @@ func (h *NetworkHandler) DeleteSecurityGroupRule(c *fiber.Ctx) error {
 // --- Firewall Log ---
 
 // GetFirewallLog handles GET /clusters/:cluster_id/firewall/log.
-func (h *NetworkHandler) GetFirewallLog(c *fiber.Ctx) error {
+func (h *NetworkHandler) GetFirewallLog(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err

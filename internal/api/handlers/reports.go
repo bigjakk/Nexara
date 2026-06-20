@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -144,7 +144,7 @@ func toRunResponse(r db.ReportRun) reportRunResponse {
 // --- Schedule CRUD ---
 
 // ListSchedules handles GET /api/v1/reports/schedules
-func (h *ReportHandler) ListSchedules(c *fiber.Ctx) error {
+func (h *ReportHandler) ListSchedules(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "report")
 	if err != nil {
 		return err
@@ -169,7 +169,7 @@ func (h *ReportHandler) ListSchedules(c *fiber.Ctx) error {
 }
 
 // CreateSchedule handles POST /api/v1/reports/schedules
-func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
+func (h *ReportHandler) CreateSchedule(c fiber.Ctx) error {
 	var req struct {
 		Name            string          `json:"name"`
 		ReportType      string          `json:"report_type"`
@@ -183,7 +183,7 @@ func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
 		Parameters      json.RawMessage `json:"parameters"`
 		Enabled         *bool           `json:"enabled"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -255,7 +255,7 @@ func (h *ReportHandler) CreateSchedule(c *fiber.Ctx) error {
 }
 
 // GetSchedule handles GET /api/v1/reports/schedules/:id
-func (h *ReportHandler) GetSchedule(c *fiber.Ctx) error {
+func (h *ReportHandler) GetSchedule(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
@@ -274,7 +274,7 @@ func (h *ReportHandler) GetSchedule(c *fiber.Ctx) error {
 }
 
 // UpdateSchedule handles PUT /api/v1/reports/schedules/:id
-func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
+func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
@@ -303,7 +303,7 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 		Parameters      json.RawMessage `json:"parameters"`
 		Enabled         *bool           `json:"enabled"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -409,7 +409,7 @@ func (h *ReportHandler) UpdateSchedule(c *fiber.Ctx) error {
 }
 
 // DeleteSchedule handles DELETE /api/v1/reports/schedules/:id
-func (h *ReportHandler) DeleteSchedule(c *fiber.Ctx) error {
+func (h *ReportHandler) DeleteSchedule(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid schedule ID")
@@ -435,14 +435,14 @@ func (h *ReportHandler) DeleteSchedule(c *fiber.Ctx) error {
 // --- Report Generation ---
 
 // GenerateReport handles POST /api/v1/reports/generate
-func (h *ReportHandler) GenerateReport(c *fiber.Ctx) error {
+func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 	var req struct {
 		ReportType     string `json:"report_type"`
 		ClusterID      string `json:"cluster_id"`
 		TimeRangeHours int    `json:"time_range_hours"`
 		Format         string `json:"format"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -548,7 +548,7 @@ func (h *ReportHandler) GenerateReport(c *fiber.Ctx) error {
 // --- Report Runs ---
 
 // ListRuns handles GET /api/v1/reports/runs
-func (h *ReportHandler) ListRuns(c *fiber.Ctx) error {
+func (h *ReportHandler) ListRuns(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "report")
 	if err != nil {
 		return err
@@ -573,7 +573,7 @@ func (h *ReportHandler) ListRuns(c *fiber.Ctx) error {
 }
 
 // GetRun handles GET /api/v1/reports/runs/:id
-func (h *ReportHandler) GetRun(c *fiber.Ctx) error {
+func (h *ReportHandler) GetRun(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
@@ -592,7 +592,7 @@ func (h *ReportHandler) GetRun(c *fiber.Ctx) error {
 }
 
 // GetRunHTML handles GET /api/v1/reports/runs/:id/html
-func (h *ReportHandler) GetRunHTML(c *fiber.Ctx) error {
+func (h *ReportHandler) GetRunHTML(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
@@ -618,7 +618,7 @@ func (h *ReportHandler) GetRunHTML(c *fiber.Ctx) error {
 }
 
 // GetRunCSV handles GET /api/v1/reports/runs/:id/csv
-func (h *ReportHandler) GetRunCSV(c *fiber.Ctx) error {
+func (h *ReportHandler) GetRunCSV(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid run ID")
@@ -644,7 +644,7 @@ func (h *ReportHandler) GetRunCSV(c *fiber.Ctx) error {
 
 // --- Validation ---
 
-func (h *ReportHandler) validateScheduleRequest(c *fiber.Ctx, name, reportType, clusterID string, timeRangeHours int, schedule, format string, emailEnabled bool, emailChannelID *string, emailRecipients []string, parameters json.RawMessage) error {
+func (h *ReportHandler) validateScheduleRequest(c fiber.Ctx, name, reportType, clusterID string, timeRangeHours int, schedule, format string, emailEnabled bool, emailChannelID *string, emailRecipients []string, parameters json.RawMessage) error {
 	if name == "" || len(name) > 200 {
 		return fiber.NewError(fiber.StatusBadRequest, "name must be 1-200 characters")
 	}

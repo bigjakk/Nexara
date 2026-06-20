@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -39,7 +39,7 @@ type searchResult struct {
 // Results are filtered per-row against the caller's view:cluster permissions
 // so users with cluster-scoped roles only see entries in clusters they have
 // access to. A caller with no clusters in scope receives an empty list.
-func (h *SearchHandler) GlobalSearch(c *fiber.Ctx) error {
+func (h *SearchHandler) GlobalSearch(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "cluster")
 	if err != nil {
 		return err

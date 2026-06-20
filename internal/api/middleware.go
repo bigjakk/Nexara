@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/limiter"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/gofiber/fiber/v2/middleware/requestid"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/cors"
+	"github.com/gofiber/fiber/v3/middleware/limiter"
+	"github.com/gofiber/fiber/v3/middleware/logger"
+	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
@@ -46,12 +46,34 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"form-action 'self'; " +
 	"object-src 'none'"
 
+// corsAllowOrigins converts the comma-separated CORS_ALLOW_ORIGINS config value
+// into the []string that Fiber v3's cors middleware expects (v2 accepted a raw
+// comma-string). An empty or literal "*" value maps to ["*"], preserving the v2
+// behavior where an unset AllowOrigins defaulted to "*" (allow all). The cors
+// middleware sets no credentials here, so a wildcard origin is valid and does not
+// trip v3's AllowCredentials+"*" guard.
+func corsAllowOrigins(raw string) []string {
+	if raw == "" || raw == "*" {
+		return []string{"*"}
+	}
+	var out []string
+	for _, o := range strings.Split(raw, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			out = append(out, o)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"*"}
+	}
+	return out
+}
+
 func (s *Server) setupMiddleware() {
 	// Recover from panics.
 	s.app.Use(recover.New())
 
 	// Security headers (proxy-agnostic — always present regardless of reverse proxy choice).
-	s.app.Use(func(c *fiber.Ctx) error {
+	s.app.Use(func(c fiber.Ctx) error {
 		c.Set("X-Content-Type-Options", "nosniff")
 		c.Set("X-Frame-Options", "DENY")
 		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -70,7 +92,7 @@ func (s *Server) setupMiddleware() {
 	// proxmoxCache is unset (no encryption key, test scaffolding) the
 	// helper falls through to per-call construction.
 	if s.proxmoxCache != nil {
-		s.app.Use(func(c *fiber.Ctx) error {
+		s.app.Use(func(c fiber.Ctx) error {
 			handlers.SetProxmoxCacheLocal(c, s.proxmoxCache)
 			return c.Next()
 		})
@@ -80,22 +102,26 @@ func (s *Server) setupMiddleware() {
 	s.app.Use(requestid.New())
 
 	// Structured request logging with request ID.
+	// Fiber v3's requestid middleware registers a logger context tag
+	// (logger.RegisterContextTag("requestid", …)), so the ID is referenced as
+	// ${requestid} — the v2 ${locals:requestid} no longer resolves because
+	// requestid stores the value in the request context, not c.Locals.
 	s.app.Use(logger.New(logger.Config{
-		Format: "${time} | ${status} | ${latency} | ${ip} | ${locals:requestid} | ${method} ${path}\n",
+		Format: "${time} | ${status} | ${latency} | ${ip} | ${requestid} | ${method} ${path}\n",
 	}))
 
-	// CORS.
+	// CORS. Fiber v3 takes []string for the allow-lists (v2 took comma-strings).
 	s.app.Use(cors.New(cors.Config{
-		AllowOrigins: s.config.CORSAllowOrigins,
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
-		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+		AllowOrigins: corsAllowOrigins(s.config.CORSAllowOrigins),
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 	}))
 
 	// Body size limit for non-upload API traffic (10 MB).
 	// Upload endpoints bypass this check — their bodies are streamed via
 	// StreamRequestBody and parsed incrementally by the handler.
 	const apiBodyLimit = 10 * 1024 * 1024
-	s.app.Use(func(c *fiber.Ctx) error {
+	s.app.Use(func(c fiber.Ctx) error {
 		if strings.Contains(c.Path(), "/storage/") && strings.HasSuffix(c.Path(), "/upload") {
 			return c.Next()
 		}
@@ -118,10 +144,10 @@ func (s *Server) setupMiddleware() {
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        15,
 		Expiration: 1 * time.Minute,
-		KeyGenerator: func(c *fiber.Ctx) string {
+		KeyGenerator: func(c fiber.Ctx) string {
 			return c.IP() + ":auth"
 		},
-		Next: func(c *fiber.Ctx) bool {
+		Next: func(c fiber.Ctx) bool {
 			switch c.Path() {
 			case "/api/v1/auth/login",
 				"/api/v1/auth/register",
@@ -143,10 +169,10 @@ func (s *Server) setupMiddleware() {
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        30,
 		Expiration: 1 * time.Minute,
-		KeyGenerator: func(c *fiber.Ctx) string {
+		KeyGenerator: func(c fiber.Ctx) string {
 			return c.IP() + ":refresh"
 		},
-		Next: func(c *fiber.Ctx) bool {
+		Next: func(c fiber.Ctx) bool {
 			return c.Path() != "/api/v1/auth/refresh"
 		},
 	}))
@@ -159,10 +185,10 @@ func (s *Server) setupMiddleware() {
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        60,
 		Expiration: 1 * time.Minute,
-		KeyGenerator: func(c *fiber.Ctx) string {
+		KeyGenerator: func(c fiber.Ctx) string {
 			return c.IP() + ":ws-token"
 		},
-		Next: func(c *fiber.Ctx) bool {
+		Next: func(c fiber.Ctx) bool {
 			return c.Path() != "/api/v1/auth/ws-token"
 		},
 	}))
@@ -174,7 +200,7 @@ func (s *Server) setupMiddleware() {
 	s.app.Use(limiter.New(limiter.Config{
 		Max:        s.config.RateLimitMax,
 		Expiration: s.config.RateLimitExpiration,
-		Next: func(c *fiber.Ctx) bool {
+		Next: func(c fiber.Ctx) bool {
 			return strings.HasPrefix(c.Path(), "/api/v1/auth/") ||
 				strings.HasPrefix(c.Path(), "/ws")
 		},
@@ -183,7 +209,7 @@ func (s *Server) setupMiddleware() {
 
 // authRequired returns middleware that rejects unauthenticated requests.
 func (s *Server) authRequired() fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		if s.jwtService == nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Auth not configured")
 		}
@@ -232,7 +258,7 @@ func (s *Server) authRequired() fiber.Handler {
 
 // authOptional returns middleware that extracts auth info if present, but doesn't require it.
 func (s *Server) authOptional() fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		if s.jwtService == nil {
 			return c.Next()
 		}
@@ -270,7 +296,7 @@ func (s *Server) authOptional() fiber.Handler {
 }
 
 // extractBearerToken extracts the JWT from the Authorization header.
-func extractBearerToken(c *fiber.Ctx) string {
+func extractBearerToken(c fiber.Ctx) string {
 	header := c.Get("Authorization")
 	if header == "" {
 		return ""
@@ -284,7 +310,7 @@ func extractBearerToken(c *fiber.Ctx) string {
 
 // authenticateAPIKey validates an nxra_ prefixed API key token and sets
 // the user identity in Fiber locals. Returns an error on failure.
-func (s *Server) authenticateAPIKey(c *fiber.Ctx, token string) error {
+func (s *Server) authenticateAPIKey(c fiber.Ctx, token string) error {
 	if s.queries == nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Database not configured")
 	}
@@ -314,7 +340,7 @@ func (s *Server) authenticateAPIKey(c *fiber.Ctx, token string) error {
 	if len(ip) > 45 { // max IPv6 length
 		ip = ip[:45]
 	}
-	go func() {
+	go func() { //nolint:gosec // G118: intentionally detached — async last_used update must outlive the request (Fiber recycles the request context)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if updateErr := s.queries.UpdateAPIKeyLastUsed(ctx, db.UpdateAPIKeyLastUsedParams{

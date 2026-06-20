@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -52,7 +52,7 @@ func nodeMaintenanceCommand(enable bool, nodeName string) string {
 // this runs `ha-manager crm-command node-maintenance enable|disable <node>` over
 // SSH using the cluster's stored credentials. Clusters without SSH configured can
 // use the REST "Evacuate" action instead.
-func (h *NodeHandler) SetNodeMaintenance(c *fiber.Ctx) error {
+func (h *NodeHandler) SetNodeMaintenance(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func (h *NodeHandler) SetNodeMaintenance(c *fiber.Ctx) error {
 	var req struct {
 		Enable bool `json:"enable"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -98,7 +98,7 @@ func (h *NodeHandler) SetNodeMaintenance(c *fiber.Ctx) error {
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster ID.
-func (h *NodeHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *NodeHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
@@ -171,7 +171,7 @@ func toNodeResponse(n db.Node) nodeResponse {
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/nodes.
-func (h *NodeHandler) ListByCluster(c *fiber.Ctx) error {
+func (h *NodeHandler) ListByCluster(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -239,7 +239,7 @@ type nodePCIDeviceResponse struct {
 }
 
 // ListNodeDisks handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/disks.
-func (h *NodeHandler) ListNodeDisks(c *fiber.Ctx) error {
+func (h *NodeHandler) ListNodeDisks(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -267,7 +267,7 @@ func (h *NodeHandler) ListNodeDisks(c *fiber.Ctx) error {
 }
 
 // ListNodeNetworkInterfaces handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/network-interfaces.
-func (h *NodeHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
+func (h *NodeHandler) ListNodeNetworkInterfaces(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -297,7 +297,7 @@ func (h *NodeHandler) ListNodeNetworkInterfaces(c *fiber.Ctx) error {
 }
 
 // ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/pci-devices.
-func (h *NodeHandler) ListNodePCIDevices(c *fiber.Ctx) error {
+func (h *NodeHandler) ListNodePCIDevices(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -329,7 +329,7 @@ func (h *NodeHandler) ListNodePCIDevices(c *fiber.Ctx) error {
 // --- Node management endpoints (DNS, Time, Power) ---
 
 // resolveNodeName looks up a node by cluster_id and node name param, returns the Proxmox node name.
-func (h *NodeHandler) resolveNodeName(c *fiber.Ctx) (uuid.UUID, string, error) {
+func (h *NodeHandler) resolveNodeName(c fiber.Ctx) (uuid.UUID, string, error) {
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
 	if err != nil {
 		return uuid.Nil, "", fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
@@ -342,7 +342,7 @@ func (h *NodeHandler) resolveNodeName(c *fiber.Ctx) (uuid.UUID, string, error) {
 }
 
 // GetNodeDNS handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/dns.
-func (h *NodeHandler) GetNodeDNS(c *fiber.Ctx) error {
+func (h *NodeHandler) GetNodeDNS(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -369,7 +369,7 @@ type setNodeDNSRequest struct {
 }
 
 // SetNodeDNS handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/dns.
-func (h *NodeHandler) SetNodeDNS(c *fiber.Ctx) error {
+func (h *NodeHandler) SetNodeDNS(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -378,7 +378,7 @@ func (h *NodeHandler) SetNodeDNS(c *fiber.Ctx) error {
 		return err
 	}
 	var req setNodeDNSRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if strings.TrimSpace(req.Search) == "" {
@@ -397,7 +397,7 @@ func (h *NodeHandler) SetNodeDNS(c *fiber.Ctx) error {
 }
 
 // GetNodeTime handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/time.
-func (h *NodeHandler) GetNodeTime(c *fiber.Ctx) error {
+func (h *NodeHandler) GetNodeTime(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -421,7 +421,7 @@ type setNodeTimezoneRequest struct {
 }
 
 // SetNodeTimezone handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/time.
-func (h *NodeHandler) SetNodeTimezone(c *fiber.Ctx) error {
+func (h *NodeHandler) SetNodeTimezone(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -430,7 +430,7 @@ func (h *NodeHandler) SetNodeTimezone(c *fiber.Ctx) error {
 		return err
 	}
 	var req setNodeTimezoneRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if strings.TrimSpace(req.Timezone) == "" {
@@ -449,7 +449,7 @@ func (h *NodeHandler) SetNodeTimezone(c *fiber.Ctx) error {
 }
 
 // ShutdownNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/shutdown.
-func (h *NodeHandler) ShutdownNode(c *fiber.Ctx) error {
+func (h *NodeHandler) ShutdownNode(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -469,7 +469,7 @@ func (h *NodeHandler) ShutdownNode(c *fiber.Ctx) error {
 }
 
 // RebootNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/reboot.
-func (h *NodeHandler) RebootNode(c *fiber.Ctx) error {
+func (h *NodeHandler) RebootNode(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -503,7 +503,7 @@ type evacuateMigration struct {
 
 // EvacuateNode handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/evacuate.
 // Distributes guests across available nodes using DRS-aware target selection.
-func (h *NodeHandler) EvacuateNode(c *fiber.Ctx) error {
+func (h *NodeHandler) EvacuateNode(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -512,7 +512,7 @@ func (h *NodeHandler) EvacuateNode(c *fiber.Ctx) error {
 		return err
 	}
 	var req evacuateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)

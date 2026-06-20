@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -26,7 +26,7 @@ import (
 // When the request was authenticated via API key, the key's id is injected
 // into the details JSON as `api_key_id` so an action can be correlated to a
 // specific key (not just the owning user).
-func AuditLog(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {
+func AuditLog(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {
 	uid, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return
@@ -104,7 +104,7 @@ type TrackTaskParams struct {
 // This is the ONLY sanctioned way to record a task — handlers must not hand-roll
 // the audit / InsertTaskHistory / event trio. The collector reconciler keeps the
 // task_history.status accurate from "running" to completed/failed.
-func TrackTask(c *fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p TrackTaskParams) {
+func TrackTask(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p TrackTaskParams) {
 	details := map[string]any{"upid": p.UPID, "node": p.Node}
 	if p.ResourceName != "" {
 		details["resource_name"] = p.ResourceName
@@ -167,13 +167,13 @@ const proxmoxCacheLocalsKey = "proxmoxCache"
 
 // SetProxmoxCacheLocal stores the cache pointer on a fiber.Ctx Locals slot.
 // Tests and the production middleware both call this to wire the cache in.
-func SetProxmoxCacheLocal(c *fiber.Ctx, cache *proxmox.ClientCache) {
+func SetProxmoxCacheLocal(c fiber.Ctx, cache *proxmox.ClientCache) {
 	c.Locals(proxmoxCacheLocalsKey, cache)
 }
 
 // proxmoxCacheFromCtx retrieves the cache from Locals; returns nil if
 // nothing was wired.
-func proxmoxCacheFromCtx(c *fiber.Ctx) *proxmox.ClientCache {
+func proxmoxCacheFromCtx(c fiber.Ctx) *proxmox.ClientCache {
 	v := c.Locals(proxmoxCacheLocalsKey)
 	if v == nil {
 		return nil
@@ -193,7 +193,7 @@ func proxmoxCacheFromCtx(c *fiber.Ctx) *proxmox.ClientCache {
 // upload callers (which want a 30-minute floor) hit the multipart
 // escape hatch inside the apiClient that already runs without an
 // http.Client.Timeout.
-func CreateProxmoxClient(c *fiber.Ctx, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, timeout ...time.Duration) (*proxmox.Client, error) {
+func CreateProxmoxClient(c fiber.Ctx, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, timeout ...time.Duration) (*proxmox.Client, error) {
 	if cache := proxmoxCacheFromCtx(c); cache != nil {
 		client, err := cache.Get(c.Context(), clusterID)
 		if err == nil {

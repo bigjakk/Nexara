@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )
 
@@ -26,7 +26,7 @@ func newClusterTestApp(t *testing.T) *fiber.App {
 
 	// Inject role + user_id from X-Test-Role, then wire the stub
 	// permissionEngine so the production gate path runs end-to-end.
-	app.Use(func(c *fiber.Ctx) error {
+	app.Use(func(c fiber.Ctx) error {
 		role := c.Get("X-Test-Role")
 		if role != "" {
 			c.Locals("role", role)
@@ -45,7 +45,7 @@ func newClusterTestApp(t *testing.T) *fiber.App {
 	return app
 }
 
-func testErrorHandler(c *fiber.Ctx, err error) error {
+func testErrorHandler(c fiber.Ctx, err error) error {
 	code := fiber.StatusInternalServerError
 	message := "Internal Server Error"
 	if e, ok := err.(*fiber.Error); ok {

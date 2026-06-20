@@ -3,7 +3,7 @@ package handlers
 import (
 	"fmt"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -23,7 +23,7 @@ type liveDiskResponse struct {
 
 // ListLiveDisks handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/list.
 // Returns fresh disk data directly from Proxmox (includes "used" field).
-func (h *NodeHandler) ListLiveDisks(c *fiber.Ctx) error {
+func (h *NodeHandler) ListLiveDisks(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -59,7 +59,7 @@ func (h *NodeHandler) ListLiveDisks(c *fiber.Ctx) error {
 // --- Disk SMART ---
 
 // GetDiskSMART handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/smart?disk=...
-func (h *NodeHandler) GetDiskSMART(c *fiber.Ctx) error {
+func (h *NodeHandler) GetDiskSMART(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -85,7 +85,7 @@ func (h *NodeHandler) GetDiskSMART(c *fiber.Ctx) error {
 // --- ZFS Pools ---
 
 // ListZFSPools handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs.
-func (h *NodeHandler) ListZFSPools(c *fiber.Ctx) error {
+func (h *NodeHandler) ListZFSPools(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -113,7 +113,7 @@ type createZFSPoolRequest struct {
 }
 
 // CreateZFSPool handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs.
-func (h *NodeHandler) CreateZFSPool(c *fiber.Ctx) error {
+func (h *NodeHandler) CreateZFSPool(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -122,7 +122,7 @@ func (h *NodeHandler) CreateZFSPool(c *fiber.Ctx) error {
 		return err
 	}
 	var req createZFSPoolRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Name == "" || req.RaidLevel == "" || req.Devices == "" {
@@ -156,7 +156,7 @@ func (h *NodeHandler) CreateZFSPool(c *fiber.Ctx) error {
 }
 
 // DeleteZFSPool handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/zfs/:pool_name.
-func (h *NodeHandler) DeleteZFSPool(c *fiber.Ctx) error {
+func (h *NodeHandler) DeleteZFSPool(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -168,8 +168,8 @@ func (h *NodeHandler) DeleteZFSPool(c *fiber.Ctx) error {
 	if poolName == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Pool name is required")
 	}
-	cleanupDisks := c.QueryBool("cleanup-disks", false)
-	cleanupConfig := c.QueryBool("cleanup-config", false)
+	cleanupDisks := fiber.Query[bool](c, "cleanup-disks", false)
+	cleanupConfig := fiber.Query[bool](c, "cleanup-config", false)
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -194,7 +194,7 @@ func (h *NodeHandler) DeleteZFSPool(c *fiber.Ctx) error {
 // --- LVM ---
 
 // ListLVM handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm.
-func (h *NodeHandler) ListLVM(c *fiber.Ctx) error {
+func (h *NodeHandler) ListLVM(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -220,7 +220,7 @@ type createLVMRequest struct {
 }
 
 // CreateLVM handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm.
-func (h *NodeHandler) CreateLVM(c *fiber.Ctx) error {
+func (h *NodeHandler) CreateLVM(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -229,7 +229,7 @@ func (h *NodeHandler) CreateLVM(c *fiber.Ctx) error {
 		return err
 	}
 	var req createLVMRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Name == "" || req.Device == "" {
@@ -261,7 +261,7 @@ func (h *NodeHandler) CreateLVM(c *fiber.Ctx) error {
 }
 
 // DeleteLVM handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvm/:vg_name.
-func (h *NodeHandler) DeleteLVM(c *fiber.Ctx) error {
+func (h *NodeHandler) DeleteLVM(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -273,8 +273,8 @@ func (h *NodeHandler) DeleteLVM(c *fiber.Ctx) error {
 	if vgName == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "Volume group name is required")
 	}
-	cleanupDisks := c.QueryBool("cleanup-disks", false)
-	cleanupConfig := c.QueryBool("cleanup-config", false)
+	cleanupDisks := fiber.Query[bool](c, "cleanup-disks", false)
+	cleanupConfig := fiber.Query[bool](c, "cleanup-config", false)
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -299,7 +299,7 @@ func (h *NodeHandler) DeleteLVM(c *fiber.Ctx) error {
 // --- LVM-Thin ---
 
 // ListLVMThin handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin.
-func (h *NodeHandler) ListLVMThin(c *fiber.Ctx) error {
+func (h *NodeHandler) ListLVMThin(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -325,7 +325,7 @@ type createLVMThinRequest struct {
 }
 
 // CreateLVMThin handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin.
-func (h *NodeHandler) CreateLVMThin(c *fiber.Ctx) error {
+func (h *NodeHandler) CreateLVMThin(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -334,7 +334,7 @@ func (h *NodeHandler) CreateLVMThin(c *fiber.Ctx) error {
 		return err
 	}
 	var req createLVMThinRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Name == "" || req.Device == "" {
@@ -366,7 +366,7 @@ func (h *NodeHandler) CreateLVMThin(c *fiber.Ctx) error {
 }
 
 // DeleteLVMThin handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/disks/lvmthin/:pool_name.
-func (h *NodeHandler) DeleteLVMThin(c *fiber.Ctx) error {
+func (h *NodeHandler) DeleteLVMThin(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -382,8 +382,8 @@ func (h *NodeHandler) DeleteLVMThin(c *fiber.Ctx) error {
 	if volumeGroup == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "volume-group query parameter is required")
 	}
-	cleanupDisks := c.QueryBool("cleanup-disks", false)
-	cleanupConfig := c.QueryBool("cleanup-config", false)
+	cleanupDisks := fiber.Query[bool](c, "cleanup-disks", false)
+	cleanupConfig := fiber.Query[bool](c, "cleanup-config", false)
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
@@ -408,7 +408,7 @@ func (h *NodeHandler) DeleteLVMThin(c *fiber.Ctx) error {
 // --- Directory ---
 
 // ListDirectories handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/directory.
-func (h *NodeHandler) ListDirectories(c *fiber.Ctx) error {
+func (h *NodeHandler) ListDirectories(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -435,7 +435,7 @@ type createDirectoryRequest struct {
 }
 
 // CreateDirectory handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/directory.
-func (h *NodeHandler) CreateDirectory(c *fiber.Ctx) error {
+func (h *NodeHandler) CreateDirectory(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -444,7 +444,7 @@ func (h *NodeHandler) CreateDirectory(c *fiber.Ctx) error {
 		return err
 	}
 	var req createDirectoryRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Name == "" || req.Device == "" || req.Filesystem == "" {
@@ -483,7 +483,7 @@ type diskActionRequest struct {
 }
 
 // InitializeGPT handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/disks/initgpt.
-func (h *NodeHandler) InitializeGPT(c *fiber.Ctx) error {
+func (h *NodeHandler) InitializeGPT(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -492,7 +492,7 @@ func (h *NodeHandler) InitializeGPT(c *fiber.Ctx) error {
 		return err
 	}
 	var req diskActionRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Disk == "" {
@@ -520,7 +520,7 @@ func (h *NodeHandler) InitializeGPT(c *fiber.Ctx) error {
 }
 
 // WipeDisk handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/disks/wipe.
-func (h *NodeHandler) WipeDisk(c *fiber.Ctx) error {
+func (h *NodeHandler) WipeDisk(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -529,7 +529,7 @@ func (h *NodeHandler) WipeDisk(c *fiber.Ctx) error {
 		return err
 	}
 	var req diskActionRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Disk == "" {

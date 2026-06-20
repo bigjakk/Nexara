@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -60,7 +60,7 @@ type vmFolderListResponse struct {
 // List returns every folder for the cluster plus every (vm_id, folder_id)
 // membership so the frontend can render the whole tree from a single round
 // trip.
-func (h *VMFoldersHandler) List(c *fiber.Ctx) error {
+func (h *VMFoldersHandler) List(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -97,7 +97,7 @@ type vmFolderCreateRequest struct {
 }
 
 // Create handles POST /api/v1/clusters/:cluster_id/vm-folders.
-func (h *VMFoldersHandler) Create(c *fiber.Ctx) error {
+func (h *VMFoldersHandler) Create(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -107,7 +107,7 @@ func (h *VMFoldersHandler) Create(c *fiber.Ctx) error {
 	}
 
 	var req vmFolderCreateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	name := strings.TrimSpace(req.Name)
@@ -170,7 +170,7 @@ func (n *jsonNullUUID) UnmarshalJSON(b []byte) error {
 
 // Update handles PATCH /api/v1/clusters/:cluster_id/vm-folders/:folder_id.
 // Supports renaming (name) and re-parenting (parent_id, null for top level).
-func (h *VMFoldersHandler) Update(c *fiber.Ctx) error {
+func (h *VMFoldersHandler) Update(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -196,7 +196,7 @@ func (h *VMFoldersHandler) Update(c *fiber.Ctx) error {
 	}
 
 	var req vmFolderUpdateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -262,7 +262,7 @@ func (h *VMFoldersHandler) Update(c *fiber.Ctx) error {
 // Cascade in the schema removes child folders and memberships; VMs are not
 // touched, they simply lose their folder assignment and fall back to the
 // implicit "unassigned" pseudo-folder on the frontend.
-func (h *VMFoldersHandler) Delete(c *fiber.Ctx) error {
+func (h *VMFoldersHandler) Delete(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -305,7 +305,7 @@ type assignVMFolderRequest struct {
 // AssignVM handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/folder.
 // The VM must belong to the URL cluster and (if specified) the target
 // folder must also belong to that same cluster.
-func (h *VMFoldersHandler) AssignVM(c *fiber.Ctx) error {
+func (h *VMFoldersHandler) AssignVM(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -331,7 +331,7 @@ func (h *VMFoldersHandler) AssignVM(c *fiber.Ctx) error {
 	}
 
 	var req assignVMFolderRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -367,7 +367,7 @@ func (h *VMFoldersHandler) AssignVM(c *fiber.Ctx) error {
 // ensureFolderInCluster returns 404 if the folder doesn't exist or doesn't
 // belong to the supplied cluster. Centralised so cross-cluster references
 // can't leak via crafted requests.
-func (h *VMFoldersHandler) ensureFolderInCluster(c *fiber.Ctx, folderID, clusterID uuid.UUID) error {
+func (h *VMFoldersHandler) ensureFolderInCluster(c fiber.Ctx, folderID, clusterID uuid.UUID) error {
 	folder, err := h.queries.GetVMFolder(c.Context(), folderID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -385,7 +385,7 @@ func (h *VMFoldersHandler) ensureFolderInCluster(c *fiber.Ctx, folderID, cluster
 // `newParentID` would put `folderID` underneath one of its own descendants.
 // Walks up from the candidate parent toward the root; if we encounter
 // folderID, that's the cycle.
-func (h *VMFoldersHandler) wouldCreateCycle(c *fiber.Ctx, folderID, newParentID, clusterID uuid.UUID) (bool, error) {
+func (h *VMFoldersHandler) wouldCreateCycle(c fiber.Ctx, folderID, newParentID, clusterID uuid.UUID) (bool, error) {
 	current := newParentID
 	for i := 0; i < 1024; i++ { // depth cap as a runaway guard
 		if current == folderID {

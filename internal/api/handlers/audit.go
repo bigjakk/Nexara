@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -84,9 +84,9 @@ func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow) auditLogResponse {
 }
 
 // parseAuditFilters extracts all filter params from the request query string.
-func (h *AuditHandler) parseAuditFilters(c *fiber.Ctx) (db.ListAuditLogAdvancedParams, db.CountAuditLogAdvancedParams, error) {
-	limit := c.QueryInt("limit", 50)
-	offset := c.QueryInt("offset", 0)
+func (h *AuditHandler) parseAuditFilters(c fiber.Ctx) (db.ListAuditLogAdvancedParams, db.CountAuditLogAdvancedParams, error) {
+	limit := fiber.Query[int](c, "limit", 50)
+	offset := fiber.Query[int](c, "offset", 0)
 	if limit > 200 {
 		limit = 200
 	}
@@ -158,7 +158,7 @@ func (h *AuditHandler) parseAuditFilters(c *fiber.Ctx) (db.ListAuditLogAdvancedP
 }
 
 // List handles GET /api/v1/audit-log.
-func (h *AuditHandler) List(c *fiber.Ctx) error {
+func (h *AuditHandler) List(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "audit")
 	if err != nil {
 		return err
@@ -205,7 +205,7 @@ func (h *AuditHandler) List(c *fiber.Ctx) error {
 }
 
 // ListRecent handles GET /api/v1/audit-log/recent — returns the 50 most recent entries.
-func (h *AuditHandler) ListRecent(c *fiber.Ctx) error {
+func (h *AuditHandler) ListRecent(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "audit")
 	if err != nil {
 		return err
@@ -269,7 +269,7 @@ func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow) auditLogResponse 
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/audit-log.
-func (h *AuditHandler) ListByCluster(c *fiber.Ctx) error {
+func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -278,7 +278,7 @@ func (h *AuditHandler) ListByCluster(c *fiber.Ctx) error {
 		return err
 	}
 
-	limit := c.QueryInt("limit", 50)
+	limit := fiber.Query[int](c, "limit", 50)
 	if limit < 1 {
 		limit = 1
 	} else if limit > 200 {
@@ -303,7 +303,7 @@ func (h *AuditHandler) ListByCluster(c *fiber.Ctx) error {
 }
 
 // ListActions handles GET /api/v1/audit-log/actions — returns distinct action values.
-func (h *AuditHandler) ListActions(c *fiber.Ctx) error {
+func (h *AuditHandler) ListActions(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "audit"); err != nil {
 		return err
 	}
@@ -317,7 +317,7 @@ func (h *AuditHandler) ListActions(c *fiber.Ctx) error {
 }
 
 // ListUsers handles GET /api/v1/audit-log/users — returns distinct users in audit log.
-func (h *AuditHandler) ListUsers(c *fiber.Ctx) error {
+func (h *AuditHandler) ListUsers(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "audit"); err != nil {
 		return err
 	}
@@ -341,7 +341,7 @@ func (h *AuditHandler) ListUsers(c *fiber.Ctx) error {
 }
 
 // Export handles GET /api/v1/audit-log/export — exports audit log in CSV, JSON, or syslog format.
-func (h *AuditHandler) Export(c *fiber.Ctx) error {
+func (h *AuditHandler) Export(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "audit")
 	if err != nil {
 		return err
@@ -393,7 +393,7 @@ func (h *AuditHandler) Export(c *fiber.Ctx) error {
 	}
 }
 
-func (h *AuditHandler) exportJSON(c *fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string) error {
+func (h *AuditHandler) exportJSON(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string) error {
 	resp := make([]auditLogResponse, len(items))
 	for i, a := range items {
 		resp[i] = toAdvancedAuditResponse(a)
@@ -404,7 +404,7 @@ func (h *AuditHandler) exportJSON(c *fiber.Ctx, items []db.ListAuditLogAdvancedR
 	return c.JSON(resp)
 }
 
-func (h *AuditHandler) exportCSV(c *fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string) error {
+func (h *AuditHandler) exportCSV(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string) error {
 	c.Set("Content-Type", "text/csv; charset=utf-8")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-log-%s.csv", timestamp))
 
@@ -454,7 +454,7 @@ func (h *AuditHandler) exportCSV(c *fiber.Ctx, items []db.ListAuditLogAdvancedRo
 }
 
 // exportSyslog outputs audit entries in RFC 5424 syslog format for SIEM integration.
-func (h *AuditHandler) exportSyslog(c *fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string) error {
+func (h *AuditHandler) exportSyslog(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string) error {
 	c.Set("Content-Type", "text/plain; charset=utf-8")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-log-%s.log", timestamp))
 
@@ -518,7 +518,7 @@ func syslogSeverity(action string) int {
 const syslogSettingKey = "syslog_forwarding"
 
 // GetSyslogConfig handles GET /api/v1/audit-log/syslog-config.
-func (h *AuditHandler) GetSyslogConfig(c *fiber.Ctx) error {
+func (h *AuditHandler) GetSyslogConfig(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "audit"); err != nil {
 		return err
 	}
@@ -545,13 +545,13 @@ func (h *AuditHandler) GetSyslogConfig(c *fiber.Ctx) error {
 }
 
 // UpdateSyslogConfig handles PUT /api/v1/audit-log/syslog-config.
-func (h *AuditHandler) UpdateSyslogConfig(c *fiber.Ctx) error {
+func (h *AuditHandler) UpdateSyslogConfig(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "audit"); err != nil {
 		return err
 	}
 
 	var cfg proxsyslog.Config
-	if err := c.BodyParser(&cfg); err != nil {
+	if err := c.Bind().Body(&cfg); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -610,13 +610,13 @@ func (h *AuditHandler) UpdateSyslogConfig(c *fiber.Ctx) error {
 }
 
 // TestSyslog handles POST /api/v1/audit-log/syslog-test.
-func (h *AuditHandler) TestSyslog(c *fiber.Ctx) error {
+func (h *AuditHandler) TestSyslog(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "audit"); err != nil {
 		return err
 	}
 
 	var cfg proxsyslog.Config
-	if err := c.BodyParser(&cfg); err != nil {
+	if err := c.Bind().Body(&cfg); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 

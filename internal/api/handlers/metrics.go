@@ -4,7 +4,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -100,7 +100,7 @@ func toMetricPoint(r rawRow, diskReadBps, diskWriteBps, netInBps, netOutBps floa
 }
 
 // GetClusterHistorical handles GET /api/v1/clusters/:cluster_id/metrics.
-func (h *MetricsHandler) GetClusterHistorical(c *fiber.Ctx) error {
+func (h *MetricsHandler) GetClusterHistorical(c fiber.Ctx) error {
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
@@ -150,7 +150,7 @@ func (h *MetricsHandler) GetClusterHistorical(c *fiber.Ctx) error {
 }
 
 // GetVMHistorical handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics.
-func (h *MetricsHandler) GetVMHistorical(c *fiber.Ctx) error {
+func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx) error {
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
@@ -210,7 +210,7 @@ func (h *MetricsHandler) GetVMHistorical(c *fiber.Ctx) error {
 }
 
 // GetNodeHistorical handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics.
-func (h *MetricsHandler) GetNodeHistorical(c *fiber.Ctx) error {
+func (h *MetricsHandler) GetNodeHistorical(c fiber.Ctx) error {
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")

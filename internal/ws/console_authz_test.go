@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/auth"
@@ -38,12 +38,12 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 	// machinery that app.Test can't fully drive — the middleware is what
 	// we're actually testing here.
 	var reached bool
-	passHandler := func(c *fiber.Ctx) error {
+	passHandler := func(c fiber.Ctx) error {
 		reached = true
 		return c.SendStatus(fiber.StatusOK)
 	}
 
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app := fiber.New()
 	app.Use("/ws/console", server.authMiddleware)
 	app.Get("/ws/console", passHandler)
 	app.Use("/ws/vnc", server.authMiddleware)
@@ -344,7 +344,7 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 				)
 			}
 
-			resp, err := app.Test(req, -1)
+			resp, err := app.Test(req, fiber.TestConfig{Timeout: 0})
 			if err != nil {
 				t.Fatalf("app.Test: %v", err)
 			}
@@ -409,9 +409,9 @@ func TestTokenFromSubprotocol(t *testing.T) {
 // lines (RFC 7230 §3.2.2). Fasthttp stores each as a distinct kv entry; the
 // helper joins them before delegating to the parser.
 func TestTokenFromSubprotocolHeader_MultiLine(t *testing.T) {
-	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app := fiber.New()
 	var got string
-	app.Get("/probe", func(c *fiber.Ctx) error {
+	app.Get("/probe", func(c fiber.Ctx) error {
 		got = tokenFromSubprotocolHeader(c)
 		return c.SendStatus(fiber.StatusOK)
 	})
@@ -421,7 +421,7 @@ func TestTokenFromSubprotocolHeader_MultiLine(t *testing.T) {
 	req.Header.Add("Sec-WebSocket-Protocol", "nexara.token")
 	req.Header.Add("Sec-WebSocket-Protocol", "nexara.token.abc.def.ghi")
 
-	resp, err := app.Test(req, -1)
+	resp, err := app.Test(req, fiber.TestConfig{Timeout: 0})
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}

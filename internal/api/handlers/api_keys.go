@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -94,7 +94,7 @@ func textPtr(t pgtype.Text) *string {
 // --- Handlers ---
 
 // Create handles POST /api/v1/api-keys.
-func (h *APIKeyHandler) Create(c *fiber.Ctx) error {
+func (h *APIKeyHandler) Create(c fiber.Ctx) error {
 	// API keys cannot create new API keys — require an interactive JWT session.
 	// This prevents key self-replication if a key is compromised.
 	if authMethod, _ := c.Locals("auth_method").(string); authMethod == "api_key" {
@@ -106,7 +106,7 @@ func (h *APIKeyHandler) Create(c *fiber.Ctx) error {
 	}
 
 	var req createAPIKeyRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -178,7 +178,7 @@ func (h *APIKeyHandler) Create(c *fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/api-keys.
-func (h *APIKeyHandler) List(c *fiber.Ctx) error {
+func (h *APIKeyHandler) List(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "api_key"); err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func (h *APIKeyHandler) List(c *fiber.Ctx) error {
 }
 
 // Revoke handles DELETE /api/v1/api-keys/:id.
-func (h *APIKeyHandler) Revoke(c *fiber.Ctx) error {
+func (h *APIKeyHandler) Revoke(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "api_key"); err != nil {
 		return err
 	}
@@ -248,7 +248,7 @@ func (h *APIKeyHandler) Revoke(c *fiber.Ctx) error {
 }
 
 // RevokeAll handles DELETE /api/v1/api-keys.
-func (h *APIKeyHandler) RevokeAll(c *fiber.Ctx) error {
+func (h *APIKeyHandler) RevokeAll(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "api_key"); err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func (h *APIKeyHandler) RevokeAll(c *fiber.Ctx) error {
 }
 
 // AdminList handles GET /api/v1/admin/api-keys.
-func (h *APIKeyHandler) AdminList(c *fiber.Ctx) error {
+func (h *APIKeyHandler) AdminList(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -299,7 +299,7 @@ func (h *APIKeyHandler) AdminList(c *fiber.Ctx) error {
 }
 
 // AdminRevoke handles DELETE /api/v1/admin/api-keys/:id.
-func (h *APIKeyHandler) AdminRevoke(c *fiber.Ctx) error {
+func (h *APIKeyHandler) AdminRevoke(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}

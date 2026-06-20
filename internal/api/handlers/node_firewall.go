@@ -5,11 +5,11 @@ import (
 	"strconv"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // ListNodeFirewallRules handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules.
-func (h *NodeHandler) ListNodeFirewallRules(c *fiber.Ctx) error {
+func (h *NodeHandler) ListNodeFirewallRules(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func (r nodeFirewallRuleRequest) toParams() proxmox.FirewallRuleParams {
 }
 
 // CreateNodeFirewallRule handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules.
-func (h *NodeHandler) CreateNodeFirewallRule(c *fiber.Ctx) error {
+func (h *NodeHandler) CreateNodeFirewallRule(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -70,7 +70,7 @@ func (h *NodeHandler) CreateNodeFirewallRule(c *fiber.Ctx) error {
 		return err
 	}
 	var req nodeFirewallRuleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Type == "" || req.Action == "" {
@@ -89,7 +89,7 @@ func (h *NodeHandler) CreateNodeFirewallRule(c *fiber.Ctx) error {
 }
 
 // UpdateNodeFirewallRule handles PUT /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules/:pos.
-func (h *NodeHandler) UpdateNodeFirewallRule(c *fiber.Ctx) error {
+func (h *NodeHandler) UpdateNodeFirewallRule(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func (h *NodeHandler) UpdateNodeFirewallRule(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule position")
 	}
 	var req nodeFirewallRuleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -118,7 +118,7 @@ func (h *NodeHandler) UpdateNodeFirewallRule(c *fiber.Ctx) error {
 }
 
 // DeleteNodeFirewallRule handles DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules/:pos.
-func (h *NodeHandler) DeleteNodeFirewallRule(c *fiber.Ctx) error {
+func (h *NodeHandler) DeleteNodeFirewallRule(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -142,7 +142,7 @@ func (h *NodeHandler) DeleteNodeFirewallRule(c *fiber.Ctx) error {
 }
 
 // GetNodeFirewallLog handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/log.
-func (h *NodeHandler) GetNodeFirewallLog(c *fiber.Ctx) error {
+func (h *NodeHandler) GetNodeFirewallLog(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err

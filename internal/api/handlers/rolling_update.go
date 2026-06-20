@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -154,7 +154,7 @@ func toRollingNodeResponse(n db.RollingUpdateNode) rollingUpdateNodeResponse {
 }
 
 // ListJobs returns rolling update jobs for a cluster.
-func (h *RollingUpdateHandler) ListJobs(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) ListJobs(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -201,7 +201,7 @@ type createRollingUpdateRequest struct {
 }
 
 // CreateJob creates a new rolling update job.
-func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -211,7 +211,7 @@ func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
 	}
 
 	var req createRollingUpdateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -371,7 +371,7 @@ func (h *RollingUpdateHandler) CreateJob(c *fiber.Ctx) error {
 }
 
 // GetJob returns a single rolling update job with node counts.
-func (h *RollingUpdateHandler) GetJob(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) GetJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -394,7 +394,7 @@ func (h *RollingUpdateHandler) GetJob(c *fiber.Ctx) error {
 }
 
 // StartJob starts a pending rolling update job.
-func (h *RollingUpdateHandler) StartJob(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) StartJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -431,7 +431,7 @@ func (h *RollingUpdateHandler) StartJob(c *fiber.Ctx) error {
 }
 
 // CancelJob cancels a rolling update job.
-func (h *RollingUpdateHandler) CancelJob(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) CancelJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -464,7 +464,7 @@ func (h *RollingUpdateHandler) CancelJob(c *fiber.Ctx) error {
 	// out of the orchestrator's running-jobs tick, so nothing else would ever
 	// restore these. Detached context: the restores call Proxmox and must
 	// outlive this request.
-	go func() {
+	go func() { //nolint:gosec // G118: intentionally detached — cancel-cleanup restores must outlive the request (Fiber recycles the request context)
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("rolling-update cancel cleanup panicked", "job_id", jobID, "panic", r)
@@ -485,7 +485,7 @@ func (h *RollingUpdateHandler) CancelJob(c *fiber.Ctx) error {
 }
 
 // PauseJob pauses a running rolling update job.
-func (h *RollingUpdateHandler) PauseJob(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) PauseJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -513,7 +513,7 @@ func (h *RollingUpdateHandler) PauseJob(c *fiber.Ctx) error {
 }
 
 // ResumeJob resumes a paused rolling update job.
-func (h *RollingUpdateHandler) ResumeJob(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) ResumeJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -541,7 +541,7 @@ func (h *RollingUpdateHandler) ResumeJob(c *fiber.Ctx) error {
 }
 
 // ListNodes returns nodes for a rolling update job.
-func (h *RollingUpdateHandler) ListNodes(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) ListNodes(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -569,7 +569,7 @@ func (h *RollingUpdateHandler) ListNodes(c *fiber.Ctx) error {
 }
 
 // ConfirmUpgrade confirms that manual upgrade is done on a node.
-func (h *RollingUpdateHandler) ConfirmUpgrade(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) ConfirmUpgrade(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -613,7 +613,7 @@ func (h *RollingUpdateHandler) ConfirmUpgrade(c *fiber.Ctx) error {
 }
 
 // SkipNode skips a pending node in a rolling update job.
-func (h *RollingUpdateHandler) SkipNode(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) SkipNode(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -655,7 +655,7 @@ func (h *RollingUpdateHandler) SkipNode(c *fiber.Ctx) error {
 }
 
 // PreviewPackages returns pending apt packages for a specific node.
-func (h *RollingUpdateHandler) PreviewPackages(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) PreviewPackages(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -683,7 +683,7 @@ func (h *RollingUpdateHandler) PreviewPackages(c *fiber.Ctx) error {
 }
 
 // PreflightHA analyzes HA/DRS constraints and capacity feasibility for a proposed set of nodes.
-func (h *RollingUpdateHandler) PreflightHA(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) PreflightHA(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -696,7 +696,7 @@ func (h *RollingUpdateHandler) PreflightHA(c *fiber.Ctx) error {
 		Nodes       []string `json:"nodes"`
 		Parallelism int32    `json:"parallelism"`
 	}
-	if err := c.BodyParser(&req); err != nil || len(req.Nodes) == 0 {
+	if err := c.Bind().Body(&req); err != nil || len(req.Nodes) == 0 {
 		return fiber.NewError(fiber.StatusBadRequest, "nodes array is required")
 	}
 	if req.Parallelism <= 0 {
@@ -739,7 +739,7 @@ type sshCredentialResponse struct {
 }
 
 // GetSSHCredentials returns SSH credential metadata (never returns the secret).
-func (h *RollingUpdateHandler) GetSSHCredentials(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) GetSSHCredentials(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -773,7 +773,7 @@ type upsertSSHCredentialRequest struct {
 }
 
 // UpsertSSHCredentials creates or updates SSH credentials for a cluster.
-func (h *RollingUpdateHandler) UpsertSSHCredentials(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) UpsertSSHCredentials(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -783,7 +783,7 @@ func (h *RollingUpdateHandler) UpsertSSHCredentials(c *fiber.Ctx) error {
 	}
 
 	var req upsertSSHCredentialRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -846,7 +846,7 @@ func (h *RollingUpdateHandler) UpsertSSHCredentials(c *fiber.Ctx) error {
 }
 
 // DeleteSSHCredentials removes SSH credentials for a cluster.
-func (h *RollingUpdateHandler) DeleteSSHCredentials(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) DeleteSSHCredentials(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -874,7 +874,7 @@ func (h *RollingUpdateHandler) DeleteSSHCredentials(c *fiber.Ctx) error {
 //     match the presented one; UI should warn and offer re-pin.
 //   - {success: false, message: "..."} — connection or auth failure for
 //     reasons unrelated to host-key trust.
-func (h *RollingUpdateHandler) TestSSHConnection(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) TestSSHConnection(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -886,7 +886,7 @@ func (h *RollingUpdateHandler) TestSSHConnection(c *fiber.Ctx) error {
 	var req struct {
 		NodeName string `json:"node_name"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if err := validateNodeName(req.NodeName); err != nil {
@@ -999,7 +999,7 @@ type sshKnownHostResponse struct {
 }
 
 // ListSSHKnownHosts returns the pinned host keys for a cluster.
-func (h *RollingUpdateHandler) ListSSHKnownHosts(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) ListSSHKnownHosts(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1040,7 +1040,7 @@ type pinSSHHostKeyRequest struct {
 // after verifying the freshly-scanned fingerprint matches the one the user
 // confirmed in the UI. This closes the TOCTOU window between the test
 // response and the pin call.
-func (h *RollingUpdateHandler) PinSSHHostKey(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) PinSSHHostKey(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1050,7 +1050,7 @@ func (h *RollingUpdateHandler) PinSSHHostKey(c *fiber.Ctx) error {
 	}
 
 	var req pinSSHHostKeyRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if err := validateNodeName(req.NodeName); err != nil {
@@ -1124,7 +1124,7 @@ func (h *RollingUpdateHandler) PinSSHHostKey(c *fiber.Ctx) error {
 
 // DeleteSSHKnownHost removes a pinned host key entry. The next connection
 // to that host will fail closed until re-pinned.
-func (h *RollingUpdateHandler) DeleteSSHKnownHost(c *fiber.Ctx) error {
+func (h *RollingUpdateHandler) DeleteSSHKnownHost(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1193,7 +1193,7 @@ func guardSSHHost(ctx context.Context, host string) error {
 // or a 400 error if the address is not yet known. The previous silent
 // fallback to using the node name as a hostname is removed; an unknown
 // address now fails loudly so the user can fix the underlying state.
-func (h *RollingUpdateHandler) resolveNodeAddress(c *fiber.Ctx, clusterID uuid.UUID, nodeName string) (string, error) {
+func (h *RollingUpdateHandler) resolveNodeAddress(c fiber.Ctx, clusterID uuid.UUID, nodeName string) (string, error) {
 	addr, err := h.queries.GetNodeAddressByName(c.Context(), db.GetNodeAddressByNameParams{
 		ClusterID: clusterID,
 		Name:      nodeName,

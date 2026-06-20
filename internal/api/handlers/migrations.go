@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -58,7 +58,7 @@ func NewMigrationHandler(shutdownCtx context.Context, queries *db.Queries, encry
 // Proxmox client cache stashed in fiber Locals by the API middleware.
 // Falls back to a cache-less orchestrator if the middleware didn't run
 // (e.g. partial-construction tests).
-func (h *MigrationHandler) newOrchestrator(c *fiber.Ctx) *migration.Orchestrator {
+func (h *MigrationHandler) newOrchestrator(c fiber.Ctx) *migration.Orchestrator {
 	orch := migration.NewOrchestrator(h.queries, h.encryptionKey, nil, h.eventPub)
 	if cache := proxmoxCacheFromCtx(c); cache != nil {
 		orch.SetProxmoxCache(cache)
@@ -188,9 +188,9 @@ var validMigrationModes = map[string]bool{
 }
 
 // Create handles POST /api/v1/migrations.
-func (h *MigrationHandler) Create(c *fiber.Ctx) error {
+func (h *MigrationHandler) Create(c fiber.Ctx) error {
 	var req createMigrationRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -325,17 +325,17 @@ func (h *MigrationHandler) Create(c *fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/migrations.
-func (h *MigrationHandler) List(c *fiber.Ctx) error {
+func (h *MigrationHandler) List(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "migration")
 	if err != nil {
 		return err
 	}
 
 	limit := safeconv.Int32(50)
-	if l := c.QueryInt("limit", 50); l > 0 && l <= 500 {
+	if l := fiber.Query[int](c, "limit", 50); l > 0 && l <= 500 {
 		limit = safeconv.Int32(l)
 	}
-	offset := safeconv.Int32(c.QueryInt("offset", 0))
+	offset := safeconv.Int32(fiber.Query[int](c, "offset", 0))
 
 	jobs, err := h.queries.ListMigrationJobs(c.Context(), db.ListMigrationJobsParams{
 		Limit:  limit,
@@ -359,7 +359,7 @@ func (h *MigrationHandler) List(c *fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/migrations/:id.
-func (h *MigrationHandler) Get(c *fiber.Ctx) error {
+func (h *MigrationHandler) Get(c fiber.Ctx) error {
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -381,7 +381,7 @@ func (h *MigrationHandler) Get(c *fiber.Ctx) error {
 }
 
 // RunCheck handles POST /api/v1/migrations/:id/check.
-func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
+func (h *MigrationHandler) RunCheck(c fiber.Ctx) error {
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -411,7 +411,7 @@ func (h *MigrationHandler) RunCheck(c *fiber.Ctx) error {
 }
 
 // Execute handles POST /api/v1/migrations/:id/execute.
-func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
+func (h *MigrationHandler) Execute(c fiber.Ctx) error {
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -485,7 +485,7 @@ func (h *MigrationHandler) Execute(c *fiber.Ctx) error {
 }
 
 // Cancel handles POST /api/v1/migrations/:id/cancel.
-func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
+func (h *MigrationHandler) Cancel(c fiber.Ctx) error {
 	jobID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid migration job ID")
@@ -523,7 +523,7 @@ func (h *MigrationHandler) Cancel(c *fiber.Ctx) error {
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/migrations.
-func (h *MigrationHandler) ListByCluster(c *fiber.Ctx) error {
+func (h *MigrationHandler) ListByCluster(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -533,10 +533,10 @@ func (h *MigrationHandler) ListByCluster(c *fiber.Ctx) error {
 	}
 
 	limit := safeconv.Int32(50)
-	if l := c.QueryInt("limit", 50); l > 0 && l <= 500 {
+	if l := fiber.Query[int](c, "limit", 50); l > 0 && l <= 500 {
 		limit = safeconv.Int32(l)
 	}
-	offset := safeconv.Int32(c.QueryInt("offset", 0))
+	offset := safeconv.Int32(fiber.Query[int](c, "offset", 0))
 
 	jobs, err := h.queries.ListMigrationJobsByCluster(c.Context(), db.ListMigrationJobsByClusterParams{
 		SourceClusterID: clusterID,

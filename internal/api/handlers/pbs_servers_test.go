@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )
 
@@ -21,7 +21,7 @@ func newPBSTestApp(t *testing.T) *fiber.App {
 		ErrorHandler: testErrorHandler,
 	})
 
-	app.Use(func(c *fiber.Ctx) error {
+	app.Use(func(c fiber.Ctx) error {
 		role := c.Get("X-Test-Role")
 		if role != "" {
 			c.Locals("role", role)

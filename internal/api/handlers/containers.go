@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -63,7 +63,7 @@ type ctVolumeMoveRequest struct {
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/containers.
-func (h *ContainerHandler) ListByCluster(c *fiber.Ctx) error {
+func (h *ContainerHandler) ListByCluster(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -86,7 +86,7 @@ func (h *ContainerHandler) ListByCluster(c *fiber.Ctx) error {
 }
 
 // GetContainer handles GET /api/v1/clusters/:cluster_id/containers/:ct_id.
-func (h *ContainerHandler) GetContainer(c *fiber.Ctx) error {
+func (h *ContainerHandler) GetContainer(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ func (h *ContainerHandler) GetContainer(c *fiber.Ctx) error {
 }
 
 // PerformAction handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/status.
-func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
+func (h *ContainerHandler) PerformAction(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -127,7 +127,7 @@ func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
 	}
 
 	var req ctActionRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -181,7 +181,7 @@ func (h *ContainerHandler) PerformAction(c *fiber.Ctx) error {
 }
 
 // CloneContainer handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone.
-func (h *ContainerHandler) CloneContainer(c *fiber.Ctx) error {
+func (h *ContainerHandler) CloneContainer(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -196,7 +196,7 @@ func (h *ContainerHandler) CloneContainer(c *fiber.Ctx) error {
 	}
 
 	var req ctCloneRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -240,7 +240,7 @@ func (h *ContainerHandler) CloneContainer(c *fiber.Ctx) error {
 }
 
 // MigrateContainer handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/migrate.
-func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
+func (h *ContainerHandler) MigrateContainer(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -255,7 +255,7 @@ func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
 	}
 
 	var req ctMigrateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -297,7 +297,7 @@ func (h *ContainerHandler) MigrateContainer(c *fiber.Ctx) error {
 
 // ConvertToTemplate handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/convert-to-template.
 // This converts a stopped container to a template. The operation is irreversible in Proxmox.
-func (h *ContainerHandler) ConvertToTemplate(c *fiber.Ctx) error {
+func (h *ContainerHandler) ConvertToTemplate(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -350,7 +350,7 @@ func (h *ContainerHandler) ConvertToTemplate(c *fiber.Ctx) error {
 
 // CloneToTemplate handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone-to-template.
 // This clones a container and then automatically converts the clone to a template.
-func (h *ContainerHandler) CloneToTemplate(c *fiber.Ctx) error {
+func (h *ContainerHandler) CloneToTemplate(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -365,7 +365,7 @@ func (h *ContainerHandler) CloneToTemplate(c *fiber.Ctx) error {
 	}
 
 	var req ctCloneRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -407,7 +407,7 @@ func (h *ContainerHandler) CloneToTemplate(c *fiber.Ctx) error {
 	if req.Target != "" {
 		targetNode = req.Target
 	}
-	go h.convertCloneToTemplate(pxClient, targetNode, req.NewID, cluster.ID.String())
+	go h.convertCloneToTemplate(pxClient, targetNode, req.NewID, cluster.ID.String()) //nolint:gosec // G118: intentionally detached — clone→template conversion must outlive the request (Fiber recycles the request context)
 
 	return c.JSON(vmActionResponse{
 		UPID:   cloneUpid,
@@ -458,7 +458,7 @@ func (h *ContainerHandler) convertCloneToTemplate(pxClient *proxmox.Client, node
 }
 
 // DestroyContainer handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id.
-func (h *ContainerHandler) DestroyContainer(c *fiber.Ctx) error {
+func (h *ContainerHandler) DestroyContainer(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -502,7 +502,7 @@ func (h *ContainerHandler) DestroyContainer(c *fiber.Ctx) error {
 }
 
 // resolveCT loads the container, its node, the cluster, and creates a Proxmox client.
-func (h *ContainerHandler) resolveCT(c *fiber.Ctx, clusterID, ctID uuid.UUID) (db.Vm, db.Node, db.Cluster, *proxmox.Client, error) {
+func (h *ContainerHandler) resolveCT(c fiber.Ctx, clusterID, ctID uuid.UUID) (db.Vm, db.Node, db.Cluster, *proxmox.Client, error) {
 	var zeroCT db.Vm
 	var zeroNode db.Node
 	var zeroCluster db.Cluster
@@ -543,7 +543,7 @@ func (h *ContainerHandler) resolveCT(c *fiber.Ctx, clusterID, ctID uuid.UUID) (d
 // --- Snapshot handlers ---
 
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
-func (h *ContainerHandler) ListSnapshots(c *fiber.Ctx) error {
+func (h *ContainerHandler) ListSnapshots(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -585,7 +585,7 @@ func (h *ContainerHandler) ListSnapshots(c *fiber.Ctx) error {
 }
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
-func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
+func (h *ContainerHandler) CreateSnapshot(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -600,7 +600,7 @@ func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
 	}
 
 	var req snapshotRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.SnapName == "" {
@@ -640,7 +640,7 @@ func (h *ContainerHandler) CreateSnapshot(c *fiber.Ctx) error {
 }
 
 // DeleteSnapshot handles DELETE /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name.
-func (h *ContainerHandler) DeleteSnapshot(c *fiber.Ctx) error {
+func (h *ContainerHandler) DeleteSnapshot(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -689,7 +689,7 @@ func (h *ContainerHandler) DeleteSnapshot(c *fiber.Ctx) error {
 }
 
 // RollbackSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots/:snap_name/rollback.
-func (h *ContainerHandler) RollbackSnapshot(c *fiber.Ctx) error {
+func (h *ContainerHandler) RollbackSnapshot(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -763,7 +763,7 @@ type createCTRequest struct {
 }
 
 // CreateContainer handles POST /api/v1/clusters/:cluster_id/containers.
-func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
+func (h *ContainerHandler) CreateContainer(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -773,7 +773,7 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 	}
 
 	var req createCTRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -839,7 +839,7 @@ func (h *ContainerHandler) CreateContainer(c *fiber.Ctx) error {
 // --- Container Config handlers ---
 
 // GetContainerConfig handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/config.
-func (h *ContainerHandler) GetContainerConfig(c *fiber.Ctx) error {
+func (h *ContainerHandler) GetContainerConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -867,7 +867,7 @@ func (h *ContainerHandler) GetContainerConfig(c *fiber.Ctx) error {
 }
 
 // ResizeDisk handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/disks/resize.
-func (h *ContainerHandler) ResizeDisk(c *fiber.Ctx) error {
+func (h *ContainerHandler) ResizeDisk(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -885,7 +885,7 @@ func (h *ContainerHandler) ResizeDisk(c *fiber.Ctx) error {
 		Disk string `json:"disk"`
 		Size string `json:"size"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -915,7 +915,7 @@ func (h *ContainerHandler) ResizeDisk(c *fiber.Ctx) error {
 }
 
 // MoveVolume handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/volumes/move.
-func (h *ContainerHandler) MoveVolume(c *fiber.Ctx) error {
+func (h *ContainerHandler) MoveVolume(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -930,7 +930,7 @@ func (h *ContainerHandler) MoveVolume(c *fiber.Ctx) error {
 	}
 
 	var req ctVolumeMoveRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -976,7 +976,7 @@ type setCTConfigRequest struct {
 }
 
 // SetContainerConfig handles PUT /api/v1/clusters/:cluster_id/containers/:ct_id/config.
-func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
+func (h *ContainerHandler) SetContainerConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -991,7 +991,7 @@ func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
 	}
 
 	var req setCTConfigRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if len(req.Fields) == 0 {
@@ -1015,6 +1015,6 @@ func (h *ContainerHandler) SetContainerConfig(c *fiber.Ctx) error {
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster.
-func (h *ContainerHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *ContainerHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }

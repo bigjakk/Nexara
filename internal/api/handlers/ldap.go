@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -130,7 +130,7 @@ func toLDAPConfigResponse(cfg db.LdapConfig) ldapConfigResponse {
 }
 
 // List handles GET /api/v1/ldap/configs.
-func (h *LDAPHandler) List(c *fiber.Ctx) error {
+func (h *LDAPHandler) List(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (h *LDAPHandler) List(c *fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/ldap/configs/:id.
-func (h *LDAPHandler) Get(c *fiber.Ctx) error {
+func (h *LDAPHandler) Get(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -171,13 +171,13 @@ func (h *LDAPHandler) Get(c *fiber.Ctx) error {
 }
 
 // Create handles POST /api/v1/ldap/configs.
-func (h *LDAPHandler) Create(c *fiber.Ctx) error {
+func (h *LDAPHandler) Create(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
 
 	var req ldapConfigRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -249,7 +249,7 @@ func (h *LDAPHandler) Create(c *fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/ldap/configs/:id.
-func (h *LDAPHandler) Update(c *fiber.Ctx) error {
+func (h *LDAPHandler) Update(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func (h *LDAPHandler) Update(c *fiber.Ctx) error {
 	}
 
 	var req ldapConfigRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -341,7 +341,7 @@ func (h *LDAPHandler) Update(c *fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/ldap/configs/:id.
-func (h *LDAPHandler) Delete(c *fiber.Ctx) error {
+func (h *LDAPHandler) Delete(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -370,7 +370,7 @@ type testConnectionResponse struct {
 }
 
 // TestConnection handles POST /api/v1/ldap/configs/:id/test.
-func (h *LDAPHandler) TestConnection(c *fiber.Ctx) error {
+func (h *LDAPHandler) TestConnection(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -408,7 +408,7 @@ func (h *LDAPHandler) TestConnection(c *fiber.Ctx) error {
 
 	// If a test username was provided, try to search for it
 	var req testConnectionRequest
-	if err := c.BodyParser(&req); err == nil && req.TestUsername != "" {
+	if err := c.Bind().Body(&req); err == nil && req.TestUsername != "" {
 		user, err := client.SearchUser(req.TestUsername)
 		if err != nil {
 			slog.Error("LDAP test user search failed", "config_id", id, "username", req.TestUsername, "error", err)
@@ -427,7 +427,7 @@ func (h *LDAPHandler) TestConnection(c *fiber.Ctx) error {
 }
 
 // Sync handles POST /api/v1/ldap/configs/:id/sync.
-func (h *LDAPHandler) Sync(c *fiber.Ctx) error {
+func (h *LDAPHandler) Sync(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -551,7 +551,7 @@ func (h *LDAPHandler) buildLDAPConfig(cfg db.LdapConfig) (auth.LDAPConfig, error
 }
 
 // syncUserRoles maps LDAP group DNs to RBAC role UUIDs and assigns them.
-func (h *LDAPHandler) syncUserRoles(c *fiber.Ctx, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
+func (h *LDAPHandler) syncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
 	// Clear existing RBAC roles
 	_ = h.queries.RevokeAllUserRoles(c.Context(), userID)
 
@@ -595,7 +595,7 @@ func (h *LDAPHandler) BuildLDAPConfigFromDB(cfg db.LdapConfig) (auth.LDAPConfig,
 }
 
 // SyncUserRoles is exported for use by the auth handler during login.
-func (h *LDAPHandler) SyncUserRoles(c *fiber.Ctx, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
+func (h *LDAPHandler) SyncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
 	h.syncUserRoles(c, userID, groups, mapping, defaultRoleID)
 }
 

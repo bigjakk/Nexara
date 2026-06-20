@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -23,12 +23,12 @@ func NewClusterOptionsHandler(queries *db.Queries, encryptionKey string, eventPu
 	return &ClusterOptionsHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
-func (h *ClusterOptionsHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *ClusterOptionsHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // GetOptions handles GET /clusters/:cluster_id/options.
-func (h *ClusterOptionsHandler) GetOptions(c *fiber.Ctx) error {
+func (h *ClusterOptionsHandler) GetOptions(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -48,7 +48,7 @@ func (h *ClusterOptionsHandler) GetOptions(c *fiber.Ctx) error {
 }
 
 // UpdateOptions handles PUT /clusters/:cluster_id/options.
-func (h *ClusterOptionsHandler) UpdateOptions(c *fiber.Ctx) error {
+func (h *ClusterOptionsHandler) UpdateOptions(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func (h *ClusterOptionsHandler) UpdateOptions(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.UpdateClusterOptionsParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -73,7 +73,7 @@ func (h *ClusterOptionsHandler) UpdateOptions(c *fiber.Ctx) error {
 }
 
 // GetDescription handles GET /clusters/:cluster_id/description.
-func (h *ClusterOptionsHandler) GetDescription(c *fiber.Ctx) error {
+func (h *ClusterOptionsHandler) GetDescription(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -93,7 +93,7 @@ func (h *ClusterOptionsHandler) GetDescription(c *fiber.Ctx) error {
 }
 
 // UpdateDescription handles PUT /clusters/:cluster_id/description.
-func (h *ClusterOptionsHandler) UpdateDescription(c *fiber.Ctx) error {
+func (h *ClusterOptionsHandler) UpdateDescription(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -104,7 +104,7 @@ func (h *ClusterOptionsHandler) UpdateDescription(c *fiber.Ctx) error {
 	var req struct {
 		Description string `json:"description"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -122,7 +122,7 @@ func (h *ClusterOptionsHandler) UpdateDescription(c *fiber.Ctx) error {
 }
 
 // GetTags handles GET /clusters/:cluster_id/tags.
-func (h *ClusterOptionsHandler) GetTags(c *fiber.Ctx) error {
+func (h *ClusterOptionsHandler) GetTags(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -146,7 +146,7 @@ func (h *ClusterOptionsHandler) GetTags(c *fiber.Ctx) error {
 }
 
 // UpdateTags handles PUT /clusters/:cluster_id/tags.
-func (h *ClusterOptionsHandler) UpdateTags(c *fiber.Ctx) error {
+func (h *ClusterOptionsHandler) UpdateTags(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -159,7 +159,7 @@ func (h *ClusterOptionsHandler) UpdateTags(c *fiber.Ctx) error {
 		UserTagAccess  *string `json:"user_tag_access"`
 		TagStyle       *string `json:"tag_style"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -179,7 +179,7 @@ func (h *ClusterOptionsHandler) UpdateTags(c *fiber.Ctx) error {
 }
 
 // GetClusterConfig handles GET /clusters/:cluster_id/config.
-func (h *ClusterOptionsHandler) GetClusterConfig(c *fiber.Ctx) error {
+func (h *ClusterOptionsHandler) GetClusterConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -199,7 +199,7 @@ func (h *ClusterOptionsHandler) GetClusterConfig(c *fiber.Ctx) error {
 }
 
 // GetJoinInfo handles GET /clusters/:cluster_id/config/join.
-func (h *ClusterOptionsHandler) GetJoinInfo(c *fiber.Ctx) error {
+func (h *ClusterOptionsHandler) GetJoinInfo(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -219,7 +219,7 @@ func (h *ClusterOptionsHandler) GetJoinInfo(c *fiber.Ctx) error {
 }
 
 // ListCorosyncNodes handles GET /clusters/:cluster_id/config/nodes.
-func (h *ClusterOptionsHandler) ListCorosyncNodes(c *fiber.Ctx) error {
+func (h *ClusterOptionsHandler) ListCorosyncNodes(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err

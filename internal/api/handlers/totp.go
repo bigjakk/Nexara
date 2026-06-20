@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
@@ -42,7 +42,7 @@ type TOTPHandler struct {
 	totpService  *auth.TOTPService
 	rdb          *redis.Client
 	eventPub     *events.Publisher
-	issueTokens  func(c *fiber.Ctx, user db.User, auditAction string) error
+	issueTokens  func(c fiber.Ctx, user db.User, auditAction string) error
 }
 
 // NewTOTPHandler creates a new TOTP handler.
@@ -56,12 +56,12 @@ func NewTOTPHandler(queries *db.Queries, encryptionKey string, rdb *redis.Client
 }
 
 // SetIssueTokensFn sets the token-issuing function (called from server setup).
-func (h *TOTPHandler) SetIssueTokensFn(fn func(c *fiber.Ctx, user db.User, auditAction string) error) {
+func (h *TOTPHandler) SetIssueTokensFn(fn func(c fiber.Ctx, user db.User, auditAction string) error) {
 	h.issueTokens = fn
 }
 
 // BeginSetup handles POST /api/v1/auth/totp/setup — starts TOTP enrollment.
-func (h *TOTPHandler) BeginSetup(c *fiber.Ctx) error {
+func (h *TOTPHandler) BeginSetup(c fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -100,7 +100,7 @@ func (h *TOTPHandler) BeginSetup(c *fiber.Ctx) error {
 }
 
 // ConfirmSetup handles POST /api/v1/auth/totp/setup/verify — confirms TOTP enrollment.
-func (h *TOTPHandler) ConfirmSetup(c *fiber.Ctx) error {
+func (h *TOTPHandler) ConfirmSetup(c fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -109,7 +109,7 @@ func (h *TOTPHandler) ConfirmSetup(c *fiber.Ctx) error {
 	var req struct {
 		Code string `json:"code"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Code == "" {
@@ -189,7 +189,7 @@ func (h *TOTPHandler) ConfirmSetup(c *fiber.Ctx) error {
 }
 
 // Disable handles DELETE /api/v1/auth/totp — disables TOTP for the current user.
-func (h *TOTPHandler) Disable(c *fiber.Ctx) error {
+func (h *TOTPHandler) Disable(c fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -199,7 +199,7 @@ func (h *TOTPHandler) Disable(c *fiber.Ctx) error {
 		Code         string `json:"code"`
 		RecoveryCode string `json:"recovery_code"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Code == "" && req.RecoveryCode == "" {
@@ -247,7 +247,7 @@ func (h *TOTPHandler) Disable(c *fiber.Ctx) error {
 }
 
 // Status handles GET /api/v1/auth/totp/status — returns TOTP status for current user.
-func (h *TOTPHandler) Status(c *fiber.Ctx) error {
+func (h *TOTPHandler) Status(c fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -270,7 +270,7 @@ func (h *TOTPHandler) Status(c *fiber.Ctx) error {
 }
 
 // RegenerateRecoveryCodes handles POST /api/v1/auth/totp/recovery-codes/regenerate.
-func (h *TOTPHandler) RegenerateRecoveryCodes(c *fiber.Ctx) error {
+func (h *TOTPHandler) RegenerateRecoveryCodes(c fiber.Ctx) error {
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if userID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -279,7 +279,7 @@ func (h *TOTPHandler) RegenerateRecoveryCodes(c *fiber.Ctx) error {
 	var req struct {
 		Code string `json:"code"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Code == "" {
@@ -334,13 +334,13 @@ func (h *TOTPHandler) RegenerateRecoveryCodes(c *fiber.Ctx) error {
 }
 
 // VerifyLogin handles POST /api/v1/auth/totp/verify-login — completes two-step login.
-func (h *TOTPHandler) VerifyLogin(c *fiber.Ctx) error {
+func (h *TOTPHandler) VerifyLogin(c fiber.Ctx) error {
 	var req struct {
 		TOTPPendingToken string `json:"totp_pending_token"`
 		Code             string `json:"code"`
 		RecoveryCode     string `json:"recovery_code"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.TOTPPendingToken == "" {
@@ -441,7 +441,7 @@ func (h *TOTPHandler) VerifyLogin(c *fiber.Ctx) error {
 }
 
 // AdminReset handles DELETE /api/v1/users/:id/totp — admin resets user's TOTP.
-func (h *TOTPHandler) AdminReset(c *fiber.Ctx) error {
+func (h *TOTPHandler) AdminReset(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}

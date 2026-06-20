@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
@@ -211,7 +211,7 @@ var validSeverities = map[string]bool{
 // --- Handlers ---
 
 // ListScans lists CVE scans for a cluster.
-func (h *CVEHandler) ListScans(c *fiber.Ctx) error {
+func (h *CVEHandler) ListScans(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -246,7 +246,7 @@ func (h *CVEHandler) ListScans(c *fiber.Ctx) error {
 }
 
 // TriggerScan starts a new CVE scan for a cluster.
-func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
+func (h *CVEHandler) TriggerScan(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -321,7 +321,7 @@ func (h *CVEHandler) TriggerScan(c *fiber.Ctx) error {
 }
 
 // GetScan returns a single CVE scan with its node results.
-func (h *CVEHandler) GetScan(c *fiber.Ctx) error {
+func (h *CVEHandler) GetScan(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -362,7 +362,7 @@ func (h *CVEHandler) GetScan(c *fiber.Ctx) error {
 }
 
 // ListVulnerabilities returns vulnerabilities for a scan.
-func (h *CVEHandler) ListVulnerabilities(c *fiber.Ctx) error {
+func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -429,7 +429,7 @@ func (h *CVEHandler) ListVulnerabilities(c *fiber.Ctx) error {
 }
 
 // DeleteScan deletes a CVE scan and its results.
-func (h *CVEHandler) DeleteScan(c *fiber.Ctx) error {
+func (h *CVEHandler) DeleteScan(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -462,7 +462,7 @@ func (h *CVEHandler) DeleteScan(c *fiber.Ctx) error {
 }
 
 // GetSecurityPosture returns the security posture summary for a cluster.
-func (h *CVEHandler) GetSecurityPosture(c *fiber.Ctx) error {
+func (h *CVEHandler) GetSecurityPosture(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -533,7 +533,7 @@ type updateCVEScheduleRequest struct {
 }
 
 // GetSchedule returns the CVE scan schedule for a cluster.
-func (h *CVEHandler) GetSchedule(c *fiber.Ctx) error {
+func (h *CVEHandler) GetSchedule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -561,7 +561,7 @@ func (h *CVEHandler) GetSchedule(c *fiber.Ctx) error {
 }
 
 // UpdateSchedule updates the CVE scan schedule for a cluster.
-func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
+func (h *CVEHandler) UpdateSchedule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -571,7 +571,7 @@ func (h *CVEHandler) UpdateSchedule(c *fiber.Ctx) error {
 	}
 
 	var req updateCVEScheduleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -637,7 +637,7 @@ type updateCVENotifyConfigRequest struct {
 
 // GetCVENotificationConfig returns the per-cluster CVE notification config.
 // Falls back to disabled defaults when no config exists yet.
-func (h *CVEHandler) GetCVENotificationConfig(c *fiber.Ctx) error {
+func (h *CVEHandler) GetCVENotificationConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -684,7 +684,7 @@ func (h *CVEHandler) GetCVENotificationConfig(c *fiber.Ctx) error {
 }
 
 // UpdateCVENotificationConfig upserts the per-cluster CVE notification config.
-func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
+func (h *CVEHandler) UpdateCVENotificationConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -694,7 +694,7 @@ func (h *CVEHandler) UpdateCVENotificationConfig(c *fiber.Ctx) error {
 	}
 
 	var req updateCVENotifyConfigRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 

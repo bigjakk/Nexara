@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofiber/contrib/websocket"
+	"github.com/gofiber/contrib/v3/websocket"
 	"github.com/google/uuid"
 )
 

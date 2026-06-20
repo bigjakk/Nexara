@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -23,12 +23,12 @@ func NewMetricServerHandler(queries *db.Queries, encryptionKey string, eventPub 
 	return &MetricServerHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
-func (h *MetricServerHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *MetricServerHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // ListServers handles GET /clusters/:cluster_id/metric-servers.
-func (h *MetricServerHandler) ListServers(c *fiber.Ctx) error {
+func (h *MetricServerHandler) ListServers(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -52,7 +52,7 @@ func (h *MetricServerHandler) ListServers(c *fiber.Ctx) error {
 }
 
 // CreateServer handles POST /clusters/:cluster_id/metric-servers.
-func (h *MetricServerHandler) CreateServer(c *fiber.Ctx) error {
+func (h *MetricServerHandler) CreateServer(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func (h *MetricServerHandler) CreateServer(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.CreateMetricServerParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.ID == "" || req.Type == "" || req.Server == "" || req.Port == 0 {
@@ -80,7 +80,7 @@ func (h *MetricServerHandler) CreateServer(c *fiber.Ctx) error {
 }
 
 // GetServer handles GET /clusters/:cluster_id/metric-servers/:server_id.
-func (h *MetricServerHandler) GetServer(c *fiber.Ctx) error {
+func (h *MetricServerHandler) GetServer(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -105,7 +105,7 @@ func (h *MetricServerHandler) GetServer(c *fiber.Ctx) error {
 }
 
 // UpdateServer handles PUT /clusters/:cluster_id/metric-servers/:server_id.
-func (h *MetricServerHandler) UpdateServer(c *fiber.Ctx) error {
+func (h *MetricServerHandler) UpdateServer(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -115,7 +115,7 @@ func (h *MetricServerHandler) UpdateServer(c *fiber.Ctx) error {
 	}
 	serverID := c.Params("server_id")
 	var req proxmox.UpdateMetricServerParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -131,7 +131,7 @@ func (h *MetricServerHandler) UpdateServer(c *fiber.Ctx) error {
 }
 
 // DeleteServer handles DELETE /clusters/:cluster_id/metric-servers/:server_id.
-func (h *MetricServerHandler) DeleteServer(c *fiber.Ctx) error {
+func (h *MetricServerHandler) DeleteServer(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err

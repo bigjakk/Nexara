@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/changelog"
 )
@@ -22,7 +22,7 @@ func NewChangelogHandler(svc *changelog.Service) *ChangelogHandler {
 // Always returns 200 with a (possibly empty) entries array — the popup is
 // expected to gracefully no-op on empty data, so callers don't need to
 // distinguish "no releases yet" from "GitHub is unreachable".
-func (h *ChangelogHandler) Get(c *fiber.Ctx) error {
+func (h *ChangelogHandler) Get(c fiber.Ctx) error {
 	if h.svc == nil {
 		return c.JSON(fiber.Map{"entries": []changelog.Entry{}})
 	}

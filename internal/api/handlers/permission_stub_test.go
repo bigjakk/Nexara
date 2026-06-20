@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/auth"
@@ -49,7 +49,7 @@ func (s *stubEngine) LoadUserPermissions(_ context.Context, _ uuid.UUID) (*auth.
 // through unchanged so unauthenticated paths still hit a 500 from
 // engineFromContext, matching production behaviour.
 func installStubEngineMiddleware(app *fiber.App) {
-	app.Use(func(c *fiber.Ctx) error {
+	app.Use(func(c fiber.Ctx) error {
 		if uid, _ := c.Locals("user_id").(uuid.UUID); uid != uuid.Nil {
 			role, _ := c.Locals("role").(string)
 			c.Locals("rbac_engine", &stubEngine{role: role})

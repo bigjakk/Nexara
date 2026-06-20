@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // APIDocsHandler serves the API endpoint catalog. Endpoints are
@@ -272,7 +272,7 @@ func groupFromPath(path string) string {
 }
 
 // GetDocs returns the auto-generated API endpoint catalog.
-func (h *APIDocsHandler) GetDocs(c *fiber.Ctx) error {
+func (h *APIDocsHandler) GetDocs(c fiber.Ctx) error {
 	if h.app == nil {
 		// SetApp wasn't called yet — surface the failure rather than
 		// silently returning an empty list, which would confuse the

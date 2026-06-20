@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // RefreshCookieName is the cookie name carrying the long-lived refresh token
@@ -43,7 +43,7 @@ func SetCookieSecureMode(mode string) {
 //     X-Forwarded-Proto only from a TRUSTED_PROXIES upstream, and the flag is
 //     downgraded on plain-HTTP so homelab IP-only deploys don't have the browser
 //     silently drop the cookie ("Set-Cookie disappears" is a worse failure mode).
-func refreshCookieSecure(c *fiber.Ctx) bool {
+func refreshCookieSecure(c fiber.Ctx) bool {
 	switch cookieSecureMode {
 	case "always":
 		return true
@@ -57,7 +57,7 @@ func refreshCookieSecure(c *fiber.Ctx) bool {
 // setRefreshCookie installs the refresh-token cookie with HttpOnly, Secure (per
 // SECURE_COOKIES, see refreshCookieSecure), SameSite=Strict, and a path scoped
 // to the auth endpoints.
-func setRefreshCookie(c *fiber.Ctx, token string, ttl time.Duration) {
+func setRefreshCookie(c fiber.Ctx, token string, ttl time.Duration) {
 	c.Cookie(&fiber.Cookie{
 		Name:     RefreshCookieName,
 		Value:    token,
@@ -72,7 +72,7 @@ func setRefreshCookie(c *fiber.Ctx, token string, ttl time.Duration) {
 // clearRefreshCookie expires the refresh-token cookie immediately. The
 // attributes (Path/Domain/Secure/SameSite) must match the original Set-Cookie
 // for the browser to accept the deletion, so Secure tracks setRefreshCookie.
-func clearRefreshCookie(c *fiber.Ctx) {
+func clearRefreshCookie(c fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{
 		Name:     RefreshCookieName,
 		Value:    "",
@@ -87,7 +87,7 @@ func clearRefreshCookie(c *fiber.Ctx) {
 
 // readRefreshTokenFromCookie returns the refresh token stored in the request
 // cookie, or "" if the cookie is absent.
-func readRefreshTokenFromCookie(c *fiber.Ctx) string {
+func readRefreshTokenFromCookie(c fiber.Ctx) string {
 	return c.Cookies(RefreshCookieName)
 }
 
@@ -95,6 +95,6 @@ func readRefreshTokenFromCookie(c *fiber.Ctx) string {
 // shell. Mobile clients have no DOM cookie jar and instead store the refresh
 // token in SecureStore, so the response keeps the refresh token in the body
 // for them.
-func isMobileClient(c *fiber.Ctx) bool {
+func isMobileClient(c fiber.Ctx) bool {
 	return strings.EqualFold(strings.TrimSpace(c.Get("X-Nexara-Device-Type")), "mobile")
 }

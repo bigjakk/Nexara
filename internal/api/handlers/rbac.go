@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -32,7 +32,7 @@ func NewRBACHandler(queries *db.Queries, rbac *auth.RBACEngine, eventPub *events
 }
 
 // invalidateRoleUsers clears the RBAC cache for all users holding a given role.
-func (h *RBACHandler) invalidateRoleUsers(c *fiber.Ctx, roleID uuid.UUID) {
+func (h *RBACHandler) invalidateRoleUsers(c fiber.Ctx, roleID uuid.UUID) {
 	userIDs, err := h.queries.ListUserIDsByRole(c.Context(), roleID)
 	if err != nil {
 		return
@@ -74,7 +74,7 @@ type updateRoleRequest struct {
 }
 
 // ListRoles handles GET /api/v1/rbac/roles.
-func (h *RBACHandler) ListRoles(c *fiber.Ctx) error {
+func (h *RBACHandler) ListRoles(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "role"); err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func (h *RBACHandler) ListRoles(c *fiber.Ctx) error {
 }
 
 // GetRole handles GET /api/v1/rbac/roles/:id.
-func (h *RBACHandler) GetRole(c *fiber.Ctx) error {
+func (h *RBACHandler) GetRole(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "role"); err != nil {
 		return err
 	}
@@ -145,13 +145,13 @@ func (h *RBACHandler) GetRole(c *fiber.Ctx) error {
 }
 
 // CreateRole handles POST /api/v1/rbac/roles.
-func (h *RBACHandler) CreateRole(c *fiber.Ctx) error {
+func (h *RBACHandler) CreateRole(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "role"); err != nil {
 		return err
 	}
 
 	var req createRoleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -193,7 +193,7 @@ func (h *RBACHandler) CreateRole(c *fiber.Ctx) error {
 }
 
 // UpdateRole handles PUT /api/v1/rbac/roles/:id.
-func (h *RBACHandler) UpdateRole(c *fiber.Ctx) error {
+func (h *RBACHandler) UpdateRole(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "role"); err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func (h *RBACHandler) UpdateRole(c *fiber.Ctx) error {
 	}
 
 	var req updateRoleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -272,7 +272,7 @@ func (h *RBACHandler) UpdateRole(c *fiber.Ctx) error {
 }
 
 // DeleteRole handles DELETE /api/v1/rbac/roles/:id.
-func (h *RBACHandler) DeleteRole(c *fiber.Ctx) error {
+func (h *RBACHandler) DeleteRole(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "role"); err != nil {
 		return err
 	}
@@ -310,7 +310,7 @@ func (h *RBACHandler) DeleteRole(c *fiber.Ctx) error {
 // -- Permissions --
 
 // ListPermissions handles GET /api/v1/rbac/permissions.
-func (h *RBACHandler) ListPermissions(c *fiber.Ctx) error {
+func (h *RBACHandler) ListPermissions(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "role"); err != nil {
 		return err
 	}
@@ -354,7 +354,7 @@ type assignRoleRequest struct {
 }
 
 // ListUserRoles handles GET /api/v1/rbac/users/:user_id/roles.
-func (h *RBACHandler) ListUserRoles(c *fiber.Ctx) error {
+func (h *RBACHandler) ListUserRoles(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "role"); err != nil {
 		return err
 	}
@@ -391,7 +391,7 @@ func (h *RBACHandler) ListUserRoles(c *fiber.Ctx) error {
 }
 
 // AssignUserRole handles POST /api/v1/rbac/users/:user_id/roles.
-func (h *RBACHandler) AssignUserRole(c *fiber.Ctx) error {
+func (h *RBACHandler) AssignUserRole(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "role"); err != nil {
 		return err
 	}
@@ -406,7 +406,7 @@ func (h *RBACHandler) AssignUserRole(c *fiber.Ctx) error {
 	}
 
 	var req assignRoleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -461,7 +461,7 @@ func (h *RBACHandler) AssignUserRole(c *fiber.Ctx) error {
 }
 
 // RevokeUserRole handles DELETE /api/v1/rbac/users/:user_id/roles/:id.
-func (h *RBACHandler) RevokeUserRole(c *fiber.Ctx) error {
+func (h *RBACHandler) RevokeUserRole(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "role"); err != nil {
 		return err
 	}
@@ -501,7 +501,7 @@ func (h *RBACHandler) RevokeUserRole(c *fiber.Ctx) error {
 // -- Current User Permissions --
 
 // MyPermissions handles GET /api/v1/rbac/me/permissions.
-func (h *RBACHandler) MyPermissions(c *fiber.Ctx) error {
+func (h *RBACHandler) MyPermissions(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")

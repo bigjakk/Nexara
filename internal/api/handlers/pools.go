@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -23,12 +23,12 @@ func NewPoolHandler(queries *db.Queries, encryptionKey string, eventPub *events.
 	return &PoolHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
-func (h *PoolHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *PoolHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // CreatePool handles POST /clusters/:cluster_id/pools.
-func (h *PoolHandler) CreatePool(c *fiber.Ctx) error {
+func (h *PoolHandler) CreatePool(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -37,7 +37,7 @@ func (h *PoolHandler) CreatePool(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.CreatePoolParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.PoolID == "" {
@@ -57,7 +57,7 @@ func (h *PoolHandler) CreatePool(c *fiber.Ctx) error {
 }
 
 // GetPool handles GET /clusters/:cluster_id/pools/:pool_id.
-func (h *PoolHandler) GetPool(c *fiber.Ctx) error {
+func (h *PoolHandler) GetPool(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -81,7 +81,7 @@ func (h *PoolHandler) GetPool(c *fiber.Ctx) error {
 }
 
 // UpdatePool handles PUT /clusters/:cluster_id/pools/:pool_id.
-func (h *PoolHandler) UpdatePool(c *fiber.Ctx) error {
+func (h *PoolHandler) UpdatePool(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func (h *PoolHandler) UpdatePool(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Pool ID is required")
 	}
 	var req proxmox.UpdatePoolParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -111,7 +111,7 @@ func (h *PoolHandler) UpdatePool(c *fiber.Ctx) error {
 }
 
 // DeletePool handles DELETE /clusters/:cluster_id/pools/:pool_id.
-func (h *PoolHandler) DeletePool(c *fiber.Ctx) error {
+func (h *PoolHandler) DeletePool(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err

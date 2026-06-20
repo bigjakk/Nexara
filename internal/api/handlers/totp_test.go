@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
@@ -48,7 +48,7 @@ func newTOTPTestApp(t *testing.T, handler *TOTPHandler, userID uuid.UUID) *fiber
 	t.Helper()
 
 	app := fiber.New(fiber.Config{
-		ErrorHandler: func(c *fiber.Ctx, err error) error {
+		ErrorHandler: func(c fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			message := "Internal Server Error"
 			if e, ok := err.(*fiber.Error); ok {
@@ -62,7 +62,7 @@ func newTOTPTestApp(t *testing.T, handler *TOTPHandler, userID uuid.UUID) *fiber
 		},
 	})
 
-	app.Use(func(c *fiber.Ctx) error {
+	app.Use(func(c fiber.Ctx) error {
 		c.Locals("user_id", userID)
 		return c.Next()
 	})

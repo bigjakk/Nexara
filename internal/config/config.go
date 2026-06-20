@@ -63,7 +63,7 @@ type Config struct {
 	// accepts all origins — appropriate for self-hosted dev/lab installs
 	// but logged at startup so production operators see the gap. Match
 	// is exact (no wildcard subdomain support) per
-	// gofiber/contrib/websocket's Origins field.
+	// gofiber/contrib/v3/websocket's Origins field.
 	WSAllowedOrigins string `envconfig:"WS_ALLOWED_ORIGINS"`
 	DataDir          string `envconfig:"DATA_DIR" default:"/data/nexara"`
 	MaxUploadSize    int64  `envconfig:"MAX_UPLOAD_SIZE" default:"16106127360"`

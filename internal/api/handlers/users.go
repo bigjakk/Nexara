@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -55,7 +55,7 @@ type updateUserRequest struct {
 }
 
 // List handles GET /api/v1/users.
-func (h *UserHandler) List(c *fiber.Ctx) error {
+func (h *UserHandler) List(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "user"); err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func (h *UserHandler) List(c *fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/users/:id.
-func (h *UserHandler) Get(c *fiber.Ctx) error {
+func (h *UserHandler) Get(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "user"); err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func (h *UserHandler) Get(c *fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/users/:id.
-func (h *UserHandler) Update(c *fiber.Ctx) error {
+func (h *UserHandler) Update(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (h *UserHandler) Update(c *fiber.Ctx) error {
 	}
 
 	var req updateUserRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -216,7 +216,7 @@ func (h *UserHandler) Update(c *fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/users/:id.
-func (h *UserHandler) Delete(c *fiber.Ctx) error {
+func (h *UserHandler) Delete(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}

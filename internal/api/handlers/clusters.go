@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -138,13 +138,13 @@ func toClusterResponse(c db.Cluster, nsi nodeStatusInfo) clusterResponse {
 }
 
 // Create handles POST /api/v1/clusters.
-func (h *ClusterHandler) Create(c *fiber.Ctx) error {
+func (h *ClusterHandler) Create(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "cluster"); err != nil {
 		return err
 	}
 
 	var req createClusterRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -228,7 +228,7 @@ func (h *ClusterHandler) Create(c *fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/clusters.
-func (h *ClusterHandler) List(c *fiber.Ctx) error {
+func (h *ClusterHandler) List(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "cluster")
 	if err != nil {
 		return err
@@ -266,7 +266,7 @@ func (h *ClusterHandler) List(c *fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/clusters/:id.
-func (h *ClusterHandler) Get(c *fiber.Ctx) error {
+func (h *ClusterHandler) Get(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
@@ -299,7 +299,7 @@ func (h *ClusterHandler) Get(c *fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/clusters/:id.
-func (h *ClusterHandler) Update(c *fiber.Ctx) error {
+func (h *ClusterHandler) Update(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
@@ -309,7 +309,7 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 	}
 
 	var req updateClusterRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -414,7 +414,7 @@ func (h *ClusterHandler) Update(c *fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/clusters/:id.
-func (h *ClusterHandler) Delete(c *fiber.Ctx) error {
+func (h *ClusterHandler) Delete(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster ID")
@@ -499,13 +499,13 @@ type fetchFingerprintResponse struct {
 
 // FetchFingerprint handles POST /api/v1/clusters/fetch-fingerprint.
 // It connects to the Proxmox host, retrieves the TLS certificate, and returns the SHA-256 fingerprint.
-func (h *ClusterHandler) FetchFingerprint(c *fiber.Ctx) error {
+func (h *ClusterHandler) FetchFingerprint(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "cluster"); err != nil {
 		return err
 	}
 
 	var req fetchFingerprintRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.APIURL == "" {

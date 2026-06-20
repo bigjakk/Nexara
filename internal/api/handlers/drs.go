@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -183,7 +183,7 @@ var validRuleTypes = map[string]bool{
 }
 
 // GetConfig handles GET /api/v1/clusters/:cluster_id/drs/config.
-func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
+func (h *DRSHandler) GetConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -218,7 +218,7 @@ func (h *DRSHandler) GetConfig(c *fiber.Ctx) error {
 // detectNativeCRS reads the cluster's Proxmox CRS configuration so the UI can
 // warn about (and defer to) the native dynamic load balancer. Returns nil when
 // the options can't be fetched or no CRS is configured.
-func (h *DRSHandler) detectNativeCRS(c *fiber.Ctx, clusterID uuid.UUID) *nativeCRSStatus {
+func (h *DRSHandler) detectNativeCRS(c fiber.Ctx, clusterID uuid.UUID) *nativeCRSStatus {
 	client, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return nil
@@ -243,7 +243,7 @@ func (h *DRSHandler) detectNativeCRS(c *fiber.Ctx, clusterID uuid.UUID) *nativeC
 }
 
 // UpdateConfig handles PUT /api/v1/clusters/:cluster_id/drs/config.
-func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
+func (h *DRSHandler) UpdateConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -253,7 +253,7 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 	}
 
 	var req drsConfigRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -298,7 +298,7 @@ func (h *DRSHandler) UpdateConfig(c *fiber.Ctx) error {
 }
 
 // ListRules handles GET /api/v1/clusters/:cluster_id/drs/rules.
-func (h *DRSHandler) ListRules(c *fiber.Ctx) error {
+func (h *DRSHandler) ListRules(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -321,7 +321,7 @@ func (h *DRSHandler) ListRules(c *fiber.Ctx) error {
 }
 
 // CreateRule handles POST /api/v1/clusters/:cluster_id/drs/rules.
-func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
+func (h *DRSHandler) CreateRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -331,7 +331,7 @@ func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
 	}
 
 	var req drsRuleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -364,7 +364,7 @@ func (h *DRSHandler) CreateRule(c *fiber.Ctx) error {
 }
 
 // DeleteRule handles DELETE /api/v1/clusters/:cluster_id/drs/rules/:rule_id.
-func (h *DRSHandler) DeleteRule(c *fiber.Ctx) error {
+func (h *DRSHandler) DeleteRule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -388,7 +388,7 @@ func (h *DRSHandler) DeleteRule(c *fiber.Ctx) error {
 }
 
 // TriggerEvaluate handles POST /api/v1/clusters/:cluster_id/drs/evaluate.
-func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
+func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -527,7 +527,7 @@ func (h *DRSHandler) TriggerEvaluate(c *fiber.Ctx) error {
 }
 
 // ListHistory handles GET /api/v1/clusters/:cluster_id/drs/history.
-func (h *DRSHandler) ListHistory(c *fiber.Ctx) error {
+func (h *DRSHandler) ListHistory(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -537,7 +537,7 @@ func (h *DRSHandler) ListHistory(c *fiber.Ctx) error {
 	}
 
 	limit := int32(50)
-	if l := c.QueryInt("limit", 50); l > 0 && l <= 500 {
+	if l := fiber.Query[int](c, "limit", 50); l > 0 && l <= 500 {
 		limit = int32(l)
 	}
 
@@ -558,7 +558,7 @@ func (h *DRSHandler) ListHistory(c *fiber.Ctx) error {
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster ID.
-func (h *DRSHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *DRSHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
@@ -621,7 +621,7 @@ func haRuleToResponse(clusterID uuid.UUID, entry proxmox.HARuleEntry) drsRuleRes
 }
 
 // ListHARules handles GET /api/v1/clusters/:cluster_id/drs/ha-rules.
-func (h *DRSHandler) ListHARules(c *fiber.Ctx) error {
+func (h *DRSHandler) ListHARules(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -649,7 +649,7 @@ func (h *DRSHandler) ListHARules(c *fiber.Ctx) error {
 }
 
 // CreateHARule handles POST /api/v1/clusters/:cluster_id/drs/ha-rules.
-func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
+func (h *DRSHandler) CreateHARule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -665,7 +665,7 @@ func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
 		NodeNames []string `json:"node_names"`
 		Enabled   bool     `json:"enabled"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -722,7 +722,7 @@ func (h *DRSHandler) CreateHARule(c *fiber.Ctx) error {
 }
 
 // DeleteHARule handles DELETE /api/v1/clusters/:cluster_id/drs/ha-rules/:rule_name.
-func (h *DRSHandler) DeleteHARule(c *fiber.Ctx) error {
+func (h *DRSHandler) DeleteHARule(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err

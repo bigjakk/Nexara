@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -95,7 +95,7 @@ var validScheduleActions = map[string]bool{
 }
 
 // Create handles POST /api/v1/clusters/:cluster_id/schedules.
-func (h *ScheduleHandler) Create(c *fiber.Ctx) error {
+func (h *ScheduleHandler) Create(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -105,7 +105,7 @@ func (h *ScheduleHandler) Create(c *fiber.Ctx) error {
 	}
 
 	var req createScheduleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -156,7 +156,7 @@ func (h *ScheduleHandler) Create(c *fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/clusters/:cluster_id/schedules.
-func (h *ScheduleHandler) List(c *fiber.Ctx) error {
+func (h *ScheduleHandler) List(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -179,7 +179,7 @@ func (h *ScheduleHandler) List(c *fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/clusters/:cluster_id/schedules/:id.
-func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
+func (h *ScheduleHandler) Update(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -194,7 +194,7 @@ func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
 	}
 
 	var req updateScheduleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -224,7 +224,7 @@ func (h *ScheduleHandler) Update(c *fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/clusters/:cluster_id/schedules/:id.
-func (h *ScheduleHandler) Delete(c *fiber.Ctx) error {
+func (h *ScheduleHandler) Delete(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err

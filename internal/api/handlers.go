@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"runtime"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // Version information set via ldflags at build time.
@@ -21,7 +21,7 @@ type versionResponse struct {
 	GoVersion string `json:"go_version"`
 }
 
-func (s *Server) handleVersion(c *fiber.Ctx) error {
+func (s *Server) handleVersion(c fiber.Ctx) error {
 	return c.JSON(versionResponse{
 		Version:   Version,
 		Commit:    Commit,
@@ -30,7 +30,7 @@ func (s *Server) handleVersion(c *fiber.Ctx) error {
 	})
 }
 
-func (s *Server) handleHealthz(c *fiber.Ctx) error {
+func (s *Server) handleHealthz(c fiber.Ctx) error {
 	if s.db != nil {
 		if err := s.db.Ping(c.Context()); err != nil {
 			// Log the detail server-side; don't disclose DB host/driver internals

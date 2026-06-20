@@ -5,13 +5,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // --- Node Services ---
 
 // ListNodeServices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/services.
-func (h *NodeHandler) ListNodeServices(c *fiber.Ctx) error {
+func (h *NodeHandler) ListNodeServices(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -31,7 +31,7 @@ func (h *NodeHandler) ListNodeServices(c *fiber.Ctx) error {
 }
 
 // ServiceAction handles POST /api/v1/clusters/:cluster_id/nodes/:node_name/services/:service/:action.
-func (h *NodeHandler) ServiceAction(c *fiber.Ctx) error {
+func (h *NodeHandler) ServiceAction(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err
@@ -74,7 +74,7 @@ func (h *NodeHandler) ServiceAction(c *fiber.Ctx) error {
 // --- Node Syslog ---
 
 // GetNodeSyslog handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/syslog.
-func (h *NodeHandler) GetNodeSyslog(c *fiber.Ctx) error {
+func (h *NodeHandler) GetNodeSyslog(c fiber.Ctx) error {
 	clusterID, nodeName, err := h.resolveNodeName(c)
 	if err != nil {
 		return err

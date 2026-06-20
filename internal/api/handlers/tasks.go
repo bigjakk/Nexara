@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -96,20 +96,20 @@ var validTaskStatuses = map[string]bool{
 // pagination (mirrors AuditHandler.List). Includes DRS/system tasks. Status is
 // served from the reconciled task_history row, so the client need not poll
 // Proxmox per entry.
-func (h *TaskHandler) List(c *fiber.Ctx) error {
+func (h *TaskHandler) List(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "task")
 	if err != nil {
 		return err
 	}
 
-	limit := c.QueryInt("limit", 50)
+	limit := fiber.Query[int](c, "limit", 50)
 	if limit < 1 {
 		limit = 1
 	}
 	if limit > 200 {
 		limit = 200
 	}
-	offset := c.QueryInt("offset", 0)
+	offset := fiber.Query[int](c, "offset", 0)
 	if offset < 0 {
 		offset = 0
 	}
@@ -169,14 +169,14 @@ func (h *TaskHandler) List(c *fiber.Ctx) error {
 }
 
 // Create creates a new task history record.
-func (h *TaskHandler) Create(c *fiber.Ctx) error {
+func (h *TaskHandler) Create(c fiber.Ctx) error {
 	uid, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Invalid user")
 	}
 
 	var req createTaskRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -219,7 +219,7 @@ func (h *TaskHandler) Create(c *fiber.Ctx) error {
 }
 
 // Update updates a task history record by UPID.
-func (h *TaskHandler) Update(c *fiber.Ctx) error {
+func (h *TaskHandler) Update(c fiber.Ctx) error {
 	rawUPID := c.Params("upid")
 	if rawUPID == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "upid is required")
@@ -241,7 +241,7 @@ func (h *TaskHandler) Update(c *fiber.Ctx) error {
 	}
 
 	var req updateTaskRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -278,7 +278,7 @@ func (h *TaskHandler) Update(c *fiber.Ctx) error {
 // filter would require an array-of-uuid SQL parameter), this stays gated on
 // global manage:task — i.e. effectively admin-only. A user with manage:task
 // scoped only to cluster X cannot wipe history that includes cluster Y.
-func (h *TaskHandler) ClearCompleted(c *fiber.Ctx) error {
+func (h *TaskHandler) ClearCompleted(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "task"); err != nil {
 		return err
 	}

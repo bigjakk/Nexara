@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -321,7 +321,7 @@ type createMaintenanceWindowRequest struct {
 // ====== Alert Rules ======
 
 // ListRules lists all alert rules.
-func (h *AlertHandler) ListRules(c *fiber.Ctx) error {
+func (h *AlertHandler) ListRules(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "alert")
 	if err != nil {
 		return err
@@ -385,9 +385,9 @@ func (h *AlertHandler) ListRules(c *fiber.Ctx) error {
 }
 
 // CreateRule creates a new alert rule.
-func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
+func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 	var req createAlertRuleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -524,7 +524,7 @@ func (h *AlertHandler) CreateRule(c *fiber.Ctx) error {
 }
 
 // GetRule returns a single alert rule.
-func (h *AlertHandler) GetRule(c *fiber.Ctx) error {
+func (h *AlertHandler) GetRule(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule ID")
@@ -547,7 +547,7 @@ func (h *AlertHandler) GetRule(c *fiber.Ctx) error {
 }
 
 // UpdateRule updates an existing alert rule.
-func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
+func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule ID")
@@ -567,7 +567,7 @@ func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
 	}
 
 	var req createAlertRuleRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -714,7 +714,7 @@ func (h *AlertHandler) UpdateRule(c *fiber.Ctx) error {
 }
 
 // DeleteRule deletes an alert rule.
-func (h *AlertHandler) DeleteRule(c *fiber.Ctx) error {
+func (h *AlertHandler) DeleteRule(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid rule ID")
@@ -745,7 +745,7 @@ func (h *AlertHandler) DeleteRule(c *fiber.Ctx) error {
 // ====== Alert History ======
 
 // ListAlerts lists alert history with optional filters.
-func (h *AlertHandler) ListAlerts(c *fiber.Ctx) error {
+func (h *AlertHandler) ListAlerts(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "alert")
 	if err != nil {
 		return err
@@ -816,7 +816,7 @@ func (h *AlertHandler) ListAlerts(c *fiber.Ctx) error {
 }
 
 // GetAlert returns a single alert.
-func (h *AlertHandler) GetAlert(c *fiber.Ctx) error {
+func (h *AlertHandler) GetAlert(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid alert ID")
@@ -839,7 +839,7 @@ func (h *AlertHandler) GetAlert(c *fiber.Ctx) error {
 }
 
 // GetAlertSummary returns active alert counts.
-func (h *AlertHandler) GetAlertSummary(c *fiber.Ctx) error {
+func (h *AlertHandler) GetAlertSummary(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "alert"); err != nil {
 		return err
 	}
@@ -860,7 +860,7 @@ func (h *AlertHandler) GetAlertSummary(c *fiber.Ctx) error {
 }
 
 // AcknowledgeAlert acknowledges a firing alert.
-func (h *AlertHandler) AcknowledgeAlert(c *fiber.Ctx) error {
+func (h *AlertHandler) AcknowledgeAlert(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid alert ID")
@@ -906,7 +906,7 @@ func (h *AlertHandler) AcknowledgeAlert(c *fiber.Ctx) error {
 }
 
 // ResolveAlert resolves a firing or acknowledged alert.
-func (h *AlertHandler) ResolveAlert(c *fiber.Ctx) error {
+func (h *AlertHandler) ResolveAlert(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid alert ID")
@@ -952,7 +952,7 @@ func (h *AlertHandler) ResolveAlert(c *fiber.Ctx) error {
 }
 
 // ListAlertsByCluster lists alerts for a specific cluster.
-func (h *AlertHandler) ListAlertsByCluster(c *fiber.Ctx) error {
+func (h *AlertHandler) ListAlertsByCluster(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -987,7 +987,7 @@ func (h *AlertHandler) ListAlertsByCluster(c *fiber.Ctx) error {
 }
 
 // CountActiveAlertsByCluster returns active alert counts for a cluster.
-func (h *AlertHandler) CountActiveAlertsByCluster(c *fiber.Ctx) error {
+func (h *AlertHandler) CountActiveAlertsByCluster(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1011,7 +1011,7 @@ func (h *AlertHandler) CountActiveAlertsByCluster(c *fiber.Ctx) error {
 // ====== Notification Channels ======
 
 // ListChannels lists all notification channels.
-func (h *AlertHandler) ListChannels(c *fiber.Ctx) error {
+func (h *AlertHandler) ListChannels(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "notification_channel"); err != nil {
 		return err
 	}
@@ -1029,13 +1029,13 @@ func (h *AlertHandler) ListChannels(c *fiber.Ctx) error {
 }
 
 // CreateChannel creates a new notification channel.
-func (h *AlertHandler) CreateChannel(c *fiber.Ctx) error {
+func (h *AlertHandler) CreateChannel(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
 		return err
 	}
 
 	var req createChannelRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -1078,7 +1078,7 @@ func (h *AlertHandler) CreateChannel(c *fiber.Ctx) error {
 }
 
 // GetChannel returns a single notification channel.
-func (h *AlertHandler) GetChannel(c *fiber.Ctx) error {
+func (h *AlertHandler) GetChannel(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "notification_channel"); err != nil {
 		return err
 	}
@@ -1097,7 +1097,7 @@ func (h *AlertHandler) GetChannel(c *fiber.Ctx) error {
 }
 
 // UpdateChannel updates a notification channel.
-func (h *AlertHandler) UpdateChannel(c *fiber.Ctx) error {
+func (h *AlertHandler) UpdateChannel(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
 		return err
 	}
@@ -1113,7 +1113,7 @@ func (h *AlertHandler) UpdateChannel(c *fiber.Ctx) error {
 	}
 
 	var req createChannelRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -1161,7 +1161,7 @@ func (h *AlertHandler) UpdateChannel(c *fiber.Ctx) error {
 }
 
 // DeleteChannel deletes a notification channel.
-func (h *AlertHandler) DeleteChannel(c *fiber.Ctx) error {
+func (h *AlertHandler) DeleteChannel(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
 		return err
 	}
@@ -1185,7 +1185,7 @@ func (h *AlertHandler) DeleteChannel(c *fiber.Ctx) error {
 }
 
 // TestChannel sends a test notification through a channel.
-func (h *AlertHandler) TestChannel(c *fiber.Ctx) error {
+func (h *AlertHandler) TestChannel(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "notification_channel"); err != nil {
 		return err
 	}
@@ -1251,7 +1251,7 @@ func (h *AlertHandler) TestChannel(c *fiber.Ctx) error {
 // ====== Maintenance Windows ======
 
 // ListMaintenanceWindows lists maintenance windows for a cluster.
-func (h *AlertHandler) ListMaintenanceWindows(c *fiber.Ctx) error {
+func (h *AlertHandler) ListMaintenanceWindows(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1286,7 +1286,7 @@ func (h *AlertHandler) ListMaintenanceWindows(c *fiber.Ctx) error {
 }
 
 // CreateMaintenanceWindow creates a new maintenance window.
-func (h *AlertHandler) CreateMaintenanceWindow(c *fiber.Ctx) error {
+func (h *AlertHandler) CreateMaintenanceWindow(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1296,7 +1296,7 @@ func (h *AlertHandler) CreateMaintenanceWindow(c *fiber.Ctx) error {
 	}
 
 	var req createMaintenanceWindowRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -1345,7 +1345,7 @@ func (h *AlertHandler) CreateMaintenanceWindow(c *fiber.Ctx) error {
 }
 
 // UpdateMaintenanceWindow updates a maintenance window.
-func (h *AlertHandler) UpdateMaintenanceWindow(c *fiber.Ctx) error {
+func (h *AlertHandler) UpdateMaintenanceWindow(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1370,7 +1370,7 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c *fiber.Ctx) error {
 	}
 
 	var req createMaintenanceWindowRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -1426,7 +1426,7 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c *fiber.Ctx) error {
 }
 
 // DeleteMaintenanceWindow deletes a maintenance window.
-func (h *AlertHandler) DeleteMaintenanceWindow(c *fiber.Ctx) error {
+func (h *AlertHandler) DeleteMaintenanceWindow(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err

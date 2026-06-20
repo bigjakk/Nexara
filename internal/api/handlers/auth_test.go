@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/auth"
 )
@@ -298,7 +298,7 @@ func newTestApp(t *testing.T) *fiber.App {
 	}
 
 	app := fiber.New(fiber.Config{
-		ErrorHandler: func(c *fiber.Ctx, err error) error {
+		ErrorHandler: func(c fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			message := "Internal Server Error"
 			if e, ok := err.(*fiber.Error); ok {

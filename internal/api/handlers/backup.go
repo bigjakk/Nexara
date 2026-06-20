@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -36,7 +36,7 @@ func NewBackupHandler(queries *db.Queries, encryptionKey string, eventPub *event
 // through the per-server Proxmox client cache when one is available
 // (set on the request via api/middleware), falling back to per-call
 // construction otherwise.
-func (h *BackupHandler) createPBSClient(c *fiber.Ctx, pbsServerID uuid.UUID) (*proxmox.PBSClient, error) {
+func (h *BackupHandler) createPBSClient(c fiber.Ctx, pbsServerID uuid.UUID) (*proxmox.PBSClient, error) {
 	if cache := proxmoxCacheFromCtx(c); cache != nil {
 		client, err := cache.GetPBS(c.Context(), pbsServerID)
 		if err == nil {
@@ -75,7 +75,7 @@ func (h *BackupHandler) createPBSClient(c *fiber.Ctx, pbsServerID uuid.UUID) (*p
 	return client, nil
 }
 
-func parsePBSID(c *fiber.Ctx) (uuid.UUID, error) {
+func parsePBSID(c fiber.Ctx) (uuid.UUID, error) {
 	id, err := uuid.Parse(c.Params("pbs_id"))
 	if err != nil {
 		return uuid.Nil, fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
@@ -88,7 +88,7 @@ func parsePBSID(c *fiber.Ctx) (uuid.UUID, error) {
 // — so a user with cluster-scoped backup rights cannot drive a PBS bound to a
 // different cluster. Standalone PBS servers (no cluster_id) fall back to the
 // global requirePerm.
-func (h *BackupHandler) requirePBSPerm(c *fiber.Ctx, pbsID uuid.UUID, action string) error {
+func (h *BackupHandler) requirePBSPerm(c fiber.Ctx, pbsID uuid.UUID, action string) error {
 	server, err := h.queries.GetPBSServer(c.Context(), pbsID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -105,7 +105,7 @@ func (h *BackupHandler) requirePBSPerm(c *fiber.Ctx, pbsID uuid.UUID, action str
 // --- Live proxy endpoints ---
 
 // ListDatastores handles GET /api/v1/pbs-servers/:pbs_id/datastores
-func (h *BackupHandler) ListDatastores(c *fiber.Ctx) error {
+func (h *BackupHandler) ListDatastores(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -128,7 +128,7 @@ func (h *BackupHandler) ListDatastores(c *fiber.Ctx) error {
 }
 
 // GetDatastoreStatus handles GET /api/v1/pbs-servers/:pbs_id/datastores/status
-func (h *BackupHandler) GetDatastoreStatus(c *fiber.Ctx) error {
+func (h *BackupHandler) GetDatastoreStatus(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -152,7 +152,7 @@ func (h *BackupHandler) GetDatastoreStatus(c *fiber.Ctx) error {
 }
 
 // TriggerGC handles POST /api/v1/pbs-servers/:pbs_id/datastores/:store/gc
-func (h *BackupHandler) TriggerGC(c *fiber.Ctx) error {
+func (h *BackupHandler) TriggerGC(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -189,7 +189,7 @@ type deleteSnapshotRequest struct {
 }
 
 // DeleteSnapshot handles DELETE /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots
-func (h *BackupHandler) DeleteSnapshot(c *fiber.Ctx) error {
+func (h *BackupHandler) DeleteSnapshot(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -204,7 +204,7 @@ func (h *BackupHandler) DeleteSnapshot(c *fiber.Ctx) error {
 	}
 
 	var req deleteSnapshotRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.BackupType == "" || req.BackupID == "" || req.BackupTime == 0 {
@@ -240,7 +240,7 @@ type protectSnapshotRequest struct {
 }
 
 // ProtectSnapshot handles PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/protect
-func (h *BackupHandler) ProtectSnapshot(c *fiber.Ctx) error {
+func (h *BackupHandler) ProtectSnapshot(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -255,7 +255,7 @@ func (h *BackupHandler) ProtectSnapshot(c *fiber.Ctx) error {
 	}
 
 	var req protectSnapshotRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.BackupType == "" || req.BackupID == "" || req.BackupTime == 0 {
@@ -297,7 +297,7 @@ type updateSnapshotNotesRequest struct {
 }
 
 // UpdateSnapshotNotes handles PUT /api/v1/pbs-servers/:pbs_id/datastores/:store/snapshots/notes
-func (h *BackupHandler) UpdateSnapshotNotes(c *fiber.Ctx) error {
+func (h *BackupHandler) UpdateSnapshotNotes(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -312,7 +312,7 @@ func (h *BackupHandler) UpdateSnapshotNotes(c *fiber.Ctx) error {
 	}
 
 	var req updateSnapshotNotesRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.BackupType == "" || req.BackupID == "" || req.BackupTime == 0 {
@@ -334,7 +334,7 @@ func (h *BackupHandler) UpdateSnapshotNotes(c *fiber.Ctx) error {
 }
 
 // GetTaskLog handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid/log
-func (h *BackupHandler) GetTaskLog(c *fiber.Ctx) error {
+func (h *BackupHandler) GetTaskLog(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -373,7 +373,7 @@ type pruneDatastoreRequest struct {
 }
 
 // PruneDatastore handles POST /api/v1/pbs-servers/:pbs_id/datastores/:store/prune
-func (h *BackupHandler) PruneDatastore(c *fiber.Ctx) error {
+func (h *BackupHandler) PruneDatastore(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -388,7 +388,7 @@ func (h *BackupHandler) PruneDatastore(c *fiber.Ctx) error {
 	}
 
 	var req pruneDatastoreRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -430,7 +430,7 @@ func (h *BackupHandler) PruneDatastore(c *fiber.Ctx) error {
 }
 
 // GetDatastoreConfig handles GET /api/v1/pbs-servers/:pbs_id/datastores/:store/config
-func (h *BackupHandler) GetDatastoreConfig(c *fiber.Ctx) error {
+func (h *BackupHandler) GetDatastoreConfig(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -458,7 +458,7 @@ func (h *BackupHandler) GetDatastoreConfig(c *fiber.Ctx) error {
 }
 
 // RunSyncJob handles POST /api/v1/pbs-servers/:pbs_id/sync-jobs/:job_id/run
-func (h *BackupHandler) RunSyncJob(c *fiber.Ctx) error {
+func (h *BackupHandler) RunSyncJob(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -489,7 +489,7 @@ func (h *BackupHandler) RunSyncJob(c *fiber.Ctx) error {
 }
 
 // RunVerifyJob handles POST /api/v1/pbs-servers/:pbs_id/verify-jobs/:job_id/run
-func (h *BackupHandler) RunVerifyJob(c *fiber.Ctx) error {
+func (h *BackupHandler) RunVerifyJob(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -520,7 +520,7 @@ func (h *BackupHandler) RunVerifyJob(c *fiber.Ctx) error {
 }
 
 // ListTasks handles GET /api/v1/pbs-servers/:pbs_id/tasks
-func (h *BackupHandler) ListTasks(c *fiber.Ctx) error {
+func (h *BackupHandler) ListTasks(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -551,7 +551,7 @@ func (h *BackupHandler) ListTasks(c *fiber.Ctx) error {
 }
 
 // GetTaskStatus handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid
-func (h *BackupHandler) GetTaskStatus(c *fiber.Ctx) error {
+func (h *BackupHandler) GetTaskStatus(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -581,7 +581,7 @@ func (h *BackupHandler) GetTaskStatus(c *fiber.Ctx) error {
 // --- DB-backed endpoints ---
 
 // ListSnapshots handles GET /api/v1/pbs-servers/:pbs_id/snapshots
-func (h *BackupHandler) ListSnapshots(c *fiber.Ctx) error {
+func (h *BackupHandler) ListSnapshots(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -611,7 +611,7 @@ func (h *BackupHandler) ListSnapshots(c *fiber.Ctx) error {
 }
 
 // ListSyncJobs handles GET /api/v1/pbs-servers/:pbs_id/sync-jobs
-func (h *BackupHandler) ListSyncJobs(c *fiber.Ctx) error {
+func (h *BackupHandler) ListSyncJobs(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -629,7 +629,7 @@ func (h *BackupHandler) ListSyncJobs(c *fiber.Ctx) error {
 }
 
 // ListVerifyJobs handles GET /api/v1/pbs-servers/:pbs_id/verify-jobs
-func (h *BackupHandler) ListVerifyJobs(c *fiber.Ctx) error {
+func (h *BackupHandler) ListVerifyJobs(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -647,7 +647,7 @@ func (h *BackupHandler) ListVerifyJobs(c *fiber.Ctx) error {
 }
 
 // GetDatastoreMetrics handles GET /api/v1/pbs-servers/:pbs_id/metrics
-func (h *BackupHandler) GetDatastoreMetrics(c *fiber.Ctx) error {
+func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -695,7 +695,7 @@ func (h *BackupHandler) GetDatastoreMetrics(c *fiber.Ctx) error {
 
 // GetDatastoreRRD handles GET /api/v1/pbs-servers/:pbs_id/datastores/:store/rrd
 // Live proxy to PBS RRD — returns IO performance metrics (transfer rate, IOPS).
-func (h *BackupHandler) GetDatastoreRRD(c *fiber.Ctx) error {
+func (h *BackupHandler) GetDatastoreRRD(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)
 	if err != nil {
 		return err
@@ -730,7 +730,7 @@ func (h *BackupHandler) GetDatastoreRRD(c *fiber.Ctx) error {
 // filtered to PBS servers whose cluster the caller has view:backup on.
 // Standalone PBS servers (no cluster_id) are visible only to callers with the
 // global view:backup grant.
-func (h *BackupHandler) ListSnapshotsByBackupID(c *fiber.Ctx) error {
+func (h *BackupHandler) ListSnapshotsByBackupID(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "backup")
 	if err != nil {
 		return err
@@ -777,7 +777,7 @@ func (h *BackupHandler) ListSnapshotsByBackupID(c *fiber.Ctx) error {
 
 // createPVEClient creates a PVE client for the given cluster ID. Routes
 // through the per-server Proxmox client cache when one is available.
-func (h *BackupHandler) createPVEClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *BackupHandler) createPVEClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 60*time.Second)
 }
 
@@ -790,7 +790,7 @@ type triggerBackupRequest struct {
 }
 
 // TriggerBackup handles POST /api/v1/clusters/:cluster_id/backup
-func (h *BackupHandler) TriggerBackup(c *fiber.Ctx) error {
+func (h *BackupHandler) TriggerBackup(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -800,7 +800,7 @@ func (h *BackupHandler) TriggerBackup(c *fiber.Ctx) error {
 	}
 
 	var req triggerBackupRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.VMID == "" || req.Node == "" {
@@ -846,7 +846,7 @@ func (h *BackupHandler) TriggerBackup(c *fiber.Ctx) error {
 }
 
 // ListBackupJobs handles GET /api/v1/clusters/:cluster_id/backup-jobs
-func (h *BackupHandler) ListBackupJobs(c *fiber.Ctx) error {
+func (h *BackupHandler) ListBackupJobs(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -883,7 +883,7 @@ type backupJobRequest struct {
 }
 
 // CreateBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs
-func (h *BackupHandler) CreateBackupJob(c *fiber.Ctx) error {
+func (h *BackupHandler) CreateBackupJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -893,7 +893,7 @@ func (h *BackupHandler) CreateBackupJob(c *fiber.Ctx) error {
 	}
 
 	var req backupJobRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -924,7 +924,7 @@ func (h *BackupHandler) CreateBackupJob(c *fiber.Ctx) error {
 }
 
 // UpdateBackupJob handles PUT /api/v1/clusters/:cluster_id/backup-jobs/:job_id
-func (h *BackupHandler) UpdateBackupJob(c *fiber.Ctx) error {
+func (h *BackupHandler) UpdateBackupJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -939,7 +939,7 @@ func (h *BackupHandler) UpdateBackupJob(c *fiber.Ctx) error {
 	}
 
 	var req backupJobRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -970,7 +970,7 @@ func (h *BackupHandler) UpdateBackupJob(c *fiber.Ctx) error {
 }
 
 // DeleteBackupJob handles DELETE /api/v1/clusters/:cluster_id/backup-jobs/:job_id
-func (h *BackupHandler) DeleteBackupJob(c *fiber.Ctx) error {
+func (h *BackupHandler) DeleteBackupJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -999,7 +999,7 @@ func (h *BackupHandler) DeleteBackupJob(c *fiber.Ctx) error {
 }
 
 // RunBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs/:job_id/run
-func (h *BackupHandler) RunBackupJob(c *fiber.Ctx) error {
+func (h *BackupHandler) RunBackupJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1054,7 +1054,7 @@ type restoreBackupRequest struct {
 }
 
 // RestoreBackup handles POST /api/v1/clusters/:cluster_id/restore
-func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
+func (h *BackupHandler) RestoreBackup(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -1064,7 +1064,7 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 	}
 
 	var req restoreBackupRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.PBSServerID == "" || req.BackupType == "" || req.BackupID == "" || req.BackupTime == 0 || req.TargetNode == "" || req.VMID <= 0 {
@@ -1213,7 +1213,7 @@ func (h *BackupHandler) RestoreBackup(c *fiber.Ctx) error {
 
 	// If requested, wait for restore to finish then start the VM in the background.
 	if req.StartAfterRestore {
-		go func() {
+		go func() { //nolint:gosec // G118: intentionally detached — start-after-restore watcher must outlive the request (Fiber recycles the request context)
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("start-after-restore watcher panicked", "upid", upid, "panic", r)
@@ -1281,7 +1281,7 @@ type backupCoverageEntry struct {
 //
 // This correctly handles multi-cluster setups where different clusters
 // use different PBS datastores, even with overlapping VMIDs.
-func (h *BackupHandler) GetBackupCoverage(c *fiber.Ctx) error {
+func (h *BackupHandler) GetBackupCoverage(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "backup")
 	if err != nil {
 		return err

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -95,7 +95,7 @@ type deleteContentResponse struct {
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/storage.
-func (h *StorageHandler) ListByCluster(c *fiber.Ctx) error {
+func (h *StorageHandler) ListByCluster(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -118,7 +118,7 @@ func (h *StorageHandler) ListByCluster(c *fiber.Ctx) error {
 }
 
 // GetContent handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/content.
-func (h *StorageHandler) GetContent(c *fiber.Ctx) error {
+func (h *StorageHandler) GetContent(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -165,7 +165,7 @@ func (h *StorageHandler) GetContent(c *fiber.Ctx) error {
 // multipart stream directly and pipe the file part to Proxmox.
 //
 // The frontend must send form fields in order: content, filesize, file.
-func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
+func (h *StorageHandler) UploadFile(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -198,7 +198,9 @@ func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 	// Get the body stream. For large uploads (> BodyLimit), fasthttp provides
 	// a streaming reader that avoids buffering the entire body in memory.
 	// For smaller bodies, fall back to the in-memory buffer.
-	bodyStream := c.Context().RequestBodyStream()
+	// Fiber v3: the underlying fasthttp.RequestCtx is c.RequestCtx() (c.Context()
+	// now returns the Go context.Context).
+	bodyStream := c.RequestCtx().RequestBodyStream()
 	if bodyStream == nil {
 		bodyStream = bytes.NewReader(c.Body())
 	}
@@ -275,7 +277,7 @@ func (h *StorageHandler) UploadFile(c *fiber.Ctx) error {
 }
 
 // DeleteContent handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id/content/:volume.
-func (h *StorageHandler) DeleteContent(c *fiber.Ctx) error {
+func (h *StorageHandler) DeleteContent(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -341,7 +343,7 @@ var validStorageTypes = map[string]bool{
 
 // GetConfig handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/config.
 // Returns the Proxmox-level storage configuration (paths, servers, etc.).
-func (h *StorageHandler) GetConfig(c *fiber.Ctx) error {
+func (h *StorageHandler) GetConfig(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -371,7 +373,7 @@ type createStorageRequest struct {
 }
 
 // Create handles POST /api/v1/clusters/:cluster_id/storage.
-func (h *StorageHandler) Create(c *fiber.Ctx) error {
+func (h *StorageHandler) Create(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -381,7 +383,7 @@ func (h *StorageHandler) Create(c *fiber.Ctx) error {
 	}
 
 	var req createStorageRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -426,7 +428,7 @@ type updateStorageRequest struct {
 }
 
 // Update handles PUT /api/v1/clusters/:cluster_id/storage/:storage_id.
-func (h *StorageHandler) Update(c *fiber.Ctx) error {
+func (h *StorageHandler) Update(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -441,7 +443,7 @@ func (h *StorageHandler) Update(c *fiber.Ctx) error {
 	}
 
 	var req updateStorageRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -468,7 +470,7 @@ func (h *StorageHandler) Update(c *fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/clusters/:cluster_id/storage/:storage_id.
-func (h *StorageHandler) Delete(c *fiber.Ctx) error {
+func (h *StorageHandler) Delete(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -502,7 +504,7 @@ func (h *StorageHandler) Delete(c *fiber.Ctx) error {
 }
 
 // resolveStorage loads the storage pool from the DB and creates a Proxmox client.
-func (h *StorageHandler) resolveStorage(c *fiber.Ctx) (db.StoragePool, *proxmox.Client, error) {
+func (h *StorageHandler) resolveStorage(c fiber.Ctx) (db.StoragePool, *proxmox.Client, error) {
 	var zero db.StoragePool
 
 	clusterID, err := uuid.Parse(c.Params("cluster_id"))
@@ -537,6 +539,6 @@ func (h *StorageHandler) resolveStorage(c *fiber.Ctx) (db.StoragePool, *proxmox.
 
 // createProxmoxClient creates a Proxmox client for the given cluster.
 // Uses 30-minute timeout for large ISO uploads.
-func (h *StorageHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *StorageHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, 30*time.Minute)
 }

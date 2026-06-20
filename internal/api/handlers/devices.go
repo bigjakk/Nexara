@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -31,7 +31,7 @@ func NewMobileDeviceHandler(queries *db.Queries, eventPub *events.Publisher) *Mo
 
 // auditDevice writes an audit_log entry for a device action. Device actions
 // are not cluster-scoped, so cluster_id is left null.
-func (h *MobileDeviceHandler) auditDevice(c *fiber.Ctx, deviceID, action string, details map[string]any) {
+func (h *MobileDeviceHandler) auditDevice(c fiber.Ctx, deviceID, action string, details map[string]any) {
 	if h.eventPub == nil {
 		return
 	}
@@ -104,14 +104,14 @@ func validatePrintableString(field, value string) error {
 //     return 409 Conflict instead of silently reassigning ownership. The
 //     legitimate device must explicitly delete the old row (or an admin
 //     must) before re-registering.
-func (h *MobileDeviceHandler) Register(c *fiber.Ctx) error {
+func (h *MobileDeviceHandler) Register(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
 	var req registerDeviceRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -188,7 +188,7 @@ func (h *MobileDeviceHandler) Register(c *fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/me/devices — returns the current user's devices.
-func (h *MobileDeviceHandler) List(c *fiber.Ctx) error {
+func (h *MobileDeviceHandler) List(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -211,7 +211,7 @@ func (h *MobileDeviceHandler) List(c *fiber.Ctx) error {
 // The user can only delete their own devices. The handler uses
 // `DeleteMobileDeviceForUser` which scopes the WHERE by both id AND user_id
 // so a malicious user can't delete another user's device by guessing IDs.
-func (h *MobileDeviceHandler) Delete(c *fiber.Ctx) error {
+func (h *MobileDeviceHandler) Delete(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -241,7 +241,7 @@ func (h *MobileDeviceHandler) Delete(c *fiber.Ctx) error {
 
 // AdminListByUser handles GET /api/v1/admin/users/:id/devices.
 // Requires the manage:user RBAC permission.
-func (h *MobileDeviceHandler) AdminListByUser(c *fiber.Ctx) error {
+func (h *MobileDeviceHandler) AdminListByUser(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -265,7 +265,7 @@ func (h *MobileDeviceHandler) AdminListByUser(c *fiber.Ctx) error {
 
 // AdminDelete handles DELETE /api/v1/admin/devices/:id.
 // Requires the manage:user RBAC permission.
-func (h *MobileDeviceHandler) AdminDelete(c *fiber.Ctx) error {
+func (h *MobileDeviceHandler) AdminDelete(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}

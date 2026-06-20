@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -75,7 +75,7 @@ func (h *AuthHandler) SetTOTPHandler(th *TOTPHandler) {
 // Mobile clients can set X-Nexara-Device-Type (mobile|desktop), X-Nexara-Device-Name,
 // and X-Nexara-Device-ID headers to tag their sessions. If those headers are absent
 // the session is tagged as "web".
-func deviceInfoFromRequest(c *fiber.Ctx) auth.DeviceInfo {
+func deviceInfoFromRequest(c fiber.Ctx) auth.DeviceInfo {
 	deviceType := strings.ToLower(strings.TrimSpace(c.Get("X-Nexara-Device-Type")))
 	switch deviceType {
 	case "mobile", "desktop":
@@ -137,7 +137,7 @@ type authUserResponse struct {
 
 // authAuditLog writes an audit log entry for auth events. Uses the provided userID
 // directly since auth events happen before/outside normal auth middleware.
-func (h *AuthHandler) authAuditLog(c *fiber.Ctx, userID uuid.UUID, action string, details json.RawMessage) {
+func (h *AuthHandler) authAuditLog(c fiber.Ctx, userID uuid.UUID, action string, details json.RawMessage) {
 	if details == nil {
 		details = json.RawMessage(`{}`)
 	}
@@ -170,9 +170,9 @@ func (h *AuthHandler) authAuditLog(c *fiber.Ctx, userID uuid.UUID, action string
 //     or rolls back.
 //   - HashPassword runs only after the admin gate passes. Failed gates burn
 //     no bcrypt CPU.
-func (h *AuthHandler) Register(c *fiber.Ctx) error {
+func (h *AuthHandler) Register(c fiber.Ctx) error {
 	var req registerRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -359,9 +359,9 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 // disabling JIT-provisioning of new LDAP users on first login. Operators
 // who accept this trade can leave it; tighter postures should disable JIT
 // and pre-provision LDAP users.
-func (h *AuthHandler) Login(c *fiber.Ctx) error {
+func (h *AuthHandler) Login(c fiber.Ctx) error {
 	var req loginRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -430,7 +430,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 // path discovers the conflict. Vanishingly narrow window in practice and
 // no different from the LDAP-bound attempt the user was about to make
 // anyway, but worth documenting.
-func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.User, bool) {
+func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string) (db.User, bool) {
 	if h.ldapHandler == nil {
 		return db.User{}, false
 	}
@@ -530,7 +530,7 @@ func (h *AuthHandler) tryLDAPLogin(c *fiber.Ctx, email, password string) (db.Use
 }
 
 // issueTokens creates JWT + session for the given user and returns the auth response.
-func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string) error {
+func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, auditAction string) error {
 	accessToken, expiresAt, err := h.jwtService.GenerateAccessToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate access token")
@@ -578,7 +578,7 @@ func (h *AuthHandler) issueTokens(c *fiber.Ctx, user db.User, auditAction string
 }
 
 // IssueTokens is the exported version of issueTokens for cross-handler use.
-func (h *AuthHandler) IssueTokens(c *fiber.Ctx, user db.User, auditAction string) error {
+func (h *AuthHandler) IssueTokens(c fiber.Ctx, user db.User, auditAction string) error {
 	return h.issueTokens(c, user, auditAction)
 }
 
@@ -608,14 +608,14 @@ type consoleTokenResponse struct {
 //
 // The underlying access token + regular RBAC check happens first — a user who
 // cannot normally open this console cannot mint a token for it either.
-func (h *AuthHandler) ConsoleToken(c *fiber.Ctx) error {
+func (h *AuthHandler) ConsoleToken(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
 	}
 
 	var req consoleTokenRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -733,7 +733,7 @@ type wsTokenResponse struct {
 // upgrade entirely. The hub token can be carried in `?token=` or in the
 // `Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>` subprotocol
 // header (preferred — keeps the JWT out of proxy access logs and Referer).
-func (h *AuthHandler) WSToken(c *fiber.Ctx) error {
+func (h *AuthHandler) WSToken(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -766,10 +766,10 @@ func (h *AuthHandler) WSToken(c *fiber.Ctx) error {
 // Refresh exchanges a valid refresh token for a new token pair. The refresh
 // token is read from the JSON body when present (mobile path) and otherwise
 // from the HttpOnly cookie set on prior auth responses (web path).
-func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
+func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 	var req refreshRequest
 	// Body is optional — web clients post `{}` and rely on the cookie.
-	_ = c.BodyParser(&req)
+	_ = c.Bind().Body(&req)
 
 	if req.RefreshToken == "" {
 		req.RefreshToken = readRefreshTokenFromCookie(c)
@@ -897,10 +897,10 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 // browser clients, body for mobile clients) and clears the browser cookie.
 // The cookie is cleared unconditionally so a stale cookie does not linger
 // after logout even if the token is already invalid.
-func (h *AuthHandler) Logout(c *fiber.Ctx) error {
+func (h *AuthHandler) Logout(c fiber.Ctx) error {
 	var req logoutRequest
 	// Body is optional for browser clients (cookie carries the token).
-	_ = c.BodyParser(&req)
+	_ = c.Bind().Body(&req)
 
 	if req.RefreshToken == "" {
 		req.RefreshToken = readRefreshTokenFromCookie(c)
@@ -941,7 +941,7 @@ func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 
 // LogoutAll revokes all sessions for the current user and clears the browser
 // refresh cookie.
-func (h *AuthHandler) LogoutAll(c *fiber.Ctx) error {
+func (h *AuthHandler) LogoutAll(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -959,7 +959,7 @@ func (h *AuthHandler) LogoutAll(c *fiber.Ctx) error {
 }
 
 // SetupStatus returns whether initial admin setup has been completed.
-func (h *AuthHandler) SetupStatus(c *fiber.Ctx) error {
+func (h *AuthHandler) SetupStatus(c fiber.Ctx) error {
 	count, err := h.queries.CountUsers(c.Context())
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check user count")
@@ -970,7 +970,7 @@ func (h *AuthHandler) SetupStatus(c *fiber.Ctx) error {
 }
 
 // loadPerms loads the flat permissions list for the given user via RBAC engine.
-func (h *AuthHandler) loadPerms(c *fiber.Ctx, userID uuid.UUID) []string {
+func (h *AuthHandler) loadPerms(c fiber.Ctx, userID uuid.UUID) []string {
 	if h.rbac == nil {
 		return []string{}
 	}
@@ -982,7 +982,7 @@ func (h *AuthHandler) loadPerms(c *fiber.Ctx, userID uuid.UUID) []string {
 }
 
 // SSOStatus returns whether OIDC/SSO is enabled and the provider name.
-func (h *AuthHandler) SSOStatus(c *fiber.Ctx) error {
+func (h *AuthHandler) SSOStatus(c fiber.Ctx) error {
 	resp := fiber.Map{
 		"oidc_enabled":       false,
 		"oidc_provider_name": "",
@@ -1000,7 +1000,7 @@ func (h *AuthHandler) SSOStatus(c *fiber.Ctx) error {
 }
 
 // OIDCTokenExchange consumes the short-lived exchange code and issues standard JWT tokens.
-func (h *AuthHandler) OIDCTokenExchange(c *fiber.Ctx) error {
+func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx) error {
 	if h.oidcHandler == nil {
 		return fiber.NewError(fiber.StatusNotFound, "OIDC not configured")
 	}
@@ -1008,7 +1008,7 @@ func (h *AuthHandler) OIDCTokenExchange(c *fiber.Ctx) error {
 	var req struct {
 		Code string `json:"code"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -1046,7 +1046,7 @@ func (h *AuthHandler) OIDCTokenExchange(c *fiber.Ctx) error {
 
 // issueOrTOTP checks if the user has TOTP enabled. If so, returns a pending token
 // instead of issuing JWT tokens directly. Otherwise, issues tokens normally.
-func (h *AuthHandler) issueOrTOTP(c *fiber.Ctx, user db.User, auditAction string) error {
+func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, auditAction string) error {
 	if user.TotpSecret.Valid && h.totpHandler != nil {
 		token, err := h.totpHandler.CreateTOTPPendingToken(c.Context(), user.ID, auditAction)
 		if err != nil {
@@ -1072,7 +1072,7 @@ type profileResponse struct {
 }
 
 // GetMe returns the current user's profile.
-func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
+func (h *AuthHandler) GetMe(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -1100,7 +1100,7 @@ type updateProfileRequest struct {
 
 // UpdateProfile allows the current user to update their own display name.
 // Only local users can edit their profile — LDAP/OIDC profiles are managed externally.
-func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
+func (h *AuthHandler) UpdateProfile(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -1116,7 +1116,7 @@ func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	}
 
 	var req updateProfileRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -1157,7 +1157,7 @@ type changePasswordRequest struct {
 
 // ChangePassword allows the current user to change their own password.
 // Only available for local auth users.
-func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
+func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
 		return fiber.NewError(fiber.StatusUnauthorized, "Authentication required")
@@ -1173,7 +1173,7 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
 	}
 
 	var req changePasswordRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 

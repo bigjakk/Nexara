@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
@@ -172,24 +172,29 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 	return s
 }
 
-// buildFiberConfig assembles the Fiber-side config struct. EnableTrustedProxyCheck=true with
-// empty TrustedProxies means Fiber IGNORES the header for everyone — the safe default for
-// direct-to-internet deployments. When TRUSTED_PROXIES names the reverse proxy
-// (e.g. "127.0.0.1,10.0.0.0/8"), c.IP() returns the real client IP from X-Forwarded-For, which
-// is what the auth/general/refresh/ws-token rate limiters key on (Finding #13).
-// EnableIPValidation returns just the first valid IP from the header rather than the raw
-// comma-separated list, so a malicious downstream can't craft a header that lands in an
-// oddly-keyed bucket.
+// buildFiberConfig assembles the Fiber-side config struct. TrustProxy=true with
+// an empty TrustProxyConfig.Proxies means Fiber IGNORES the proxy header for everyone
+// — the safe default for direct-to-internet deployments. When TRUSTED_PROXIES names
+// the reverse proxy (e.g. "127.0.0.1,10.0.0.0/8"), c.IP() returns the real client IP
+// from X-Forwarded-For, which is what the auth/general/refresh/ws-token rate limiters
+// key on (Finding #13). EnableIPValidation returns just the first valid IP from the
+// header rather than the raw comma-separated list, so a malicious downstream can't
+// craft a header that lands in an oddly-keyed bucket.
+//
+// Fiber v3 rename: EnableTrustedProxyCheck → TrustProxy, and the TrustedProxies list
+// moved into TrustProxyConfig.Proxies. The TrustProxyConfig.{Loopback,LinkLocal,
+// Private,UnixSocket} auto-trust toggles all default false, so ONLY the explicit
+// Proxies list is trusted — preserving the exact v2 semantics (XFF is honored solely
+// for remotes on the TRUSTED_PROXIES allowlist).
 func buildFiberConfig(cfg *config.Config) fiber.Config {
 	return fiber.Config{
 		ErrorHandler:                 errorHandler,
-		DisableStartupMessage:        true,
 		BodyLimit:                    32 * 1024 * 1024, // 32MB — bodies above this are streamed, not buffered
 		StreamRequestBody:            true,             // Enable streaming for large uploads (ISO/vztmpl)
 		DisablePreParseMultipartForm: true,             // Don't buffer multipart bodies; upload handler parses the stream itself
 		ProxyHeader:                  cfg.ProxyHeader,
-		EnableTrustedProxyCheck:      true,
-		TrustedProxies:               cfg.TrustedProxies,
+		TrustProxy:                   true,
+		TrustProxyConfig:             fiber.TrustProxyConfig{Proxies: cfg.TrustedProxies},
 		EnableIPValidation:           true,
 	}
 }
@@ -388,8 +393,10 @@ func (s *Server) loadSyslogConfig(fwd *proxsyslog.Forwarder) {
 }
 
 // Listen starts the HTTP server on the given address.
+//
+// Fiber v3 moved DisableStartupMessage out of fiber.Config and into ListenConfig.
 func (s *Server) Listen(addr string) error {
-	return s.app.Listen(addr)
+	return s.app.Listen(addr, fiber.ListenConfig{DisableStartupMessage: true})
 }
 
 // Shutdown gracefully shuts down the server.

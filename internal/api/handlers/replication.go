@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -24,12 +24,12 @@ func NewReplicationHandler(queries *db.Queries, encryptionKey string, eventPub *
 	return &ReplicationHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
-func (h *ReplicationHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *ReplicationHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // ListJobs handles GET /clusters/:cluster_id/replication.
-func (h *ReplicationHandler) ListJobs(c *fiber.Ctx) error {
+func (h *ReplicationHandler) ListJobs(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -49,7 +49,7 @@ func (h *ReplicationHandler) ListJobs(c *fiber.Ctx) error {
 }
 
 // CreateJob handles POST /clusters/:cluster_id/replication.
-func (h *ReplicationHandler) CreateJob(c *fiber.Ctx) error {
+func (h *ReplicationHandler) CreateJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -58,7 +58,7 @@ func (h *ReplicationHandler) CreateJob(c *fiber.Ctx) error {
 		return err
 	}
 	var req proxmox.CreateReplicationJobParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.ID == "" || req.Target == "" {
@@ -81,7 +81,7 @@ func (h *ReplicationHandler) CreateJob(c *fiber.Ctx) error {
 }
 
 // GetJob handles GET /clusters/:cluster_id/replication/:job_id.
-func (h *ReplicationHandler) GetJob(c *fiber.Ctx) error {
+func (h *ReplicationHandler) GetJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func (h *ReplicationHandler) GetJob(c *fiber.Ctx) error {
 }
 
 // UpdateJob handles PUT /clusters/:cluster_id/replication/:job_id.
-func (h *ReplicationHandler) UpdateJob(c *fiber.Ctx) error {
+func (h *ReplicationHandler) UpdateJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -112,7 +112,7 @@ func (h *ReplicationHandler) UpdateJob(c *fiber.Ctx) error {
 	}
 	jobID := c.Params("job_id")
 	var req proxmox.UpdateReplicationJobParams
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -129,7 +129,7 @@ func (h *ReplicationHandler) UpdateJob(c *fiber.Ctx) error {
 }
 
 // DeleteJob handles DELETE /clusters/:cluster_id/replication/:job_id.
-func (h *ReplicationHandler) DeleteJob(c *fiber.Ctx) error {
+func (h *ReplicationHandler) DeleteJob(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -152,7 +152,7 @@ func (h *ReplicationHandler) DeleteJob(c *fiber.Ctx) error {
 }
 
 // TriggerSync handles POST /clusters/:cluster_id/replication/:job_id/trigger.
-func (h *ReplicationHandler) TriggerSync(c *fiber.Ctx) error {
+func (h *ReplicationHandler) TriggerSync(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -187,7 +187,7 @@ func (h *ReplicationHandler) TriggerSync(c *fiber.Ctx) error {
 }
 
 // GetStatus handles GET /clusters/:cluster_id/replication/:job_id/status.
-func (h *ReplicationHandler) GetStatus(c *fiber.Ctx) error {
+func (h *ReplicationHandler) GetStatus(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func (h *ReplicationHandler) GetStatus(c *fiber.Ctx) error {
 }
 
 // GetLog handles GET /clusters/:cluster_id/replication/:job_id/log.
-func (h *ReplicationHandler) GetLog(c *fiber.Ctx) error {
+func (h *ReplicationHandler) GetLog(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err

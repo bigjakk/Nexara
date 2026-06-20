@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/auth"
@@ -26,7 +26,7 @@ type permissionEngine interface {
 // middleware. The bool reports whether both are present; absence in
 // production means the request bypassed auth, which the caller turns
 // into a 500 to fail loud rather than silently degrading.
-func engineFromContext(c *fiber.Ctx) (permissionEngine, uuid.UUID, bool) {
+func engineFromContext(c fiber.Ctx) (permissionEngine, uuid.UUID, bool) {
 	eng, _ := c.Locals("rbac_engine").(permissionEngine)
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 	if eng == nil || userID == uuid.Nil {
@@ -39,7 +39,7 @@ func engineFromContext(c *fiber.Ctx) (permissionEngine, uuid.UUID, bool) {
 // for system-wide resources (users, settings, RBAC, system reports).
 // For per-cluster checks prefer requireClusterPerm so a cluster-scoped
 // role grant is honoured.
-func requirePerm(c *fiber.Ctx, action, resource string) error {
+func requirePerm(c fiber.Ctx, action, resource string) error {
 	eng, userID, ok := engineFromContext(c)
 	if !ok {
 		return fiber.NewError(fiber.StatusInternalServerError, "RBAC engine not configured")
@@ -58,7 +58,7 @@ func requirePerm(c *fiber.Ctx, action, resource string) error {
 // specific cluster. Global-scoped grants cover all clusters; a user
 // with only a cluster-scoped grant on a different cluster is rejected
 // with 403.
-func requireClusterPerm(c *fiber.Ctx, action, resource string, clusterID uuid.UUID) error {
+func requireClusterPerm(c fiber.Ctx, action, resource string, clusterID uuid.UUID) error {
 	eng, userID, ok := engineFromContext(c)
 	if !ok {
 		return fiber.NewError(fiber.StatusInternalServerError, "RBAC engine not configured")
@@ -101,7 +101,7 @@ func (a clusterAccess) PermitsCluster(id uuid.UUID) bool {
 // On failure the returned error is always a *fiber.Error so callers can
 // `return err` directly and get the right HTTP status. Don't wrap with
 // fmt.Errorf — that would hide the status code from Fiber's ErrorHandler.
-func accessibleClusters(c *fiber.Ctx, action, resource string) (clusterAccess, error) { //nolint:unparam // action always "view" today; preserved for future filters
+func accessibleClusters(c fiber.Ctx, action, resource string) (clusterAccess, error) { //nolint:unparam // action always "view" today; preserved for future filters
 	eng, userID, ok := engineFromContext(c)
 	if !ok {
 		return clusterAccess{}, fiber.NewError(fiber.StatusInternalServerError, "RBAC engine not configured")
@@ -133,7 +133,7 @@ func accessibleClusters(c *fiber.Ctx, action, resource string) (clusterAccess, e
 }
 
 // clusterIDFromParam extracts and parses the cluster_id URL parameter.
-func clusterIDFromParam(c *fiber.Ctx) (uuid.UUID, error) {
+func clusterIDFromParam(c fiber.Ctx) (uuid.UUID, error) {
 	raw := c.Params("cluster_id")
 	if raw == "" {
 		raw = c.Params("id")

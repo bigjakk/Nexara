@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 )
 
@@ -15,7 +15,7 @@ import (
 // the handlers under test go through the exact same engineFromContext
 // path as production.
 func installTestRoleMiddleware(app *fiber.App) {
-	app.Use(func(c *fiber.Ctx) error {
+	app.Use(func(c fiber.Ctx) error {
 		if role := c.Get("X-Test-Role"); role != "" {
 			c.Locals("role", role)
 			c.Locals("user_id", uuid.New())
@@ -31,7 +31,7 @@ func installTestRoleMiddleware(app *fiber.App) {
 func TestRequireClusterPerm_StubEngine(t *testing.T) {
 	app := fiber.New()
 	installTestRoleMiddleware(app)
-	app.Get("/probe", func(c *fiber.Ctx) error {
+	app.Get("/probe", func(c fiber.Ctx) error {
 		if err := requireClusterPerm(c, "manage", "cluster", uuid.New()); err != nil {
 			return err
 		}
@@ -69,7 +69,7 @@ func TestRequireClusterPerm_StubEngine(t *testing.T) {
 // is the load-bearing test for 5.1: production must NOT fall back.
 func TestRequireClusterPerm_NoEngine(t *testing.T) {
 	app := fiber.New()
-	app.Get("/probe", func(c *fiber.Ctx) error {
+	app.Get("/probe", func(c fiber.Ctx) error {
 		if err := requireClusterPerm(c, "manage", "cluster", uuid.New()); err != nil {
 			return err
 		}
@@ -94,7 +94,7 @@ func TestAccessibleClusters_StubEngine(t *testing.T) {
 	app := fiber.New()
 	installTestRoleMiddleware(app)
 
-	app.Get("/probe-admin", func(c *fiber.Ctx) error {
+	app.Get("/probe-admin", func(c fiber.Ctx) error {
 		access, err := accessibleClusters(c, "view", "cluster")
 		if err != nil {
 			return err
@@ -105,7 +105,7 @@ func TestAccessibleClusters_StubEngine(t *testing.T) {
 		return c.SendStatus(http.StatusOK)
 	})
 
-	app.Get("/probe-non-admin", func(c *fiber.Ctx) error {
+	app.Get("/probe-non-admin", func(c fiber.Ctx) error {
 		access, err := accessibleClusters(c, "view", "cluster")
 		if err != nil {
 			return err

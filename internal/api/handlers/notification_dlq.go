@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -105,7 +105,7 @@ var validDLQStates = map[string]bool{
 // Rows with a NULL cluster_id (global rules + rule-less test dispatches)
 // are visible to anyone with the global permission, since there is no
 // cluster boundary to honour.
-func (h *NotificationDLQHandler) List(c *fiber.Ctx) error {
+func (h *NotificationDLQHandler) List(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "notification_dlq"); err != nil {
 		return err
 	}
@@ -167,7 +167,7 @@ func (h *NotificationDLQHandler) List(c *fiber.Ctx) error {
 }
 
 // Summary returns counts grouped by state for the DLQ widget.
-func (h *NotificationDLQHandler) Summary(c *fiber.Ctx) error {
+func (h *NotificationDLQHandler) Summary(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "notification_dlq"); err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func (h *NotificationDLQHandler) Summary(c *fiber.Ctx) error {
 //
 // For cluster-scoped DLQ rows the cluster permission is also checked so an
 // operator cross-cluster can't replay another tenant's traffic.
-func (h *NotificationDLQHandler) Retry(c *fiber.Ctx) error {
+func (h *NotificationDLQHandler) Retry(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "notification_dlq"); err != nil {
 		return err
 	}
@@ -242,7 +242,7 @@ func (h *NotificationDLQHandler) Retry(c *fiber.Ctx) error {
 // Dismiss marks a DLQ entry as dismissed without retrying. Used when an
 // operator decides the failure is no longer actionable (rule deleted,
 // channel rotated, etc).
-func (h *NotificationDLQHandler) Dismiss(c *fiber.Ctx) error {
+func (h *NotificationDLQHandler) Dismiss(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "notification_dlq"); err != nil {
 		return err
 	}
@@ -275,7 +275,7 @@ func (h *NotificationDLQHandler) Dismiss(c *fiber.Ctx) error {
 
 // Delete permanently removes a DLQ entry. Provided alongside Dismiss for
 // operators who want to keep the table compact.
-func (h *NotificationDLQHandler) Delete(c *fiber.Ctx) error {
+func (h *NotificationDLQHandler) Delete(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "notification_dlq"); err != nil {
 		return err
 	}

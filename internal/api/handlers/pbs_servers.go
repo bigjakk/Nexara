@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -82,9 +82,9 @@ func toPBSResponse(p db.PbsServer) pbsResponse {
 }
 
 // Create handles POST /api/v1/pbs-servers.
-func (h *PBSHandler) Create(c *fiber.Ctx) error {
+func (h *PBSHandler) Create(c fiber.Ctx) error {
 	var req createPBSRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -152,7 +152,7 @@ func (h *PBSHandler) Create(c *fiber.Ctx) error {
 }
 
 // List handles GET /api/v1/pbs-servers.
-func (h *PBSHandler) List(c *fiber.Ctx) error {
+func (h *PBSHandler) List(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "pbs")
 	if err != nil {
 		return err
@@ -181,7 +181,7 @@ func (h *PBSHandler) List(c *fiber.Ctx) error {
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/pbs-servers.
-func (h *PBSHandler) ListByCluster(c *fiber.Ctx) error {
+func (h *PBSHandler) ListByCluster(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -204,7 +204,7 @@ func (h *PBSHandler) ListByCluster(c *fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/pbs-servers/:id.
-func (h *PBSHandler) Get(c *fiber.Ctx) error {
+func (h *PBSHandler) Get(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
@@ -230,14 +230,14 @@ func (h *PBSHandler) Get(c *fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/pbs-servers/:id.
-func (h *PBSHandler) Update(c *fiber.Ctx) error {
+func (h *PBSHandler) Update(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")
 	}
 
 	var req updatePBSRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -330,7 +330,7 @@ func (h *PBSHandler) Update(c *fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/pbs-servers/:id.
-func (h *PBSHandler) Delete(c *fiber.Ctx) error {
+func (h *PBSHandler) Delete(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid PBS server ID")

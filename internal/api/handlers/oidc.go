@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -128,7 +128,7 @@ func toOIDCConfigResponse(cfg db.OidcConfig) oidcConfigResponse {
 // --- Admin CRUD endpoints ---
 
 // List handles GET /api/v1/oidc/configs.
-func (h *OIDCHandler) List(c *fiber.Ctx) error {
+func (h *OIDCHandler) List(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (h *OIDCHandler) List(c *fiber.Ctx) error {
 }
 
 // Get handles GET /api/v1/oidc/configs/:id.
-func (h *OIDCHandler) Get(c *fiber.Ctx) error {
+func (h *OIDCHandler) Get(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -169,13 +169,13 @@ func (h *OIDCHandler) Get(c *fiber.Ctx) error {
 }
 
 // Create handles POST /api/v1/oidc/configs.
-func (h *OIDCHandler) Create(c *fiber.Ctx) error {
+func (h *OIDCHandler) Create(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
 
 	var req oidcConfigRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -244,7 +244,7 @@ func (h *OIDCHandler) Create(c *fiber.Ctx) error {
 }
 
 // Update handles PUT /api/v1/oidc/configs/:id.
-func (h *OIDCHandler) Update(c *fiber.Ctx) error {
+func (h *OIDCHandler) Update(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -263,7 +263,7 @@ func (h *OIDCHandler) Update(c *fiber.Ctx) error {
 	}
 
 	var req oidcConfigRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -333,7 +333,7 @@ func (h *OIDCHandler) Update(c *fiber.Ctx) error {
 }
 
 // Delete handles DELETE /api/v1/oidc/configs/:id.
-func (h *OIDCHandler) Delete(c *fiber.Ctx) error {
+func (h *OIDCHandler) Delete(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -353,7 +353,7 @@ func (h *OIDCHandler) Delete(c *fiber.Ctx) error {
 }
 
 // TestConnection handles POST /api/v1/oidc/configs/:id/test.
-func (h *OIDCHandler) TestConnection(c *fiber.Ctx) error {
+func (h *OIDCHandler) TestConnection(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "user"); err != nil {
 		return err
 	}
@@ -409,7 +409,7 @@ func (h *OIDCHandler) TestConnection(c *fiber.Ctx) error {
 
 // Authorize handles GET /api/v1/auth/oidc/authorize.
 // Returns the IdP redirect URL with state, nonce, PKCE.
-func (h *OIDCHandler) Authorize(c *fiber.Ctx) error {
+func (h *OIDCHandler) Authorize(c fiber.Ctx) error {
 	cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -441,28 +441,28 @@ func (h *OIDCHandler) Authorize(c *fiber.Ctx) error {
 // Callback handles GET /api/v1/auth/oidc/callback.
 // Called by the IdP after authentication; exchanges code, provisions user,
 // stores short-lived exchange code in Redis, and redirects to frontend.
-func (h *OIDCHandler) Callback(c *fiber.Ctx) error {
+func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 	code := c.Query("code")
 	state := c.Query("state")
 	if code == "" || state == "" {
 		errMsg := c.Query("error_description", c.Query("error", "unknown error"))
-		return c.Redirect("/login?error=" + url.QueryEscape("SSO failed: "+errMsg))
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("SSO failed: "+errMsg))
 	}
 
 	cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
 	if err != nil {
-		return c.Redirect("/login?error=" + url.QueryEscape("OIDC not configured"))
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("OIDC not configured"))
 	}
 
 	oidcCfg, err := h.buildOIDCConfig(cfg)
 	if err != nil {
-		return c.Redirect("/login?error=" + url.QueryEscape("OIDC config error"))
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("OIDC config error"))
 	}
 
 	provider, err := auth.NewOIDCProvider(c.Context(), oidcCfg, h.rdb)
 	if err != nil {
 		slog.Error("OIDC provider init failed in callback", "error", err)
-		return c.Redirect("/login?error=" + url.QueryEscape("OIDC provider error"))
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("OIDC provider error"))
 	}
 
 	userInfo, err := provider.ExchangeAndVerify(c.Context(), code, state)
@@ -472,14 +472,14 @@ func (h *OIDCHandler) Callback(c *fiber.Ctx) error {
 		if errors.Is(err, auth.ErrOIDCDomainNotAllowed) {
 			errMsg = "Your email domain is not allowed"
 		}
-		return c.Redirect("/login?error=" + url.QueryEscape(errMsg))
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(errMsg))
 	}
 
 	// JIT provision or update the user
 	user, err := h.provisionUser(c, cfg, userInfo)
 	if err != nil {
 		slog.Error("OIDC user provisioning failed", "email", userInfo.Email, "error", err)
-		return c.Redirect("/login?error=" + url.QueryEscape("User provisioning failed"))
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("User provisioning failed"))
 	}
 
 	// Sync group-to-role mapping
@@ -492,14 +492,14 @@ func (h *OIDCHandler) Callback(c *fiber.Ctx) error {
 	// Store short-lived exchange code in Redis (5 second TTL)
 	exchangeCode, err := auth.GenerateRandomString(32)
 	if err != nil {
-		return c.Redirect("/login?error=" + url.QueryEscape("Internal error"))
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("Internal error"))
 	}
 
 	exchangeData, _ := json.Marshal(map[string]string{
 		"user_id": user.ID.String(),
 	})
 	if err := h.rdb.Set(c.Context(), "oidc:exchange:"+exchangeCode, string(exchangeData), 5*time.Second).Err(); err != nil {
-		return c.Redirect("/login?error=" + url.QueryEscape("Internal error"))
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("Internal error"))
 	}
 
 	details, _ := json.Marshal(map[string]string{"email": userInfo.Email, "ip": c.IP()})
@@ -512,12 +512,12 @@ func (h *OIDCHandler) Callback(c *fiber.Ctx) error {
 		Details:      details,
 	})
 
-	return c.Redirect("/oidc-callback?oidc_token=" + exchangeCode)
+	return c.Redirect().Status(fiber.StatusFound).To("/oidc-callback?oidc_token=" + exchangeCode)
 }
 
 // --- User provisioning ---
 
-func (h *OIDCHandler) provisionUser(c *fiber.Ctx, cfg db.OidcConfig, userInfo *auth.OIDCUserInfo) (db.User, error) {
+func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *auth.OIDCUserInfo) (db.User, error) {
 	// Look up existing user
 	user, err := h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
 		Email:      userInfo.Email,
@@ -574,7 +574,7 @@ func (h *OIDCHandler) provisionUser(c *fiber.Ctx, cfg db.OidcConfig, userInfo *a
 }
 
 // syncUserRoles maps OIDC group names to RBAC role UUIDs and assigns them.
-func (h *OIDCHandler) syncUserRoles(c *fiber.Ctx, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
+func (h *OIDCHandler) syncUserRoles(c fiber.Ctx, userID uuid.UUID, groups []string, mapping map[string]string, defaultRoleID pgtype.UUID) {
 	_ = h.queries.RevokeAllUserRoles(c.Context(), userID)
 
 	assigned := false

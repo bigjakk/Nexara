@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -26,12 +26,12 @@ func NewAptRepositoryHandler(queries *db.Queries, encryptionKey string, eventPub
 	return &AptRepositoryHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
 }
 
-func (h *AptRepositoryHandler) createProxmoxClient(c *fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
+func (h *AptRepositoryHandler) createProxmoxClient(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.Client, error) {
 	return CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
 }
 
 // ListRepositories handles GET /clusters/:cluster_id/nodes/:node/apt/repositories.
-func (h *AptRepositoryHandler) ListRepositories(c *fiber.Ctx) error {
+func (h *AptRepositoryHandler) ListRepositories(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -62,7 +62,7 @@ type toggleRepoRequest struct {
 }
 
 // ToggleRepository handles PUT /clusters/:cluster_id/nodes/:node/apt/repositories.
-func (h *AptRepositoryHandler) ToggleRepository(c *fiber.Ctx) error {
+func (h *AptRepositoryHandler) ToggleRepository(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -75,7 +75,7 @@ func (h *AptRepositoryHandler) ToggleRepository(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
 	}
 	var req toggleRepoRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.Path == "" || len(req.Path) > 256 {
@@ -115,7 +115,7 @@ type addStandardRepoRequest struct {
 }
 
 // AddStandardRepository handles POST /clusters/:cluster_id/nodes/:node/apt/repositories.
-func (h *AptRepositoryHandler) AddStandardRepository(c *fiber.Ctx) error {
+func (h *AptRepositoryHandler) AddStandardRepository(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return err
@@ -128,7 +128,7 @@ func (h *AptRepositoryHandler) AddStandardRepository(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Node name is required")
 	}
 	var req addStandardRepoRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 	if !handlePattern.MatchString(req.Handle) {
