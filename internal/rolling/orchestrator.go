@@ -401,6 +401,24 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			continue
 		}
 
+		// Wait out any in-flight lock on this guest before migrating. An
+		// HA-managed migration from the just-completed previous node's restore
+		// can still be settling (hamigrate → async qmigrate holds
+		// lock=migrate); issuing our migrate now would fail hard with "VM is
+		// locked (migrate)". Once it clears, re-confirm the guest is still here
+		// — the settling migration may have moved it off this node entirely.
+		// Mirrors resumeDrain's pre-migrate handling.
+		if pre := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID, ""); pre == "interrupted" {
+			o.logger.Info("drain interrupted by shutdown while waiting for pre-migrate unlock; next leader will resume",
+				"node", node.NodeName, "vmid", guest.VMID)
+			return
+		}
+		if !o.isGuestOnNode(ctx, client, node.NodeName, guest) {
+			o.logger.Info("guest migrated off node while its lock cleared, skipping",
+				"vmid", guest.VMID, "type", guest.Type, "node", node.NodeName)
+			continue
+		}
+
 		gs := GuestSnapshot{VMID: guest.VMID, Name: guest.Name, Type: guest.Type, Status: guest.Status}
 		target, err := SelectTarget(gs, node.NodeName, targets, haResMap, haGrpMap, haRules, drsRules, nodeWorkloads)
 		if err != nil {
@@ -413,18 +431,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			Online: guest.Status == "running",
 		}
 
-		var upid string
-		var migrateErr error
-
-		switch guest.Type {
-		case "qemu":
-			upid, migrateErr = client.MigrateVM(ctx, node.NodeName, guest.VMID, params)
-		case "lxc":
-			upid, migrateErr = client.MigrateCT(ctx, node.NodeName, guest.VMID, params)
-		default:
-			continue
-		}
-
+		upid, migrateErr := o.migrateWithRetry(ctx, client, node.NodeName, guest, params)
 		if migrateErr != nil {
 			o.failNode(ctx, job, node, fmt.Sprintf("migrate %s %d: %v", guest.Type, guest.VMID, migrateErr))
 			return
@@ -445,7 +452,7 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			o.failNode(ctx, job, node, fmt.Sprintf("migration of %s %d failed (status: %s)", guest.Type, guest.VMID, status))
 			return
 		}
-		lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID)
+		lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID, target)
 		if lockStatus == "interrupted" {
 			o.logger.Info("drain interrupted by shutdown while waiting for guest unlock; next leader will resume",
 				"node", node.NodeName, "vmid", guest.VMID)
@@ -593,7 +600,7 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 		// returns "VM is locked (migrate)" and we'd falsely mark the node
 		// failed. After the lock clears, re-check whether the guest is even
 		// still on the source node before deciding to migrate again.
-		lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID)
+		lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID, "")
 		if lockStatus == "interrupted" {
 			o.logger.Info("resume drain interrupted by shutdown while waiting for prior lock to clear",
 				"node", node.NodeName, "vmid", guest.VMID)
@@ -619,16 +626,7 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 			Online: guest.Status == "running",
 		}
 
-		var upid string
-		var migrateErr error
-		switch guest.Type {
-		case "qemu":
-			upid, migrateErr = client.MigrateVM(ctx, node.NodeName, guest.VMID, params)
-		case "lxc":
-			upid, migrateErr = client.MigrateCT(ctx, node.NodeName, guest.VMID, params)
-		default:
-			continue
-		}
+		upid, migrateErr := o.migrateWithRetry(ctx, client, node.NodeName, guest, params)
 		if migrateErr != nil {
 			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — migrate %s %d: %v", guest.Type, guest.VMID, migrateErr))
 			return
@@ -647,7 +645,7 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 			o.failNode(ctx, job, node, fmt.Sprintf("resume drain — migration of %s %d failed (status: %s)", guest.Type, guest.VMID, status))
 			return
 		}
-		postLockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID)
+		postLockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID, target)
 		if postLockStatus == "interrupted" {
 			o.logger.Info("resume drain interrupted by shutdown while waiting for guest unlock; next leader will resume",
 				"node", node.NodeName, "vmid", guest.VMID)
@@ -1189,8 +1187,13 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 		}
 		// HA-managed guests redirect to a fast hamigrate UPID; wait for the
 		// underlying qmigrate to drop the lock so the next node's drain
-		// doesn't race the in-flight restore migration.
-		lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID)
+		// doesn't race the in-flight restore migration. Pass the restore
+		// target so the wait confirms the guest actually arrived there before
+		// declaring the node done — the hamigrate returns before the HA CRM
+		// sets lock=migrate, so a bare unlock check can return prematurely and
+		// let the next node's drain race this still-pending migration (the
+		// "VM is locked (migrate)" drain failure).
+		lockStatus := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID, node.NodeName)
 		if lockStatus == "interrupted" {
 			o.logger.Info("restore interrupted by shutdown while waiting for guest unlock; next leader will resume",
 				"node", node.NodeName, "vmid", guest.VMID)
@@ -1777,7 +1780,25 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 //     restart in Swarm/K8s). The lock may still be in place;
 //     the next scheduler leader will resume polling via the
 //     stall detector in advanceDraining / advanceRestoring.
-func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.Client, guestType string, vmid int) string {
+//
+// expectNode, when non-empty, additionally requires the guest to be observed
+// at that node before returning "completed". This closes the HA
+// hamigrate→async qmigrate gap where the lock isn't set yet at the first poll:
+// pass the migration target so a node isn't declared settled while its
+// migration is still pending. Pass "" to return as soon as the guest is
+// unlocked on any node (e.g. a pre-migrate wait where the destination is
+// whatever the caller is about to choose).
+// settleConfirmGrace bounds how long waitForGuestUnlocked waits for an
+// expected migration to actually start (set its lock) when the guest is
+// already unlocked but not yet at the expected target node. This bridges the
+// HA hamigrate→async qmigrate gap: the migrate API call returns before the HA
+// CRM sets lock=migrate, so a naive "first empty lock wins" check returns too
+// early and the caller races the in-flight migration. If no lock appears
+// within this window, the migration apparently isn't happening and we stop
+// waiting rather than hang.
+const settleConfirmGrace = 45 * time.Second
+
+func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.Client, guestType string, vmid int, expectNode string) string {
 	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Minute)
 	defer cancel()
 
@@ -1798,6 +1819,8 @@ func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.C
 	}
 
 	var lastLock string
+	var sawLock bool
+	var unlockedElsewhereSince time.Time
 	for {
 		select {
 		case <-pollCtx.Done():
@@ -1821,20 +1844,48 @@ func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.C
 				continue
 			}
 			found := false
+			var node string
 			for _, r := range resources {
 				if !matchesGuest(r) {
 					continue
 				}
 				found = true
 				lastLock = r.Lock
-				if r.Lock == "" {
-					return "completed"
-				}
+				node = r.Node
 				break
 			}
 			if !found {
 				// Guest is no longer visible (deleted/destroyed) — treat
 				// as settled so we don't loop forever.
+				return "completed"
+			}
+			if lastLock != "" {
+				// A lock is held — a migration (or other task) is in flight.
+				// Wait for it to clear; reset the no-lock grace window.
+				sawLock = true
+				unlockedElsewhereSince = time.Time{}
+				continue
+			}
+			// Unlocked. If the caller doesn't care which node it lands on, or
+			// it's already at the expected target, it's settled.
+			if expectNode == "" || node == expectNode {
+				return "completed"
+			}
+			// Unlocked but not yet at the expected target. If we already
+			// observed the lock, the migration finished (the guest just ended
+			// up somewhere else) — safe to proceed.
+			if sawLock {
+				return "completed"
+			}
+			// Never locked and not at the target yet: an HA migration may not
+			// have started (hamigrate→qmigrate gap). Wait a bounded grace for
+			// the lock to appear before giving up, so we neither race the
+			// in-flight migration nor hang on one that never happens.
+			if unlockedElsewhereSince.IsZero() {
+				unlockedElsewhereSince = time.Now()
+			} else if time.Since(unlockedElsewhereSince) > settleConfirmGrace {
+				o.logger.Warn("guest unlocked but never reached expected node; proceeding",
+					"vmid", vmid, "type", guestType, "expected_node", expectNode, "current_node", node)
 				return "completed"
 			}
 		}
@@ -1905,6 +1956,53 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 			}
 		}
 	}
+}
+
+// migrateMaxAttempts bounds how many times a drain migration is retried when
+// it hits a transient "VM is locked (migrate)" error. A guest can be briefly
+// locked by an HA-managed migration that's still settling when the drain
+// reaches it; between attempts we wait for that lock to clear.
+const migrateMaxAttempts = 3
+
+// migrateWithRetry issues a guest migration and retries on a transient lock
+// error, waiting for the lock to clear between attempts. Non-lock errors and
+// the final attempt's error are returned unchanged so the caller's normal
+// failure handling runs. A shutdown, or a lock that never clears within the
+// wait deadline, also returns the last error (on shutdown the next scheduler
+// leader resumes the drain via the stall detector). On success it returns the
+// migration task UPID.
+func (o *Orchestrator) migrateWithRetry(ctx context.Context, client *proxmox.Client, sourceNode string, guest GuestSnapshot, params proxmox.MigrateParams) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= migrateMaxAttempts; attempt++ {
+		var upid string
+		var err error
+		switch guest.Type {
+		case "qemu":
+			upid, err = client.MigrateVM(ctx, sourceNode, guest.VMID, params)
+		case "lxc":
+			upid, err = client.MigrateCT(ctx, sourceNode, guest.VMID, params)
+		default:
+			return "", fmt.Errorf("unsupported guest type %q", guest.Type)
+		}
+		if err == nil {
+			return upid, nil
+		}
+		lastErr = err
+		if !proxmox.IsLockedError(err) || attempt == migrateMaxAttempts {
+			return "", err
+		}
+		o.logger.Warn("migrate hit transient lock, waiting for unlock before retry",
+			"vmid", guest.VMID, "type", guest.Type, "from", sourceNode,
+			"attempt", attempt, "max", migrateMaxAttempts, "error", err)
+		// Only retry once the lock has actually cleared. A "timeout" (still
+		// locked at the 30-min deadline) or "interrupted" (shutdown) means a
+		// retry would just block again — surface the lock error instead so the
+		// node fails promptly rather than after another full wait.
+		if status := o.waitForGuestUnlocked(ctx, client, guest.Type, guest.VMID, ""); status != "completed" {
+			return "", lastErr
+		}
+	}
+	return "", lastErr
 }
 
 func (o *Orchestrator) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {

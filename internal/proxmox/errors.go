@@ -45,3 +45,13 @@ func IsGuestNotRunningError(err error) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && strings.Contains(apiErr.Message, "not running")
 }
+
+// IsLockedError reports whether err is a Proxmox "VM/CT is locked (…)"
+// response — returned when an operation (e.g. migrate) is attempted on a guest
+// that is already locked by another in-flight task such as an HA-managed
+// migration that is still settling. These are transient: the lock clears once
+// the holding task finishes, so the operation is safe to retry after waiting.
+func IsLockedError(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && strings.Contains(apiErr.Message, "is locked")
+}
