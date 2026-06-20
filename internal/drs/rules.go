@@ -2,6 +2,7 @@ package drs
 
 import (
 	"encoding/json"
+	"fmt"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -41,23 +42,47 @@ func ParseDBRules(dbRules []db.DrsRule) []Rule {
 
 // IsMigrationAllowed checks if a proposed migration violates any rules.
 func IsMigrationAllowed(migration Recommendation, nodeWorkloads map[string][]Workload, rules []Rule) bool {
+	allowed, _ := checkMigration(migration, nodeWorkloads, rules)
+	return allowed
+}
+
+// checkMigration is IsMigrationAllowed but also returns a human-readable reason
+// when a rule blocks the move (empty string when allowed). The planner uses the
+// reason for actionable "blocked by rule" logging — without it, a move silently
+// vanishing into a rule check is painful to diagnose in the field.
+//
+// nodeWorkloads must reflect the FULL placement of every running guest,
+// including pinned ones: a pinned VM still occupies its node and still
+// participates in affinity/anti-affinity rules even though it can't be moved.
+func checkMigration(migration Recommendation, nodeWorkloads map[string][]Workload, rules []Rule) (allowed bool, reason string) {
 	for _, rule := range rules {
 		switch rule.Type {
 		case RuleTypePin:
 			if !isPinAllowed(migration, rule) {
-				return false
+				return false, fmt.Sprintf("pin rule: vm %d may only run on %v", migration.VMID, rule.NodeNames)
 			}
 		case RuleTypeAffinity:
 			if !isAffinityAllowed(migration, nodeWorkloads, rule) {
-				return false
+				return false, fmt.Sprintf("affinity rule: vm %d must stay co-located with vms %v", migration.VMID, otherVMIDs(rule.VMIDs, migration.VMID))
 			}
 		case RuleTypeAntiAffinity:
 			if !isAntiAffinityAllowed(migration, nodeWorkloads, rule) {
-				return false
+				return false, fmt.Sprintf("anti-affinity rule: vm %d must not share node %s with vms %v", migration.VMID, migration.TargetNode, otherVMIDs(rule.VMIDs, migration.VMID))
 			}
 		}
 	}
-	return true
+	return true, ""
+}
+
+// otherVMIDs returns the members of a rule group other than self, for logging.
+func otherVMIDs(vmids []int, self int) []int {
+	others := make([]int, 0, len(vmids))
+	for _, v := range vmids {
+		if v != self {
+			others = append(others, v)
+		}
+	}
+	return others
 }
 
 // isPinAllowed checks that a pinned VM is not moved away from its designated node.

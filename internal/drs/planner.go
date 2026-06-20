@@ -76,6 +76,16 @@ func Plan(
 			})
 
 			for j, w := range workloads {
+				// Pinned workloads (PCI/USB passthrough, containers when
+				// include_containers is off, etc.) must never be migrated, but
+				// they remain in currentWorkloads so they still count toward node
+				// scores and stay visible to affinity/anti-affinity/pin checks —
+				// e.g. a movable VM must not be placed onto a node hosting its
+				// pinned anti-affinity partner.
+				if w.Pinned {
+					continue
+				}
+
 				migration := Recommendation{
 					VMID:       w.VMID,
 					VMType:     w.Type,
@@ -83,13 +93,21 @@ func Plan(
 					TargetNode: target,
 				}
 
-				if !IsMigrationAllowed(migration, currentWorkloads, rules) {
+				if allowed, reason := checkMigration(migration, currentWorkloads, rules); !allowed {
 					logger.Info("DRS planner: migration blocked by rule",
-						"vmid", w.VMID, "source", source, "target", target)
+						"vmid", w.VMID, "source", source, "target", target, "reason", reason)
 					continue
 				}
 
 				scoreBefore := CalculateImbalance(currentScores)
+				// Capture the pre-move node scores for the recommendation's
+				// human-readable reason. Read currentScores (which reflects every
+				// prior simulated move this run) rather than the immutable `scores`
+				// map, which is stale from the 2nd iteration onward — and read it
+				// *before* applying this move so the reason shows the loads that
+				// motivated it, not the post-move ones.
+				sourceScore := currentScores[source].Score
+				targetScore := currentScores[target].Score
 
 				// Simulate the move.
 				currentWorkloads[source] = append(workloads[:j], workloads[j+1:]...)
@@ -128,7 +146,7 @@ func Plan(
 				migration.ExpectedImprovement = scoreBefore - scoreAfter
 				migration.Reason = fmt.Sprintf(
 					"rebalance: node %s score %.3f -> move %s %d to %s (score %.3f)",
-					source, scores[source].Score, w.Type, w.VMID, target, scores[target].Score,
+					source, sourceScore, w.Type, w.VMID, target, targetScore,
 				)
 
 				recommendations = append(recommendations, migration)
@@ -146,7 +164,51 @@ func Plan(
 		}
 	}
 
-	return recommendations
+	return collapseHops(recommendations)
+}
+
+// collapseHops merges the multiple migration hops the greedy loop can emit for a
+// single guest in one run (e.g. a→b in one iteration, then b→c in a later one)
+// into a single source→target recommendation. Recommendations are computed
+// against each guest's real current location, so the intermediate node is a
+// simulation artifact only — executing the net move reaches the same final
+// placement with one live migration instead of two. A guest that nets back to
+// its origin node is dropped entirely. First-appearance order is preserved.
+func collapseHops(recs []Recommendation) []Recommendation {
+	if len(recs) <= 1 {
+		return recs
+	}
+
+	order := make([]int, 0, len(recs))
+	merged := make(map[int]Recommendation, len(recs))
+	for _, r := range recs {
+		existing, ok := merged[r.VMID]
+		if !ok {
+			order = append(order, r.VMID)
+			merged[r.VMID] = r
+			continue
+		}
+		// Extend the net move: keep the original source and the first hop's
+		// score-before, adopt the latest hop's target and score-after.
+		existing.TargetNode = r.TargetNode
+		existing.ScoreAfter = r.ScoreAfter
+		existing.ExpectedImprovement = existing.ScoreBefore - r.ScoreAfter
+		existing.Reason = fmt.Sprintf(
+			"rebalance: consolidate %s %d to a single migration %s -> %s",
+			existing.VMType, existing.VMID, existing.SourceNode, r.TargetNode,
+		)
+		merged[r.VMID] = existing
+	}
+
+	out := make([]Recommendation, 0, len(order))
+	for _, vmid := range order {
+		r := merged[vmid]
+		if r.SourceNode == r.TargetNode {
+			continue // net no-op: guest returned to its origin node
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // findSourceTargetPairs returns candidate source→target pairs ordered by priority.

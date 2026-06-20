@@ -295,14 +295,18 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 	rules := ParseDBRules(dbRules)
 	rules = append(rules, haRules...)
 
-	// Build filtered workloads for the planner (exclude pinned VMs).
-	plannerWorkloads := make(map[string][]Workload, len(nodeWorkloads))
+	// Pinned workloads (PCI/USB passthrough, containers when include_containers
+	// is off, etc.) are NOT filtered out before planning. They still occupy
+	// their node — so they must count toward node load scoring — and they still
+	// participate in affinity/anti-affinity rules — so a movable VM is never
+	// migrated onto a node hosting its pinned anti-affinity partner. The planner
+	// skips them as migration *candidates* instead (see Plan). Filtering them
+	// here previously made the planner blind to pinned rule members, which let
+	// DRS recommend migrations Proxmox HA then rejected (exit code 2).
 	pinnedCount := 0
-	for node, wls := range nodeWorkloads {
+	for _, wls := range nodeWorkloads {
 		for _, w := range wls {
-			if !w.Pinned {
-				plannerWorkloads[node] = append(plannerWorkloads[node], w)
-			} else {
+			if w.Pinned {
 				pinnedCount++
 			}
 		}
@@ -314,8 +318,9 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 		"rule_count", len(rules),
 	)
 
-	// Plan migrations using filtered workloads but original scores.
-	result.Recommendations = Plan(scores, plannerWorkloads, nodeEntries, rules, weights, cfg.ImbalanceThreshold, e.logger)
+	// Plan migrations over the full workload set; the planner keeps pinned VMs
+	// for scoring and rule visibility but never selects them for migration.
+	result.Recommendations = Plan(scores, nodeWorkloads, nodeEntries, rules, weights, cfg.ImbalanceThreshold, e.logger)
 
 	return result, nil
 }
