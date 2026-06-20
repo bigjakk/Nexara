@@ -1,6 +1,7 @@
 package drs
 
 import (
+	"io"
 	"log/slog"
 	"testing"
 
@@ -8,14 +9,22 @@ import (
 )
 
 // TestPlanCollapsesMultiHopForSameVM is the end-to-end guard for the multi-hop
-// fix. This score landscape makes the greedy loop migrate vm 1001 n3→n1 and then
-// (a later iteration, after vm 1000 moves) n1→n3 — a pure round trip — while vm
-// 1000 moves n3→n2 once. Without collapsing, the executor would live-migrate vm
-// 1001 twice only to return it to n3. After the fix the planner must emit at
-// most one recommendation per VMID, drop the net no-op round trip, and keep the
-// genuine move.
+// fix. This score landscape (a hot n3 with two movable guests; empty n1/n2 of
+// equal score; light n4) makes the greedy loop route guests through different
+// intermediate nodes depending on Go's randomized map-iteration order — some
+// runs produce a multi-hop or a pure round trip for one VMID. Whatever the path,
+// collapseHops must always guarantee the two deterministic invariants below:
+// at most one recommendation per VMID, and never a no-op (source == target).
+//
+// Asserting a *specific* outcome (e.g. "vm 1001 is the one dropped") would be
+// flaky precisely because the path is map-order dependent — that mistake is what
+// this version fixes. The exact collapse semantics are pinned deterministically
+// by TestCollapseHops; here we run many iterations so the varied orderings
+// (including the multi-hop ones) are exercised, and any unwiring of collapseHops
+// surfaces as a duplicate VMID.
 func TestPlanCollapsesMultiHopForSameVM(t *testing.T) {
 	weights := DefaultWeights()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	nodeEntries := map[string]proxmox.NodeListEntry{
 		"n1": {Node: "n1", Status: "online", MaxCPU: 32, MaxMem: 64e9},
@@ -23,47 +32,44 @@ func TestPlanCollapsesMultiHopForSameVM(t *testing.T) {
 		"n3": {Node: "n3", Status: "online", MaxCPU: 16, MaxMem: 16e9},
 		"n4": {Node: "n4", Status: "online", MaxCPU: 4, MaxMem: 8e9},
 	}
-	nodeWorkloads := map[string][]Workload{
-		"n3": {
-			{VMID: 1000, Type: "qemu", Node: "n3", CPUUsage: 0.4, CPUs: 8, Mem: 10e9, MaxMem: 32e9},
-			{VMID: 1001, Type: "qemu", Node: "n3", CPUUsage: 0.7, CPUs: 4, Mem: 3.5e9, MaxMem: 16e9},
-		},
-		"n4": {
-			{VMID: 1002, Type: "qemu", Node: "n4", CPUUsage: 0.85, CPUs: 3, Mem: 2.3e9, MaxMem: 8e9},
-		},
-	}
-
-	scores := make(map[string]NodeScore)
-	for name, ne := range nodeEntries {
-		scores[name] = ScoreNode(ne, nodeWorkloads[name], weights)
-	}
-	if CalculateImbalance(scores) <= 0.05 {
-		t.Fatalf("test setup: expected an imbalanced cluster")
-	}
-
-	recs := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.05, slog.Default())
-
-	// Core invariant: each guest is migrated at most once per run.
-	seen := make(map[int]int)
-	for _, r := range recs {
-		seen[r.VMID]++
-		if r.SourceNode == r.TargetNode {
-			t.Errorf("recommendation must never be a no-op (source==target): %+v", r)
-		}
-	}
-	for vmid, count := range seen {
-		if count > 1 {
-			t.Errorf("vmid %d appears %d times; the planner must emit at most one hop per guest: %+v", vmid, count, recs)
+	build := func() map[string][]Workload {
+		return map[string][]Workload{
+			"n3": {
+				{VMID: 1000, Type: "qemu", Node: "n3", CPUUsage: 0.4, CPUs: 8, Mem: 10e9, MaxMem: 32e9},
+				{VMID: 1001, Type: "qemu", Node: "n3", CPUUsage: 0.7, CPUs: 4, Mem: 3.5e9, MaxMem: 16e9},
+			},
+			"n4": {
+				{VMID: 1002, Type: "qemu", Node: "n4", CPUUsage: 0.85, CPUs: 3, Mem: 2.3e9, MaxMem: 8e9},
+			},
 		}
 	}
 
-	// The genuine move (vm 1000 n3→n2) survives; the round-tripped vm 1001 is
-	// dropped because its net source and target are identical.
-	if seen[1001] != 0 {
-		t.Errorf("expected the round-tripped vm 1001 to be dropped, got recs: %+v", recs)
+	sawRecommendation := false
+	for i := 0; i < 1000; i++ {
+		nodeWorkloads := build()
+		scores := make(map[string]NodeScore)
+		for name, ne := range nodeEntries {
+			scores[name] = ScoreNode(ne, nodeWorkloads[name], weights)
+		}
+
+		recs := Plan(scores, nodeWorkloads, nodeEntries, nil, weights, 0.05, quiet)
+		if len(recs) > 0 {
+			sawRecommendation = true
+		}
+
+		seen := make(map[int]bool, len(recs))
+		for _, r := range recs {
+			if r.SourceNode == r.TargetNode {
+				t.Fatalf("iter %d: recommendation must never be a no-op (source==target): %+v", i, r)
+			}
+			if seen[r.VMID] {
+				t.Fatalf("iter %d: vmid %d recommended more than once — collapseHops not applied: %+v", i, r.VMID, recs)
+			}
+			seen[r.VMID] = true
+		}
 	}
-	if seen[1000] != 1 {
-		t.Errorf("expected the genuine vm 1000 move to survive exactly once, got recs: %+v", recs)
+	if !sawRecommendation {
+		t.Fatal("expected the planner to produce at least one recommendation across iterations")
 	}
 }
 
