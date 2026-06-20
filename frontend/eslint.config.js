@@ -36,7 +36,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["vite.config.ts", "vitest.config.ts", "tailwind.config.ts"],
+    files: ["vite.config.ts", "vitest.config.ts"],
     rules: {
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",

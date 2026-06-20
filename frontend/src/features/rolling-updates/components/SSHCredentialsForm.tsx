@@ -333,7 +333,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
 
         {testState.kind === "success" && (
           <div className="flex items-center gap-2 rounded-md border border-emerald-500/50 bg-emerald-500/10 p-2 text-xs text-emerald-600 dark:text-emerald-400">
-            <CheckCircle className="h-4 w-4 flex-shrink-0" />
+            <CheckCircle className="h-4 w-4 shrink-0" />
             <div>
               SSH connection successful.
               {testState.fingerprint && (
@@ -347,7 +347,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
 
         {testState.kind === "error" && (
           <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
-            <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="break-words">{testState.message}</div>
           </div>
         )}
@@ -355,7 +355,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
         {testState.kind === "pending" && (
           <div className="space-y-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs">
             <div className="flex items-start gap-2 text-amber-700 dark:text-amber-400">
-              <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
                 <p className="font-medium">
                   Host key not yet trusted.
@@ -413,7 +413,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
         {testState.kind === "mismatch" && (
           <div className="space-y-2 rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs">
             <div className="flex items-start gap-2 text-destructive">
-              <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
                 <p className="font-medium">
                   Host key has changed since it was pinned.

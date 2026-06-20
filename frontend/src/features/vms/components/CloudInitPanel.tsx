@@ -159,7 +159,7 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
             }}
             placeholder="ssh-rsa AAAA... user@host"
             rows={3}
-            className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           />
         </div>
       </div>

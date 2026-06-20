@@ -103,7 +103,7 @@ export function CopyableName({ name, className }: CopyableNameProps) {
           }
         }}
         className={cn(
-          "inline-flex cursor-pointer select-text items-center gap-1 rounded-sm font-semibold text-foreground underline decoration-muted-foreground/50 decoration-dotted underline-offset-[3px] transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          "inline-flex cursor-pointer select-text items-center gap-1 rounded-sm font-semibold text-foreground underline decoration-muted-foreground/50 decoration-dotted underline-offset-[3px] transition-colors hover:decoration-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
           className,
         )}
       >

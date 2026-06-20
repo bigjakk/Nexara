@@ -36,7 +36,7 @@ import { parseKVString, buildKVString } from "../lib/vm-config-parsers";
 import type { VMConfig } from "../types/vm";
 
 const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 interface ContainerResourcesPanelProps {
   clusterId: string;
@@ -354,7 +354,7 @@ function MoveVolumeDialog({
             <Label htmlFor="ct-target-storage">Target Storage</Label>
             <select
               id="ct-target-storage"
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
               value={targetStorage}
               onChange={(e) => {
                 setTargetStorage(e.target.value);
@@ -1450,7 +1450,7 @@ export function ContainerResourcesPanel({
                   setDescription(e.target.value);
                 }}
                 rows={3}
-                className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
             <div>

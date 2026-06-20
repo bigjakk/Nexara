@@ -55,7 +55,7 @@ export function MigrationEdge({
             style={{
               transform: `translate(-50%, -50%) translate(${String(labelX)}px, ${String(labelY)}px)`,
             }}
-            className="nodrag nopan pointer-events-none absolute z-10 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 backdrop-blur-sm dark:text-emerald-400"
+            className="nodrag nopan pointer-events-none absolute z-10 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-600 backdrop-blur-xs dark:text-emerald-400"
           >
             {label}
           </div>

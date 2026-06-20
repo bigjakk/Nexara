@@ -137,7 +137,7 @@ export function VMConsolePreview({ clusterId, node, vmid, onOpen }: VMConsolePre
     <button
       type="button"
       onClick={onOpen}
-      className="group relative block h-[140px] w-[240px] shrink-0 overflow-hidden rounded-lg border bg-black ring-offset-background transition hover:ring-2 hover:ring-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="group relative block h-[140px] w-[240px] shrink-0 overflow-hidden rounded-lg border bg-black ring-offset-background transition hover:ring-2 hover:ring-ring focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       title="Open VNC console"
       aria-label="Open VNC console"
     >

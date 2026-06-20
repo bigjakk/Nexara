@@ -120,7 +120,7 @@ export function NodePowerActions({ clusterId, nodeName, otherNodes, inMaintenanc
                   <div className="space-y-2">
                     <Label>Target Node</Label>
                     <select
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                       value={targetNode}
                       onChange={(e) => { setTargetNode(e.target.value); }}
                     >

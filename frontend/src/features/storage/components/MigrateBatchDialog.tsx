@@ -172,7 +172,7 @@ export function MigrateBatchDialog({
             <Label htmlFor="batch-target-storage">Target storage</Label>
             <select
               id="batch-target-storage"
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
               value={targetStorage}
               onChange={(e) => { setTargetStorage(e.target.value); }}
               disabled={running || finished}

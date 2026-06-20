@@ -12,8 +12,8 @@ export const StorageNode = memo(function StorageNode({ data }: NodeProps) {
     usedPercent > 90 ? "bg-red-500" : usedPercent > 70 ? "bg-amber-500" : "bg-emerald-500";
 
   return (
-    <div className="rounded border bg-card px-2.5 py-2 shadow-sm min-w-[140px] cursor-pointer">
-      <Handle type="target" position={Position.Top} className="!bg-muted-foreground !w-1.5 !h-1.5" />
+    <div className="rounded border bg-card px-2.5 py-2 shadow-xs min-w-[140px] cursor-pointer">
+      <Handle type="target" position={Position.Top} className="bg-muted-foreground! w-1.5! h-1.5!" />
       <div className="flex items-center gap-1.5">
         <Database className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium truncate">{d.label}</span>

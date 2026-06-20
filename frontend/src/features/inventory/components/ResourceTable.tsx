@@ -214,7 +214,7 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
       {visibleLifecycle.map((config) => (
         <button
           key={config.action}
-          className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+          className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground"
           onClick={() => { handleLifecycleAction(config.action, config.needsConfirm, config.label); }}
         >
           <span className="mr-2">{config.icon}</span>
@@ -226,7 +226,7 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
         <>
           <div className="-mx-1 my-1 h-px bg-border" />
           <button
-            className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+            className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground"
             onClick={handleOpenConsole}
           >
             <span className="mr-2"><Monitor className="h-4 w-4" /></span>
@@ -240,7 +240,7 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
       {visibleManagement.map((config) => (
         <button
           key={config.action}
-          className={`relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground ${
+          className={`relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground ${
             config.variant === "destructive" ? "text-destructive" : ""
           }`}
           onClick={() => { handleManagementAction(config.action); }}

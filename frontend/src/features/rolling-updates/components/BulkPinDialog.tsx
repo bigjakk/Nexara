@@ -290,7 +290,7 @@ export function BulkPinDialog({
                     toggleRow(idx);
                   }}
                 />
-                <div className="mt-0.5 flex-shrink-0">{renderStateIcon(row)}</div>
+                <div className="mt-0.5 shrink-0">{renderStateIcon(row)}</div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2">
                     <span className="font-medium">{row.name}</span>

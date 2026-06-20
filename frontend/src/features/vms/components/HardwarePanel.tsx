@@ -48,7 +48,7 @@ import {
 import type { VMConfig } from "../types/vm";
 
 const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 const DISK_KEY_RE = /^(scsi|ide|sata|virtio|efidisk|tpmstate|unused)\d+$/;
 
@@ -885,7 +885,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
     <div className="space-y-3">
       {isRunning && (
         <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           <span>Running VM — hardware changes will be pending until restart.</span>
         </div>
       )}
@@ -1331,7 +1331,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
                 value={description}
                 onChange={(e) => { setDescription(e.target.value); }}
                 rows={2}
-                className="flex w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-xs shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-xs shadow-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
             <div className="space-y-1">
@@ -1434,7 +1434,7 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
                     </div>
                     <div className="space-y-0.5">
                       <Label className="text-[10px]">Cache</Label>
-                      <select className={compactSelect + " !h-7"} value={edit.cache} onChange={(e) => { updateDiskEdit(key, { cache: e.target.value }); }}>
+                      <select className={compactSelect + " h-7!"} value={edit.cache} onChange={(e) => { updateDiskEdit(key, { cache: e.target.value }); }}>
                         <option value="">Default</option>
                         {cacheModes.map((c) => (<option key={c.value} value={c.value}>{c.label}</option>))}
                       </select>
@@ -1486,13 +1486,13 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
               <div className="space-y-0.5">
                 <Label className="text-[10px]">Bus</Label>
-                <select className={compactSelect + " !h-7"} value={addDiskBus} onChange={(e) => { setAddDiskBus(e.target.value); }}>
+                <select className={compactSelect + " h-7!"} value={addDiskBus} onChange={(e) => { setAddDiskBus(e.target.value); }}>
                   {diskBusTypes.map((b) => (<option key={b.value} value={b.value}>{b.label}</option>))}
                 </select>
               </div>
               <div className="space-y-0.5">
                 <Label className="text-[10px]">Storage</Label>
-                <select className={compactSelect + " !h-7"} value={addDiskStorage} onChange={(e) => { setAddDiskStorage(e.target.value); }}>
+                <select className={compactSelect + " h-7!"} value={addDiskStorage} onChange={(e) => { setAddDiskStorage(e.target.value); }}>
                   <option value="">Select...</option>
                   {diskStorages.map((s) => (<option key={s.id} value={s.storage}>{s.storage} ({s.type})</option>))}
                 </select>
@@ -1503,13 +1503,13 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
               </div>
               <div className="space-y-0.5">
                 <Label className="text-[10px]">Format</Label>
-                <select className={compactSelect + " !h-7"} value={addDiskFormat} onChange={(e) => { setAddDiskFormat(e.target.value); }}>
+                <select className={compactSelect + " h-7!"} value={addDiskFormat} onChange={(e) => { setAddDiskFormat(e.target.value); }}>
                   {diskFormats.map((f) => (<option key={f.value} value={f.value}>{f.label}</option>))}
                 </select>
               </div>
               <div className="space-y-0.5">
                 <Label className="text-[10px]">Cache</Label>
-                <select className={compactSelect + " !h-7"} value={addDiskCache} onChange={(e) => { setAddDiskCache(e.target.value); }}>
+                <select className={compactSelect + " h-7!"} value={addDiskCache} onChange={(e) => { setAddDiskCache(e.target.value); }}>
                   <option value="">Default</option>
                   {cacheModes.map((c) => (<option key={c.value} value={c.value}>{c.label}</option>))}
                 </select>

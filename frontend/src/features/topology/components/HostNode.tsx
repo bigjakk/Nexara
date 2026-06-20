@@ -39,8 +39,8 @@ export const HostNode = memo(function HostNode({ data }: NodeProps) {
   const version = d.pveVersion.replace(/^pve-manager\/([^/]+).*$/, "$1");
 
   return (
-    <div className="min-w-[200px] cursor-pointer rounded-xl border bg-card px-3 py-2.5 shadow-sm transition-colors hover:border-muted-foreground/30 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
-      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-muted-foreground" />
+    <div className="min-w-[200px] cursor-pointer rounded-xl border bg-card px-3 py-2.5 shadow-xs transition-colors hover:border-muted-foreground/30 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]">
+      <Handle type="target" position={Position.Top} className="h-2! w-2! bg-muted-foreground!" />
       <div className="flex items-center gap-2">
         <div
           className="h-2 w-2 shrink-0 rounded-full"
@@ -79,7 +79,7 @@ export const HostNode = memo(function HostNode({ data }: NodeProps) {
         </span>
         {version && <span className="ml-auto pl-2">PVE {version}</span>}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-muted-foreground" />
+      <Handle type="source" position={Position.Bottom} className="h-2! w-2! bg-muted-foreground!" />
     </div>
   );
 });

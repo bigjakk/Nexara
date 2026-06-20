@@ -45,7 +45,7 @@ function ErrorBanner({ error }: { error: Error }) {
   const isForbidden = message.includes("403") || message.toLowerCase().includes("permission") || message.toLowerCase().includes("forbidden");
   return (
     <div className="flex items-center gap-2 rounded-md border border-orange-300 bg-orange-50 p-3 text-sm text-orange-800 dark:border-orange-700 dark:bg-orange-950 dark:text-orange-200">
-      <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+      <AlertTriangle className="h-4 w-4 shrink-0" />
       <span>{isForbidden ? "Permission denied. You may need to log out and back in for new RBAC permissions to take effect." : message}</span>
     </div>
   );
@@ -250,7 +250,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
     <Tabs defaultValue="status">
       {mutationError && (
         <div className="mb-4 flex items-center gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
-          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{mutationError}</span>
         </div>
       )}
@@ -634,7 +634,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
             <CardContent>
               {groupsDeprecated && (
                 <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
                     Proxmox VE 9 migrated HA Groups to <strong>HA Rules</strong> (node affinity).
                     Creating or editing groups is disabled &mdash; use the <strong>Rules</strong> section

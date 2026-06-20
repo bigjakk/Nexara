@@ -370,7 +370,7 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
             <textarea
               ref={pasteRef}
               placeholder="Ctrl+V to paste here..."
-              className="h-24 w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-24 w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
               autoFocus
             />
             <div className="flex justify-end gap-2">

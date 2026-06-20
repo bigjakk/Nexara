@@ -11,8 +11,8 @@ export const GuestNode = memo(function GuestNode({ data }: NodeProps) {
   const Icon = d.type === "qemu" ? MonitorSmartphone : Container;
 
   return (
-    <div className="rounded border bg-card px-2.5 py-2 shadow-sm min-w-[140px] cursor-pointer">
-      <Handle type="target" position={Position.Top} className="!bg-muted-foreground !w-1.5 !h-1.5" />
+    <div className="rounded border bg-card px-2.5 py-2 shadow-xs min-w-[140px] cursor-pointer">
+      <Handle type="target" position={Position.Top} className="bg-muted-foreground! w-1.5! h-1.5!" />
       <div className="flex items-center gap-1.5">
         <div
           className="h-2 w-2 rounded-full shrink-0"

@@ -57,7 +57,7 @@ interface DiskEntry {
 }
 
 const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 type Step =
   | "general"
@@ -824,7 +824,7 @@ export function CreateVMDialog({
                     onChange={(e) => {
                       setDescription(e.target.value);
                     }}
-                    className="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                     placeholder="Optional description"
                     rows={2}
                   />
@@ -1503,7 +1503,7 @@ export function CreateVMDialog({
                     onChange={(e) => {
                       setSshkeys(e.target.value);
                     }}
-                    className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs font-mono focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                     placeholder="ssh-rsa AAAA..."
                     rows={3}
                   />

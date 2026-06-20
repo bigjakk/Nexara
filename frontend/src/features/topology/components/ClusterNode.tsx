@@ -12,7 +12,7 @@ export const ClusterNode = memo(function ClusterNode({ data }: NodeProps) {
   return (
     <div
       className={cn(
-        "min-w-[220px] cursor-pointer rounded-xl border px-4 py-2.5 shadow-sm transition-colors",
+        "min-w-[220px] cursor-pointer rounded-xl border px-4 py-2.5 shadow-xs transition-colors",
         d.status === "online"
           ? "border-emerald-500/30 bg-emerald-500/[0.05] hover:border-emerald-500/50"
           : d.status === "degraded"
@@ -41,7 +41,7 @@ export const ClusterNode = memo(function ClusterNode({ data }: NodeProps) {
         <span>{d.nodeCount} node{d.nodeCount !== 1 ? "s" : ""}</span>
         <span>{d.vmCount} guest{d.vmCount !== 1 ? "s" : ""}</span>
       </div>
-      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-primary" />
+      <Handle type="source" position={Position.Bottom} className="h-2! w-2! bg-primary!" />
     </div>
   );
 });

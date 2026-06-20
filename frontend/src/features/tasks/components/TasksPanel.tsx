@@ -20,7 +20,7 @@ import { useTasks, type TaskRecord } from "../api/tasks-queries";
 const PAGE_SIZE = 50;
 
 const selectClass =
-  "flex h-9 w-[200px] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "flex h-9 w-[200px] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 const statusFilters = [
   { value: "", label: "All Statuses" },

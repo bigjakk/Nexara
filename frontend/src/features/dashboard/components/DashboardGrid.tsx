@@ -247,7 +247,7 @@ function WidgetOverlay({
 }) {
   const label = getWidgetLabel(widgetId, clusterNames);
   return (
-    <Card className="absolute inset-x-0 top-0 z-10 flex h-8 items-center justify-between rounded-b-none border-b bg-muted/80 px-2 backdrop-blur-sm">
+    <Card className="absolute inset-x-0 top-0 z-10 flex h-8 items-center justify-between rounded-b-none border-b bg-muted/80 px-2 backdrop-blur-xs">
       <CardHeader className="flex flex-row items-center gap-1 p-0">
         <GripVertical className="widget-drag-handle h-4 w-4 cursor-grab text-muted-foreground" />
         <CardTitle className="text-xs font-medium">

@@ -626,7 +626,7 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
       <p className="text-xs text-muted-foreground">Pool</p>
       <div className="flex items-center gap-1">
         <select
-          className="h-7 rounded-md border bg-transparent px-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+          className="h-7 rounded-md border bg-transparent px-1.5 text-sm outline-hidden focus:ring-2 focus:ring-ring"
           value={selected}
           onChange={(e) => { setSelected(e.target.value); }}
           disabled={setPool.isPending}
@@ -687,7 +687,7 @@ function InlineRename({
     <div className="flex items-center gap-1">
       <input
         ref={inputRef}
-        className="h-9 rounded-md border bg-transparent px-2 text-xl font-bold outline-none focus:ring-2 focus:ring-ring"
+        className="h-9 rounded-md border bg-transparent px-2 text-xl font-bold outline-hidden focus:ring-2 focus:ring-ring"
         value={value}
         onChange={(e) => { onChange(e.target.value); }}
         onKeyDown={(e) => {

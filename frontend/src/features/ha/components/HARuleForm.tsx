@@ -348,7 +348,7 @@ export function HARuleForm(props: Props) {
         {unmanagedSelected.length > 0 && (
           <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/60">
             <div className="flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <div>
                 <span className="font-mono">{unmanagedSelected.join(", ")}</span>{" "}
                 {unmanagedSelected.length === 1 ? "is" : "are"} not yet HA-managed. Proxmox won't accept
@@ -537,7 +537,7 @@ export function HARuleForm(props: Props) {
 
       {submitError && (
         <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
-          <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <div>{submitError.title}</div>
             {submitError.hint && <div className="mt-1 text-xs opacity-90">{submitError.hint}</div>}

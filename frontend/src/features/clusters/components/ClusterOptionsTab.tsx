@@ -215,7 +215,7 @@ function ErrorBanner({ error }: { error: Error }) {
   const isForbidden = message.includes("403") || message.toLowerCase().includes("permission") || message.toLowerCase().includes("forbidden");
   return (
     <div className="flex items-center gap-2 rounded-md border border-orange-300 bg-orange-50 p-3 text-sm text-orange-800 dark:border-orange-700 dark:bg-orange-950 dark:text-orange-200">
-      <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+      <AlertTriangle className="h-4 w-4 shrink-0" />
       <span>
         {isForbidden
           ? "The Proxmox API token does not have permission to access this data. Ensure the token has Sys.Audit privilege on /."
@@ -475,8 +475,8 @@ function GeneralSection({
             }
           >
             {feedback.kind === "success"
-              ? <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0" />
-              : <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />}
+              ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
             <span>{feedback.message}</span>
           </div>
         )}

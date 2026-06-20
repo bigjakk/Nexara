@@ -77,7 +77,7 @@ export function SecurityPostureCard({ posture, onShowKEV }: SecurityPostureCardP
           <button
             type="button"
             onClick={() => { onShowKEV(posture.scan_id); }}
-            className="mt-4 flex w-full items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-left text-sm transition-colors hover:bg-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+            className="mt-4 flex w-full items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-left text-sm transition-colors hover:bg-red-500/20 focus:outline-hidden focus:ring-2 focus:ring-red-500/50"
           >
             <Flame className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
             <div className="flex-1">

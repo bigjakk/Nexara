@@ -81,7 +81,7 @@ export function HAMaintenanceCard({ clusterId, pveVersion }: HAMaintenanceCardPr
         </p>
         {error && (
           <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 p-2 text-xs text-destructive">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>{error}</span>
           </div>
         )}

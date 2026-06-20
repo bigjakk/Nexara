@@ -220,7 +220,7 @@ export function TopologyCanvas({
           pannable
           zoomable
           nodeColor={minimapColor}
-          className="!border !bg-card"
+          className="border! bg-card!"
         />
       </ReactFlow>
     </div>

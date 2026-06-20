@@ -273,7 +273,7 @@ export function FloatingConsole() {
         className="group overflow-hidden rounded-lg border border-border/30 shadow-xl transition-opacity hover:opacity-100 opacity-70"
       >
         {/* Live console content */}
-        <div className="relative h-full w-full bg-[#1a1b26]/80 backdrop-blur-sm">
+        <div className="relative h-full w-full bg-[#1a1b26]/80 backdrop-blur-xs">
           {tabs.map((tab) =>
             tab.type === "vm_vnc" || tab.type === "ct_vnc" ? (
               <VNCViewer
@@ -317,7 +317,7 @@ export function FloatingConsole() {
           </div>
 
           {/* Subtle overlay label */}
-          <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center gap-1.5 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5">
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center gap-1.5 bg-linear-to-t from-black/60 to-transparent px-2 py-1.5">
             <TerminalSquare className="h-3 w-3 text-white/70" />
             <span className="truncate text-[11px] text-white/70">
               {activeTab?.label ?? "Console"}

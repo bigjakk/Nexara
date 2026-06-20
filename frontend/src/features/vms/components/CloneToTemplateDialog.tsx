@@ -176,7 +176,7 @@ export function CloneToTemplateDialog({
                   id="ctt-target"
                   value={target}
                   onChange={(e) => { setTarget(e.target.value); }}
-                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <option value="">Same node</option>
                   {nodes?.map((n) => (
@@ -193,7 +193,7 @@ export function CloneToTemplateDialog({
                     id="ctt-storage"
                     value={storage}
                     onChange={(e) => { setStorage(e.target.value); }}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                   >
                     <option value="">Same as source</option>
                     {storageOptions.map((s) => (

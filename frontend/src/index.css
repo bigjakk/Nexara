@@ -1,6 +1,75 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Class-based dark mode (was `darkMode: "class"` in tailwind.config.ts). The
+   `.dark` class is toggled on an ancestor by the theme store; without this
+   v4 would fall back to `prefers-color-scheme`. */
+@custom-variant dark (&:is(.dark *));
+
+/* Touch / coarse-pointer devices have no hover, so hover-reveal action
+   buttons (health-pill mute/dismiss, sidebar kebab) need an explicit
+   "show on coarse pointer" variant. Was a tailwindcss/plugin addVariant. */
+@custom-variant pointer-coarse (@media (pointer: coarse));
+
+/* Theme tokens (ported from tailwind.config.ts `theme.extend`). `inline` keeps
+   utilities resolving to `hsl(var(--token))` so the raw-channel variables in
+   :root/.dark below — and all the `hsl(var(--token) / alpha)` usages in the
+   custom CSS further down — keep working unchanged. */
+@theme inline {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  /* Custom radius scale tied to --radius (NOT the Tailwind defaults — this
+     project overrode borderRadius.sm/md/lg in v3). Keep mapped so rounded-*
+     utilities are unchanged and stay reactive to runtime --radius changes. */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
 
 @layer base {
   :root {
@@ -80,6 +149,12 @@
   select option {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
+  }
+  /* v4 dropped Preflight's `button { cursor: pointer }`; restore it to match
+     v3 behavior across this button-heavy admin UI. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 }
 
