@@ -89,7 +89,9 @@ export function BulkMoveDialog({
     setBuildingJobs(true);
 
     // Fetch all VMs once to map vmid → UUID
-    let vmList: VMListEntry[] = [];
+    // Assigned in the try; the catch returns, so no initializer is needed
+    // (an empty-array default would be a dead store).
+    let vmList: VMListEntry[];
     try {
       vmList = await apiClient.get<VMListEntry[]>(`/api/v1/clusters/${clusterId}/vms`);
     } catch {

@@ -24,8 +24,8 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    /* Paths */
-    "baseUrl": ".",
+    /* Paths (baseUrl removed: deprecated in TS 6; relative paths resolve
+       against this tsconfig's directory) */
     "paths": {
       "@/*": ["./src/*"]
     }

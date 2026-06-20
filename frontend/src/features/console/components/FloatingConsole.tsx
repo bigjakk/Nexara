@@ -194,8 +194,10 @@ export function FloatingConsole() {
       const dy = e.clientY - resizeRef.current.startY;
       const { dir, startSize, startPos } = resizeRef.current;
 
-      let newWidth = startSize.width;
-      let newHeight = startSize.height;
+      // newWidth/newHeight are assigned in both branches of each if below,
+      // so no initializer (would be a dead store; flagged by no-useless-assignment).
+      let newWidth: number;
+      let newHeight: number;
       let newX = startPos.x;
       let newY = startPos.y;
 

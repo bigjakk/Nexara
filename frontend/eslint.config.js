@@ -22,7 +22,13 @@ export default tseslint.config(
       "react-refresh": reactRefresh,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // eslint-plugin-react-hooks v7's "recommended" preset now bundles the
+      // React Compiler diagnostics (set-state-in-effect, refs, immutability,
+      // etc.), which flag ~75 pre-existing call sites. Keep the classic
+      // two-rule behavior here so the bump stays a dependency change; adopting
+      // the compiler rules is a separate, deliberate code-quality effort.
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
       "react-refresh/only-export-components": [
         "warn",
         { allowConstantExport: true },

@@ -20,36 +20,21 @@ export default defineConfig({
     target: ["chrome89", "edge89", "firefox89", "safari15"],
     rollupOptions: {
       output: {
-        manualChunks: {
-          "vendor-react": ["react", "react-dom", "react-router-dom"],
-          "vendor-tanstack": [
-            "@tanstack/react-query",
-            "@tanstack/react-table",
-          ],
-          "vendor-ui": [
-            "@radix-ui/react-avatar",
-            "@radix-ui/react-checkbox",
-            "@radix-ui/react-context-menu",
-            "@radix-ui/react-dialog",
-            "@radix-ui/react-dropdown-menu",
-            "@radix-ui/react-label",
-            "@radix-ui/react-popover",
-            "@radix-ui/react-select",
-            "@radix-ui/react-separator",
-            "@radix-ui/react-slider",
-            "@radix-ui/react-slot",
-            "@radix-ui/react-switch",
-            "@radix-ui/react-tabs",
-            "@radix-ui/react-tooltip",
-          ],
-          "vendor-charts": ["recharts"],
-          "vendor-flow": ["@xyflow/react"],
-          "vendor-terminal": [
-            "@xterm/xterm",
-            "@xterm/addon-fit",
-            "@xterm/addon-web-links",
-          ],
-          "vendor-i18n": ["i18next", "react-i18next"],
+        // Vite 7 / rolldown requires manualChunks as a function (the object
+        // form is rollup-only). Keyed off the module path to preserve the
+        // same deliberate vendor splits.
+        manualChunks: (id: string) => {
+          if (!id.includes("node_modules")) return undefined;
+          if (/node_modules\/(react|react-dom|react-router|react-router-dom)\//.test(id))
+            return "vendor-react";
+          if (id.includes("node_modules/@tanstack/")) return "vendor-tanstack";
+          if (id.includes("node_modules/@radix-ui/")) return "vendor-ui";
+          if (id.includes("node_modules/recharts/")) return "vendor-charts";
+          if (id.includes("node_modules/@xyflow/")) return "vendor-flow";
+          if (id.includes("node_modules/@xterm/")) return "vendor-terminal";
+          if (/node_modules\/(i18next|react-i18next)\//.test(id))
+            return "vendor-i18n";
+          return undefined;
         },
       },
     },
