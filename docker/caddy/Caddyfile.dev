@@ -7,6 +7,21 @@
 # Redirect plain HTTP to HTTPS so credentials (incl. the refresh cookie) never
 # traverse cleartext. Production proxies (operator-provided) should do the same
 # and additionally emit HSTS.
+#
+# BUT when an upstream proxy (the operator's Traefik/nginx) terminates TLS and
+# forwards to us over HTTP, it sets X-Forwarded-Proto: https. Redirecting that
+# request would bounce edge-HTTPS traffic back to HTTPS forever
+# (ERR_TOO_MANY_REDIRECTS). So only redirect genuine cleartext requests that
+# hit :80 directly; otherwise proxy through to the app.
 :80 {
-	redir https://{host}{uri} permanent
+	# Only redirect genuine cleartext browser requests. Never redirect:
+	#  - edge-terminated HTTPS (X-Forwarded-Proto: https) — would loop;
+	#  - WebSocket upgrades (Connection: Upgrade) — a 301 breaks the handshake
+	#    (the /ws connection just "fails" in the browser).
+	@cleartext {
+		not header X-Forwarded-Proto https
+		not header Connection *Upgrade*
+	}
+	redir @cleartext https://{host}{uri} permanent
+	reverse_proxy nexara:8080
 }
