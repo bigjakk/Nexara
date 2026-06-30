@@ -98,6 +98,11 @@ const AppearancePage = lazy(() =>
     default: m.AppearancePage,
   })),
 );
+const ImportsPage = lazy(() =>
+  import("@/features/vms/pages/ImportsPage").then((m) => ({
+    default: m.ImportsPage,
+  })),
+);
 const ProfilePage = lazy(() =>
   import("@/features/settings/pages/ProfilePage").then((m) => ({
     default: m.ProfilePage,
@@ -271,6 +276,14 @@ const router = createBrowserRouter([
             element: (
               <RequirePermission action="view" resource="cve_scan">
                 <LazyPage><SecurityDashboardPage /></LazyPage>
+              </RequirePermission>
+            ),
+          },
+          {
+            path: "imports",
+            element: (
+              <RequirePermission action="view" resource="vm_import">
+                <LazyPage><ImportsPage /></LazyPage>
               </RequirePermission>
             ),
           },

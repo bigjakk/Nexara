@@ -52,6 +52,7 @@ import { FloatingConsole } from "@/features/console/components/FloatingConsole";
 import { VMContextDialogs } from "@/features/vms/components/VMContextDialogs";
 import { SearchBar } from "./SearchBar";
 import { CreateResourceMenu } from "./CreateResourceMenu";
+import { CreateResourceDialogs } from "./CreateResourceDialogs";
 import { GlobalHealthIndicator } from "./GlobalHealthIndicator";
 
 function getInitials(name: string): string {
@@ -296,6 +297,7 @@ export function AppShell() {
         <TaskLogPanel />
         <TaskProgressDialog />
         <VMContextDialogs />
+        <CreateResourceDialogs />
       </div>
       <FloatingConsole />
       <Toaster position="top-right" richColors closeButton theme={themeMode} />

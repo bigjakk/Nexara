@@ -512,6 +512,37 @@ type StorageContent struct {
 	VMID    int    `json:"vmid,omitempty"`
 }
 
+// ImportMetadata is the parsed guest definition returned by
+// GET /nodes/{node}/storage/{storage}/import-metadata for an importable source
+// (an OVA/OVF appliance or an ESXi VMX-based guest). Field shapes vary by Proxmox
+// version and source type, so the variable parts are kept as raw JSON and parsed
+// tolerantly via the helpers in client_import.go.
+type ImportMetadata struct {
+	Type       string                     `json:"type"`        // always "vm"
+	Source     string                     `json:"source"`      // "esxi" | "ova" | ...
+	CreateArgs map[string]json.RawMessage `json:"create-args"` // cores, memory, name, ostype, bios, scsihw, machine, smbios1, ...
+	Disks      map[string]json.RawMessage `json:"disks"`       // bus slot ("scsi0") -> source volid / {volid,size,image-format}
+	Net        map[string]json.RawMessage `json:"net"`         // net slot ("net0") -> {model, macaddr, ...}
+	Warnings   []ImportWarning            `json:"warnings"`
+}
+
+// ImportWarning flags a guest setting that needs review after import (e.g. lost EFI
+// state, a running source guest, an unsupported NVMe disk). The Type is an enum from
+// pve-storage (cdrom-image-ignored, efi-state-lost, guest-is-running, nvme-unsupported,
+// ova-needs-extracting, ovmf-with-lsi-unsupported, serial-port-socket-only).
+type ImportWarning struct {
+	Type  string `json:"type"`
+	Key   string `json:"key,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
+// ImportDisk is a single parsed source disk from ImportMetadata.Disks.
+type ImportDisk struct {
+	Volid       string `json:"volid"`
+	Size        int64  `json:"size,omitempty"`
+	ImageFormat string `json:"image-format,omitempty"`
+}
+
 // OCIPullParams holds parameters for POST /nodes/{node}/storage/{storage}/oci-registry-pull.
 // Available in Proxmox VE 9.1+. Requires skopeo on the node and a file-based storage
 // with vztmpl content enabled.

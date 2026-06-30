@@ -20,6 +20,7 @@ type Querier interface {
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
 	CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	CancelVMImportJob(ctx context.Context, id uuid.UUID) error
 	CheckUserPermission(ctx context.Context, arg CheckUserPermissionParams) (bool, error)
 	// Atomically claims due tasks so concurrent schedulers (e.g. during leader
 	// takeover) don't double-run the same row. SKIP LOCKED makes each
@@ -37,6 +38,7 @@ type Querier interface {
 	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	CompleteVMImportJob(ctx context.Context, id uuid.UUID) error
 	ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) error
 	CountActiveAPIKeysByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) (CountActiveAlertsByClusterRow, error)
@@ -166,6 +168,7 @@ type Querier interface {
 	// manual trigger forever (the 409 concurrent-scan guard keys off the latest
 	// scan row) and suppressing post-rolling-update rescans.
 	FailStaleCVEScans(ctx context.Context) (int64, error)
+	FailVMImportJob(ctx context.Context, arg FailVMImportJobParams) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error)
 	GetAPIKeyByID(ctx context.Context, id uuid.UUID) (ApiKey, error)
 	GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error)
@@ -270,6 +273,7 @@ type Querier interface {
 	GetVMByClusterAndVmid(ctx context.Context, arg GetVMByClusterAndVmidParams) (Vm, error)
 	GetVMFolder(ctx context.Context, id uuid.UUID) (VmFolder, error)
 	GetVMIODailyRate(ctx context.Context, arg GetVMIODailyRateParams) ([]GetVMIODailyRateRow, error)
+	GetVMImportJob(ctx context.Context, id uuid.UUID) (VmImportJob, error)
 	GetVMMetrics1h(ctx context.Context, arg GetVMMetrics1hParams) ([]GetVMMetrics1hRow, error)
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
 	GetVMMetricsDailyAvg(ctx context.Context, arg GetVMMetricsDailyAvgParams) ([]GetVMMetricsDailyAvgRow, error)
@@ -309,12 +313,14 @@ type Querier interface {
 	InsertRollingUpdateNode(ctx context.Context, arg InsertRollingUpdateNodeParams) (RollingUpdateNode, error)
 	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
+	InsertVMImportJob(ctx context.Context, arg InsertVMImportJobParams) (VmImportJob, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ListAPIKeysByUserRow, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
 	ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
 	ListActiveMaintenanceWindows(ctx context.Context) ([]MaintenanceWindow, error)
 	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
+	ListActiveVMImportJobs(ctx context.Context) ([]VmImportJob, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	ListAlertHistoryByCluster(ctx context.Context, arg ListAlertHistoryByClusterParams) ([]AlertHistory, error)
 	ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHistoryFilteredParams) ([]AlertHistory, error)
@@ -446,6 +452,7 @@ type Querier interface {
 	// currently present in vms are naturally dropped by the join.
 	ListVMFolderMembershipsByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMFolderMembershipsByClusterRow, error)
 	ListVMFoldersByCluster(ctx context.Context, clusterID uuid.UUID) ([]VmFolder, error)
+	ListVMImportJobsByCluster(ctx context.Context, arg ListVMImportJobsByClusterParams) ([]VmImportJob, error)
 	// ListVMStatusesByCluster feeds the collector's pre/post-sync inventory diff.
 	// Every column here is compared across a sync pass to decide whether to
 	// publish an inventory_change event, so external edits (Proxmox UI, qm/pct)
@@ -511,10 +518,12 @@ type Querier interface {
 	SetRolePermissions(ctx context.Context, roleID uuid.UUID) error
 	SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error
 	SetVMConfigOSType(ctx context.Context, arg SetVMConfigOSTypeParams) error
+	SetVMImportJobUPID(ctx context.Context, arg SetVMImportJobUPIDParams) error
 	SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error
 	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) error
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	StartVMImportJob(ctx context.Context, id uuid.UUID) error
 	TouchMobileDevice(ctx context.Context, id uuid.UUID) error
 	TouchRollingUpdateNode(ctx context.Context, id uuid.UUID) error
 	TransitionAlertToFiring(ctx context.Context, id uuid.UUID) error

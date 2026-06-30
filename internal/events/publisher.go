@@ -32,6 +32,7 @@ const (
 	KindReplicationChange = "replication_change"
 	KindACMEChange       = "acme_change"
 	KindAptRepoChange    = "apt_repo_change"
+	KindVMImport         = "vm_import"
 )
 
 // Event is a lightweight notification pushed through Redis pub/sub.

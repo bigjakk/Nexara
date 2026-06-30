@@ -10,14 +10,13 @@ import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { useAuth } from "@/hooks/useAuth";
 import { useThemeStore } from "@/stores/theme-store";
 import { StatusIcon } from "@/components/StatusIcon";
-import { CreateVMDialog } from "@/features/vms/components/CreateVMDialog";
-import { CreateCTDialog } from "@/features/vms/components/CreateCTDialog";
+import { useCreateResourceStore, type CreateKind } from "@/stores/create-resource-store";
 import {
   Monitor, Server, HardDrive, Database, Search, Layers,
   Settings, Shield, Network, Repeat, Award, BarChart3,
   Bell, FileText, Map, Eye, Users, Key, Lock, Palette,
   Tag, Cpu, Globe, Container, TerminalSquare, Sun, Moon,
-  MonitorCog, Plus,
+  MonitorCog, Plus, Upload,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -109,16 +108,25 @@ function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
-type PaletteView = "root" | "create-vm" | "create-ct";
+type PaletteView = "root" | "create-vm" | "create-ct" | "create-import";
+
+const viewToKind: Partial<Record<PaletteView, CreateKind>> = {
+  "create-vm": "vm",
+  "create-ct": "ct",
+  "create-import": "import",
+};
+const kindToView: Record<CreateKind, PaletteView> = {
+  vm: "create-vm",
+  ct: "create-ct",
+  import: "create-import",
+};
 
 export function SearchBar() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<PaletteView>("root");
-  const [createVMOpen, setCreateVMOpen] = useState(false);
-  const [createCTOpen, setCreateCTOpen] = useState(false);
-  const [createCluster, setCreateCluster] = useState("");
   const navigate = useNavigate();
+  const request = useCreateResourceStore((s) => s.request);
   const { hasPermission } = useAuth();
   const setThemeMode = useThemeStore((s) => s.setMode);
   const searchQuery = useGlobalSearch(query);
@@ -167,34 +175,30 @@ export function SearchBar() {
   // Begin a create flow: single cluster goes straight to the dialog,
   // multiple clusters detour through an in-palette cluster picker view.
   const startCreate = useCallback(
-    (type: "vm" | "ct") => {
+    (type: CreateKind) => {
       const list = clusters ?? [];
       if (list.length === 1 && list[0]) {
-        setCreateCluster(list[0].id);
+        request(type, list[0].id);
         setOpen(false);
         setQuery("");
         setView("root");
-        if (type === "vm") setCreateVMOpen(true);
-        else setCreateCTOpen(true);
         return;
       }
       setQuery("");
-      setView(type === "vm" ? "create-vm" : "create-ct");
+      setView(kindToView[type]);
     },
-    [clusters],
+    [clusters, request],
   );
 
   const pickCreateCluster = useCallback(
     (clusterId: string) => {
-      setCreateCluster(clusterId);
-      const type = view;
+      const kind = viewToKind[view];
       setOpen(false);
       setQuery("");
       setView("root");
-      if (type === "create-vm") setCreateVMOpen(true);
-      else setCreateCTOpen(true);
+      if (kind) request(kind, clusterId);
     },
-    [view],
+    [view, request],
   );
 
   interface ActionEntry {
@@ -208,15 +212,23 @@ export function SearchBar() {
   }
 
   const actions = useMemo<ActionEntry[]>(
-    () => [
-      { id: "create-vm", label: "Create virtual machine…", description: "New QEMU guest", keywords: ["create", "new", "vm", "virtual machine", "qemu"], icon: <Plus className="h-4 w-4" />, chipClass: "bg-emerald-500/10 text-emerald-500", perform: () => { startCreate("vm"); } },
-      { id: "create-ct", label: "Create container…", description: "New LXC guest", keywords: ["create", "new", "ct", "container", "lxc"], icon: <Container className="h-4 w-4" />, chipClass: "bg-sky-500/10 text-sky-500", perform: () => { startCreate("ct"); } },
-      { id: "console", label: "Open console", description: "Terminal & VNC sessions", keywords: ["console", "terminal", "shell", "vnc", "xterm"], icon: <TerminalSquare className="h-4 w-4" />, chipClass: "bg-violet-500/10 text-violet-500", perform: () => { goTo("/console"); } },
-      { id: "theme-dark", label: "Theme: dark", description: "Switch to dark mode", keywords: ["theme", "dark", "mode", "appearance"], icon: <Moon className="h-4 w-4" />, chipClass: "bg-amber-500/10 text-amber-500", perform: () => { setThemeMode("dark"); close(); } },
-      { id: "theme-light", label: "Theme: light", description: "Switch to light mode", keywords: ["theme", "light", "mode", "appearance"], icon: <Sun className="h-4 w-4" />, chipClass: "bg-amber-500/10 text-amber-500", perform: () => { setThemeMode("light"); close(); } },
-      { id: "theme-system", label: "Theme: system", description: "Follow the OS preference", keywords: ["theme", "system", "auto", "mode", "appearance"], icon: <MonitorCog className="h-4 w-4" />, chipClass: "bg-amber-500/10 text-amber-500", perform: () => { setThemeMode("system"); close(); } },
-    ],
-    [startCreate, goTo, setThemeMode, close],
+    () => {
+      const list: ActionEntry[] = [
+        { id: "create-vm", label: "Create virtual machine…", description: "New QEMU guest", keywords: ["create", "new", "vm", "virtual machine", "qemu"], icon: <Plus className="h-4 w-4" />, chipClass: "bg-emerald-500/10 text-emerald-500", perform: () => { startCreate("vm"); } },
+        { id: "create-ct", label: "Create container…", description: "New LXC guest", keywords: ["create", "new", "ct", "container", "lxc"], icon: <Container className="h-4 w-4" />, chipClass: "bg-sky-500/10 text-sky-500", perform: () => { startCreate("ct"); } },
+      ];
+      if (can("manage:vm_import")) {
+        list.push({ id: "import-vm", label: "Import virtual machine…", description: "From OVA/OVF or ESXi", keywords: ["import", "ova", "ovf", "esxi", "vmware", "migrate"], icon: <Upload className="h-4 w-4" />, chipClass: "bg-violet-500/10 text-violet-500", perform: () => { startCreate("import"); } });
+      }
+      list.push(
+        { id: "console", label: "Open console", description: "Terminal & VNC sessions", keywords: ["console", "terminal", "shell", "vnc", "xterm"], icon: <TerminalSquare className="h-4 w-4" />, chipClass: "bg-violet-500/10 text-violet-500", perform: () => { goTo("/console"); } },
+        { id: "theme-dark", label: "Theme: dark", description: "Switch to dark mode", keywords: ["theme", "dark", "mode", "appearance"], icon: <Moon className="h-4 w-4" />, chipClass: "bg-amber-500/10 text-amber-500", perform: () => { setThemeMode("dark"); close(); } },
+        { id: "theme-light", label: "Theme: light", description: "Switch to light mode", keywords: ["theme", "light", "mode", "appearance"], icon: <Sun className="h-4 w-4" />, chipClass: "bg-amber-500/10 text-amber-500", perform: () => { setThemeMode("light"); close(); } },
+        { id: "theme-system", label: "Theme: system", description: "Follow the OS preference", keywords: ["theme", "system", "auto", "mode", "appearance"], icon: <MonitorCog className="h-4 w-4" />, chipClass: "bg-amber-500/10 text-amber-500", perform: () => { setThemeMode("system"); close(); } },
+      );
+      return list;
+    },
+    [startCreate, goTo, setThemeMode, close, can],
   );
 
   const q = query.toLowerCase();
@@ -360,7 +372,7 @@ export function SearchBar() {
             />
             <CommandList className="max-h-[420px]">
               {inPicker ? (
-                <CommandGroup heading={view === "create-vm" ? "Create VM — choose cluster" : "Create CT — choose cluster"}>
+                <CommandGroup heading={view === "create-vm" ? "Create VM — choose cluster" : view === "create-import" ? "Import VM — choose cluster" : "Create CT — choose cluster"}>
                   {(clusters ?? [])
                     .filter((c) => q.length === 0 || c.name.toLowerCase().includes(q))
                     .map((c) => (
@@ -508,21 +520,6 @@ export function SearchBar() {
           </Command>
         </DialogContent>
       </Dialog>
-
-      {createVMOpen && (
-        <CreateVMDialog
-          open={createVMOpen}
-          onOpenChange={setCreateVMOpen}
-          clusterId={createCluster}
-        />
-      )}
-      {createCTOpen && (
-        <CreateCTDialog
-          open={createCTOpen}
-          onOpenChange={setCreateCTOpen}
-          clusterId={createCluster}
-        />
-      )}
     </>
   );
 }

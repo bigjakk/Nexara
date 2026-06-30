@@ -727,6 +727,88 @@ func (s *Scheduler) RunRollingUpdates(ctx context.Context) {
 	s.rollingOrch.Tick(ctx)
 }
 
+// RunVMImportReconcile polls the Proxmox task behind each active VM-import job and flips
+// the job to completed/failed once the create-with-import task reaches a terminal state.
+// This is what gives the import history a durable status across process restarts (the
+// dispatching API request returns as soon as the long disk conversion has started).
+func (s *Scheduler) RunVMImportReconcile(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("vm import reconcile panicked", "panic", r)
+		}
+	}()
+
+	jobs, err := s.queries.ListActiveVMImportJobs(ctx)
+	if err != nil {
+		s.logger.Error("vm import reconcile: list active jobs failed", "error", err)
+		return
+	}
+	if len(jobs) == 0 {
+		return
+	}
+
+	clients := make(map[uuid.UUID]*proxmox.Client)
+	for _, job := range jobs {
+		client, seen := clients[job.ClusterID]
+		if !seen {
+			c, cerr := s.createClient(ctx, job.ClusterID)
+			if cerr != nil {
+				s.logger.Warn("vm import reconcile: create client failed", "cluster_id", job.ClusterID, "error", cerr)
+				clients[job.ClusterID] = nil
+				continue
+			}
+			client = c
+			clients[job.ClusterID] = c
+		}
+		if client == nil {
+			continue
+		}
+		s.reconcileImportJob(ctx, client, job)
+	}
+}
+
+func (s *Scheduler) reconcileImportJob(ctx context.Context, client *proxmox.Client, job db.VmImportJob) {
+	status, err := client.GetTaskStatus(ctx, job.TargetNode, job.Upid)
+	if err != nil {
+		s.logger.Warn("vm import reconcile: task status failed", "job_id", job.ID, "upid", job.Upid, "error", err)
+		return
+	}
+	if status.Status != "stopped" {
+		return // still running
+	}
+	// proxmox.TaskSucceeded is the single source of truth for the success rule —
+	// it treats empty and "WARNINGS: N" exit statuses as success, which imports
+	// (EFI-state-lost, guest-was-running, etc.) routinely emit.
+	if proxmox.TaskSucceeded(status.ExitStatus) {
+		if err := s.queries.CompleteVMImportJob(ctx, job.ID); err != nil {
+			s.logger.Error("vm import reconcile: complete failed", "job_id", job.ID, "error", err)
+			return
+		}
+		s.publishImport(ctx, job, "completed")
+		return
+	}
+	reason := status.ExitStatus
+	if reason == "" {
+		reason = "import task failed"
+	}
+	if err := s.queries.FailVMImportJob(ctx, db.FailVMImportJobParams{ID: job.ID, FailureReason: reason}); err != nil {
+		s.logger.Error("vm import reconcile: fail update failed", "job_id", job.ID, "error", err)
+		return
+	}
+	s.publishImport(ctx, job, "failed")
+}
+
+func (s *Scheduler) publishImport(ctx context.Context, job db.VmImportJob, action string) {
+	if s.eventPub == nil {
+		return
+	}
+	s.eventPub.ClusterEvent(ctx, job.ClusterID.String(), events.KindVMImport, "vm_import", job.ID.String(), action)
+	if action == "completed" {
+		// A newly-imported VM should surface in the inventory promptly.
+		s.eventPub.ClusterEvent(ctx, job.ClusterID.String(), events.KindInventoryChange, "vm", "", "import_completed")
+	}
+}
+
 // mustAtoi converts a string to int, returning 0 on failure.
 func mustAtoi(s string) int {
 	var n int

@@ -567,6 +567,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		runReportRetention := engine("report_retention", sched.RunReportRetention)
 		runTaskRetention := engine("task_retention", sched.RunTaskRetention)
 		runRolling := engine("rolling_updates", sched.RunRollingUpdates)
+		runImports := engine("vm_import_reconcile", sched.RunVMImportReconcile)
 
 		// Run initial checks immediately.
 		runTasks()
@@ -578,6 +579,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		runReportRetention()
 		runTaskRetention()
 		runRolling()
+		runImports()
 
 		taskTicker := time.NewTicker(60 * time.Second)
 		defer taskTicker.Stop()
@@ -606,6 +608,9 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 		rollingTicker := time.NewTicker(15 * time.Second)
 		defer rollingTicker.Stop()
 
+		importTicker := time.NewTicker(15 * time.Second)
+		defer importTicker.Stop()
+
 		for {
 			select {
 			case <-taskTicker.C:
@@ -626,6 +631,8 @@ func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 				runTaskRetention()
 			case <-rollingTicker.C:
 				runRolling()
+			case <-importTicker.C:
+				runImports()
 			case <-ctx.Done():
 				logger.Info("scheduler stopped")
 				return

@@ -54,8 +54,7 @@ import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDial
 import { EditClusterDialog } from "@/features/clusters/components/EditClusterDialog";
 import { DeleteClusterDialog } from "@/features/clusters/components/DeleteClusterDialog";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
-import { CreateVMDialog } from "@/features/vms/components/CreateVMDialog";
-import { CreateCTDialog } from "@/features/vms/components/CreateCTDialog";
+import { CreateResourceContextItems } from "./create-resource-actions";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -284,8 +283,6 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
 
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [createVMOpen, setCreateVMOpen] = useState(false);
-  const [createCTOpen, setCreateCTOpen] = useState(false);
 
   // Only fetch children when expanded
   const { data: nodes } = useClusterNodes(isExpanded ? cluster.id : "");
@@ -397,22 +394,7 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-40">
-          <ContextMenuItem
-            onClick={() => {
-              setCreateVMOpen(true);
-            }}
-          >
-            <Monitor className="mr-2 h-3.5 w-3.5" />
-            Create VM
-          </ContextMenuItem>
-          <ContextMenuItem
-            onClick={() => {
-              setCreateCTOpen(true);
-            }}
-          >
-            <Container className="mr-2 h-3.5 w-3.5" />
-            Create CT
-          </ContextMenuItem>
+          <CreateResourceContextItems clusterId={cluster.id} />
           <ContextMenuSeparator />
           <ContextMenuItem
             onClick={() => {
@@ -446,20 +428,6 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
           cluster={cluster}
           open={deleteOpen}
           onOpenChange={setDeleteOpen}
-        />
-      )}
-      {createVMOpen && (
-        <CreateVMDialog
-          open={createVMOpen}
-          onOpenChange={setCreateVMOpen}
-          clusterId={cluster.id}
-        />
-      )}
-      {createCTOpen && (
-        <CreateCTDialog
-          open={createCTOpen}
-          onOpenChange={setCreateCTOpen}
-          clusterId={cluster.id}
         />
       )}
     </>

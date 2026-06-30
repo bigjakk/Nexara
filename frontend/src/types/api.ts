@@ -959,3 +959,92 @@ export interface VMFolderListResponse {
   folders: VMFolder[];
   memberships: VMFolderMembership[];
 }
+
+// --- VM Import ---
+
+export interface ImportWarning {
+  type: string;
+  key?: string;
+  value?: string;
+}
+
+export interface ImportDisk {
+  volid: string;
+  size?: number;
+}
+
+export interface ImportMetadataResponse {
+  type: string;
+  source: string;
+  name: string;
+  cores: number;
+  memory: number;
+  ostype: string;
+  create_args: Record<string, string>;
+  disks: Record<string, ImportDisk>;
+  warnings: ImportWarning[];
+}
+
+export interface ImportSourceContentItem {
+  volid: string;
+  format: string;
+  size: number;
+  ctime: number;
+  content: string;
+  vmid?: number;
+}
+
+export interface ImportSourceContent {
+  node: string;
+  storage: string;
+  shared: boolean;
+  items: ImportSourceContentItem[];
+}
+
+export interface VMImportJob {
+  id: string;
+  cluster_id: string;
+  source_acquisition: string;
+  source_format: string;
+  source_ref: string;
+  target_node: string;
+  target_storage: string;
+  target_vmid: number;
+  name: string;
+  status: string;
+  upid?: string;
+  failure_reason?: string;
+  warnings: ImportWarning[];
+  options: Record<string, unknown>;
+  created_by: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StartImportRequest {
+  node: string;
+  storage: string;
+  volume: string;
+  source_format: string;
+  source_acquisition: string;
+  target_node: string;
+  target_storage: string;
+  working_storage?: string;
+  bridge?: string;
+  vmid?: number;
+  name?: string;
+  disk_format?: string;
+  start_after?: boolean;
+  live_import?: boolean;
+}
+
+export interface EsxiSourceRequest {
+  storage: string;
+  server: string;
+  username: string;
+  password: string;
+  skip_cert_verification: boolean;
+  nodes?: string;
+}

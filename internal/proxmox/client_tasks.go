@@ -35,6 +35,22 @@ func (c *Client) GetTaskLog(ctx context.Context, node string, upid string, start
 	}
 	return entries, nil
 }
+// StopNodeTask aborts a running task via DELETE /nodes/{node}/tasks/{upid}. Best-effort;
+// returns an error if the task can't be signalled (e.g. already finished). Does not
+// return a UPID.
+func (c *Client) StopNodeTask(ctx context.Context, node string, upid string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if upid == "" {
+		return fmt.Errorf("UPID cannot be empty")
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/tasks/" + url.PathEscape(upid)
+	if err := c.doDelete(ctx, path, nil); err != nil {
+		return fmt.Errorf("stop task on %s: %w", node, err)
+	}
+	return nil
+}
 func (c *Client) GetNodeTasks(ctx context.Context, node string, since int64, limit int) ([]NodeTask, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err

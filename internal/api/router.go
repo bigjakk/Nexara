@@ -215,6 +215,16 @@ func (s *Server) setupRoutes() {
 			clusters.Post("/:cluster_id/storage/:storage_id/appliances", s.storageHandler.DownloadAppliance)
 			clusters.Get("/:cluster_id/appliances", s.storageHandler.ListAppliances)
 		}
+		if s.vmImportHandler != nil {
+			clusters.Post("/:cluster_id/import-metadata", s.vmImportHandler.GetImportMetadata)
+			clusters.Get("/:cluster_id/vm-import-sources/:storage_id/content", s.vmImportHandler.ListImportContent)
+			clusters.Post("/:cluster_id/vm-import-sources/esxi", s.vmImportHandler.RegisterEsxiSource)
+			clusters.Delete("/:cluster_id/vm-import-sources/:storage_id", s.vmImportHandler.DeleteImportSource)
+			clusters.Get("/:cluster_id/vm-imports", s.vmImportHandler.ListVMImports)
+			clusters.Post("/:cluster_id/vm-imports", s.vmImportHandler.StartVMImport)
+			clusters.Get("/:cluster_id/vm-imports/:id", s.vmImportHandler.GetVMImport)
+			clusters.Post("/:cluster_id/vm-imports/:id/cancel", s.vmImportHandler.CancelVMImport)
+		}
 		if s.metricsHandler != nil {
 			clusters.Get("/:cluster_id/metrics", s.metricsHandler.GetClusterHistorical)
 			clusters.Get("/:cluster_id/vms/:vm_id/metrics", s.metricsHandler.GetVMHistorical)

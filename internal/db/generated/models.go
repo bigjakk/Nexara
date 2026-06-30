@@ -979,6 +979,28 @@ type VmFolderMembership struct {
 	Vmid      int32     `json:"vmid"`
 }
 
+type VmImportJob struct {
+	ID                uuid.UUID          `json:"id"`
+	ClusterID         uuid.UUID          `json:"cluster_id"`
+	SourceAcquisition string             `json:"source_acquisition"`
+	SourceFormat      string             `json:"source_format"`
+	SourceRef         string             `json:"source_ref"`
+	TargetNode        string             `json:"target_node"`
+	TargetStorage     string             `json:"target_storage"`
+	TargetVmid        int32              `json:"target_vmid"`
+	Name              string             `json:"name"`
+	Status            string             `json:"status"`
+	Upid              string             `json:"upid"`
+	FailureReason     string             `json:"failure_reason"`
+	WarningsJson      json.RawMessage    `json:"warnings_json"`
+	OptionsJson       json.RawMessage    `json:"options_json"`
+	CreatedBy         uuid.UUID          `json:"created_by"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+}
+
 type VmMetric struct {
 	Time      time.Time `json:"time"`
 	VmID      uuid.UUID `json:"vm_id"`
