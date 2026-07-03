@@ -157,6 +157,22 @@ func (h *StorageHandler) GetContent(c fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
+// uploadContentAllowed reports whether a caller holding the given cluster-scoped grants may
+// upload the given content type. ISO/CT-template uploads are a storage-management action;
+// OVA (import) uploads are permitted for either manage:storage or manage:vm_import. The
+// decision is isolated here so its security-load-bearing branches are unit-tested and stay
+// correct across refactors of the streaming multipart loop that calls it.
+func uploadContentAllowed(content string, canStorage, canImport bool) bool {
+	switch content {
+	case "iso", "vztmpl":
+		return canStorage
+	case "import":
+		return canStorage || canImport
+	default:
+		return false
+	}
+}
+
 // UploadFile handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload.
 //
 // This handler uses streaming multipart parsing to avoid buffering the entire
@@ -170,8 +186,19 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
+	// Coarse gate: ISO/CT-template uploads require manage:storage; OVA (import) uploads are
+	// also reachable with manage:vm_import. The exact content type only arrives inside the
+	// multipart stream, so resolve both grants up front and enforce per-content below.
+	canStorage, err := hasClusterPerm(c, "manage", "storage", clusterID)
+	if err != nil {
 		return err
+	}
+	canImport, err := hasClusterPerm(c, "manage", "vm_import", clusterID)
+	if err != nil {
+		return err
+	}
+	if !canStorage && !canImport {
+		return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
 	}
 
 	pool, pxClient, err := h.resolveStorage(c)
@@ -233,8 +260,17 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx) error {
 			if filename == "" || filename == "." || filename == "/" {
 				return fiber.NewError(fiber.StatusBadRequest, "Invalid filename")
 			}
-			if uploadContent != "iso" && uploadContent != "vztmpl" {
-				return fiber.NewError(fiber.StatusBadRequest, "content must be 'iso' or 'vztmpl'")
+			switch uploadContent {
+			case "iso", "vztmpl", "import":
+				// valid content type
+			default:
+				return fiber.NewError(fiber.StatusBadRequest, "content must be 'iso', 'vztmpl', or 'import'")
+			}
+			// Per-content permission enforcement (see uploadContentAllowed). This runs before
+			// any byte is streamed to Proxmox — a manage:vm_import-only caller cannot upload
+			// an ISO/CT-template, only an OVA (import).
+			if !uploadContentAllowed(uploadContent, canStorage, canImport) {
+				return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
 			}
 			if fileSize <= 0 {
 				return fiber.NewError(fiber.StatusBadRequest, "filesize field is required before file")

@@ -738,6 +738,12 @@ func (s *Scheduler) RunVMImportReconcile(ctx context.Context) {
 		}
 	}()
 
+	// Fail any jobs whose dispatch was interrupted before a UPID was recorded — they have
+	// no task to reconcile against and would otherwise sit 'pending' forever.
+	if err := s.queries.FailStalePendingVMImportJobs(ctx); err != nil {
+		s.logger.Warn("vm import reconcile: stale-pending sweep failed", "error", err)
+	}
+
 	jobs, err := s.queries.ListActiveVMImportJobs(ctx)
 	if err != nil {
 		s.logger.Error("vm import reconcile: list active jobs failed", "error", err)

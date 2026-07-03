@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
+import { deriveFilenameFromURL } from "@/lib/derive-filename";
 import { useDownloadURL } from "../api/storage-queries";
 
 interface URLDownloadDialogProps {
@@ -71,19 +72,9 @@ export function URLDownloadDialog({
     !filenameTrimmed.includes("\\") &&
     !filenameTrimmed.includes("..");
 
-  function deriveFilename(input: string) {
-    try {
-      const u = new URL(input);
-      const segments = u.pathname.split("/").filter(Boolean);
-      return segments.length > 0 ? (segments[segments.length - 1] ?? "") : "";
-    } catch {
-      return "";
-    }
-  }
-
   function handleUrlBlur() {
     if (!filename && urlValid) {
-      const derived = deriveFilename(urlTrimmed);
+      const derived = deriveFilenameFromURL(urlTrimmed);
       if (derived) setFilename(derived);
     }
   }

@@ -46,7 +46,7 @@ export function useStorageContent(clusterId: string, storageId: string) {
 interface UploadParams {
   clusterId: string;
   storageId: string;
-  content: "iso" | "vztmpl";
+  content: "iso" | "vztmpl" | "import";
   file: File;
   onProgress?: (percent: number) => void;
 }

@@ -175,6 +175,37 @@ func (c *Client) DownloadURLToStorage(ctx context.Context, node, storage string,
 	return upid, nil
 }
 
+// QueryURLMetadata performs GET /nodes/{node}/query-url-metadata?url=<url> — the endpoint
+// the PVE GUI uses to detect a download's filename and size before fetching it. verifyCerts
+// mirrors the download-url option (nil = Proxmox default, which verifies). The node makes an
+// outbound HEAD request to the URL, so callers must be authorized for it.
+func (c *Client) QueryURLMetadata(ctx context.Context, node, rawURL string, verifyCerts *bool) (*URLMetadata, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if rawURL == "" {
+		return nil, fmt.Errorf("URL is required")
+	}
+	if len(rawURL) > 2048 {
+		return nil, fmt.Errorf("URL exceeds 2048 characters")
+	}
+	q := url.Values{}
+	q.Set("url", rawURL)
+	if verifyCerts != nil {
+		if *verifyCerts {
+			q.Set("verify-certificates", "1")
+		} else {
+			q.Set("verify-certificates", "0")
+		}
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/query-url-metadata?" + q.Encode()
+	var meta URLMetadata
+	if err := c.do(ctx, path, &meta); err != nil {
+		return nil, fmt.Errorf("query url metadata on %s: %w", node, err)
+	}
+	return &meta, nil
+}
+
 // GetAppliances returns the Proxmox appliance catalog from GET /nodes/{node}/aplinfo.
 // This lists official LXC templates (Debian/Ubuntu/Alpine/Turnkey/...).
 func (c *Client) GetAppliances(ctx context.Context, node string) ([]ApplianceTemplate, error) {

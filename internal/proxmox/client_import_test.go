@@ -78,8 +78,25 @@ func TestBuildImportCreateParams_MapsTypedFieldsAndDisks(t *testing.T) {
 	if p.Net0 != "vmxnet3=AA:BB:CC:DD:EE:FF,bridge=vmbr0" {
 		t.Errorf("Net0 = %q", p.Net0)
 	}
+	// Live import already boots the guest, so start and live-restore are mutually exclusive
+	// — live import wins and an explicit start=1 must NOT also be emitted.
+	if p.Start {
+		t.Error("Start should be false when LiveImport is set (live import implies boot)")
+	}
+}
+
+func TestBuildImportCreateParams_StartAfterWithoutLiveImport(t *testing.T) {
+	meta := sampleMetadata()
+	p := BuildImportCreateParams(meta, ImportCreateOptions{
+		VMID:          200,
+		TargetStorage: "local-lvm",
+		StartAfter:    true,
+	})
 	if !p.Start {
-		t.Error("Start should be true when StartAfter is set")
+		t.Error("Start should be true when StartAfter is set and LiveImport is not")
+	}
+	if _, ok := p.Extra["live-restore"]; ok {
+		t.Error("live-restore should be absent when LiveImport is false")
 	}
 }
 

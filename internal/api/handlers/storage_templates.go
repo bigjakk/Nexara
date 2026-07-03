@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -8,6 +9,28 @@ import (
 
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
+
+// deriveURLFilename extracts a safe basename from a download URL's path, or "" if none can
+// be derived. Query string and fragment are ignored; path separators and parent references
+// are rejected (the Proxmox client re-validates the final filename before use).
+func deriveURLFilename(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	p := u.Path
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		p = p[i+1:]
+	}
+	if decoded, derr := url.PathUnescape(p); derr == nil {
+		p = decoded
+	}
+	p = strings.TrimSpace(p)
+	if p == "" || p == "." || p == ".." || strings.ContainsAny(p, "/\\") || strings.Contains(p, "..") {
+		return ""
+	}
+	return p
+}
 
 // --- Request/response types ---
 
@@ -144,6 +167,14 @@ func (h *StorageHandler) DownloadURL(c fiber.Ctx) error {
 	}
 	if !storageHasContent(pool.Content, req.Content) {
 		return fiber.NewError(fiber.StatusBadRequest, "Storage does not support "+req.Content+" content")
+	}
+	// For OVA imports the filename is optional in the wizard — derive it from the URL path
+	// so a bare URL is enough. Proxmox still validates the extension (.ova for import).
+	if req.Filename == "" {
+		req.Filename = deriveURLFilename(req.URL)
+		if req.Filename == "" {
+			return fiber.NewError(fiber.StatusBadRequest, "could not derive a filename from the URL; provide one explicitly")
+		}
 	}
 
 	upid, err := pxClient.DownloadURLToStorage(c.Context(), node.Name, pool.Storage, proxmox.URLDownloadParams{

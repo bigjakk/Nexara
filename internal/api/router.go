@@ -217,9 +217,12 @@ func (s *Server) setupRoutes() {
 		}
 		if s.vmImportHandler != nil {
 			clusters.Post("/:cluster_id/import-metadata", s.vmImportHandler.GetImportMetadata)
-			clusters.Get("/:cluster_id/vm-import-sources/:storage_id/content", s.vmImportHandler.ListImportContent)
+			clusters.Get("/:cluster_id/query-url-metadata", s.vmImportHandler.QueryURLMetadata)
+			clusters.Get("/:cluster_id/vm-import-sources", s.vmImportHandler.ListImportSources)
+			clusters.Get("/:cluster_id/vm-import-sources/content", s.vmImportHandler.ListImportContent)
 			clusters.Post("/:cluster_id/vm-import-sources/esxi", s.vmImportHandler.RegisterEsxiSource)
-			clusters.Delete("/:cluster_id/vm-import-sources/:storage_id", s.vmImportHandler.DeleteImportSource)
+			clusters.Post("/:cluster_id/vm-import-sources/enable-content", s.vmImportHandler.EnableImportContent)
+			clusters.Delete("/:cluster_id/vm-import-sources/:storage", s.vmImportHandler.DeleteImportSource)
 			clusters.Get("/:cluster_id/vm-imports", s.vmImportHandler.ListVMImports)
 			clusters.Post("/:cluster_id/vm-imports", s.vmImportHandler.StartVMImport)
 			clusters.Get("/:cluster_id/vm-imports/:id", s.vmImportHandler.GetVMImport)

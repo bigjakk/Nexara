@@ -45,3 +45,14 @@ WHERE id = $1 AND status IN ('pending', 'running');
 SELECT * FROM vm_import_jobs
 WHERE status IN ('pending', 'running') AND upid <> ''
 ORDER BY created_at ASC;
+
+-- name: FailStalePendingVMImportJobs :exec
+-- Fail jobs that never got a UPID: the dispatch was interrupted (process crash/restart)
+-- between recording the job and starting the Proxmox create task, so they would otherwise
+-- sit 'pending' with no task to reconcile against forever.
+UPDATE vm_import_jobs
+SET status = 'failed',
+    failure_reason = 'dispatch interrupted before the import task started — check the Proxmox task history',
+    completed_at = now(),
+    updated_at = now()
+WHERE status = 'pending' AND upid = '' AND created_at < now() - interval '30 minutes';

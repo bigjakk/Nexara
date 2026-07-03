@@ -994,11 +994,29 @@ export interface ImportSourceContentItem {
   vmid?: number;
 }
 
+// A deduplicated import-capable storage (or ESXi source) as seen at the cluster level,
+// paired with an online node from which it can be browsed. Shared storages appear once;
+// non-shared per-node storages appear once per node.
+export interface ImportSource {
+  storage: string;
+  type: string;
+  content: string;
+  shared: boolean;
+  node: string;
+  pool_id?: string;
+}
+
 export interface ImportSourceContent {
   node: string;
   storage: string;
-  shared: boolean;
   items: ImportSourceContentItem[];
+}
+
+// Result of the query-url-metadata probe (Proxmox-detected filename/size for a remote URL).
+export interface URLMetadataResponse {
+  filename?: string;
+  size?: number;
+  mimetype?: string;
 }
 
 export interface VMImportJob {

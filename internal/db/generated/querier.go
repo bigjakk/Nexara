@@ -168,6 +168,10 @@ type Querier interface {
 	// manual trigger forever (the 409 concurrent-scan guard keys off the latest
 	// scan row) and suppressing post-rolling-update rescans.
 	FailStaleCVEScans(ctx context.Context) (int64, error)
+	// Fail jobs that never got a UPID: the dispatch was interrupted (process crash/restart)
+	// between recording the job and starting the Proxmox create task, so they would otherwise
+	// sit 'pending' with no task to reconcile against forever.
+	FailStalePendingVMImportJobs(ctx context.Context) error
 	FailVMImportJob(ctx context.Context, arg FailVMImportJobParams) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error)
 	GetAPIKeyByID(ctx context.Context, id uuid.UUID) (ApiKey, error)

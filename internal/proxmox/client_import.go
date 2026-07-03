@@ -174,11 +174,13 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 	if opts.Bridge != "" {
 		p.Net0 = buildImportNet(meta, opts.Bridge)
 	}
-	if opts.StartAfter {
-		p.Start = true
-	}
+	// Live import boots the guest while disks stream in, so it already implies start.
+	// Emitting both live-restore=1 and start=1 is redundant (and PVE may reject the pair),
+	// so the two options are mutually exclusive here — live import wins.
 	if opts.LiveImport {
 		p.Extra["live-restore"] = "1"
+	} else if opts.StartAfter {
+		p.Start = true
 	}
 	return p
 }

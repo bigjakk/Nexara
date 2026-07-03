@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { Label } from "@/components/ui/label";
 import { ImportHistoryTable } from "../components/ImportHistoryTable";
+import { ImportSourcesManager } from "../components/ImportSourcesManager";
 
 const selectClass =
   "flex h-9 w-64 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
@@ -40,7 +41,14 @@ export function ImportsPage() {
         </div>
       )}
 
-      {clusterId && <ImportHistoryTable clusterId={clusterId} />}
+      {clusterId && <ImportSourcesManager clusterId={clusterId} />}
+
+      {clusterId && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold">History</h2>
+          <ImportHistoryTable clusterId={clusterId} />
+        </div>
+      )}
     </div>
   );
 }

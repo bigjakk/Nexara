@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -131,19 +132,226 @@ func (h *VMImportHandler) GetImportMetadata(c fiber.Ctx) error {
 	})
 }
 
-// --- importable content listing --------------------------------------------------------
+// --- URL metadata probe ----------------------------------------------------------------
 
-type importSourceContentResponse struct {
-	Node    string                    `json:"node"`
-	Storage string                    `json:"storage"`
-	Shared  bool                      `json:"shared"`
-	Items   []proxmox.StorageContent  `json:"items"`
+// QueryURLMetadata handles GET /api/v1/clusters/:cluster_id/query-url-metadata?node=&url=.
+// It asks Proxmox to detect a remote download's filename and size (what the PVE GUI's
+// "Query URL" button does) so the import wizard can pre-fill the filename before staging an
+// OVA. This makes the node issue an outbound request to an arbitrary URL (an SSRF-shaped
+// primitive), so it is gated on manage:storage — the same bar as the download it precedes
+// (DownloadURL) — rather than the lower manage:vm_import, which must not gain a node-side
+// URL-fetch capability it otherwise lacks. The browser-upload leg (no node-side fetch) is
+// what remains available to manage:vm_import holders.
+func (h *VMImportHandler) QueryURLMetadata(c fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
+		return err
+	}
+	rawURL := c.Query("url")
+	if rawURL == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "url is required")
+	}
+	if !isHTTPURL(rawURL) {
+		return fiber.NewError(fiber.StatusBadRequest, "url must be an http or https URL")
+	}
+	nodeName, err := h.pickImportNode(c, clusterID, c.Query("node"))
+	if err != nil {
+		return err
+	}
+	pxClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, importClientTimeout)
+	if err != nil {
+		return err
+	}
+	meta, err := pxClient.QueryURLMetadata(c.Context(), nodeName, rawURL, nil)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	return c.JSON(meta)
 }
 
-// ListImportContent handles GET /api/v1/clusters/:cluster_id/vm-import-sources/:storage_id/content.
-// It returns the importable volumes/guests (content=import) on the given storage pool,
-// along with the node that hosts it and its shared flag — everything the wizard needs to
-// drive metadata lookups and constrain the target node.
+// pickImportNode validates the given node belongs to the cluster, or — when empty — falls
+// back to the first online node. Used by node-agnostic probes (URL metadata) where any
+// reachable node will do.
+func (h *VMImportHandler) pickImportNode(c fiber.Ctx, clusterID uuid.UUID, nodeName string) (string, error) {
+	if nodeName != "" {
+		node, err := h.queries.GetNodeByClusterAndName(c.Context(), db.GetNodeByClusterAndNameParams{
+			ClusterID: clusterID,
+			Name:      nodeName,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return "", fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
+			}
+			return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to get node")
+		}
+		return node.Name, nil
+	}
+	nodes, err := h.queries.ListNodesByCluster(c.Context(), clusterID)
+	if err != nil {
+		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to list nodes")
+	}
+	for _, n := range nodes {
+		if n.Status == "online" {
+			return n.Name, nil
+		}
+	}
+	return "", fiber.NewError(fiber.StatusServiceUnavailable, "No online node available")
+}
+
+// isHTTPURL reports whether raw parses as an absolute http(s) URL with a host.
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// --- import sources + content listing --------------------------------------------------
+
+// intrinsicallySharedStorageTypes are PVE storage backends reachable from every cluster
+// node by their nature (network-backed), so PVE may omit the explicit `shared` flag in the
+// storage config. ESXi import storage is a network connection to the ESXi host and is
+// likewise visible cluster-wide.
+var intrinsicallySharedStorageTypes = map[string]bool{
+	"nfs": true, "cifs": true, "glusterfs": true, "cephfs": true, "esxi": true,
+}
+
+func isSharedImportStorage(cfg proxmox.StorageConfig) bool {
+	return cfg.Shared == 1 || intrinsicallySharedStorageTypes[cfg.Type]
+}
+
+type importSourceEntry struct {
+	Storage string `json:"storage"`
+	Type    string `json:"type"`
+	Content string `json:"content"`
+	Shared  bool   `json:"shared"`
+	Node    string `json:"node"`              // an online node from which this source can be browsed
+	PoolID  string `json:"pool_id,omitempty"` // storage_pools UUID for (storage,node), when in inventory
+}
+
+// ListImportSources handles GET /api/v1/clusters/:cluster_id/vm-import-sources. It returns
+// the import-capable storages (content=import) and ESXi sources across the cluster, built
+// from the *live* Proxmox storage config rather than Nexara's periodically-synced inventory
+// — so a shared storage appears once (not once per node) and a just-registered ESXi source
+// shows up immediately. Each entry carries an online node from which to browse it.
+func (h *VMImportHandler) ListImportSources(c fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "vm_import", clusterID); err != nil {
+		return err
+	}
+	pxClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, importClientTimeout)
+	if err != nil {
+		return err
+	}
+	cfgs, err := pxClient.ListStorageConfigs(c.Context())
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	nodes, err := h.queries.ListNodesByCluster(c.Context(), clusterID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list nodes")
+	}
+	onlineNodes := make([]db.Node, 0, len(nodes))
+	nodeByID := make(map[uuid.UUID]string, len(nodes))
+	for _, n := range nodes {
+		nodeByID[n.ID] = n.Name
+		if n.Status == "online" {
+			onlineNodes = append(onlineNodes, n)
+		}
+	}
+
+	// (storage,node) -> pool UUID, so the wizard can drive the pool-id-keyed upload/download
+	// endpoints. Absent for a source not yet in inventory (e.g. a just-registered ESXi host).
+	pools, _ := h.queries.ListStoragePoolsByCluster(c.Context(), clusterID)
+	poolID := make(map[string]string, len(pools))
+	for _, p := range pools {
+		poolID[p.Storage+"\x00"+nodeByID[p.NodeID]] = p.ID.String()
+	}
+
+	entries := make([]importSourceEntry, 0)
+	for _, cfg := range cfgs {
+		if cfg.Disable == 1 {
+			continue
+		}
+		if cfg.Type != "esxi" && !storageHasContent(cfg.Content, "import") {
+			continue
+		}
+		allowed := parseNodeRestriction(cfg.Nodes)
+		candidates := make([]db.Node, 0, len(onlineNodes))
+		for _, n := range onlineNodes {
+			if allowed == nil || allowed[n.Name] {
+				candidates = append(candidates, n)
+			}
+		}
+		if len(candidates) == 0 {
+			continue // no online node can reach it; nothing to browse
+		}
+		shared := isSharedImportStorage(cfg)
+		emit := func(n db.Node) {
+			entries = append(entries, importSourceEntry{
+				Storage: cfg.Storage,
+				Type:    cfg.Type,
+				Content: cfg.Content,
+				Shared:  shared,
+				Node:    n.Name,
+				PoolID:  poolID[cfg.Storage+"\x00"+n.Name],
+			})
+		}
+		if shared {
+			emit(candidates[0]) // one entry; any online node can browse it
+		} else {
+			for _, n := range candidates {
+				emit(n) // per-node: each node's copy holds different files
+			}
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Storage != entries[j].Storage {
+			return entries[i].Storage < entries[j].Storage
+		}
+		return entries[i].Node < entries[j].Node
+	})
+	return c.JSON(entries)
+}
+
+// parseNodeRestriction parses a PVE storage `nodes` field (comma-separated node names).
+// Returns nil when unrestricted (all nodes), or a set of the allowed node names.
+func parseNodeRestriction(nodes string) map[string]bool {
+	nodes = strings.TrimSpace(nodes)
+	if nodes == "" {
+		return nil
+	}
+	set := make(map[string]bool)
+	for _, n := range strings.Split(nodes, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			set[n] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+type importSourceContentResponse struct {
+	Node    string                   `json:"node"`
+	Storage string                   `json:"storage"`
+	Items   []proxmox.StorageContent `json:"items"`
+}
+
+// ListImportContent handles GET /api/v1/clusters/:cluster_id/vm-import-sources/content
+// ?storage=<name>&node=<name>. It returns the importable volumes/guests (content=import) on
+// the given storage as seen from the given node. The node is one that ListImportSources
+// already resolved to be online, which is what lets a shared source be browsed even when its
+// inventory-owning node is down.
 func (h *VMImportHandler) ListImportContent(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
@@ -152,29 +360,26 @@ func (h *VMImportHandler) ListImportContent(c fiber.Ctx) error {
 	if err := requireClusterPerm(c, "view", "vm_import", clusterID); err != nil {
 		return err
 	}
-	storageID, err := uuid.Parse(c.Params("storage_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid storage ID")
+	storage := c.Query("storage")
+	nodeName := c.Query("node")
+	if storage == "" || nodeName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "storage and node are required")
 	}
-	pool, err := h.queries.GetStoragePool(c.Context(), storageID)
+	node, err := h.queries.GetNodeByClusterAndName(c.Context(), db.GetNodeByClusterAndNameParams{
+		ClusterID: clusterID,
+		Name:      nodeName,
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusNotFound, "Storage pool not found")
+			return fiber.NewError(fiber.StatusNotFound, "Node not found in this cluster")
 		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get storage pool")
-	}
-	if pool.ClusterID != clusterID {
-		return fiber.NewError(fiber.StatusNotFound, "Storage pool not found in this cluster")
-	}
-	node, err := h.queries.GetNode(c.Context(), pool.NodeID)
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node for storage pool")
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node")
 	}
 	pxClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID, importClientTimeout)
 	if err != nil {
 		return err
 	}
-	items, err := pxClient.GetStorageContentByType(c.Context(), node.Name, pool.Storage, "import")
+	items, err := pxClient.GetStorageContentByType(c.Context(), node.Name, storage, "import")
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -183,8 +388,7 @@ func (h *VMImportHandler) ListImportContent(c fiber.Ctx) error {
 	}
 	return c.JSON(importSourceContentResponse{
 		Node:    node.Name,
-		Storage: pool.Storage,
-		Shared:  pool.Shared,
+		Storage: storage,
 		Items:   items,
 	})
 }
@@ -237,6 +441,12 @@ func (h *VMImportHandler) StartVMImport(c fiber.Ctx) error {
 	case "url", "esxi", "upload":
 	default:
 		return fiber.NewError(fiber.StatusBadRequest, "invalid source_acquisition")
+	}
+	// A VMID of 0 means auto-allocate; any explicit value must be in Proxmox's valid range
+	// (100–999999999). Reject early with a clear message rather than letting PVE fail the
+	// create task after the wizard has been completed.
+	if req.VMID != 0 && (req.VMID < 100 || req.VMID > 999999999) {
+		return fiber.NewError(fiber.StatusBadRequest, "vmid must be between 100 and 999999999")
 	}
 
 	userID, _ := c.Locals("user_id").(uuid.UUID)
@@ -533,8 +743,11 @@ func (h *VMImportHandler) RegisterEsxiSource(c fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "created", "storage": req.Storage})
 }
 
-// DeleteImportSource handles DELETE /api/v1/clusters/:cluster_id/vm-import-sources/:storage_id.
-// The id is the storage pool's UUID; we resolve it to the Proxmox storage name to remove it.
+// DeleteImportSource handles DELETE /api/v1/clusters/:cluster_id/vm-import-sources/:storage.
+// The param is the Proxmox storage name. The import-source-only guard is enforced against
+// the *live* storage config so a just-registered ESXi source (not yet in inventory) can be
+// removed, and so a role holding only manage:vm_import cannot delete arbitrary production
+// storage — that still requires manage:storage via the storage management endpoint.
 func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
@@ -543,25 +756,9 @@ func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx) error {
 	if err := requireClusterPerm(c, "manage", "vm_import", clusterID); err != nil {
 		return err
 	}
-	storageID, err := uuid.Parse(c.Params("storage_id"))
-	if err != nil {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid storage ID")
-	}
-	pool, err := h.queries.GetStoragePool(c.Context(), storageID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusNotFound, "Storage pool not found")
-		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get storage pool")
-	}
-	if pool.ClusterID != clusterID {
-		return fiber.NewError(fiber.StatusNotFound, "Storage pool not found in this cluster")
-	}
-	// Restrict this endpoint to import sources so a custom role holding only
-	// manage:vm_import cannot delete arbitrary production storage pools (that
-	// requires manage:storage via the storage management endpoint).
-	if pool.Type != "esxi" && !strings.Contains(pool.Content, "import") {
-		return fiber.NewError(fiber.StatusBadRequest, "storage is not an import source; use the storage management endpoint")
+	storageName := c.Params("storage")
+	if storageName == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "storage is required")
 	}
 	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
 	if err != nil {
@@ -571,13 +768,87 @@ func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := pxClient.DeleteStorage(c.Context(), pool.Storage); err != nil {
+	cfg, err := pxClient.GetStorageConfig(c.Context(), storageName)
+	if err != nil {
 		return mapProxmoxError(err)
 	}
-	details, _ := json.Marshal(map[string]any{"storage": pool.Storage})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", pool.Storage, "delete_import_source", details)
-	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "storage", pool.Storage, "delete")
-	return c.JSON(fiber.Map{"status": "deleted", "storage": pool.Storage})
+	if cfg.Type != "esxi" && !storageHasContent(cfg.Content, "import") {
+		return fiber.NewError(fiber.StatusBadRequest, "storage is not an import source; use the storage management endpoint")
+	}
+	if err := pxClient.DeleteStorage(c.Context(), storageName); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]any{"storage": storageName})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", storageName, "delete_import_source", details)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "storage", storageName, "delete")
+	return c.JSON(fiber.Map{"status": "deleted", "storage": storageName})
+}
+
+// --- enable import content -------------------------------------------------------------
+
+type enableImportContentRequest struct {
+	Storage string `json:"storage"`
+}
+
+// EnableImportContent handles POST /api/v1/clusters/:cluster_id/vm-import-sources/enable-content.
+// It adds the "import" content type to an existing file-based storage by MERGING it into the
+// storage's current content list (never replacing it), so a fresh cluster can be made
+// import-capable straight from the wizard. Requires manage:storage — changing what a storage
+// is used for is a storage-management action, not something manage:vm_import alone permits.
+func (h *VMImportHandler) EnableImportContent(c fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
+		return err
+	}
+	var req enableImportContentRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Storage == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "storage is required")
+	}
+	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
+	}
+	pxClient, err := CreateProxmoxClient(c, h.queries, h.encryptionKey, clusterID)
+	if err != nil {
+		return err
+	}
+	cfg, err := pxClient.GetStorageConfig(c.Context(), req.Storage)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+	if storageHasContent(cfg.Content, "import") {
+		return c.JSON(fiber.Map{"status": "unchanged", "storage": req.Storage, "content": cfg.Content})
+	}
+	merged := mergeContent(cfg.Content, "import")
+	form := url.Values{}
+	form.Set("content", merged)
+	if err := pxClient.UpdateStorage(c.Context(), req.Storage, form); err != nil {
+		return mapProxmoxError(err)
+	}
+	details, _ := json.Marshal(map[string]any{"storage": req.Storage, "content": merged})
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", req.Storage, "enable_import_content", details)
+	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "storage", req.Storage, "update")
+	return c.JSON(fiber.Map{"status": "updated", "storage": req.Storage, "content": merged})
+}
+
+// mergeContent appends want to a comma-separated PVE content list if absent, preserving the
+// existing entries and their order.
+func mergeContent(content, want string) string {
+	for _, part := range strings.Split(content, ",") {
+		if strings.TrimSpace(part) == want {
+			return content
+		}
+	}
+	if strings.TrimSpace(content) == "" {
+		return want
+	}
+	return content + "," + want
 }
 
 // --- helpers ---------------------------------------------------------------------------

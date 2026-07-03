@@ -564,6 +564,16 @@ type URLDownloadParams struct {
 	VerifyCertificates     *bool  // nil = default (true)
 }
 
+// URLMetadata is the result of GET /nodes/{node}/query-url-metadata — the filename and
+// size Proxmox detects for a remote URL (via a HEAD request), used to pre-fill the
+// download form the same way the PVE GUI's "Query URL" button does. Fields are absent
+// when the server doesn't advertise them.
+type URLMetadata struct {
+	Filename string `json:"filename,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	Mimetype string `json:"mimetype,omitempty"`
+}
+
 // ApplianceTemplate represents an entry from GET /nodes/{node}/aplinfo —
 // the catalog of official Proxmox appliance templates (Debian/Ubuntu/Turnkey/etc).
 type ApplianceTemplate struct {
