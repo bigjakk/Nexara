@@ -237,6 +237,43 @@ func TestBuildImportCreateParams_DefaultsCPU(t *testing.T) {
 	}
 }
 
+func TestBuildImportCreateParams_FoldsSocketsIntoCores(t *testing.T) {
+	// VMware/ESXi reports 4 vCPU as sockets=4 with no cores → normalize to 4 cores × 1 socket
+	// so Windows (which caps sockets) actually uses all four.
+	meta := &ImportMetadata{
+		Type: "vm",
+		CreateArgs: map[string]json.RawMessage{
+			"name":    json.RawMessage(`"win"`),
+			"sockets": json.RawMessage(`"4"`),
+		},
+	}
+	p := BuildImportCreateParams(meta, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"})
+	if p.Cores != 4 || p.Sockets != 1 {
+		t.Errorf("cores/sockets = %d/%d, want 4/1 (sockets folded into cores)", p.Cores, p.Sockets)
+	}
+
+	// A source that DOES specify cores (a deliberate 2×2 topology) is left untouched.
+	meta.CreateArgs["cores"] = json.RawMessage(`"2"`)
+	meta.CreateArgs["sockets"] = json.RawMessage(`"2"`)
+	p2 := BuildImportCreateParams(meta, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"})
+	if p2.Cores != 2 || p2.Sockets != 2 {
+		t.Errorf("explicit topology should be preserved, got %d/%d", p2.Cores, p2.Sockets)
+	}
+
+	// Neither specified → 1 core, 1 socket.
+	bare := &ImportMetadata{Type: "vm", CreateArgs: map[string]json.RawMessage{"name": json.RawMessage(`"x"`)}}
+	p3 := BuildImportCreateParams(bare, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"})
+	if p3.Cores != 1 || p3.Sockets != 1 {
+		t.Errorf("bare guest cores/sockets = %d/%d, want 1/1", p3.Cores, p3.Sockets)
+	}
+
+	// User override wins over the normalization.
+	p4 := BuildImportCreateParams(meta, ImportCreateOptions{VMID: 104, TargetStorage: "ceph", Cores: 8, Sockets: 1})
+	if p4.Cores != 8 || p4.Sockets != 1 {
+		t.Errorf("user override should win, got %d/%d", p4.Cores, p4.Sockets)
+	}
+}
+
 func TestBuildImportCreateParams_RemapsPvscsiDisksToSata(t *testing.T) {
 	// A VMware guest on pvscsi: OVMF can't drive pvscsi, so the boot disk must land on SATA
 	// and the leftover pvscsi controller should default to virtio-scsi-single.

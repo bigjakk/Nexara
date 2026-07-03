@@ -179,6 +179,21 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 	p.CPUType = args["cpu"]
 	p.Boot = args["boot"]
 
+	// Normalize the CPU topology. VMware/ESXi commonly reports vCPUs as sockets with no
+	// per-socket core count (numvcpus=N, coresPerSocket=1), which the metadata surfaces as
+	// sockets=N and no "cores". Importing that verbatim yields an N-socket × 1-core guest —
+	// wrong, because Windows client editions cap sockets (Win11 Pro=2, Home=1), so the guest
+	// silently loses vCPUs and shows a single core. Fold the whole vCPU count into cores on a
+	// single socket (the universally-usable topology) whenever the source gave no explicit
+	// core count. A source that specifies cores (a deliberate topology) is left untouched.
+	if p.Cores == 0 {
+		p.Cores = p.Sockets
+		if p.Cores < 1 {
+			p.Cores = 1
+		}
+		p.Sockets = 1
+	}
+
 	// Forward remaining create-args verbatim (smbios1, vga, numa, ...). Disk and NIC
 	// slots are handled below from the dedicated maps, so skip anything that looks like one.
 	for k, v := range args {
