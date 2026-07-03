@@ -205,6 +205,13 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 	if opts.CPUType != "" {
 		p.CPUType = opts.CPUType
 	}
+	// Default the CPU model to x86-64-v2-AES (Proxmox's own default for new VMs) when neither
+	// the source nor the user specified one. QEMU's bare default, kvm64, lacks SSE4.2/POPCNT,
+	// which modern guests — notably Windows 11 — require to boot; without this an imported
+	// Win11 guest hangs at boot even though a native Proxmox import (which sets this) boots.
+	if p.CPUType == "" {
+		p.CPUType = "x86-64-v2-AES"
+	}
 	if opts.OSType != "" {
 		p.OSType = opts.OSType
 	}

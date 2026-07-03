@@ -208,6 +208,35 @@ func TestBuildImportCreateParams_OverridesAndNetwork(t *testing.T) {
 	}
 }
 
+func TestBuildImportCreateParams_DefaultsCPU(t *testing.T) {
+	// No cpu in the source and no override → default to x86-64-v2-AES. QEMU's bare kvm64
+	// default lacks SSE4.2/POPCNT that Windows 11 needs, so it would hang at boot.
+	meta := &ImportMetadata{
+		Type: "vm",
+		CreateArgs: map[string]json.RawMessage{
+			"name":   json.RawMessage(`"win11"`),
+			"ostype": json.RawMessage(`"win11"`),
+		},
+		Disks: map[string]json.RawMessage{
+			"scsi0": json.RawMessage(`{"volid":"s:import/x.ova/x.vmdk"}`),
+		},
+	}
+	if got := BuildImportCreateParams(meta, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"}).CPUType; got != "x86-64-v2-AES" {
+		t.Errorf("CPUType = %q, want x86-64-v2-AES default", got)
+	}
+
+	// A source-provided cpu is preserved (not overwritten by the default).
+	meta.CreateArgs["cpu"] = json.RawMessage(`"host"`)
+	if got := BuildImportCreateParams(meta, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"}).CPUType; got != "host" {
+		t.Errorf("source cpu should be preserved, got %q", got)
+	}
+
+	// A user override wins over both the source and the default.
+	if got := BuildImportCreateParams(meta, ImportCreateOptions{VMID: 104, TargetStorage: "ceph", CPUType: "x86-64-v3"}).CPUType; got != "x86-64-v3" {
+		t.Errorf("user override should win, got %q", got)
+	}
+}
+
 func TestBuildImportCreateParams_RemapsPvscsiDisksToSata(t *testing.T) {
 	// A VMware guest on pvscsi: OVMF can't drive pvscsi, so the boot disk must land on SATA
 	// and the leftover pvscsi controller should default to virtio-scsi-single.
