@@ -105,7 +105,14 @@ export function useImportJobs(clusterId: string) {
     queryFn: () =>
       apiClient.get<VMImportJob[]>(`/api/v1/clusters/${clusterId}/vm-imports`),
     enabled: clusterId.length > 0,
-    refetchInterval: 10_000,
+    // Poll only while an import is in flight; stop once every job is terminal
+    // (matches the CVE-scan / rolling-update query pattern).
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some(
+        (j) => j.status === "pending" || j.status === "running",
+      )
+        ? 5000
+        : false,
   });
 }
 
