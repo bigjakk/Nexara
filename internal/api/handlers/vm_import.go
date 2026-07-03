@@ -410,6 +410,32 @@ type startImportRequest struct {
 	DiskFormat        string `json:"disk_format"`
 	StartAfter        bool   `json:"start_after"`
 	LiveImport        bool   `json:"live_import"`
+
+	// Guest-config overrides (empty/zero = keep the source-derived value). These give the
+	// import wizard the same knobs as Create VM, minus adding hardware.
+	Cores       int    `json:"cores"`
+	Sockets     int    `json:"sockets"`
+	Memory      int    `json:"memory"` // MiB
+	CPUType     string `json:"cpu_type"`
+	OSType      string `json:"os_type"`
+	BIOS        string `json:"bios"`
+	Machine     string `json:"machine"`
+	ScsiHW      string `json:"scsihw"`
+	Pool        string `json:"pool"`
+	Tags        string `json:"tags"`
+	Description string `json:"description"`
+	OnBoot      *bool  `json:"onboot"`
+	Agent       *bool  `json:"agent"`
+	Numa        *bool  `json:"numa"`
+
+	// Network options for the synthesised net0 (applied only when Bridge is set).
+	NetModel   string `json:"net_model"`
+	VLANTag    int    `json:"vlan_tag"`
+	Firewall   *bool  `json:"firewall"`
+	MACAddress string `json:"mac_address"`
+	RateLimit  string `json:"rate_limit"`
+	MTU        int    `json:"mtu"`
+	Multiqueue int    `json:"multiqueue"`
 }
 
 // StartVMImport handles POST /api/v1/clusters/:cluster_id/vm-imports. It records an import
@@ -484,6 +510,27 @@ func (h *VMImportHandler) StartVMImport(c fiber.Ctx) error {
 		DiskFormat:     req.DiskFormat,
 		StartAfter:     req.StartAfter,
 		LiveImport:     req.LiveImport,
+		Cores:          req.Cores,
+		Sockets:        req.Sockets,
+		MemoryMiB:      req.Memory,
+		CPUType:        req.CPUType,
+		OSType:         req.OSType,
+		BIOS:           req.BIOS,
+		Machine:        req.Machine,
+		ScsiHW:         req.ScsiHW,
+		Pool:           req.Pool,
+		Tags:           req.Tags,
+		Description:    req.Description,
+		OnBoot:         req.OnBoot,
+		Agent:          req.Agent,
+		Numa:           req.Numa,
+		NetModel:       req.NetModel,
+		VLANTag:        req.VLANTag,
+		Firewall:       req.Firewall,
+		MACAddr:        req.MACAddress,
+		RateLimit:      req.RateLimit,
+		MTU:            req.MTU,
+		Multiqueue:     req.Multiqueue,
 	})
 
 	warnings, _ := json.Marshal(meta.Warnings)

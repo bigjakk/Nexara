@@ -156,6 +156,56 @@ func TestBuildImportCreateParams_NoOptionalsNoFormat(t *testing.T) {
 	}
 }
 
+func TestBuildImportCreateParams_OverridesAndNetwork(t *testing.T) {
+	meta := sampleMetadata()
+	onboot := true
+	fw := true
+	p := BuildImportCreateParams(meta, ImportCreateOptions{
+		VMID:          300,
+		TargetStorage: "ceph",
+		// guest overrides (source has cores=4 sockets=2 memory=8192 ostype=l26 bios=ovmf)
+		Cores:       8,
+		Sockets:     1,
+		MemoryMiB:   4096,
+		CPUType:     "host",
+		OSType:      "win11",
+		BIOS:        "seabios",
+		Machine:     "q35",
+		ScsiHW:      "virtio-scsi-single",
+		Pool:        "prod",
+		Tags:        "imported;lab",
+		Description: "migrated appliance",
+		OnBoot:      &onboot,
+		// network overrides on the synthesised net0
+		Bridge:     "vmbr1",
+		NetModel:   "e1000",
+		VLANTag:    42,
+		Firewall:   &fw,
+		MACAddr:    "12:34:56:78:9A:BC",
+		RateLimit:  "100",
+		MTU:        9000,
+		Multiqueue: 4,
+	})
+
+	if p.Cores != 8 || p.Sockets != 1 || p.Memory != 4096 {
+		t.Errorf("overrides not applied: cores/sockets/memory = %d/%d/%d", p.Cores, p.Sockets, p.Memory)
+	}
+	if p.CPUType != "host" || p.OSType != "win11" || p.BIOS != "seabios" || p.Machine != "q35" || p.ScsiHW != "virtio-scsi-single" {
+		t.Errorf("system overrides not applied: cpu=%q ostype=%q bios=%q machine=%q scsihw=%q",
+			p.CPUType, p.OSType, p.BIOS, p.Machine, p.ScsiHW)
+	}
+	if p.Pool != "prod" || p.Tags != "imported;lab" || p.Description != "migrated appliance" {
+		t.Errorf("identity overrides not applied: pool=%q tags=%q desc=%q", p.Pool, p.Tags, p.Description)
+	}
+	if p.OnBoot == nil || !*p.OnBoot {
+		t.Error("onboot override not applied")
+	}
+	wantNet := "e1000=12:34:56:78:9A:BC,bridge=vmbr1,tag=42,firewall=1,rate=100,mtu=9000,queues=4"
+	if p.Net0 != wantNet {
+		t.Errorf("Net0 = %q, want %q", p.Net0, wantNet)
+	}
+}
+
 func TestParsedDisks_ObjectAndStringForms(t *testing.T) {
 	meta := sampleMetadata()
 	disks := meta.ParsedDisks()

@@ -1056,6 +1056,31 @@ export interface StartImportRequest {
   disk_format?: string;
   start_after?: boolean;
   live_import?: boolean;
+
+  // Guest-config overrides (omit to keep the source-derived value).
+  cores?: number;
+  sockets?: number;
+  memory?: number;
+  cpu_type?: string;
+  os_type?: string;
+  bios?: string;
+  machine?: string;
+  scsihw?: string;
+  pool?: string;
+  tags?: string;
+  description?: string;
+  onboot?: boolean;
+  agent?: boolean;
+  numa?: boolean;
+
+  // Network options for the synthesised NIC (only applied when bridge is set).
+  net_model?: string;
+  vlan_tag?: number;
+  firewall?: boolean;
+  mac_address?: string;
+  rate_limit?: string;
+  mtu?: number;
+  multiqueue?: number;
 }
 
 export interface EsxiSourceRequest {

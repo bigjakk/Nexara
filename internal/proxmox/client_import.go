@@ -112,7 +112,10 @@ func (m *ImportMetadata) FlatCreateArgs() map[string]string {
 }
 
 // ImportCreateOptions configures BuildImportCreateParams — the target placement and the
-// user's choices for a single guest import.
+// user's choices for a single guest import. The zero value of an override field means "keep
+// the value parsed from the source"; a non-zero value replaces it. Adding hardware (extra
+// disks/NICs) is intentionally out of scope — only the guest the source defines is created,
+// with its settings adjustable.
 type ImportCreateOptions struct {
 	VMID           int
 	Name           string // overrides the metadata name when non-empty
@@ -122,6 +125,31 @@ type ImportCreateOptions struct {
 	DiskFormat     string // optional target disk format override (qcow2|raw|vmdk)
 	StartAfter     bool   // boot the VM once all disks have finished importing
 	LiveImport     bool   // boot the VM while disks stream in (live-restore=1) — data-loss on failure
+
+	// Guest-config overrides (empty/zero = keep the source-derived value).
+	Cores       int
+	Sockets     int
+	MemoryMiB   int
+	CPUType     string
+	OSType      string
+	BIOS        string
+	Machine     string
+	ScsiHW      string
+	Pool        string
+	Tags        string
+	Description string
+	OnBoot      *bool
+	Agent       *bool
+	Numa        *bool
+
+	// Network options applied to the synthesised net0 (only when Bridge is set).
+	NetModel   string // overrides the source NIC model (virtio/e1000/vmxnet3/...)
+	VLANTag    int    // 802.1q tag; 0 = untagged
+	Firewall   *bool  // enable the PVE firewall on the NIC
+	MACAddr    string // overrides the source MAC
+	RateLimit  string // MB/s cap (PVE "rate"); empty = unlimited
+	MTU        int    // 0 = default
+	Multiqueue int    // 0 = disabled
 }
 
 // BuildImportCreateParams maps a parsed ImportMetadata plus the user's placement choices
@@ -163,6 +191,54 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 		p.Name = opts.Name
 	}
 
+	// User overrides win over the source-derived values.
+	if opts.Cores > 0 {
+		p.Cores = opts.Cores
+	}
+	if opts.Sockets > 0 {
+		p.Sockets = opts.Sockets
+	}
+	if opts.MemoryMiB > 0 {
+		p.Memory = opts.MemoryMiB
+	}
+	if opts.CPUType != "" {
+		p.CPUType = opts.CPUType
+	}
+	if opts.OSType != "" {
+		p.OSType = opts.OSType
+	}
+	if opts.BIOS != "" {
+		p.BIOS = opts.BIOS
+	}
+	if opts.Machine != "" {
+		p.Machine = opts.Machine
+	}
+	if opts.ScsiHW != "" {
+		p.ScsiHW = opts.ScsiHW
+	}
+	if opts.Pool != "" {
+		p.Pool = opts.Pool
+	}
+	if opts.Tags != "" {
+		p.Tags = opts.Tags
+	}
+	if opts.Description != "" {
+		p.Description = opts.Description
+	}
+	if opts.OnBoot != nil {
+		p.OnBoot = opts.OnBoot
+	}
+	if opts.Numa != nil {
+		p.Numa = opts.Numa
+	}
+	if opts.Agent != nil {
+		if *opts.Agent {
+			p.Agent = "1"
+		} else {
+			p.Agent = "0"
+		}
+	}
+
 	for slot, disk := range meta.ParsedDisks() {
 		if disk.Volid == "" {
 			continue
@@ -178,7 +254,7 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 		p.Extra["import-working-storage"] = opts.WorkingStorage
 	}
 	if opts.Bridge != "" {
-		p.Net0 = buildImportNet(meta, opts.Bridge)
+		p.Net0 = buildImportNet(meta, opts)
 	}
 	// Live import boots the guest while disks stream in, so it already implies start.
 	// Emitting both live-restore=1 and start=1 is redundant (and PVE may reject the pair),
@@ -191,28 +267,59 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 	return p
 }
 
-// buildImportNet synthesises a net0 spec from the first source NIC (preserving model and
-// MAC when present) bound to the chosen bridge, e.g. "virtio=AA:BB:..,bridge=vmbr0".
-func buildImportNet(meta *ImportMetadata, bridge string) string {
-	model := "virtio"
-	mac := ""
-	for _, raw := range meta.Net {
-		var n struct {
-			Model   string `json:"model"`
-			Macaddr string `json:"macaddr"`
-		}
-		if err := json.Unmarshal(raw, &n); err == nil {
-			if n.Model != "" {
-				model = n.Model
+// buildImportNet synthesises a net0 spec bound to the chosen bridge. The model and MAC
+// default to the source's first NIC (preserving them across the migration) but are
+// overridable, as are the VLAN tag, firewall, rate limit, MTU and multiqueue — e.g.
+// "virtio=AA:BB:..,bridge=vmbr0,tag=10,firewall=1".
+func buildImportNet(meta *ImportMetadata, opts ImportCreateOptions) string {
+	model := opts.NetModel
+	mac := opts.MACAddr
+	if model == "" || mac == "" {
+		for _, raw := range meta.Net {
+			var n struct {
+				Model   string `json:"model"`
+				Macaddr string `json:"macaddr"`
 			}
-			mac = n.Macaddr
+			if err := json.Unmarshal(raw, &n); err == nil {
+				if model == "" && n.Model != "" {
+					model = n.Model
+				}
+				if mac == "" {
+					mac = n.Macaddr
+				}
+			}
+			break
 		}
-		break
 	}
+	if model == "" {
+		model = "virtio"
+	}
+
+	spec := model
 	if mac != "" {
-		return model + "=" + mac + ",bridge=" + bridge
+		spec += "=" + mac
 	}
-	return model + ",bridge=" + bridge
+	spec += ",bridge=" + opts.Bridge
+	if opts.VLANTag > 0 {
+		spec += ",tag=" + strconv.Itoa(opts.VLANTag)
+	}
+	if opts.Firewall != nil {
+		if *opts.Firewall {
+			spec += ",firewall=1"
+		} else {
+			spec += ",firewall=0"
+		}
+	}
+	if opts.RateLimit != "" {
+		spec += ",rate=" + opts.RateLimit
+	}
+	if opts.MTU > 0 {
+		spec += ",mtu=" + strconv.Itoa(opts.MTU)
+	}
+	if opts.Multiqueue > 0 {
+		spec += ",queues=" + strconv.Itoa(opts.Multiqueue)
+	}
+	return spec
 }
 
 // isGuestSlotKey reports whether a create-arg key is a disk or NIC slot that this package
