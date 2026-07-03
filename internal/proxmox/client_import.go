@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -239,15 +240,48 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 		}
 	}
 
-	for slot, disk := range meta.ParsedDisks() {
+	// Map imported disks onto SATA. OVMF has no VMware-PVSCSI UEFI driver (upstream disabled
+	// it — no maintainer), so a boot disk left on pvscsi is invisible to the firmware; and
+	// re-homing a VMware guest's boot disk onto VirtIO-SCSI instead would BSOD it (the driver
+	// isn't marked boot-critical). SATA is understood by both the firmware and any guest OS,
+	// so — like Proxmox's own importer and every VMware→PVE migration guide — we place imported
+	// data disks on SATA (sata0..5) and leave the user to switch to VirtIO-SCSI post-import
+	// after installing drivers. Special slots (efidisk0/tpmstate0) keep their identity.
+	parsed := meta.ParsedDisks()
+	dataSlots := make([]string, 0, len(parsed))
+	for slot, disk := range parsed {
 		if disk.Volid == "" {
 			continue
 		}
-		spec := opts.TargetStorage + ":0,import-from=" + disk.Volid
-		if opts.DiskFormat != "" {
-			spec += ",format=" + opts.DiskFormat
+		if slot == "efidisk0" || slot == "tpmstate0" {
+			p.Extra[slot] = importFromSpec(opts, disk.Volid)
+			continue
 		}
-		p.Extra[slot] = spec
+		dataSlots = append(dataSlots, slot)
+	}
+	sort.Slice(dataSlots, func(i, j int) bool { return diskSlotLess(dataSlots[i], dataSlots[j]) })
+	bootOrder := make([]string, 0, len(dataSlots))
+	movedOffScsi := false
+	for i, slot := range dataSlots {
+		target := slot
+		if i < 6 { // SATA supports sata0..sata5; overflow disks keep their original slot
+			target = "sata" + strconv.Itoa(i)
+		}
+		if strings.HasPrefix(slot, "scsi") && target != slot {
+			movedOffScsi = true
+		}
+		p.Extra[target] = importFromSpec(opts, parsed[slot].Volid)
+		bootOrder = append(bootOrder, target)
+	}
+	if len(bootOrder) > 0 {
+		// Replace the source boot order (which references the old, now-remapped slots) with
+		// the actual disks so the firmware finds the bootloader.
+		p.Boot = "order=" + strings.Join(bootOrder, ";")
+	}
+	// A leftover pvscsi controller with no SCSI disks is useless and is the exact thing OVMF
+	// can't drive; default it to virtio-scsi-single (matching Proxmox's importer).
+	if movedOffScsi && (p.ScsiHW == "" || p.ScsiHW == "pvscsi") {
+		p.ScsiHW = "virtio-scsi-single"
 	}
 
 	// OVMF/UEFI guests need an EFI vars disk to persist their NVRAM boot entries. Source OVAs
@@ -277,6 +311,37 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 		p.Start = true
 	}
 	return p
+}
+
+// importFromSpec builds a create-with-import-from disk spec that allocates a new volume on
+// the target storage and streams the source disk into it.
+func importFromSpec(opts ImportCreateOptions, volid string) string {
+	spec := opts.TargetStorage + ":0,import-from=" + volid
+	if opts.DiskFormat != "" {
+		spec += ",format=" + opts.DiskFormat
+	}
+	return spec
+}
+
+// diskSlotLess orders bus slots naturally (by bus name, then numeric index) so disk
+// remapping is deterministic — e.g. scsi0 < scsi1 < scsi10 (not lexical scsi0 < scsi10 < scsi1).
+func diskSlotLess(a, b string) bool {
+	pa, na := splitSlot(a)
+	pb, nb := splitSlot(b)
+	if pa != pb {
+		return pa < pb
+	}
+	return na < nb
+}
+
+// splitSlot splits a bus slot like "scsi10" into its prefix ("scsi") and index (10).
+func splitSlot(s string) (prefix string, index int) {
+	i := 0
+	for i < len(s) && (s[i] < '0' || s[i] > '9') {
+		i++
+	}
+	index, _ = strconv.Atoi(s[i:])
+	return s[:i], index
 }
 
 // buildImportNet synthesises a net0 spec bound to the chosen bridge. The model and MAC

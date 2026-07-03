@@ -99,8 +99,10 @@ func TestBuildImportCreateParams_MapsTypedFieldsAndDisks(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"scsi0":                  "local-lvm:0,import-from=esxi:ha/ds/web01/web01.vmdk,format=qcow2",
-		"scsi1":                  "local-lvm:0,import-from=esxi:ha/ds/web01/web01_1.vmdk,format=qcow2",
+		// Data disks are remapped from the source's scsi bus onto SATA for bootability;
+		// efidisk0 keeps its identity.
+		"sata0":                  "local-lvm:0,import-from=esxi:ha/ds/web01/web01.vmdk,format=qcow2",
+		"sata1":                  "local-lvm:0,import-from=esxi:ha/ds/web01/web01_1.vmdk,format=qcow2",
 		"efidisk0":               "local-lvm:0,import-from=esxi:ha/ds/web01/web01.nvram,format=qcow2",
 		"import-working-storage": "local",
 		"live-restore":           "1",
@@ -139,8 +141,8 @@ func TestBuildImportCreateParams_NoOptionalsNoFormat(t *testing.T) {
 	meta := sampleMetadata()
 	p := BuildImportCreateParams(meta, ImportCreateOptions{VMID: 1, TargetStorage: "ceph"})
 
-	if p.Extra["scsi0"] != "ceph:0,import-from=esxi:ha/ds/web01/web01.vmdk" {
-		t.Errorf("Extra[scsi0] = %q, want no format suffix", p.Extra["scsi0"])
+	if p.Extra["sata0"] != "ceph:0,import-from=esxi:ha/ds/web01/web01.vmdk" {
+		t.Errorf("Extra[sata0] = %q, want no format suffix", p.Extra["sata0"])
 	}
 	if _, ok := p.Extra["import-working-storage"]; ok {
 		t.Error("import-working-storage should be absent when WorkingStorage empty")
@@ -203,6 +205,44 @@ func TestBuildImportCreateParams_OverridesAndNetwork(t *testing.T) {
 	wantNet := "e1000=12:34:56:78:9A:BC,bridge=vmbr1,tag=42,firewall=1,rate=100,mtu=9000,queues=4"
 	if p.Net0 != wantNet {
 		t.Errorf("Net0 = %q, want %q", p.Net0, wantNet)
+	}
+}
+
+func TestBuildImportCreateParams_RemapsPvscsiDisksToSata(t *testing.T) {
+	// A VMware guest on pvscsi: OVMF can't drive pvscsi, so the boot disk must land on SATA
+	// and the leftover pvscsi controller should default to virtio-scsi-single.
+	meta := &ImportMetadata{
+		Type: "vm",
+		CreateArgs: map[string]json.RawMessage{
+			"name":   json.RawMessage(`"win"`),
+			"bios":   json.RawMessage(`"ovmf"`),
+			"scsihw": json.RawMessage(`"pvscsi"`),
+			"boot":   json.RawMessage(`"order=scsi0"`),
+		},
+		Disks: map[string]json.RawMessage{
+			"scsi0": json.RawMessage(`{"volid":"synology:import/win.ova/win-disk1.vmdk"}`),
+			"scsi1": json.RawMessage(`{"volid":"synology:import/win.ova/win-disk2.vmdk"}`),
+		},
+	}
+	p := BuildImportCreateParams(meta, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"})
+
+	if p.Extra["sata0"] != "ceph:0,import-from=synology:import/win.ova/win-disk1.vmdk" {
+		t.Errorf("sata0 = %q", p.Extra["sata0"])
+	}
+	if p.Extra["sata1"] != "ceph:0,import-from=synology:import/win.ova/win-disk2.vmdk" {
+		t.Errorf("sata1 = %q", p.Extra["sata1"])
+	}
+	if _, ok := p.Extra["scsi0"]; ok {
+		t.Error("scsi0 should have been remapped off the pvscsi bus")
+	}
+	if p.Boot != "order=sata0;sata1" {
+		t.Errorf("Boot = %q, want order=sata0;sata1", p.Boot)
+	}
+	if p.ScsiHW != "virtio-scsi-single" {
+		t.Errorf("ScsiHW = %q, want virtio-scsi-single (pvscsi replaced)", p.ScsiHW)
+	}
+	if p.Extra["efidisk0"] != "ceph:1,efitype=4m" {
+		t.Errorf("efidisk0 = %q, want a synthesised EFI disk", p.Extra["efidisk0"])
 	}
 }
 
