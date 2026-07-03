@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // GetStorageContentByType is like GetStorageContent but filters server-side by content
@@ -33,11 +34,15 @@ func (c *Client) GetStorageContentByType(ctx context.Context, node, storage, con
 }
 
 // GetImportMetadata parses an importable source (OVA/OVF or ESXi VMX) via
-// GET /nodes/{node}/storage/{storage}/import-metadata?volume=<volid> and returns the
-// guest definition used to pre-fill a create-with-import-from call. The volume is the
-// importable volid (e.g. "store:import/x.ova/disk.vmdk" or
-// "esxi:ha-datacenter/ds/VM/VM.vmx"); it is passed as a query parameter so its ':' and
-// '/' are percent-encoded rather than treated as path separators.
+// GET /nodes/{node}/storage/{storage}/import-metadata?volume=<volname> and returns the
+// guest definition used to pre-fill a create-with-import-from call.
+//
+// The `volume` parameter must be the storage-RELATIVE volname (e.g. "import/x.ova" or
+// "ha-datacenter/ds/VM/VM.vmx"), NOT the full volid ("store:import/x.ova"): the endpoint is
+// already scoped to the storage by its URL path, so PVE runs parse_volname on whatever is
+// passed and a leading "<storage>:" makes it fail with "unable to parse directory volume
+// name". Callers pass the full volid as listed by the content API, so we strip the prefix
+// here. It is passed as a query parameter so its ':' and '/' are percent-encoded.
 func (c *Client) GetImportMetadata(ctx context.Context, node, storage, volume string) (*ImportMetadata, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err
@@ -48,8 +53,9 @@ func (c *Client) GetImportMetadata(ctx context.Context, node, storage, volume st
 	if volume == "" {
 		return nil, fmt.Errorf("volume is required")
 	}
+	volname := strings.TrimPrefix(volume, storage+":")
 	q := url.Values{}
-	q.Set("volume", volume)
+	q.Set("volume", volname)
 	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/import-metadata?" + q.Encode()
 	var meta ImportMetadata
 	if err := c.do(ctx, path, &meta); err != nil {

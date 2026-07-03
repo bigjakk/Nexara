@@ -1,9 +1,44 @@
 package proxmox
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
 	"testing"
 )
+
+// TestGetImportMetadata_StripsStoragePrefix locks in the fix for the PVE "unable to parse
+// directory volume name" failure: the import-metadata endpoint is storage-scoped by its URL
+// path, so the volume query param must be the storage-RELATIVE volname, not the full volid.
+// Callers pass the full volid (as the content API lists it); the client must strip the
+// "<storage>:" prefix before the request.
+func TestGetImportMetadata_StripsStoragePrefix(t *testing.T) {
+	var gotVolume string
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes/pve1/storage/synology/import-metadata": func(w http.ResponseWriter, r *http.Request) {
+			gotVolume = r.URL.Query().Get("volume")
+			jsonResponse(w, map[string]any{"type": "vm", "source": "import/x.ova"})
+		},
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	// Caller passes the full volid, exactly as the content listing returns it.
+	if _, err := c.GetImportMetadata(context.Background(), "pve1", "synology", "synology:import/x.ova"); err != nil {
+		t.Fatalf("GetImportMetadata: %v", err)
+	}
+	if gotVolume != "import/x.ova" {
+		t.Errorf("volume sent to PVE = %q, want %q (storage prefix must be stripped)", gotVolume, "import/x.ova")
+	}
+
+	// An already-relative volname must pass through unchanged.
+	if _, err := c.GetImportMetadata(context.Background(), "pve1", "synology", "import/x.ova"); err != nil {
+		t.Fatalf("GetImportMetadata (relative): %v", err)
+	}
+	if gotVolume != "import/x.ova" {
+		t.Errorf("relative volume mangled: got %q", gotVolume)
+	}
+}
 
 func sampleMetadata() *ImportMetadata {
 	return &ImportMetadata{
