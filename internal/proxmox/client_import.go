@@ -250,6 +250,18 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 		p.Extra[slot] = spec
 	}
 
+	// OVMF/UEFI guests need an EFI vars disk to persist their NVRAM boot entries. Source OVAs
+	// (e.g. from VMware) don't carry a PVE-compatible one — that's the "efi-state-lost" import
+	// warning — so, matching Proxmox's own importer, synthesise a fresh efidisk0 on the target
+	// storage when the guest is OVMF and none was imported from the source. Without this the
+	// firmware has nowhere to store its boot entry and the guest won't boot. No format= is set
+	// so PVE picks the right one per storage (qcow2 on file, raw on Ceph/LVM).
+	if p.BIOS == "ovmf" {
+		if _, ok := p.Extra["efidisk0"]; !ok {
+			p.Extra["efidisk0"] = opts.TargetStorage + ":1,efitype=4m"
+		}
+	}
+
 	if opts.WorkingStorage != "" {
 		p.Extra["import-working-storage"] = opts.WorkingStorage
 	}

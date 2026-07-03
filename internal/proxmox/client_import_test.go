@@ -206,6 +206,49 @@ func TestBuildImportCreateParams_OverridesAndNetwork(t *testing.T) {
 	}
 }
 
+func TestBuildImportCreateParams_SynthesisesEfidiskForOVMF(t *testing.T) {
+	// An OVMF guest with only a data disk (no EFI vars disk in the source, as with a VMware
+	// OVA) must get a fresh efidisk0 on the target storage, or it won't boot.
+	ovmf := &ImportMetadata{
+		Type: "vm",
+		CreateArgs: map[string]json.RawMessage{
+			"name":   json.RawMessage(`"win"`),
+			"bios":   json.RawMessage(`"ovmf"`),
+			"ostype": json.RawMessage(`"win11"`),
+		},
+		Disks: map[string]json.RawMessage{
+			"scsi0": json.RawMessage(`{"volid":"synology:import/win.ova/win-disk1.vmdk"}`),
+		},
+	}
+	p := BuildImportCreateParams(ovmf, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"})
+	if p.Extra["efidisk0"] != "ceph:1,efitype=4m" {
+		t.Errorf("efidisk0 = %q, want %q", p.Extra["efidisk0"], "ceph:1,efitype=4m")
+	}
+
+	// SeaBIOS guests must NOT get an efidisk.
+	seabios := &ImportMetadata{
+		Type: "vm",
+		CreateArgs: map[string]json.RawMessage{
+			"name": json.RawMessage(`"lin"`),
+			"bios": json.RawMessage(`"seabios"`),
+		},
+		Disks: map[string]json.RawMessage{
+			"scsi0": json.RawMessage(`{"volid":"synology:import/lin.ova/lin-disk1.vmdk"}`),
+		},
+	}
+	ps := BuildImportCreateParams(seabios, ImportCreateOptions{VMID: 105, TargetStorage: "ceph"})
+	if _, ok := ps.Extra["efidisk0"]; ok {
+		t.Errorf("seabios guest should not get an efidisk0, got %q", ps.Extra["efidisk0"])
+	}
+
+	// When the source DOES carry an EFI vars disk (e.g. ESXi nvram), keep the imported one —
+	// don't clobber it with a synthesised blank. sampleMetadata has an efidisk0 nvram disk.
+	pk := BuildImportCreateParams(sampleMetadata(), ImportCreateOptions{VMID: 106, TargetStorage: "local-lvm"})
+	if got := pk.Extra["efidisk0"]; got != "local-lvm:0,import-from=esxi:ha/ds/web01/web01.nvram" {
+		t.Errorf("imported efidisk0 was overwritten: %q", got)
+	}
+}
+
 func TestParsedDisks_ObjectAndStringForms(t *testing.T) {
 	meta := sampleMetadata()
 	disks := meta.ParsedDisks()
