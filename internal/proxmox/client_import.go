@@ -169,8 +169,7 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 		"cpu": true, "boot": true,
 	}
 	p.Name = args["name"]
-	p.Cores = atoiSafe(args["cores"])
-	p.Sockets = atoiSafe(args["sockets"])
+	p.Cores, p.Sockets = NormalizeVCPU(atoiSafe(args["cores"]), atoiSafe(args["sockets"]))
 	p.Memory = atoiSafe(args["memory"])
 	p.OSType = args["ostype"]
 	p.BIOS = args["bios"]
@@ -178,21 +177,6 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 	p.Machine = args["machine"]
 	p.CPUType = args["cpu"]
 	p.Boot = args["boot"]
-
-	// Normalize the CPU topology. VMware/ESXi commonly reports vCPUs as sockets with no
-	// per-socket core count (numvcpus=N, coresPerSocket=1), which the metadata surfaces as
-	// sockets=N and no "cores". Importing that verbatim yields an N-socket × 1-core guest —
-	// wrong, because Windows client editions cap sockets (Win11 Pro=2, Home=1), so the guest
-	// silently loses vCPUs and shows a single core. Fold the whole vCPU count into cores on a
-	// single socket (the universally-usable topology) whenever the source gave no explicit
-	// core count. A source that specifies cores (a deliberate topology) is left untouched.
-	if p.Cores == 0 {
-		p.Cores = p.Sockets
-		if p.Cores < 1 {
-			p.Cores = 1
-		}
-		p.Sockets = 1
-	}
 
 	// Forward remaining create-args verbatim (smbios1, vga, numa, ...). Disk and NIC
 	// slots are handled below from the dedicated maps, so skip anything that looks like one.
@@ -364,6 +348,24 @@ func splitSlot(s string) (prefix string, index int) {
 	}
 	index, _ = strconv.Atoi(s[i:])
 	return s[:i], index
+}
+
+// NormalizeVCPU folds a socket-expressed vCPU count into cores. VMware/ESXi reports vCPUs as
+// sockets with no per-socket core count (numvcpus=N, coresPerSocket=1), which import-metadata
+// surfaces as sockets=N and no "cores". Importing that verbatim makes an N-socket × 1-core
+// guest — wrong, because Windows client editions cap sockets (Win11 Pro=2, Home=1), so the
+// guest silently loses vCPUs and shows a single core. When cores is unset it returns the whole
+// count as cores on one socket (the universally-usable topology); an explicit core count (a
+// deliberate topology) is preserved. Used by both BuildImportCreateParams and the import
+// metadata endpoint so the wizard shows exactly what the import will produce.
+func NormalizeVCPU(cores, sockets int) (normCores, normSockets int) {
+	if cores == 0 {
+		if sockets < 1 {
+			sockets = 1
+		}
+		return sockets, 1
+	}
+	return cores, sockets
 }
 
 // buildImportNet synthesises a net0 spec bound to the chosen bridge. The model and MAC

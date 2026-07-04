@@ -81,15 +81,16 @@ type importMetadataRequest struct {
 }
 
 type importMetadataResponse struct {
-	Type       string                     `json:"type"`
-	Source     string                     `json:"source"`
-	Name       string                     `json:"name"`
-	Cores      int                        `json:"cores"`
-	Memory     int                        `json:"memory"`
-	OSType     string                     `json:"ostype"`
-	CreateArgs map[string]string          `json:"create_args"`
+	Type       string                        `json:"type"`
+	Source     string                        `json:"source"`
+	Name       string                        `json:"name"`
+	Cores      int                           `json:"cores"`
+	Sockets    int                           `json:"sockets"`
+	Memory     int                           `json:"memory"`
+	OSType     string                        `json:"ostype"`
+	CreateArgs map[string]string             `json:"create_args"`
 	Disks      map[string]proxmox.ImportDisk `json:"disks"`
-	Warnings   []proxmox.ImportWarning    `json:"warnings"`
+	Warnings   []proxmox.ImportWarning       `json:"warnings"`
 }
 
 // GetImportMetadata handles POST /api/v1/clusters/:cluster_id/import-metadata. It parses an
@@ -119,11 +120,16 @@ func (h *VMImportHandler) GetImportMetadata(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 	args := meta.FlatCreateArgs()
+	// Report the normalized vCPU topology (fold sockets into cores when the source gives no
+	// explicit core count) so the wizard's Inspect/Customize/Review show exactly what the
+	// import will produce — the same NormalizeVCPU BuildImportCreateParams applies.
+	cores, sockets := proxmox.NormalizeVCPU(atoiOrZero(args["cores"]), atoiOrZero(args["sockets"]))
 	return c.JSON(importMetadataResponse{
 		Type:       meta.Type,
 		Source:     meta.Source,
 		Name:       args["name"],
-		Cores:      atoiOrZero(args["cores"]),
+		Cores:      cores,
+		Sockets:    sockets,
 		Memory:     atoiOrZero(args["memory"]),
 		OSType:     args["ostype"],
 		CreateArgs: args,

@@ -978,6 +978,7 @@ export interface ImportMetadataResponse {
   source: string;
   name: string;
   cores: number;
+  sockets: number;
   memory: number;
   ostype: string;
   create_args: Record<string, string>;
