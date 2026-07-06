@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Nexara! This guide covers the dev
 
 ### Prerequisites
 
-- **Go** 1.24+ — [install](https://go.dev/doc/install)
+- **Go** 1.25+ — [install](https://go.dev/doc/install)
 - **Node.js** 20+ — [install](https://nodejs.org/)
 - **PostgreSQL** 16 with TimescaleDB — or use Docker
 - **Redis** 7 — or use Docker
@@ -103,9 +103,9 @@ nexara/
 - **No `any` types** — use `unknown` and narrow with type guards
 - **Components:** functional with hooks; no class components
 - **State:** TanStack Query for server state, Zustand for client state
-- **Styling:** Tailwind CSS utility classes via Shadcn/ui components
+- **Styling:** Tailwind CSS v4 utility classes via Shadcn/ui components — CSS-first configuration (no `tailwind.config.js`; the theme lives in CSS)
 - **Icons:** Lucide React exclusively
-- **Linting:** ESLint strict-type-checked + Prettier
+- **Linting:** ESLint strict-type-checked + Prettier (flat config at `frontend/eslint.config.js`)
 
 ### Frontend Feature Modules
 

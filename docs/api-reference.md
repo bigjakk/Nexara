@@ -142,6 +142,11 @@ GET /api/v1/version
 ```
 Returns the application version, commit hash, and build time.
 
+```
+GET /api/v1/changelog
+```
+Returns recent release notes from GitHub Releases (feeds the in-app "What's new" dialog). Public, no auth. The source repo is configurable via `CHANGELOG_REPO`.
+
 ---
 
 ## Endpoint Catalog
@@ -199,6 +204,8 @@ Returns the application version, commit hash, and build time.
 
 ### Nodes
 
+> `:node` is the Proxmox node *name*; `:node_id` is Nexara's node UUID.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/clusters/:id/nodes` | List nodes in a cluster |
@@ -212,6 +219,45 @@ Returns the application version, commit hash, and build time.
 | GET | `/clusters/:id/nodes/:node_id/disks` | List node disks (model, size, health, wearout) |
 | GET | `/clusters/:id/nodes/:node_id/network-interfaces` | List node network interfaces |
 | GET | `/clusters/:id/nodes/:node_id/pci-devices` | List node PCI devices |
+| GET | `/clusters/:id/nodes/:node/dns` | Get node DNS config |
+| PUT | `/clusters/:id/nodes/:node/dns` | Set node DNS config |
+| GET | `/clusters/:id/nodes/:node/time` | Get node time and timezone |
+| PUT | `/clusters/:id/nodes/:node/time` | Set node timezone |
+| POST | `/clusters/:id/nodes/:node/shutdown` | Shut down a node |
+| POST | `/clusters/:id/nodes/:node/reboot` | Reboot a node |
+| POST | `/clusters/:id/nodes/:node/maintenance` | Enter/exit HA node maintenance (needs cluster SSH credentials) |
+| POST | `/clusters/:id/nodes/:node/evacuate` | Migrate all guests off a node |
+| GET | `/clusters/:id/nodes/:node/services` | List node services |
+| POST | `/clusters/:id/nodes/:node/services/:service/:action` | Start/stop/restart a node service |
+| GET | `/clusters/:id/nodes/:node/syslog` | Get node syslog (filterable) |
+
+### Node Disks
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/clusters/:id/nodes/:node/disks/list` | Live disk inventory from the node |
+| GET | `/clusters/:id/nodes/:node/disks/smart` | Get S.M.A.R.T. data for a disk |
+| GET | `/clusters/:id/nodes/:node/disks/zfs` | List ZFS pools |
+| POST | `/clusters/:id/nodes/:node/disks/zfs` | Create ZFS pool |
+| DELETE | `/clusters/:id/nodes/:node/disks/zfs/:pool` | Delete ZFS pool |
+| GET | `/clusters/:id/nodes/:node/disks/lvm` | List LVM volume groups |
+| POST | `/clusters/:id/nodes/:node/disks/lvm` | Create LVM volume group |
+| DELETE | `/clusters/:id/nodes/:node/disks/lvm/:vg` | Delete LVM volume group |
+| GET | `/clusters/:id/nodes/:node/disks/lvmthin` | List LVM-thin pools |
+| POST | `/clusters/:id/nodes/:node/disks/lvmthin` | Create LVM-thin pool |
+| DELETE | `/clusters/:id/nodes/:node/disks/lvmthin/:pool` | Delete LVM-thin pool |
+| GET | `/clusters/:id/nodes/:node/disks/directory` | List directory storages |
+| POST | `/clusters/:id/nodes/:node/disks/directory` | Create directory storage |
+| POST | `/clusters/:id/nodes/:node/disks/initgpt` | Initialize a disk with GPT |
+| PUT | `/clusters/:id/nodes/:node/disks/wipe` | Wipe a disk |
+
+### APT Repositories
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/clusters/:id/nodes/:node/apt/repositories` | List APT repositories |
+| PUT | `/clusters/:id/nodes/:node/apt/repositories` | Enable/disable a repository |
+| POST | `/clusters/:id/nodes/:node/apt/repositories` | Add a standard Proxmox repository |
 
 ### Virtual Machines
 
@@ -239,6 +285,18 @@ Returns the application version, commit hash, and build time.
 | POST | `/clusters/:id/vms/:vm_id/disks/detach` | Detach a disk |
 | POST | `/clusters/:id/vms/:vm_id/media` | Change CD/DVD media |
 | PUT | `/clusters/:id/vms/:vm_id/pool` | Set VM resource pool |
+
+### VM Folders
+
+Organize guests into folders in the Nexara inventory tree (Nexara-side only — Proxmox is untouched).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/clusters/:id/vm-folders` | List VM folders |
+| POST | `/clusters/:id/vm-folders` | Create folder |
+| PATCH | `/clusters/:id/vm-folders/:folder_id` | Update folder (PATCH, not PUT) |
+| DELETE | `/clusters/:id/vm-folders/:folder_id` | Delete folder |
+| PUT | `/clusters/:id/vms/:vm_id/folder` | Assign a VM to a folder |
 
 ### Containers (LXC)
 
@@ -274,6 +332,28 @@ Returns the application version, commit hash, and build time.
 | GET | `/clusters/:id/storage/:sid/content` | List storage content |
 | POST | `/clusters/:id/storage/:sid/upload` | Upload a file |
 | DELETE | `/clusters/:id/storage/:sid/content/*` | Delete content |
+| POST | `/clusters/:id/storage/:sid/oci-pull` | Pull an OCI image as a container template |
+| POST | `/clusters/:id/storage/:sid/download-url` | Download a file from a URL to storage |
+| POST | `/clusters/:id/storage/:sid/appliances` | Download a turnkey appliance |
+| GET | `/clusters/:id/appliances` | List available appliance templates |
+
+### VM Import
+
+Import VMs from ESXi/vCenter sources, OVA/OVF appliances, or disk images. Reads require `view:vm_import`, mutations `manage:vm_import`, except where noted.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/clusters/:id/import-metadata` | Parse guest metadata (CPU, memory, disks, OS) from an importable source |
+| GET | `/clusters/:id/query-url-metadata` | Probe a download URL for filename/size — **requires `manage:storage`** (node-side network primitive) |
+| GET | `/clusters/:id/vm-import-sources` | List registered import sources |
+| GET | `/clusters/:id/vm-import-sources/content` | List importable content across sources |
+| POST | `/clusters/:id/vm-import-sources/esxi` | Register an ESXi/vCenter source |
+| POST | `/clusters/:id/vm-import-sources/enable-content` | Enable `import` content on an existing storage — **requires `manage:storage`** |
+| DELETE | `/clusters/:id/vm-import-sources/:storage` | Unregister an import source (only accepts import-source storages) |
+| GET | `/clusters/:id/vm-imports` | List import jobs |
+| POST | `/clusters/:id/vm-imports` | Start an import |
+| GET | `/clusters/:id/vm-imports/:id` | Get import job status |
+| POST | `/clusters/:id/vm-imports/:id/cancel` | Cancel an import (optionally deleting the partially created VM) |
 
 ### Resource Pools
 
@@ -335,6 +415,11 @@ Returns the application version, commit hash, and build time.
 | POST | `/clusters/:id/vms/:vm_id/firewall/rules` | Create VM firewall rule |
 | PUT | `/clusters/:id/vms/:vm_id/firewall/rules/:pos` | Update VM firewall rule |
 | DELETE | `/clusters/:id/vms/:vm_id/firewall/rules/:pos` | Delete VM firewall rule |
+| GET | `/clusters/:id/nodes/:node/firewall/rules` | List node firewall rules |
+| POST | `/clusters/:id/nodes/:node/firewall/rules` | Create node firewall rule |
+| PUT | `/clusters/:id/nodes/:node/firewall/rules/:pos` | Update node firewall rule |
+| DELETE | `/clusters/:id/nodes/:node/firewall/rules/:pos` | Delete node firewall rule |
+| GET | `/clusters/:id/nodes/:node/firewall/log` | Get node firewall log |
 | GET | `/clusters/:id/firewall/aliases` | List firewall aliases |
 | POST | `/clusters/:id/firewall/aliases` | Create alias |
 | PUT | `/clusters/:id/firewall/aliases/:name` | Update alias |
@@ -411,7 +496,11 @@ Returns the application version, commit hash, and build time.
 | GET | `/clusters/:id/ha/status` | Get HA status |
 | GET | `/clusters/:id/ha/rules` | List HA rules |
 | POST | `/clusters/:id/ha/rules` | Create HA rule |
+| PUT | `/clusters/:id/ha/rules/:rule` | Update HA rule |
 | DELETE | `/clusters/:id/ha/rules/:rule` | Delete HA rule |
+| GET | `/clusters/:id/ha/manager-status` | Get HA manager status |
+| POST | `/clusters/:id/ha/arm` | Re-arm HA cluster-wide (PVE 9.2+) |
+| POST | `/clusters/:id/ha/disarm` | Disarm HA cluster-wide, freezing or ignoring resources (PVE 9.2+) |
 
 ### Replication
 
@@ -525,6 +614,8 @@ Returns the application version, commit hash, and build time.
 | GET | `/clusters/:id/security-posture` | Get security posture score |
 | GET | `/clusters/:id/cve-scan-schedule` | Get scan schedule |
 | PUT | `/clusters/:id/cve-scan-schedule` | Update scan schedule |
+| GET | `/clusters/:id/cve-notifications` | Get CVE notification config |
+| PUT | `/clusters/:id/cve-notifications` | Update CVE notification config |
 
 ### Alerts
 
@@ -558,6 +649,18 @@ Returns the application version, commit hash, and build time.
 | PUT | `/notification-channels/:id` | Update channel |
 | DELETE | `/notification-channels/:id` | Delete channel |
 | POST | `/notification-channels/:id/test` | Send test notification |
+
+### Notification Dead-Letter Queue
+
+Failed notification deliveries land here for inspection, retry, or dismissal.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/notification-dlq` | List failed notifications |
+| GET | `/notification-dlq/summary` | Get failure counts |
+| POST | `/notification-dlq/:id/retry` | Retry a failed notification |
+| POST | `/notification-dlq/:id/dismiss` | Dismiss a failed notification |
+| DELETE | `/notification-dlq/:id` | Delete a DLQ entry |
 
 ### Maintenance Windows
 
@@ -607,6 +710,9 @@ Returns the application version, commit hash, and build time.
 | PUT | `/clusters/:id/ssh-credentials` | Create/update SSH credentials |
 | DELETE | `/clusters/:id/ssh-credentials` | Delete SSH credentials |
 | POST | `/clusters/:id/ssh-credentials/test` | Test SSH connection |
+| GET | `/clusters/:id/ssh-known-hosts` | List pinned SSH host keys |
+| POST | `/clusters/:id/ssh-known-hosts` | Pin an SSH host key |
+| DELETE | `/clusters/:id/ssh-known-hosts/:id` | Remove a pinned host key |
 
 ### Schedules
 
@@ -729,6 +835,18 @@ Returns the application version, commit hash, and build time.
 | DELETE | `/api-keys` | Revoke all your API keys |
 | GET | `/admin/api-keys` | Admin: list all API keys |
 | DELETE | `/admin/api-keys/:id` | Admin: revoke any API key |
+
+### Push Devices
+
+Mobile push-notification device registrations.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/me/devices` | Register a push device for the current user |
+| GET | `/me/devices` | List your registered devices |
+| DELETE | `/me/devices/:id` | Unregister one of your devices |
+| GET | `/admin/users/:id/devices` | Admin: list a user's devices |
+| DELETE | `/admin/devices/:id` | Admin: unregister any device |
 
 ### Search
 

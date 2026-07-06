@@ -10,7 +10,7 @@
     <a href="https://ghcr.io/bigjakk/nexara"><img src="https://img.shields.io/badge/Container-ghcr.io-2496ED.svg?logo=docker&logoColor=white" alt="Container Image"></a>
     <br>
     <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.25-00ADD8.svg?logo=go&logoColor=white" alt="Go 1.25"></a>
-    <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5-3178C6.svg?logo=typescript&logoColor=white" alt="TypeScript 5"></a>
+    <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-6-3178C6.svg?logo=typescript&logoColor=white" alt="TypeScript 6"></a>
     <a href="#features"><img src="https://img.shields.io/badge/UI-Responsive-38BDF8.svg?logo=tailwindcss&logoColor=white" alt="Responsive UI"></a>
     <a href="https://github.com/bigjakk/Nexara/issues"><img src="https://img.shields.io/github/issues/bigjakk/Nexara" alt="Open Issues"></a>
     <a href="https://github.com/bigjakk/Nexara/commits/master"><img src="https://img.shields.io/github/last-commit/bigjakk/Nexara" alt="Last Commit"></a>
@@ -95,10 +95,12 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 - Multi-cluster management (unlimited clusters)
 - Real-time CPU, memory, disk, network metrics
 - VM/CT lifecycle — create, migrate, snapshot, clone, destroy
+- **VM import** — bring VMs over from ESXi/vCenter, OVA/OVF appliances, or raw disk images (browser upload or URL)
 - Disk management — resize, move, attach/detach
 - Template management and resource pools
 - Live migration with pre-flight checks
 - **Node evacuation** — bulk migrate all guests off a node
+- **Health rollup** — Ceph, disk S.M.A.R.T., quorum, storage, and task failures aggregated into one dismissible health indicator
 
 </td>
 <td width="50%">
@@ -165,8 +167,9 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 
 ### User Experience
 - **Responsive design** — full functionality on phones and tablets, not just desktop
+- **Installable PWA** — add Nexara to your phone's home screen as an app
 - **Topology map** — interactive React Flow infrastructure view
-- **Global search** — find anything instantly
+- **Command palette** — press Ctrl+K to search and jump anywhere
 - **Theming** — dark/light mode, 9 accent colors
 - **Custom branding** — logo, favicon, app title
 - **Localization** — i18n framework with language selector
@@ -213,12 +216,13 @@ All settings are environment variables in `.env`. Secrets are auto-generated on 
 | `JWT_SECRET` | auto-generated | JWT signing key |
 | `ENCRYPTION_KEY` | auto-generated | AES-256-GCM key for secrets at rest |
 | `API_PORT` | `8080` | Server listen port |
-| `METRICS_COLLECT_INTERVAL` | `10s` | How often to poll Proxmox for metrics |
+| `METRICS_COLLECT_INTERVAL` | `30s` | How often to poll Proxmox for metrics (Docker deployments set `10s`) |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `PUID` / `PGID` | `1000` | Container user/group ID |
 | `DATA_DIR` | Docker volume | Custom data path (e.g. NFS mount) |
 | `TRUSTED_PROXIES` | empty | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is trusted. **Set this when behind a reverse proxy** so rate limiters key on the real client IP. |
 | `PROXY_HEADER` | `X-Forwarded-For` | Header consulted for the client IP when the remote is on `TRUSTED_PROXIES`. |
+| `WS_ALLOWED_ORIGINS` | empty (allow all) | Comma-separated exact origins allowed to open WebSocket connections. **Set to your public origin in production** (CSRF defence). |
 
 See [`.env.example`](.env.example) for the full reference.
 
@@ -289,8 +293,8 @@ nexara.example.com {
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Go 1.25, Fiber v2, sqlc + pgx, gorilla/websocket |
-| Frontend | React 19, TypeScript 5, Vite 6, Shadcn/ui, TanStack Query/Table, Zustand, Recharts, xterm.js, noVNC, React Flow |
+| Backend | Go 1.25, Fiber v3, sqlc + pgx, gorilla/websocket |
+| Frontend | React 19, TypeScript 6, Vite 8, Tailwind CSS v4, Shadcn/ui, TanStack Query/Table, Zustand, Recharts, xterm.js, noVNC, React Flow |
 | Database | PostgreSQL 16 + TimescaleDB |
 | Cache | Redis 7 (Valkey compatible) |
 | Deploy | Docker Compose (3 containers) |

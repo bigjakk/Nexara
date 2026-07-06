@@ -5,18 +5,26 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 ## Table of Contents
 
 - [Cluster Management](#cluster-management)
+- [Infrastructure Health](#infrastructure-health)
+- [Topology Map](#topology-map)
 - [User Management](#user-management)
 - [RBAC Setup](#rbac-setup)
 - [Authentication Providers](#authentication-providers)
 - [DRS Configuration](#drs-configuration)
+- [High Availability](#high-availability)
 - [Storage Management](#storage-management)
+- [VM Imports](#vm-imports)
 - [Backup Management](#backup-management)
 - [Alert Configuration](#alert-configuration)
 - [CVE Scanning](#cve-scanning)
 - [Rolling Updates](#rolling-updates)
 - [Scheduled Tasks](#scheduled-tasks)
+- [Tasks & Audit Log](#tasks--audit-log)
 - [Reports](#reports)
+- [Mobile & PWA](#mobile--pwa)
+- [UI Tips](#ui-tips)
 - [Branding & Theming](#branding--theming)
+- [Security & Deployment Settings](#security--deployment-settings)
 
 ---
 
@@ -46,6 +54,46 @@ From the cluster list, click the delete button. This removes the cluster from Ne
 ### API Token Requirements
 
 The Proxmox API token needs sufficient privileges to read cluster state and perform actions. For full functionality, use a token with `PVEAdmin` role or equivalent. For read-only monitoring, `PVEAuditor` is sufficient.
+
+---
+
+## Infrastructure Health
+
+Nexara aggregates health across everything it manages, server-side, and surfaces it as a health pill in the header. Click the pill to see every current issue with its reason.
+
+### What It Checks
+
+| Issue | Severity |
+|-------|----------|
+| Node offline / fenced | error |
+| Failed disk (S.M.A.R.T.) | error |
+| Storage inactive | warning |
+| Storage near-full | warning, error at ≥ 95% |
+| Node root filesystem near-full | warning, error at ≥ 95% |
+| Failed tasks | warning |
+| HA resource errors | error |
+| Quorum lost | error |
+| Guest I/O errors | error |
+| Replication failures | error |
+| Ceph health checks | mirrors Ceph's own severity |
+
+### Dismissing and Muting
+
+- **Dismiss** hides one specific current issue. It stays hidden until the underlying condition resolves; if the same problem comes back later, it reappears.
+- **Mute** suppresses an entire issue type everywhere until you restore it from the same menu.
+
+Both are stored in your browser (localStorage), not server-wide — other admins still see the issues.
+
+---
+
+## Topology Map
+
+Navigate to **Topology** from the sidebar for an interactive map of your infrastructure — clusters, nodes, guests, and storage rendered as a live graph.
+
+- **Filters** — toggle **VMs/CTs** and **Storage**; switch **Layout** between Top-Down and Left-Right
+- **Health coloring** — elements are colored by status: healthy, degraded, or offline
+- **Click-through** — click any element to jump to its detail page
+- Pan and zoom with the mouse or trackpad
 
 ---
 
@@ -237,12 +285,15 @@ The Distributed Resource Scheduler automatically balances VM workloads across cl
 
 1. Navigate to a cluster's detail page
 2. Go to the **DRS** tab
-3. Toggle DRS to **Enabled**
+3. Choose a **Mode**:
+   - **Advisory — recommend only** — DRS generates migration recommendations for you to review and apply
+   - **Automatic — migrate VMs** — DRS executes the migrations itself
+   - **Disabled — do nothing** — turns evaluation off
 4. Configure:
-   - **Mode** — `manual` (recommend migrations) or `automatic` (execute migrations)
-   - **Evaluation Interval** — how often DRS evaluates balance (e.g., `300s`)
-   - **CPU Threshold** — imbalance percentage to trigger migrations
-   - **Memory Threshold** — imbalance percentage to trigger migrations
+   - **Resource Weights** — how heavily CPU vs. memory pressure counts toward a node's load score
+   - **Imbalance Threshold** — the cluster imbalance percentage that triggers migration planning (5–100%, in 5% steps)
+   - **Evaluation Interval** — how often DRS evaluates balance, in seconds
+   - **Include containers in balancing** — balance CTs alongside VMs
 
 ### DRS Rules
 
@@ -254,15 +305,44 @@ Create rules to control VM placement:
 
 ### Manual Evaluation
 
-Click **Evaluate Now** to trigger an immediate DRS evaluation. In manual mode, this generates migration recommendations that you can review and approve.
+Click **Evaluate Now** to trigger an immediate DRS evaluation. In Advisory mode, this generates migration recommendations that you can review and approve.
 
 ### DRS History
 
-The DRS History tab shows all past evaluations, including which migrations were recommended and executed.
+The **History** tab within DRS shows all past evaluations, including which migrations were recommended and executed.
 
 ### Native CRS Coexistence (Proxmox VE 9.2+)
 
 Proxmox VE 9.2 added a native dynamic load balancer to its Cluster Resource Scheduler (CRS). When a cluster has it enabled (`crs: ha=dynamic, ha-auto-rebalance=1` in the datacenter options), Nexara detects it and **disables its own automatic migrations** so the two balancers don't fight — Advisory mode still works as a read-only second opinion, and a banner on the DRS tab explains the state. You can manage the native CRS dynamic options (threshold, hold duration, margin, method) from **Cluster → Datacenter Options → CRS**.
+
+---
+
+## High Availability
+
+Nexara manages Proxmox HA from each cluster's **HA** tab.
+
+### HA Rules
+
+Create HA rules from the cluster's **HA** tab. Rule names must start with a letter, be at least 2 characters, and contain only letters, numbers, hyphens, and underscores — the form validates this up front instead of letting Proxmox reject the rule later.
+
+While picking resources for a rule, the search also lists guests that are not yet HA-managed. Tick **Add to HA management** and Nexara enrolls them as part of creating the rule — no need to leave the form and add the resource separately.
+
+### Node Maintenance
+
+To service a node without fighting HA (the maintenance actions appear once the cluster's SSH credentials are configured):
+
+1. Open the node's detail page
+2. Click **Enter Maintenance** — HA-managed guests are migrated away, and the node shows a maintenance indicator in the tree and node views
+3. When you're done, click **Exit Maintenance**
+
+### Cluster-Wide HA Arm/Disarm (PVE 9.2+)
+
+On Proxmox VE 9.2+, the **HA Maintenance** card on the HA tab can take HA offline cluster-wide for major maintenance:
+
+- **Disarm HA…** — choose what happens to HA resources while disarmed:
+  - **Freeze — lock services in place**
+  - **Ignore — suspend HA tracking (manage manually)**
+- **Re-arm HA** — restore normal HA operation when maintenance is finished
 
 ---
 
@@ -319,6 +399,44 @@ equivalent to selecting all guests in the VMs/CTs tab and migrating,
 but with a dedicated dialog tuned for "I'm decommissioning this
 pool" workflows. Container volumes are not yet covered by Evacuate;
 use the per-guest migrate or bulk-migrate flow for those.
+
+---
+
+## VM Imports
+
+Navigate to **Imports** from the sidebar to bring existing VMs into Proxmox from ESXi/vCenter hosts, OVA/OVF appliances, or disk images. Imports run as Proxmox tasks, so they show up in the task history and audit log like any other operation.
+
+### Registering an ESXi / vCenter Source
+
+1. On the **VM Imports** page, click **Add ESXi source**
+2. Fill in:
+   - **Storage ID** — the name Proxmox will use for this source (must start with a letter; letters, digits, `-_.` only)
+   - **Server** — the ESXi or vCenter address
+   - **Username** / **Password**
+   - Optionally tick **Skip TLS certificate verification** for self-signed ESXi hosts
+3. Click **Register source**
+
+The source is registered as a special storage on the cluster, and the VMs it exposes become selectable when importing.
+
+### Importing a VM
+
+1. Click **Import VM** (also available from the Ctrl+K command palette)
+2. Pick where the guest comes from:
+   - **From import storage** — a VM on a registered ESXi source, or an appliance on import-enabled storage
+   - **Download OVA from URL** — paste a link and click **Check URL** to probe it; optionally override the filename
+   - **Upload OVA** — pick a `.ova` file from your machine and click **Upload to storage**
+3. Review the guest in the customize step — settings are grouped into **OS & System**, **CPU & Memory**, **Network**, and **Identity & options**
+4. Start the import and follow progress in the history table
+
+Proxmox-side defaults that trip up manual imports are handled automatically: UEFI (OVMF) guests get an EFI vars disk created, imported disks attach on SATA so the firmware can boot them, and the CPU type defaults to `x86-64-v2-AES` (required for Windows 11 guests).
+
+### Import History
+
+The history table shows **Name**, **Target**, **Source**, **Status** (pending / running / completed / failed / cancelled), and **Created**. Cancelling a running import asks whether to **Also delete the partially created VM**.
+
+### Permissions
+
+Importing is gated by a dedicated VM-import permission (`manage:vm_import`). Two operations additionally require storage-management rights (`manage:storage`) because they exercise or change storage configuration: probing a download URL, and enabling import content on an existing storage.
 
 ---
 
@@ -380,11 +498,12 @@ Navigate to **Alerts** from the sidebar.
 2. Click **Create Rule**
 3. Configure:
    - **Name** — descriptive rule name
+   - **Scope** — **Cluster** (any matching resource in the cluster), **Node** (one specific node), or **VM** (one specific guest). VM-scoped rules are pinned to the guest's VMID within the cluster, so they keep working across migrations and inventory re-syncs.
    - **Metric** — what to monitor (CPU, memory, disk, etc.)
    - **Condition** — threshold and comparison (e.g., CPU > 90%)
-   - **Duration** — how long the condition must persist before firing
+   - **Duration** — how long the condition must persist before firing; `0` fires on the first breaching sample
    - **Severity** — info, warning, critical
-   - **Cooldown** — minimum time between re-fires
+   - **Cooldown** — minimum time between re-fires, measured from when the previous alert resolved
 4. Add notification channels and escalation chain (optional)
 5. Add a custom message template (optional)
 6. Click **Save**
@@ -548,6 +667,19 @@ Scheduled tasks run on cron expressions. They are managed per cluster.
 
 The scheduler evaluates schedules every 60 seconds (configurable via `SCHEDULER_TICK`).
 
+Every execution of a scheduled snapshot or reboot is recorded in the task history and the audit log, so scheduled activity is traceable exactly like manual actions.
+
+---
+
+## Tasks & Audit Log
+
+Everything that happens — user-initiated, scheduled, or automated (DRS, rolling updates) — is tracked in two places:
+
+- **Task history** — every Proxmox task (UPID) Nexara dispatches or observes, with live status (pending → running → completed / failed). Rows expand to show the full details and error output. Tasks started outside Nexara (directly in the Proxmox UI or CLI) are synced in as well and carry a **PVE** badge so you can tell where an action originated.
+- **Audit log** — who did what, when, and to which resource, with the full request details in expandable rows.
+
+Failed tasks surface the error message from Proxmox in the UI — failures are never silently swallowed.
+
 ---
 
 ## Reports
@@ -574,6 +706,30 @@ Navigate to **Reports** from the sidebar.
 
 ---
 
+## Mobile & PWA
+
+The entire UI is responsive — every feature works on phones and tablets:
+
+- Navigation collapses into a drawer menu
+- Detail pages and tables reflow into mobile-friendly layouts
+- Consoles (VNC, serial, node shell) take over the full screen on mobile
+- Touch targets are sized for fingers, including tree and header actions
+
+To install Nexara as an app, open it in your phone's browser and choose **Add to Home Screen** (or **Install app**). It then launches in a standalone window without browser chrome.
+
+> Nexara is a live dashboard and needs a connection to your Nexara server — the installed app does not work offline.
+
+---
+
+## UI Tips
+
+- **Command palette** — press **Ctrl+K** (**⌘K** on macOS) anywhere. Search across clusters, nodes, VMs/CTs, and storage; jump to pages; or run actions like creating a VM or container, importing a VM, opening a console, and switching the theme.
+- **What's new** — after an upgrade, a "What's new" dialog summarizes the releases you've picked up since your last visit (fed by GitHub Releases).
+- **Confirmation dialogs** — destructive operations (shutdown, reboot, destroy, delete) always ask first and name the exact resource affected.
+- **Click to copy** — resource names shown in confirmation dialogs copy to the clipboard on click, handy for pasting into a terminal.
+
+---
+
 ## Branding & Theming
 
 Navigate to **Admin > Branding**.
@@ -594,3 +750,14 @@ Navigate to **Settings > Appearance** to choose from 9 accent color presets that
 - **Byte Unit** — binary (GiB) or decimal (GB)
 - **Date Format** — various date/time display formats
 - **Refresh Interval** — how often dashboards auto-refresh
+
+---
+
+## Security & Deployment Settings
+
+Two environment variables matter for any production deployment — see the [Installation Guide](installation.md#configuration-reference) for the full reference:
+
+- **`WS_ALLOWED_ORIGINS`** — exact-match allow-list of `Origin` values accepted on WebSocket upgrades (`/ws`, `/ws/console`, `/ws/vnc`). Set it to your public origin (e.g. `https://nexara.example.com`) so a malicious page on another domain can't open a WebSocket through a logged-in user's browser. Empty or `*` accepts any origin — fine for labs, and warned about at startup.
+- **`TRUSTED_PROXIES`** — when Nexara sits behind nginx/Traefik/Caddy, set this to the proxy's IP or CIDR so the per-IP rate limiters key on the real client address instead of the proxy's. Without it, all proxied traffic shares one rate-limit bucket. Pair with `PROXY_HEADER` if your proxy uses a non-standard header.
+
+Also consider `SECURE_COOKIES=always` behind a TLS-terminating proxy, and `HSTS_MAX_AGE` for HTTPS-only deployments with a trusted certificate.

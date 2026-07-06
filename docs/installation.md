@@ -7,6 +7,7 @@
 - **10 GB disk** for the application and database
 - A **Proxmox VE** cluster (7.x, 8.x, or 9.x — including 9.2) with an API token
 - Ports **80** and **443** available (or configure alternatives)
+- A modern browser — **Chrome/Edge 111+, Firefox 128+, or Safari 16.4+**. Very old browsers that can't run the app at all show an upgrade notice instead of a blank page.
 
 ## Quick Install
 
@@ -67,6 +68,8 @@ docker compose ps
 curl http://localhost/healthz
 ```
 
+> The container's built-in health check runs `/nexara healthcheck` (a CLI subcommand) inside the container — that's what `docker compose ps` reports. The `/healthz` HTTP endpoint is the equivalent for manual checks and external monitors.
+
 ## Configuration Reference
 
 All configuration is via environment variables in `.env`:
@@ -81,13 +84,17 @@ All configuration is via environment variables in `.env`:
 | `API_PORT` | No | `8080` | API server listen port |
 | `JWT_SECRET` | No | auto-generated | Secret for signing JWT tokens (min 16 chars) |
 | `ENCRYPTION_KEY` | No | auto-generated | 32-byte hex key for AES-256-GCM encryption of secrets at rest |
-| `METRICS_COLLECT_INTERVAL` | No | `10s` | How often metrics are collected from Proxmox |
+| `METRICS_COLLECT_INTERVAL` | No | `30s` (Docker deployments set `10s`) | How often metrics are collected from Proxmox |
+| `TASK_HISTORY_RETENTION` | No | `24h` | How long finished Proxmox task records are kept before the retention sweep deletes them. Go duration in hours (`168h` = 7 days); running tasks are never removed. |
 | `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `PUID` | No | `1000` | User ID for the container process and data directory |
 | `PGID` | No | `1000` | Group ID for the container process and data directory |
-| `DATA_DIR` | No | Docker volume | Custom data path for secrets, branding, uploads (e.g. NFS mount) |
+| `DATA_DIR` | No | Docker volumes | Host path that relocates **all** persistent state (PostgreSQL, Redis, app data) from named volumes to `db/`/`redis/`/`data/` subdirectories (e.g. an NFS mount) |
 | `TRUSTED_PROXIES` | **Yes for production behind a reverse proxy** | empty | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is honored. Without it the rate limiters can't tell clients apart behind nginx/Traefik/Caddy. Examples: `127.0.0.1`, `10.0.0.0/8,172.16.0.0/12`. Leave empty when Nexara is exposed directly. |
 | `PROXY_HEADER` | No | `X-Forwarded-For` | Header consulted for the client IP when the remote is on `TRUSTED_PROXIES`. Override only for non-standard upstreams. |
+| `WS_ALLOWED_ORIGINS` | **Recommended for production** | empty (allow all) | Comma-separated exact `Origin` values accepted on WebSocket upgrades (`/ws`, `/ws/console`, `/ws/vnc`), e.g. `https://nexara.example.com`. Empty or `*` keeps the permissive default (fine for labs, warned at startup). |
+| `SECURE_COOKIES` | No | `auto` | `Secure` attribute on the refresh-token cookie: `auto` (set when the request is detected as HTTPS), `always` (recommended behind a TLS-terminating proxy), `never` (intentional plain-HTTP lab only). |
+| `HSTS_MAX_AGE` | No | `0` (disabled) | `Strict-Transport-Security` max-age in seconds (e.g. `31536000`). Enable only on HTTPS with a trusted certificate — with a self-signed cert it makes certificate errors unbypassable. |
 
 ## First-Time Setup
 
@@ -105,6 +112,10 @@ Open `http://localhost` (or your configured domain) in a browser. On first run, 
 6. Click **Save**
 
 The collector begins syncing inventory and metrics within seconds. You'll see nodes, VMs, and containers appear on the dashboard.
+
+### 3. Install on Your Phone (Optional)
+
+The UI is fully responsive and ships a PWA manifest: open Nexara in your phone's browser and choose **Add to Home Screen** (or **Install app**) to get a standalone app-style window. All features — including consoles — work on mobile.
 
 ### Creating a Proxmox API Token
 
@@ -178,19 +189,23 @@ docker compose up -d
 
 ### Volume Backup
 
-For a full backup including Redis data:
+Nexara stores state in **three** volumes: `nexara-db-data` (PostgreSQL), `nexara-redis-data` (Redis), and `nexara-data` (secrets, branding, uploads). For a full cold backup:
 
 ```bash
 # Stop all services
 docker compose down
 
-# Back up Docker volumes
-docker run --rm -v nexara-db-data:/data -v $(pwd):/backup alpine \
-  tar czf /backup/nexara-volumes-$(date +%Y%m%d).tar.gz /data
+# Back up all three Docker volumes into one archive
+docker run --rm \
+  -v nexara-db-data:/vol/db -v nexara-redis-data:/vol/redis -v nexara-data:/vol/data \
+  -v $(pwd):/backup alpine \
+  tar czf /backup/nexara-volumes-$(date +%Y%m%d).tar.gz /vol
 
 # Restart
 docker compose up -d
 ```
+
+> If you set `DATA_DIR` in `.env`, there are no named volumes — all state lives in `db/`, `redis/`, and `data/` subdirectories under that path, so back up that directory instead.
 
 ## Troubleshooting
 
