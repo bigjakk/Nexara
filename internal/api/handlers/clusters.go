@@ -432,7 +432,37 @@ func (h *ClusterHandler) Delete(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get cluster")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_deleted", nil)
+	// An active rolling update holds cluster-side state (paused CRS
+	// auto-rebalance, disabled HA rules, drained guests), and deleting the
+	// cluster would CASCADE away the records needed to restore it. Fail
+	// closed: if the check itself errors we can't rule out an active job.
+	busy, busyErr := h.queries.HasRunningJobForCluster(c.Context(), id)
+	if busyErr != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check for active rolling update jobs")
+	}
+	if busy {
+		return fiber.NewError(fiber.StatusConflict,
+			"Cluster has an active rolling update job. Cancel it before deleting the cluster.")
+	}
+
+	// Terminal jobs whose cleanup is still pending also hold cluster-side
+	// state, but they must not block deletion — a cluster being deleted is
+	// often one that's gone for good, and its cleanup could never succeed.
+	// Record what leaks so the audit trail explains the cluster-side residue
+	// (paused CRS, disabled HA rules) if the cluster is ever re-added.
+	deleteDetails := json.RawMessage(nil)
+	if pending, pendErr := h.queries.ListCleanupPendingJobsForCluster(c.Context(), id); pendErr == nil && len(pending) > 0 {
+		ids := make([]string, len(pending))
+		for i, pj := range pending {
+			ids[i] = pj.ID.String()
+		}
+		deleteDetails, _ = json.Marshal(map[string]any{
+			"warning":                 "deleted with unreleased rolling-update state; CRS pause / HA-rule disables may persist on the Proxmox cluster",
+			"cleanup_pending_job_ids": ids,
+		})
+	}
+
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_deleted", deleteDetails)
 
 	if err := h.queries.DeleteCluster(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete cluster")

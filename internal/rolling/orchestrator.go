@@ -82,7 +82,8 @@ func NewOrchestrator(shutdownCtx context.Context, queries *db.Queries, encryptio
 	}
 }
 
-// Tick is called on each scheduler interval. It advances all running jobs.
+// Tick is called on each scheduler interval. It advances all running jobs,
+// then retries the state release for terminal jobs that still hold something.
 func (o *Orchestrator) Tick(ctx context.Context) {
 	jobs, err := o.queries.ListRunningRollingUpdateJobs(ctx)
 	if err != nil {
@@ -93,6 +94,8 @@ func (o *Orchestrator) Tick(ctx context.Context) {
 	for _, job := range jobs {
 		o.processJob(ctx, job)
 	}
+
+	o.sweepPendingCleanups(ctx)
 }
 
 func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) {
@@ -178,8 +181,15 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 		if counts.Failed > 0 {
 			o.failJob(ctx, job, "one or more nodes failed")
 		} else {
-			if err := o.queries.CompleteRollingUpdateJob(ctx, job.ID); err != nil {
+			rows, err := o.queries.CompleteRollingUpdateJob(ctx, job.ID)
+			if err != nil {
 				o.logger.Error("failed to complete rolling update job", "job_id", job.ID, "error", err)
+				return
+			}
+			if rows == 0 {
+				// The job went terminal through another path mid-tick (a
+				// cancel) — that path owns the terminal events and release.
+				o.logger.Info("job already terminal, skipping completion", "job_id", job.ID)
 				return
 			}
 			o.publishEvent(ctx, job.ClusterID, job.ID, "completed")
@@ -187,10 +197,12 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 			o.sendJobNotification(ctx, job, "completed", "Rolling update completed successfully")
 			o.logger.Info("rolling update job completed", "job_id", job.ID)
 			o.triggerPostUpgradeCVEScan(job)
+			// Release everything the job held (DRS pause, native CRS pause,
+			// disabled HA rules, any passthrough guest not confirmed running).
+			// Anything this one-shot attempt can't release is retried by the
+			// cleanup sweep. failJob releases on the failure branch itself.
+			o.releaseJobState(ctx, job.ID, true)
 		}
-		// Re-enable DRS + native CRS if we paused them at the start.
-		o.restoreDRS(ctx, job)
-		o.restoreNativeCRS(ctx, job)
 	}
 }
 
@@ -237,10 +249,27 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 		guestSIDs[sid] = true
 	}
 
-	// Disable HA rules (affinity/anti-affinity) that reference any guest on this node.
-	// This prevents ha-manager from blocking migrations due to rule violations.
-	// We only disable rules, NOT resource states — disabling HA resource state stops VMs.
-	var disabledRules []DisabledHARule
+	// Last check before this node starts mutating cluster state — a cancel
+	// racing this window would otherwise disable HA rules after the cancel
+	// cleanup already ran. The cleanup sweep would still catch it, but skip
+	// the mutation entirely when we can see the cancel coming.
+	if o.isJobCancelled(ctx, job.ID) {
+		o.logger.Info("job cancelled or paused before drain start, not starting node", "node", node.NodeName)
+		return
+	}
+
+	guestsJSON, _ := json.Marshal(guests)
+	_ = o.queries.SetNodeGuestsJSON(ctx, db.SetNodeGuestsJSONParams{
+		ID:         node.ID,
+		GuestsJson: guestsJSON,
+	})
+
+	// Find HA rules (affinity/anti-affinity) that reference any guest on this
+	// node. Disabling them prevents ha-manager from blocking migrations due to
+	// rule violations. We only disable rules, NOT resource states — disabling
+	// HA resource state stops VMs. Rules already disabled (by the admin, or by
+	// an earlier node of this job) are left alone and stay unrecorded.
+	var toDisable []DisabledHARule
 	haRulesList, _ := client.GetHARules(ctx)
 	for _, rule := range haRulesList {
 		if rule.Disable == 1 {
@@ -258,30 +287,62 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 		if !affectsGuest {
 			continue
 		}
-		o.logger.Info("disabling HA rule before drain",
-			"rule", rule.Rule, "type", rule.Type, "node", node.NodeName)
-		if err := client.SetHARuleDisabled(ctx, rule.Rule, rule.Type, true); err != nil {
-			o.logger.Warn("failed to disable HA rule",
-				"rule", rule.Rule, "error", err)
-		} else {
-			disabledRules = append(disabledRules, DisabledHARule{Rule: rule.Rule, Type: rule.Type})
+		toDisable = append(toDisable, DisabledHARule{Rule: rule.Rule, Type: rule.Type})
+	}
+
+	// Record first, then disable: re-enabling an already-enabled rule at
+	// release time is a harmless no-op, but a rule disabled without a
+	// persisted record can never be restored automatically. The record is
+	// job-scoped because rules are cluster-wide objects — a per-node record
+	// meant node A's completion could re-enable a rule that node B (still
+	// draining, parallelism >= 2) depended on. Rules are re-enabled when the
+	// job reaches a terminal state.
+	if len(toDisable) > 0 {
+		if err := o.recordJobDisabledHARules(ctx, job.ID, toDisable); err != nil {
+			o.failNode(ctx, job, node, fmt.Sprintf("record HA rules before disabling: %v", err))
+			return
+		}
+		for _, rule := range toDisable {
+			o.logger.Info("disabling HA rule before drain",
+				"rule", rule.Rule, "type", rule.Type, "node", node.NodeName)
+			if err := client.SetHARuleDisabled(ctx, rule.Rule, rule.Type, true); err != nil {
+				o.logger.Warn("failed to disable HA rule",
+					"rule", rule.Rule, "error", err)
+			}
+		}
+		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_ha_rules_disabled",
+			map[string]string{"rules": ruleNames(toDisable), "node": node.NodeName})
+
+		// A cancel racing the disable loop may have run its cleanup against
+		// the pre-disable state (its re-enable was a no-op and it may have
+		// cleared the record). Re-record unconditionally — the merge is
+		// idempotent, and recordJobDisabledHARules re-arms cleanup_pending on
+		// a terminal job so even a DB blip on the status read below can't
+		// hide the disabled rules from the sweep.
+		if err := o.recordJobDisabledHARules(ctx, job.ID, toDisable); err != nil {
+			o.logger.Warn("failed to re-record HA rules after disabling", "job_id", job.ID, "error", err)
+		}
+		switch o.jobStatus(ctx, job.ID) {
+		case "running":
+			// Proceed to drain.
+		case "cancelled":
+			o.logger.Info("job cancelled while disabling HA rules, releasing them", "node", node.NodeName)
+			o.releaseJobState(ctx, job.ID, true)
+			return
+		case "paused":
+			// A paused job keeps its held state on purpose; stop before
+			// draining and let resume re-run this node from 'pending'.
+			o.logger.Info("job paused while disabling HA rules, not starting drain", "node", node.NodeName)
+			return
+		default:
+			// Unknown status (read error) — don't start migrating guests for
+			// a job we can't confirm is still running. The rules are recorded
+			// and armed above; the next tick or the sweep sorts it out.
+			o.logger.Warn("could not confirm job status after disabling HA rules, not starting drain",
+				"job_id", job.ID, "node", node.NodeName)
+			return
 		}
 	}
-
-	// Store disabled rules in the DB so we can re-enable after restore.
-	if len(disabledRules) > 0 {
-		rulesJSON, _ := json.Marshal(disabledRules)
-		_ = o.queries.SetNodeDisabledHARules(ctx, db.SetNodeDisabledHARulesParams{
-			ID:              node.ID,
-			DisabledHaRules: rulesJSON,
-		})
-	}
-
-	guestsJSON, _ := json.Marshal(guests)
-	_ = o.queries.SetNodeGuestsJSON(ctx, db.SetNodeGuestsJSONParams{
-		ID:         node.ID,
-		GuestsJson: guestsJSON,
-	})
 
 	if err := o.queries.SetNodeDrainStarted(ctx, node.ID); err != nil {
 		o.logger.Error("failed to set node drain started", "node_id", node.ID, "error", err)
@@ -337,9 +398,9 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 	// Migrate all guests using HA-aware target selection.
 	// Passthrough guests (PCI/USB) cannot be live-migrated — shut them down
 	// in-place and restart them on the same node after the update completes.
-	for i, guest := range guests {
+	for _, guest := range guests {
 		// Check for cancellation between each guest operation.
-		if i > 0 && o.isJobCancelled(ctx, job.ID) {
+		if o.isJobCancelled(ctx, job.ID) {
 			o.logger.Info("job cancelled during drain, stopping migrations", "node", node.NodeName)
 			return
 		}
@@ -355,6 +416,15 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 			// Gracefully shut down the passthrough guest — it stays on this node.
 			o.logger.Info("shutting down passthrough guest (cannot live-migrate)",
 				"vmid", guest.VMID, "type", guest.Type, "name", guest.Name, "node", node.NodeName)
+
+			// Record the shutdown intent first: a stopped guest with no
+			// record can never be restarted automatically, and recording
+			// per-guest (not in bulk at drain start) keeps guests the drain
+			// never reached out of the record.
+			if err := o.appendStoppedPassthrough(ctx, node.ID, guest); err != nil {
+				o.failNode(ctx, job, node, fmt.Sprintf("record passthrough shutdown of %s %d: %v", guest.Type, guest.VMID, err))
+				return
+			}
 
 			var upid string
 			var shutErr error
@@ -481,6 +551,20 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 }
 
 func (o *Orchestrator) completeDrain(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
+	// The drain loop only handles the snapshot taken at drain start. Verify
+	// nothing landed here since (a manual migration, HA recovery after some
+	// other node died) — an unnoticed guest would be hard-stopped by the
+	// upcoming reboot. Verification errors don't fail the node: a transient
+	// API blip at the last step shouldn't kill the job, and the pre-reboot
+	// check runs again later.
+	if violations, err := o.verifyNodeDrained(ctx, client, node.NodeName); err != nil {
+		o.logger.Warn("could not verify node is empty after drain, proceeding",
+			"node", node.NodeName, "error", err)
+	} else if len(violations) > 0 {
+		o.failNode(ctx, job, node, fmt.Sprintf("node still has running guests after drain (moved here mid-drain?): %s", formatGuestList(violations)))
+		return
+	}
+
 	// Refresh apt index on the node.
 	upid, err := client.RefreshNodeAptIndex(ctx, node.NodeName)
 	if err != nil {
@@ -555,6 +639,10 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 		if guest.Passthrough {
 			o.logger.Info("resume drain: shutting down passthrough guest",
 				"vmid", guest.VMID, "name", guest.Name, "node", node.NodeName)
+			if err := o.appendStoppedPassthrough(ctx, node.ID, guest); err != nil {
+				o.failNode(ctx, job, node, fmt.Sprintf("resume drain — record passthrough shutdown of %s %d: %v", guest.Type, guest.VMID, err))
+				return
+			}
 			var upid string
 			var shutErr error
 			switch guest.Type {
@@ -665,29 +753,38 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 
 // getGuestStatus returns the current status of a guest on a node ("running", "stopped", etc.).
 func (o *Orchestrator) getGuestStatus(ctx context.Context, client *proxmox.Client, nodeName string, guest GuestSnapshot) string {
+	status, _, _ := o.guestStatusOnNode(ctx, client, nodeName, guest)
+	return status
+}
+
+// guestStatusOnNode reports a guest's status on a node, distinguishing "not
+// present on this node" (found=false) from "couldn't tell" (err != nil) —
+// the release path drops record entries for the former but must retry the
+// latter.
+func (o *Orchestrator) guestStatusOnNode(ctx context.Context, client *proxmox.Client, nodeName string, guest GuestSnapshot) (status string, found bool, err error) {
 	switch guest.Type {
 	case "qemu":
-		vms, err := client.GetVMs(ctx, nodeName)
-		if err != nil {
-			return ""
+		vms, verr := client.GetVMs(ctx, nodeName)
+		if verr != nil {
+			return "", false, verr
 		}
 		for _, vm := range vms {
 			if vm.VMID == guest.VMID {
-				return vm.Status
+				return vm.Status, true, nil
 			}
 		}
 	case "lxc":
-		cts, err := client.GetContainers(ctx, nodeName)
-		if err != nil {
-			return ""
+		cts, cerr := client.GetContainers(ctx, nodeName)
+		if cerr != nil {
+			return "", false, cerr
 		}
 		for _, ct := range cts {
 			if ct.VMID == guest.VMID {
-				return ct.Status
+				return ct.Status, true, nil
 			}
 		}
 	}
-	return ""
+	return "", false, nil
 }
 
 // upgradeAbsoluteTimeout caps the time we'll keep retrying a node's
@@ -945,6 +1042,17 @@ func (o *Orchestrator) runSSHUpgrade(ctx context.Context, cancel context.CancelF
 	}
 
 	if needsReboot {
+		// Guests can land on the node during a long apt run (manual
+		// migration, HA recovery) — re-verify it's still empty right before
+		// pulling the trigger on the reboot.
+		if violations, verr := o.verifyNodeDrained(ctx, client, node.NodeName); verr != nil {
+			o.logger.Warn("could not verify node is empty before reboot, proceeding",
+				"node", node.NodeName, "error", verr)
+		} else if len(violations) > 0 {
+			o.failNode(ctx, job, node, fmt.Sprintf("refusing to reboot: running guests present on node: %s", formatGuestList(violations)))
+			return
+		}
+
 		if err := o.queries.SetNodeUpgradeCompleted(ctx, node.ID); err != nil {
 			o.logger.Error("failed to set node upgrade completed", "node_id", node.ID, "error", err)
 			return
@@ -1064,8 +1172,24 @@ func (o *Orchestrator) advanceRebooting(ctx context.Context, client *proxmox.Cli
 func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
 	// Node is healthy — start restoring guests if configured.
 	if !job.AutoRestoreGuests {
-		// Re-enable HA rules even when not auto-restoring guests.
-		o.restoreHAStates(ctx, client, node)
+		// auto_restore_guests only skips migrating guests back to this node.
+		// Passthrough guests weren't migrated anywhere — the drain shut them
+		// down in place — so they must be started back up regardless. Move
+		// the node to 'restoring' first so the stall detector and restore
+		// timeout cover the start-task waits, instead of re-entering this
+		// branch every tick.
+		if len(o.stoppedPassthroughFor(node)) > 0 {
+			if node.Step != "restoring" {
+				if err := o.queries.SetNodeRestoreStarted(ctx, node.ID); err != nil {
+					o.logger.Error("failed to set node restore started", "node_id", node.ID, "error", err)
+					return
+				}
+				o.publishEvent(ctx, job.ClusterID, job.ID, "node_restoring")
+			}
+			if _, res := o.restartStoppedPassthrough(ctx, client, job, node, true, true); res == "interrupted" {
+				return
+			}
+		}
 		if err := o.queries.SetNodeRestoreCompleted(ctx, node.ID); err != nil {
 			o.logger.Error("failed to set node restore completed", "node_id", node.ID, "error", err)
 			return
@@ -1080,7 +1204,6 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 	_ = json.Unmarshal(node.GuestsJson, &guests)
 
 	if len(guests) == 0 {
-		o.restoreHAStates(ctx, client, node)
 		if err := o.queries.SetNodeRestoreCompleted(ctx, node.ID); err != nil {
 			o.logger.Error("failed to set node restore completed", "node_id", node.ID, "error", err)
 		}
@@ -1107,40 +1230,19 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 		return
 	}
 
+	// Passthrough guests were shut down in place during the drain — start
+	// them back up first. Failures are non-fatal here: the guest stays in
+	// the stopped-passthrough record and the cleanup sweep retries it after
+	// the job finishes.
+	if _, res := o.restartStoppedPassthrough(ctx, client, job, node, true, true); res == "interrupted" {
+		o.logger.Info("restore interrupted by shutdown during passthrough start; next leader will resume",
+			"node", node.NodeName)
+		return
+	}
+
 	for _, guest := range guests {
-		// Passthrough guests were shut down in-place — start them back up.
 		if guest.Passthrough {
-			o.logger.Info("starting passthrough guest after node update",
-				"vmid", guest.VMID, "type", guest.Type, "name", guest.Name, "node", node.NodeName)
-
-			var upid string
-			var startErr error
-			switch guest.Type {
-			case "qemu":
-				upid, startErr = client.StartVM(ctx, node.NodeName, guest.VMID)
-			case "lxc":
-				upid, startErr = client.StartCT(ctx, node.NodeName, guest.VMID)
-			}
-			if startErr != nil {
-				o.logger.Warn("failed to start passthrough guest after update",
-					"vmid", guest.VMID, "error", startErr)
-				continue // Non-fatal — skip the guest.
-			}
-
-			status := o.waitForTask(ctx, client, node.NodeName, upid)
-			if status == "interrupted" {
-				o.logger.Info("restore interrupted by shutdown during passthrough start; next leader will resume",
-					"node", node.NodeName, "vmid", guest.VMID)
-				return
-			}
-			if status != "completed" {
-				o.logger.Warn("passthrough guest start failed",
-					"vmid", guest.VMID, "status", status)
-			} else {
-				o.logger.Info("passthrough guest started successfully",
-					"vmid", guest.VMID, "name", guest.Name)
-			}
-			continue
+			continue // Started above; passthrough guests never migrate.
 		}
 
 		// Find the guest on other nodes.
@@ -1205,9 +1307,6 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 		}
 	}
 
-	// Re-enable HA on all guests that had it before drain.
-	o.restoreHAStates(ctx, client, node)
-
 	if err := o.queries.SetNodeRestoreCompleted(ctx, node.ID); err != nil {
 		o.logger.Error("failed to set node restore completed", "node_id", node.ID, "error", err)
 		return
@@ -1218,10 +1317,11 @@ func (o *Orchestrator) advanceHealthCheck(ctx context.Context, client *proxmox.C
 }
 
 func (o *Orchestrator) advanceRestoring(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
-	// Check for timeout (30 minutes).
+	// Check for timeout (30 minutes). Anything not restored by now (guests
+	// still elsewhere, passthrough guests still recorded stopped) is left to
+	// the job-end release / cleanup sweep.
 	if node.RestoreStartedAt.Valid && time.Since(node.RestoreStartedAt.Time) > 30*time.Minute {
 		o.logger.Warn("guest restore timed out, marking node completed", "node", node.NodeName)
-		o.restoreHAStates(ctx, client, node)
 		_ = o.queries.SetNodeRestoreCompleted(ctx, node.ID)
 		o.publishEvent(ctx, job.ClusterID, job.ID, "node_completed")
 		return
@@ -1242,16 +1342,31 @@ func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJ
 		return fmt.Errorf("node is not awaiting upgrade (current step: %s)", node.Step)
 	}
 
+	var client *proxmox.Client
+	if job.RebootAfterUpdate {
+		var err error
+		client, err = o.createClient(ctx, job.ClusterID)
+		if err != nil {
+			return fmt.Errorf("create client for reboot: %w", err)
+		}
+
+		// Guests can land on the node while it waits for confirmation
+		// (manual migration, HA recovery after another node died). Refuse
+		// the reboot before confirming anything, so the node stays
+		// awaiting_upgrade and the admin can move the guests off and retry.
+		if violations, verr := o.verifyNodeDrained(ctx, client, node.NodeName); verr != nil {
+			o.logger.Warn("could not verify node is empty before confirmed reboot, proceeding",
+				"node", node.NodeName, "error", verr)
+		} else if len(violations) > 0 {
+			return fmt.Errorf("node has running guests, refusing to reboot: %s — migrate them off and confirm again", formatGuestList(violations))
+		}
+	}
+
 	if err := o.queries.ConfirmNodeUpgrade(ctx, node.ID); err != nil {
 		return fmt.Errorf("confirm node upgrade: %w", err)
 	}
 
 	if job.RebootAfterUpdate {
-		client, err := o.createClient(ctx, job.ClusterID)
-		if err != nil {
-			return fmt.Errorf("create client for reboot: %w", err)
-		}
-
 		if err := client.RebootNode(ctx, node.NodeName); err != nil {
 			// Mark reboot started even on failure — the node might still reboot.
 			_ = o.queries.SetNodeRebootStarted(ctx, node.ID)
@@ -1359,40 +1474,26 @@ func (o *Orchestrator) findGuestLocation(ctx context.Context, client *proxmox.Cl
 
 // isGuestOnNode checks if a guest (VM/CT) is still present on the given node.
 func (o *Orchestrator) isGuestOnNode(ctx context.Context, client *proxmox.Client, nodeName string, guest GuestSnapshot) bool {
-	switch guest.Type {
-	case "qemu":
-		vms, err := client.GetVMs(ctx, nodeName)
-		if err != nil {
-			return true // Assume still there on error to avoid skipping incorrectly.
-		}
-		for _, vm := range vms {
-			if vm.VMID == guest.VMID {
-				return true
-			}
-		}
-		return false
-	case "lxc":
-		cts, err := client.GetContainers(ctx, nodeName)
-		if err != nil {
-			return true
-		}
-		for _, ct := range cts {
-			if ct.VMID == guest.VMID {
-				return true
-			}
-		}
-		return false
+	_, found, err := o.guestStatusOnNode(ctx, client, nodeName, guest)
+	if err != nil {
+		return true // Assume still there on error to avoid skipping incorrectly.
 	}
-	return true
+	return found
 }
 
 // isJobCancelled re-reads the job from the DB to check if it's been cancelled or paused.
 func (o *Orchestrator) isJobCancelled(ctx context.Context, jobID uuid.UUID) bool {
+	status := o.jobStatus(ctx, jobID)
+	return status == "cancelled" || status == "paused"
+}
+
+// jobStatus re-reads the job's current status; "" on read error.
+func (o *Orchestrator) jobStatus(ctx context.Context, jobID uuid.UUID) string {
 	job, err := o.queries.GetRollingUpdateJob(ctx, jobID)
 	if err != nil {
-		return false
+		return ""
 	}
-	return job.Status == "cancelled" || job.Status == "paused"
+	return job.Status
 }
 
 // disableDRSIfEnabled checks if DRS is enabled for the cluster and disables it
@@ -1426,29 +1527,204 @@ func (o *Orchestrator) disableDRSIfEnabled(ctx context.Context, job db.RollingUp
 	}
 }
 
-// restoreDRS re-enables DRS if it was disabled at the start of the rolling update.
-func (o *Orchestrator) restoreDRS(ctx context.Context, job db.RollingUpdateJob) {
-	// Re-read the job so a fail-on-the-same-tick-as-disable path still sees the
-	// persisted flag: disableDRSIfEnabled sets drs_was_enabled in the DB but not
-	// on the in-memory struct passed in (read at the top of the tick), so a
-	// first-tick failNode → failJob → restoreDRS would otherwise skip the
-	// re-enable and leave DRS off permanently. Mirrors restoreNativeCRS.
-	if fresh, err := o.queries.GetRollingUpdateJob(ctx, job.ID); err == nil {
-		job = fresh
+// releaseJobState re-reads the job and releases everything it may still
+// hold: the DRS pause (DB-only), the native CRS pause (Proxmox), disabled HA
+// rules (the job-level record plus legacy per-node records written by
+// pre-000073 versions), and passthrough guests the drain shut down that
+// haven't been confirmed running again. Each marker is cleared only once its
+// restore is confirmed, so a partial release stays visible and the cleanup
+// sweep retries it until nothing is left.
+//
+// auditFailures controls whether restore failures write audit entries. The
+// inline first-chance callers (job completion, failJob, cancel cleanup) pass
+// true; the retry sweep passes false so a long cluster outage doesn't flood
+// the audit log with identical entries every attempt.
+//
+// Returns released (nothing is held anymore) and didWork (there was at least
+// one held resource at entry).
+func (o *Orchestrator) releaseJobState(ctx context.Context, jobID uuid.UUID, auditFailures bool) (released, didWork bool) {
+	job, err := o.queries.GetRollingUpdateJob(ctx, jobID)
+	if err != nil {
+		o.logger.Warn("rolling: release could not re-read job", "job_id", jobID, "error", err)
+		return false, false
 	}
-	if !job.DrsWasEnabled {
+	nodes, err := o.queries.ListRollingUpdateNodes(ctx, job.ID)
+	if err != nil {
+		o.logger.Warn("rolling: release could not list nodes", "job_id", job.ID, "error", err)
+		return false, false
+	}
+
+	jobRules := parseDisabledRules(job.DisabledHaRules)
+	var nodesWithRules, nodesWithStopped []db.RollingUpdateNode
+	for _, n := range nodes {
+		if len(parseDisabledRules(n.DisabledHaRules)) > 0 {
+			nodesWithRules = append(nodesWithRules, n)
+		}
+		if len(o.stoppedPassthroughFor(n)) > 0 {
+			nodesWithStopped = append(nodesWithStopped, n)
+		}
+	}
+
+	released = true
+	didWork = job.DrsWasEnabled || job.NativeCrsPaused ||
+		len(jobRules) > 0 || len(nodesWithRules) > 0 || len(nodesWithStopped) > 0
+
+	// 1. Nexara DRS — DB-only, no client needed.
+	if job.DrsWasEnabled {
+		if err := o.queries.SetDRSEnabled(ctx, db.SetDRSEnabledParams{
+			ClusterID: job.ClusterID,
+			Enabled:   true,
+		}); err != nil {
+			o.logger.Warn("failed to re-enable DRS after rolling update", "job_id", job.ID, "error", err)
+			released = false
+		} else if err := o.queries.SetJobDRSWasEnabled(ctx, db.SetJobDRSWasEnabledParams{
+			ID:            job.ID,
+			DrsWasEnabled: false,
+		}); err != nil {
+			released = false
+		} else {
+			o.logger.Info("re-enabled DRS after rolling update", "job_id", job.ID, "cluster_id", job.ClusterID)
+		}
+	}
+
+	// The rest needs a Proxmox client.
+	if job.NativeCrsPaused || len(jobRules) > 0 || len(nodesWithRules) > 0 || len(nodesWithStopped) > 0 {
+		client, cerr := o.createClient(ctx, job.ClusterID)
+		if cerr != nil {
+			o.logger.Error("rolling: failed to build client to release job state; will retry via cleanup sweep",
+				"job_id", job.ID, "cluster_id", job.ClusterID, "error", cerr)
+			if auditFailures {
+				o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_cleanup_failed",
+					map[string]string{"error": cerr.Error()})
+			}
+			return false, didWork
+		}
+
+		// 2. Native CRS auto-rebalance.
+		if job.NativeCrsPaused {
+			saved := job.SavedCrsConfig
+			if err := client.SetClusterOptions(ctx, proxmox.UpdateClusterOptionsParams{CRS: &saved}); err != nil {
+				o.logger.Error("rolling: failed to restore native CRS auto-rebalance; will retry via cleanup sweep",
+					"job_id", job.ID, "saved_crs", saved, "error", err)
+				if auditFailures {
+					o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restore_failed",
+						map[string]string{"saved_crs": saved, "error": err.Error()})
+				}
+				released = false
+			} else if err := o.queries.ClearJobNativeCRSPaused(ctx, job.ID); err != nil {
+				released = false
+			} else {
+				o.logger.Info("restored native CRS auto-rebalance after rolling update",
+					"job_id", job.ID, "cluster_id", job.ClusterID, "crs", saved)
+				o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restored",
+					map[string]string{"crs": saved})
+			}
+		}
+
+		// 3. HA rules — the job-level record, plus legacy per-node records
+		// written by pre-000073 versions (jobs in flight across the upgrade).
+		if len(jobRules) > 0 {
+			if !o.releaseRuleRecord(ctx, client, job, jobRules, "", auditFailures, func(remaining []DisabledHARule) bool {
+				return o.persistJobDisabledRules(ctx, job.ID, remaining)
+			}) {
+				released = false
+			}
+		}
+		for _, n := range nodesWithRules {
+			node := n
+			if !o.releaseRuleRecord(ctx, client, job, parseDisabledRules(node.DisabledHaRules), node.NodeName, auditFailures, func(remaining []DisabledHARule) bool {
+				raw, _ := json.Marshal(nonNilRules(remaining))
+				if err := o.queries.SetNodeDisabledHARules(ctx, db.SetNodeDisabledHARulesParams{
+					ID:              node.ID,
+					DisabledHaRules: raw,
+				}); err != nil {
+					o.logger.Warn("failed to persist remaining disabled HA rules", "node_id", node.ID, "error", err)
+					return false
+				}
+				return true
+			}) {
+				released = false
+			}
+		}
+
+		// 4. Passthrough guests shut down by the drain and never confirmed
+		// running again. No task waits here — starts are issued and confirmed
+		// on a later pass so a sick cluster can't stall the whole tick. A
+		// running guest may only be pruned from the record once the drain is
+		// provably dead: a cancelled drain can keep winding down an in-flight
+		// shutdown task after the job goes terminal, so before that a
+		// "running" observation may be a guest our own drain is about to stop.
+		pruneRunning := job.CompletedAt.Valid && time.Since(job.CompletedAt.Time) > pruneRunningAfter
+		for _, n := range nodesWithStopped {
+			pending, res := o.restartStoppedPassthrough(ctx, client, job, n, false, pruneRunning)
+			if res == "interrupted" || pending > 0 {
+				released = false
+			}
+		}
+	}
+
+	if released && job.CleanupPending {
+		// Best-effort: if this write fails the next sweep re-confirms
+		// (didWork will be false then) and clears it without a second audit.
+		_ = o.queries.ClearJobCleanupPending(ctx, job.ID)
+	}
+	return released, didWork
+}
+
+// ReleaseJobState is the exported entry point for handlers that must ensure
+// a terminal job's held cluster state is released before proceeding (e.g.
+// creating a new job on the same cluster). Returns whether everything is
+// released and whether there was anything to release.
+func (o *Orchestrator) ReleaseJobState(ctx context.Context, jobID uuid.UUID) (released, didWork bool) {
+	return o.releaseJobState(ctx, jobID, true)
+}
+
+// cleanupBackoff returns how long to wait after the previous release attempt
+// before retrying a terminal job's cleanup. Early attempts retry quickly to
+// cover transient blips; later ones back off hard so a cluster that stays
+// unreachable for days doesn't get hammered every tick.
+func cleanupBackoff(attempts int32) time.Duration {
+	switch {
+	case attempts < 5:
+		return 2 * time.Minute
+	case attempts < 10:
+		return 10 * time.Minute
+	default:
+		return time.Hour
+	}
+}
+
+// sweepPendingCleanups retries the state release for terminal jobs that
+// still hold something. The inline release attempts (completion, failJob,
+// cancel) are one-shot — and the most common failure cause, an unreachable
+// cluster, tends to make those inline attempts fail too. This sweep is what
+// makes release eventual instead of best-effort.
+func (o *Orchestrator) sweepPendingCleanups(ctx context.Context) {
+	jobs, err := o.queries.ListRollingUpdateJobsNeedingCleanup(ctx)
+	if err != nil {
+		o.logger.Error("failed to list rolling update jobs needing cleanup", "error", err)
 		return
 	}
-
-	o.logger.Info("re-enabling DRS after rolling update",
-		"job_id", job.ID, "cluster_id", job.ClusterID)
-
-	if err := o.queries.SetDRSEnabled(ctx, db.SetDRSEnabledParams{
-		ClusterID: job.ClusterID,
-		Enabled:   true,
-	}); err != nil {
-		o.logger.Warn("failed to re-enable DRS after rolling update",
-			"job_id", job.ID, "error", err)
+	for _, job := range jobs {
+		if time.Since(job.UpdatedAt) < cleanupBackoff(job.CleanupAttempts) {
+			continue
+		}
+		attempts, err := o.queries.IncrementJobCleanupAttempts(ctx, job.ID)
+		if err != nil {
+			continue
+		}
+		released, didWork := o.releaseJobState(ctx, job.ID, false)
+		if !released {
+			o.logger.Warn("rolling update cleanup did not fully release job state; will retry",
+				"job_id", job.ID, "cluster_id", job.ClusterID, "attempts", attempts)
+			continue
+		}
+		if didWork {
+			o.logger.Info("released leftover rolling update state",
+				"job_id", job.ID, "cluster_id", job.ClusterID, "attempts", attempts)
+			o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_cleanup_recovered",
+				map[string]string{"attempts": fmt.Sprintf("%d", attempts)})
+		}
 	}
 }
 
@@ -1505,42 +1781,157 @@ func (o *Orchestrator) pauseNativeCRSIfActive(ctx context.Context, client *proxm
 		map[string]string{"saved_crs": saved, "paused_crs": paused})
 }
 
-// restoreNativeCRS writes back the CRS config saved by pauseNativeCRSIfActive.
-// It re-reads the job first so a fail-on-the-same-tick-as-pause path still sees
-// the persisted flag (the in-memory job copy may predate the pause). It builds
-// its own client so it can run from the no-client failJob path as well. If the
-// restore can't be applied, it logs loudly and audits a restore_failed entry so
-// the operator knows auto-rebalance is still paused.
-func (o *Orchestrator) restoreNativeCRS(ctx context.Context, job db.RollingUpdateJob) {
-	if fresh, err := o.queries.GetRollingUpdateJob(ctx, job.ID); err == nil {
-		job = fresh
+// parseDisabledRules decodes a disabled-HA-rules record; nil, "null" and
+// "[]" all mean "nothing recorded".
+func parseDisabledRules(raw []byte) []DisabledHARule {
+	if len(raw) == 0 {
+		return nil
 	}
-	if !job.NativeCrsPaused {
-		return
+	var rules []DisabledHARule
+	if err := json.Unmarshal(raw, &rules); err != nil {
+		return nil
 	}
+	return rules
+}
 
-	saved := job.SavedCrsConfig
-	client, err := o.createClient(ctx, job.ClusterID)
+// nonNilRules keeps json.Marshal from encoding an empty set as "null" —
+// "[]" is the marker for "record cleared", distinct from NULL ("no record").
+func nonNilRules(rules []DisabledHARule) []DisabledHARule {
+	if rules == nil {
+		return []DisabledHARule{}
+	}
+	return rules
+}
+
+func ruleNames(rules []DisabledHARule) string {
+	names := make([]string, len(rules))
+	for i, r := range rules {
+		names[i] = r.Rule
+	}
+	return strings.Join(names, ", ")
+}
+
+// mergeDisabledRules unions add into existing, deduplicating by rule name
+// (rule names are unique cluster-wide in Proxmox).
+func mergeDisabledRules(existing, add []DisabledHARule) []DisabledHARule {
+	seen := make(map[string]bool, len(existing))
+	out := existing
+	for _, r := range existing {
+		seen[r.Rule] = true
+	}
+	for _, r := range add {
+		if !seen[r.Rule] {
+			seen[r.Rule] = true
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// recordJobDisabledHARules merges rules into the job-level disabled-rules
+// record and persists it. Called BEFORE the rules are actually disabled:
+// re-enabling an already-enabled rule at release time is a harmless no-op,
+// but a rule disabled without a persisted record can never be restored
+// automatically, so a persist failure here must abort the disable.
+func (o *Orchestrator) recordJobDisabledHARules(ctx context.Context, jobID uuid.UUID, rules []DisabledHARule) error {
+	job, err := o.queries.GetRollingUpdateJob(ctx, jobID)
 	if err != nil {
-		o.logger.Error("rolling: failed to build client to restore native CRS — auto-rebalance left paused; restore manually via Datacenter Options → CRS",
-			"job_id", job.ID, "cluster_id", job.ClusterID, "error", err)
-		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restore_failed",
-			map[string]string{"saved_crs": saved, "error": err.Error()})
-		return
+		return fmt.Errorf("re-read job: %w", err)
+	}
+	merged := mergeDisabledRules(parseDisabledRules(job.DisabledHaRules), rules)
+	raw, err := json.Marshal(nonNilRules(merged))
+	if err != nil {
+		return err
+	}
+	if err := o.queries.SetJobDisabledHARules(ctx, db.SetJobDisabledHARulesParams{
+		ID:              jobID,
+		DisabledHaRules: raw,
+	}); err != nil {
+		return fmt.Errorf("persist disabled HA rules: %w", err)
+	}
+	// If the job already went terminal (the startNode cancel race), re-arm
+	// the cleanup sweep: its terminal transition — and possibly a cleanup
+	// pass — may have pre-dated this record. No-op for active jobs.
+	if err := o.queries.ArmJobCleanupPending(ctx, jobID); err != nil {
+		o.logger.Warn("failed to re-arm cleanup after recording HA rules", "job_id", jobID, "error", err)
+	}
+	return nil
+}
+
+// persistJobDisabledRules writes back what's still awaiting re-enable.
+// Returns false when the write fails (the release must then be retried).
+func (o *Orchestrator) persistJobDisabledRules(ctx context.Context, jobID uuid.UUID, remaining []DisabledHARule) bool {
+	raw, _ := json.Marshal(nonNilRules(remaining))
+	if err := o.queries.SetJobDisabledHARules(ctx, db.SetJobDisabledHARulesParams{
+		ID:              jobID,
+		DisabledHaRules: raw,
+	}); err != nil {
+		o.logger.Warn("failed to persist remaining disabled HA rules", "job_id", jobID, "error", err)
+		return false
+	}
+	return true
+}
+
+// releaseRuleRecord re-enables one disabled-HA-rules record (job-level, or a
+// legacy per-node one when nodeName is set) and persists whatever failed for
+// a later retry. Returns true only when the record fully released: every
+// rule re-enabled or dropped, and the cleared record persisted.
+func (o *Orchestrator) releaseRuleRecord(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, rules []DisabledHARule, nodeName string, auditFailures bool, persist func([]DisabledHARule) bool) bool {
+	details := func(rs []DisabledHARule) map[string]string {
+		d := map[string]string{"rules": ruleNames(rs)}
+		if nodeName != "" {
+			d["node"] = nodeName
+		}
+		return d
 	}
 
-	if err := client.SetClusterOptions(ctx, proxmox.UpdateClusterOptionsParams{CRS: &saved}); err != nil {
-		o.logger.Error("rolling: failed to restore native CRS auto-rebalance — left paused; restore manually",
-			"job_id", job.ID, "saved_crs", saved, "error", err)
-		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restore_failed",
-			map[string]string{"saved_crs": saved, "error": err.Error()})
-		return
+	remaining := o.reenableHARules(ctx, client, rules)
+	persisted := persist(remaining)
+	if len(remaining) > 0 {
+		if auditFailures {
+			o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_ha_restore_failed", details(remaining))
+		}
+		return false
 	}
+	if !persisted {
+		return false
+	}
+	// Fires once per record: the cleared record isn't re-entered.
+	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_ha_rules_restored", details(rules))
+	return true
+}
 
-	o.logger.Info("restored native CRS auto-rebalance after rolling update",
-		"job_id", job.ID, "cluster_id", job.ClusterID, "crs", saved)
-	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_crs_restored",
-		map[string]string{"crs": saved})
+// reenableHARules re-enables each disabled HA rule and returns the ones that
+// failed so the caller can persist them for a later retry. Rules that no
+// longer exist on the cluster are dropped — they can never be re-enabled and
+// would otherwise keep the cleanup sweep retrying forever.
+func (o *Orchestrator) reenableHARules(ctx context.Context, client *proxmox.Client, rules []DisabledHARule) []DisabledHARule {
+	var remaining []DisabledHARule
+	for _, rule := range rules {
+		o.logger.Info("re-enabling HA rule after rolling update", "rule", rule.Rule, "type", rule.Type)
+		if err := client.SetHARuleDisabled(ctx, rule.Rule, rule.Type, false); err != nil {
+			o.logger.Warn("failed to re-enable HA rule", "rule", rule.Rule, "type", rule.Type, "error", err)
+			remaining = append(remaining, rule)
+		}
+	}
+	if len(remaining) > 0 {
+		if current, err := client.GetHARules(ctx); err == nil {
+			exists := make(map[string]bool, len(current))
+			for _, r := range current {
+				exists[r.Rule] = true
+			}
+			kept := remaining[:0]
+			for _, r := range remaining {
+				if exists[r.Rule] {
+					kept = append(kept, r)
+				} else {
+					o.logger.Info("disabled HA rule no longer exists, dropping from restore record", "rule", r.Rule)
+				}
+			}
+			remaining = kept
+		}
+	}
+	return remaining
 }
 
 // sendJobNotification dispatches a notification to the configured channel when a job completes or fails.
@@ -1653,29 +2044,295 @@ func (o *Orchestrator) triggerPostUpgradeCVEScan(job db.RollingUpdateJob) {
 	}()
 }
 
-// restoreHAStates re-enables HA rules that were temporarily disabled before drain.
-func (o *Orchestrator) restoreHAStates(ctx context.Context, client *proxmox.Client, node db.RollingUpdateNode) {
-	var disabledRules []DisabledHARule
-	if err := json.Unmarshal(node.DisabledHaRules, &disabledRules); err == nil {
-		for _, rule := range disabledRules {
-			o.logger.Info("re-enabling HA rule after update",
-				"rule", rule.Rule, "type", rule.Type, "node", node.NodeName)
-			if err := client.SetHARuleDisabled(ctx, rule.Rule, rule.Type, false); err != nil {
-				o.logger.Warn("failed to re-enable HA rule",
-					"rule", rule.Rule, "type", rule.Type, "error", err)
-			}
+// passthroughGuests returns the subset of a guest snapshot that has PCI/USB
+// passthrough — the guests the drain shuts down in place instead of migrating.
+func passthroughGuests(guests []GuestSnapshot) []GuestSnapshot {
+	out := []GuestSnapshot{}
+	for _, g := range guests {
+		if g.Passthrough {
+			out = append(out, g)
 		}
+	}
+	return out
+}
+
+// stoppedPassthroughFor returns the passthrough guests recorded as shut down
+// and not yet confirmed running for a node. A NULL column means the row was
+// written by a pre-000073 version (new rows default to '[]') — fall back to
+// deriving the set from the guest snapshot, except for nodes that already
+// finished under the old code: their passthrough guests were handled (or
+// deliberately left) long ago, and "restoring" them now could power on a
+// guest an admin has since shut down on purpose.
+func (o *Orchestrator) stoppedPassthroughFor(node db.RollingUpdateNode) []GuestSnapshot {
+	if len(node.StoppedPassthroughJson) > 0 {
+		var list []GuestSnapshot
+		if err := json.Unmarshal(node.StoppedPassthroughJson, &list); err == nil {
+			return list
+		}
+		return nil
+	}
+	if node.Step == "completed" || node.Step == "skipped" {
+		return nil
+	}
+	var guests []GuestSnapshot
+	_ = json.Unmarshal(node.GuestsJson, &guests)
+	return passthroughGuests(guests)
+}
+
+func (o *Orchestrator) persistStoppedPassthrough(ctx context.Context, nodeID uuid.UUID, list []GuestSnapshot) {
+	if list == nil {
+		list = []GuestSnapshot{}
+	}
+	raw, _ := json.Marshal(list)
+	if err := o.queries.SetNodeStoppedPassthrough(ctx, db.SetNodeStoppedPassthroughParams{
+		ID:                     nodeID,
+		StoppedPassthroughJson: raw,
+	}); err != nil {
+		o.logger.Warn("failed to persist stopped-passthrough record", "node_id", nodeID, "error", err)
 	}
 }
 
+// appendStoppedPassthrough records a passthrough guest just before the drain
+// shuts it down. Record-then-mutate: a stopped guest with no record can
+// never be restarted automatically, so callers must abort the shutdown when
+// this fails.
+func (o *Orchestrator) appendStoppedPassthrough(ctx context.Context, nodeID uuid.UUID, guest GuestSnapshot) error {
+	node, err := o.queries.GetRollingUpdateNode(ctx, nodeID)
+	if err != nil {
+		return fmt.Errorf("re-read node: %w", err)
+	}
+	list := o.stoppedPassthroughFor(node)
+	for _, g := range list {
+		if g.VMID == guest.VMID && g.Type == guest.Type {
+			return nil
+		}
+	}
+	raw, err := json.Marshal(append(list, guest))
+	if err != nil {
+		return err
+	}
+	if err := o.queries.SetNodeStoppedPassthrough(ctx, db.SetNodeStoppedPassthroughParams{
+		ID:                     nodeID,
+		StoppedPassthroughJson: raw,
+	}); err != nil {
+		return fmt.Errorf("persist stopped-passthrough record: %w", err)
+	}
+	return nil
+}
+
+// nodeGuestStatuses lists a node's guests once and returns vmid→status maps
+// for VMs and containers, so per-guest checks don't re-list the whole node.
+func nodeGuestStatuses(ctx context.Context, client *proxmox.Client, nodeName string) (vmStatus, ctStatus map[int]string, err error) {
+	vms, err := client.GetVMs(ctx, nodeName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list VMs: %w", err)
+	}
+	cts, err := client.GetContainers(ctx, nodeName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list containers: %w", err)
+	}
+	vmStatus = make(map[int]string, len(vms))
+	for _, vm := range vms {
+		vmStatus[vm.VMID] = vm.Status
+	}
+	ctStatus = make(map[int]string, len(cts))
+	for _, ct := range cts {
+		ctStatus[ct.VMID] = ct.Status
+	}
+	return vmStatus, ctStatus, nil
+}
+
+// restartStoppedPassthrough starts the passthrough guests recorded as shut
+// down on a node, pruning the record as each is confirmed. Start failures
+// are non-fatal: the guest stays recorded and is retried by the cleanup
+// sweep after the job reaches a terminal state. Returns how many guests are
+// still pending and "ok"/"interrupted" ("interrupted" = a shutdown cut a
+// task wait short; callers should return and let the next leader resume).
+//
+// wait=true polls each start task to completion (the in-job restore path);
+// wait=false issues starts and leaves confirmation to the next sweep pass so
+// a sick cluster can't stall the tick.
+//
+// pruneRunning controls whether a guest observed already running is dropped
+// from the record. The in-job restore path passes true — that node's drain
+// is provably done. The cleanup sweep must pass false until the drain can't
+// still be active: a cancelled drain keeps winding down its in-flight
+// shutdown task after the job goes terminal, so an early "running"
+// observation may be a guest our own drain is about to stop — pruning it
+// then would leak the guest powered off with no record.
+func (o *Orchestrator) restartStoppedPassthrough(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode, wait, pruneRunning bool) (pendingCount int, result string) {
+	list := o.stoppedPassthroughFor(node)
+	if node.StoppedPassthroughJson == nil && len(list) > 0 {
+		// Legacy row with derived work: materialize the record so future
+		// passes and the cleanup sweep work from an explicit, prunable list.
+		o.persistStoppedPassthrough(ctx, node.ID, list)
+	}
+	if len(list) == 0 {
+		return 0, "ok"
+	}
+
+	vmStatus, ctStatus, listErr := nodeGuestStatuses(ctx, client, node.NodeName)
+	if listErr != nil {
+		// Can't observe the node — keep everything and retry later.
+		o.logger.Warn("could not list guests for passthrough restart",
+			"node", node.NodeName, "error", listErr)
+		return len(list), "ok"
+	}
+
+	pending := []GuestSnapshot{}
+	for i, guest := range list {
+		var status string
+		var found bool
+		switch guest.Type {
+		case "qemu":
+			status, found = vmStatus[guest.VMID]
+		case "lxc":
+			status, found = ctStatus[guest.VMID]
+		}
+		if !found {
+			continue // Gone from the node (deleted/moved) — nothing to undo.
+		}
+		// "stopped" needs a start; "paused" needs a resume, which the start
+		// call also performs (a partial shutdown can leave a guest paused).
+		if status != "stopped" && status != "paused" {
+			if !pruneRunning {
+				pending = append(pending, guest)
+			}
+			continue
+		}
+
+		o.logger.Info("starting passthrough guest after node update",
+			"vmid", guest.VMID, "type", guest.Type, "name", guest.Name, "node", node.NodeName)
+		var upid string
+		var startErr error
+		switch guest.Type {
+		case "qemu":
+			upid, startErr = client.StartVM(ctx, node.NodeName, guest.VMID)
+		case "lxc":
+			upid, startErr = client.StartCT(ctx, node.NodeName, guest.VMID)
+		}
+		if startErr != nil {
+			o.logger.Warn("failed to start passthrough guest after update",
+				"vmid", guest.VMID, "error", startErr)
+			pending = append(pending, guest)
+			continue
+		}
+		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_passthrough_started",
+			map[string]string{
+				"vmid": fmt.Sprintf("%d", guest.VMID), "type": guest.Type,
+				"name": guest.Name, "node": node.NodeName, "upid": upid,
+			})
+		if !wait {
+			// Confirmation happens on the next sweep pass.
+			pending = append(pending, guest)
+			continue
+		}
+
+		taskStatus := o.waitForTask(ctx, client, node.NodeName, upid)
+		if taskStatus == "interrupted" {
+			pending = append(pending, guest)
+			pending = append(pending, list[i+1:]...)
+			o.persistStoppedPassthrough(ctx, node.ID, pending)
+			return len(pending), "interrupted"
+		}
+		if taskStatus != "completed" {
+			o.logger.Warn("passthrough guest start failed", "vmid", guest.VMID, "status", taskStatus)
+			pending = append(pending, guest)
+			continue
+		}
+		o.logger.Info("passthrough guest started successfully", "vmid", guest.VMID, "name", guest.Name)
+	}
+
+	if len(pending) != len(list) {
+		o.persistStoppedPassthrough(ctx, node.ID, pending)
+	}
+	return len(pending), "ok"
+}
+
+// verifyNodeDrained lists the node's current guests and returns the ones
+// still running or paused. The drain loop only handles the snapshot taken at
+// drain start; a guest that landed here since — a manual migration, an HA
+// recovery after another node died — would be hard-stopped by the upcoming
+// reboot. Templates never run and stopped guests survive a reboot untouched,
+// so only running/paused guests count. Listing errors are retried a couple
+// of times so a transient API blip doesn't degrade the safety check to
+// advisory at the moment it matters (callers proceed with a warning only on
+// persistent error).
+func (o *Orchestrator) verifyNodeDrained(ctx context.Context, client *proxmox.Client, nodeName string) ([]string, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-o.shutdownCtx.Done():
+				return nil, lastErr
+			case <-time.After(2 * time.Second):
+			}
+		}
+		var violations []string
+		vms, err := client.GetVMs(ctx, nodeName)
+		if err != nil {
+			lastErr = fmt.Errorf("list VMs: %w", err)
+			continue
+		}
+		for _, vm := range vms {
+			if vm.Template == 1 {
+				continue
+			}
+			if vm.Status == "running" || vm.Status == "paused" {
+				violations = append(violations, fmt.Sprintf("qemu %d (%s)", vm.VMID, vm.Name))
+			}
+		}
+		cts, err := client.GetContainers(ctx, nodeName)
+		if err != nil {
+			lastErr = fmt.Errorf("list containers: %w", err)
+			continue
+		}
+		for _, ct := range cts {
+			if ct.Status == "running" {
+				violations = append(violations, fmt.Sprintf("lxc %d (%s)", ct.VMID, ct.Name))
+			}
+		}
+		return violations, nil
+	}
+	return nil, lastErr
+}
+
+// formatGuestList joins guest descriptions for a failure reason, capped so a
+// dense node can't blow up the message.
+func formatGuestList(guests []string) string {
+	const maxListed = 10
+	if len(guests) <= maxListed {
+		return strings.Join(guests, ", ")
+	}
+	return fmt.Sprintf("%s, and %d more", strings.Join(guests[:maxListed], ", "), len(guests)-maxListed)
+}
+
 func (o *Orchestrator) failNode(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode, reason string) {
+	// A graceful shutdown (SIGTERM) cancels in-flight Proxmox calls, and
+	// those surface here as ordinary errors — but they aren't node failures.
+	// Leave the node in its current step: every step has resume coverage
+	// (drain/restore stall detectors, upgrade heartbeat, reboot poll), and a
+	// genuine failure will re-occur and be recorded by the next leader.
+	if o.shutdownCtx.Err() != nil {
+		o.logger.Info("skipping node failure during shutdown; next leader will resume",
+			"node", node.NodeName, "reason", reason)
+		return
+	}
+
 	o.logger.Error("rolling update node failed", "node", node.NodeName, "reason", reason)
 	dbCtx, cancel := cleanupCtxFor(ctx)
 	defer cancel()
-	_ = o.queries.FailRollingUpdateNode(dbCtx, db.FailRollingUpdateNodeParams{
+	rows, err := o.queries.FailRollingUpdateNode(dbCtx, db.FailRollingUpdateNodeParams{
 		ID:            node.ID,
 		FailureReason: reason,
 	})
+	if err == nil && rows == 0 {
+		// The node reached a terminal step through another path (completed,
+		// skipped) — a stale goroutine's failure must not take down the job.
+		o.logger.Info("node already in a terminal step, not failing job",
+			"node", node.NodeName, "reason", reason)
+		return
+	}
 	o.publishEvent(dbCtx, job.ClusterID, job.ID, "node_failed")
 	o.failJob(dbCtx, job, fmt.Sprintf("node %s failed: %s", node.NodeName, reason))
 }
@@ -1684,26 +2341,33 @@ func (o *Orchestrator) failJob(ctx context.Context, job db.RollingUpdateJob, rea
 	o.logger.Error("rolling update job failed", "job_id", job.ID, "reason", reason)
 	dbCtx, cancel := cleanupCtxFor(ctx)
 	defer cancel()
-	_ = o.queries.FailRollingUpdateJob(dbCtx, db.FailRollingUpdateJobParams{
+	rows, err := o.queries.FailRollingUpdateJob(dbCtx, db.FailRollingUpdateJobParams{
 		ID:            job.ID,
 		FailureReason: reason,
 	})
-	o.publishEvent(dbCtx, job.ClusterID, job.ID, "failed")
-	o.auditLog(dbCtx, job.ClusterID, job.ID, "rolling_update_failed", map[string]string{"reason": reason})
-	o.sendJobNotification(dbCtx, job, "failed", fmt.Sprintf("Rolling update failed: %s", reason))
-	// Re-enable DRS + native CRS if we paused them at the start, and any HA
-	// rules still disabled on nodes the failure abandoned mid-flight (normal
-	// completion restores them per node; this path never reached it).
-	o.restoreDRS(dbCtx, job)
-	o.restoreNativeCRS(dbCtx, job)
-	o.restoreAllNodeHAStates(dbCtx, job)
+	if err == nil && rows == 0 {
+		// Already terminal (e.g. cancelled concurrently) — don't emit a
+		// second terminal event/notification. The release below still runs;
+		// it's a no-op when the other path already released everything.
+		o.logger.Info("job already terminal, skipping failure events", "job_id", job.ID)
+	} else {
+		o.publishEvent(dbCtx, job.ClusterID, job.ID, "failed")
+		o.auditLog(dbCtx, job.ClusterID, job.ID, "rolling_update_failed", map[string]string{"reason": reason})
+		o.sendJobNotification(dbCtx, job, "failed", fmt.Sprintf("Rolling update failed: %s", reason))
+	}
+	// Release everything the job held. This inline attempt is best-effort —
+	// under SIGTERM the cleanup ctx gives it 5 seconds, and if the failure
+	// cause is an unreachable cluster the Proxmox-side restores will fail
+	// too. Whatever it can't release stays marked and the cleanup sweep
+	// retries it until it's out.
+	o.releaseJobState(dbCtx, job.ID, true)
 }
 
 // CleanupCancelledJob releases everything a cancelled job may still hold:
-// the DRS pause, the native CRS pause, and HA rules disabled for in-flight
-// nodes. Cancelled jobs drop out of the running-jobs tick, so without an
-// explicit cleanup these stay leaked until another job on the same cluster
-// happens to complete — or forever.
+// the DRS pause, the native CRS pause, disabled HA rules, and passthrough
+// guests the drain shut down. Cancelled jobs drop out of the running-jobs
+// tick; this inline attempt covers the common case immediately and the
+// cleanup sweep retries anything it couldn't release.
 func (o *Orchestrator) CleanupCancelledJob(ctx context.Context, jobID uuid.UUID) {
 	job, err := o.queries.GetRollingUpdateJob(ctx, jobID)
 	if err != nil {
@@ -1711,40 +2375,8 @@ func (o *Orchestrator) CleanupCancelledJob(ctx context.Context, jobID uuid.UUID)
 			"job_id", jobID, "error", err)
 		return
 	}
-	o.restoreDRS(ctx, job)
-	o.restoreNativeCRS(ctx, job)
-	o.restoreAllNodeHAStates(ctx, job)
+	o.releaseJobState(ctx, jobID, true)
 	o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_cancel_cleanup", nil)
-}
-
-// restoreAllNodeHAStates re-enables every HA rule still recorded as disabled
-// on any of the job's nodes. The client is built lazily so jobs that never
-// disabled anything cost nothing.
-func (o *Orchestrator) restoreAllNodeHAStates(ctx context.Context, job db.RollingUpdateJob) {
-	nodes, err := o.queries.ListRollingUpdateNodes(ctx, job.ID)
-	if err != nil {
-		o.logger.Warn("rolling: failed to list nodes for HA-rule restore",
-			"job_id", job.ID, "error", err)
-		return
-	}
-	var client *proxmox.Client
-	for _, node := range nodes {
-		if len(node.DisabledHaRules) == 0 || string(node.DisabledHaRules) == "null" || string(node.DisabledHaRules) == "[]" {
-			continue
-		}
-		if client == nil {
-			c, clientErr := o.createClient(ctx, job.ClusterID)
-			if clientErr != nil {
-				o.logger.Error("rolling: failed to build client to restore HA rules — re-enable manually via Datacenter → HA",
-					"job_id", job.ID, "cluster_id", job.ClusterID, "error", clientErr)
-				o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_ha_restore_failed",
-					map[string]string{"error": clientErr.Error()})
-				return
-			}
-			client = c
-		}
-		o.restoreHAStates(ctx, client, node)
-	}
 }
 
 // cleanupCtxFor returns (ctx, no-op cancel) when ctx is still alive, or a
@@ -1788,6 +2420,19 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 // migration is still pending. Pass "" to return as soon as the guest is
 // unlocked on any node (e.g. a pre-migrate wait where the destination is
 // whatever the caller is about to choose).
+// taskWaitTimeout caps how long waitForTask / waitForGuestUnlocked poll a
+// single Proxmox task or guest lock before giving up.
+const taskWaitTimeout = 30 * time.Minute
+
+// pruneRunningAfter is how long after a job's terminal transition the
+// cleanup sweep may treat a running passthrough guest as "not ours to
+// restart" and prune it from the record. It must comfortably exceed
+// taskWaitTimeout: a cancelled drain goroutine can keep winding down its
+// in-flight shutdown task for up to one full task wait after the job goes
+// terminal, and pruning during that window could drop a guest our own drain
+// is about to stop — leaking it powered off with no record.
+const pruneRunningAfter = 2 * taskWaitTimeout
+
 // settleConfirmGrace bounds how long waitForGuestUnlocked waits for an
 // expected migration to actually start (set its lock) when the guest is
 // already unlocked but not yet at the expected target node. This bridges the
@@ -1799,7 +2444,7 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 const settleConfirmGrace = 45 * time.Second
 
 func (o *Orchestrator) waitForGuestUnlocked(_ context.Context, client *proxmox.Client, guestType string, vmid int, expectNode string) string {
-	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Minute)
+	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, taskWaitTimeout)
 	defer cancel()
 
 	ticker := time.NewTicker(3 * time.Second)
@@ -1912,7 +2557,7 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 	// the poll loop. The final-check block below uses context.Background()
 	// on purpose so the outcome can still be recorded during graceful
 	// shutdown instead of orphaning the task.
-	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, 30*time.Minute)
+	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, taskWaitTimeout)
 	defer cancel()
 
 	ticker := time.NewTicker(5 * time.Second)

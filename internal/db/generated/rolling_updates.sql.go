@@ -13,26 +13,88 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const cancelRollingUpdateJob = `-- name: CancelRollingUpdateJob :exec
+const armJobCleanupPending = `-- name: ArmJobCleanupPending :exec
 UPDATE rolling_update_jobs
-SET status = 'cancelled', completed_at = now(), updated_at = now()
-WHERE id = $1 AND status IN ('pending', 'running', 'paused')
+SET cleanup_pending = true, updated_at = now()
+WHERE id = $1 AND status IN ('completed', 'failed', 'cancelled')
 `
 
-func (q *Queries) CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, cancelRollingUpdateJob, id)
+// ArmJobCleanupPending re-arms the sweep when held state is recorded onto a
+// job that already reached a terminal status (the startNode cancel race);
+// a no-op for active jobs, whose terminal transition sets the flag itself.
+func (q *Queries) ArmJobCleanupPending(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, armJobCleanupPending, id)
 	return err
 }
 
-const completeRollingUpdateJob = `-- name: CompleteRollingUpdateJob :exec
+const cancelRollingUpdateJob = `-- name: CancelRollingUpdateJob :execrows
 UPDATE rolling_update_jobs
-SET status = 'completed', completed_at = now(), updated_at = now()
+SET status = 'cancelled', cleanup_pending = true, completed_at = now(), updated_at = now()
+WHERE id = $1 AND status IN ('pending', 'running', 'paused')
+`
+
+func (q *Queries) CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelRollingUpdateJob, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const clearJobCleanupPending = `-- name: ClearJobCleanupPending :exec
+UPDATE rolling_update_jobs
+SET cleanup_pending = false, updated_at = now()
+WHERE rolling_update_jobs.id = $1
+  AND rolling_update_jobs.drs_was_enabled = false
+  AND rolling_update_jobs.native_crs_paused = false
+  AND (rolling_update_jobs.disabled_ha_rules IS NULL OR rolling_update_jobs.disabled_ha_rules::text IN ('null', '[]'))
+  AND NOT EXISTS (
+      SELECT 1 FROM rolling_update_nodes n
+      WHERE n.job_id = rolling_update_jobs.id
+        AND ((n.disabled_ha_rules IS NOT NULL AND n.disabled_ha_rules::text NOT IN ('null', '[]'))
+          OR (n.stopped_passthrough_json IS NOT NULL AND n.stopped_passthrough_json::text NOT IN ('null', '[]')))
+  )
+`
+
+// ClearJobCleanupPending is self-guarding: the flag only clears when no
+// job-level marker and no node-level record still holds state, so a release
+// racing a concurrent record-write cannot retire the job from the sweep
+// while something is still held. (Node columns left NULL by pre-000073
+// versions don't block the clear — the release path materializes them to
+// explicit lists on its first pass.)
+func (q *Queries) ClearJobCleanupPending(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearJobCleanupPending, id)
+	return err
+}
+
+const clearJobNativeCRSPaused = `-- name: ClearJobNativeCRSPaused :exec
+UPDATE rolling_update_jobs
+SET native_crs_paused = false, updated_at = now()
 WHERE id = $1
 `
 
-func (q *Queries) CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, completeRollingUpdateJob, id)
+func (q *Queries) ClearJobNativeCRSPaused(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearJobNativeCRSPaused, id)
 	return err
+}
+
+const completeRollingUpdateJob = `-- name: CompleteRollingUpdateJob :execrows
+
+UPDATE rolling_update_jobs
+SET status = 'completed', cleanup_pending = true, completed_at = now(), updated_at = now()
+WHERE id = $1 AND status IN ('pending', 'running', 'paused')
+`
+
+// Terminal transitions set cleanup_pending: the job may still hold cluster
+// state (DRS pause, native CRS pause, disabled HA rules, stopped passthrough
+// guests). The orchestrator's cleanup sweep re-checks flagged jobs until
+// every held resource is confirmed released, then clears the flag.
+func (q *Queries) CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, completeRollingUpdateJob, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const confirmNodeUpgrade = `-- name: ConfirmNodeUpgrade :exec
@@ -88,10 +150,10 @@ func (q *Queries) CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (Cou
 	return i, err
 }
 
-const failRollingUpdateJob = `-- name: FailRollingUpdateJob :exec
+const failRollingUpdateJob = `-- name: FailRollingUpdateJob :execrows
 UPDATE rolling_update_jobs
-SET status = 'failed', failure_reason = $2, completed_at = now(), updated_at = now()
-WHERE id = $1
+SET status = 'failed', failure_reason = $2, cleanup_pending = true, completed_at = now(), updated_at = now()
+WHERE id = $1 AND status IN ('pending', 'running', 'paused')
 `
 
 type FailRollingUpdateJobParams struct {
@@ -99,15 +161,18 @@ type FailRollingUpdateJobParams struct {
 	FailureReason string    `json:"failure_reason"`
 }
 
-func (q *Queries) FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error {
-	_, err := q.db.Exec(ctx, failRollingUpdateJob, arg.ID, arg.FailureReason)
-	return err
+func (q *Queries) FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failRollingUpdateJob, arg.ID, arg.FailureReason)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const failRollingUpdateNode = `-- name: FailRollingUpdateNode :exec
+const failRollingUpdateNode = `-- name: FailRollingUpdateNode :execrows
 UPDATE rolling_update_nodes
 SET step = 'failed', failure_reason = $2, updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND step NOT IN ('completed', 'failed', 'skipped')
 `
 
 type FailRollingUpdateNodeParams struct {
@@ -115,13 +180,16 @@ type FailRollingUpdateNodeParams struct {
 	FailureReason string    `json:"failure_reason"`
 }
 
-func (q *Queries) FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) error {
-	_, err := q.db.Exec(ctx, failRollingUpdateNode, arg.ID, arg.FailureReason)
-	return err
+func (q *Queries) FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failRollingUpdateNode, arg.ID, arg.FailureReason)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getNextPendingNode = `-- name: GetNextPendingNode :one
-SELECT id, job_id, node_name, node_order, step, failure_reason, packages_json, guests_json, drain_started_at, drain_completed_at, upgrade_confirmed_at, reboot_started_at, reboot_completed_at, health_check_at, restore_started_at, restore_completed_at, created_at, updated_at, upgrade_started_at, upgrade_completed_at, upgrade_output, disabled_ha_rules, skip_reason FROM rolling_update_nodes
+SELECT id, job_id, node_name, node_order, step, failure_reason, packages_json, guests_json, drain_started_at, drain_completed_at, upgrade_confirmed_at, reboot_started_at, reboot_completed_at, health_check_at, restore_started_at, restore_completed_at, created_at, updated_at, upgrade_started_at, upgrade_completed_at, upgrade_output, disabled_ha_rules, skip_reason, stopped_passthrough_json FROM rolling_update_nodes
 WHERE job_id = $1 AND step = 'pending'
 ORDER BY node_order
 LIMIT 1
@@ -154,12 +222,13 @@ func (q *Queries) GetNextPendingNode(ctx context.Context, jobID uuid.UUID) (Roll
 		&i.UpgradeOutput,
 		&i.DisabledHaRules,
 		&i.SkipReason,
+		&i.StoppedPassthroughJson,
 	)
 	return i, err
 }
 
 const getRollingUpdateJob = `-- name: GetRollingUpdateJob :one
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config FROM rolling_update_jobs WHERE id = $1
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts FROM rolling_update_jobs WHERE id = $1
 `
 
 func (q *Queries) GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (RollingUpdateJob, error) {
@@ -186,12 +255,15 @@ func (q *Queries) GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (Rollin
 		&i.NotifyChannelID,
 		&i.NativeCrsPaused,
 		&i.SavedCrsConfig,
+		&i.DisabledHaRules,
+		&i.CleanupPending,
+		&i.CleanupAttempts,
 	)
 	return i, err
 }
 
 const getRollingUpdateNode = `-- name: GetRollingUpdateNode :one
-SELECT id, job_id, node_name, node_order, step, failure_reason, packages_json, guests_json, drain_started_at, drain_completed_at, upgrade_confirmed_at, reboot_started_at, reboot_completed_at, health_check_at, restore_started_at, restore_completed_at, created_at, updated_at, upgrade_started_at, upgrade_completed_at, upgrade_output, disabled_ha_rules, skip_reason FROM rolling_update_nodes WHERE id = $1
+SELECT id, job_id, node_name, node_order, step, failure_reason, packages_json, guests_json, drain_started_at, drain_completed_at, upgrade_confirmed_at, reboot_started_at, reboot_completed_at, health_check_at, restore_started_at, restore_completed_at, created_at, updated_at, upgrade_started_at, upgrade_completed_at, upgrade_output, disabled_ha_rules, skip_reason, stopped_passthrough_json FROM rolling_update_nodes WHERE id = $1
 `
 
 func (q *Queries) GetRollingUpdateNode(ctx context.Context, id uuid.UUID) (RollingUpdateNode, error) {
@@ -221,6 +293,7 @@ func (q *Queries) GetRollingUpdateNode(ctx context.Context, id uuid.UUID) (Rolli
 		&i.UpgradeOutput,
 		&i.DisabledHaRules,
 		&i.SkipReason,
+		&i.StoppedPassthroughJson,
 	)
 	return i, err
 }
@@ -239,10 +312,24 @@ func (q *Queries) HasRunningJobForCluster(ctx context.Context, clusterID uuid.UU
 	return has_running, err
 }
 
+const incrementJobCleanupAttempts = `-- name: IncrementJobCleanupAttempts :one
+UPDATE rolling_update_jobs
+SET cleanup_attempts = cleanup_attempts + 1, updated_at = now()
+WHERE id = $1
+RETURNING cleanup_attempts
+`
+
+func (q *Queries) IncrementJobCleanupAttempts(ctx context.Context, id uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementJobCleanupAttempts, id)
+	var cleanup_attempts int32
+	err := row.Scan(&cleanup_attempts)
+	return cleanup_attempts, err
+}
+
 const insertRollingUpdateJob = `-- name: InsertRollingUpdateJob :one
 INSERT INTO rolling_update_jobs (cluster_id, parallelism, reboot_after_update, auto_restore_guests, package_excludes, ha_policy, ha_warnings, auto_upgrade, created_by, notify_channel_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config
+RETURNING id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts
 `
 
 type InsertRollingUpdateJobParams struct {
@@ -293,6 +380,9 @@ func (q *Queries) InsertRollingUpdateJob(ctx context.Context, arg InsertRollingU
 		&i.NotifyChannelID,
 		&i.NativeCrsPaused,
 		&i.SavedCrsConfig,
+		&i.DisabledHaRules,
+		&i.CleanupPending,
+		&i.CleanupAttempts,
 	)
 	return i, err
 }
@@ -300,7 +390,7 @@ func (q *Queries) InsertRollingUpdateJob(ctx context.Context, arg InsertRollingU
 const insertRollingUpdateNode = `-- name: InsertRollingUpdateNode :one
 INSERT INTO rolling_update_nodes (job_id, node_name, node_order, packages_json)
 VALUES ($1, $2, $3, $4)
-RETURNING id, job_id, node_name, node_order, step, failure_reason, packages_json, guests_json, drain_started_at, drain_completed_at, upgrade_confirmed_at, reboot_started_at, reboot_completed_at, health_check_at, restore_started_at, restore_completed_at, created_at, updated_at, upgrade_started_at, upgrade_completed_at, upgrade_output, disabled_ha_rules, skip_reason
+RETURNING id, job_id, node_name, node_order, step, failure_reason, packages_json, guests_json, drain_started_at, drain_completed_at, upgrade_confirmed_at, reboot_started_at, reboot_completed_at, health_check_at, restore_started_at, restore_completed_at, created_at, updated_at, upgrade_started_at, upgrade_completed_at, upgrade_output, disabled_ha_rules, skip_reason, stopped_passthrough_json
 `
 
 type InsertRollingUpdateNodeParams struct {
@@ -342,12 +432,65 @@ func (q *Queries) InsertRollingUpdateNode(ctx context.Context, arg InsertRolling
 		&i.UpgradeOutput,
 		&i.DisabledHaRules,
 		&i.SkipReason,
+		&i.StoppedPassthroughJson,
 	)
 	return i, err
 }
 
+const listCleanupPendingJobsForCluster = `-- name: ListCleanupPendingJobsForCluster :many
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts FROM rolling_update_jobs
+WHERE cluster_id = $1
+  AND cleanup_pending = true
+  AND status IN ('completed', 'failed', 'cancelled')
+ORDER BY updated_at
+`
+
+func (q *Queries) ListCleanupPendingJobsForCluster(ctx context.Context, clusterID uuid.UUID) ([]RollingUpdateJob, error) {
+	rows, err := q.db.Query(ctx, listCleanupPendingJobsForCluster, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RollingUpdateJob{}
+	for rows.Next() {
+		var i RollingUpdateJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Status,
+			&i.Parallelism,
+			&i.RebootAfterUpdate,
+			&i.AutoRestoreGuests,
+			&i.PackageExcludes,
+			&i.FailureReason,
+			&i.CreatedBy,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.HaPolicy,
+			&i.HaWarnings,
+			&i.AutoUpgrade,
+			&i.DrsWasEnabled,
+			&i.NotifyChannelID,
+			&i.NativeCrsPaused,
+			&i.SavedCrsConfig,
+			&i.DisabledHaRules,
+			&i.CleanupPending,
+			&i.CleanupAttempts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRollingUpdateJobs = `-- name: ListRollingUpdateJobs :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts FROM rolling_update_jobs
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -389,6 +532,61 @@ func (q *Queries) ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpda
 			&i.NotifyChannelID,
 			&i.NativeCrsPaused,
 			&i.SavedCrsConfig,
+			&i.DisabledHaRules,
+			&i.CleanupPending,
+			&i.CleanupAttempts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRollingUpdateJobsNeedingCleanup = `-- name: ListRollingUpdateJobsNeedingCleanup :many
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts FROM rolling_update_jobs
+WHERE cleanup_pending = true
+  AND status IN ('completed', 'failed', 'cancelled')
+ORDER BY updated_at
+LIMIT 20
+`
+
+func (q *Queries) ListRollingUpdateJobsNeedingCleanup(ctx context.Context) ([]RollingUpdateJob, error) {
+	rows, err := q.db.Query(ctx, listRollingUpdateJobsNeedingCleanup)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RollingUpdateJob{}
+	for rows.Next() {
+		var i RollingUpdateJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Status,
+			&i.Parallelism,
+			&i.RebootAfterUpdate,
+			&i.AutoRestoreGuests,
+			&i.PackageExcludes,
+			&i.FailureReason,
+			&i.CreatedBy,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.HaPolicy,
+			&i.HaWarnings,
+			&i.AutoUpgrade,
+			&i.DrsWasEnabled,
+			&i.NotifyChannelID,
+			&i.NativeCrsPaused,
+			&i.SavedCrsConfig,
+			&i.DisabledHaRules,
+			&i.CleanupPending,
+			&i.CleanupAttempts,
 		); err != nil {
 			return nil, err
 		}
@@ -401,7 +599,7 @@ func (q *Queries) ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpda
 }
 
 const listRollingUpdateNodes = `-- name: ListRollingUpdateNodes :many
-SELECT id, job_id, node_name, node_order, step, failure_reason, packages_json, guests_json, drain_started_at, drain_completed_at, upgrade_confirmed_at, reboot_started_at, reboot_completed_at, health_check_at, restore_started_at, restore_completed_at, created_at, updated_at, upgrade_started_at, upgrade_completed_at, upgrade_output, disabled_ha_rules, skip_reason FROM rolling_update_nodes
+SELECT id, job_id, node_name, node_order, step, failure_reason, packages_json, guests_json, drain_started_at, drain_completed_at, upgrade_confirmed_at, reboot_started_at, reboot_completed_at, health_check_at, restore_started_at, restore_completed_at, created_at, updated_at, upgrade_started_at, upgrade_completed_at, upgrade_output, disabled_ha_rules, skip_reason, stopped_passthrough_json FROM rolling_update_nodes
 WHERE job_id = $1
 ORDER BY node_order
 `
@@ -439,6 +637,7 @@ func (q *Queries) ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) (
 			&i.UpgradeOutput,
 			&i.DisabledHaRules,
 			&i.SkipReason,
+			&i.StoppedPassthroughJson,
 		); err != nil {
 			return nil, err
 		}
@@ -451,7 +650,7 @@ func (q *Queries) ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) (
 }
 
 const listRunningRollingUpdateJobs = `-- name: ListRunningRollingUpdateJobs :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts FROM rolling_update_jobs
 WHERE status = 'running'
 ORDER BY created_at
 `
@@ -486,6 +685,9 @@ func (q *Queries) ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUp
 			&i.NotifyChannelID,
 			&i.NativeCrsPaused,
 			&i.SavedCrsConfig,
+			&i.DisabledHaRules,
+			&i.CleanupPending,
+			&i.CleanupAttempts,
 		); err != nil {
 			return nil, err
 		}
@@ -535,6 +737,22 @@ func (q *Queries) SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabl
 	return err
 }
 
+const setJobDisabledHARules = `-- name: SetJobDisabledHARules :exec
+UPDATE rolling_update_jobs
+SET disabled_ha_rules = $2, updated_at = now()
+WHERE id = $1
+`
+
+type SetJobDisabledHARulesParams struct {
+	ID              uuid.UUID `json:"id"`
+	DisabledHaRules []byte    `json:"disabled_ha_rules"`
+}
+
+func (q *Queries) SetJobDisabledHARules(ctx context.Context, arg SetJobDisabledHARulesParams) error {
+	_, err := q.db.Exec(ctx, setJobDisabledHARules, arg.ID, arg.DisabledHaRules)
+	return err
+}
+
 const setJobNativeCRSPaused = `-- name: SetJobNativeCRSPaused :exec
 UPDATE rolling_update_jobs
 SET native_crs_paused = true, saved_crs_config = $2, updated_at = now()
@@ -562,6 +780,9 @@ type SetNodeDisabledHARulesParams struct {
 	DisabledHaRules json.RawMessage `json:"disabled_ha_rules"`
 }
 
+// Legacy: new code records disabled HA rules at job scope (see
+// SetJobDisabledHARules); this remains only so the release path can clear
+// per-node records written by pre-000073 versions.
 func (q *Queries) SetNodeDisabledHARules(ctx context.Context, arg SetNodeDisabledHARulesParams) error {
 	_, err := q.db.Exec(ctx, setNodeDisabledHARules, arg.ID, arg.DisabledHaRules)
 	return err
@@ -687,6 +908,22 @@ func (q *Queries) SetNodeRestoreStarted(ctx context.Context, id uuid.UUID) error
 	return err
 }
 
+const setNodeStoppedPassthrough = `-- name: SetNodeStoppedPassthrough :exec
+UPDATE rolling_update_nodes
+SET stopped_passthrough_json = $2, updated_at = now()
+WHERE id = $1
+`
+
+type SetNodeStoppedPassthroughParams struct {
+	ID                     uuid.UUID `json:"id"`
+	StoppedPassthroughJson []byte    `json:"stopped_passthrough_json"`
+}
+
+func (q *Queries) SetNodeStoppedPassthrough(ctx context.Context, arg SetNodeStoppedPassthroughParams) error {
+	_, err := q.db.Exec(ctx, setNodeStoppedPassthrough, arg.ID, arg.StoppedPassthroughJson)
+	return err
+}
+
 const setNodeUpgradeCompleted = `-- name: SetNodeUpgradeCompleted :exec
 UPDATE rolling_update_nodes
 SET step = 'rebooting', upgrade_completed_at = now(), upgrade_confirmed_at = now(), reboot_started_at = now(), updated_at = now()
@@ -740,7 +977,7 @@ func (q *Queries) SetNodeUpgradeStarted(ctx context.Context, id uuid.UUID) error
 	return err
 }
 
-const skipRollingUpdateNode = `-- name: SkipRollingUpdateNode :exec
+const skipRollingUpdateNode = `-- name: SkipRollingUpdateNode :execrows
 UPDATE rolling_update_nodes
 SET step = 'skipped', skip_reason = $2, updated_at = now()
 WHERE id = $1 AND step = 'pending'
@@ -751,9 +988,12 @@ type SkipRollingUpdateNodeParams struct {
 	SkipReason string    `json:"skip_reason"`
 }
 
-func (q *Queries) SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) error {
-	_, err := q.db.Exec(ctx, skipRollingUpdateNode, arg.ID, arg.SkipReason)
-	return err
+func (q *Queries) SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, skipRollingUpdateNode, arg.ID, arg.SkipReason)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const skipRollingUpdateNodeAny = `-- name: SkipRollingUpdateNodeAny :exec

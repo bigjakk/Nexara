@@ -791,32 +791,36 @@ type RollingUpdateJob struct {
 	NotifyChannelID   pgtype.UUID        `json:"notify_channel_id"`
 	NativeCrsPaused   bool               `json:"native_crs_paused"`
 	SavedCrsConfig    string             `json:"saved_crs_config"`
+	DisabledHaRules   []byte             `json:"disabled_ha_rules"`
+	CleanupPending    bool               `json:"cleanup_pending"`
+	CleanupAttempts   int32              `json:"cleanup_attempts"`
 }
 
 type RollingUpdateNode struct {
-	ID                 uuid.UUID          `json:"id"`
-	JobID              uuid.UUID          `json:"job_id"`
-	NodeName           string             `json:"node_name"`
-	NodeOrder          int32              `json:"node_order"`
-	Step               string             `json:"step"`
-	FailureReason      string             `json:"failure_reason"`
-	PackagesJson       json.RawMessage    `json:"packages_json"`
-	GuestsJson         json.RawMessage    `json:"guests_json"`
-	DrainStartedAt     pgtype.Timestamptz `json:"drain_started_at"`
-	DrainCompletedAt   pgtype.Timestamptz `json:"drain_completed_at"`
-	UpgradeConfirmedAt pgtype.Timestamptz `json:"upgrade_confirmed_at"`
-	RebootStartedAt    pgtype.Timestamptz `json:"reboot_started_at"`
-	RebootCompletedAt  pgtype.Timestamptz `json:"reboot_completed_at"`
-	HealthCheckAt      pgtype.Timestamptz `json:"health_check_at"`
-	RestoreStartedAt   pgtype.Timestamptz `json:"restore_started_at"`
-	RestoreCompletedAt pgtype.Timestamptz `json:"restore_completed_at"`
-	CreatedAt          time.Time          `json:"created_at"`
-	UpdatedAt          time.Time          `json:"updated_at"`
-	UpgradeStartedAt   pgtype.Timestamptz `json:"upgrade_started_at"`
-	UpgradeCompletedAt pgtype.Timestamptz `json:"upgrade_completed_at"`
-	UpgradeOutput      string             `json:"upgrade_output"`
-	DisabledHaRules    json.RawMessage    `json:"disabled_ha_rules"`
-	SkipReason         string             `json:"skip_reason"`
+	ID                     uuid.UUID          `json:"id"`
+	JobID                  uuid.UUID          `json:"job_id"`
+	NodeName               string             `json:"node_name"`
+	NodeOrder              int32              `json:"node_order"`
+	Step                   string             `json:"step"`
+	FailureReason          string             `json:"failure_reason"`
+	PackagesJson           json.RawMessage    `json:"packages_json"`
+	GuestsJson             json.RawMessage    `json:"guests_json"`
+	DrainStartedAt         pgtype.Timestamptz `json:"drain_started_at"`
+	DrainCompletedAt       pgtype.Timestamptz `json:"drain_completed_at"`
+	UpgradeConfirmedAt     pgtype.Timestamptz `json:"upgrade_confirmed_at"`
+	RebootStartedAt        pgtype.Timestamptz `json:"reboot_started_at"`
+	RebootCompletedAt      pgtype.Timestamptz `json:"reboot_completed_at"`
+	HealthCheckAt          pgtype.Timestamptz `json:"health_check_at"`
+	RestoreStartedAt       pgtype.Timestamptz `json:"restore_started_at"`
+	RestoreCompletedAt     pgtype.Timestamptz `json:"restore_completed_at"`
+	CreatedAt              time.Time          `json:"created_at"`
+	UpdatedAt              time.Time          `json:"updated_at"`
+	UpgradeStartedAt       pgtype.Timestamptz `json:"upgrade_started_at"`
+	UpgradeCompletedAt     pgtype.Timestamptz `json:"upgrade_completed_at"`
+	UpgradeOutput          string             `json:"upgrade_output"`
+	DisabledHaRules        json.RawMessage    `json:"disabled_ha_rules"`
+	SkipReason             string             `json:"skip_reason"`
+	StoppedPassthroughJson []byte             `json:"stopped_passthrough_json"`
 }
 
 type ScheduledTask struct {

@@ -15,11 +15,15 @@ import (
 type Querier interface {
 	AcknowledgeAlert(ctx context.Context, arg AcknowledgeAlertParams) error
 	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
+	// ArmJobCleanupPending re-arms the sweep when held state is recorded onto a
+	// job that already reached a terminal status (the startNode cancel race);
+	// a no-op for active jobs, whose terminal transition sets the flag itself.
+	ArmJobCleanupPending(ctx context.Context, id uuid.UUID) error
 	AssignUserRole(ctx context.Context, arg AssignUserRoleParams) (UserRole, error)
 	AssignVMToFolder(ctx context.Context, arg AssignVMToFolderParams) error
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) error
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
-	CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) (int64, error)
 	CancelVMImportJob(ctx context.Context, id uuid.UUID) error
 	CheckUserPermission(ctx context.Context, arg CheckUserPermissionParams) (bool, error)
 	// Atomically claims due tasks so concurrent schedulers (e.g. during leader
@@ -35,9 +39,21 @@ type Querier interface {
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
+	// ClearJobCleanupPending is self-guarding: the flag only clears when no
+	// job-level marker and no node-level record still holds state, so a release
+	// racing a concurrent record-write cannot retire the job from the sweep
+	// while something is still held. (Node columns left NULL by pre-000073
+	// versions don't block the clear — the release path materializes them to
+	// explicit lists on its first pass.)
+	ClearJobCleanupPending(ctx context.Context, id uuid.UUID) error
+	ClearJobNativeCRSPaused(ctx context.Context, id uuid.UUID) error
 	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
-	CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	// Terminal transitions set cleanup_pending: the job may still hold cluster
+	// state (DRS pause, native CRS pause, disabled HA rules, stopped passthrough
+	// guests). The orchestrator's cleanup sweep re-checks flagged jobs until
+	// every held resource is confirmed released, then clears the flag.
+	CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) (int64, error)
 	CompleteVMImportJob(ctx context.Context, id uuid.UUID) error
 	ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) error
 	CountActiveAPIKeysByUser(ctx context.Context, userID uuid.UUID) (int64, error)
@@ -161,8 +177,8 @@ type Querier interface {
 	// the resources payload was well-formed before treating it as authoritative.
 	DeleteVMsAbsentFromCluster(ctx context.Context, arg DeleteVMsAbsentFromClusterParams) (int64, error)
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
-	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) error
-	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) error
+	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) (int64, error)
+	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) (int64, error)
 	// FailStaleCVEScans abandons scans stuck in running/pending — a panic, hard
 	// crash, or restart mid-scan otherwise leaves the row blocking every future
 	// manual trigger forever (the 409 concurrent-scan guard keys off the latest
@@ -284,6 +300,7 @@ type Querier interface {
 	GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetricsParams) ([]GetVMRecentMetricsRow, error)
 	HasClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	HasRunningJobForCluster(ctx context.Context, clusterID uuid.UUID) (bool, error)
+	IncrementJobCleanupAttempts(ctx context.Context, id uuid.UUID) (int32, error)
 	// Alert History
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
 	// Alert Rules
@@ -345,6 +362,7 @@ type Querier interface {
 	ListCVEScanVulnsBySeverity(ctx context.Context, arg ListCVEScanVulnsBySeverityParams) ([]CveScanVuln, error)
 	ListCVEScanVulnsKEV(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
 	ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]CveScan, error)
+	ListCleanupPendingJobsForCluster(ctx context.Context, clusterID uuid.UUID) ([]RollingUpdateJob, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListDRSHistory(ctx context.Context, arg ListDRSHistoryParams) ([]DrsHistory, error)
@@ -427,6 +445,7 @@ type Querier interface {
 	ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpdateJobsParams) ([]RollingUpdateJob, error)
+	ListRollingUpdateJobsNeedingCleanup(ctx context.Context) ([]RollingUpdateJob, error)
 	ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) ([]RollingUpdateNode, error)
 	// Nodes whose root filesystem is at or above 85% usage.
 	ListRootfsFullNodes(ctx context.Context) ([]ListRootfsFullNodesRow, error)
@@ -497,9 +516,13 @@ type Querier interface {
 	RevokeUserRole(ctx context.Context, arg RevokeUserRoleParams) error
 	SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error
 	SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabledParams) error
+	SetJobDisabledHARules(ctx context.Context, arg SetJobDisabledHARulesParams) error
 	SetJobNativeCRSPaused(ctx context.Context, arg SetJobNativeCRSPausedParams) error
 	SetLDAPUserActive(ctx context.Context, arg SetLDAPUserActiveParams) error
 	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
+	// Legacy: new code records disabled HA rules at job scope (see
+	// SetJobDisabledHARules); this remains only so the release path can clear
+	// per-node records written by pre-000073 versions.
 	SetNodeDisabledHARules(ctx context.Context, arg SetNodeDisabledHARulesParams) error
 	SetNodeDrainCompletedAuto(ctx context.Context, id uuid.UUID) error
 	SetNodeDrainCompletedManual(ctx context.Context, id uuid.UUID) error
@@ -511,6 +534,7 @@ type Querier interface {
 	SetNodeRebootStarted(ctx context.Context, id uuid.UUID) error
 	SetNodeRestoreCompleted(ctx context.Context, id uuid.UUID) error
 	SetNodeRestoreStarted(ctx context.Context, id uuid.UUID) error
+	SetNodeStoppedPassthrough(ctx context.Context, arg SetNodeStoppedPassthroughParams) error
 	SetNodeUpgradeCompleted(ctx context.Context, id uuid.UUID) error
 	SetNodeUpgradeCompletedNoReboot(ctx context.Context, id uuid.UUID) error
 	SetNodeUpgradeOutput(ctx context.Context, arg SetNodeUpgradeOutputParams) error
@@ -524,7 +548,7 @@ type Querier interface {
 	SetVMConfigOSType(ctx context.Context, arg SetVMConfigOSTypeParams) error
 	SetVMImportJobUPID(ctx context.Context, arg SetVMImportJobUPIDParams) error
 	SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error
-	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) error
+	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) (int64, error)
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	StartVMImportJob(ctx context.Context, id uuid.UUID) error

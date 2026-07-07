@@ -22,19 +22,24 @@ UPDATE rolling_update_jobs
 SET status = 'running', started_at = now(), updated_at = now()
 WHERE id = $1 AND status = 'pending';
 
--- name: CompleteRollingUpdateJob :exec
-UPDATE rolling_update_jobs
-SET status = 'completed', completed_at = now(), updated_at = now()
-WHERE id = $1;
+-- Terminal transitions set cleanup_pending: the job may still hold cluster
+-- state (DRS pause, native CRS pause, disabled HA rules, stopped passthrough
+-- guests). The orchestrator's cleanup sweep re-checks flagged jobs until
+-- every held resource is confirmed released, then clears the flag.
 
--- name: FailRollingUpdateJob :exec
+-- name: CompleteRollingUpdateJob :execrows
 UPDATE rolling_update_jobs
-SET status = 'failed', failure_reason = $2, completed_at = now(), updated_at = now()
-WHERE id = $1;
+SET status = 'completed', cleanup_pending = true, completed_at = now(), updated_at = now()
+WHERE id = $1 AND status IN ('pending', 'running', 'paused');
 
--- name: CancelRollingUpdateJob :exec
+-- name: FailRollingUpdateJob :execrows
 UPDATE rolling_update_jobs
-SET status = 'cancelled', completed_at = now(), updated_at = now()
+SET status = 'failed', failure_reason = $2, cleanup_pending = true, completed_at = now(), updated_at = now()
+WHERE id = $1 AND status IN ('pending', 'running', 'paused');
+
+-- name: CancelRollingUpdateJob :execrows
+UPDATE rolling_update_jobs
+SET status = 'cancelled', cleanup_pending = true, completed_at = now(), updated_at = now()
 WHERE id = $1 AND status IN ('pending', 'running', 'paused');
 
 -- name: PauseRollingUpdateJob :exec
@@ -76,12 +81,12 @@ UPDATE rolling_update_nodes
 SET step = $2, updated_at = now()
 WHERE id = $1;
 
--- name: FailRollingUpdateNode :exec
+-- name: FailRollingUpdateNode :execrows
 UPDATE rolling_update_nodes
 SET step = 'failed', failure_reason = $2, updated_at = now()
-WHERE id = $1;
+WHERE id = $1 AND step NOT IN ('completed', 'failed', 'skipped');
 
--- name: SkipRollingUpdateNode :exec
+-- name: SkipRollingUpdateNode :execrows
 UPDATE rolling_update_nodes
 SET step = 'skipped', skip_reason = $2, updated_at = now()
 WHERE id = $1 AND step = 'pending';
@@ -184,10 +189,76 @@ SELECT
 FROM rolling_update_nodes
 WHERE job_id = $1;
 
+-- Legacy: new code records disabled HA rules at job scope (see
+-- SetJobDisabledHARules); this remains only so the release path can clear
+-- per-node records written by pre-000073 versions.
 -- name: SetNodeDisabledHARules :exec
 UPDATE rolling_update_nodes
 SET disabled_ha_rules = $2, updated_at = now()
 WHERE id = $1;
+
+-- name: SetJobDisabledHARules :exec
+UPDATE rolling_update_jobs
+SET disabled_ha_rules = $2, updated_at = now()
+WHERE id = $1;
+
+-- name: ClearJobNativeCRSPaused :exec
+UPDATE rolling_update_jobs
+SET native_crs_paused = false, updated_at = now()
+WHERE id = $1;
+
+-- name: SetNodeStoppedPassthrough :exec
+UPDATE rolling_update_nodes
+SET stopped_passthrough_json = $2, updated_at = now()
+WHERE id = $1;
+
+-- ClearJobCleanupPending is self-guarding: the flag only clears when no
+-- job-level marker and no node-level record still holds state, so a release
+-- racing a concurrent record-write cannot retire the job from the sweep
+-- while something is still held. (Node columns left NULL by pre-000073
+-- versions don't block the clear — the release path materializes them to
+-- explicit lists on its first pass.)
+-- name: ClearJobCleanupPending :exec
+UPDATE rolling_update_jobs
+SET cleanup_pending = false, updated_at = now()
+WHERE rolling_update_jobs.id = $1
+  AND rolling_update_jobs.drs_was_enabled = false
+  AND rolling_update_jobs.native_crs_paused = false
+  AND (rolling_update_jobs.disabled_ha_rules IS NULL OR rolling_update_jobs.disabled_ha_rules::text IN ('null', '[]'))
+  AND NOT EXISTS (
+      SELECT 1 FROM rolling_update_nodes n
+      WHERE n.job_id = rolling_update_jobs.id
+        AND ((n.disabled_ha_rules IS NOT NULL AND n.disabled_ha_rules::text NOT IN ('null', '[]'))
+          OR (n.stopped_passthrough_json IS NOT NULL AND n.stopped_passthrough_json::text NOT IN ('null', '[]')))
+  );
+
+-- ArmJobCleanupPending re-arms the sweep when held state is recorded onto a
+-- job that already reached a terminal status (the startNode cancel race);
+-- a no-op for active jobs, whose terminal transition sets the flag itself.
+-- name: ArmJobCleanupPending :exec
+UPDATE rolling_update_jobs
+SET cleanup_pending = true, updated_at = now()
+WHERE id = $1 AND status IN ('completed', 'failed', 'cancelled');
+
+-- name: IncrementJobCleanupAttempts :one
+UPDATE rolling_update_jobs
+SET cleanup_attempts = cleanup_attempts + 1, updated_at = now()
+WHERE id = $1
+RETURNING cleanup_attempts;
+
+-- name: ListRollingUpdateJobsNeedingCleanup :many
+SELECT * FROM rolling_update_jobs
+WHERE cleanup_pending = true
+  AND status IN ('completed', 'failed', 'cancelled')
+ORDER BY updated_at
+LIMIT 20;
+
+-- name: ListCleanupPendingJobsForCluster :many
+SELECT * FROM rolling_update_jobs
+WHERE cluster_id = $1
+  AND cleanup_pending = true
+  AND status IN ('completed', 'failed', 'cancelled')
+ORDER BY updated_at;
 
 -- name: SetJobDRSWasEnabled :exec
 UPDATE rolling_update_jobs

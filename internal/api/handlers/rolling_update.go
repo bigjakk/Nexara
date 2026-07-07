@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
@@ -244,6 +245,24 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusConflict, "A rolling update job is already active for this cluster")
 	}
 
+	// A prior job whose cleanup is still pending holds cluster state (paused
+	// native CRS, disabled HA rules, stopped passthrough guests). Starting a
+	// new job under it is unsafe: the deferred cleanup sweep would restore
+	// that state mid-drain — e.g. re-enable the CRS auto-rebalancer while
+	// this job is draining a node. The cluster must be reachable to run a
+	// job anyway, so try the release synchronously right now and only refuse
+	// if something still couldn't be released.
+	pendingJobs, err := h.queries.ListCleanupPendingJobsForCluster(c.Context(), clusterID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check for pending cleanup")
+	}
+	for _, pj := range pendingJobs {
+		if released, _ := h.orchestrator.ReleaseJobState(c.Context(), pj.ID); !released {
+			return fiber.NewError(fiber.StatusConflict,
+				"A previous rolling update still holds cluster state (paused CRS auto-rebalance, disabled HA rules, or stopped guests) and it could not be released right now. Cleanup retries automatically — resolve cluster connectivity and try again.")
+		}
+	}
+
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	rebootAfter := false
@@ -455,8 +474,12 @@ func (h *RollingUpdateHandler) CancelJob(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusNotFound, "Rolling update job not found")
 	}
 
-	if err := h.queries.CancelRollingUpdateJob(c.Context(), jobID); err != nil {
+	rows, err := h.queries.CancelRollingUpdateJob(c.Context(), jobID)
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to cancel job")
+	}
+	if rows == 0 {
+		return fiber.NewError(fiber.StatusBadRequest, "Job is not active (already finished or cancelled)")
 	}
 
 	// Release everything the job still holds — the DRS pause, the native CRS
@@ -641,11 +664,24 @@ func (h *RollingUpdateHandler) SkipNode(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Node does not belong to this job")
 	}
 
-	if err := h.queries.SkipRollingUpdateNode(c.Context(), db.SkipRollingUpdateNodeParams{
+	rows, err := h.queries.SkipRollingUpdateNode(c.Context(), db.SkipRollingUpdateNodeParams{
 		ID:         nodeID,
 		SkipReason: "manually skipped by user",
-	}); err != nil {
+	})
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to skip node")
+	}
+	if rows == 0 {
+		// The guarded UPDATE matched nothing — the node already started (it
+		// may hold drained guests and disabled HA rules) or already finished.
+		// Re-read for the message: the step from the pre-check read may be
+		// stale (the orchestrator can start the node between read and update).
+		step := node.Step
+		if fresh, ferr := h.queries.GetRollingUpdateNode(c.Context(), nodeID); ferr == nil {
+			step = fresh.Step
+		}
+		return fiber.NewError(fiber.StatusBadRequest,
+			fmt.Sprintf("Node cannot be skipped in step %q — only nodes that have not started can be skipped", step))
 	}
 
 	details, _ := json.Marshal(map[string]string{"node": node.NodeName})
