@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true
@@ -84,7 +84,7 @@ jobs:
           echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -117,6 +117,8 @@ jobs:
           GH_TOKEN: ${{ secrets.PKG_VISIBILITY_TOKEN }}
 
       - name: Cleanup old package versions
+        # No Node 24 release of this action exists yet (latest is v5 / Node 20); GitHub
+        # force-runs it on Node 24. Bump when upstream ships a Node 24 version.
         uses: actions/delete-package-versions@v5
         with:
           package-name: nexara
@@ -132,7 +134,7 @@ jobs:
           scripts/generate-release-notes.sh "${{ steps.version.outputs.tag }}" > /tmp/release-notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Nexara ${{ steps.version.outputs.tag }}
