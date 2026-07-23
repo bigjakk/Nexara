@@ -18,8 +18,10 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
+import { StatusBadge } from "@/features/inventory/components/StatusBadge";
 import { apiClient } from "@/lib/api-client";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatUptime } from "@/lib/format";
 import type { VMResponse } from "@/types/api";
 import type { StorageContentItem } from "../types/storage";
 import { MigrateBatchDialog, type MigrateBatchJob } from "./MigrateBatchDialog";
@@ -36,6 +38,14 @@ interface GuestRow {
   guestId: string;
   guestKind: "vm" | "ct";
   name: string;
+  /** PVE power state (e.g. "running", "stopped"); "" when the guest is unknown. */
+  status: string;
+  /** Resolved host node name; "" when unknown. */
+  nodeName: string;
+  cpuCount: number;
+  memTotal: number;
+  uptime: number;
+  template: boolean;
   volumes: StorageContentItem[];
   totalBytes: number;
 }
@@ -63,12 +73,15 @@ export function StorageGuestTable({
     enabled: clusterId.length > 0,
     staleTime: 30_000,
   });
+  const nodesQuery = useClusterNodes(clusterId);
 
   const rows = useMemo<GuestRow[]>(() => {
     const byVmidVm = new Map<number, VMResponse>();
     for (const v of vmsQuery.data ?? []) byVmidVm.set(v.vmid, v);
     const byVmidCT = new Map<number, VMResponse>();
     for (const c of ctsQuery.data ?? []) byVmidCT.set(c.vmid, c);
+    const nodeNameById = new Map<string, string>();
+    for (const n of nodesQuery.data ?? []) nodeNameById.set(n.id, n.name);
 
     // Group items by (vmid, kind). Pick kind from item.content (images→vm,
     // rootdir→ct) since that matches Proxmox's storage content tagging.
@@ -89,13 +102,19 @@ export function StorageGuestTable({
         guestId: meta?.id ?? "",
         guestKind: kind,
         name: meta?.name ?? `(unknown ${kind === "ct" ? "container" : "VM"})`,
+        status: meta?.status ?? "",
+        nodeName: meta ? (nodeNameById.get(meta.node_id) ?? "") : "",
+        cpuCount: meta?.cpu_count ?? 0,
+        memTotal: meta?.mem_total ?? 0,
+        uptime: meta?.uptime ?? 0,
+        template: meta?.template ?? false,
         volumes: [item],
         totalBytes: item.size,
       });
     }
 
     return Array.from(groups.values()).sort((a, b) => a.vmid - b.vmid);
-  }, [items, vmsQuery.data, ctsQuery.data]);
+  }, [items, vmsQuery.data, ctsQuery.data, nodesQuery.data]);
 
   const allSelected = rows.length > 0 && selectedVmids.size === rows.length;
   const someSelected = selectedVmids.size > 0 && selectedVmids.size < rows.length;
@@ -192,8 +211,13 @@ export function StorageGuestTable({
               />
             </TableHead>
             <TableHead>Name</TableHead>
+            <TableHead>Status</TableHead>
             <TableHead>VMID</TableHead>
             <TableHead>Type</TableHead>
+            <TableHead>Node</TableHead>
+            <TableHead className="text-right">CPU</TableHead>
+            <TableHead className="text-right">Memory</TableHead>
+            <TableHead className="text-right">Uptime</TableHead>
             <TableHead className="text-right">Disks</TableHead>
             <TableHead className="text-right">Total size</TableHead>
             <TableHead className="w-20" />
@@ -221,14 +245,36 @@ export function StorageGuestTable({
                       ) : (
                         <Server className="h-4 w-4 text-muted-foreground" />
                       )}
-                      {row.name}
+                      <span>{row.name}</span>
+                      {row.template && (
+                        <Badge variant="secondary" className="text-xs">
+                          Template
+                        </Badge>
+                      )}
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    {row.status ? (
+                      <StatusBadge status={row.status} />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs">{row.vmid}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className="text-xs">
                       {row.guestKind === "ct" ? "CT" : "VM"}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs">{row.nodeName || "—"}</TableCell>
+                  <TableCell className="text-right text-xs">
+                    {row.cpuCount > 0 ? row.cpuCount : "—"}
+                  </TableCell>
+                  <TableCell className="text-right text-xs">
+                    {row.memTotal > 0 ? formatBytes(row.memTotal) : "—"}
+                  </TableCell>
+                  <TableCell className="text-right text-xs">
+                    {formatUptime(row.uptime, "—")}
                   </TableCell>
                   <TableCell className="text-right text-xs">
                     {row.volumes.length}
