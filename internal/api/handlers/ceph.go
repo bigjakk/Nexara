@@ -191,29 +191,35 @@ func (h *CephHandler) ListOSDs(c fiber.Ctx) error {
 
 // flattenOSDTree walks the OSD tree and returns flat OSD entries.
 func flattenOSDTree(node *proxmox.CephOSDTreeNode) []cephOSDResponse {
-	var result []cephOSDResponse
+	return appendTreeOSDs(nil, node, "")
+}
+
+// appendTreeOSDs walks the CRUSH tree carrying the enclosing host bucket's name
+// down, so OSDs that don't repeat it inline still resolve to a node — the OSD
+// lifecycle handlers address daemon actions by host, so this must be populated.
+func appendTreeOSDs(dst []cephOSDResponse, node *proxmox.CephOSDTreeNode, host string) []cephOSDResponse {
+	if node.Type == "host" && node.Name != "" {
+		host = node.Name
+	}
 	if node.Type == "osd" {
-		result = append(result, cephOSDResponse{
+		osdHost := node.Host
+		if osdHost == "" {
+			osdHost = host
+		}
+		dst = append(dst, cephOSDResponse{
 			ID:          int(node.ID),
 			Name:        node.Name,
-			Host:        node.Host,
+			Host:        osdHost,
 			Up:          boolToInt(node.Status == "up"),
-			In:          1,
+			In:          boolToInt(node.IsIn()),
 			Status:      node.Status,
 			CrushWeight: node.CrushWeight,
 		})
 	}
 	for i := range node.Children {
-		if node.Type == "host" {
-			for j := range node.Children {
-				if node.Children[j].Host == "" {
-					node.Children[j].Host = node.Name
-				}
-			}
-		}
-		result = append(result, flattenOSDTree(&node.Children[i])...)
+		dst = appendTreeOSDs(dst, &node.Children[i], host)
 	}
-	return result
+	return dst
 }
 
 func boolToInt(b bool) int {

@@ -35,6 +35,7 @@ const resourceTypes = [
   { value: "cluster", label: "Cluster" },
   { value: "storage", label: "Storage" },
   { value: "ceph_pool", label: "Ceph Pool" },
+  { value: "ceph_osd", label: "Ceph OSD" },
   { value: "auth", label: "Auth" },
   { value: "task", label: "Task" },
   { value: "drs", label: "DRS" },

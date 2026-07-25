@@ -48,6 +48,45 @@ export interface CephOSD {
   crush_weight: number;
 }
 
+/** OSD lifecycle actions. `in`/`out` are CRUSH membership changes applied
+ *  immediately; `start`/`stop`/`restart` control the daemon and return a task. */
+export type CephOSDAction = "in" | "out" | "start" | "stop" | "restart";
+
+export interface CephPoolConstraint {
+  pool_name: string;
+  size: number;
+  min_size: number;
+}
+
+export type CephPreflightSeverity = "ok" | "warning" | "critical";
+
+/** Advisory redundancy assessment for an OSD action. Never blocks the action —
+ *  it shows what the action costs so the operator can decide. */
+export interface CephOSDPreflight {
+  osd_id: number;
+  action: CephOSDAction;
+  disruptive: boolean;
+  severity: CephPreflightSeverity;
+  osds_total: number;
+  osds_serving: number;
+  osds_serving_after: number;
+  hosts_serving: number;
+  hosts_serving_after: number;
+  max_pool_size: number;
+  max_pool_min_size: number;
+  pools: CephPoolConstraint[];
+  warnings: string[];
+}
+
+export interface CephOSDActionResponse {
+  status: string;
+  osd: string;
+  action: CephOSDAction;
+  node?: string;
+  /** Present only for daemon actions, which Proxmox runs as a task. */
+  upid?: string;
+}
+
 export interface CephPool {
   pool_name: string;
   pool: number;

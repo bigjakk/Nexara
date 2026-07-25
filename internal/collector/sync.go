@@ -1211,30 +1211,34 @@ func (s *Syncer) syncCeph(ctx context.Context, client ProxmoxClient, clusterID u
 
 // flattenOSDs walks the OSD tree and extracts OSD nodes.
 func flattenOSDs(clusterID uuid.UUID, node *proxmox.CephOSDTreeNode) []cephOSDMetricSnapshot {
-	var result []cephOSDMetricSnapshot
+	return appendOSDSnapshots(nil, clusterID, node, "")
+}
+
+// appendOSDSnapshots walks the CRUSH tree carrying the enclosing host bucket's
+// name down, so OSDs that don't repeat it inline still resolve to a node.
+func appendOSDSnapshots(dst []cephOSDMetricSnapshot, clusterID uuid.UUID, node *proxmox.CephOSDTreeNode, host string) []cephOSDMetricSnapshot {
+	if node.Type == "host" && node.Name != "" {
+		host = node.Name
+	}
 	if node.Type == "osd" {
-		result = append(result, cephOSDMetricSnapshot{
+		osdHost := node.Host
+		if osdHost == "" {
+			osdHost = host
+		}
+		dst = append(dst, cephOSDMetricSnapshot{
 			ClusterID:   clusterID,
 			OSDID:       int(node.ID),
 			OSDName:     node.Name,
-			Host:        node.Host,
+			Host:        osdHost,
 			StatusUp:    node.Status == "up",
-			StatusIn:    true, // present in tree means "in"
+			StatusIn:    node.IsIn(),
 			CrushWeight: node.CrushWeight,
 		})
 	}
 	for i := range node.Children {
-		// Propagate host name to child OSDs
-		if node.Type == "host" {
-			for j := range node.Children {
-				if node.Children[j].Host == "" {
-					node.Children[j].Host = node.Name
-				}
-			}
-		}
-		result = append(result, flattenOSDs(clusterID, &node.Children[i])...)
+		dst = appendOSDSnapshots(dst, clusterID, &node.Children[i], host)
 	}
-	return result
+	return dst
 }
 
 // SyncAllPBS syncs all active PBS servers and returns collected metric results.

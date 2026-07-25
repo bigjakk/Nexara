@@ -385,6 +385,12 @@ Import VMs from ESXi/vCenter sources, OVA/OVF appliances, or disk images. Reads 
 | GET | `/clusters/:id/ceph/rules` | List CRUSH rules |
 | POST | `/clusters/:id/ceph/pools` | Create Ceph pool |
 | DELETE | `/clusters/:id/ceph/pools/:name` | Delete Ceph pool |
+| GET | `/clusters/:id/ceph/osds/:osd_id/preflight?action=` | Assess the redundancy impact of an OSD action |
+| POST | `/clusters/:id/ceph/osds/:osd_id/in` | Mark OSD in |
+| POST | `/clusters/:id/ceph/osds/:osd_id/out` | Mark OSD out |
+| POST | `/clusters/:id/ceph/osds/:osd_id/start` | Start OSD daemon |
+| POST | `/clusters/:id/ceph/osds/:osd_id/stop` | Stop OSD daemon |
+| POST | `/clusters/:id/ceph/osds/:osd_id/restart` | Restart OSD daemon |
 | GET | `/clusters/:id/ceph/metrics` | Get Ceph historical metrics |
 | GET | `/clusters/:id/ceph/osds/metrics` | Get OSD metrics |
 | GET | `/clusters/:id/ceph/pools/metrics` | Get pool metrics |

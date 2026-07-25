@@ -439,3 +439,74 @@ func (c *Client) DeleteCephPool(ctx context.Context, node, poolName string) erro
 	}
 	return nil
 }
+
+// cephOSDInOutActions are the mon-level OSD membership commands. Unlike the
+// daemon actions below these run synchronously and return no task UPID.
+var cephOSDInOutActions = map[string]bool{"in": true, "out": true}
+
+// cephDaemonActions are the systemd-level Ceph daemon commands exposed at
+// POST /nodes/{node}/ceph/{action}.
+var cephDaemonActions = map[string]bool{"start": true, "stop": true, "restart": true}
+
+// SetCephOSDIn marks an OSD "in" — eligible to hold data — via
+// POST /nodes/{node}/ceph/osd/{osdid}/in. Ceph begins backfilling PGs onto it.
+func (c *Client) SetCephOSDIn(ctx context.Context, node string, osdID int) error {
+	return c.setCephOSDInOut(ctx, node, osdID, "in")
+}
+
+// SetCephOSDOut marks an OSD "out" via POST /nodes/{node}/ceph/osd/{osdid}/out.
+// The daemon keeps running but Ceph remaps its PGs onto the remaining OSDs.
+func (c *Client) SetCephOSDOut(ctx context.Context, node string, osdID int) error {
+	return c.setCephOSDInOut(ctx, node, osdID, "out")
+}
+
+// setCephOSDInOut issues an OSD in/out mon command. Any node in the cluster can
+// serve it — the request does not have to reach the OSD's own host.
+func (c *Client) setCephOSDInOut(ctx context.Context, node string, osdID int, action string) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if osdID < 0 {
+		return fmt.Errorf("invalid OSD ID %d", osdID)
+	}
+	if !cephOSDInOutActions[action] {
+		return fmt.Errorf("invalid OSD membership action %q", action)
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/ceph/osd/" + strconv.Itoa(osdID) + "/" + action
+	if err := c.doPost(ctx, path, nil, nil); err != nil {
+		return fmt.Errorf("mark osd.%d %s on %s: %w", osdID, action, node, err)
+	}
+	return nil
+}
+
+// CephServiceAction starts, stops or restarts a Ceph daemon via
+// POST /nodes/{node}/ceph/{action} with service=<type>.<id> (e.g. "osd.3"), and
+// returns the UPID of the resulting Proxmox task.
+//
+// Unlike the in/out mon commands this is a systemd operation, so node MUST be
+// the host actually running the daemon.
+func (c *Client) CephServiceAction(ctx context.Context, node, service, action string) (string, error) {
+	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if !cephDaemonActions[action] {
+		return "", fmt.Errorf("invalid ceph daemon action %q", action)
+	}
+	if !cephServicePattern.MatchString(service) {
+		return "", fmt.Errorf("invalid ceph service name %q", service)
+	}
+	form := url.Values{}
+	form.Set("service", service)
+
+	var upid string
+	path := "/nodes/" + url.PathEscape(node) + "/ceph/" + action
+	if err := c.doPost(ctx, path, form, &upid); err != nil {
+		return "", fmt.Errorf("%s ceph service %s on %s: %w", action, service, node, err)
+	}
+	return upid, nil
+}
+
+// cephServicePattern mirrors the Proxmox API's own `service` parameter format,
+// e.g. "osd.3", "mon.pve1". An unqualified type ("osd") would target every
+// daemon of that type on the node, so the id suffix is required here.
+var cephServicePattern = regexp.MustCompile(`^(mon|mds|osd|mgr)\.[A-Za-z0-9\-]{1,200}$`)

@@ -48,6 +48,10 @@ var upidMethods = map[string]bool{
 	"MigrateAllGuests": true, "ServiceAction": true, "RefreshNodeAptIndex": true,
 	"OrderNodeCertificate": true, "RenewNodeCertificate": true, "RevokeNodeCertificate": true,
 
+	// Ceph (internal/proxmox/client_storage.go). Note the OSD in/out mon
+	// commands are NOT here: they return no UPID, so their handlers AuditLog.
+	"CephServiceAction": true,
+
 	// Replication / storage / backup / acme
 	"TriggerReplication":   true,
 	"UploadToStorage":      true,

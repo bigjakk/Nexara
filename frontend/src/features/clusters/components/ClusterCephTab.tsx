@@ -107,7 +107,7 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
 
         <TabsContent value="osds" className="space-y-4">
           <OSDGrid osds={osds} />
-          <OSDTable osds={osds} />
+          <OSDTable osds={osds} clusterId={clusterId} />
         </TabsContent>
 
         <TabsContent value="pools" className="space-y-4">

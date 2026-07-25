@@ -390,6 +390,32 @@ func (fi *FlexInt) UnmarshalJSON(b []byte) error {
 	return fmt.Errorf("FlexInt: cannot unmarshal %s", string(b))
 }
 
+// FlexBool decodes a Proxmox boolean that may arrive as 0/1, true/false, or
+// "0"/"1" depending on the endpoint and PVE release.
+type FlexBool bool
+
+func (fb *FlexBool) UnmarshalJSON(b []byte) error {
+	var n int
+	if err := json.Unmarshal(b, &n); err == nil {
+		*fb = n != 0
+		return nil
+	}
+	var v bool
+	if err := json.Unmarshal(b, &v); err == nil {
+		*fb = FlexBool(v)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		// ParseBool covers "1"/"0"/"true"/"false"/"t"/"f"; anything else is
+		// treated as false rather than failing the surrounding response.
+		parsed, err := strconv.ParseBool(s)
+		*fb = FlexBool(err == nil && parsed)
+		return nil
+	}
+	return fmt.Errorf("FlexBool: cannot unmarshal %s", string(b))
+}
+
 // TermProxyResponse holds the response from a termproxy or vncproxy POST request.
 type TermProxyResponse struct {
 	Port     FlexInt `json:"port"`
@@ -814,6 +840,20 @@ type CephOSDTreeNode struct {
 	Host     string            `json:"host,omitempty"`
 	Children []CephOSDTreeNode `json:"children,omitempty"`
 	CrushWeight float64        `json:"crush_weight,omitempty"`
+	// In reports whether the OSD is "in" the CRUSH map (eligible to hold data),
+	// as opposed to Status which reports whether its daemon is up. Proxmox omits
+	// it on non-OSD tree nodes, so it is a pointer: nil means "not reported" and
+	// callers fall back to assuming in — the behaviour before this field existed.
+	In *FlexBool `json:"in,omitempty"`
+}
+
+// IsIn reports whether the OSD is in the CRUSH map, defaulting to true when
+// Proxmox did not report the field (older releases, or non-OSD tree nodes).
+func (n *CephOSDTreeNode) IsIn() bool {
+	if n.In == nil {
+		return true
+	}
+	return bool(*n.In)
 }
 
 
