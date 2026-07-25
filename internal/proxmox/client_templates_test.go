@@ -414,7 +414,48 @@ func TestValidateStorageFilename(t *testing.T) {
 // loosening either one in isolation fails here rather than in production as an
 // undeletable volume.
 func TestStorageFilenamesProduceDeletableVolids(t *testing.T) {
-	filenames := []string{
+	corpus := volidInvariantCorpus()
+
+	var accepted, rejected int
+	for _, storage := range []string{"local", "local-lvm", "nfs.backup-01"} {
+		// Every content directory Proxmox files an uploaded volume under, plus
+		// the per-VMID directory used for disk images.
+		for _, contentDir := range []string{"iso", "vztmpl", "import", "backup", "100"} {
+			for _, filename := range corpus {
+				if err := ValidateStorageFilename(filename); err != nil {
+					rejected++
+					continue
+				}
+				accepted++
+				volid := storage + ":" + contentDir + "/" + filename
+				if err := validateVolumeID(volid); err != nil {
+					t.Errorf("ValidateStorageFilename accepted %q, but the volume id it produces "+
+						"(%q) is rejected by validateVolumeID: %v", filename, volid, err)
+				}
+			}
+		}
+	}
+
+	// The invariant is an implication, so it holds vacuously over a corpus that
+	// is entirely accepted or entirely rejected. Both counts must be non-zero
+	// for the loop above to have tested anything.
+	if accepted == 0 {
+		t.Error("no filename in the corpus was accepted — the invariant went untested")
+	}
+	if rejected == 0 {
+		t.Error("no filename in the corpus was rejected — the corpus cannot catch a dropped rule")
+	}
+}
+
+// volidInvariantCorpus is deliberately hostile. The invariant above is an
+// implication — accepted filename implies deletable volume id — which any
+// corpus of already-safe names satisfies without exercising a single rule.
+// Feeding in names that MUST be rejected is what gives it teeth: drop a rule
+// from ValidateStorageFilename and the matching entry here becomes accepted,
+// produces a volume id validateVolumeID rejects, and the test fails.
+func volidInvariantCorpus() []string {
+	corpus := []string{
+		// Names Proxmox and real users produce.
 		"debian-12.7.0-amd64-netinst.iso",
 		"debian-12-standard_12.7-1_amd64.tar.zst",
 		"vzdump-qemu-100-2024_01_01-00_00_00.vma.zst",
@@ -422,19 +463,27 @@ func TestStorageFilenamesProduceDeletableVolids(t *testing.T) {
 		"ubuntu (1).iso",
 		"img+extra~1.iso",
 		"appliance.ova",
+
+		// Path structure.
+		"", ".", "..", "a/b", `a\b`, "..hidden", "../../etc/passwd", "a//b",
+
+		// The forbidden set — the whole premise of the shared constant.
+		"50%off.iso", "test#1.iso", "what?.iso", "%2e%2e%2f.iso",
+
+		// Length, either side of the 255-byte limit.
+		strings.Repeat("a", 255),
+		strings.Repeat("a", 256),
 	}
 
-	// Every content directory Proxmox files an uploaded volume under.
-	for _, contentDir := range []string{"iso", "vztmpl", "import", "backup"} {
-		for _, filename := range filenames {
-			if err := ValidateStorageFilename(filename); err != nil {
-				t.Errorf("ValidateStorageFilename(%q) = %v, want nil", filename, err)
-				continue
-			}
-			volid := "local:" + contentDir + "/" + filename
-			if err := validateVolumeID(volid); err != nil {
-				t.Errorf("created %q but validateVolumeID rejects it: %v", volid, err)
-			}
-		}
+	// Every ASCII byte embedded in an otherwise-valid name, so no single
+	// character can be quietly dropped from the rules without failing here.
+	for b := 0; b < 128; b++ {
+		corpus = append(corpus, "file"+string(rune(b))+".iso")
 	}
+	// Non-ASCII runes, including the C1 range that must be rejected and the
+	// ordinary accented/CJK characters that must not be.
+	for _, r := range []rune{0x85, 0x9f, 0xa0, 0xef, 0x4e2d} {
+		corpus = append(corpus, "file"+string(r)+".iso")
+	}
+	return corpus
 }

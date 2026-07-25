@@ -178,16 +178,16 @@ func (c *Client) PullOCIImage(ctx context.Context, node, storage string, params 
 	}
 	if params.FileName != "" {
 		if len(params.FileName) > 64 {
-			return "", fmt.Errorf("filename exceeds 64 characters")
+			return "", fmt.Errorf("%w: filename exceeds 64 characters", ErrInvalidInput)
 		}
 		if !vztmplFilenamePattern.MatchString(params.FileName) {
-			return "", fmt.Errorf("filename contains invalid characters")
+			return "", fmt.Errorf("%w: filename contains invalid characters", ErrInvalidInput)
 		}
-		// The pattern permits dots, so a bare ".." slips through it. That is the
-		// one value here that could become an undeletable volume id, since the
-		// stored name depends on whether Proxmox appends its ".tar" suffix.
-		if strings.Contains(params.FileName, "..") {
-			return "", fmt.Errorf("filename must not contain %q", "..")
+		// The pattern permits dots, so bare "." and ".." slip through it. Those
+		// are the values here that could become an undeletable volume id, since
+		// the stored name depends on whether Proxmox appends its ".tar" suffix.
+		if params.FileName == "." || strings.Contains(params.FileName, "..") {
+			return "", fmt.Errorf("%w: filename %q is not a valid name", ErrInvalidInput, params.FileName)
 		}
 	}
 
@@ -368,7 +368,13 @@ func ValidateStorageFilename(filename string) error {
 	if len(filename) > 255 {
 		return fmt.Errorf("%w: filename too long (%d bytes)", ErrInvalidInput, len(filename))
 	}
-	if filename == "." || filename == ".." || strings.Contains(filename, "..") {
+	// "." and ".." get their own message: filepath.Base("") yields ".", so a
+	// multipart part with no filename lands here, and telling that caller their
+	// name "must not contain .." sends them hunting for dots that aren't there.
+	if filename == "." || filename == ".." {
+		return fmt.Errorf("%w: %q is not a valid filename", ErrInvalidInput, filename)
+	}
+	if strings.Contains(filename, "..") {
 		return fmt.Errorf("%w: filename %q must not contain %q", ErrInvalidInput, filename, "..")
 	}
 	if strings.ContainsAny(filename, `/\`) {
