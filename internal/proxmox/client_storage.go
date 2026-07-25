@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // ociReferencePattern is a pragmatic validator for Docker/OCI image references.
@@ -58,14 +59,103 @@ func (c *Client) DeleteStorageContent(ctx context.Context, node, storage, volume
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
+	if err := validateVolumeID(volume); err != nil {
+		return "", err
+	}
 	// Volume IDs contain ":" (storage:path) — PathEscape would over-encode it.
-	// Proxmox expects the volume as-is in the URL path.
+	// Proxmox expects the volume as-is in the URL path. validateVolumeID above
+	// is what makes interpolating it here safe.
 	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/content/" + volume
 	var upid string
 	if err := c.doDelete(ctx, path, &upid); err != nil {
 		return "", fmt.Errorf("delete volume %s on %s/%s: %w", volume, node, storage, err)
 	}
 	return upid, nil
+}
+
+// volumeStorageIDPattern matches the "storeid" half of a volume id.
+var volumeStorageIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// forbiddenVolumeIDChars are the characters that would let a volume id escape
+// its position in the request path:
+//
+//	%   smuggles an encoded "../" or "?" through for pveproxy to decode
+//	?   starts a query string, appending parameters to the outbound call
+//	#   starts a fragment, silently truncating the path
+//	\   is not valid in a PVE volume id and confuses path parsers
+//
+// Excluding "%" is the load-bearing one, and NOT because net/url would escape a
+// stray "%" for us — it would not. net/url is all-or-nothing: URL.EscapedPath
+// returns RawPath verbatim whenever validEncoded accepts it, and validEncoded
+// explicitly allows "%". So "local:iso/%2e%2e%2f%2e%2e%2faccess" reaches
+// Proxmox byte-for-byte and decodes to "../../access" on the far side —
+// verified against a capture server. Do not drop "%" from this set on the
+// assumption that the encoder cleans up after us.
+//
+// Everything else is safe to pass through. Bytes >= 0x80 are always
+// percent-encoded (net/url's escape is byte-wise), and the ASCII characters
+// that do survive literally — ! $ & ' ( ) * + , ; = : @ [ ] — carry no
+// structural meaning inside a path segment. So after this set and the segment
+// rules below, a volume id cannot leave the slot it occupies.
+const forbiddenVolumeIDChars = "%?#\\"
+
+// validateVolumeID checks a Proxmox volume id — "local:iso/debian-12.iso",
+// "local-lvm:vm-100-disk-0", "local:backup/vzdump-qemu-100-....vma.zst" —
+// before it is interpolated into a request path.
+//
+// The id is deliberately NOT percent-encoded on the way out, because Proxmox
+// matches the literal path: escaping would turn the "/" of "iso/debian-12.iso"
+// into %2F and break every file-based volume. That makes this function the only
+// thing standing between an operator-supplied string and a URL that is fetched
+// with the cluster's API token, so it rejects traversal outright rather than
+// relying on the far side to normalise.
+//
+// Accepted trade-off: a volume whose name contains one of forbiddenVolumeIDChars
+// cannot be deleted through this client. Proxmox will not mint such a name
+// itself, but Nexara's own upload and download-url handlers do not filter those
+// characters out of a caller-supplied filename, so it is possible to create one.
+// The fix for that belongs on the creating side — restricting a filename is safe,
+// whereas relaxing anything here reopens the path-injection hole.
+func validateVolumeID(volume string) error {
+	if volume == "" {
+		return fmt.Errorf("%w: volume id is required", ErrInvalidInput)
+	}
+	if len(volume) > 512 {
+		return fmt.Errorf("%w: volume id too long (%d bytes)", ErrInvalidInput, len(volume))
+	}
+	if i := strings.IndexAny(volume, forbiddenVolumeIDChars); i >= 0 {
+		return fmt.Errorf("%w: volume id %q contains %q", ErrInvalidInput, volume, volume[i])
+	}
+	// C0 controls, DEL, and the C1 range (U+0080–U+009F). This has to decode
+	// runes: C1 controls encode as 0xC2 0x80–0x9F in UTF-8, so a byte-wise scan
+	// for ASCII controls misses them entirely. None of these can split the
+	// request — net/url percent-encodes them — but they have no place in a
+	// volume id and would end up in Proxmox task and syslog output.
+	for _, r := range volume {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return fmt.Errorf("%w: volume id %q contains a control character", ErrInvalidInput, volume)
+		}
+	}
+
+	storage, name, ok := strings.Cut(volume, ":")
+	if !ok {
+		return fmt.Errorf("%w: volume id %q is not in \"storage:name\" form", ErrInvalidInput, volume)
+	}
+	if !volumeStorageIDPattern.MatchString(storage) {
+		return fmt.Errorf("%w: volume id %q has a bad storage name %q", ErrInvalidInput, volume, storage)
+	}
+	if name == "" {
+		return fmt.Errorf("%w: volume id %q is missing a volume name", ErrInvalidInput, volume)
+	}
+	// Reject "."/".." segments (traversal) and empty ones (a leading or doubled
+	// "/"). Dots *inside* a segment are left alone — "vzdump-qemu-100.vma.zst"
+	// and "ubuntu-24.04.1.iso" are ordinary names.
+	for _, segment := range strings.Split(name, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return fmt.Errorf("%w: volume id %q has a bad path segment %q", ErrInvalidInput, volume, segment)
+		}
+	}
+	return nil
 }
 // PullOCIImage triggers POST /nodes/{node}/storage/{storage}/oci-registry-pull.
 // Available in Proxmox VE 9.1+. The storage must be file-based with vztmpl content

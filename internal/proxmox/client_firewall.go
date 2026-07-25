@@ -232,6 +232,11 @@ func (c *Client) UpdateFirewallIPSetEntry(ctx context.Context, setName, cidr str
 	if params.Comment != "" {
 		form.Set("comment", params.Comment)
 	}
+	// cidr=".." would address the IP set itself, deleting every entry while the
+	// audit record still reads as a single-entry change.
+	if err := validatePathSegment("IP set entry", cidr); err != nil {
+		return err
+	}
 	path := "/cluster/firewall/ipset/" + url.PathEscape(setName) + "/" + url.PathEscape(cidr)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update entry %s in IP set %s: %w", cidr, setName, err)
@@ -239,6 +244,11 @@ func (c *Client) UpdateFirewallIPSetEntry(ctx context.Context, setName, cidr str
 	return nil
 }
 func (c *Client) DeleteFirewallIPSetEntry(ctx context.Context, setName, cidr string) error {
+	// cidr=".." would address the IP set itself, deleting every entry while the
+	// audit record still reads as a single-entry change.
+	if err := validatePathSegment("IP set entry", cidr); err != nil {
+		return err
+	}
 	path := "/cluster/firewall/ipset/" + url.PathEscape(setName) + "/" + url.PathEscape(cidr)
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("delete entry %s from IP set %s: %w", cidr, setName, err)

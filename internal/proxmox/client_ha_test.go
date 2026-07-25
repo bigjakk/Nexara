@@ -52,3 +52,87 @@ func TestDisarmHA(t *testing.T) {
 		t.Errorf("resource-mode = %q, want ignore", gotMode)
 	}
 }
+
+func TestValidateHAResourceID(t *testing.T) {
+	tests := []struct {
+		name    string
+		sid     string
+		wantErr bool
+	}{
+		{"vm", "vm:100", false},
+		{"container", "ct:101", false},
+		{"bare vmid", "100", false},
+		{"max vmid", "999999999", false},
+
+		{"traversal", "../../../../access/users/root@pam", true},
+		{"traversal after type", "vm:../../../access", true},
+		{"encoded traversal", "vm:%2e%2e%2faccess", true},
+		{"query injection", "vm:100?force=1", true},
+		{"fragment injection", "vm:100#x", true},
+		{"slash", "vm:100/status", true},
+		{"empty", "", true},
+		{"type only", "vm:", true},
+		{"non-numeric name", "vm:abc", true},
+		{"uppercase type", "VM:100", true},
+		{"newline", "vm:100\nX-Injected: 1", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateHAResourceID(tt.sid)
+			if tt.wantErr && err == nil {
+				t.Errorf("validateHAResourceID(%q) = nil, want an error", tt.sid)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("validateHAResourceID(%q) = %v, want nil", tt.sid, err)
+			}
+		})
+	}
+}
+
+func TestGetHAResource_SendsSIDLiterally(t *testing.T) {
+	// Proxmox rejects a percent-encoded colon here, so the SID must reach it raw
+	// — which is exactly why validateHAResourceID has to carry the safety.
+	srv, seen := newCaptureServer(t, `{"data":{"sid":"vm:100"}}`)
+	c := newTestClient(t, srv.URL)
+
+	if _, err := c.GetHAResource(context.Background(), "vm:100"); err != nil {
+		t.Fatalf("GetHAResource: %v", err)
+	}
+
+	want := "/api2/json/cluster/ha/resources/vm:100"
+	if len(*seen) != 1 || (*seen)[0] != want {
+		t.Errorf("request target = %v, want [%s]", *seen, want)
+	}
+}
+
+func TestHAResourceMethods_RejectInjectionWithoutIssuingRequest(t *testing.T) {
+	const attack = "../../../../access/users/root@pam"
+
+	calls := map[string]func(c *Client) error{
+		"GetHAResource": func(c *Client) error {
+			_, err := c.GetHAResource(context.Background(), attack)
+			return err
+		},
+		"UpdateHAResource": func(c *Client) error {
+			return c.UpdateHAResource(context.Background(), attack, UpdateHAResourceParams{})
+		},
+		"DeleteHAResource": func(c *Client) error {
+			return c.DeleteHAResource(context.Background(), attack)
+		},
+	}
+
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			srv, seen := newCaptureServer(t, `{"data":null}`)
+			c := newTestClient(t, srv.URL)
+
+			if err := call(c); err == nil {
+				t.Fatalf("%s(%q) succeeded, want rejection", name, attack)
+			}
+			if len(*seen) != 0 {
+				t.Errorf("issued %d request(s) %v, want none", len(*seen), *seen)
+			}
+		})
+	}
+}

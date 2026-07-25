@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -155,8 +156,33 @@ func (c *Client) CreateHAResource(ctx context.Context, params CreateHAResourcePa
 	}
 	return nil
 }
+
+// haResourceIDPattern matches a Proxmox HA resource id: the guest's VMID with
+// an optional type prefix — "vm:100", "ct:101", "100".
+var haResourceIDPattern = regexp.MustCompile(`^(?:[a-z]{1,16}:)?\d{1,12}$`)
+
+// validateHAResourceID checks an HA SID before it is interpolated into a request
+// path. Like volume ids these go out literally rather than percent-encoded
+// (Proxmox rejects an encoded colon here — see the call sites), so the pattern
+// is the only thing keeping an operator-supplied SID from redirecting a request
+// that carries the cluster's API token. It is deliberately strict: HA resources
+// are VMs and containers, addressed by VMID.
+func validateHAResourceID(sid string) error {
+	if sid == "" {
+		return fmt.Errorf("%w: HA resource id is required", ErrInvalidInput)
+	}
+	if !haResourceIDPattern.MatchString(sid) {
+		return fmt.Errorf("%w: HA resource id %q should be a VMID, optionally prefixed (e.g. \"vm:100\")", ErrInvalidInput, sid)
+	}
+	return nil
+}
+
 func (c *Client) GetHAResource(ctx context.Context, sid string) (*HAResource, error) {
-	// Use raw SID (e.g. "vm:100") — Proxmox rejects percent-encoded colons in HA SID paths.
+	if err := validateHAResourceID(sid); err != nil {
+		return nil, err
+	}
+	// Use raw SID (e.g. "vm:100") — Proxmox rejects percent-encoded colons in HA
+	// SID paths. validateHAResourceID above is what makes that safe.
 	path := "/cluster/ha/resources/" + sid
 	var res HAResource
 	if err := c.do(ctx, path, &res); err != nil {
@@ -165,6 +191,9 @@ func (c *Client) GetHAResource(ctx context.Context, sid string) (*HAResource, er
 	return &res, nil
 }
 func (c *Client) UpdateHAResource(ctx context.Context, sid string, params UpdateHAResourceParams) error {
+	if err := validateHAResourceID(sid); err != nil {
+		return err
+	}
 	form := url.Values{}
 	if params.State != nil {
 		form.Set("state", *params.State)
@@ -195,6 +224,9 @@ func (c *Client) UpdateHAResource(ctx context.Context, sid string, params Update
 	return nil
 }
 func (c *Client) DeleteHAResource(ctx context.Context, sid string) error {
+	if err := validateHAResourceID(sid); err != nil {
+		return err
+	}
 	// Use raw SID — Proxmox rejects percent-encoded colons in HA SID paths.
 	path := "/cluster/ha/resources/" + sid
 	if err := c.doDelete(ctx, path, nil); err != nil {

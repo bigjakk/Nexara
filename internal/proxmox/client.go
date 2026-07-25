@@ -51,6 +51,28 @@ func validateNodeName(node string) error {
 	return nil
 }
 
+// validatePathSegment guards a caller-supplied value that becomes exactly one
+// segment of a Proxmox request path.
+//
+// url.PathEscape alone is not enough for this. It escapes "/" but leaves "."
+// and ".." untouched, so an escaped ".." still resolves upward once pveproxy
+// normalises the path — landing the request on the parent collection, which is
+// often a different endpoint with different permissions. DELETE
+// /nodes/{node}/network/.. is the worked example: it becomes DELETE
+// /nodes/{node}/network, Proxmox's "revert pending network config".
+func validatePathSegment(kind, value string) error {
+	if value == "" {
+		return fmt.Errorf("%w: %s is required", ErrInvalidInput, kind)
+	}
+	if value == "." || value == ".." {
+		return fmt.Errorf("%w: %q is not a valid %s", ErrInvalidInput, value, kind)
+	}
+	if strings.ContainsAny(value, `/\`) {
+		return fmt.Errorf("%w: %s %q must not contain a path separator", ErrInvalidInput, kind, value)
+	}
+	return nil
+}
+
 // stringVal safely extracts a string from a map entry.
 func stringVal(m map[string]interface{}, key string) string {
 	v, ok := m[key]

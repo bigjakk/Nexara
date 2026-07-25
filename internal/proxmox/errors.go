@@ -18,6 +18,12 @@ var (
 
 	// ErrInvalidResponse indicates the API returned an unparseable response.
 	ErrInvalidResponse = errors.New("invalid response")
+
+	// ErrInvalidInput indicates the caller supplied an argument the client
+	// refused to send — a malformed identifier that would corrupt the request
+	// path, say. It never reaches the network, so handlers should surface it as
+	// a client error rather than as a Proxmox failure.
+	ErrInvalidInput = errors.New("invalid input")
 )
 
 // APIError represents a non-sentinel HTTP error from the Proxmox API.

@@ -1329,3 +1329,72 @@ func TestRefuseRedirect_NoRedirectStillWorks(t *testing.T) {
 		t.Errorf("got %+v, want one node named pve1", nodes)
 	}
 }
+
+func TestValidatePathSegment(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"interface", "vmbr0", false},
+		{"vlan interface", "vmbr0.100", false},
+		{"cidr entry", "10.0.0.0-24", false},
+		{"dotted name", "bond0.4094", false},
+
+		{"empty", "", true},
+		{"dot", ".", true},
+		{"dotdot", "..", true},
+		{"slash", "a/b", true},
+		{"backslash", `a\b`, true},
+		{"traversal", "../..", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePathSegment("thing", tt.value)
+			if tt.wantErr && err == nil {
+				t.Errorf("validatePathSegment(%q) = nil, want an error", tt.value)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("validatePathSegment(%q) = %v, want nil", tt.value, err)
+			}
+		})
+	}
+}
+
+func TestDeleteNetworkInterface_RejectsDotDot(t *testing.T) {
+	// url.PathEscape would leave ".." intact, so DELETE /nodes/pve1/network/..
+	// collapses to Proxmox's revert-pending-network-config endpoint — an action
+	// gated behind a different permission than this delete.
+	srv, seen := newCaptureServer(t, `{"data":null}`)
+	c := newTestClient(t, srv.URL)
+
+	if err := c.DeleteNetworkInterface(context.Background(), "pve1", ".."); err == nil {
+		t.Fatal("DeleteNetworkInterface(\"..\") succeeded, want rejection")
+	}
+	if len(*seen) != 0 {
+		t.Errorf("issued %d request(s) %v, want none", len(*seen), *seen)
+	}
+
+	// The ordinary case must still go out untouched.
+	if err := c.DeleteNetworkInterface(context.Background(), "pve1", "vmbr9"); err != nil {
+		t.Fatalf("DeleteNetworkInterface(vmbr9): %v", err)
+	}
+	want := "/api2/json/nodes/pve1/network/vmbr9"
+	if len(*seen) != 1 || (*seen)[0] != want {
+		t.Errorf("request target = %v, want [%s]", *seen, want)
+	}
+}
+
+func TestDeleteFirewallIPSetEntry_RejectsDotDot(t *testing.T) {
+	// cidr=".." would address the set itself and wipe every entry.
+	srv, seen := newCaptureServer(t, `{"data":null}`)
+	c := newTestClient(t, srv.URL)
+
+	if err := c.DeleteFirewallIPSetEntry(context.Background(), "blocklist", ".."); err == nil {
+		t.Fatal("DeleteFirewallIPSetEntry(\"..\") succeeded, want rejection")
+	}
+	if len(*seen) != 0 {
+		t.Errorf("issued %d request(s) %v, want none", len(*seen), *seen)
+	}
+}

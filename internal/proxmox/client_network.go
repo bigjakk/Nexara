@@ -384,6 +384,9 @@ func (c *Client) UpdateNetworkInterface(ctx context.Context, node string, iface 
 		form.Set("method6", params.Method6)
 	}
 	form.Set("autostart", strconv.Itoa(params.Autostart))
+	if err := validatePathSegment("interface name", iface); err != nil {
+		return err
+	}
 	path := "/nodes/" + url.PathEscape(node) + "/network/" + url.PathEscape(iface)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("update network interface %s on %s: %w", iface, node, err)
@@ -392,6 +395,12 @@ func (c *Client) UpdateNetworkInterface(ctx context.Context, node string, iface 
 }
 func (c *Client) DeleteNetworkInterface(ctx context.Context, node string, iface string) error {
 	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	// Without this, iface=".." collapses the path to /nodes/{node}/network —
+	// Proxmox's revert-pending-config endpoint, which Nexara gates behind a
+	// different permission than this delete.
+	if err := validatePathSegment("interface name", iface); err != nil {
 		return err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/network/" + url.PathEscape(iface)

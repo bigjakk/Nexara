@@ -1730,6 +1730,12 @@ func (h *VMHandler) GetGuestAgentInfo(c fiber.Ctx) error {
 
 // mapProxmoxError converts a Proxmox client error to an appropriate Fiber error.
 func mapProxmoxError(err error) error {
+	// The client refused to send this — it never reached Proxmox, so reporting
+	// it as a Proxmox failure (500) would misdirect the operator. The message is
+	// safe to surface: it describes their own input.
+	if errors.Is(err, proxmox.ErrInvalidInput) {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
 	if errors.Is(err, proxmox.ErrNotFound) {
 		return fiber.NewError(fiber.StatusNotFound, "Resource not found on Proxmox")
 	}
