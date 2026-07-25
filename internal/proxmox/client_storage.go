@@ -45,6 +45,11 @@ func (c *Client) UploadToStorage(ctx context.Context, node, storage, contentType
 	if err := validateNodeName(node); err != nil {
 		return "", err
 	}
+	// Checked before a byte is streamed: a name that survives here but not
+	// validateVolumeID would land a volume the delete endpoint cannot address.
+	if err := ValidateStorageFilename(filename); err != nil {
+		return "", err
+	}
 	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/upload"
 	fields := map[string]string{
 		"content": contentType,
@@ -126,15 +131,8 @@ func validateVolumeID(volume string) error {
 	if i := strings.IndexAny(volume, forbiddenVolumeIDChars); i >= 0 {
 		return fmt.Errorf("%w: volume id %q contains %q", ErrInvalidInput, volume, volume[i])
 	}
-	// C0 controls, DEL, and the C1 range (U+0080–U+009F). This has to decode
-	// runes: C1 controls encode as 0xC2 0x80–0x9F in UTF-8, so a byte-wise scan
-	// for ASCII controls misses them entirely. None of these can split the
-	// request — net/url percent-encodes them — but they have no place in a
-	// volume id and would end up in Proxmox task and syslog output.
-	for _, r := range volume {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
-			return fmt.Errorf("%w: volume id %q contains a control character", ErrInvalidInput, volume)
-		}
+	if hasControlChar(volume) {
+		return fmt.Errorf("%w: volume id %q contains a control character", ErrInvalidInput, volume)
 	}
 
 	storage, name, ok := strings.Cut(volume, ":")
@@ -185,6 +183,12 @@ func (c *Client) PullOCIImage(ctx context.Context, node, storage string, params 
 		if !vztmplFilenamePattern.MatchString(params.FileName) {
 			return "", fmt.Errorf("filename contains invalid characters")
 		}
+		// The pattern permits dots, so a bare ".." slips through it. That is the
+		// one value here that could become an undeletable volume id, since the
+		// stored name depends on whether Proxmox appends its ".tar" suffix.
+		if strings.Contains(params.FileName, "..") {
+			return "", fmt.Errorf("filename must not contain %q", "..")
+		}
 	}
 
 	form := url.Values{}
@@ -224,15 +228,8 @@ func (c *Client) DownloadURLToStorage(ctx context.Context, node, storage string,
 	default:
 		return "", fmt.Errorf("content must be iso, vztmpl, or import (got %q)", params.Content)
 	}
-	if params.Filename == "" {
-		return "", fmt.Errorf("filename is required")
-	}
-	if len(params.Filename) > 255 {
-		return "", fmt.Errorf("filename exceeds 255 characters")
-	}
-	// Disallow path separators and parent-dir references.
-	if invalidFilename(params.Filename) {
-		return "", fmt.Errorf("filename must not contain path separators or '..'")
+	if err := ValidateStorageFilename(params.Filename); err != nil {
+		return "", err
 	}
 
 	form := url.Values{}
@@ -339,23 +336,52 @@ func (c *Client) DownloadAppliance(ctx context.Context, node, storage, template 
 	return upid, nil
 }
 
-// invalidFilename returns true if the filename contains path separators or parent refs.
-func invalidFilename(name string) bool {
-	if name == "" || name == "." || name == ".." {
-		return true
-	}
-	for i := 0; i < len(name); i++ {
-		if name[i] == '/' || name[i] == '\\' {
-			return true
-		}
-	}
-	// Disallow "../" sneaking through as a substring on platforms with weird encodings.
-	for i := 0; i+1 < len(name); i++ {
-		if name[i] == '.' && name[i+1] == '.' {
+// hasControlChar reports whether s contains a C0 control, DEL, or a C1 control
+// (U+0080–U+009F). It decodes runes deliberately: C1 controls encode as
+// 0xC2 0x80–0x9F in UTF-8, so a byte-wise scan for ASCII controls misses them.
+func hasControlChar(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			return true
 		}
 	}
 	return false
+}
+
+// ValidateStorageFilename checks a caller-supplied filename that Proxmox will
+// turn into the tail of a volume id — "local:iso/<filename>".
+//
+// This is the creating-side mirror of validateVolumeID, and the two share
+// forbiddenVolumeIDChars on purpose. A filename accepted here must always
+// produce a volume id that validateVolumeID accepts, or we mint volumes the
+// delete path can never address: exactly the gap that opened when the upload
+// handler's ad-hoc check and the delete-side rules drifted apart. Widen one
+// side only by widening the other — TestStorageFilenamesProduceDeletableVolids
+// pins the two together.
+//
+// Spaces and non-ASCII are fine: they survive a volume id unharmed, since
+// net/url percent-encodes them on the wire and Proxmox decodes them back.
+func ValidateStorageFilename(filename string) error {
+	if filename == "" {
+		return fmt.Errorf("%w: filename is required", ErrInvalidInput)
+	}
+	if len(filename) > 255 {
+		return fmt.Errorf("%w: filename too long (%d bytes)", ErrInvalidInput, len(filename))
+	}
+	if filename == "." || filename == ".." || strings.Contains(filename, "..") {
+		return fmt.Errorf("%w: filename %q must not contain %q", ErrInvalidInput, filename, "..")
+	}
+	if strings.ContainsAny(filename, `/\`) {
+		return fmt.Errorf("%w: filename %q must not contain a path separator", ErrInvalidInput, filename)
+	}
+	if i := strings.IndexAny(filename, forbiddenVolumeIDChars); i >= 0 {
+		return fmt.Errorf("%w: filename %q contains %q, which cannot appear in a Proxmox volume id",
+			ErrInvalidInput, filename, filename[i])
+	}
+	if hasControlChar(filename) {
+		return fmt.Errorf("%w: filename %q contains a control character", ErrInvalidInput, filename)
+	}
+	return nil
 }
 
 func (c *Client) GetStorageConfig(ctx context.Context, storage string) (*StorageConfig, error) {

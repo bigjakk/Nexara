@@ -224,8 +224,12 @@ func TestDownloadURLToStorage_Validation(t *testing.T) {
 		{"empty url", URLDownloadParams{Content: "iso", Filename: "x.iso"}, "URL"},
 		{"bad content", URLDownloadParams{URL: "https://x", Content: "exe", Filename: "x"}, "content"},
 		{"empty filename", URLDownloadParams{URL: "https://x", Content: "iso"}, "filename"},
-		{"slash in filename", URLDownloadParams{URL: "https://x", Content: "iso", Filename: "a/b"}, "separators"},
-		{"dotdot in filename", URLDownloadParams{URL: "https://x", Content: "iso", Filename: ".."}, "separators"},
+		{"slash in filename", URLDownloadParams{URL: "https://x", Content: "iso", Filename: "a/b"}, "path separator"},
+		{"dotdot in filename", URLDownloadParams{URL: "https://x", Content: "iso", Filename: ".."}, ".."},
+		// New: characters that are legal in a filename but cannot appear in a
+		// volume id, so a download using one would be undeletable.
+		{"percent in filename", URLDownloadParams{URL: "https://x", Content: "iso", Filename: "50%off.iso"}, "volume id"},
+		{"hash in filename", URLDownloadParams{URL: "https://x", Content: "iso", Filename: "test#1.iso"}, "volume id"},
 		{"checksum without algorithm", URLDownloadParams{URL: "https://x", Content: "iso", Filename: "x.iso", Checksum: "abc"}, "algorithm"},
 	}
 	for _, tc := range tests {
@@ -346,23 +350,91 @@ func TestDownloadAppliance_Validation(t *testing.T) {
 	}
 }
 
-// --- invalidFilename helper ---
+// --- ValidateStorageFilename ---
+//
+// Replaces the old invalidFilename helper, which enforced a second, weaker rule
+// set than the delete path and so allowed uploads that could never be deleted.
 
-func TestInvalidFilename(t *testing.T) {
-	cases := map[string]bool{
-		"":               true,
-		".":              true,
-		"..":             true,
-		"a/b":            true,
-		"a\\b":           true,
-		"..hidden":       true, // disallow consecutive dots anywhere — defensive
-		"hello.tar.gz":   false,
-		"debian-12_amd64": false,
+func TestValidateStorageFilename(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		wantErr  bool
+	}{
+		// Names Proxmox and users actually produce — all must keep working.
+		{"iso", "debian-12.7.0-amd64-netinst.iso", false},
+		{"template", "debian-12-standard_12.7-1_amd64.tar.zst", false},
+		{"backup", "vzdump-qemu-100-2024_01_01-00_00_00.vma.zst", false},
+		{"ova", "appliance.ova", false},
+		{"tarball", "hello.tar.gz", false},
+		{"underscores and dashes", "debian-12_amd64", false},
+		{"spaces", "Windows 11 x64.iso", false},
+		{"non-ascii", "na\u00efve-ubuntu.iso", false},
+		{"parens", "ubuntu (1).iso", false},
+		{"plus and tilde", "img+extra~1.iso", false},
+
+		// Would mint a volume id the delete path refuses.
+		{"percent", "50%off.iso", true},
+		{"hash", "test#1.iso", true},
+		{"question mark", "what?.iso", true},
+		{"backslash", `a\b.iso`, true},
+
+		// Path structure.
+		{"empty", "", true},
+		{"dot", ".", true},
+		{"dotdot", "..", true},
+		{"slash", "a/b", true},
+		{"consecutive dots anywhere", "..hidden", true},
+		{"traversal", "../../etc/passwd", true},
+
+		// Control characters.
+		{"newline", "a\nb.iso", true},
+		{"null", "a\x00b.iso", true},
+		{"C1 control", "a\u0085b.iso", true},
+
+		{"over length", strings.Repeat("a", 256), true},
 	}
-	for in, want := range cases {
-		got := invalidFilename(in)
-		if got != want {
-			t.Errorf("invalidFilename(%q) = %v, want %v", in, got, want)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateStorageFilename(tt.filename)
+			if tt.wantErr && err == nil {
+				t.Errorf("ValidateStorageFilename(%q) = nil, want an error", tt.filename)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("ValidateStorageFilename(%q) = %v, want nil", tt.filename, err)
+			}
+		})
+	}
+}
+
+// TestStorageFilenamesProduceDeletableVolids is the invariant that closes the
+// gap: anything we let a caller create must be something the delete path can
+// address. It pins ValidateStorageFilename and validateVolumeID together, so
+// loosening either one in isolation fails here rather than in production as an
+// undeletable volume.
+func TestStorageFilenamesProduceDeletableVolids(t *testing.T) {
+	filenames := []string{
+		"debian-12.7.0-amd64-netinst.iso",
+		"debian-12-standard_12.7-1_amd64.tar.zst",
+		"vzdump-qemu-100-2024_01_01-00_00_00.vma.zst",
+		"Windows 11 x64.iso",
+		"ubuntu (1).iso",
+		"img+extra~1.iso",
+		"appliance.ova",
+	}
+
+	// Every content directory Proxmox files an uploaded volume under.
+	for _, contentDir := range []string{"iso", "vztmpl", "import", "backup"} {
+		for _, filename := range filenames {
+			if err := ValidateStorageFilename(filename); err != nil {
+				t.Errorf("ValidateStorageFilename(%q) = %v, want nil", filename, err)
+				continue
+			}
+			volid := "local:" + contentDir + "/" + filename
+			if err := validateVolumeID(volid); err != nil {
+				t.Errorf("created %q but validateVolumeID rejects it: %v", volid, err)
+			}
 		}
 	}
 }

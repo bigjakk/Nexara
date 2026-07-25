@@ -257,8 +257,10 @@ func (h *StorageHandler) UploadFile(c fiber.Ctx) error {
 
 		case "file":
 			filename := filepath.Base(part.FileName())
-			if filename == "" || filename == "." || filename == "/" {
-				return fiber.NewError(fiber.StatusBadRequest, "Invalid filename")
+			// Rejected here rather than after the upload lands, so we never
+			// create a volume whose id the delete endpoint would refuse.
+			if err := proxmox.ValidateStorageFilename(filename); err != nil {
+				return mapProxmoxError(err)
 			}
 			switch uploadContent {
 			case "iso", "vztmpl", "import":
