@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   Keyboard,
   Maximize2,
@@ -35,7 +36,7 @@ import type { VMAction } from "@/features/vms/types/vm";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useMountISO } from "../api/console-queries";
 import { ISOPickerDialog } from "./ISOPickerDialog";
-import { typeTextIntoVnc } from "./VNCViewer";
+import { typeTextIntoVnc } from "../lib/vnc-keys";
 
 // X11 keysyms
 const XK = {
@@ -52,6 +53,24 @@ const XK = {
 function sendKeyCombo(rfb: RFB, keysyms: number[]) {
   for (const k of keysyms) rfb.sendKey(k, null, true);
   for (const k of [...keysyms].reverse()) rfb.sendKey(k, null, false);
+}
+
+/** How many distinct dropped characters to name in the paste warning. */
+const MAX_LISTED_UNMAPPED = 8;
+
+/**
+ * Characters with no glyph of their own: control codes, format characters,
+ * every kind of space (a non-breaking space pasted out of a web page is the
+ * common case), and lone combining marks — printing one raw would show
+ * nothing, or graft an accent onto the surrounding label text.
+ */
+const NO_GLYPH = /^[\p{C}\p{Z}\p{M}]$/u;
+
+/** Renderable label for a dropped character. */
+function describeChar(ch: string): string {
+  if (!NO_GLYPH.test(ch)) return ch;
+  const cp = ch.codePointAt(0) ?? 0;
+  return `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
 interface VNCToolbarProps {
@@ -146,7 +165,23 @@ export function VNCToolbar({ rfb, tab }: VNCToolbarProps) {
   function handleSendPaste() {
     const text = pasteRef.current?.value;
     if (text && rfb) {
-      typeTextIntoVnc(rfb, text);
+      // Partial success is the right outcome here: everything on a US layout
+      // is typed, and the rest is reported rather than vanishing silently.
+      const unmapped = typeTextIntoVnc(rfb, text);
+      if (unmapped.length > 0) {
+        const distinct = [...new Set(unmapped)];
+        const listed = distinct
+          .slice(0, MAX_LISTED_UNMAPPED)
+          .map(describeChar)
+          .join(" ");
+        const more = distinct.length > MAX_LISTED_UNMAPPED ? " …" : "";
+        toast.warning(
+          `${String(unmapped.length)} character(s) could not be typed`,
+          {
+            description: `Not available on a US keyboard layout: ${listed}${more}`,
+          },
+        );
+      }
     }
     setPasteOpen(false);
     rfb?.focus();

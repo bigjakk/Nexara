@@ -1,10 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import type RFB from "@novnc/novnc";
-import { typeTextIntoVnc } from "./VNCViewer";
-
-// The module imports the real noVNC client for its component; the pasted-text
-// helper under test only needs an object exposing sendKey().
-vi.mock("@novnc/novnc", () => ({ default: vi.fn() }));
+import { typeTextIntoVnc } from "./vnc-keys";
 
 const XK_SHIFT_L = 0xffe1;
 
@@ -165,5 +161,37 @@ describe("typeTextIntoVnc", () => {
       [0xff0d, "Enter", true],
       [0xff09, "Tab", true],
     ]);
+  });
+
+  it("reports nothing unmapped for text the US layout covers", () => {
+    const { rfb } = makeRfb();
+
+    expect(typeTextIntoVnc(rfb, "sudo reboot\n\tok!")).toEqual([]);
+  });
+
+  // Characters off the US layout resolve to keycode 0 under QEMU's en-us
+  // keymap and never reach the guest — the caller has to be able to say so.
+  it("returns each character with no US-layout key, in order", () => {
+    const { rfb } = makeRfb();
+
+    expect(typeTextIntoVnc(rfb, "café — 🎉")).toEqual(["é", "—", "🎉"]);
+  });
+
+  it("counts repeats so the caller can report how many were dropped", () => {
+    const { rfb } = makeRfb();
+
+    expect(typeTextIntoVnc(rfb, "naïve résumé")).toEqual(["ï", "é", "é"]);
+  });
+
+  // Partial success: an unmappable character must not abort the paste, so
+  // everything around it still types. (replayAsServer passes an unknown
+  // keysym through untranslated; a real server drops it — which is exactly
+  // what the returned list exists to report.)
+  it("keeps typing the mappable characters around an unmappable one", () => {
+    const text = "cafés are nice";
+    const { rfb, calls } = makeRfb();
+
+    expect(typeTextIntoVnc(rfb, text)).toEqual(["é"]);
+    expect(replayAsServer(calls)).toBe(text);
   });
 });
