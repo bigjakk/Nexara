@@ -81,14 +81,66 @@ var settingScopes = map[string]settingScope{
 	"user":   {perUser: true},
 }
 
-// settingScopeID validates the requested scope, enforces the write gate when
-// write is true, and returns the scope_id the row is keyed on. Every settings
-// handler routes its scope handling through here so the read and write paths
-// can't drift apart on which scopes exist or who may touch them.
-func settingScopeID(c fiber.Ctx, scope string, write bool) (pgtype.UUID, error) {
+// reservedGlobalSettings maps a shared-scope setting key to the endpoint that
+// owns it. These endpoints refuse the listed keys outright — reads and writes
+// alike, for every caller including a manage:settings holder — because a
+// dedicated handler already gates them on a narrower permission.
+//
+// Without this, the generic endpoints are a way around the owner's gate in both
+// directions. Shared-scope reads here are deliberately ungated (the SPA fetches
+// branding for every signed-in user), so an owned key would be readable by any
+// authenticated account, Viewer included, via GET /settings/:key or dumped
+// wholesale by GET /settings?scope=global. Writes gate on manage:settings, so
+// holding that alone would be enough to overwrite a key whose own handler
+// demands something else — for syslog forwarding, enough to redirect the audit
+// stream at an attacker-controlled collector or disable it outright.
+//
+// The reservation binds to the shared row, not to the name: a "user" scope row
+// of the same key is keyed on the caller's own user_id and readable by nobody
+// else, so it stays allowed.
+//
+// Keys are referenced through the const their owner declares, so renaming one
+// there cannot silently unreserve it. TestGuard_GlobalSettingKeysClassified
+// fails if a new global key appears in either map.
+var reservedGlobalSettings = map[string]string{
+	syslogSettingKey: "/api/v1/audit-log/syslog-config (manage:audit)",
+}
+
+// reservedSettingOwner returns the endpoint that owns key under scope, or ""
+// when the generic endpoints may handle it. Per-user scopes are never reserved:
+// the row is keyed on the caller's own user_id, so nobody else can read it back.
+//
+// An unrecognised scope classifies as shared, not exempt — the zero settingScope
+// has perUser false. Every caller validates the scope first, so that branch is
+// unreachable today; it is written this way so the one function the reservation
+// rests on fails closed if a caller ever forgets.
+func reservedSettingOwner(scope, key string) string {
+	if settingScopes[scope].perUser {
+		return ""
+	}
+	return reservedGlobalSettings[key]
+}
+
+// settingScopeID validates the requested scope, rejects keys owned by a
+// dedicated endpoint, enforces the write gate when write is true, and returns
+// the scope_id the row is keyed on. Every settings handler routes its scope
+// handling through here so the read and write paths can't drift apart on which
+// scopes exist, which keys are off-limits, or who may touch them.
+//
+// key is "" for the bulk listing, which has no single key — ListSettings drops
+// reserved rows from its result instead.
+func settingScopeID(c fiber.Ctx, key, scope string, write bool) (pgtype.UUID, error) {
 	sc, ok := settingScopes[scope]
 	if !ok {
 		return pgtype.UUID{}, fiber.NewError(fiber.StatusBadRequest, "Invalid scope: must be global or user")
+	}
+
+	// Ahead of the write gate: manage:settings is not a way in either, so the
+	// answer is the same for every caller and naming the owner is more useful
+	// than a bare permission denial.
+	if owner := reservedSettingOwner(scope, key); owner != "" {
+		return pgtype.UUID{}, fiber.NewError(fiber.StatusForbidden,
+			"Setting '"+key+"' is managed by "+owner+" — use that endpoint")
 	}
 
 	if write && sc.adminOnly {
@@ -113,7 +165,7 @@ func settingScopeID(c fiber.Ctx, scope string, write bool) (pgtype.UUID, error) 
 func (h *SettingsHandler) ListSettings(c fiber.Ctx) error {
 	scope := c.Query("scope", "global")
 
-	scopeID, err := settingScopeID(c, scope, false)
+	scopeID, err := settingScopeID(c, "", scope, false)
 	if err != nil {
 		return err
 	}
@@ -126,9 +178,15 @@ func (h *SettingsHandler) ListSettings(c fiber.Ctx) error {
 		return fmt.Errorf("list settings: %w", err)
 	}
 
-	result := make([]settingResponse, len(settings))
-	for i, s := range settings {
-		result[i] = toSettingResponse(s)
+	result := make([]settingResponse, 0, len(settings))
+	for _, s := range settings {
+		// Fetching a reserved key by name is refused, so returning it in the
+		// bulk dump would reopen the same hole. Filtered rather than refused
+		// wholesale: one owned row shouldn't take the whole listing down.
+		if reservedSettingOwner(scope, s.Key) != "" {
+			continue
+		}
+		result = append(result, toSettingResponse(s))
 	}
 	return c.JSON(result)
 }
@@ -143,7 +201,7 @@ func (h *SettingsHandler) GetSetting(c fiber.Ctx) error {
 
 	scope := c.Query("scope", "user")
 
-	scopeID, err := settingScopeID(c, scope, false)
+	scopeID, err := settingScopeID(c, key, scope, false)
 	if err != nil {
 		return err
 	}
@@ -202,7 +260,7 @@ func (h *SettingsHandler) UpsertSetting(c fiber.Ctx) error {
 		scope = "user"
 	}
 
-	scopeID, err := settingScopeID(c, scope, true)
+	scopeID, err := settingScopeID(c, key, scope, true)
 	if err != nil {
 		return err
 	}
@@ -230,7 +288,7 @@ func (h *SettingsHandler) DeleteSetting(c fiber.Ctx) error {
 
 	scope := c.Query("scope", "user")
 
-	scopeID, err := settingScopeID(c, scope, true)
+	scopeID, err := settingScopeID(c, key, scope, true)
 	if err != nil {
 		return err
 	}
@@ -498,6 +556,13 @@ func (h *SettingsHandler) GetBranding(c fiber.Ctx) error {
 
 	branding := make(map[string]json.RawMessage)
 	for _, s := range settings {
+		// The prefix filter is what keeps this ungated read to branding, but
+		// it's a naming convention, not a gate — an owned key that ever adopted
+		// the prefix would ride straight out. Reserved keys are dropped here
+		// too so every path over the shared rows answers to one rule.
+		if reservedSettingOwner("global", s.Key) != "" {
+			continue
+		}
 		if strings.HasPrefix(s.Key, "branding.") {
 			branding[s.Key] = s.Value
 		}

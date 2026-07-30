@@ -5,10 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"go/ast"
+	"go/token"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -54,9 +62,10 @@ func newSettingsApp(t *testing.T, queries *db.Queries) *fiber.App {
 
 	// Probe route: exercises settingScopeID directly so the paths that would
 	// otherwise reach the database (an admin writing global, a user writing
-	// their own scope) can still be asserted without one.
+	// their own scope) can still be asserted without one. An absent key query
+	// param stands in for the bulk listing, which passes "".
 	app.Get("/scope-probe", func(c fiber.Ctx) error {
-		scopeID, err := settingScopeID(c, c.Query("scope"), c.Query("write") == "true")
+		scopeID, err := settingScopeID(c, c.Query("key"), c.Query("scope"), c.Query("write") == "true")
 		if err != nil {
 			return err
 		}
@@ -173,7 +182,15 @@ var errCaptured = errors.New("args captured")
 // sends and then fails. It lets the tests assert on the scope and scope_id that
 // actually reach Postgres — which the deny-path cases can never observe —
 // without standing up a database.
-type captureDBTX struct{ args []any }
+//
+// args staying nil is itself an assertion: it means the handler returned before
+// issuing any query.
+type captureDBTX struct {
+	args []any
+	// rows, when non-nil, is replayed to Query instead of failing — for the
+	// handlers that filter a result set rather than just issuing the query.
+	rows []db.Setting
+}
 
 func (c *captureDBTX) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
 	c.args = args
@@ -182,7 +199,10 @@ func (c *captureDBTX) Exec(_ context.Context, _ string, args ...any) (pgconn.Com
 
 func (c *captureDBTX) Query(_ context.Context, _ string, args ...any) (pgx.Rows, error) {
 	c.args = args
-	return nil, errCaptured
+	if c.rows == nil {
+		return nil, errCaptured
+	}
+	return &settingRows{rows: c.rows}, nil
 }
 
 func (c *captureDBTX) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
@@ -193,6 +213,70 @@ func (c *captureDBTX) QueryRow(_ context.Context, _ string, args ...any) pgx.Row
 type errRow struct{}
 
 func (errRow) Scan(...any) error { return errCaptured }
+
+// settingRows replays a fixed []db.Setting through pgx.Rows so a handler that
+// reads a result set — rather than merely issuing the query — can be exercised
+// without a database. Scan assigns positionally in the column order the
+// generated settings queries select, and reports a mismatch rather than
+// silently filling zero values if that order ever changes.
+type settingRows struct {
+	rows []db.Setting
+	i    int
+	err  error
+}
+
+func (r *settingRows) Next() bool {
+	if r.i >= len(r.rows) {
+		return false
+	}
+	r.i++
+	return true
+}
+
+func (r *settingRows) Scan(dest ...any) error {
+	s := r.rows[r.i-1]
+	cols := []any{s.ID, s.Key, s.Value, s.Scope, s.ScopeID, s.CreatedAt, s.UpdatedAt}
+	if len(dest) != len(cols) {
+		r.err = fmt.Errorf("scan got %d destinations, want %d", len(dest), len(cols))
+		return r.err
+	}
+	for i, d := range dest {
+		ptr := reflect.ValueOf(d)
+		if ptr.Kind() != reflect.Pointer {
+			r.err = fmt.Errorf("scan destination %d is %T, not a pointer", i, d)
+			return r.err
+		}
+		val := reflect.ValueOf(cols[i])
+		if ptr.Elem().Type() != val.Type() {
+			r.err = fmt.Errorf("scan destination %d is *%s, want *%s — the select column order changed",
+				i, ptr.Elem().Type(), val.Type())
+			return r.err
+		}
+		ptr.Elem().Set(val)
+	}
+	return nil
+}
+
+func (r *settingRows) Err() error                                 { return r.err }
+func (*settingRows) Close()                                       {}
+func (*settingRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (*settingRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (*settingRows) Values() ([]any, error)                       { return nil, errCaptured }
+func (*settingRows) RawValues() [][]byte                          { return nil }
+func (*settingRows) Conn() *pgx.Conn                              { return nil }
+
+// newTestSetting builds a settings row with the fixed timestamps and a random
+// ID; only key, scope and value matter to the assertions.
+func newTestSetting(scope, key, value string) db.Setting {
+	return db.Setting{
+		ID:        uuid.New(),
+		Key:       key,
+		Value:     json.RawMessage(value),
+		Scope:     scope,
+		CreatedAt: time.Unix(0, 0).UTC(),
+		UpdatedAt: time.Unix(0, 0).UTC(),
+	}
+}
 
 // TestSettingsHandlersKeyRowsOnCaller asserts each handler forwards the gate's
 // scope_id to the query rather than dropping it. Without this, a handler could
@@ -342,4 +426,384 @@ func TestSettingsHandlersEnforceScopeGate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSettingScopeIDRefusesReservedKeys covers the second half of the gate:
+// which keys the generic endpoints may touch at all. Shared-scope reads here
+// are ungated by design, so a key whose dedicated handler gates on a narrower
+// permission (syslog_forwarding on manage:audit) would otherwise be readable by
+// every authenticated account and writable by anyone with manage:settings.
+//
+// The refusal is unconditional — an admin gets it too. Holding manage:settings
+// must not be a second route to a manage:audit-owned key, so there is no role
+// that turns these cases into a 200.
+func TestSettingScopeIDRefusesReservedKeys(t *testing.T) {
+	app := newSettingsTestApp(t)
+
+	tests := []struct {
+		name        string
+		key         string
+		scope       string
+		write       bool
+		role        string
+		wantStatus  int
+		wantScopeID string
+	}{
+		{"reserved global read as viewer", syslogSettingKey, "global", false, "viewer", http.StatusForbidden, ""},
+		{"reserved global read as admin", syslogSettingKey, "global", false, "admin", http.StatusForbidden, ""},
+		{"reserved global write as admin", syslogSettingKey, "global", true, "admin", http.StatusForbidden, ""},
+		{"reserved global write as viewer", syslogSettingKey, "global", true, "viewer", http.StatusForbidden, ""},
+
+		// The reservation binds to the shared row, not the name: a user-scope
+		// row of the same key is keyed on the caller and reachable by nobody
+		// else, so refusing it would be gratuitous.
+		{"reserved key in user scope reads", syslogSettingKey, "user", false, "viewer", http.StatusOK, testSettingsUserID.String()},
+		{"reserved key in user scope writes", syslogSettingKey, "user", true, "viewer", http.StatusOK, testSettingsUserID.String()},
+
+		// An unreserved global key is unaffected — this is the branding fetch
+		// the ungated global read exists for.
+		{"unreserved global read as viewer", "branding.app_title", "global", false, "viewer", http.StatusOK, "null"},
+		{"unreserved global write as admin", "branding.app_title", "global", true, "admin", http.StatusOK, "null"},
+
+		// An unknown scope is still a 400, not a 403: the scope is validated
+		// before the key is classified.
+		{"reserved key in unknown scope", syslogSettingKey, "node", false, "admin", http.StatusBadRequest, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url := "/scope-probe?scope=" + tt.scope + "&key=" + tt.key
+			if tt.write {
+				url += "&write=true"
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req.Header.Set("X-Test-Role", tt.role)
+
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, tt.wantStatus, body)
+			}
+			if tt.wantScopeID == "" {
+				return
+			}
+
+			var got struct {
+				ScopeID string `json:"scope_id"`
+			}
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("decode body %s: %v", body, err)
+			}
+			if got.ScopeID != tt.wantScopeID {
+				t.Errorf("scope_id = %q, want %q", got.ScopeID, tt.wantScopeID)
+			}
+		})
+	}
+}
+
+// TestSettingsHandlersRefuseReservedGlobalKeys asserts each keyed endpoint
+// actually enforces the reservation, and — the load-bearing half — that it does
+// so before issuing any query. A handler that returned 403 after reading the
+// row would still have leaked nothing, but one that read and then forgot to
+// check would pass a status-only assertion; capture.args pins the ordering.
+func TestSettingsHandlersRefuseReservedGlobalKeys(t *testing.T) {
+	reservedURL := "/settings/" + syslogSettingKey
+
+	tests := []struct {
+		name    string
+		method  string
+		url     string
+		body    string
+		role    string
+		refused bool // 403 naming the owner, and no query issued
+	}{
+		{"get reserved global as viewer", http.MethodGet, reservedURL + "?scope=global", "", "viewer", true},
+		{"get reserved global as admin", http.MethodGet, reservedURL + "?scope=global", "", "admin", true},
+		{"put reserved global as admin", http.MethodPut, reservedURL, `{"value":{"enabled":false},"scope":"global"}`, "admin", true},
+		{"put reserved global as viewer", http.MethodPut, reservedURL, `{"value":{"enabled":false},"scope":"global"}`, "viewer", true},
+		{"delete reserved global as admin", http.MethodDelete, reservedURL + "?scope=global", "", "admin", true},
+		{"delete reserved global as viewer", http.MethodDelete, reservedURL + "?scope=global", "", "viewer", true},
+
+		// Same key, own row: allowed through to the query.
+		{"get reserved key in user scope", http.MethodGet, reservedURL, "", "viewer", false},
+		{"put reserved key in user scope", http.MethodPut, reservedURL, `{"value":1}`, "viewer", false},
+		{"delete reserved key in user scope", http.MethodDelete, reservedURL, "", "viewer", false},
+
+		// Unreserved global keys still work for the roles that could always
+		// reach them.
+		{"get unreserved global as viewer", http.MethodGet, "/settings/branding.app_title?scope=global", "", "viewer", false},
+		{"put unreserved global as admin", http.MethodPut, "/settings/branding.app_title", `{"value":"Nexara","scope":"global"}`, "admin", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capture := &captureDBTX{}
+			app := newSettingsApp(t, db.New(capture))
+
+			var req *http.Request
+			if tt.body == "" {
+				req = httptest.NewRequest(tt.method, tt.url, nil)
+			} else {
+				req = httptest.NewRequest(tt.method, tt.url, bytes.NewBufferString(tt.body))
+				req.Header.Set("Content-Type", "application/json")
+			}
+			req.Header.Set("X-Test-Role", tt.role)
+
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, _ := io.ReadAll(resp.Body)
+
+			if !tt.refused {
+				if capture.args == nil {
+					t.Fatalf("query never reached (status %d) — the gate refused a request it should allow, body: %s",
+						resp.StatusCode, body)
+				}
+				return
+			}
+
+			if resp.StatusCode != http.StatusForbidden {
+				t.Errorf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusForbidden, body)
+			}
+			if capture.args != nil {
+				t.Errorf("the query ran anyway with args %#v — the reserved key reached the database", capture.args)
+			}
+			if owner := reservedGlobalSettings[syslogSettingKey]; !strings.Contains(string(body), owner) {
+				t.Errorf("body %s does not name the owning endpoint %q — the caller has nowhere to go", body, owner)
+			}
+		})
+	}
+}
+
+// TestListSettingsExcludesReservedGlobalKeys covers the bulk path, which takes
+// no key and so cannot be refused by the gate. GET /settings?scope=global dumps
+// every shared row at once, which would hand a Viewer the syslog config the
+// keyed endpoint just refused them.
+func TestListSettingsExcludesReservedGlobalKeys(t *testing.T) {
+	const syslogValue = `{"enabled":true,"host":"siem.internal","port":6514,"protocol":"tls"}`
+
+	tests := []struct {
+		name     string
+		scope    string
+		wantKeys []string
+	}{
+		{"global listing drops the owned key", "global", []string{"branding.app_title"}},
+		{"user listing keeps it — the row is the caller's own", "user", []string{"branding.app_title", syslogSettingKey}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capture := &captureDBTX{rows: []db.Setting{
+				newTestSetting(tt.scope, "branding.app_title", `"Nexara"`),
+				newTestSetting(tt.scope, syslogSettingKey, syslogValue),
+			}}
+			app := newSettingsApp(t, db.New(capture))
+
+			req := httptest.NewRequest(http.MethodGet, "/settings?scope="+tt.scope, nil)
+			req.Header.Set("X-Test-Role", "viewer")
+
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusOK, body)
+			}
+
+			var got []settingResponse
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("decode body %s: %v", body, err)
+			}
+			gotKeys := make([]string, len(got))
+			for i, s := range got {
+				gotKeys[i] = s.Key
+			}
+			if strings.Join(gotKeys, ",") != strings.Join(tt.wantKeys, ",") {
+				t.Errorf("keys = %v, want %v", gotKeys, tt.wantKeys)
+			}
+
+			// The values ride along with the keys, so pin the disclosure
+			// itself: the SIEM host must not appear in a global listing.
+			if leaked := strings.Contains(string(body), "siem.internal"); leaked != (tt.scope != "global") {
+				t.Errorf("SIEM host present in body = %v, want %v: %s", leaked, tt.scope != "global", body)
+			}
+		})
+	}
+}
+
+// unreservedGlobalSettings are the shared-scope keys the generic endpoints may
+// serve, each with the reason it is safe to expose. It exists purely to keep
+// TestGuard_GlobalSettingKeysClassified exhaustive: together with
+// reservedGlobalSettings it classifies every global key written from Go.
+var unreservedGlobalSettings = map[string]string{
+	"branding.logo_url":    "public branding asset URL; every signed-in user's SPA renders it",
+	"branding.favicon_url": "public branding asset URL; every signed-in user's SPA renders it",
+	// Written only by the SPA's Branding page through the generic PUT, so the
+	// guard never sees it. Listed anyway so the two maps together stay a
+	// complete inventory of the global keys in use.
+	"branding.app_title": "public application name; every signed-in user's SPA renders it",
+}
+
+// settingParamsTypes are the sqlc param structs that carry a single setting
+// key. ListSettingsByScopeParams is absent on purpose — it has no key.
+var settingParamsTypes = map[string]bool{
+	"GetSettingParams":    true,
+	"UpsertSettingParams": true,
+	"DeleteSettingParams": true,
+}
+
+// TestGuard_GlobalSettingKeysClassified is the drift guard behind the reserved
+// list, in the same static-analysis style as tracktask_guard_test.go. It parses
+// internal/api and internal/api/handlers and fails on any global setting key
+// that is in neither reservedGlobalSettings nor unreservedGlobalSettings.
+//
+// Without it the reservation only covers keys someone remembered to add. The
+// disclosure the list was written for is structural: shared-scope reads on the
+// generic endpoints are ungated, so the next global key holding a secret is
+// world-readable the day it lands. This forces its author to classify it.
+//
+// Only statically resolvable keys are checked — a string literal, or an
+// identifier bound to a package-level string const. A global write whose key it
+// cannot resolve is itself a failure, since that key would slip the guard.
+//
+// Two limits worth knowing. It reads the two Go packages that write settings
+// today; a third would need adding here. And it cannot see keys the SPA writes
+// through the generic PUT (branding.app_title is one) — those are classified by
+// hand in unreservedGlobalSettings.
+func TestGuard_GlobalSettingKeysClassified(t *testing.T) {
+	for _, dir := range []string{".", ".."} {
+		fset, files := parseGoFiles(t, dir)
+		consts := packageStringConsts(files)
+
+		for _, file := range files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				lit, ok := n.(*ast.CompositeLit)
+				if !ok || !isSettingParamsType(lit.Type) {
+					return true
+				}
+				fields := compositeFields(lit)
+				pos := fset.Position(lit.Pos())
+
+				scope, ok := resolveString(fields["Scope"], consts)
+				if !ok {
+					// The generic handlers pass the request's scope, and are
+					// the reservation's own enforcement point — nowhere else
+					// gets to write a setting under a scope chosen at runtime,
+					// or the key would never be classified at all.
+					if filepath.Base(pos.Filename) != "settings.go" {
+						t.Errorf("%s: writes a setting under a scope this guard cannot resolve statically.\n"+
+							"\tOnly the generic handlers in settings.go may do that. Use a literal scope here, "+
+							"or route the write through settingScopeID.", pos)
+					}
+					return true
+				}
+				if scope != "global" {
+					return true
+				}
+
+				key, ok := resolveString(fields["Key"], consts)
+				if !ok {
+					t.Errorf("%s: writes a global setting under a key this guard cannot resolve statically.\n"+
+						"\tUse a string literal or a package-level string const so the key can be classified "+
+						"in reservedGlobalSettings or unreservedGlobalSettings (settings_scope_test.go).", pos)
+					return true
+				}
+				if reservedGlobalSettings[key] == "" && unreservedGlobalSettings[key] == "" {
+					t.Errorf("%s: global setting key %q is classified in neither reservedGlobalSettings nor "+
+						"unreservedGlobalSettings.\n"+
+						"\tGlobal reads on GET /api/v1/settings are ungated, so this key is readable by every "+
+						"authenticated user and writable by any manage:settings holder.\n"+
+						"\tIf a dedicated endpoint owns it, add it to reservedGlobalSettings "+
+						"(internal/api/handlers/settings.go); if it is safe for everyone to read, record why "+
+						"in unreservedGlobalSettings.", pos, key)
+				}
+				return true
+			})
+		}
+	}
+}
+
+// packageStringConsts collects package-level `const name = "literal"` bindings
+// so a key referenced through its owner's const (syslogSettingKey) resolves.
+func packageStringConsts(files []*ast.File) map[string]string {
+	consts := map[string]string{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Names) != len(vs.Values) {
+					continue
+				}
+				for i, name := range vs.Names {
+					if s, ok := stringLiteral(vs.Values[i]); ok {
+						consts[name.Name] = s
+					}
+				}
+			}
+		}
+	}
+	return consts
+}
+
+// isSettingParamsType reports whether a composite literal's type is one of the
+// sqlc setting param structs, i.e. `db.GetSettingParams` and friends.
+func isSettingParamsType(expr ast.Expr) bool {
+	sel, ok := expr.(*ast.SelectorExpr)
+	return ok && settingParamsTypes[sel.Sel.Name]
+}
+
+// compositeFields indexes a composite literal's `Field: value` elements by
+// field name.
+func compositeFields(lit *ast.CompositeLit) map[string]ast.Expr {
+	fields := map[string]ast.Expr{}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		if name, ok := kv.Key.(*ast.Ident); ok {
+			fields[name.Name] = kv.Value
+		}
+	}
+	return fields
+}
+
+// resolveString reads a string literal, or an identifier bound to a
+// package-level string const.
+func resolveString(expr ast.Expr, consts map[string]string) (string, bool) {
+	if expr == nil {
+		return "", false
+	}
+	if s, ok := stringLiteral(expr); ok {
+		return s, true
+	}
+	id, ok := expr.(*ast.Ident)
+	if !ok {
+		return "", false
+	}
+	s, ok := consts[id.Name]
+	return s, ok
+}
+
+func stringLiteral(expr ast.Expr) (string, bool) {
+	lit, ok := expr.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	s, err := strconv.Unquote(lit.Value)
+	return s, err == nil
 }
