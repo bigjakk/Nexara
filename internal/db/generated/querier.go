@@ -279,6 +279,15 @@ type Querier interface {
 	GetScheduledTask(ctx context.Context, id uuid.UUID) (ScheduledTask, error)
 	GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
+	// ORDER BY makes the LIMIT 1 deterministic. 000075 deduped the shared-scope
+	// rows that a plain UNIQUE let accumulate and now prevents new ones, so a
+	// duplicate should be unreachable — but an unordered LIMIT 1 would silently
+	// resolve to the planner's choice (in practice the oldest, i.e. most stale,
+	// heap tuple) if one ever appeared again. Newest write wins instead.
+	//
+	// id is the final tiebreak so the ordering is total: rows written in the same
+	// transaction share now(), and updated_at alone would degenerate back to heap
+	// order. Matches the dedup ordering in 000075.
 	GetSetting(ctx context.Context, arg GetSettingParams) (Setting, error)
 	GetStoragePool(ctx context.Context, id uuid.UUID) (StoragePool, error)
 	GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, error)
@@ -393,6 +402,7 @@ type Querier interface {
 	ListFailedReplication(ctx context.Context) ([]ListFailedReplicationRow, error)
 	ListFirewallTemplates(ctx context.Context) ([]FirewallTemplate, error)
 	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
+	// No row-level tiebreak, for the reasons noted on ListSettingsByScope above.
 	ListGlobalSettings(ctx context.Context) ([]Setting, error)
 	// Guests whose HA resource state is "error" (needs manual intervention).
 	ListHAErrorGuests(ctx context.Context) ([]ListHAErrorGuestsRow, error)
@@ -453,6 +463,12 @@ type Querier interface {
 	ListRunningTaskHistoryByCluster(ctx context.Context, clusterID uuid.UUID) ([]TaskHistory, error)
 	ListSSHKnownHosts(ctx context.Context, clusterID uuid.UUID) ([]SshKnownHost, error)
 	ListScheduledTasksByCluster(ctx context.Context, clusterID uuid.UUID) ([]ScheduledTask, error)
+	// Deliberately no row-level tiebreak, unlike GetSetting above. 000075 makes a
+	// duplicate (key, scope, scope_id) unreachable; if one somehow appeared, a list
+	// surfaces it as a repeated key rather than silently resolving it, so there is
+	// nothing to disambiguate. A tiebreak would also have to match each caller's
+	// fold direction — GetBranding builds a last-wins map, so it would need ASC
+	// where GetSetting needs DESC — which is a sharper edge than leaving it off.
 	ListSettingsByScope(ctx context.Context, arg ListSettingsByScopeParams) ([]Setting, error)
 	// Active storage at or above 85% usage. De-duplicate shared pools.
 	ListStorageNearFull(ctx context.Context) ([]ListStorageNearFullRow, error)
