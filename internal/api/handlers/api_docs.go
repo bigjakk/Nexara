@@ -234,11 +234,13 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/rbac/permissions":  {Description: "List all permissions", Permission: "view:role", Group: "Roles & Permissions"},
 
 	// ── Settings ──────────────────────────────────────────────────────
-	"GET /api/v1/settings":      {Description: "Get application settings", Group: "Settings"},
-	"PUT /api/v1/settings/:key": {Description: "Create or update a setting (permission enforced for global-scope writes)", Permission: "manage:settings", Group: "Settings"},
-	"GET /api/v1/version":       {Description: "Get API version", Group: "Settings"},
-	"GET /api/v1/changelog":     {Description: "Get release notes parsed from GitHub Releases", Group: "Settings"},
-	"GET /api/v1/search":        {Description: "Search across all resources", Group: "Settings"},
+	"GET /api/v1/settings":         {Description: "Get application settings (scope: global or user)", Group: "Settings"},
+	"GET /api/v1/settings/:key":    {Description: "Get a single setting (scope: global or user)", Group: "Settings"},
+	"PUT /api/v1/settings/:key":    {Description: "Create or update a setting; global-scope writes require manage:settings, user-scope writes affect only the caller", Permission: "manage:settings", Group: "Settings"},
+	"DELETE /api/v1/settings/:key": {Description: "Delete a setting; global-scope deletes require manage:settings, user-scope deletes affect only the caller", Permission: "manage:settings", Group: "Settings"},
+	"GET /api/v1/version":          {Description: "Get API version", Group: "Settings"},
+	"GET /api/v1/changelog":        {Description: "Get release notes parsed from GitHub Releases", Group: "Settings"},
+	"GET /api/v1/search":           {Description: "Search across all resources", Group: "Settings"},
 
 	// ── Metrics ───────────────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/metrics":                {Description: "Get cluster metrics", Permission: "view:cluster", Group: "Metrics"},

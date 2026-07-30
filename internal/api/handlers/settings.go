@@ -54,24 +54,68 @@ func toSettingResponse(s db.Setting) settingResponse {
 	return resp
 }
 
+// settingScope describes how one scope string is handled: which row the
+// setting keys on, and what a write to it requires.
+type settingScope struct {
+	// perUser keys the row on the caller's user_id. Otherwise scope_id is
+	// NULL and the row is shared by every user.
+	perUser bool
+	// adminOnly gates writes (create/update/delete) on manage:settings.
+	// Reads stay open — the SPA fetches global settings (branding, etc.)
+	// for every signed-in user.
+	adminOnly bool
+}
+
+// settingScopes is the authoritative set of scopes these endpoints accept.
+//
+// The settings table's CHECK constraint also permits 'cluster', but nothing
+// reads or writes a cluster-scoped setting, and these endpoints take no
+// cluster ID — so such a row would land on scope_id = NULL, i.e. a second
+// shared namespace keyed only by name rather than per-cluster storage. It
+// used to fall through the write gate entirely, letting any authenticated
+// user create, overwrite or delete entries every other user reads back.
+// Implementing it properly means plumbing a cluster ID through and gating
+// on requireClusterPerm; until then the scope is rejected outright.
+var settingScopes = map[string]settingScope{
+	"global": {adminOnly: true},
+	"user":   {perUser: true},
+}
+
+// settingScopeID validates the requested scope, enforces the write gate when
+// write is true, and returns the scope_id the row is keyed on. Every settings
+// handler routes its scope handling through here so the read and write paths
+// can't drift apart on which scopes exist or who may touch them.
+func settingScopeID(c fiber.Ctx, scope string, write bool) (pgtype.UUID, error) {
+	sc, ok := settingScopes[scope]
+	if !ok {
+		return pgtype.UUID{}, fiber.NewError(fiber.StatusBadRequest, "Invalid scope: must be global or user")
+	}
+
+	if write && sc.adminOnly {
+		if err := requirePerm(c, "manage", "settings"); err != nil {
+			return pgtype.UUID{}, err
+		}
+	}
+
+	if !sc.perUser {
+		return pgtype.UUID{}, nil
+	}
+
+	userID, _ := c.Locals("user_id").(uuid.UUID)
+	if userID == uuid.Nil {
+		return pgtype.UUID{}, fiber.NewError(fiber.StatusUnauthorized, "Not authenticated")
+	}
+	return pgtype.UUID{Bytes: userID, Valid: true}, nil
+}
+
 // ListSettings returns settings filtered by scope.
 // GET /api/v1/settings?scope=global|user
 func (h *SettingsHandler) ListSettings(c fiber.Ctx) error {
 	scope := c.Query("scope", "global")
-	if scope != "global" && scope != "user" && scope != "cluster" {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid scope: must be global, user, or cluster")
-	}
 
-	var scopeID pgtype.UUID
-	switch scope {
-	case "user":
-		userID, _ := c.Locals("user_id").(uuid.UUID)
-		if userID == uuid.Nil {
-			return fiber.NewError(fiber.StatusUnauthorized, "Not authenticated")
-		}
-		scopeID = pgtype.UUID{Bytes: userID, Valid: true}
-	case "global":
-		// All authenticated users can read global settings
+	scopeID, err := settingScopeID(c, scope, false)
+	if err != nil {
+		return err
 	}
 
 	settings, err := h.queries.ListSettingsByScope(c.Context(), db.ListSettingsByScopeParams{
@@ -98,14 +142,10 @@ func (h *SettingsHandler) GetSetting(c fiber.Ctx) error {
 	}
 
 	scope := c.Query("scope", "user")
-	var scopeID pgtype.UUID
 
-	if scope == "user" {
-		userID, _ := c.Locals("user_id").(uuid.UUID)
-		if userID == uuid.Nil {
-			return fiber.NewError(fiber.StatusUnauthorized, "Not authenticated")
-		}
-		scopeID = pgtype.UUID{Bytes: userID, Valid: true}
+	scopeID, err := settingScopeID(c, scope, false)
+	if err != nil {
+		return err
 	}
 
 	setting, err := h.queries.GetSetting(c.Context(), db.GetSettingParams{
@@ -161,24 +201,10 @@ func (h *SettingsHandler) UpsertSetting(c fiber.Ctx) error {
 	if scope == "" {
 		scope = "user"
 	}
-	if scope != "global" && scope != "user" && scope != "cluster" {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid scope")
-	}
 
-	// Global settings require admin permission
-	if scope == "global" {
-		if err := requirePerm(c, "manage", "settings"); err != nil {
-			return err
-		}
-	}
-
-	var scopeID pgtype.UUID
-	if scope == "user" {
-		userID, _ := c.Locals("user_id").(uuid.UUID)
-		if userID == uuid.Nil {
-			return fiber.NewError(fiber.StatusUnauthorized, "Not authenticated")
-		}
-		scopeID = pgtype.UUID{Bytes: userID, Valid: true}
+	scopeID, err := settingScopeID(c, scope, true)
+	if err != nil {
+		return err
 	}
 
 	setting, err := h.queries.UpsertSetting(c.Context(), db.UpsertSettingParams{
@@ -204,20 +230,9 @@ func (h *SettingsHandler) DeleteSetting(c fiber.Ctx) error {
 
 	scope := c.Query("scope", "user")
 
-	// Global settings require admin permission
-	if scope == "global" {
-		if err := requirePerm(c, "manage", "settings"); err != nil {
-			return err
-		}
-	}
-
-	var scopeID pgtype.UUID
-	if scope == "user" {
-		userID, _ := c.Locals("user_id").(uuid.UUID)
-		if userID == uuid.Nil {
-			return fiber.NewError(fiber.StatusUnauthorized, "Not authenticated")
-		}
-		scopeID = pgtype.UUID{Bytes: userID, Valid: true}
+	scopeID, err := settingScopeID(c, scope, true)
+	if err != nil {
+		return err
 	}
 
 	if err := h.queries.DeleteSetting(c.Context(), db.DeleteSettingParams{
