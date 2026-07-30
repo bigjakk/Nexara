@@ -603,8 +603,8 @@ func (h *ContainerHandler) CreateSnapshot(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
-	if req.SnapName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "snap_name is required")
+	if err := validateSnapshotName(req.SnapName); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)

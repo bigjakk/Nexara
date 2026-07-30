@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1076,6 +1077,25 @@ type snapshotResponse struct {
 	Parent      string `json:"parent,omitempty"`
 }
 
+// snapshotNameRE mirrors Proxmox's pve-configid format for snapshot names
+// (a leading letter, then letters, digits, '-' or '_') plus the API's
+// 40-character cap.
+var snapshotNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{1,39}$`)
+
+// validateSnapshotName rejects names Proxmox would refuse, with an
+// actionable message instead of PVE's "invalid configid" error.
+func validateSnapshotName(name string) error {
+	switch {
+	case name == "":
+		return errors.New("snap_name is required")
+	case name == "current":
+		return errors.New(`snap_name "current" is reserved by Proxmox`)
+	case !snapshotNameRE.MatchString(name):
+		return errors.New("snap_name must start with a letter and contain only letters, digits, '-' and '_' (no spaces), 2-40 characters")
+	}
+	return nil
+}
+
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
 func (h *VMHandler) ListSnapshots(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -1137,8 +1157,8 @@ func (h *VMHandler) CreateSnapshot(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
-	if req.SnapName == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "snap_name is required")
+	if err := validateSnapshotName(req.SnapName); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)

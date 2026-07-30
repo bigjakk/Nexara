@@ -51,6 +51,20 @@ describe("VMActions", () => {
     expect(screen.getByRole("button", { name: /migrate/i })).toBeInTheDocument();
   });
 
+  it("shows snapshot button when onSnapshot is provided", () => {
+    renderWithProviders(
+      <VMActions {...defaultProps} onSnapshot={vi.fn()} />,
+    );
+    expect(screen.getByRole("button", { name: /snapshot/i })).toBeEnabled();
+  });
+
+  it("hides snapshot button for templates", () => {
+    renderWithProviders(
+      <VMActions {...defaultProps} template onSnapshot={vi.fn()} />,
+    );
+    expect(screen.queryByRole("button", { name: /snapshot/i })).toBeNull();
+  });
+
   it("disables destroy when running", () => {
     renderWithProviders(<VMActions {...defaultProps} status="running" />);
     expect(screen.getByRole("button", { name: /destroy/i })).toBeDisabled();

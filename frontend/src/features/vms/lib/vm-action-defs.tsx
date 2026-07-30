@@ -6,6 +6,7 @@ import {
   Zap,
   Pause,
   PlayCircle,
+  Camera,
   Copy,
   ArrowRightLeft,
   Trash2,
@@ -23,7 +24,7 @@ export interface ActionConfig {
   showWhen: (status: string, kind: ResourceKind) => boolean;
 }
 
-export type ManagementAction = "clone" | "clone-to-template" | "deploy" | "migrate" | "convert-to-template" | "destroy";
+export type ManagementAction = "snapshot" | "clone" | "clone-to-template" | "deploy" | "migrate" | "convert-to-template" | "destroy";
 
 export interface ManagementActionConfig {
   action: ManagementAction;
@@ -93,6 +94,13 @@ export const lifecycleActions: ActionConfig[] = [
 ];
 
 export const managementActions: ManagementActionConfig[] = [
+  {
+    action: "snapshot",
+    label: "Take Snapshot",
+    icon: <Camera className="h-4 w-4" />,
+    variant: "outline",
+    showWhen: (_s, _k, template) => !template,
+  },
   {
     action: "deploy",
     label: "Deploy from Template",

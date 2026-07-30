@@ -1,6 +1,7 @@
 import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMAction } from "../api/vm-queries";
+import { CreateSnapshotDialog } from "./CreateSnapshotDialog";
 import { CloneDialog } from "./CloneDialog";
 import { CloneToTemplateDialog } from "./CloneToTemplateDialog";
 import { DeployTemplateDialog } from "./DeployTemplateDialog";
@@ -30,6 +31,15 @@ export function VMContextDialogs() {
 
   return (
     <>
+      <CreateSnapshotDialog
+        open={openDialog === "snapshot"}
+        onOpenChange={(open) => { if (!open) closeDialog(); }}
+        clusterId={target.clusterId}
+        resourceId={target.resourceId}
+        kind={target.kind}
+        resourceName={target.name}
+      />
+
       <CloneDialog
         open={openDialog === "clone"}
         onOpenChange={(open) => { if (!open) closeDialog(); }}

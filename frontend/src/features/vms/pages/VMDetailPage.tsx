@@ -25,6 +25,7 @@ import { DeployTemplateDialog } from "../components/DeployTemplateDialog";
 import { MigrateJobDialog } from "../components/MigrateJobDialog";
 import { DestroyDialog } from "../components/DestroyDialog";
 import { ConvertToTemplateDialog } from "../components/ConvertToTemplateDialog";
+import { CreateSnapshotDialog } from "../components/CreateSnapshotDialog";
 import { SnapshotPanel } from "../components/SnapshotPanel";
 import { CloudInitPanel } from "../components/CloudInitPanel";
 import { HardwarePanel } from "../components/HardwarePanel";
@@ -69,6 +70,7 @@ export function VMDetailPage() {
     prevNodeRef.current = nodeName;
   }, [nodeName, clusterId, vm, updateTabNode]);
 
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneToTemplateOpen, setCloneToTemplateOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
@@ -263,6 +265,7 @@ export function VMDetailPage() {
         status={vm.status}
         name={vm.name}
         template={vm.template}
+        onSnapshot={() => { setSnapshotOpen(true); }}
         onClone={() => { setCloneOpen(true); }}
         onCloneToTemplate={() => { setCloneToTemplateOpen(true); }}
         onDeploy={() => { setDeployOpen(true); }}
@@ -336,6 +339,7 @@ export function VMDetailPage() {
             clusterId={clusterId}
             resourceId={vmId}
             kind={kind}
+            resourceName={vm.name}
           />
         </TabsContent>
 
@@ -366,6 +370,14 @@ export function VMDetailPage() {
       </Tabs>
 
       {/* Dialogs */}
+      <CreateSnapshotDialog
+        open={snapshotOpen}
+        onOpenChange={setSnapshotOpen}
+        clusterId={clusterId}
+        resourceId={vmId}
+        kind={kind}
+        resourceName={vm.name}
+      />
       <CloneDialog
         open={cloneOpen}
         onOpenChange={setCloneOpen}

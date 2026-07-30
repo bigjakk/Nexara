@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, ArrowRightLeft, Trash2, FileBox, Rocket } from "lucide-react";
+import { Camera, Copy, ArrowRightLeft, Trash2, FileBox, Rocket } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +39,7 @@ interface VMActionsProps {
   status: string;
   name: string;
   template?: boolean;
+  onSnapshot?: () => void;
   onClone: () => void;
   onCloneToTemplate?: () => void;
   onDeploy?: () => void;
@@ -55,6 +56,7 @@ export function VMActions({
   status,
   name,
   template,
+  onSnapshot,
   onClone,
   onCloneToTemplate,
   onDeploy,
@@ -137,6 +139,19 @@ export function VMActions({
         ))}
 
         <div className="h-6 w-px bg-border" />
+
+        {!template && onSnapshot && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isPending}
+            onClick={onSnapshot}
+          >
+            <Camera className="h-4 w-4" />
+            Snapshot
+          </Button>
+        )}
 
         {template && onDeploy && (
           <Button

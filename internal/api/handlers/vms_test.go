@@ -1,6 +1,9 @@
 package handlers
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExtractNodeFromUPID(t *testing.T) {
 	tests := []struct {
@@ -33,6 +36,37 @@ func TestSplitUPID(t *testing.T) {
 	}
 	if parts[1] != "pve1" {
 		t.Errorf("parts[1] = %q, want pve1", parts[1])
+	}
+}
+
+func TestValidateSnapshotName(t *testing.T) {
+	valid := []string{"ab", "before-upgrade", "Snap_2026-07-30", "a1", strings.Repeat("a", 40)}
+	for _, name := range valid {
+		if err := validateSnapshotName(name); err != nil {
+			t.Errorf("validateSnapshotName(%q) = %v, want nil", name, err)
+		}
+	}
+
+	invalid := []struct {
+		name string
+		why  string
+	}{
+		{"", "empty"},
+		{"a", "too short"},
+		{"my snap", "contains space"},
+		{" ab", "leading space"},
+		{"1abc", "starts with digit"},
+		{"-abc", "starts with dash"},
+		{"_abc", "starts with underscore"},
+		{"ab.c", "invalid character"},
+		{"ab/c", "path separator"},
+		{"current", "reserved by Proxmox"},
+		{strings.Repeat("a", 41), "too long"},
+	}
+	for _, tt := range invalid {
+		if err := validateSnapshotName(tt.name); err == nil {
+			t.Errorf("validateSnapshotName(%q) = nil, want error (%s)", tt.name, tt.why)
+		}
 	}
 }
 

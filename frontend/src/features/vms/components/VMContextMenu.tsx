@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Monitor, FolderInput } from "lucide-react";
 import { useVMAction } from "../api/vm-queries";
-import { lifecycleActions, managementActions } from "../lib/vm-action-defs";
+import { lifecycleActions, managementActions, type ManagementAction } from "../lib/vm-action-defs";
 import {
   useVMContextMenuStore,
   type VMContextTarget,
@@ -27,7 +27,7 @@ interface VMContextMenuProps {
 }
 
 export function VMContextMenu({ target, children, onAction }: VMContextMenuProps) {
-  const { openClone, openCloneToTemplate, openDeploy, openMigrate, openDestroy, openConvertToTemplate, openConfirmAction, openMoveToFolder } =
+  const { openSnapshot, openClone, openCloneToTemplate, openDeploy, openMigrate, openDestroy, openConvertToTemplate, openConfirmAction, openMoveToFolder } =
     useVMContextMenuStore();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
@@ -71,8 +71,9 @@ export function VMContextMenu({ target, children, onAction }: VMContextMenuProps
     }
   }
 
-  function handleManagementAction(action: "clone" | "clone-to-template" | "deploy" | "migrate" | "convert-to-template" | "destroy") {
+  function handleManagementAction(action: ManagementAction) {
     onAction?.();
+    if (action === "snapshot") openSnapshot(target);
     if (action === "clone") openClone(target);
     if (action === "clone-to-template") openCloneToTemplate(target);
     if (action === "deploy") openDeploy(target);

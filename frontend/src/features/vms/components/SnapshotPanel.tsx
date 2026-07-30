@@ -2,28 +2,27 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Camera, RotateCcw, Trash2, Loader2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   useSnapshots,
-  useCreateSnapshot,
   useDeleteSnapshot,
   useRollbackSnapshot,
 } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
+import { CreateSnapshotDialog } from "./CreateSnapshotDialog";
 import type { ResourceKind, Snapshot } from "../types/vm";
 
 interface SnapshotPanelProps {
   clusterId: string;
   resourceId: string;
   kind: ResourceKind;
+  resourceName: string;
 }
 
 export function SnapshotPanel({
   clusterId,
   resourceId,
   kind,
+  resourceName,
 }: SnapshotPanelProps) {
   const queryClient = useQueryClient();
   const { data: snapshots, isLoading } = useSnapshots(
@@ -31,7 +30,6 @@ export function SnapshotPanel({
     resourceId,
     kind,
   );
-  const createMutation = useCreateSnapshot();
   const deleteMutation = useDeleteSnapshot();
   const rollbackMutation = useRollbackSnapshot();
 
@@ -48,38 +46,10 @@ export function SnapshotPanel({
     setUpid(null);
   }
 
-  const [showForm, setShowForm] = useState(false);
-  const [snapName, setSnapName] = useState("");
-  const [description, setDescription] = useState("");
-  const [vmstate, setVmstate] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [upid, setUpid] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmRollback, setConfirmRollback] = useState<string | null>(null);
-
-  function handleCreate(e: React.SyntheticEvent) {
-    e.preventDefault();
-    createMutation.mutate(
-      {
-        clusterId,
-        resourceId,
-        kind,
-        body: {
-          snap_name: snapName,
-          ...(description ? { description } : {}),
-          ...(kind === "vm" ? { vmstate } : {}),
-        },
-      },
-      {
-        onSuccess: (data) => {
-          setUpid(data.upid);
-          setShowForm(false);
-          setSnapName("");
-          setDescription("");
-          setVmstate(false);
-        },
-      },
-    );
-  }
 
   function handleDelete(name: string) {
     deleteMutation.mutate(
@@ -147,84 +117,22 @@ export function SnapshotPanel({
           variant="outline"
           className="gap-2"
           onClick={() => {
-            setShowForm(!showForm);
+            setCreateOpen(true);
           }}
         >
           <Camera className="h-4 w-4" />
-          Create Snapshot
+          Take Snapshot
         </Button>
       </div>
 
-      {showForm && (
-        <form
-          onSubmit={handleCreate}
-          className="space-y-3 rounded-lg border p-4"
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="snap-name">Name</Label>
-              <Input
-                id="snap-name"
-                value={snapName}
-                onChange={(e) => {
-                  setSnapName(e.target.value);
-                }}
-                placeholder="e.g. before-upgrade"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="snap-desc">Description</Label>
-              <Input
-                id="snap-desc"
-                value={description}
-                onChange={(e) => {
-                  setDescription(e.target.value);
-                }}
-                placeholder="Optional"
-              />
-            </div>
-          </div>
-          {kind === "vm" && (
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="snap-vmstate"
-                checked={vmstate}
-                onCheckedChange={(checked) => {
-                  setVmstate(Boolean(checked));
-                }}
-              />
-              <Label htmlFor="snap-vmstate" className="text-sm">
-                Include RAM state
-              </Label>
-            </div>
-          )}
-          {createMutation.isError && (
-            <p className="text-sm text-destructive">
-              {createMutation.error.message}
-            </p>
-          )}
-          <div className="flex gap-2">
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!snapName || createMutation.isPending}
-            >
-              {createMutation.isPending ? "Creating..." : "Create"}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setShowForm(false);
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
-      )}
+      <CreateSnapshotDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        clusterId={clusterId}
+        resourceId={resourceId}
+        kind={kind}
+        resourceName={resourceName}
+      />
 
       {isLoading && (
         <div className="flex items-center justify-center py-8">
