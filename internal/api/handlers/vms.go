@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1094,6 +1095,105 @@ func validateSnapshotName(name string) error {
 		return errors.New("snap_name must start with a letter and contain only letters, digits, '-' and '_' (no spaces), 2-40 characters")
 	}
 	return nil
+}
+
+type snapshotCapabilityResponse struct {
+	Supported       bool     `json:"supported"`
+	BlockingVolumes []string `json:"blocking_volumes"`
+}
+
+// fileBackedStorageTypes are storage types where guest volumes live as plain
+// files: only qcow2 images support snapshots there — raw (and vmdk) do not.
+var fileBackedStorageTypes = map[string]bool{
+	"dir":       true,
+	"nfs":       true,
+	"cifs":      true,
+	"glusterfs": true,
+}
+
+// volumeKeyRE matches config keys referencing guest volumes relevant to the
+// snapshot-capability hint (disks, EFI vars, TPM state, CT rootfs/mounts).
+var volumeKeyRE = regexp.MustCompile(`^(scsi|ide|sata|virtio|mp)\d+$|^(efidisk0|tpmstate0|rootfs)$`)
+
+// snapshotBlockingVolumes lists volumes that likely prevent snapshots:
+// non-qcow2 images on file-backed storage and passthrough devices. It is a
+// best-effort hint for the UI — Proxmox's feature check is the authority on
+// whether the guest can snapshot at all.
+func snapshotBlockingVolumes(config proxmox.VMConfig, storageTypes map[string]string) []string {
+	blocking := []string{}
+	for key, raw := range config {
+		if !volumeKeyRE.MatchString(key) {
+			continue
+		}
+		val, ok := raw.(string)
+		if !ok || strings.Contains(val, "media=cdrom") {
+			continue
+		}
+		volume, _, _ := strings.Cut(val, ",")
+		if strings.HasPrefix(volume, "/") {
+			blocking = append(blocking, key+" (passthrough device)")
+			continue
+		}
+		storage, _, found := strings.Cut(volume, ":")
+		if !found || !fileBackedStorageTypes[storageTypes[storage]] {
+			continue
+		}
+		if strings.HasSuffix(volume, ".qcow2") {
+			continue
+		}
+		blocking = append(blocking, key+" on "+storage)
+	}
+	sort.Strings(blocking)
+	return blocking
+}
+
+// storageTypesByName maps a cluster's storage pool names to their types from
+// the collector-synced inventory. Best-effort: empty on error, which just
+// suppresses the blocking-volume hint.
+func storageTypesByName(c fiber.Ctx, queries *db.Queries, clusterID uuid.UUID) map[string]string {
+	types := map[string]string{}
+	pools, err := queries.ListStoragePoolsByCluster(c.Context(), clusterID)
+	if err != nil {
+		return types
+	}
+	for _, p := range pools {
+		types[p.Storage] = p.Type
+	}
+	return types
+}
+
+// GetSnapshotCapability handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshot-capability.
+func (h *VMHandler) GetSnapshotCapability(c fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "vm", clusterID); err != nil {
+		return err
+	}
+
+	vmID, err := uuid.Parse(c.Params("vm_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid VM ID")
+	}
+
+	vm, node, _, pxClient, err := h.resolveVM(c, clusterID, vmID)
+	if err != nil {
+		return err
+	}
+
+	supported, err := pxClient.GetVMSnapshotFeature(c.Context(), node.Name, int(vm.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	resp := snapshotCapabilityResponse{Supported: supported, BlockingVolumes: []string{}}
+	if !supported {
+		if config, cfgErr := pxClient.GetVMConfig(c.Context(), node.Name, int(vm.Vmid)); cfgErr == nil {
+			resp.BlockingVolumes = snapshotBlockingVolumes(config, storageTypesByName(c, h.queries, clusterID))
+		}
+	}
+	return c.JSON(resp)
 }
 
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.

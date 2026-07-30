@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 func TestExtractNodeFromUPID(t *testing.T) {
@@ -67,6 +70,96 @@ func TestValidateSnapshotName(t *testing.T) {
 		if err := validateSnapshotName(tt.name); err == nil {
 			t.Errorf("validateSnapshotName(%q) = nil, want error (%s)", tt.name, tt.why)
 		}
+	}
+}
+
+func TestSnapshotBlockingVolumes(t *testing.T) {
+	storageTypes := map[string]string{
+		"synology":    "nfs",
+		"proxmox-ssd": "nfs",
+		"local":       "dir",
+		"test":        "rbd",
+		"local-lvm":   "lvmthin",
+	}
+
+	tests := []struct {
+		name   string
+		config proxmox.VMConfig
+		want   []string
+	}{
+		{
+			name: "win11: qcow2 disk fine, raw tpm state on nfs flagged",
+			config: proxmox.VMConfig{
+				"scsi0":     "proxmox-ssd:102/vm-102-disk-0.qcow2,discard=on,size=125G",
+				"tpmstate0": "proxmox-ssd:102/vm-102-disk-1.raw,size=4M,version=v2.0",
+				"ide2":      "none,media=cdrom",
+				"bios":      "ovmf",
+			},
+			want: []string{"tpmstate0 on proxmox-ssd"},
+		},
+		{
+			name: "raw disk on nfs flagged",
+			config: proxmox.VMConfig{
+				"scsi0": "synology:121/vm-121-disk-0.raw,discard=on,size=81G",
+			},
+			want: []string{"scsi0 on synology"},
+		},
+		{
+			name: "rbd and lvmthin volumes are fine",
+			config: proxmox.VMConfig{
+				"scsi0":   "test:vm-101-disk-0,size=32G",
+				"virtio1": "local-lvm:vm-101-disk-1,size=8G",
+			},
+			want: []string{},
+		},
+		{
+			name: "cdrom iso on file storage is ignored",
+			config: proxmox.VMConfig{
+				"ide2":  "synology:iso/WinXPSP3.iso,media=cdrom,size=637568K",
+				"scsi0": "test:vm-101-disk-0,size=32G",
+			},
+			want: []string{},
+		},
+		{
+			name: "passthrough device flagged",
+			config: proxmox.VMConfig{
+				"scsi1": "/dev/disk/by-id/ata-Foo123,size=500G",
+			},
+			want: []string{"scsi1 (passthrough device)"},
+		},
+		{
+			name: "container rootfs and mount point raw on nfs flagged",
+			config: proxmox.VMConfig{
+				"rootfs": "proxmox-ssd:105/vm-105-disk-0.raw,size=8G",
+				"mp0":    "test:vm-105-disk-1,mp=/data,size=10G",
+			},
+			want: []string{"rootfs on proxmox-ssd"},
+		},
+		{
+			name: "unknown storage is not accused",
+			config: proxmox.VMConfig{
+				"scsi0": "mystery:vm-1-disk-0.raw,size=1G",
+			},
+			want: []string{},
+		},
+		{
+			name: "non-string and non-volume keys are ignored",
+			config: proxmox.VMConfig{
+				"cores":  float64(4),
+				"name":   "kali",
+				"scsihw": "virtio-scsi-pci",
+			},
+			want: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := snapshotBlockingVolumes(tt.config, storageTypes)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("snapshotBlockingVolumes() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

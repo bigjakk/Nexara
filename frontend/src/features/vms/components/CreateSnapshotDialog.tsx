@@ -12,7 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useCreateSnapshot, useTaskStatus } from "../api/vm-queries";
+import {
+  useCreateSnapshot,
+  useSnapshotCapability,
+  useTaskStatus,
+} from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { snapshotNameError, SNAPSHOT_NAME_RULES } from "../lib/snapshot-name";
@@ -55,6 +59,15 @@ export function CreateSnapshotDialog({
   const [snapName, setSnapName] = useState("");
   const [description, setDescription] = useState("");
   const [vmstate, setVmstate] = useState(false);
+
+  // Only the open dialog instance runs the pre-flight check; a query error
+  // just means no warning (Proxmox remains the authority at submit time).
+  const { data: capability } = useSnapshotCapability(
+    clusterId,
+    resourceId,
+    kind,
+    open,
+  );
 
   const { data: taskStatus } = useTaskStatus(
     task?.clusterId ?? "",
@@ -193,6 +206,26 @@ export function CreateSnapshotDialog({
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
+            {capability && !capability.supported && (
+              <div className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-500">
+                <p className="font-medium">
+                  Proxmox reports that this guest cannot take snapshots in its
+                  current configuration.
+                </p>
+                {capability.blocking_volumes.length > 0 && (
+                  <p>
+                    Likely cause:{" "}
+                    <span className="font-medium">
+                      {capability.blocking_volumes.join(", ")}
+                    </span>{" "}
+                    — that storage has no snapshot support. Move the volume to
+                    snapshot-capable storage (RBD, LVM-thin, ZFS) or use qcow2
+                    format.
+                  </p>
+                )}
+                <p>You can still try, but the task will most likely fail.</p>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="snapshot-name">Name</Label>
               <Input

@@ -88,6 +88,10 @@ vi.mock("../api/vm-queries", () => ({
     data: [],
     isLoading: false,
   }),
+  useSnapshotCapability: () => ({
+    data: { supported: true, blocking_volumes: [] },
+    isLoading: false,
+  }),
   useCreateSnapshot: () => ({
     mutate: vi.fn(),
     isPending: false,

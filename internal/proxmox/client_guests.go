@@ -493,6 +493,46 @@ func (c *Client) RollbackVMSnapshot(ctx context.Context, node string, vmid int, 
 	}
 	return upid, nil
 }
+
+// featureCheck is the response of GET /nodes/{node}/{qemu|lxc}/{vmid}/feature.
+type featureCheck struct {
+	HasFeature FlexBool `json:"hasFeature"`
+}
+
+// GetVMSnapshotFeature reports whether a VM's current configuration supports
+// taking snapshots — the same check the native PVE UI uses to enable its
+// snapshot button (false e.g. for raw disks or TPM state on file storage).
+func (c *Client) GetVMSnapshotFeature(ctx context.Context, node string, vmid int) (bool, error) {
+	if err := validateNodeName(node); err != nil {
+		return false, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return false, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/feature?feature=snapshot"
+	var res featureCheck
+	if err := c.do(ctx, path, &res); err != nil {
+		return false, fmt.Errorf("get snapshot feature for VM %d on %s: %w", vmid, node, err)
+	}
+	return bool(res.HasFeature), nil
+}
+
+// GetCTSnapshotFeature is the container counterpart of GetVMSnapshotFeature.
+func (c *Client) GetCTSnapshotFeature(ctx context.Context, node string, vmid int) (bool, error) {
+	if err := validateNodeName(node); err != nil {
+		return false, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return false, err
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/feature?feature=snapshot"
+	var res featureCheck
+	if err := c.do(ctx, path, &res); err != nil {
+		return false, fmt.Errorf("get snapshot feature for CT %d on %s: %w", vmid, node, err)
+	}
+	return bool(res.HasFeature), nil
+}
+
 func (c *Client) ListCTSnapshots(ctx context.Context, node string, vmid int) ([]Snapshot, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err

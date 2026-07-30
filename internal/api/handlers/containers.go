@@ -542,6 +542,40 @@ func (h *ContainerHandler) resolveCT(c fiber.Ctx, clusterID, ctID uuid.UUID) (db
 
 // --- Snapshot handlers ---
 
+// GetSnapshotCapability handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshot-capability.
+func (h *ContainerHandler) GetSnapshotCapability(c fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "view", "container", clusterID); err != nil {
+		return err
+	}
+
+	ctID, err := uuid.Parse(c.Params("ct_id"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid container ID")
+	}
+
+	ct, node, _, pxClient, err := h.resolveCT(c, clusterID, ctID)
+	if err != nil {
+		return err
+	}
+
+	supported, err := pxClient.GetCTSnapshotFeature(c.Context(), node.Name, int(ct.Vmid))
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	resp := snapshotCapabilityResponse{Supported: supported, BlockingVolumes: []string{}}
+	if !supported {
+		if config, cfgErr := pxClient.GetCTConfig(c.Context(), node.Name, int(ct.Vmid)); cfgErr == nil {
+			resp.BlockingVolumes = snapshotBlockingVolumes(config, storageTypesByName(c, h.queries, clusterID))
+		}
+	}
+	return c.JSON(resp)
+}
+
 // ListSnapshots handles GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.
 func (h *ContainerHandler) ListSnapshots(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)

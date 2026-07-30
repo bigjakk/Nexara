@@ -267,6 +267,39 @@ export function useTaskStatus(clusterId: string, upid: string | null) {
 
 // --- Snapshots ---
 
+export interface SnapshotCapability {
+  supported: boolean;
+  blocking_volumes: string[];
+}
+
+/** Proxmox's own guest-level snapshot feature check (the one the native PVE
+ * UI uses to grey out its snapshot button), plus a best-effort list of the
+ * volumes that block it. */
+export function useSnapshotCapability(
+  clusterId: string,
+  resourceId: string,
+  kind: ResourceKind,
+  enabled: boolean,
+) {
+  const base =
+    kind === "ct"
+      ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshot-capability`
+      : `/api/v1/clusters/${clusterId}/vms/${resourceId}/snapshot-capability`;
+
+  return useQuery({
+    queryKey: [
+      "clusters",
+      clusterId,
+      kind === "ct" ? "containers" : "vms",
+      resourceId,
+      "snapshot-capability",
+    ],
+    queryFn: () => apiClient.get<SnapshotCapability>(base),
+    enabled: enabled && clusterId.length > 0 && resourceId.length > 0,
+    staleTime: 60_000,
+  });
+}
+
 export function useSnapshots(
   clusterId: string,
   resourceId: string,
