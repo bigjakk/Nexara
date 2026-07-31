@@ -247,9 +247,21 @@ func (c *captureDBTX) Query(_ context.Context, sql string, args ...any) (pgx.Row
 func (c *captureDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	c.record(sql, args)
 	if c.row == nil {
-		return errRow{}
+		return failRow{err: errCaptured}
 	}
 	return settingRow{s: *c.row}
+}
+
+// ranStatement reports whether the handler issued a statement containing sql.
+// For assertions about which statements a request reached, as opposed to which
+// arguments they carried.
+func (c *captureDBTX) ranStatement(sql string) bool {
+	for _, q := range c.calls {
+		if strings.Contains(q.sql, sql) {
+			return true
+		}
+	}
+	return false
 }
 
 // auditInserts decodes every audit_log row the handler wrote back into the
@@ -288,10 +300,6 @@ func argAs[T any](t *testing.T, args []any, i int) T {
 	}
 	return v
 }
-
-type errRow struct{}
-
-func (errRow) Scan(...any) error { return errCaptured }
 
 // settingRow replays one db.Setting through pgx.Row, reusing settingRows' scan
 // so the same column-order guard applies to the single-row path.
@@ -664,7 +672,7 @@ func TestSettingsHandlersRefuseReservedGlobalKeys(t *testing.T) {
 			if capture.args != nil {
 				t.Errorf("the query ran anyway with args %#v — the reserved key reached the database", capture.args)
 			}
-			if owner := reservedGlobalSettings[syslogSettingKey]; !strings.Contains(string(body), owner) {
+			if owner := reservedGlobalSettings[syslogSettingKey].String(); !strings.Contains(string(body), owner) {
 				t.Errorf("body %s does not name the owning endpoint %q — the caller has nowhere to go", body, owner)
 			}
 		})
@@ -1001,11 +1009,10 @@ func TestBrandingUploadsAudit(t *testing.T) {
 	}
 }
 
-// assertSettingAudit checks the fields every settings audit row shares and
-// returns the decoded details for the caller's own assertions. A non-empty
-// sentinel must not appear anywhere in the row — that is the check keeping the
-// setting's value out of the audit log.
-func assertSettingAudit(t *testing.T, entry db.InsertAuditLogParams, action, key, scope, sentinel string) settingAuditDetails {
+// assertAuditEnvelope checks the columns every settings-resource audit row
+// shares, whichever endpoint wrote it — the generic settings handlers, the
+// branding uploads, or the syslog forwarding endpoints in audit_syslog_test.go.
+func assertAuditEnvelope(t *testing.T, entry db.InsertAuditLogParams, action, resourceID string) {
 	t.Helper()
 
 	if entry.Action != action {
@@ -1014,8 +1021,8 @@ func assertSettingAudit(t *testing.T, entry db.InsertAuditLogParams, action, key
 	if entry.ResourceType != settingResourceType {
 		t.Errorf("resource_type = %q, want %q", entry.ResourceType, settingResourceType)
 	}
-	if entry.ResourceID != key {
-		t.Errorf("resource_id = %q, want the setting key %q", entry.ResourceID, key)
+	if entry.ResourceID != resourceID {
+		t.Errorf("resource_id = %q, want the setting key %q", entry.ResourceID, resourceID)
 	}
 	if !entry.UserID.Valid || uuid.UUID(entry.UserID.Bytes) != testSettingsUserID {
 		t.Errorf("user_id = %v, want the caller %s — the row cannot be attributed", entry.UserID, testSettingsUserID)
@@ -1023,6 +1030,16 @@ func assertSettingAudit(t *testing.T, entry db.InsertAuditLogParams, action, key
 	if entry.ClusterID.Valid {
 		t.Errorf("cluster_id = %s, want NULL — settings are not cluster-scoped", uuid.UUID(entry.ClusterID.Bytes))
 	}
+}
+
+// assertSettingAudit checks the fields every settings audit row shares and
+// returns the decoded details for the caller's own assertions. A non-empty
+// sentinel must not appear anywhere in the row — that is the check keeping the
+// setting's value out of the audit log.
+func assertSettingAudit(t *testing.T, entry db.InsertAuditLogParams, action, key, scope, sentinel string) settingAuditDetails {
+	t.Helper()
+
+	assertAuditEnvelope(t, entry, action, key)
 
 	var details settingAuditDetails
 	if err := json.Unmarshal(entry.Details, &details); err != nil {
@@ -1178,7 +1195,7 @@ func TestGuard_GlobalSettingKeysClassified(t *testing.T) {
 						"in reservedGlobalSettings or unreservedGlobalSettings (settings_scope_test.go).", pos)
 					return true
 				}
-				if reservedGlobalSettings[key] == "" && unreservedGlobalSettings[key] == "" {
+				if _, reserved := reservedGlobalSettings[key]; !reserved && unreservedGlobalSettings[key] == "" {
 					t.Errorf("%s: global setting key %q is classified in neither reservedGlobalSettings nor "+
 						"unreservedGlobalSettings.\n"+
 						"\tGlobal reads on GET /api/v1/settings are ungated, so this key is readable by every "+

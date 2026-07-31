@@ -3,12 +3,14 @@ package handlers
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -57,13 +59,55 @@ type auditListResponse struct {
 	Total int64              `json:"total"`
 }
 
-func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow) auditLogResponse {
+// reservedSettingVisibility resolves, once per request, which reserved setting
+// keys this caller may see the details of: those whose owning endpoint they
+// could have read the setting from directly.
+//
+// It is the read half of the reservation in settings.go. An entry about a
+// reserved key carries that key's value — the syslog forwarding entries name
+// the collector the audit stream is sent to, and whether its transport is
+// verified — while view:audit belongs to the default Viewer role and every
+// audit read here serves cluster-less rows to anyone holding it globally.
+// Without this, recording the change would hand a Viewer the value that
+// GET /api/v1/settings/<key> refuses them.
+func reservedSettingVisibility(c fiber.Ctx) (map[string]bool, error) {
+	visible := make(map[string]bool, len(reservedGlobalSettings))
+	for key, owner := range reservedGlobalSettings {
+		allowed, err := hasGlobalPerm(c, owner.Action, owner.Resource)
+		if err != nil {
+			return nil, err
+		}
+		visible[key] = allowed
+	}
+	return visible, nil
+}
+
+// auditDetailsFor returns the details a caller may see for one audit row.
+//
+// Redacted rather than dropped: who changed which setting, and when, is the
+// part of the record every view:audit holder is entitled to — it is the value
+// alone that is owned. The replacement names the permission to ask for, so a
+// reader can tell a redaction from an entry that carried nothing.
+func auditDetailsFor(resourceType, resourceID, details string, visible map[string]bool) string {
+	if resourceType != settingResourceType || visible[resourceID] {
+		return details
+	}
+	owner, reserved := reservedGlobalSettings[resourceID]
+	if !reserved {
+		return details
+	}
+	// The interpolated halves come from reservedGlobalSettings, a table of
+	// literals, never from the request — so this needs no escaping.
+	return `{"redacted":true,"requires":"` + owner.Action + `:` + owner.Resource + `"}`
+}
+
+func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow, visible map[string]bool) auditLogResponse {
 	resp := auditLogResponse{
 		ID:              a.ID,
 		ResourceType:    a.ResourceType,
 		ResourceID:      a.ResourceID,
 		Action:          a.Action,
-		Details:         string(a.Details),
+		Details:         auditDetailsFor(a.ResourceType, a.ResourceID, string(a.Details), visible),
 		CreatedAt:       a.CreatedAt.Format(time.RFC3339Nano),
 		Source:          a.Source,
 		UserEmail:       a.UserEmail.String,
@@ -184,6 +228,11 @@ func (h *AuditHandler) List(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to count audit log")
 	}
 
+	visible, err := reservedSettingVisibility(c)
+	if err != nil {
+		return err
+	}
+
 	resp := auditListResponse{
 		Items: make([]auditLogResponse, 0, len(items)),
 		Total: total,
@@ -198,7 +247,7 @@ func (h *AuditHandler) List(c fiber.Ctx) error {
 		} else if !access.HasGlobal {
 			continue
 		}
-		resp.Items = append(resp.Items, toAdvancedAuditResponse(a))
+		resp.Items = append(resp.Items, toAdvancedAuditResponse(a, visible))
 	}
 
 	return c.JSON(resp)
@@ -216,6 +265,11 @@ func (h *AuditHandler) ListRecent(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list recent activity")
 	}
 
+	visible, err := reservedSettingVisibility(c)
+	if err != nil {
+		return err
+	}
+
 	resp := make([]auditLogResponse, 0, len(items))
 	for _, a := range items {
 		if a.ClusterID.Valid {
@@ -225,19 +279,19 @@ func (h *AuditHandler) ListRecent(c fiber.Ctx) error {
 		} else if !access.HasGlobal {
 			continue
 		}
-		resp = append(resp, toRecentAuditResponse(a))
+		resp = append(resp, toRecentAuditResponse(a, visible))
 	}
 
 	return c.JSON(resp)
 }
 
-func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow) auditLogResponse {
+func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow, visible map[string]bool) auditLogResponse {
 	resp := auditLogResponse{
 		ID:              a.ID,
 		ResourceType:    a.ResourceType,
 		ResourceID:      a.ResourceID,
 		Action:          a.Action,
-		Details:         string(a.Details),
+		Details:         auditDetailsFor(a.ResourceType, a.ResourceID, string(a.Details), visible),
 		CreatedAt:       a.CreatedAt.Format(time.RFC3339Nano),
 		Source:          a.Source,
 		UserEmail:       a.UserEmail.String,
@@ -294,9 +348,18 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log")
 	}
 
+	// A reserved setting key is global, so its entries carry no cluster_id and
+	// this cluster-filtered query cannot return one. Applied anyway, so that
+	// every path over these rows answers to one rule rather than to a property
+	// of the current WHERE clause.
+	visible, err := reservedSettingVisibility(c)
+	if err != nil {
+		return err
+	}
+
 	resp := make([]auditLogResponse, len(items))
 	for i, a := range items {
-		resp[i] = toAdvancedAuditResponse(a)
+		resp[i] = toAdvancedAuditResponse(a, visible)
 	}
 
 	return c.JSON(resp)
@@ -381,22 +444,29 @@ func (h *AuditHandler) Export(c fiber.Ctx) error {
 		items = append(items, a)
 	}
 
+	// An export is the same disclosure as a listing, in a file. Resolved here
+	// so all three formats share one answer.
+	visible, err := reservedSettingVisibility(c)
+	if err != nil {
+		return err
+	}
+
 	timestamp := time.Now().Format("20060102-150405")
 
 	switch format {
 	case "csv":
-		return h.exportCSV(c, items, timestamp)
+		return h.exportCSV(c, items, timestamp, visible)
 	case "syslog":
-		return h.exportSyslog(c, items, timestamp)
+		return h.exportSyslog(c, items, timestamp, visible)
 	default:
-		return h.exportJSON(c, items, timestamp)
+		return h.exportJSON(c, items, timestamp, visible)
 	}
 }
 
-func (h *AuditHandler) exportJSON(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string) error {
+func (h *AuditHandler) exportJSON(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string, visible map[string]bool) error {
 	resp := make([]auditLogResponse, len(items))
 	for i, a := range items {
-		resp[i] = toAdvancedAuditResponse(a)
+		resp[i] = toAdvancedAuditResponse(a, visible)
 	}
 
 	c.Set("Content-Type", "application/json; charset=utf-8")
@@ -404,7 +474,7 @@ func (h *AuditHandler) exportJSON(c fiber.Ctx, items []db.ListAuditLogAdvancedRo
 	return c.JSON(resp)
 }
 
-func (h *AuditHandler) exportCSV(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string) error {
+func (h *AuditHandler) exportCSV(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string, visible map[string]bool) error {
 	c.Set("Content-Type", "text/csv; charset=utf-8")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-log-%s.csv", timestamp))
 
@@ -445,7 +515,7 @@ func (h *AuditHandler) exportCSV(c fiber.Ctx, items []db.ListAuditLogAdvancedRow
 			resourceName,
 			vmid,
 			a.Action,
-			string(a.Details),
+			auditDetailsFor(a.ResourceType, a.ResourceID, string(a.Details), visible),
 		})
 	}
 
@@ -454,7 +524,7 @@ func (h *AuditHandler) exportCSV(c fiber.Ctx, items []db.ListAuditLogAdvancedRow
 }
 
 // exportSyslog outputs audit entries in RFC 5424 syslog format for SIEM integration.
-func (h *AuditHandler) exportSyslog(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string) error {
+func (h *AuditHandler) exportSyslog(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string, visible map[string]bool) error {
 	c.Set("Content-Type", "text/plain; charset=utf-8")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-log-%s.log", timestamp))
 
@@ -482,7 +552,7 @@ func (h *AuditHandler) exportSyslog(c fiber.Ctx, items []db.ListAuditLogAdvanced
 			userName, clusterName, a.ResourceType, a.ResourceID, a.Action)
 
 		// Append details JSON if non-empty.
-		details := string(a.Details)
+		details := auditDetailsFor(a.ResourceType, a.ResourceID, string(a.Details), visible)
 		if details != "" && details != "{}" {
 			msg += fmt.Sprintf(" details=%s", details)
 		}
@@ -517,28 +587,162 @@ func syslogSeverity(action string) int {
 
 const syslogSettingKey = "syslog_forwarding"
 
+// The audit actions these endpoints record.
+//
+// Both are filed under the settings resource type with the setting key as the
+// resource id: the config is a row in `settings`, and recording the probe
+// against that same id means one filter over the audit log tells the whole
+// story of a destination — every change, and every test that preceded it.
+const (
+	syslogUpdatedAction = "syslog_forwarding_updated"
+	syslogTestedAction  = "syslog_forwarding_tested"
+)
+
+// Bounds on the caller-supplied strings a syslog audit detail carries: the host
+// and protocol from the config itself, and the probe's error text, which wraps
+// net's own message around that same host. Neither endpoint caps the host it
+// accepts, so without these one request writes a body-limit-sized string into
+// audit_log. They bound the size of a row, not the number of them — nothing
+// rate-limits the probe.
+const (
+	maxSyslogAuditValueLen = 256
+	maxSyslogAuditErrorLen = 512
+)
+
+// syslogAuditConfig is the part of a forwarding config that a change or a probe
+// records: where the audit stream goes, over what, and whether it goes at all.
+//
+// It is a struct of its own rather than proxsyslog.Config, and that is the
+// point. Marshalling the config itself would copy every field the forwarder
+// ever grows — a TLS client key, a collector token — into a table with a wider
+// read audience than the settings row, on the day the field landed and with
+// nothing to catch it. Adding a field here is a deliberate act.
+// TestGuard_SyslogAuditFieldsClassified fails when proxsyslog.Config gains one
+// that is neither recorded here nor listed as deliberately omitted.
+type syslogAuditConfig struct {
+	Enabled  bool   `json:"enabled"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+	Facility int    `json:"facility"`
+	// Recorded because turning it on downgrades the transport carrying the
+	// audit stream — the same class of change as pointing it somewhere else.
+	TLSSkipVerify bool `json:"tls_skip_verify"`
+}
+
+// toSyslogAuditConfig is the single point where a forwarding config crosses
+// into an audit detail, which makes it the one place the caps have to be
+// applied. Every recorded config goes through here — the previous, the new, and
+// a probe's target.
+func toSyslogAuditConfig(cfg proxsyslog.Config) syslogAuditConfig {
+	return syslogAuditConfig{
+		Enabled:       cfg.Enabled,
+		Host:          auditTruncate(cfg.Host, maxSyslogAuditValueLen),
+		Port:          cfg.Port,
+		Protocol:      auditTruncate(cfg.Protocol, maxSyslogAuditValueLen),
+		Facility:      cfg.Facility,
+		TLSSkipVerify: cfg.TLSSkipVerify,
+	}
+}
+
+// syslogAuditDetails is what a change to the forwarding config records — enough
+// to see where the audit stream used to go and where it goes now without
+// reading the settings row back, which by then holds only the new value.
+type syslogAuditDetails struct {
+	// Previous is the config this write replaced, null when none was stored.
+	// PreviousUnavailable separates that from a stored config that could not be
+	// read back, so an absent "before" is never guesswork.
+	Previous            *syslogAuditConfig `json:"previous"`
+	PreviousUnavailable bool               `json:"previous_unavailable,omitempty"`
+	New                 syslogAuditConfig  `json:"new"`
+}
+
+// syslogTestAuditDetails is what a forwarding probe records: the target as the
+// caller submitted it, and what came back.
+type syslogTestAuditDetails struct {
+	Target  syslogAuditConfig `json:"target"`
+	Success bool              `json:"success"`
+	Error   string            `json:"error,omitempty"`
+}
+
+// defaultSyslogConfig is what the endpoints report before anything has been
+// saved: forwarding off, and the RFC 5424 defaults the forwarder itself falls
+// back to.
+func defaultSyslogConfig() proxsyslog.Config {
+	return proxsyslog.Config{Port: 514, Protocol: "udp", Facility: 16}
+}
+
+// storedSyslogConfig reads the saved forwarding config. found is false when
+// nothing has been saved yet, which is not an error — that is what
+// defaultSyslogConfig is for. Anything else is an error, deliberately: a config
+// that exists but cannot be read is not the same as none, and neither caller
+// may treat it as such.
+func (h *AuditHandler) storedSyslogConfig(c fiber.Ctx) (proxsyslog.Config, bool, error) {
+	setting, err := h.queries.GetSetting(c.Context(), db.GetSettingParams{
+		Key:   syslogSettingKey,
+		Scope: "global",
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return proxsyslog.Config{}, false, nil
+	}
+	if err != nil {
+		return proxsyslog.Config{}, false, fmt.Errorf("read syslog config: %w", err)
+	}
+
+	var cfg proxsyslog.Config
+	if err := json.Unmarshal(setting.Value, &cfg); err != nil {
+		return proxsyslog.Config{}, false, fmt.Errorf("decode syslog config: %w", err)
+	}
+	return cfg, true, nil
+}
+
+// previousSyslogAudit reads the config a write is about to replace, in the
+// shape the audit detail records it. A nil config with unavailable false means
+// nothing was ever stored; unavailable true means a stored config could not be
+// read back, which the record says rather than passing off as "none".
+//
+// The read is its own statement, not part of the write's transaction. Two
+// concurrent updates can therefore each record the value they read, and the one
+// that lost the race names a "previous" that was already gone. The stored config
+// is correct either way; only that field of the record is approximate, and both
+// entries still show up.
+func (h *AuditHandler) previousSyslogAudit(c fiber.Ctx) (prev *syslogAuditConfig, unavailable bool) {
+	cfg, found, err := h.storedSyslogConfig(c)
+	if err != nil {
+		return nil, true
+	}
+	if !found {
+		return nil, false
+	}
+	audited := toSyslogAuditConfig(cfg)
+	return &audited, false
+}
+
+// syslogTestAuditError renders a failed probe for the audit detail. The message
+// embeds the caller's own host and protocol, so it is bounded like any other
+// caller-supplied string.
+func syslogTestAuditError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return auditTruncate(err.Error(), maxSyslogAuditErrorLen)
+}
+
 // GetSyslogConfig handles GET /api/v1/audit-log/syslog-config.
 func (h *AuditHandler) GetSyslogConfig(c fiber.Ctx) error {
 	if err := requirePerm(c, "manage", "audit"); err != nil {
 		return err
 	}
 
-	setting, err := h.queries.GetSetting(c.Context(), db.GetSettingParams{
-		Key:   syslogSettingKey,
-		Scope: "global",
-	})
+	cfg, found, err := h.storedSyslogConfig(c)
 	if err != nil {
-		// No config yet — return defaults.
-		return c.JSON(proxsyslog.Config{
-			Port:     514,
-			Protocol: "udp",
-			Facility: 16,
-		})
+		// Not folded into the defaults below. Showing "disabled, udp, 514" for a
+		// config that exists but could not be read invites the operator to save
+		// that straight back over a live one.
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read syslog config")
 	}
-
-	var cfg proxsyslog.Config
-	if err := json.Unmarshal(setting.Value, &cfg); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Invalid syslog config in database")
+	if !found {
+		return c.JSON(defaultSyslogConfig())
 	}
 
 	return c.JSON(cfg)
@@ -587,6 +791,8 @@ func (h *AuditHandler) UpdateSyslogConfig(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to marshal config")
 	}
 
+	previous, previousUnavailable := h.previousSyslogAudit(c)
+
 	_, err = h.queries.UpsertSetting(c.Context(), db.UpsertSettingParams{
 		Key:   syslogSettingKey,
 		Value: data,
@@ -595,6 +801,25 @@ func (h *AuditHandler) UpdateSyslogConfig(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to save syslog config")
 	}
+
+	// Where the audit log itself is sent — and whether it is sent at all — is
+	// exactly what an audit log exists to record. Redirecting the stream to
+	// another collector, or setting enabled:false to stop it, is otherwise a
+	// change that leaves no trace anywhere.
+	//
+	// Placed after the write and before the reconfigure, and both halves
+	// matter. After the write, so a save the database rejected records nothing.
+	// Before Configure, so the entry AuditLog forwards still travels over the
+	// *outgoing* connection: the collector being redirected away from, or
+	// switched off, is told so. Reconfigure first and that notice goes to the
+	// new destination, or — on a disable — nowhere at all.
+	details, _ := json.Marshal(syslogAuditDetails{ // strings, ints and bools — cannot fail
+		Previous:            previous,
+		PreviousUnavailable: previousUnavailable,
+		New:                 toSyslogAuditConfig(cfg),
+	})
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{},
+		settingResourceType, syslogSettingKey, syslogUpdatedAction, details)
 
 	// Reconfigure the live forwarder.
 	if fwd := h.eventPub.SyslogForwarder(); fwd != nil {
@@ -637,10 +862,26 @@ func (h *AuditHandler) TestSyslog(c fiber.Ctx) error {
 	}
 
 	fwd := proxsyslog.NewForwarder(nil)
-	if err := fwd.Test(cfg); err != nil {
+	probeErr := fwd.Test(cfg)
+
+	// Recorded whether or not the probe connected. This endpoint opens an
+	// outbound connection to a host the caller names and writes to it, so the
+	// attempt is the thing worth seeing — a refused one no less than a
+	// successful one, since a run of them is how a host would be swept. The
+	// outcome rides in the details rather than in the action so that both land
+	// under one filter, alongside the config changes for the same key.
+	details, _ := json.Marshal(syslogTestAuditDetails{ // strings, ints and bools — cannot fail
+		Target:  toSyslogAuditConfig(cfg),
+		Success: probeErr == nil,
+		Error:   syslogTestAuditError(probeErr),
+	})
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{},
+		settingResourceType, syslogSettingKey, syslogTestedAction, details)
+
+	if probeErr != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
-			"error":   err.Error(),
+			"error":   probeErr.Error(),
 		})
 	}
 

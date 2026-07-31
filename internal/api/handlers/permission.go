@@ -90,6 +90,22 @@ func hasClusterPerm(c fiber.Ctx, action, resource string, clusterID uuid.UUID) (
 	return allowed, nil
 }
 
+// hasGlobalPerm is requirePerm's non-erroring twin, the global-scope counterpart
+// to hasClusterPerm. For handlers that must branch on a permission rather than
+// gate on it — e.g. the audit list, which serves every view:audit holder but
+// redacts the entries whose subject is owned by a narrower permission.
+func hasGlobalPerm(c fiber.Ctx, action, resource string) (bool, error) {
+	eng, userID, ok := engineFromContext(c)
+	if !ok {
+		return false, fiber.NewError(fiber.StatusInternalServerError, "RBAC engine not configured")
+	}
+	allowed, err := eng.HasGlobalPermission(c.Context(), userID, action, resource)
+	if err != nil {
+		return false, fiber.NewError(fiber.StatusInternalServerError, "Permission check failed")
+	}
+	return allowed, nil
+}
+
 // clusterAccess captures which clusters a user can act on for a given
 // action+resource pair. If HasGlobal is true, the user can act on every
 // cluster (and the Allowed map is empty/unused). Otherwise Allowed contains

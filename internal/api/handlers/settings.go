@@ -83,6 +83,26 @@ var settingScopes = map[string]settingScope{
 	"user":   {perUser: true},
 }
 
+// settingOwner is the dedicated endpoint that owns a reserved shared-scope
+// setting key, and the permission that endpoint gates on.
+//
+// The permission is recorded, not just the path, because two places need it:
+// the refusal below points the caller at the endpoint, and the audit log
+// redacts entries about the key for anyone who could not have read the setting
+// through it (see auditDetailsFor in audit.go). One table so those two can't
+// disagree about who is allowed to see a key's value.
+type settingOwner struct {
+	Endpoint string
+	Action   string
+	Resource string
+}
+
+// String renders the owner for a refusal message: the endpoint and the
+// permission it wants.
+func (o settingOwner) String() string {
+	return fmt.Sprintf("%s (%s:%s)", o.Endpoint, o.Action, o.Resource)
+}
+
 // reservedGlobalSettings maps a shared-scope setting key to the endpoint that
 // owns it. These endpoints refuse the listed keys outright — reads and writes
 // alike, for every caller including a manage:settings holder — because a
@@ -104,23 +124,25 @@ var settingScopes = map[string]settingScope{
 // Keys are referenced through the const their owner declares, so renaming one
 // there cannot silently unreserve it. TestGuard_GlobalSettingKeysClassified
 // fails if a new global key appears in either map.
-var reservedGlobalSettings = map[string]string{
-	syslogSettingKey: "/api/v1/audit-log/syslog-config (manage:audit)",
+var reservedGlobalSettings = map[string]settingOwner{
+	syslogSettingKey: {Endpoint: "/api/v1/audit-log/syslog-config", Action: "manage", Resource: "audit"},
 }
 
-// reservedSettingOwner returns the endpoint that owns key under scope, or ""
-// when the generic endpoints may handle it. Per-user scopes are never reserved:
-// the row is keyed on the caller's own user_id, so nobody else can read it back.
+// reservedSettingOwner returns the endpoint that owns key under scope; ok is
+// false when the generic endpoints may handle it. Per-user scopes are never
+// reserved: the row is keyed on the caller's own user_id, so nobody else can
+// read it back.
 //
 // An unrecognised scope classifies as shared, not exempt — the zero settingScope
 // has perUser false. Every caller validates the scope first, so that branch is
 // unreachable today; it is written this way so the one function the reservation
 // rests on fails closed if a caller ever forgets.
-func reservedSettingOwner(scope, key string) string {
+func reservedSettingOwner(scope, key string) (settingOwner, bool) {
 	if settingScopes[scope].perUser {
-		return ""
+		return settingOwner{}, false
 	}
-	return reservedGlobalSettings[key]
+	owner, ok := reservedGlobalSettings[key]
+	return owner, ok
 }
 
 // settingScopeID validates the requested scope, rejects keys owned by a
@@ -140,9 +162,9 @@ func settingScopeID(c fiber.Ctx, key, scope string, write bool) (pgtype.UUID, er
 	// Ahead of the write gate: manage:settings is not a way in either, so the
 	// answer is the same for every caller and naming the owner is more useful
 	// than a bare permission denial.
-	if owner := reservedSettingOwner(scope, key); owner != "" {
+	if owner, reserved := reservedSettingOwner(scope, key); reserved {
 		return pgtype.UUID{}, fiber.NewError(fiber.StatusForbidden,
-			"Setting '"+key+"' is managed by "+owner+" — use that endpoint")
+			"Setting '"+key+"' is managed by "+owner.String()+" — use that endpoint")
 	}
 
 	if write && sc.adminOnly {
@@ -234,15 +256,15 @@ func (h *SettingsHandler) auditSettingWrite(c fiber.Ctx, action string, d settin
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, settingResourceType, d.Key, action, details)
 }
 
+// maxAuditFilenameLen bounds a client-supplied upload filename in an audit
+// detail: longer than any filename a real upload carries, short enough that a
+// padded one cannot bulk out the row.
+const maxAuditFilenameLen = 128
+
 // auditFilename bounds a client-supplied upload filename before it lands in an
-// audit detail. Cut on a rune boundary so the recorded JSON stays valid UTF-8.
+// audit detail.
 func auditFilename(name string) string {
-	const maxRunes = 128
-	r := []rune(name)
-	if len(r) <= maxRunes {
-		return name
-	}
-	return string(r[:maxRunes]) + "…"
+	return auditTruncate(name, maxAuditFilenameLen)
 }
 
 // ListSettings returns settings filtered by scope.
@@ -268,7 +290,7 @@ func (h *SettingsHandler) ListSettings(c fiber.Ctx) error {
 		// Fetching a reserved key by name is refused, so returning it in the
 		// bulk dump would reopen the same hole. Filtered rather than refused
 		// wholesale: one owned row shouldn't take the whole listing down.
-		if reservedSettingOwner(scope, s.Key) != "" {
+		if _, reserved := reservedSettingOwner(scope, s.Key); reserved {
 			continue
 		}
 		result = append(result, toSettingResponse(s))
@@ -673,7 +695,7 @@ func (h *SettingsHandler) GetBranding(c fiber.Ctx) error {
 		// it's a naming convention, not a gate — an owned key that ever adopted
 		// the prefix would ride straight out. Reserved keys are dropped here
 		// too so every path over the shared rows answers to one rule.
-		if reservedSettingOwner("global", s.Key) != "" {
+		if _, reserved := reservedSettingOwner("global", s.Key); reserved {
 			continue
 		}
 		if strings.HasPrefix(s.Key, "branding.") {

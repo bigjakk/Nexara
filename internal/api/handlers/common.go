@@ -81,6 +81,22 @@ func AuditLog(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clus
 	}
 }
 
+// auditTruncate bounds a caller-supplied string before it lands in an audit
+// detail. Cut on a rune boundary so the recorded JSON stays valid UTF-8, and
+// marked with an ellipsis so a reader can tell a cut string from one that
+// happened to be exactly that long.
+//
+// Anything a caller controls that reaches a detail belongs here: audit_log is
+// written once per request and never trimmed, so an uncapped string is a way to
+// grow that table at will.
+func auditTruncate(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "…"
+}
+
 // TrackTaskParams describes a dispatched Proxmox task to record.
 type TrackTaskParams struct {
 	ClusterID    uuid.UUID
