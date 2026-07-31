@@ -548,14 +548,14 @@ func (h *AuditHandler) exportSyslog(c fiber.Ctx, items []db.ListAuditLogAdvanced
 			clusterName = "system"
 		}
 
-		msg := fmt.Sprintf("user=%q cluster=%q resource_type=%s resource_id=%s action=%s",
-			userName, clusterName, a.ResourceType, a.ResourceID, a.Action)
-
-		// Append details JSON if non-empty.
-		details := auditDetailsFor(a.ResourceType, a.ResourceID, string(a.Details), visible)
-		if details != "" && details != "{}" {
-			msg += fmt.Sprintf(" details=%s", details)
-		}
+		// Shared with the live forwarder so the two renderings cannot drift;
+		// it also quotes every value, which is what stops a details blob or a
+		// resource id containing a space or a newline from forging fields or
+		// whole records at the SIEM. See proxsyslog.FormatAuditBody.
+		msg := proxsyslog.FormatAuditBody(
+			userName, clusterName, a.ResourceType, a.ResourceID, a.Action,
+			auditDetailsFor(a.ResourceType, a.ResourceID, string(a.Details), visible),
+		)
 
 		line := fmt.Sprintf("<%d>1 %s nexara audit - - - %s\n",
 			pri,

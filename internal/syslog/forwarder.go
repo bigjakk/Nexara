@@ -190,6 +190,55 @@ func (f *Forwarder) sendLocked(data []byte) error {
 	return err
 }
 
+// FormatAuditBody renders the flat key=value MSG body that both the live
+// forwarder and the audit-log syslog export emit. It is shared so the two
+// cannot drift — they already had, the export quoting user and cluster while
+// leaving resource_type, resource_id, action and details raw.
+//
+// Quoting every value with %q is load-bearing, not cosmetic. The body sits in
+// RFC 5424's free-form MSG, which collectors parse as key=value. An unquoted
+// value carrying a space forges fields: a resource id of
+//
+//	x action=login user=root
+//
+// arrives at the SIEM as a different action by a different user. An unquoted
+// newline is worse — it terminates the record and starts one the caller wrote
+// in full, so a single audit row can inject wholly fabricated events.
+//
+// %q buys two different guarantees, worth separating:
+//
+//   - Control characters — \n, \r, tabs — become escapes, so a value can never
+//     end the record or start a new one. This holds for every collector,
+//     including one that just splits the stream on newlines.
+//   - Spaces stay inside the quotes, so a value cannot open a new field. This
+//     one is conditional on the collector, and the condition is narrower than
+//     "quote-aware". %q emits Go literal escaping, so the guarantee is exact
+//     only for a reader that also honors backslash escapes — logfmt, which
+//     decodes with strconv.Unquote. An escape-blind extractor of the
+//     `key="([^"]*)"` shape (Splunk's default KV_MODE, Logstash's kv filter)
+//     ends the value at the first literal quote even when it is escaped, so
+//     a value of `prod" action="login` renders as "prod\" action=\"login" and
+//     can still surface a fabricated action field there.
+//
+// So field forging is reduced, not eliminated. It is strictly better than the
+// unquoted form it replaces — that forged fields against every parser, strict
+// ones included, and left no artifacts — but a whitespace-splitting or
+// escape-blind collector can still be partly confused. Closing it outright
+// means moving these into RFC 5424 STRUCTURED-DATA, whose escaping is
+// spec-defined and uniform across conforming parsers; that is a wire-format
+// change and belongs in its own release, not here.
+//
+// This matters because the inputs are caller-influenced: audit_log.details and
+// resource_id are populated from request data by many handlers.
+func FormatAuditBody(user, cluster, resourceType, resourceID, action, details string) string {
+	body := fmt.Sprintf("user=%q cluster=%q resource_type=%q resource_id=%q action=%q",
+		user, cluster, resourceType, resourceID, action)
+	if details != "" && details != "{}" {
+		body += fmt.Sprintf(" details=%q", details)
+	}
+	return body
+}
+
 func (f *Forwarder) formatRFC5424(msg Message) []byte {
 	facility := f.config.Facility
 	if facility == 0 {
@@ -206,12 +255,7 @@ func (f *Forwarder) formatRFC5424(msg Message) []byte {
 		clusterID = "system"
 	}
 
-	body := fmt.Sprintf("user=%s cluster=%s resource_type=%s resource_id=%s action=%s",
-		msg.UserID, clusterID, msg.ResourceType, msg.ResourceID, msg.Action)
-
-	if msg.Details != "" && msg.Details != "{}" {
-		body += fmt.Sprintf(" details=%s", msg.Details)
-	}
+	body := FormatAuditBody(msg.UserID, clusterID, msg.ResourceType, msg.ResourceID, msg.Action, msg.Details)
 
 	line := fmt.Sprintf("<%d>1 %s nexara audit - - - %s\n", pri, ts, body)
 	return []byte(line)
