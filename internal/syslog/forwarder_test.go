@@ -9,16 +9,16 @@ import (
 	"time"
 )
 
-// TestFormatAuditBodyContainsHostileValues is the regression lock behind the
-// quoting in FormatAuditBody. Both formatters used to interpolate values raw,
-// and audit_log.details and resource_id are populated from request data by many
+// TestFormatAuditSDContainsHostileValues is the regression lock behind the
+// SD-PARAM escaping. Both formatters once interpolated values raw, and
+// audit_log.details and resource_id are populated from request data by many
 // handlers — so the strings below are reachable by a caller, not hypothetical.
 //
-// The two properties asserted are the two the doc comment promises, and they
-// are deliberately checked separately: control characters can never escape
-// (true for any collector), and spaces stay inside the quoted field (true for a
-// quote-aware key=value parser).
-func TestFormatAuditBodyContainsHostileValues(t *testing.T) {
+// Two distinct properties are asserted, because they close different attacks:
+// control characters are removed (a record cannot be ended or forged), and the
+// three SD metacharacters are escaped (a value cannot leave its field or close
+// the element).
+func TestFormatAuditSDContainsHostileValues(t *testing.T) {
 	tests := []struct {
 		name string
 		// which argument carries the hostile value; user defaults to "u1"
@@ -30,37 +30,54 @@ func TestFormatAuditBodyContainsHostileValues(t *testing.T) {
 	}{
 		{
 			// exportSyslog sources this from a.UserDisplayName — a profile
-			// field the account holder edits — so before the quoting this was
-			// a live forging vector reachable by any authenticated user, not
-			// just by whoever can influence a resource id.
+			// field the account holder edits — so this is reachable by any
+			// authenticated user, not just by whoever can influence a
+			// resource id.
 			name:      "hostile display name cannot open a new field",
 			user:      `x" action="login`,
 			wantField: `user="x\" action=\"login"`,
 		},
 		{
-			name:       "space in resource_id cannot open a new field",
+			name:       "a space is harmless inside a quoted SD-PARAM",
 			resourceID: `x action=login user=root`,
 			wantField:  `resource_id="x action=login user=root"`,
 		},
 		{
-			name:       "newline in resource_id cannot start a new record",
-			resourceID: "x\n<134>1 2026-01-01T00:00:00Z nexara audit - - - user=\"root\"",
-			wantField:  `resource_id="x\n<134>1 2026-01-01T00:00:00Z nexara audit - - - user=\"root\""`,
-		},
-		{
-			name:      "newline in details cannot start a new record",
-			details:   "{\"note\":\"a\nb\"}",
-			wantField: `details="{\"note\":\"a\nb\"}"`,
-		},
-		{
-			name:       "carriage return is escaped too",
-			resourceID: "x\r\ny",
-			wantField:  `resource_id="x\r\ny"`,
-		},
-		{
+			// The escaping is spec-defined here, unlike the Go-literal quoting
+			// this replaced, so an escape-blind extractor cannot be walked out
+			// of the field by an embedded quote.
 			name:       "a quote cannot close the field early",
 			resourceID: `x" action="login`,
 			wantField:  `resource_id="x\" action=\"login"`,
+		},
+		{
+			// ] is the one metacharacter unique to SD: unescaped it would end
+			// the whole element, and everything after it would be read as MSG.
+			name:       "a bracket cannot close the SD element",
+			resourceID: `x] [nexara@32473 action="forged"`,
+			wantField:  `resource_id="x\] [nexara@32473 action=\"forged\""`,
+		},
+		{
+			name:       "a backslash cannot escape the escaping",
+			resourceID: `x\" y`,
+			wantField:  `resource_id="x\\\" y"`,
+		},
+		{
+			// Dropped rather than escaped: LF framing means a newline ends the
+			// record regardless of what the SD grammar permits.
+			name:       "newline in resource_id is removed, not escaped",
+			resourceID: "x\n<134>1 2026-01-01T00:00:00Z nexara audit - - -",
+			wantField:  `resource_id="x<134>1 2026-01-01T00:00:00Z nexara audit - - -"`,
+		},
+		{
+			name:      "newline in details is removed",
+			details:   "{\"note\":\"a\nb\"}",
+			wantField: `details="{\"note\":\"ab\"}"`,
+		},
+		{
+			name:       "carriage return is removed too",
+			resourceID: "x\r\ny",
+			wantField:  `resource_id="xy"`,
 		},
 	}
 
@@ -70,56 +87,92 @@ func TestFormatAuditBodyContainsHostileValues(t *testing.T) {
 			if user == "" {
 				user = "u1"
 			}
-			body := FormatAuditBody(user, "c1", "vm", tt.resourceID, "start", tt.details)
+			sd := FormatAuditSD(user, "c1", "vm", tt.resourceID, "start", tt.details)
 
-			if !strings.Contains(body, tt.wantField) {
-				t.Errorf("body did not contain the hostile value as one quoted field.\n got: %s\nwant substring: %s",
-					body, tt.wantField)
+			if !strings.Contains(sd, tt.wantField) {
+				t.Errorf("SD did not contain the hostile value as one escaped param.\n got: %s\nwant substring: %s",
+					sd, tt.wantField)
 			}
 
-			// The stronger of the two guarantees, and the one that holds no
-			// matter how the collector parses: a record is a line, so a raw
-			// newline or carriage return anywhere in the body means the caller
-			// can append records of their own choosing.
-			if strings.ContainsAny(body, "\n\r") {
-				t.Errorf("body carries a raw newline or carriage return, so a caller can forge whole records: %q", body)
+			// The unconditional invariant: a record is a line, so a raw newline
+			// or carriage return anywhere means the caller can append records of
+			// their own choosing.
+			if strings.ContainsAny(sd, "\n\r") {
+				t.Errorf("SD carries a raw newline or carriage return, so a caller can forge whole records: %q", sd)
+			}
+			// The element must be exactly one balanced SD element.
+			if !strings.HasPrefix(sd, "["+sdID+" ") || !strings.HasSuffix(sd, "]") {
+				t.Errorf("SD is not a single well-formed element: %s", sd)
 			}
 		})
 	}
 }
 
-// TestFormatAuditBodyRendersOrdinaryValues pins the ordinary rendering. Without
+// TestFormatAuditSDRendersOrdinaryValues pins the ordinary rendering. Without
 // it the test above is satisfied by a function that mangles every value beyond
 // recognition, which would make the audit stream useless in the ordinary case
-// this feature exists for.
-func TestFormatAuditBodyRendersOrdinaryValues(t *testing.T) {
-	body := FormatAuditBody("alice@example.com", "prod", "vm", "100", "vm_start",
+// the feature exists for.
+func TestFormatAuditSDRendersOrdinaryValues(t *testing.T) {
+	sd := FormatAuditSD("alice@example.com", "prod", "vm", "100", "vm_start",
 		`{"upid":"UPID:pve1:0001","node":"pve1"}`)
 
-	want := `user="alice@example.com" cluster="prod" resource_type="vm" resource_id="100" action="vm_start" ` +
-		`details="{\"upid\":\"UPID:pve1:0001\",\"node\":\"pve1\"}"`
-	if body != want {
-		t.Errorf("body  = %s\nwant  = %s", body, want)
+	want := `[nexara@32473 user="alice@example.com" cluster="prod" resource_type="vm" ` +
+		`resource_id="100" action="vm_start" ` +
+		`details="{\"upid\":\"UPID:pve1:0001\",\"node\":\"pve1\"}"]`
+	if sd != want {
+		t.Errorf("sd   = %s\nwant = %s", sd, want)
 	}
 }
 
-// TestFormatAuditBodyOmitsEmptyDetails covers the one conditional field. An
-// empty or {} details renders no key at all rather than an empty one, which is
-// what both formatters did before sharing this helper.
-func TestFormatAuditBodyOmitsEmptyDetails(t *testing.T) {
+// TestFormatAuditSDOmitsEmptyDetails covers the one conditional param. An
+// absent key and an empty one are different statements about what the record
+// carried.
+func TestFormatAuditSDOmitsEmptyDetails(t *testing.T) {
 	for _, details := range []string{"", "{}"} {
-		body := FormatAuditBody("u1", "c1", "vm", "100", "vm_start", details)
-		if strings.Contains(body, "details=") {
-			t.Errorf("details=%q rendered a details key: %s", details, body)
+		sd := FormatAuditSD("u1", "c1", "vm", "100", "vm_start", details)
+		if strings.Contains(sd, "details=") {
+			t.Errorf("details=%q rendered a details param: %s", details, sd)
 		}
 	}
 }
 
-// TestFormatRFC5424UsesSharedBody checks that the live forwarder actually
-// routes through FormatAuditBody. The helper being correct buys nothing if the
-// forwarder still formats its own line — which is the drift that left the
-// export quoting two fields and the forwarder none.
-func TestFormatRFC5424UsesSharedBody(t *testing.T) {
+// TestFormatAuditSDBoundsValues covers the length caps. They exist for framing,
+// not memory: a record over a collector's maximum message size is truncated or
+// split, and a split tail is an independent record whose content the caller
+// chose — which is the record forging the escaping otherwise closes.
+func TestFormatAuditSDBoundsValues(t *testing.T) {
+	// Multi-byte so a naive byte-slice truncation would corrupt UTF-8.
+	longDetails := `{"note":"` + strings.Repeat("日", 8000) + `"}`
+	longID := strings.Repeat("a", 4000)
+
+	sd := FormatAuditSD("u1", "c1", "vm", longID, "start", longDetails)
+
+	if !strings.Contains(sd, "…") {
+		t.Error("nothing was truncated, so neither cap applied")
+	}
+	if n := len([]rune(sd)); n > maxSyslogDetailsLen+maxSyslogFieldLen*6 {
+		t.Errorf("assembled SD is %d runes — the caps did not bound the record", n)
+	}
+	if !utf8ValidString(sd) {
+		t.Error("truncation split a multi-byte rune and produced invalid UTF-8")
+	}
+}
+
+func utf8ValidString(s string) bool {
+	for _, r := range s {
+		if r == '�' {
+			return false
+		}
+	}
+	return true
+}
+
+// TestFormatRFC5424UsesSharedSD checks that the live forwarder actually routes
+// through FormatAuditSD, and that the header still has the right shape. The
+// helper being correct buys nothing if the forwarder formats its own line —
+// which is the drift that once left the export escaping two fields and the
+// forwarder none.
+func TestFormatRFC5424UsesSharedSD(t *testing.T) {
 	f := NewForwarder(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer f.Close() // NewForwarder starts the sender goroutine
 	f.config = Config{Facility: 16}
@@ -134,12 +187,16 @@ func TestFormatRFC5424UsesSharedBody(t *testing.T) {
 	}))
 
 	if !strings.Contains(line, `resource_id="x action=login"`) {
-		t.Errorf("forwarder line does not carry the shared quoted rendering: %s", line)
+		t.Errorf("forwarder line does not carry the shared SD rendering: %s", line)
 	}
 	if !strings.Contains(line, `cluster="system"`) {
 		t.Errorf("forwarder line lost the empty-cluster fallback: %s", line)
 	}
-	// One trailing newline terminating the record, and no other.
+	// PROCID and MSGID stay NILVALUE; STRUCTURED-DATA now occupies the slot
+	// that used to be a third "-".
+	if !strings.Contains(line, "nexara audit - - ["+sdID+" ") {
+		t.Errorf("header shape is wrong — SD must occupy the STRUCTURED-DATA field: %s", line)
+	}
 	if n := strings.Count(line, "\n"); n != 1 || !strings.HasSuffix(line, "\n") {
 		t.Errorf("line carries %d newlines, want exactly one at the end: %q", n, line)
 	}
@@ -150,7 +207,7 @@ func TestFormatRFC5424UsesSharedBody(t *testing.T) {
 // nothing ever drains the queue — the steady state of a collector that has
 // stopped answering.
 //
-// Before this change Forward dialled, wrote, reconnected and retried inline
+// Before that change Forward dialled, wrote, reconnected and retried inline
 // while holding the forwarder's write lock: up to ~16 seconds per call against
 // an unreachable host, serialized, on the request path. The property that
 // matters is that a hopelessly backed-up forwarder costs a request nothing.

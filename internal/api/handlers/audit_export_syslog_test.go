@@ -20,7 +20,7 @@ import (
 // It goes through the method rather than re-deriving the format, which is the
 // whole point: exportSyslog is the side of the RFC 5424 rendering that
 // historically drifted from the live forwarder, and until this file it had no
-// test at all. FormatAuditBody takes six consecutive string parameters, so
+// test at all. FormatAuditSD takes six consecutive string parameters, so
 // transposing two of them at the call site compiles cleanly and ships.
 func exportSyslogLines(t *testing.T, items []db.ListAuditLogAdvancedRow, visible map[string]bool) []string {
 	t.Helper()
@@ -66,7 +66,7 @@ func auditRow(displayName, clusterName, resourceType, resourceID, action, detail
 }
 
 // TestExportSyslogRendersFieldsInOrder is the transposition guard. Every value
-// is distinguishable, so swapping any two arguments at the FormatAuditBody call
+// is distinguishable, so swapping any two arguments at the FormatAuditSD call
 // site changes this line.
 func TestExportSyslogRendersFieldsInOrder(t *testing.T) {
 	lines := exportSyslogLines(t,
@@ -78,21 +78,22 @@ func TestExportSyslogRendersFieldsInOrder(t *testing.T) {
 		t.Fatalf("got %d lines, want 1: %q", len(lines), lines)
 	}
 
-	const want = `user="alice" cluster="prod" resource_type="vm" resource_id="100" action="vm_start" ` +
-		`details="{\"node\":\"pve1\"}"`
+	const want = `[nexara@32473 user="alice" cluster="prod" resource_type="vm" ` +
+		`resource_id="100" action="vm_start" details="{\"node\":\"pve1\"}"]`
 	if !strings.Contains(lines[0], want) {
-		t.Errorf("rendered body does not match.\n got: %s\nwant substring: %s", lines[0], want)
+		t.Errorf("rendered SD does not match.\n got: %s\nwant substring: %s", lines[0], want)
 	}
 	// The RFC 5424 header is still assembled by the caller, not the helper.
-	if !strings.HasPrefix(lines[0], "<") || !strings.Contains(lines[0], "nexara audit - - -") {
-		t.Errorf("line lost its RFC 5424 header: %s", lines[0])
+	// Two NILVALUEs now, not three: STRUCTURED-DATA occupies the third slot.
+	if !strings.HasPrefix(lines[0], "<") || !strings.Contains(lines[0], "nexara audit - - [nexara@32473 ") {
+		t.Errorf("line lost its RFC 5424 header, or SD is not in the STRUCTURED-DATA field: %s", lines[0])
 	}
 }
 
-// TestExportSyslogQuotesHostileValues covers the injection the quoting exists
+// TestExportSyslogEscapesHostileValues covers the injection the quoting exists
 // for, on the export side. UserDisplayName is a profile field the account
 // holder edits, so this is reachable by any authenticated user.
-func TestExportSyslogQuotesHostileValues(t *testing.T) {
+func TestExportSyslogEscapesHostileValues(t *testing.T) {
 	lines := exportSyslogLines(t,
 		[]db.ListAuditLogAdvancedRow{
 			auditRow(`x" action="login`, "prod", "vm", "a b", "vm_start",
@@ -105,7 +106,8 @@ func TestExportSyslogQuotesHostileValues(t *testing.T) {
 	for _, want := range []string{
 		`user="x\" action=\"login"`,
 		`resource_id="a b"`,
-		`details="{\"note\":\"line1\nline2\"}"`,
+		// The newline is removed rather than escaped: LF frames records.
+		`details="{\"note\":\"line1line2\"}"`,
 	} {
 		if !strings.Contains(lines[0], want) {
 			t.Errorf("missing %s in: %s", want, lines[0])
@@ -130,8 +132,13 @@ func TestExportSyslogEmitsOneRecordPerRow(t *testing.T) {
 		t.Fatalf("got %d records for %d rows — a value forged records:\n%s",
 			len(lines), len(rows), strings.Join(lines, "\n"))
 	}
-	if strings.Contains(lines[1], `action="forged"`) && !strings.Contains(lines[1], `\n`) {
-		t.Errorf("forged action escaped its field: %s", lines[1])
+	// The forged text must survive only as an escaped SD-PARAM value, never as
+	// a param of its own.
+	if strings.Contains(lines[1], `action="forged"`) {
+		t.Errorf("forged action escaped its field and became a real param: %s", lines[1])
+	}
+	if !strings.Contains(lines[1], `action=\"forged\"`) {
+		t.Errorf("the hostile value did not survive escaped inside resource_id: %s", lines[1])
 	}
 }
 

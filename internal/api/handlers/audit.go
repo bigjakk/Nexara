@@ -549,19 +549,21 @@ func (h *AuditHandler) exportSyslog(c fiber.Ctx, items []db.ListAuditLogAdvanced
 			clusterName = "system"
 		}
 
-		// Shared with the live forwarder so the two renderings cannot drift;
-		// it also quotes every value, which is what stops a details blob or a
-		// resource id containing a space or a newline from forging fields or
-		// whole records at the SIEM. See proxsyslog.FormatAuditBody.
-		msg := proxsyslog.FormatAuditBody(
+		// Shared with the live forwarder so the two renderings cannot drift. It
+		// bounds and escapes every value by the RFC 5424 SD-PARAM rules, which
+		// is what stops a details blob or a resource id from opening a field,
+		// closing the element or ending the record. See proxsyslog.FormatAuditSD.
+		sd := proxsyslog.FormatAuditSD(
 			userName, clusterName, a.ResourceType, a.ResourceID, a.Action,
 			auditDetailsFor(a.ResourceType, a.ResourceID, string(a.Details), visible),
 		)
 
-		line := fmt.Sprintf("<%d>1 %s nexara audit - - - %s\n",
+		// One fewer "-" than before: the fields moved out of MSG into
+		// STRUCTURED-DATA, which occupies that slot.
+		line := fmt.Sprintf("<%d>1 %s nexara audit - - %s\n",
 			pri,
 			a.CreatedAt.Format(time.RFC3339Nano),
-			msg,
+			sd,
 		)
 		buf.WriteString(line)
 	}

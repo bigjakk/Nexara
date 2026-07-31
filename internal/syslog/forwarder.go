@@ -342,53 +342,118 @@ func (f *Forwarder) sendLocked(data []byte) error {
 	return err
 }
 
-// FormatAuditBody renders the flat key=value MSG body that both the live
-// forwarder and the audit-log syslog export emit. It is shared so the two
-// cannot drift — they already had, the export quoting user and cluster while
-// leaving resource_type, resource_id, action and details raw.
+// sdID is the SD-ID of the structured-data element carrying every audit field.
 //
-// Quoting every value with %q is load-bearing, not cosmetic. The body sits in
-// RFC 5424's free-form MSG, which collectors parse as key=value. An unquoted
-// value carrying a space forges fields: a resource id of
+// 32473 is the IANA private enterprise number reserved for documentation and
+// examples (RFC 5612). Nexara has no PEN of its own; using the documentation
+// one is the conventional choice and keeps the SD-ID globally unambiguous in
+// form. An operator who needs a real PEN can rewrite it at the collector.
+const sdID = "nexara@32473"
+
+// Caps on what one record may carry. %-escaping expands values — a quote costs
+// 2 bytes, a stripped control character 0, a JSON details blob roughly 1.2x —
+// so the pre-escape budget is what has to be bounded.
 //
-//	x action=login user=root
+// The risk is not memory, it is framing. RFC 6587 non-transparent framing
+// delimits records with LF, and a record over a collector's maximum message
+// size is either truncated or *split* depending on configuration — rsyslog's
+// oversizemsg.input.mode has a split mode. Under split, the tail of an
+// over-long details blob becomes an independent record whose entire content the
+// caller chose, which reinstates exactly the record forging the escaping below
+// removes. Capping the inputs keeps the assembled record comfortably under the
+// 8 KiB that collectors commonly default to.
 //
-// arrives at the SIEM as a different action by a different user. An unquoted
-// newline is worse — it terminates the record and starts one the caller wrote
-// in full, so a single audit row can inject wholly fabricated events.
-//
-// %q buys two different guarantees, worth separating:
-//
-//   - Control characters — \n, \r, tabs — become escapes, so a value can never
-//     end the record or start a new one. This holds for every collector,
-//     including one that just splits the stream on newlines.
-//   - Spaces stay inside the quotes, so a value cannot open a new field. This
-//     one is conditional on the collector, and the condition is narrower than
-//     "quote-aware". %q emits Go literal escaping, so the guarantee is exact
-//     only for a reader that also honors backslash escapes — logfmt, which
-//     decodes with strconv.Unquote. An escape-blind extractor of the
-//     `key="([^"]*)"` shape (Splunk's default KV_MODE, Logstash's kv filter)
-//     ends the value at the first literal quote even when it is escaped, so
-//     a value of `prod" action="login` renders as "prod\" action=\"login" and
-//     can still surface a fabricated action field there.
-//
-// So field forging is reduced, not eliminated. It is strictly better than the
-// unquoted form it replaces — that forged fields against every parser, strict
-// ones included, and left no artifacts — but a whitespace-splitting or
-// escape-blind collector can still be partly confused. Closing it outright
-// means moving these into RFC 5424 STRUCTURED-DATA, whose escaping is
-// spec-defined and uniform across conforming parsers; that is a wire-format
-// change and belongs in its own release, not here.
-//
-// This matters because the inputs are caller-influenced: audit_log.details and
-// resource_id are populated from request data by many handlers.
-func FormatAuditBody(user, cluster, resourceType, resourceID, action, details string) string {
-	body := fmt.Sprintf("user=%q cluster=%q resource_type=%q resource_id=%q action=%q",
-		user, cluster, resourceType, resourceID, action)
-	if details != "" && details != "{}" {
-		body += fmt.Sprintf(" details=%q", details)
+// details gets the large budget because it is the only field that legitimately
+// carries a payload; the rest are identifiers.
+const (
+	maxSyslogDetailsLen = 3072
+	maxSyslogFieldLen   = 256
+)
+
+// truncateRunes bounds s to maxRunes runes, cutting on a rune boundary so the
+// result stays valid UTF-8, and marks the cut so a reader can tell a truncated
+// value from one that happened to be that long. Mirrors auditTruncate in
+// internal/api/handlers.
+func truncateRunes(s string, maxRunes int) string {
+	if len(s) <= maxRunes { // fast path: byte length bounds rune count
+		return s
 	}
-	return body
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "…"
+}
+
+// escapeSDParam renders a value for an RFC 5424 SD-PARAM.
+//
+// Two separate jobs, and both are load-bearing:
+//
+//  1. Control characters are dropped. The spec permits them inside a PARAM-VALUE
+//     but LF framing does not — a newline ends the record and starts one the
+//     caller wrote in full. Dropping rather than escaping keeps the output
+//     unambiguous: there is no escape sequence a reader could mistake for one.
+//  2. `\`, `"` and `]` are backslash-escaped, which is the whole of the SD-PARAM
+//     escaping rule (RFC 5424 §6.3.3). Unlike the Go-literal quoting this
+//     replaces, it is spec-defined, so every conforming parser unescapes it the
+//     same way. That is what closes field forging outright: the previous %q form
+//     was exact only for readers that honored backslash escapes, and an
+//     escape-blind `key="([^"]*)"` extractor — Splunk's default KV mode,
+//     Logstash's kv filter — could still be walked out of a field by an embedded
+//     quote.
+func escapeSDParam(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for _, r := range s {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			// Dropped: see (1) above.
+		case r == '\\' || r == '"' || r == ']':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// FormatAuditSD renders the RFC 5424 STRUCTURED-DATA element that both the live
+// forwarder and the audit-log syslog export emit. It is shared so the two cannot
+// drift — they already had, back when this was a flat key=value body and the
+// export quoted two of the six fields.
+//
+// Every value is bounded and escaped by the rules above, so no caller-influenced
+// input can open a field, close the element, or end the record.
+func FormatAuditSD(user, cluster, resourceType, resourceID, action, details string) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	b.WriteString(sdID)
+
+	for _, p := range []struct{ name, value string }{
+		{"user", truncateRunes(user, maxSyslogFieldLen)},
+		{"cluster", truncateRunes(cluster, maxSyslogFieldLen)},
+		{"resource_type", truncateRunes(resourceType, maxSyslogFieldLen)},
+		{"resource_id", truncateRunes(resourceID, maxSyslogFieldLen)},
+		{"action", truncateRunes(action, maxSyslogFieldLen)},
+	} {
+		b.WriteByte(' ')
+		b.WriteString(p.name)
+		b.WriteString(`="`)
+		b.WriteString(escapeSDParam(p.value))
+		b.WriteByte('"')
+	}
+
+	// details is the one optional field. An absent key and an empty one are
+	// different statements, so a record that carried nothing renders no key.
+	if details != "" && details != "{}" {
+		b.WriteString(` details="`)
+		b.WriteString(escapeSDParam(truncateRunes(details, maxSyslogDetailsLen)))
+		b.WriteByte('"')
+	}
+
+	b.WriteByte(']')
+	return b.String()
 }
 
 func (f *Forwarder) formatRFC5424(msg Message) []byte {
@@ -407,9 +472,13 @@ func (f *Forwarder) formatRFC5424(msg Message) []byte {
 		clusterID = "system"
 	}
 
-	body := FormatAuditBody(msg.UserID, clusterID, msg.ResourceType, msg.ResourceID, msg.Action, msg.Details)
+	sd := FormatAuditSD(msg.UserID, clusterID, msg.ResourceType, msg.ResourceID, msg.Action, msg.Details)
 
-	line := fmt.Sprintf("<%d>1 %s nexara audit - - - %s\n", pri, ts, body)
+	// <PRI>VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED-DATA [MSG].
+	// The fields now live in STRUCTURED-DATA rather than a free-form MSG, so MSG
+	// is omitted — every value a caller can influence is inside the SD element,
+	// where the escaping is spec-defined.
+	line := fmt.Sprintf("<%d>1 %s nexara audit - - %s\n", pri, ts, sd)
 	return []byte(line)
 }
 
