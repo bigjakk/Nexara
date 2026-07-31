@@ -8,6 +8,12 @@ export interface ChangelogEntry {
   date: string;
   highlights: ChangelogHighlight[];
   url?: string;
+  /**
+   * How many further highlights the release body had that the server's cap
+   * dropped. Zero (and therefore absent) for essentially every real release.
+   * When non-zero the dialog says so rather than ending the list silently.
+   */
+  more_count?: number;
 }
 
 export function extractBaseVersion(raw: string | null | undefined): string | null {

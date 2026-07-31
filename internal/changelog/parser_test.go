@@ -1,6 +1,7 @@
 package changelog
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -14,7 +15,7 @@ func TestParseBody_HighlightsSection(t *testing.T) {
 - ignore me
 - ignore me too`
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 highlights, got %d: %#v", len(got), got)
 	}
@@ -38,7 +39,7 @@ func TestParseBody_NoHighlightsSection_FallsBackToBullets(t *testing.T) {
 
 End of release.`
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 3 {
 		t.Fatalf("expected 3 highlights, got %d: %#v", len(got), got)
 	}
@@ -59,7 +60,7 @@ func TestParseBody_AcceptsMultipleSeparators(t *testing.T) {
 - **Colon**: colon desc
 - **Hyphen** - hyphen desc`
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 4 {
 		t.Fatalf("expected 4 highlights, got %d", len(got))
 	}
@@ -73,7 +74,7 @@ func TestParseBody_AcceptsMultipleSeparators(t *testing.T) {
 func TestParseBody_StripsMarkdown(t *testing.T) {
 	body := `- **Title with ` + "`code`" + `** — Description with [link](https://example.com) and **bold**.`
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 highlight, got %d", len(got))
 	}
@@ -89,7 +90,7 @@ func TestParseBody_StripsContributorRefs(t *testing.T) {
 	body := `- **Live VNC console preview** — See a live thumbnail by @bigjakk in #123
 - **Another fix** — Description here #456`
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 highlights, got %d", len(got))
 	}
@@ -102,13 +103,66 @@ func TestParseBody_StripsContributorRefs(t *testing.T) {
 }
 
 func TestParseBody_CapsAtMaxHighlights(t *testing.T) {
+	const over = maxHighlightsPerRelease + 7
+
 	var body string
-	for i := 0; i < 20; i++ {
+	for i := 0; i < over; i++ {
 		body += "- **Item** — Description\n"
 	}
-	got := ParseBody(body)
+	got, more := ParseBody(body)
+
 	if len(got) != maxHighlightsPerRelease {
-		t.Fatalf("expected cap at %d, got %d", maxHighlightsPerRelease, len(got))
+		t.Fatalf("returned %d highlights, want the cap of %d", len(got), maxHighlightsPerRelease)
+	}
+	// The count is the point: truncating is acceptable, doing it silently is
+	// not — the dialog uses this to say how many are missing.
+	if more != over-maxHighlightsPerRelease {
+		t.Errorf("more = %d, want %d — a truncated release must report what it dropped",
+			more, over-maxHighlightsPerRelease)
+	}
+}
+
+// TestParseBody_KeepsRealisticReleaseIntact is the regression lock for the bug
+// this cap actually caused. The v1.8.0 body carried 12 bullets across Features,
+// Bug Fixes and Refactoring; the old cap of 8 returned the first 8 and gave the
+// UI no way to know four were gone, so the popup ended mid-list looking
+// complete.
+func TestParseBody_KeepsRealisticReleaseIntact(t *testing.T) {
+	body := `## Features
+- **(vms)**: give VM import the full Create-VM option set (minus hardware)
+- **(vms)**: flesh out VM import — browser upload, URL UX, deduped sources
+- **(vms)**: import VMs from ESXi/OVA/disk into Proxmox
+
+## Bug Fixes
+- **(vms)**: move import VM-name field into the Identity section
+- **(vms)**: show normalized vCPU topology in the import wizard
+- **(vms)**: fold imported sockets into cores (VMware vCPU topology)
+- **(vms)**: default imported guests to x86-64-v2-AES CPU (Win11 boots)
+- **(vms)**: place imported disks on SATA so OVMF guests boot
+- **(vms)**: create an EFI vars disk for OVMF guests on import
+- **(vms)**: strip storage prefix from import-metadata volume
+- **(dev)**: don't redirect edge-proxied or WebSocket traffic in dev Caddy
+
+## Refactoring
+- **(vms)**: fold review nits into VM import wizard
+
+## Container Image
+- ghcr.io/bigjakk/nexara:1.8.0
+`
+
+	got, more := ParseBody(body)
+
+	if len(got) != 12 {
+		t.Errorf("returned %d highlights, want all 12 — the cap must not eat real releases", len(got))
+	}
+	if more != 0 {
+		t.Errorf("more = %d, want 0 — nothing should have been dropped", more)
+	}
+	// Container Image is boilerplate and stays out, so 12 rather than 13.
+	for _, h := range got {
+		if strings.Contains(h.Title, "ghcr.io") {
+			t.Errorf("boilerplate section leaked into the highlights: %q", h.Title)
+		}
 	}
 }
 
@@ -119,7 +173,7 @@ func TestParseBody_EmptyOrNonsense(t *testing.T) {
 		"## Other heading\nNothing useful here.",
 	}
 	for _, c := range cases {
-		if got := ParseBody(c); len(got) != 0 {
+		if got, _ := ParseBody(c); len(got) != 0 {
 			t.Errorf("ParseBody(%q) = %#v, want empty", c, got)
 		}
 	}
@@ -131,7 +185,7 @@ func TestParseBody_MultilineBulletJoinsContinuations(t *testing.T) {
   the same bullet.
 - **Second** — Short.`
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 highlights, got %d: %#v", len(got), got)
 	}
@@ -145,7 +199,7 @@ func TestParseBody_BoldOnlyTitle(t *testing.T) {
 	body := `- **Title only, no separator**
 - **Another** — with desc`
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 2 {
 		t.Fatalf("got %d", len(got))
 	}
@@ -160,7 +214,7 @@ func TestParseBody_HandlesWhatsNewHeading(t *testing.T) {
 - **Feature** — Description.
 - **Fix** — Bug fix.`
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 highlights, got %d", len(got))
 	}
@@ -185,7 +239,7 @@ func TestParseBody_StripsConventionalCommitPrefix(t *testing.T) {
 			"Handle empty body"},
 	}
 	for _, c := range cases {
-		got := ParseBody(c.body)
+		got, _ := ParseBody(c.body)
 		if len(got) != 1 {
 			t.Errorf("body %q: got %d highlights, want 1", c.body, len(got))
 			continue
@@ -201,7 +255,7 @@ func TestParseBody_StripsConventionalCommitPrefix(t *testing.T) {
 
 func TestParseBody_ConventionalPrefixWithDescription(t *testing.T) {
 	body := `- **(vms)**: Live VNC preview — Shows a thumbnail without opening the full console.`
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 highlight, got %d", len(got))
 	}
@@ -217,7 +271,7 @@ func TestParseBody_DoesNotStripPlainBoldTitles(t *testing.T) {
 	// A bare bold title that's not in conventional-commit form (mixed case,
 	// multi-word, no parens) must keep working as a title-with-description.
 	body := `- **Live VNC console preview** — See a live thumbnail.`
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 1 {
 		t.Fatalf("got %d", len(got))
 	}
@@ -239,7 +293,7 @@ func TestParseBody_SkipsBoilerplateSections(t *testing.T) {
 
 ` + "```bash\ndocker pull foo\n```"
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 highlight, got %d: %#v", len(got), got)
 	}
@@ -270,7 +324,7 @@ func TestParseBody_ReleasePleaseStyleEnd2End(t *testing.T) {
 
 ` + "```bash\ndocker pull ghcr.io/bigjakk/nexara:0.2.33\n```"
 
-	got := ParseBody(body)
+	got, _ := ParseBody(body)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 highlights, got %d: %#v", len(got), got)
 	}

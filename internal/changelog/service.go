@@ -154,7 +154,7 @@ func (s *Service) fetch(ctx context.Context, etag string) (entries []Entry, newE
 		if version == "" {
 			continue
 		}
-		highlights := ParseBody(r.Body)
+		highlights, more := ParseBody(r.Body)
 		if len(highlights) == 0 {
 			continue
 		}
@@ -163,6 +163,7 @@ func (s *Service) fetch(ctx context.Context, etag string) (entries []Entry, newE
 			Date:       formatDate(r.PublishedAt),
 			Highlights: highlights,
 			URL:        r.HTMLURL,
+			MoreCount:  more,
 		})
 	}
 

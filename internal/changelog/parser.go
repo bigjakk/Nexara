@@ -7,16 +7,28 @@ import (
 	"unicode/utf8"
 )
 
-const maxHighlightsPerRelease = 8
+// maxHighlightsPerRelease bounds how many bullets one release contributes to
+// the popup, so a pathological release body cannot blow up the payload.
+//
+// It was 8, which silently dropped real content: v1.8.0 shipped 12 bullets
+// across Features, Bug Fixes and Refactoring and the popup showed the first 8
+// with nothing to say four were missing. The dialog scrolls, so the cap exists
+// only as a payload guard now, and ParseBody reports what it dropped so the UI
+// can point at the full notes instead of quietly ending the list.
+const maxHighlightsPerRelease = 30
 
 // ParseBody extracts highlights from a GitHub release body using these rules:
 //  1. If the body has a "## Highlights" (or "What's new") section, parse only
-//     that section. Otherwise, parse all top-level bullets in the body.
+//     that section. Otherwise, parse all top-level bullets in the body, with
+//     boilerplate sections (Chores, CI, Container Image, …) stripped.
 //  2. Each bullet matches `- **Title** SEPARATOR Description` where SEPARATOR
 //     is one of: " — ", " – ", ": ", " - ".
 //  3. Bullets without a separator become title-only highlights.
-//  4. Hard-cap at maxHighlightsPerRelease items.
-func ParseBody(body string) []Highlight {
+//  4. Cap at maxHighlightsPerRelease items.
+//
+// dropped is how many parseable bullets the cap discarded — 0 whenever the
+// release fit, which is the normal case.
+func ParseBody(body string) (highlights []Highlight, dropped int) {
 	body = strings.ReplaceAll(body, "\r\n", "\n")
 	section := extractHighlightsSection(body)
 	if section == "" {
@@ -29,12 +41,13 @@ func ParseBody(body string) []Highlight {
 		if h.Title == "" {
 			continue
 		}
-		out = append(out, h)
 		if len(out) >= maxHighlightsPerRelease {
-			break
+			dropped++
+			continue
 		}
+		out = append(out, h)
 	}
-	return out
+	return out, dropped
 }
 
 var (

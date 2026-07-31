@@ -9,9 +9,15 @@ type Highlight struct {
 }
 
 // Entry is a single release with its parsed highlights.
+//
+// MoreCount is how many further highlights the release body had that the cap
+// dropped. It is 0 for essentially every real release; when it is not, the
+// dialog says so and points at the full notes rather than ending the list
+// without explanation.
 type Entry struct {
 	Version    string      `json:"version"`
 	Date       string      `json:"date"`
 	Highlights []Highlight `json:"highlights"`
 	URL        string      `json:"url,omitempty"`
+	MoreCount  int         `json:"more_count,omitempty"`
 }
