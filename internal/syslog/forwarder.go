@@ -2,12 +2,14 @@
 package syslog
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,14 +40,90 @@ type Forwarder struct {
 	config Config
 	conn   net.Conn
 	logger *slog.Logger
+
+	// enabled mirrors config.Enabled outside the mutex so Forward can check it
+	// without ever blocking. Reading it through f.mu would put request handlers
+	// behind Configure, which holds the write lock across a 5s dial.
+	enabled atomic.Bool
+
+	// queue decouples Forward from the network. Everything past this point runs
+	// on the single sender goroutine, which is the only thing that touches conn
+	// for writing.
+	queue     chan queueItem
+	stop      chan struct{}
+	wg        sync.WaitGroup
+	closeOnce sync.Once
+	dropped   atomic.Uint64
 }
 
-// NewForwarder creates a new syslog forwarder.
+// queueItem is either an audit message to send or a flush barrier. A barrier
+// carries no message; the sender just closes done when it reaches it, which
+// tells Flush that everything queued ahead of it has been written.
+type queueItem struct {
+	msg  Message
+	done chan struct{}
+}
+
+// forwardQueueDepth bounds how many audit records may be in flight to the
+// collector. Deep enough to absorb a burst of mutations while a slow collector
+// catches up, shallow enough that a permanently unreachable one costs bounded
+// memory rather than growing without limit.
+const forwardQueueDepth = 1024
+
+// NewForwarder creates a new syslog forwarder and starts its sender goroutine.
+// Callers must Close it to stop that goroutine.
 func NewForwarder(logger *slog.Logger) *Forwarder {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Forwarder{logger: logger}
+	f := &Forwarder{
+		logger: logger,
+		queue:  make(chan queueItem, forwardQueueDepth),
+		stop:   make(chan struct{}),
+	}
+	f.wg.Add(1)
+	go f.run()
+	return f
+}
+
+// run is the sender goroutine. It owns writing to the connection, so dialling,
+// write deadlines and reconnect-and-retry all happen here rather than on a
+// request.
+func (f *Forwarder) run() {
+	defer f.wg.Done()
+	for {
+		select {
+		case item := <-f.queue:
+			f.handle(item)
+		case <-f.stop:
+			// Drain what was already accepted. A record that Forward took
+			// responsibility for should not be discarded just because shutdown
+			// began, and the queue is bounded so this terminates.
+			for {
+				select {
+				case item := <-f.queue:
+					f.handle(item)
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+func (f *Forwarder) handle(item queueItem) {
+	if item.done != nil {
+		close(item.done)
+		return
+	}
+	f.send(item.msg)
+}
+
+// Dropped returns the number of audit records discarded because the queue was
+// full. Non-zero means the collector could not keep up and records were lost —
+// the counter is the only remaining evidence that they existed.
+func (f *Forwarder) Dropped() uint64 {
+	return f.dropped.Load()
 }
 
 // Configure updates the forwarder configuration and reconnects if needed.
@@ -60,12 +138,41 @@ func (f *Forwarder) Configure(cfg Config) error {
 	}
 
 	f.config = cfg
+	f.enabled.Store(cfg.Enabled)
 
 	if !cfg.Enabled {
 		return nil
 	}
 
 	return f.connectLocked()
+}
+
+// Flush blocks until every record already queued has been written, or until ctx
+// is done. It is a barrier, not a lock: records enqueued after the call may or
+// may not be included.
+//
+// Callers that need a record to go out over the *current* connection must Flush
+// before reconfiguring. UpdateSyslogConfig does exactly that — the notice that
+// forwarding is being switched off has to reach the collector being switched
+// off, and that is the one moment it can still be told anything. Without the
+// barrier the send would race the reconfigure and usually lose.
+func (f *Forwarder) Flush(ctx context.Context) {
+	done := make(chan struct{})
+	// Blocking send, unlike Forward: a caller asking for a barrier is willing
+	// to wait for a slot, bounded by ctx.
+	select {
+	case f.queue <- queueItem{done: done}:
+	case <-ctx.Done():
+		return
+	case <-f.stop:
+		return
+	}
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+	case <-f.stop:
+	}
 }
 
 // Config returns the current configuration.
@@ -75,9 +182,46 @@ func (f *Forwarder) Config() Config {
 	return f.config
 }
 
-// Forward sends an audit message to the syslog server.
-// It is safe for concurrent use and silently drops messages if not enabled.
+// Forward hands an audit message to the sender goroutine. It never blocks and
+// never touches the network, so it is safe to call on a request path.
+//
+// It used to dial, write, reconnect and retry inline while holding the
+// forwarder's write lock. With the timeouts in this file that is up to ~16
+// seconds against an unreachable collector, and because the lock was held
+// throughout, every concurrent audited mutation queued behind it — so pointing
+// forwarding at a host that silently drops SYNs degraded the whole appliance,
+// and a manage:audit holder could do that with one config change.
+//
+// A full queue drops the record rather than stalling the request. That is the
+// deliberate trade: audit rows are already durable in Postgres, and the drop is
+// counted and logged, whereas a stall is unbounded damage to unrelated work.
 func (f *Forwarder) Forward(msg Message) {
+	if !f.enabled.Load() {
+		return
+	}
+
+	select {
+	case <-f.stop:
+		return // shutting down; the sender is on its way out
+	default:
+	}
+
+	select {
+	case f.queue <- queueItem{msg: msg}:
+	default:
+		// Log the first drop and then sparsely: the condition persists for as
+		// long as the collector is down, and a line per dropped record would
+		// itself become the flood.
+		if n := f.dropped.Add(1); n == 1 || n%100 == 0 {
+			f.logger.Warn("syslog: forward queue full, dropping audit records",
+				"dropped_total", n, "queue_depth", cap(f.queue))
+		}
+	}
+}
+
+// send performs the actual write. Only the sender goroutine calls it, so the
+// dial-and-retry cost lands there instead of on a request.
+func (f *Forwarder) send(msg Message) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -139,14 +283,22 @@ func (f *Forwarder) Test(cfg Config) error {
 	return nil
 }
 
-// Close closes the underlying connection.
+// Close stops the sender goroutine and closes the underlying connection. It
+// drains whatever was already queued first, so a clean shutdown does not
+// discard records Forward had accepted. Safe to call more than once.
 func (f *Forwarder) Close() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.conn != nil {
-		_ = f.conn.Close()
-		f.conn = nil
-	}
+	f.closeOnce.Do(func() {
+		close(f.stop)
+		f.wg.Wait()
+
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.enabled.Store(false)
+		if f.conn != nil {
+			_ = f.conn.Close()
+			f.conn = nil
+		}
+	})
 }
 
 func (f *Forwarder) connectLocked() error {

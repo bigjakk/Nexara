@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -823,6 +824,16 @@ func (h *AuditHandler) UpdateSyslogConfig(c fiber.Ctx) error {
 
 	// Reconfigure the live forwarder.
 	if fwd := h.eventPub.SyslogForwarder(); fwd != nil {
+		// Forward is asynchronous, so the audit entry above is only queued at
+		// this point. Drain it before reconfiguring, or it races Configure and
+		// usually loses — the notice would then reach the new destination, or
+		// on a disable go nowhere, which is precisely what the ordering above
+		// exists to prevent. Bounded so an unreachable collector delays this
+		// request only, never the ones that merely wrote an audit row.
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		fwd.Flush(flushCtx)
+		cancel()
+
 		if err := fwd.Configure(cfg); err != nil {
 			return c.Status(fiber.StatusOK).JSON(fiber.Map{
 				"saved":   true,

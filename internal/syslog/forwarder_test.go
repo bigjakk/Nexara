@@ -1,6 +1,9 @@
 package syslog
 
 import (
+	"io"
+	"log/slog"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -117,7 +120,8 @@ func TestFormatAuditBodyOmitsEmptyDetails(t *testing.T) {
 // forwarder still formats its own line — which is the drift that left the
 // export quoting two fields and the forwarder none.
 func TestFormatRFC5424UsesSharedBody(t *testing.T) {
-	f := NewForwarder(nil)
+	f := NewForwarder(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer f.Close() // NewForwarder starts the sender goroutine
 	f.config = Config{Facility: 16}
 
 	line := string(f.formatRFC5424(Message{
@@ -138,5 +142,105 @@ func TestFormatRFC5424UsesSharedBody(t *testing.T) {
 	// One trailing newline terminating the record, and no other.
 	if n := strings.Count(line, "\n"); n != 1 || !strings.HasSuffix(line, "\n") {
 		t.Errorf("line carries %d newlines, want exactly one at the end: %q", n, line)
+	}
+}
+
+// TestForwardShedsInsteadOfBlocking is the regression lock behind making
+// Forward asynchronous. It builds a forwarder with no sender goroutine, so
+// nothing ever drains the queue — the steady state of a collector that has
+// stopped answering.
+//
+// Before this change Forward dialled, wrote, reconnected and retried inline
+// while holding the forwarder's write lock: up to ~16 seconds per call against
+// an unreachable host, serialized, on the request path. The property that
+// matters is that a hopelessly backed-up forwarder costs a request nothing.
+func TestForwardShedsInsteadOfBlocking(t *testing.T) {
+	const depth = 4
+	f := &Forwarder{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		queue:  make(chan queueItem, depth),
+		stop:   make(chan struct{}),
+	}
+	f.enabled.Store(true)
+
+	const sends = 50
+	start := time.Now()
+	for i := 0; i < sends; i++ {
+		f.Forward(Message{Action: "vm_start", ResourceID: "100"})
+	}
+	elapsed := time.Since(start)
+
+	// Generous bound: the point is orders of magnitude, not a benchmark. The
+	// old code would have spent minutes here.
+	if elapsed > 2*time.Second {
+		t.Errorf("%d Forward calls took %v with nothing draining — Forward is still blocking",
+			sends, elapsed)
+	}
+	if got, want := f.Dropped(), uint64(sends-depth); got != want {
+		t.Errorf("Dropped() = %d, want %d (queue depth %d) — shed records must be counted, "+
+			"the counter is the only evidence they existed", got, want, depth)
+	}
+	if got := len(f.queue); got != depth {
+		t.Errorf("queue holds %d, want %d", got, depth)
+	}
+}
+
+// TestForwardIgnoredWhenDisabled pins the cheap early exit. Without it a
+// disabled forwarder would still consume queue slots and count drops.
+func TestForwardIgnoredWhenDisabled(t *testing.T) {
+	f := &Forwarder{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		queue:  make(chan queueItem, 1),
+		stop:   make(chan struct{}),
+	}
+	// enabled defaults to false.
+	for i := 0; i < 10; i++ {
+		f.Forward(Message{Action: "vm_start"})
+	}
+	if got := len(f.queue); got != 0 {
+		t.Errorf("queued %d messages while disabled, want 0", got)
+	}
+	if got := f.Dropped(); got != 0 {
+		t.Errorf("Dropped() = %d while disabled, want 0 — a disabled forwarder discards nothing", got)
+	}
+}
+
+// TestCloseDrainsQueuedRecords covers the shutdown path. Forward reports
+// success to its caller the moment a record is queued, so discarding the queue
+// on Close would lose records the application already treated as forwarded.
+func TestCloseDrainsQueuedRecords(t *testing.T) {
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+
+	f := NewForwarder(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := f.Configure(Config{
+		Enabled: true, Host: "127.0.0.1", Port: port, Protocol: "udp", Facility: 16,
+	}); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+
+	const sends = 5
+	for i := 0; i < sends; i++ {
+		f.Forward(Message{Action: "vm_start", ResourceID: "100"})
+	}
+	f.Close()
+	f.Close() // idempotent
+
+	if got := f.Dropped(); got != 0 {
+		t.Fatalf("dropped %d records that fit in the queue", got)
+	}
+	for i := 0; i < sends; i++ {
+		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatalf("set deadline: %v", err)
+		}
+		buf := make([]byte, 4096)
+		if _, _, err := conn.ReadFrom(buf); err != nil {
+			t.Fatalf("record %d of %d never arrived: %v\n"+
+				"\tClose must drain what Forward already accepted.", i+1, sends, err)
+		}
 	}
 }
