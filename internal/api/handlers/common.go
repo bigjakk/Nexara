@@ -4,6 +4,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -50,19 +51,44 @@ func AuditLog(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clus
 		}
 	}
 
-	_ = queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
+	var cidStr string
+	if clusterID.Valid {
+		cid, _ := uuid.FromBytes(clusterID.Bytes[:])
+		cidStr = cid.String()
+	}
+
+	// The action has already happened by the time this runs, so a failed insert
+	// cannot fail the request — but it must not be silent either. Without this
+	// line the failure mode is total: the action lands, the caller gets a
+	// success, and no record of it exists anywhere. The log entry is then the
+	// only remaining trace, and the only thing anyone reconciling audit_log
+	// against what actually happened has to work from — hence cluster_id, which
+	// on a multi-cluster install is what says where the unrecorded action
+	// landed.
+	//
+	// `details` is deliberately not logged. It carries filenames, HA and
+	// firewall comments, the syslog destination and api_key_id; application
+	// logs have a different audience from audit_log, and the four identifying
+	// fields already say which action went missing.
+	//
+	// Deliberately does not return the error: every audited handler calls this
+	// after its mutation has committed, so there is no caller in a position to
+	// undo anything.
+	if err := queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
 		ClusterID:    clusterID,
 		UserID:       UserUUID(uid),
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		Action:       action,
 		Details:      details,
-	})
-
-	var cidStr string
-	if clusterID.Valid {
-		cid, _ := uuid.FromBytes(clusterID.Bytes[:])
-		cidStr = cid.String()
+	}); err != nil {
+		slog.Error("audit log insert failed; action performed but not recorded",
+			"user_id", uid,
+			"cluster_id", cidStr,
+			"resource_type", resourceType,
+			"resource_id", resourceID,
+			"action", action,
+			"error", err)
 	}
 
 	eventPub.ClusterEvent(c.Context(), cidStr, events.KindAuditEntry, resourceType, resourceID, action)
