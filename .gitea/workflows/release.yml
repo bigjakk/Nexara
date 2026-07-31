@@ -13,6 +13,29 @@ env:
 jobs:
   go-ci:
     runs-on: ubuntu-latest
+
+    # Mirrors the identical block in ci.yml, and is required here rather than
+    # inherited from it: ci.yml triggers on `push: branches`, which neither
+    # GitHub nor Gitea matches for a tag push, and this workflow does not depend
+    # on it. Without this service a `v*` tag — the entire release procedure, per
+    # CLAUDE.md — runs the migration tests as silent skips while the package
+    # still reports "ok", satisfies `needs: [go-ci, ...]`, and ships an image
+    # whose migration chain then runs unvalidated against every existing user
+    # database on container startup. That is the release path, so it matters
+    # more here than in ci.yml.
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: nexara
+          POSTGRES_PASSWORD: nexara
+          POSTGRES_DB: nexara_test
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U nexara -d nexara_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v5
 
@@ -26,8 +49,26 @@ jobs:
         with:
           version: v2.12.2
 
+      # act_runner has historically started service containers without gating
+      # on their health, so the health-cmd above cannot be relied on here the
+      # way it can on GitHub. Without this the Test step can reach pgxpool.New
+      # before Postgres listens, which surfaces as a t.Fatalf and a red build
+      # rather than a skip. Uses bash's /dev/tcp so it needs no psql client in
+      # the job image.
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 60); do
+            if (echo > /dev/tcp/postgres/5432) 2>/dev/null; then
+              echo "postgres accepting connections after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "postgres never became reachable"; exit 1
+
       - name: Test
         run: go test -race -count=1 ./...
+        env:
+          NEXARA_TEST_DB_URL: postgres://nexara:nexara@postgres:5432/nexara_test?sslmode=disable
 
       - name: Build unified binary
         run: CGO_ENABLED=0 go build -o /dev/null ./cmd/nexara

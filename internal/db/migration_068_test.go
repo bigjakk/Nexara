@@ -73,12 +73,24 @@ func TestMigration068_RekeyPreservesAndDecouplesMembership(t *testing.T) {
 
 	// Deleting the cluster cascades nodes, vms, folders and memberships in both
 	// the 67 and 68 schema shapes, so cleanup is version-agnostic.
-	t.Cleanup(func() {
-		cctx, ccancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer ccancel()
-		_, _ = pool.Exec(cctx, `DELETE FROM clusters WHERE id = $1`, clusterID)
-		_, _ = pool.Exec(cctx, `DELETE FROM users WHERE id = $1`, userID)
-	})
+	//
+	// Deliberately a defer rather than t.Cleanup: t.Cleanup runs AFTER the test
+	// function's defers, by which point the `defer pool.Close()` and `defer
+	// cancel()` above have already fired, so the deletes would run against a
+	// closed pool and a cancelled context — and their errors are discarded, so
+	// nothing would surface. Registering the defer here, after those, makes it
+	// run first (LIFO), while the pool is still open. It carries its own context
+	// so it stays correct if the ordering ever shifts. The up-front call clears
+	// rows left by a run that aborted before its defers. Same shape as
+	// migration_075_test.go.
+	purge := func() {
+		pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer pcancel()
+		_, _ = pool.Exec(pctx, `DELETE FROM clusters WHERE id = $1`, clusterID)
+		_, _ = pool.Exec(pctx, `DELETE FROM users WHERE id = $1`, userID)
+	}
+	purge()
+	defer purge()
 
 	// Step 1: migrate up to 67 — vm_folder_memberships is still surrogate-keyed.
 	if err := m.Migrate(67); err != nil && !errors.Is(err, migrate.ErrNoChange) {

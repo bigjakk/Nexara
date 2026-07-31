@@ -96,7 +96,12 @@ func TestMigrationChain_FullUpDownUp(t *testing.T) {
 	// the throwaway test database doesn't carry forward schema across
 	// runs. Errors here are non-fatal — the operator can recreate the
 	// throwaway DB if cleanup fails.
-	t.Cleanup(func() {
-		_ = env.Migrate.Down()
-	})
+	//
+	// Deliberately a defer rather than t.Cleanup: Go runs a test function's
+	// defers BEFORE its t.Cleanup callbacks, so a t.Cleanup ran only after
+	// `defer env.Cleanup()` (line ~57) had already called m.Close() — the Down
+	// then did nothing and the comment above described something that never
+	// happened. The defer registered here runs first under LIFO, while the
+	// migrate instance is still open.
+	defer func() { _ = env.Migrate.Down() }()
 }

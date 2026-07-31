@@ -76,16 +76,31 @@ func TestMigration057_RoundTripPreservesChannelIds(t *testing.T) {
 	channelA := uuid.MustParse("33333333-3333-4333-8333-333333333333")
 	channelB := uuid.MustParse("44444444-4444-4444-8444-444444444444")
 
-	t.Cleanup(func() {
-		// Best-effort cleanup so a re-run on the same DB doesn't trip on FK
-		// constraints. Order matches the FK dependency tree.
+	// Best-effort cleanup so a re-run on the same DB doesn't trip on FK
+	// constraints. Order matches the FK dependency tree.
+	//
+	// Deliberately a defer rather than t.Cleanup: Go runs a test function's
+	// defers BEFORE its t.Cleanup callbacks, so by the time a t.Cleanup ran,
+	// `defer pool.Close()` above had already closed the pool — every delete
+	// failed, the errors were discarded, and the fixtures leaked into the next
+	// run. Registering the defer here, after that one, makes it run first
+	// under LIFO while the pool is still open. It carries its own context so it
+	// stays correct if the ordering ever shifts. Same shape as
+	// migration_068_test.go and migration_075_test.go.
+	purge := func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM cve_notification_configs WHERE cluster_id = $1`, clusterID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM notification_channels WHERE id IN ($1, $2)`, channelA, channelB)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM clusters WHERE id = $1`, clusterID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, userID)
-	})
+	}
+	// Up front as well as deferred: the seeds below use fixed UUIDs, so rows
+	// left by a run that aborted before its defers would collide on the primary
+	// key and fail this test for a reason that has nothing to do with the
+	// migration. Matches migration_068_test.go / migration_075_test.go.
+	purge()
+	defer purge()
 
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO users (id, email, password_hash) VALUES ($1, $2, '')

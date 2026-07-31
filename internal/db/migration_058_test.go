@@ -75,7 +75,14 @@ func TestMigration058_DropArrayRoundTripsViaJoinTable(t *testing.T) {
 	channelA := uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 	channelB := uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
 
-	t.Cleanup(func() {
+	// Deliberately a defer rather than t.Cleanup: Go runs a test function's
+	// defers BEFORE its t.Cleanup callbacks, so by the time a t.Cleanup ran,
+	// `defer pool.Close()` above had already closed the pool — every delete
+	// failed, the errors were discarded, and the fixtures leaked into the next
+	// run. Registering the defer here, after that one, makes it run first under
+	// LIFO while the pool is still open. Same shape as migration_068_test.go
+	// and migration_075_test.go.
+	purge := func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM cve_notification_config_channels WHERE config_id = $1`, clusterID)
@@ -83,7 +90,13 @@ func TestMigration058_DropArrayRoundTripsViaJoinTable(t *testing.T) {
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM notification_channels WHERE id IN ($1, $2)`, channelA, channelB)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM clusters WHERE id = $1`, clusterID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, userID)
-	})
+	}
+	// Up front as well as deferred: the seeds below use fixed UUIDs, so rows
+	// left by a run that aborted before its defers would collide on the primary
+	// key and fail this test for a reason that has nothing to do with the
+	// migration. Matches migration_068_test.go / migration_075_test.go.
+	purge()
+	defer purge()
 
 	// Step 1: migrate up to 57 (post-4.8a, pre-4.8c).
 	if err := m.Migrate(57); err != nil && !errors.Is(err, migrate.ErrNoChange) {

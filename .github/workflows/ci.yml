@@ -9,6 +9,40 @@ on:
 jobs:
   go-ci:
     runs-on: ubuntu-latest
+
+    # The internal/db migration round-trip tests skip themselves unless
+    # NEXARA_TEST_DB_URL is set, so without this service they skipped on every
+    # push while the package still reported "ok". Migrations are applied
+    # automatically against existing user databases on container startup, so a
+    # broken one would ship unnoticed.
+    #
+    # This covers pushes and PRs only. A v* tag does NOT run this workflow —
+    # `on: push: branches` does not match a tag ref — so release.yml carries its
+    # own copy of this block. Keep the two in sync; dropping it there is what
+    # would let an unvalidated migration chain ship.
+    #
+    # TimescaleDB rather than the stock postgres image: migration 000002 runs
+    # CREATE EXTENSION timescaledb, which needs the library preloaded — plain
+    # postgres cannot run the chain at all.
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: nexara
+          POSTGRES_PASSWORD: nexara
+          POSTGRES_DB: nexara_test
+        ports:
+          - 5432:5432
+        # -h 127.0.0.1 so the probe tests the TCP listener. The postgres
+        # entrypoint runs a temporary server with listen_addresses='' while it
+        # executes init scripts, and that server answers on the Unix socket —
+        # so a socket-only probe can report ready before TCP is up.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U nexara -d nexara_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v5
 
@@ -24,6 +58,13 @@ jobs:
 
       - name: Test
         run: go test -race -count=1 ./...
+        env:
+          # A throwaway database: the migration tests round-trip the schema all
+          # the way up and back down, so this must never address a real one.
+          # Reached on localhost because GitHub runs the job on the runner VM
+          # and maps the service port to it (the Gitea workflow addresses the
+          # service by name instead — its runner puts the job in a container).
+          NEXARA_TEST_DB_URL: postgres://nexara:nexara@localhost:5432/nexara_test?sslmode=disable
 
       - name: Build unified binary
         run: CGO_ENABLED=0 go build -o /dev/null ./cmd/nexara

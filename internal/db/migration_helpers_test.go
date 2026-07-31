@@ -37,6 +37,16 @@ type migrationTestEnv struct {
 // nexara-db container; CI sets this from a fresh Postgres job
 // service). Caller MUST defer Cleanup() — it closes the pool, the
 // migrate instance, and the iofs source.
+//
+// Delete your seeded rows with a `defer` registered AFTER `defer
+// env.Cleanup()`, never with t.Cleanup. Go runs a test function's defers
+// BEFORE its t.Cleanup callbacks, so a t.Cleanup delete fires once
+// env.Cleanup has already closed Pool and cancelled Ctx: the delete
+// errors out, the error is discarded, and the rows leak into the next
+// run's counts. Registering the defer after env.Cleanup's makes it run
+// first (LIFO), while the pool is still open. Give it its own
+// context.Background() timeout rather than env.Ctx so it survives a
+// reordering. See migration_075_test.go for the pattern.
 func setupMigration(t *testing.T) *migrationTestEnv {
 	t.Helper()
 
