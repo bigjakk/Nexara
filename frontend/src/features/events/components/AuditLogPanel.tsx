@@ -50,6 +50,7 @@ const resourceTypes = [
   { value: "cve_scan", label: "CVE Scan" },
   { value: "proxmox_task", label: "Proxmox Task" },
   { value: "node", label: "Node" },
+  { value: "setting", label: "Setting" },
 ] as const;
 
 type Severity = "info" | "warning" | "error" | "all";

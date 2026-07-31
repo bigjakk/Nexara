@@ -9,14 +9,17 @@ import (
 	"go/ast"
 	"go/token"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -45,7 +48,10 @@ func newSettingsTestApp(t *testing.T) *fiber.App {
 func newSettingsApp(t *testing.T, queries *db.Queries) *fiber.App {
 	t.Helper()
 
-	handler := NewSettingsHandler(queries, t.TempDir())
+	// A nil *events.Publisher is deliberate: AuditLog is nil-safe on it, so the
+	// audit row still reaches the (fake) database while the pub/sub fan-out and
+	// the syslog forwarder stay out of the test.
+	handler := NewSettingsHandler(queries, nil, t.TempDir())
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: testErrorHandler,
@@ -76,6 +82,8 @@ func newSettingsApp(t *testing.T, queries *db.Queries) *fiber.App {
 		return c.JSON(fiber.Map{"scope_id": out})
 	})
 
+	app.Post("/settings/branding/logo", handler.UploadLogo)
+	app.Post("/settings/branding/favicon", handler.UploadFavicon)
 	app.Get("/settings", handler.ListSettings)
 	app.Get("/settings/:key", handler.GetSetting)
 	app.Put("/settings/:key", handler.UpsertSetting)
@@ -178,41 +186,122 @@ func TestSettingScopesNoUngatedSharedNamespace(t *testing.T) {
 // the handler then fails out, which is fine — the assertion is on the args.
 var errCaptured = errors.New("args captured")
 
-// captureDBTX is a db.DBTX that records the arguments of the query a handler
+// capturedQuery is one statement a handler sent, with the args it carried.
+type capturedQuery struct {
+	sql  string
+	args []any
+}
+
+// captureDBTX is a db.DBTX that records the arguments of the queries a handler
 // sends and then fails. It lets the tests assert on the scope and scope_id that
 // actually reach Postgres — which the deny-path cases can never observe —
 // without standing up a database.
-//
-// args staying nil is itself an assertion: it means the handler returned before
-// issuing any query.
 type captureDBTX struct {
+	// args holds the args of the FIRST statement a handler sends, which is
+	// the settings write its scope assertions were written for. First-wins
+	// rather than last-wins because a mutation that succeeds now sends a
+	// second statement — the audit insert — whose args would otherwise
+	// overwrite it and quietly redirect every scope assertion at the wrong
+	// query.
+	//
+	// args staying nil is itself an assertion: it means the handler returned
+	// before issuing any query.
 	args []any
+	// calls records every statement in order, so the audit assertions can
+	// find the insert that trails the settings write.
+	calls []capturedQuery
 	// rows, when non-nil, is replayed to Query instead of failing — for the
 	// handlers that filter a result set rather than just issuing the query.
 	rows []db.Setting
+	// row, when non-nil, is replayed to QueryRow instead of failing — for
+	// the paths (UpsertSetting) whose audit write only happens once the
+	// settings write has returned a row.
+	row *db.Setting
+	// execErr, when non-nil, fails every Exec. Without it a DELETE cannot
+	// fail in the fake, and "the audit row trails the settings write" would
+	// be untestable — the deny cases all stop at the gate, before any query,
+	// so they pass whichever side of the write the audit call sits on.
+	execErr error
 }
 
-func (c *captureDBTX) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
-	c.args = args
-	return pgconn.CommandTag{}, nil
+func (c *captureDBTX) record(sql string, args []any) {
+	if len(c.calls) == 0 {
+		c.args = args
+	}
+	c.calls = append(c.calls, capturedQuery{sql: sql, args: args})
 }
 
-func (c *captureDBTX) Query(_ context.Context, _ string, args ...any) (pgx.Rows, error) {
-	c.args = args
+func (c *captureDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	c.record(sql, args)
+	return pgconn.CommandTag{}, c.execErr
+}
+
+func (c *captureDBTX) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	c.record(sql, args)
 	if c.rows == nil {
 		return nil, errCaptured
 	}
 	return &settingRows{rows: c.rows}, nil
 }
 
-func (c *captureDBTX) QueryRow(_ context.Context, _ string, args ...any) pgx.Row {
-	c.args = args
-	return errRow{}
+func (c *captureDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	c.record(sql, args)
+	if c.row == nil {
+		return errRow{}
+	}
+	return settingRow{s: *c.row}
+}
+
+// auditInserts decodes every audit_log row the handler wrote back into the
+// generated params struct. Matched on the SQL rather than on arg shape, so it
+// stays right if another six-argument statement is ever added.
+func (c *captureDBTX) auditInserts(t *testing.T) []db.InsertAuditLogParams {
+	t.Helper()
+
+	var out []db.InsertAuditLogParams
+	for _, q := range c.calls {
+		if !strings.Contains(q.sql, "INSERT INTO audit_log") {
+			continue
+		}
+		if len(q.args) != 6 {
+			t.Fatalf("audit insert got %d args, want 6: %#v", len(q.args), q.args)
+		}
+		out = append(out, db.InsertAuditLogParams{
+			ClusterID:    argAs[pgtype.UUID](t, q.args, 0),
+			UserID:       argAs[pgtype.UUID](t, q.args, 1),
+			ResourceType: argAs[string](t, q.args, 2),
+			ResourceID:   argAs[string](t, q.args, 3),
+			Action:       argAs[string](t, q.args, 4),
+			Details:      argAs[json.RawMessage](t, q.args, 5),
+		})
+	}
+	return out
+}
+
+// argAs reads one query argument at its expected type, failing rather than
+// zero-valuing if the column order ever shifts.
+func argAs[T any](t *testing.T, args []any, i int) T {
+	t.Helper()
+	v, ok := args[i].(T)
+	if !ok {
+		t.Fatalf("arg %d = %#v, want %T", i, args[i], v)
+	}
+	return v
 }
 
 type errRow struct{}
 
 func (errRow) Scan(...any) error { return errCaptured }
+
+// settingRow replays one db.Setting through pgx.Row, reusing settingRows' scan
+// so the same column-order guard applies to the single-row path.
+type settingRow struct{ s db.Setting }
+
+func (r settingRow) Scan(dest ...any) error {
+	rows := &settingRows{rows: []db.Setting{r.s}}
+	rows.Next()
+	return rows.Scan(dest...)
+}
 
 // settingRows replays a fixed []db.Setting through pgx.Rows so a handler that
 // reads a result set — rather than merely issuing the query — can be exercised
@@ -636,6 +725,377 @@ func TestListSettingsExcludesReservedGlobalKeys(t *testing.T) {
 			// itself: the SIEM host must not appear in a global listing.
 			if leaked := strings.Contains(string(body), "siem.internal"); leaked != (tt.scope != "global") {
 				t.Errorf("SIEM host present in body = %v, want %v: %s", leaked, tt.scope != "global", body)
+			}
+		})
+	}
+}
+
+// TestSettingsMutationsAudit covers the audit trail on the settings writes.
+// A manage:settings holder changes application-wide config through these
+// endpoints — branding, and every global key not reserved to a dedicated
+// handler — so a shared-scope mutation has to leave a row naming who touched
+// which key, per the project's audit-everything requirement.
+//
+// The user scope is deliberately silent, and that is asserted here rather than
+// left to inference: those rows are keyed on the caller's own user_id, invisible
+// to everyone else, and written on every dashboard drag. Auditing them would
+// bury the entries that matter. If that call is ever revisited, these cases are
+// what has to change.
+//
+// The refused cases pin the other half: the audit row is written after the
+// settings write returns, so a rejected request records nothing and the log
+// says what happened rather than what was attempted.
+func TestSettingsMutationsAudit(t *testing.T) {
+	// Distinctive enough to spot anywhere in the recorded row. Values run to
+	// 64KB and hold config like the syslog destination, so the audit detail
+	// carries the key and never the value.
+	const sentinel = "s3cr3t-sentinel"
+	value := `{"token":"` + sentinel + `"}`
+
+	tests := []struct {
+		name       string
+		method     string
+		url        string
+		body       string
+		role       string
+		wantStatus int
+		wantAction string // "" means: no audit row at all
+		wantKey    string
+		wantScope  string
+	}{
+		{
+			name: "global upsert is audited", method: http.MethodPut,
+			url: "/settings/branding.app_title", body: `{"value":` + value + `,"scope":"global"}`,
+			role: "admin", wantStatus: http.StatusOK,
+			wantAction: "setting_updated", wantKey: "branding.app_title", wantScope: "global",
+		},
+		{
+			name: "global delete is audited", method: http.MethodDelete,
+			url:  "/settings/branding.app_title?scope=global",
+			role: "admin", wantStatus: http.StatusNoContent,
+			wantAction: "setting_deleted", wantKey: "branding.app_title", wantScope: "global",
+		},
+
+		// The caller's own row: high-volume, private, and nothing an
+		// administrator reviewing the log needs to see.
+		{
+			name: "user upsert is not audited", method: http.MethodPut,
+			url: "/settings/dashboard.layout", body: `{"value":` + value + `}`,
+			role: "viewer", wantStatus: http.StatusOK,
+		},
+		{
+			name: "user delete is not audited", method: http.MethodDelete,
+			url:  "/settings/dashboard.layout",
+			role: "viewer", wantStatus: http.StatusNoContent,
+		},
+
+		// Nothing reached the settings table, so nothing is recorded.
+		{
+			name: "upsert refused for lacking manage:settings", method: http.MethodPut,
+			url: "/settings/branding.app_title", body: `{"value":` + value + `,"scope":"global"}`,
+			role: "viewer", wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "delete refused for lacking manage:settings", method: http.MethodDelete,
+			url:  "/settings/branding.app_title?scope=global",
+			role: "viewer", wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "upsert refused on a reserved key", method: http.MethodPut,
+			url: "/settings/" + syslogSettingKey, body: `{"value":` + value + `,"scope":"global"}`,
+			role: "admin", wantStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Upserts audit only after the settings write returns a row, so
+			// the fake has to hand one back rather than fail.
+			written := newTestSetting(tt.wantScope, tt.wantKey, value)
+			capture := &captureDBTX{row: &written}
+			app := newSettingsApp(t, db.New(capture))
+
+			var req *http.Request
+			if tt.body == "" {
+				req = httptest.NewRequest(tt.method, tt.url, nil)
+			} else {
+				req = httptest.NewRequest(tt.method, tt.url, bytes.NewBufferString(tt.body))
+				req.Header.Set("Content-Type", "application/json")
+			}
+			req.Header.Set("X-Test-Role", tt.role)
+
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, tt.wantStatus, body)
+			}
+
+			entries := capture.auditInserts(t)
+			if tt.wantAction == "" {
+				if len(entries) != 0 {
+					t.Fatalf("wrote %d audit row(s), want none: %+v", len(entries), entries)
+				}
+				return
+			}
+			if len(entries) != 1 {
+				t.Fatalf("wrote %d audit rows, want exactly 1: %+v", len(entries), entries)
+			}
+			assertSettingAudit(t, entries[0], tt.wantAction, tt.wantKey, tt.wantScope, sentinel)
+		})
+	}
+}
+
+// TestSettingsMutationAuditTrailsTheWrite pins the ordering the whole design
+// rests on: the audit call runs after the settings write returns, so a write
+// that fails records nothing.
+//
+// The refused cases in TestSettingsMutationsAudit cannot show this. They all
+// stop at the scope gate before any query runs, so they would pass just as
+// happily with the audit call moved above the write — at which point the log
+// would assert deletions the database refused.
+func TestSettingsMutationAuditTrailsTheWrite(t *testing.T) {
+	capture := &captureDBTX{execErr: errors.New("connection reset by peer")}
+	app := newSettingsApp(t, db.New(capture))
+
+	req := httptest.NewRequest(http.MethodDelete, "/settings/branding.app_title?scope=global", nil)
+	req.Header.Set("X-Test-Role", "admin")
+
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusInternalServerError, body)
+	}
+
+	// Without this the test could pass for the wrong reason — a gate that
+	// rejected the request outright never reaches the write either.
+	if len(capture.calls) == 0 {
+		t.Fatal("no query issued — the request never reached the delete, so this proves nothing about ordering")
+	}
+	if entries := capture.auditInserts(t); len(entries) != 0 {
+		t.Errorf("wrote %d audit row(s) for a delete the database rejected: %+v", len(entries), entries)
+	}
+}
+
+// TestSettingKeyIsBoundedOnEveryKeyedEndpoint covers the :key bound, which used
+// to be applied by UpsertSetting alone. Delete is the case that matters: the
+// key lands in the audit row twice (resource_id and details.key), so an
+// unbounded key is caller-controlled bulk written to the audit table on a
+// request that cannot match anything — no setting with such a key can be
+// created in the first place.
+func TestSettingKeyIsBoundedOnEveryKeyedEndpoint(t *testing.T) {
+	longKey := strings.Repeat("k", maxSettingKeyLen+1)
+
+	tests := []struct {
+		name   string
+		method string
+		url    string
+		body   string
+	}{
+		{"get", http.MethodGet, "/settings/" + longKey + "?scope=global", ""},
+		{"upsert", http.MethodPut, "/settings/" + longKey, `{"value":1,"scope":"global"}`},
+		{"delete", http.MethodDelete, "/settings/" + longKey + "?scope=global", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capture := &captureDBTX{}
+			app := newSettingsApp(t, db.New(capture))
+
+			var req *http.Request
+			if tt.body == "" {
+				req = httptest.NewRequest(tt.method, tt.url, nil)
+			} else {
+				req = httptest.NewRequest(tt.method, tt.url, bytes.NewBufferString(tt.body))
+				req.Header.Set("Content-Type", "application/json")
+			}
+			req.Header.Set("X-Test-Role", "admin")
+
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusBadRequest, body)
+			}
+			if capture.args != nil {
+				t.Errorf("the query ran anyway with args %#v — an over-long key reached the database", capture.args)
+			}
+			if entries := capture.auditInserts(t); len(entries) != 0 {
+				t.Errorf("wrote %d audit row(s) carrying the over-long key: %+v", len(entries), entries)
+			}
+		})
+	}
+}
+
+// TestBrandingUploadsAudit covers the two upload endpoints, which write a
+// global setting without going through UpsertSetting's scope gate — so they
+// need their own audit call and would not be covered by the table above.
+func TestBrandingUploadsAudit(t *testing.T) {
+	content := makePNG(t)
+
+	tests := []struct {
+		name       string
+		field      string
+		url        string
+		wantAction string
+		wantKey    string
+		wantStored string
+	}{
+		{"logo", "logo", "/settings/branding/logo", "branding_logo_uploaded", "branding.logo_url", "logo.png"},
+		{"favicon", "favicon", "/settings/branding/favicon", "branding_favicon_uploaded", "branding.favicon_url", "favicon.png"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const uploaded = "corp-brand.png"
+
+			written := newTestSetting("global", tt.wantKey, `"/api/v1/settings/branding/x-file"`)
+			capture := &captureDBTX{row: &written}
+			app := newSettingsApp(t, db.New(capture))
+
+			body, contentType := multipartImage(t, tt.field, uploaded, content)
+			req := httptest.NewRequest(http.MethodPost, tt.url, body)
+			req.Header.Set("Content-Type", contentType)
+			req.Header.Set("X-Test-Role", "admin")
+
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			respBody, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusOK, respBody)
+			}
+
+			entries := capture.auditInserts(t)
+			if len(entries) != 1 {
+				t.Fatalf("wrote %d audit rows, want exactly 1: %+v", len(entries), entries)
+			}
+			details := assertSettingAudit(t, entries[0], tt.wantAction, tt.wantKey, "global", "")
+
+			if details.Filename != uploaded {
+				t.Errorf("details.filename = %q, want %q", details.Filename, uploaded)
+			}
+			if details.StoredAs != tt.wantStored {
+				t.Errorf("details.stored_as = %q, want %q", details.StoredAs, tt.wantStored)
+			}
+			if details.SizeBytes != len(content) {
+				t.Errorf("details.size_bytes = %d, want %d", details.SizeBytes, len(content))
+			}
+		})
+	}
+}
+
+// assertSettingAudit checks the fields every settings audit row shares and
+// returns the decoded details for the caller's own assertions. A non-empty
+// sentinel must not appear anywhere in the row — that is the check keeping the
+// setting's value out of the audit log.
+func assertSettingAudit(t *testing.T, entry db.InsertAuditLogParams, action, key, scope, sentinel string) settingAuditDetails {
+	t.Helper()
+
+	if entry.Action != action {
+		t.Errorf("action = %q, want %q", entry.Action, action)
+	}
+	if entry.ResourceType != settingResourceType {
+		t.Errorf("resource_type = %q, want %q", entry.ResourceType, settingResourceType)
+	}
+	if entry.ResourceID != key {
+		t.Errorf("resource_id = %q, want the setting key %q", entry.ResourceID, key)
+	}
+	if !entry.UserID.Valid || uuid.UUID(entry.UserID.Bytes) != testSettingsUserID {
+		t.Errorf("user_id = %v, want the caller %s — the row cannot be attributed", entry.UserID, testSettingsUserID)
+	}
+	if entry.ClusterID.Valid {
+		t.Errorf("cluster_id = %s, want NULL — settings are not cluster-scoped", uuid.UUID(entry.ClusterID.Bytes))
+	}
+
+	var details settingAuditDetails
+	if err := json.Unmarshal(entry.Details, &details); err != nil {
+		t.Fatalf("decode details %s: %v", entry.Details, err)
+	}
+	if details.Key != key {
+		t.Errorf("details.key = %q, want %q", details.Key, key)
+	}
+	if details.Scope != scope {
+		t.Errorf("details.scope = %q, want %q", details.Scope, scope)
+	}
+	if sentinel != "" && strings.Contains(string(entry.Details), sentinel) {
+		t.Errorf("the setting's value leaked into the audit details: %s", entry.Details)
+	}
+	return details
+}
+
+// multipartImage builds a one-part multipart body with an explicit image
+// Content-Type — CreateFormFile would send application/octet-stream, which
+// UploadLogo rejects before it ever reaches the audit call.
+func multipartImage(t *testing.T, field, filename string, content []byte) (io.Reader, string) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, field, filename))
+	header.Set("Content-Type", "image/png")
+	part, err := w.CreatePart(header)
+	if err != nil {
+		t.Fatalf("create multipart part: %v", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatalf("write multipart part: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	return &buf, w.FormDataContentType()
+}
+
+// TestAuditFilenameBoundsClientInput covers the one client-controlled string
+// that reaches an audit detail. An unbounded filename would let a caller pad
+// every upload row, and a naive byte-slice cut would split a multi-byte rune
+// and land invalid UTF-8 in the JSON.
+func TestAuditFilenameBoundsClientInput(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{"short name passes through", "logo.png"},
+		{"long ascii name is cut", strings.Repeat("a", 500) + ".png"},
+		{"long multi-byte name is cut on a rune boundary", strings.Repeat("日", 500) + ".png"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := auditFilename(tt.in)
+
+			if !utf8.ValidString(got) {
+				t.Errorf("auditFilename(%d runes) produced invalid UTF-8: %q", utf8.RuneCountInString(tt.in), got)
+			}
+			if utf8.RuneCountInString(tt.in) <= 128 {
+				if got != tt.in {
+					t.Errorf("auditFilename(%q) = %q, want it unchanged", tt.in, got)
+				}
+				return
+			}
+			if n := utf8.RuneCountInString(got); n > 129 { // 128 kept + the ellipsis
+				t.Errorf("auditFilename kept %d runes, want at most 129", n)
+			}
+			if !strings.HasSuffix(got, "…") {
+				t.Errorf("auditFilename(%d runes) = %q, want a truncation marker", utf8.RuneCountInString(tt.in), got)
 			}
 		})
 	}

@@ -344,7 +344,7 @@ func (s *Server) registerSecurity(d *serverDeps) {
 // auto-generated API docs, and the changelog.
 func (s *Server) registerSettingsAndKeys(d *serverDeps) {
 	if d.hasDB() {
-		s.settingsHandler = handlers.NewSettingsHandler(d.queries, d.cfg.DataDir)
+		s.settingsHandler = handlers.NewSettingsHandler(d.queries, d.eventPub, d.cfg.DataDir)
 		s.apiKeyHandler = handlers.NewAPIKeyHandler(d.queries, d.eventPub)
 		s.mobileDeviceHandler = handlers.NewMobileDeviceHandler(d.queries, d.eventPub)
 	}

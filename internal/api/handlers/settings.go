@@ -14,17 +14,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 )
 
 // SettingsHandler handles application settings endpoints.
 type SettingsHandler struct {
-	queries *db.Queries
-	dataDir string // directory to store uploaded files (logos, favicons)
+	queries  *db.Queries
+	eventPub *events.Publisher
+	dataDir  string // directory to store uploaded files (logos, favicons)
 }
 
 // NewSettingsHandler creates a new settings handler.
-func NewSettingsHandler(queries *db.Queries, dataDir string) *SettingsHandler {
-	return &SettingsHandler{queries: queries, dataDir: dataDir}
+func NewSettingsHandler(queries *db.Queries, eventPub *events.Publisher, dataDir string) *SettingsHandler {
+	return &SettingsHandler{queries: queries, eventPub: eventPub, dataDir: dataDir}
 }
 
 type settingResponse struct {
@@ -160,6 +162,89 @@ func settingScopeID(c fiber.Ctx, key, scope string, write bool) (pgtype.UUID, er
 	return pgtype.UUID{Bytes: userID, Valid: true}, nil
 }
 
+// settingResourceType is the audit_log.resource_type these endpoints record
+// under; resource_id is the setting key.
+const settingResourceType = "setting"
+
+// maxSettingKeyLen bounds the :key path parameter. settings.key is TEXT, so
+// this cap is the application's alone — there is no database constraint to
+// fall back on.
+const maxSettingKeyLen = 128
+
+// settingKeyFromPath reads and validates the :key path parameter, so every
+// keyed endpoint applies one rule to it — the same reason scope and reserved
+// keys route through settingScopeID.
+//
+// The bound used to live in UpsertSetting only. That made DeleteSetting answer
+// 204 for a key no setting could ever hold, and now that deletes are audited it
+// would also write that unbounded caller-supplied string into two columns of
+// the audit row, on a request guaranteed to match nothing.
+func settingKeyFromPath(c fiber.Ctx) (string, error) {
+	key := c.Params("key")
+	if key == "" {
+		return "", fiber.NewError(fiber.StatusBadRequest, "Key is required")
+	}
+	if len(key) > maxSettingKeyLen {
+		return "", fiber.NewError(fiber.StatusBadRequest,
+			fmt.Sprintf("Key too long (max %d characters)", maxSettingKeyLen))
+	}
+	return key, nil
+}
+
+// settingAuditDetails is everything a settings mutation records.
+//
+// There is deliberately no value field. A setting value is up to 64KB and can
+// hold sensitive configuration — syslog_forwarding carries the audit
+// destination, and future keys may carry worse — so copying it into the audit
+// log would duplicate the secret into a table with a wider read audience than
+// the settings row itself. Key and scope identify which row moved; the current
+// value is always readable from `settings`. A struct rather than a map so the
+// value cannot be slipped in by a later caller.
+type settingAuditDetails struct {
+	Key   string `json:"key"`
+	Scope string `json:"scope"`
+	// Upload-only. Filename is the client-supplied name (bounded by
+	// auditFilename), StoredAs the name it was written under on disk.
+	Filename  string `json:"filename,omitempty"`
+	StoredAs  string `json:"stored_as,omitempty"`
+	SizeBytes int    `json:"size_bytes,omitempty"`
+}
+
+// auditSettingWrite records a settings mutation — but only for the shared
+// scopes, and that exclusion is the deliberate part.
+//
+// A per-user setting is keyed on the caller's own user_id: nobody else reads
+// it, nobody else can write it, and changing it alters nothing outside that
+// one account's UI. Meanwhile it is by far the highest-volume write here — the
+// dashboard persists its layout on every drag — so auditing it would bury the
+// entries that matter under a stream that says nothing about who changed the
+// application. Shared-scope writes are the opposite on both counts: one row
+// every user reads, gated on manage:settings, and rare.
+//
+// The test is settingScopes[scope].perUser rather than scope == "global", so a
+// second shared scope added to that map is audited the day it lands. It also
+// fails closed — an unrecognised scope has the zero settingScope, perUser
+// false, and so gets audited. Every caller validates the scope through
+// settingScopeID first, so that branch is unreachable today.
+func (h *SettingsHandler) auditSettingWrite(c fiber.Ctx, action string, d settingAuditDetails) {
+	if settingScopes[d.Scope].perUser {
+		return
+	}
+	details, _ := json.Marshal(d) // strings and an int — cannot fail
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, settingResourceType, d.Key, action, details)
+}
+
+// auditFilename bounds a client-supplied upload filename before it lands in an
+// audit detail. Cut on a rune boundary so the recorded JSON stays valid UTF-8.
+func auditFilename(name string) string {
+	const maxRunes = 128
+	r := []rune(name)
+	if len(r) <= maxRunes {
+		return name
+	}
+	return string(r[:maxRunes]) + "…"
+}
+
 // ListSettings returns settings filtered by scope.
 // GET /api/v1/settings?scope=global|user
 func (h *SettingsHandler) ListSettings(c fiber.Ctx) error {
@@ -194,9 +279,9 @@ func (h *SettingsHandler) ListSettings(c fiber.Ctx) error {
 // GetSetting returns a single setting by key.
 // GET /api/v1/settings/:key?scope=global|user
 func (h *SettingsHandler) GetSetting(c fiber.Ctx) error {
-	key := c.Params("key")
-	if key == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Key is required")
+	key, err := settingKeyFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	scope := c.Query("scope", "user")
@@ -226,14 +311,9 @@ type upsertSettingRequest struct {
 // UpsertSetting creates or updates a setting.
 // PUT /api/v1/settings/:key
 func (h *SettingsHandler) UpsertSetting(c fiber.Ctx) error {
-	key := c.Params("key")
-	if key == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Key is required")
-	}
-
-	// Validate key length
-	if len(key) > 128 {
-		return fiber.NewError(fiber.StatusBadRequest, "Key too long (max 128 characters)")
+	key, err := settingKeyFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	var req upsertSettingRequest
@@ -275,15 +355,17 @@ func (h *SettingsHandler) UpsertSetting(c fiber.Ctx) error {
 		return fmt.Errorf("upsert setting: %w", err)
 	}
 
+	h.auditSettingWrite(c, "setting_updated", settingAuditDetails{Key: key, Scope: scope})
+
 	return c.JSON(toSettingResponse(setting))
 }
 
 // DeleteSetting deletes a setting by key.
 // DELETE /api/v1/settings/:key?scope=global|user
 func (h *SettingsHandler) DeleteSetting(c fiber.Ctx) error {
-	key := c.Params("key")
-	if key == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "Key is required")
+	key, err := settingKeyFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	scope := c.Query("scope", "user")
@@ -301,8 +383,23 @@ func (h *SettingsHandler) DeleteSetting(c fiber.Ctx) error {
 		return fmt.Errorf("delete setting: %w", err)
 	}
 
+	// Recorded whether or not a row existed: the DELETE is unconditional and
+	// the endpoint answers 204 either way, so the request is all there is to
+	// audit. An attempt on an absent key is worth seeing.
+	h.auditSettingWrite(c, "setting_deleted", settingAuditDetails{Key: key, Scope: scope})
+
 	return c.SendStatus(fiber.StatusNoContent)
 }
+
+// The global setting keys the upload endpoints write. Named consts because
+// each one is used twice — once for the row itself, once for the audit detail
+// — and only the settings write is covered by
+// TestGuard_GlobalSettingKeysClassified, so a literal changed in one place and
+// not the other would produce audit rows naming a key that does not exist.
+const (
+	brandingLogoKey    = "branding.logo_url"
+	brandingFaviconKey = "branding.favicon_url"
+)
 
 // UploadLogo handles logo file upload for branding.
 // POST /api/v1/settings/branding/logo
@@ -378,12 +475,20 @@ func (h *SettingsHandler) UploadLogo(c fiber.Ctx) error {
 	logoURL := "/api/v1/settings/branding/logo-file"
 	valueJSON, _ := json.Marshal(logoURL)
 	if _, err := h.queries.UpsertSetting(c.Context(), db.UpsertSettingParams{
-		Key:   "branding.logo_url",
+		Key:   brandingLogoKey,
 		Value: valueJSON,
 		Scope: "global",
 	}); err != nil {
 		return fmt.Errorf("save logo setting: %w", err)
 	}
+
+	h.auditSettingWrite(c, "branding_logo_uploaded", settingAuditDetails{
+		Key:       brandingLogoKey,
+		Scope:     "global",
+		Filename:  auditFilename(file.Filename),
+		StoredAs:  filename,
+		SizeBytes: len(content),
+	})
 
 	return c.JSON(fiber.Map{"logo_url": logoURL, "filename": filename})
 }
@@ -457,12 +562,20 @@ func (h *SettingsHandler) UploadFavicon(c fiber.Ctx) error {
 	faviconURL := "/api/v1/settings/branding/favicon-file"
 	valueJSON, _ := json.Marshal(faviconURL)
 	if _, err := h.queries.UpsertSetting(c.Context(), db.UpsertSettingParams{
-		Key:   "branding.favicon_url",
+		Key:   brandingFaviconKey,
 		Value: valueJSON,
 		Scope: "global",
 	}); err != nil {
 		return fmt.Errorf("save favicon setting: %w", err)
 	}
+
+	h.auditSettingWrite(c, "branding_favicon_uploaded", settingAuditDetails{
+		Key:       brandingFaviconKey,
+		Scope:     "global",
+		Filename:  auditFilename(file.Filename),
+		StoredAs:  filename,
+		SizeBytes: len(content),
+	})
 
 	return c.JSON(fiber.Map{"favicon_url": faviconURL, "filename": filename})
 }
