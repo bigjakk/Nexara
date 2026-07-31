@@ -17,6 +17,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/events"
 )
 
 // firstUserAdvisoryLockKey is the constant passed to pg_advisory_xact_lock so
@@ -33,6 +34,7 @@ type AuthHandler struct {
 	jwtService     *auth.JWTService
 	sessionManager *auth.SessionManager
 	rbac           *auth.RBACEngine
+	eventPub       *events.Publisher
 	ldapHandler    *LDAPHandler
 	oidcHandler    *OIDCHandler
 	totpHandler    *TOTPHandler
@@ -46,13 +48,19 @@ type totpRequiredResponse struct {
 // NewAuthHandler creates a new auth handler. pool is required for the
 // register-time advisory-lock transaction; passing nil is supported only
 // for unit tests that exercise validation paths above the DB layer.
-func NewAuthHandler(pool *pgxpool.Pool, queries *db.Queries, jwtSvc *auth.JWTService, sessMgr *auth.SessionManager, rbac *auth.RBACEngine) *AuthHandler {
+// eventPub is a constructor parameter rather than one of the Set* optional
+// dependencies below on purpose: it is what carries auth events to the
+// audit_entry WS feed and the syslog collector, and a setter that a future
+// wiring change forgets to call would silently drop them again — which is
+// exactly how they went missing before.
+func NewAuthHandler(pool *pgxpool.Pool, queries *db.Queries, jwtSvc *auth.JWTService, sessMgr *auth.SessionManager, rbac *auth.RBACEngine, eventPub *events.Publisher) *AuthHandler {
 	return &AuthHandler{
 		pool:           pool,
 		queries:        queries,
 		jwtService:     jwtSvc,
 		sessionManager: sessMgr,
 		rbac:           rbac,
+		eventPub:       eventPub,
 	}
 }
 
@@ -133,22 +141,6 @@ type authUserResponse struct {
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
 	Role        string    `json:"role"`
-}
-
-// authAuditLog writes an audit log entry for auth events. Uses the provided userID
-// directly since auth events happen before/outside normal auth middleware.
-func (h *AuthHandler) authAuditLog(c fiber.Ctx, userID uuid.UUID, action string, details json.RawMessage) {
-	if details == nil {
-		details = json.RawMessage(`{}`)
-	}
-	_ = h.queries.InsertAuditLog(c.Context(), db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{},
-		UserID:       UserUUID(userID),
-		ResourceType: "auth",
-		ResourceID:   userID.String(),
-		Action:       action,
-		Details:      details,
-	})
 }
 
 // Register handles user registration.
@@ -313,7 +305,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"email": user.Email, "role": user.Role})
-	h.authAuditLog(c, user.ID, "register", details)
+	AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), "register", details)
 
 	perms := h.loadPerms(c, user.ID)
 
@@ -552,7 +544,7 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, auditAction string)
 	}
 
 	details, _ := json.Marshal(map[string]string{"email": user.Email, "ip": c.IP()})
-	h.authAuditLog(c, user.ID, auditAction, details)
+	AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), auditAction, details)
 
 	perms := h.loadPerms(c, user.ID)
 
@@ -710,7 +702,7 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx) error {
 			"vmid":       req.VMID,
 			"type":       req.Type,
 		})
-		h.authAuditLog(c, userID, "console_token_mint", details)
+		AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "console_token_mint", details)
 	}
 
 	return c.JSON(consoleTokenResponse{
@@ -747,7 +739,7 @@ func (h *AuthHandler) WSToken(c fiber.Ctx) error {
 		// Audit the deny — a disabled user trying to open a WS is a
 		// signal worth surfacing in the log. (Successful mints aren't
 		// audited; every reconnect mints, so it'd be log noise.)
-		h.authAuditLog(c, userID, "ws_token_denied_inactive", nil)
+		AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "ws_token_denied_inactive", nil)
 		return fiber.NewError(fiber.StatusUnauthorized, "Account is disabled")
 	}
 
@@ -833,7 +825,7 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 			"session_role": session.UserRole,
 			"current_role": user.Role,
 		})
-		h.authAuditLog(c, user.ID, "refresh_denied_role_changed", details)
+		AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), "refresh_denied_role_changed", details)
 		return fiber.NewError(fiber.StatusUnauthorized, "Role changed; please log in again")
 	}
 
@@ -934,7 +926,7 @@ func (h *AuthHandler) Logout(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to revoke session")
 	}
 
-	h.authAuditLog(c, session.UserID, "logout", nil)
+	AuditLogAs(c, h.queries, h.eventPub, session.UserID, pgtype.UUID{}, "auth", session.UserID.String(), "logout", nil)
 
 	return c.JSON(fiber.Map{"message": "Logged out successfully"})
 }
@@ -953,7 +945,7 @@ func (h *AuthHandler) LogoutAll(c fiber.Ctx) error {
 
 	clearRefreshCookie(c)
 
-	h.authAuditLog(c, userID, "logout_all", nil)
+	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "logout_all", nil)
 
 	return c.JSON(fiber.Map{"message": "All sessions revoked"})
 }
@@ -1137,7 +1129,7 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"display_name": req.DisplayName})
-	h.authAuditLog(c, userID, "profile_updated", details)
+	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "profile_updated", details)
 
 	return c.JSON(profileResponse{
 		ID:          updated.ID,
@@ -1206,7 +1198,7 @@ func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
 		slog.Warn("failed to revoke sessions after password change", "user_id", userID, "error", err)
 	}
 
-	h.authAuditLog(c, userID, "password_changed", nil)
+	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "password_changed", nil)
 
 	return c.JSON(fiber.Map{"message": "Password changed successfully"})
 }

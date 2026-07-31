@@ -32,6 +32,26 @@ func AuditLog(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, clus
 	if !ok {
 		return
 	}
+	AuditLogAs(c, queries, eventPub, uid, clusterID, resourceType, resourceID, action, details)
+}
+
+// AuditLogAs is AuditLog for callers that know the actor but cannot read it
+// from the request. It is the same audit path in every other respect — the row,
+// the api_key_id enrichment, the audit_entry WS event and the syslog forward.
+//
+// It exists for authentication events. Those are audited at points where
+// c.Locals("user_id") is not set yet or no longer applies — a login has not
+// been through the auth middleware, a refresh is being denied, a logout has
+// already torn the session down — so AuditLog would read no actor and return
+// without recording anything.
+//
+// Auth handlers must call this rather than growing their own insert. A private
+// wrapper is how `login`, `logout` and `password_changed` came to be missing
+// from syslog forwarding entirely: the wrapper wrote the row directly and never
+// reached the forwarder, so the events a SIEM most wants were the ones it never
+// received. TestGuard_NoHandlerAuditLogWrappers enforces this.
+func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, actor uuid.UUID, clusterID pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage) {
+	uid := actor
 	if details == nil {
 		details = json.RawMessage(`{}`)
 	}

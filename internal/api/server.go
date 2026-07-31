@@ -256,7 +256,7 @@ func (s *Server) registerInfra(d *serverDeps) {
 // LDAP / OIDC / TOTP). registerInfra must run first.
 func (s *Server) registerAuth(d *serverDeps) {
 	if d.hasDB() && d.jwt != nil && d.sessionMgr != nil {
-		s.authHandler = handlers.NewAuthHandler(d.pool, d.queries, d.jwt, d.sessionMgr, d.rbacEngine)
+		s.authHandler = handlers.NewAuthHandler(d.pool, d.queries, d.jwt, d.sessionMgr, d.rbacEngine, d.eventPub)
 	}
 	if d.hasRBAC() && d.encryptionKey != "" {
 		s.ldapHandler = handlers.NewLDAPHandler(d.queries, d.encryptionKey, d.rbacEngine, d.eventPub)

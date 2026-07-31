@@ -173,11 +173,29 @@ func TestGuard_AllUPIDDispatchersTrackTask(t *testing.T) {
 	}
 }
 
+// sanctionedAuditEntryPoints are the only functions permitted to carry an
+// audit-log name. AuditLog reads the actor from the request; AuditLogAs takes it
+// explicitly, for authentication events audited where c.Locals("user_id") is not
+// set. Both live in common.go and share one body.
+var sanctionedAuditEntryPoints = map[string]bool{
+	"AuditLog":   true,
+	"AuditLogAs": true,
+}
+
 // TestGuard_NoHandlerAuditLogWrappers enforces the "empty allowlist": there must
-// be exactly one audit entry point, the shared handlers.AuditLog. Per-handler
-// auditLog/auditLogGlobal/auditLogDetails wrappers (which historically diverged
-// in signature and risked forking the audit path) are banned. Call AuditLog —
-// or TrackTask for UPID-bearing tasks — directly.
+// be exactly one audit path, the shared helpers in common.go. Per-handler
+// wrappers are banned — they historically diverged in signature and forked the
+// audit path.
+//
+// The match is on the name containing "auditlog" anywhere, case-insensitively,
+// rather than the "auditLog" prefix it used to check. The prefix rule let
+// `authAuditLog` through for the entire life of the syslog feature: it wrote its
+// audit row with a direct InsertAuditLog, so it never reached the WS event or
+// the syslog forwarder, and `login`, `logout` and `password_changed` — the
+// events a SIEM is deployed to collect — were never forwarded at all. A
+// substring rule catches that shape and any other prefixed variant.
+//
+// parseGoFiles skips _test.go, so this test's own name does not match itself.
 func TestGuard_NoHandlerAuditLogWrappers(t *testing.T) {
 	fset, files := parseGoFiles(t, ".")
 	for _, file := range files {
@@ -186,13 +204,18 @@ func TestGuard_NoHandlerAuditLogWrappers(t *testing.T) {
 			if !ok {
 				continue
 			}
-			// Ban the lowercase auditLog* family; the exported shared AuditLog
-			// (capital A) is the sanctioned entry point and is unaffected.
-			if strings.HasPrefix(fn.Name.Name, "auditLog") {
-				pos := fset.Position(fn.Pos())
-				t.Errorf("%s: %q is a per-handler audit wrapper — call the shared handlers.AuditLog "+
-					"(or handlers.TrackTask for UPID-bearing tasks) directly instead.", pos, fn.Name.Name)
+			if sanctionedAuditEntryPoints[fn.Name.Name] {
+				continue
 			}
+			if !strings.Contains(strings.ToLower(fn.Name.Name), "auditlog") {
+				continue
+			}
+			pos := fset.Position(fn.Pos())
+			t.Errorf("%s: %q is a per-handler audit wrapper — call the shared handlers.AuditLog, "+
+				"handlers.AuditLogAs (when the actor cannot be read from the request), or "+
+				"handlers.TrackTask (for UPID-bearing tasks) directly instead.\n"+
+				"\tA wrapper that inserts its own row skips the audit_entry event and the syslog "+
+				"forward, which is how auth events went unforwarded.", pos, fn.Name.Name)
 		}
 	}
 }
