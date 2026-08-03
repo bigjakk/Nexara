@@ -360,6 +360,10 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 			ClusterID:       rule.ClusterID,
 			NodeID:          nodeID,
 			VmID:            vmID,
+			// Stable guest identity — vm_id above churns with the collector
+			// (ON DELETE SET NULL); vm_vmid is what per-VM views filter on.
+			// Invalid (NULL) for node/cluster-scoped rules.
+			VmVmid:          rule.VmVmid,
 			ResourceName:    resourceName,
 			Metric:          rule.Metric,
 			CurrentValue:    value,

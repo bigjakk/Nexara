@@ -17,17 +17,19 @@ const countTaskHistoryFiltered = `-- name: CountTaskHistoryFiltered :one
 SELECT count(*) FROM task_history
 WHERE ($1::uuid IS NULL OR cluster_id = $1)
   AND ($2::text   IS NULL OR status     = $2)
+  AND ($3::int[]   IS NULL OR vmid       = ANY($3::int[]))
 `
 
 type CountTaskHistoryFilteredParams struct {
 	ClusterID pgtype.UUID `json:"cluster_id"`
 	Status    pgtype.Text `json:"status"`
+	Vmids     []int32     `json:"vmids"`
 }
 
 // CountTaskHistoryFiltered returns the total matching the same filters, for the
 // Tasks page pagination. Mirrors CountAuditLog.
 func (q *Queries) CountTaskHistoryFiltered(ctx context.Context, arg CountTaskHistoryFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countTaskHistoryFiltered, arg.ClusterID, arg.Status)
+	row := q.db.QueryRow(ctx, countTaskHistoryFiltered, arg.ClusterID, arg.Status, arg.Vmids)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -50,7 +52,7 @@ func (q *Queries) DeleteCompletedTasks(ctx context.Context, cutoff time.Time) er
 }
 
 const getTaskByUpid = `-- name: GetTaskByUpid :one
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid FROM task_history
 WHERE upid = $1
 LIMIT 1
 `
@@ -74,6 +76,7 @@ func (q *Queries) GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Source,
+		&i.Vmid,
 	)
 	return i, err
 }
@@ -81,9 +84,11 @@ func (q *Queries) GetTaskByUpid(ctx context.Context, upid string) (TaskHistory, 
 const insertExternalTaskHistory = `-- name: InsertExternalTaskHistory :exec
 INSERT INTO task_history (
     cluster_id, user_id, upid, description, status, exit_status,
-    node, task_type, started_at, finished_at, source
+    node, task_type, started_at, finished_at, source, vmid
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'proxmox')
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'proxmox',
+    CASE WHEN split_part($3, ':', 7) ~ '^[0-9]{1,9}$'
+         THEN split_part($3, ':', 7)::int END)
 ON CONFLICT (upid) DO NOTHING
 `
 
@@ -122,10 +127,12 @@ func (q *Queries) InsertExternalTaskHistory(ctx context.Context, arg InsertExter
 }
 
 const insertTaskHistory = `-- name: InsertTaskHistory :one
-INSERT INTO task_history (cluster_id, user_id, upid, description, status, node, task_type)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO task_history (cluster_id, user_id, upid, description, status, node, task_type, vmid)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+    CASE WHEN split_part($3, ':', 7) ~ '^[0-9]{1,9}$'
+         THEN split_part($3, ':', 7)::int END)
 ON CONFLICT (upid) DO NOTHING
-RETURNING id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source
+RETURNING id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid
 `
 
 type InsertTaskHistoryParams struct {
@@ -138,6 +145,12 @@ type InsertTaskHistoryParams struct {
 	TaskType    string    `json:"task_type"`
 }
 
+// Both insert queries derive vmid from the UPID id field (field 7 of
+// UPID:node:pid:pstart:starttime:type:id:user@realm:) in SQL — the same
+// expression migration 000076 used to backfill — so no insert path can
+// forget it. Non-guest tasks (empty/non-numeric id) store NULL; the {1,9}
+// bound (VMIDs cap at 999999999) keeps a pathological all-numeric id from
+// overflowing the ::int cast.
 func (q *Queries) InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error) {
 	row := q.db.QueryRow(ctx, insertTaskHistory,
 		arg.ClusterID,
@@ -165,12 +178,13 @@ func (q *Queries) InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Source,
+		&i.Vmid,
 	)
 	return i, err
 }
 
 const listAllTaskHistory = `-- name: ListAllTaskHistory :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid FROM task_history
 ORDER BY started_at DESC
 LIMIT $1
 `
@@ -200,6 +214,7 @@ func (q *Queries) ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHi
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Source,
+			&i.Vmid,
 		); err != nil {
 			return nil, err
 		}
@@ -212,7 +227,7 @@ func (q *Queries) ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHi
 }
 
 const listRunningTaskHistoryByCluster = `-- name: ListRunningTaskHistoryByCluster :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid FROM task_history
 WHERE cluster_id = $1 AND status = 'running'
 `
 
@@ -241,6 +256,7 @@ func (q *Queries) ListRunningTaskHistoryByCluster(ctx context.Context, clusterID
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Source,
+			&i.Vmid,
 		); err != nil {
 			return nil, err
 		}
@@ -253,7 +269,7 @@ func (q *Queries) ListRunningTaskHistoryByCluster(ctx context.Context, clusterID
 }
 
 const listTaskHistory = `-- name: ListTaskHistory :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid FROM task_history
 WHERE user_id = $1
 ORDER BY started_at DESC
 LIMIT $2
@@ -289,6 +305,7 @@ func (q *Queries) ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Source,
+			&i.Vmid,
 		); err != nil {
 			return nil, err
 		}
@@ -301,7 +318,7 @@ func (q *Queries) ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams
 }
 
 const listTaskHistoryByCluster = `-- name: ListTaskHistoryByCluster :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid FROM task_history
 WHERE cluster_id = $1
 ORDER BY started_at DESC
 LIMIT $2
@@ -337,6 +354,7 @@ func (q *Queries) ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHist
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Source,
+			&i.Vmid,
 		); err != nil {
 			return nil, err
 		}
@@ -349,9 +367,10 @@ func (q *Queries) ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHist
 }
 
 const listTaskHistoryFiltered = `-- name: ListTaskHistoryFiltered :many
-SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source FROM task_history
+SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, task_type, progress, started_at, finished_at, created_at, updated_at, source, vmid FROM task_history
 WHERE ($3::uuid IS NULL OR cluster_id = $3)
   AND ($4::text   IS NULL OR status     = $4)
+  AND ($5::int[]   IS NULL OR vmid       = ANY($5::int[]))
 ORDER BY started_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -361,17 +380,20 @@ type ListTaskHistoryFilteredParams struct {
 	Offset    int32       `json:"offset"`
 	ClusterID pgtype.UUID `json:"cluster_id"`
 	Status    pgtype.Text `json:"status"`
+	Vmids     []int32     `json:"vmids"`
 }
 
-// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status
-// filters with offset pagination. Mirrors ListAuditLogFiltered. NULL narg = no
-// filter on that column.
+// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
+// vmids filters with offset pagination. Mirrors ListAuditLogFiltered. NULL
+// narg = no filter on that column. vmids matches the guest VMID parsed from
+// the UPID at insert (folder detail view passes a folder's VMID set).
 func (q *Queries) ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]TaskHistory, error) {
 	rows, err := q.db.Query(ctx, listTaskHistoryFiltered,
 		arg.Limit,
 		arg.Offset,
 		arg.ClusterID,
 		arg.Status,
+		arg.Vmids,
 	)
 	if err != nil {
 		return nil, err
@@ -396,6 +418,7 @@ func (q *Queries) ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHisto
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Source,
+			&i.Vmid,
 		); err != nil {
 			return nil, err
 		}

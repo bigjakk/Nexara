@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"fmt"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -54,6 +57,7 @@ type taskResponse struct {
 	TaskType    string   `json:"task_type"`
 	Source      string   `json:"source"`
 	Progress    *float64 `json:"progress"`
+	Vmid        *int32   `json:"vmid,omitempty"`
 	StartedAt   string   `json:"started_at"`
 	FinishedAt  *string  `json:"finished_at,omitempty"`
 }
@@ -74,6 +78,10 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 	if t.Progress.Valid {
 		resp.Progress = &t.Progress.Float64
 	}
+	if t.Vmid.Valid {
+		v := t.Vmid.Int32
+		resp.Vmid = &v
+	}
 	if t.FinishedAt.Valid {
 		s := t.FinishedAt.Time.Format(time.RFC3339Nano)
 		resp.FinishedAt = &s
@@ -90,6 +98,27 @@ type taskListResponse struct {
 // so a typo surfaces as a 400 rather than silently returning an empty page.
 var validTaskStatuses = map[string]bool{
 	"running": true, "completed": true, "failed": true, "stopped": true,
+}
+
+// maxVmidsFilter bounds the ?vmids= list so a hostile query string can't grow
+// the SQL ANY() array without limit. Proxmox VMIDs are 100..999999999.
+const maxVmidsFilter = 500
+
+// parseVmidsParam parses a comma-separated VMID list ("100,101,205").
+func parseVmidsParam(raw string) ([]int32, error) {
+	parts := strings.Split(raw, ",")
+	if len(parts) > maxVmidsFilter {
+		return nil, fmt.Errorf("too many vmids: %d > %d", len(parts), maxVmidsFilter)
+	}
+	vmids := make([]int32, 0, len(parts))
+	for _, p := range parts {
+		v, err := strconv.ParseInt(strings.TrimSpace(p), 10, 32)
+		if err != nil || v < 0 {
+			return nil, fmt.Errorf("invalid vmid %q", p)
+		}
+		vmids = append(vmids, int32(v))
+	}
+	return vmids, nil
 }
 
 // List returns task history with optional cluster_id + status filters and offset
@@ -141,6 +170,18 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 		v := pgtype.Text{String: status, Valid: true}
 		listP.Status = v
 		countP.Status = v
+	}
+
+	// Optional guest filter: comma-separated Proxmox VMIDs, matched against
+	// task_history.vmid (parsed from the UPID at insert). Used by the folder
+	// detail view to scope tasks to a folder's VMs.
+	if raw := c.Query("vmids"); raw != "" {
+		vmids, err := parseVmidsParam(raw)
+		if err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, "Invalid vmids filter")
+		}
+		listP.Vmids = vmids
+		countP.Vmids = vmids
 	}
 
 	total, err := h.queries.CountTaskHistoryFiltered(c.Context(), countP)

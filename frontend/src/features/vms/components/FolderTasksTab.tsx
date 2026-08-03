@@ -1,18 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useTasks } from "@/features/tasks/api/tasks-queries";
+import {
+  MAX_TASK_VMIDS_FILTER,
+  useTasks,
+  type TaskRecord,
+} from "@/features/tasks/api/tasks-queries";
 import { TaskRow } from "@/features/tasks/components/TasksPanel";
 import { selectClass, statusFilters } from "@/features/tasks/lib/task-filters";
 import { upidVmid } from "@/lib/upid";
 
-/** How many recent cluster tasks to scan for folder membership — must not
- * exceed the server's limit clamp (internal/api/handlers/tasks.go caps limit
- * at 200, silently). Older tasks are reachable from the Events page, which
- * paginates the full history server-side. */
-const FETCH_WINDOW = 200;
 const PAGE_SIZE = 50;
 
 export interface FolderVMLink {
@@ -23,9 +22,16 @@ export interface FolderVMLink {
 interface FolderTasksTabProps {
   clusterId: string;
   clusterName: string;
-  /** Proxmox VMIDs of the folder's VMs — tasks are matched by the UPID id field. */
+  /** Proxmox VMIDs of the folder's VMs — passed to the server-side vmids
+   * filter (task_history.vmid, parsed from the UPID at insert). */
   vmids: Set<number>;
   vmLinkByVmid: Map<number, FolderVMLink>;
+}
+
+/** The server stores vmid on each row; the UPID parse is only a fallback for
+ * rows that predate migration 000076 in an already-open session. */
+function taskVmid(task: TaskRecord): number | null {
+  return task.vmid ?? upidVmid(task.upid);
 }
 
 export function FolderTasksTab({
@@ -38,35 +44,50 @@ export function FolderTasksTab({
   const [page, setPage] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const vmidList = useMemo(
+    () => [...vmids].sort((a, b) => a - b),
+    [vmids],
+  );
+
+  // An empty folder must not fetch: absent vmids means "no filter" server-side
+  // and would return the whole cluster's history. A folder over the server's
+  // vmids cap must not fetch either — the request would just 400.
+  const hasVMs = vmidList.length > 0;
+  const tooManyVMs = vmidList.length > MAX_TASK_VMIDS_FILTER;
   const { data, isLoading, error } = useTasks({
-    limit: FETCH_WINDOW,
-    offset: 0,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
     clusterId,
+    status: statusFilter || undefined,
+    vmids: vmidList,
+    enabled: hasVMs && !tooManyVMs,
   });
 
-  const filtered = useMemo(
-    () =>
-      (data?.items ?? []).filter((task) => {
-        const vmid = upidVmid(task.upid);
-        if (vmid === null || !vmids.has(vmid)) return false;
-        return statusFilter === "" || task.status === statusFilter;
-      }),
-    [data, vmids, statusFilter],
-  );
+  const total = hasVMs ? (data?.total ?? 0) : 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const items = hasVMs ? (data?.items ?? []) : [];
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  // Clamp rather than trust state: a refetch (WS invalidation / 60s poll)
-  // can shrink the filtered set below the current page, which would
-  // otherwise strand a stale page index past the end of the list.
-  const safePage = Math.min(page, totalPages - 1);
-  const pageItems = filtered.slice(
-    safePage * PAGE_SIZE,
-    (safePage + 1) * PAGE_SIZE,
-  );
-  const scanned = data?.items.length ?? 0;
-  const truncated = data ? data.total > data.items.length : false;
+  // Snap back when a refetch (WS invalidation / 60s poll) shrinks the result
+  // below the current page — otherwise a stale page index strands an empty
+  // table. Safe against transient zeros: placeholderData in useTasks keeps
+  // the previous `total` while the next page loads.
+  useEffect(() => {
+    if (page > totalPages - 1) setPage(totalPages - 1);
+  }, [page, totalPages]);
 
-  if (isLoading) {
+  if (tooManyVMs) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        This folder spans {vmidList.length} VMs — more than the{" "}
+        {MAX_TASK_VMIDS_FILTER} the task filter supports. Use the{" "}
+        <Link to="/events" className="underline">
+          Events page
+        </Link>{" "}
+        for full task history.
+      </p>
+    );
+  }
+  if (hasVMs && isLoading) {
     return (
       <div className="space-y-2">
         {Array.from({ length: 5 }).map((_, i) => (
@@ -75,7 +96,7 @@ export function FolderTasksTab({
       </div>
     );
   }
-  if (error) {
+  if (hasVMs && error) {
     return <p className="text-destructive">{error.message}</p>;
   }
 
@@ -110,8 +131,8 @@ export function FolderTasksTab({
             </tr>
           </thead>
           <tbody>
-            {pageItems.map((task) => {
-              const vmid = upidVmid(task.upid);
+            {items.map((task) => {
+              const vmid = taskVmid(task);
               const link = vmid !== null ? vmLinkByVmid.get(vmid) : undefined;
               return (
                 <TaskRow
@@ -142,7 +163,7 @@ export function FolderTasksTab({
                 />
               );
             })}
-            {pageItems.length === 0 && (
+            {items.length === 0 && (
               <tr>
                 <td
                   colSpan={7}
@@ -158,31 +179,29 @@ export function FolderTasksTab({
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          {String(filtered.length)} task{filtered.length === 1 ? "" : "s"}
-          {truncated &&
-            ` — scanned the ${String(scanned)} most recent cluster tasks`}
+          {String(total)} task{total === 1 ? "" : "s"}
         </p>
         {totalPages > 1 && (
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              disabled={safePage === 0}
+              disabled={page === 0}
               onClick={() => {
-                setPage(Math.max(0, safePage - 1));
+                setPage((p) => Math.max(0, p - 1));
               }}
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <span className="text-sm">
-              Page {safePage + 1} of {totalPages}
+              Page {page + 1} of {totalPages}
             </span>
             <Button
               variant="outline"
               size="sm"
-              disabled={safePage + 1 >= totalPages}
+              disabled={page + 1 >= totalPages}
               onClick={() => {
-                setPage(safePage + 1);
+                setPage((p) => p + 1);
               }}
             >
               <ChevronRight className="h-4 w-4" />

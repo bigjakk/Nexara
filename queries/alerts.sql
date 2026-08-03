@@ -37,10 +37,13 @@ DELETE FROM alert_rules WHERE id = $1;
 
 -- Alert History
 
+-- vm_vmid is the stable Proxmox guest identity (from alert_rules.vm_vmid) —
+-- vm_id is the churn-prone vms.id surrogate kept for compat; see migration
+-- 000077.
 -- name: InsertAlertHistory :one
 INSERT INTO alert_history (rule_id, state, severity, cluster_id, node_id, vm_id,
-    resource_name, metric, current_value, threshold, message, escalation_level, channel_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    resource_name, metric, current_value, threshold, message, escalation_level, channel_id, vm_vmid)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 RETURNING *;
 
 -- name: GetAlertHistory :one

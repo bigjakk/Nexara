@@ -91,7 +91,7 @@ func (q *Queries) DeleteNotificationChannel(ctx context.Context, id uuid.UUID) e
 }
 
 const getAlertHistory = `-- name: GetAlertHistory :one
-SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at FROM alert_history WHERE id = $1
+SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid FROM alert_history WHERE id = $1
 `
 
 func (q *Queries) GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error) {
@@ -120,6 +120,7 @@ func (q *Queries) GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHisto
 		&i.ResolvedBy,
 		&i.CreatedAt,
 		&i.NotificationSentAt,
+		&i.VmVmid,
 	)
 	return i, err
 }
@@ -191,7 +192,7 @@ func (q *Queries) GetAlertSummary(ctx context.Context) (GetAlertSummaryRow, erro
 }
 
 const getLatestAlertForRule = `-- name: GetLatestAlertForRule :one
-SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at FROM alert_history
+SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid FROM alert_history
 WHERE rule_id = $1
   AND ($2::uuid IS NULL OR node_id = $2)
 ORDER BY created_at DESC
@@ -241,6 +242,7 @@ func (q *Queries) GetLatestAlertForRule(ctx context.Context, arg GetLatestAlertF
 		&i.ResolvedBy,
 		&i.CreatedAt,
 		&i.NotificationSentAt,
+		&i.VmVmid,
 	)
 	return i, err
 }
@@ -431,9 +433,9 @@ func (q *Queries) GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetrics
 const insertAlertHistory = `-- name: InsertAlertHistory :one
 
 INSERT INTO alert_history (rule_id, state, severity, cluster_id, node_id, vm_id,
-    resource_name, metric, current_value, threshold, message, escalation_level, channel_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at
+    resource_name, metric, current_value, threshold, message, escalation_level, channel_id, vm_vmid)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+RETURNING id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid
 `
 
 type InsertAlertHistoryParams struct {
@@ -450,9 +452,13 @@ type InsertAlertHistoryParams struct {
 	Message         string      `json:"message"`
 	EscalationLevel int32       `json:"escalation_level"`
 	ChannelID       pgtype.UUID `json:"channel_id"`
+	VmVmid          pgtype.Int4 `json:"vm_vmid"`
 }
 
 // Alert History
+// vm_vmid is the stable Proxmox guest identity (from alert_rules.vm_vmid) —
+// vm_id is the churn-prone vms.id surrogate kept for compat; see migration
+// 000077.
 func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error) {
 	row := q.db.QueryRow(ctx, insertAlertHistory,
 		arg.RuleID,
@@ -468,6 +474,7 @@ func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistory
 		arg.Message,
 		arg.EscalationLevel,
 		arg.ChannelID,
+		arg.VmVmid,
 	)
 	var i AlertHistory
 	err := row.Scan(
@@ -493,6 +500,7 @@ func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistory
 		&i.ResolvedBy,
 		&i.CreatedAt,
 		&i.NotificationSentAt,
+		&i.VmVmid,
 	)
 	return i, err
 }
@@ -649,7 +657,7 @@ func (q *Queries) InsertNotificationChannel(ctx context.Context, arg InsertNotif
 }
 
 const listActiveAlerts = `-- name: ListActiveAlerts :many
-SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at FROM alert_history
+SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid FROM alert_history
 WHERE state IN ('pending', 'firing')
 ORDER BY created_at DESC
 `
@@ -686,6 +694,7 @@ func (q *Queries) ListActiveAlerts(ctx context.Context) ([]AlertHistory, error) 
 			&i.ResolvedBy,
 			&i.CreatedAt,
 			&i.NotificationSentAt,
+			&i.VmVmid,
 		); err != nil {
 			return nil, err
 		}
@@ -698,7 +707,7 @@ func (q *Queries) ListActiveAlerts(ctx context.Context) ([]AlertHistory, error) 
 }
 
 const listActiveAlertsByCluster = `-- name: ListActiveAlertsByCluster :many
-SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at FROM alert_history
+SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid FROM alert_history
 WHERE state IN ('pending', 'firing') AND cluster_id = $1
 ORDER BY created_at DESC
 `
@@ -735,6 +744,7 @@ func (q *Queries) ListActiveAlertsByCluster(ctx context.Context, clusterID pgtyp
 			&i.ResolvedBy,
 			&i.CreatedAt,
 			&i.NotificationSentAt,
+			&i.VmVmid,
 		); err != nil {
 			return nil, err
 		}
@@ -782,7 +792,7 @@ func (q *Queries) ListActiveMaintenanceWindows(ctx context.Context) ([]Maintenan
 }
 
 const listAlertHistory = `-- name: ListAlertHistory :many
-SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at FROM alert_history
+SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid FROM alert_history
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -824,6 +834,7 @@ func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryPara
 			&i.ResolvedBy,
 			&i.CreatedAt,
 			&i.NotificationSentAt,
+			&i.VmVmid,
 		); err != nil {
 			return nil, err
 		}
@@ -836,7 +847,7 @@ func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryPara
 }
 
 const listAlertHistoryByCluster = `-- name: ListAlertHistoryByCluster :many
-SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at FROM alert_history
+SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid FROM alert_history
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -880,6 +891,7 @@ func (q *Queries) ListAlertHistoryByCluster(ctx context.Context, arg ListAlertHi
 			&i.ResolvedBy,
 			&i.CreatedAt,
 			&i.NotificationSentAt,
+			&i.VmVmid,
 		); err != nil {
 			return nil, err
 		}
@@ -892,7 +904,7 @@ func (q *Queries) ListAlertHistoryByCluster(ctx context.Context, arg ListAlertHi
 }
 
 const listAlertHistoryFiltered = `-- name: ListAlertHistoryFiltered :many
-SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at FROM alert_history
+SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid FROM alert_history
 WHERE ($1::text = '' OR state = $1::text)
   AND ($2::text = '' OR severity = $2::text)
   AND ($3::uuid IS NULL OR cluster_id = $3)
@@ -946,6 +958,7 @@ func (q *Queries) ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHis
 			&i.ResolvedBy,
 			&i.CreatedAt,
 			&i.NotificationSentAt,
+			&i.VmVmid,
 		); err != nil {
 			return nil, err
 		}
@@ -1106,7 +1119,7 @@ func (q *Queries) ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error
 }
 
 const listFiringUnacknowledged = `-- name: ListFiringUnacknowledged :many
-SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at FROM alert_history
+SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid FROM alert_history
 WHERE state = 'firing' AND acknowledged_at IS NULL
 ORDER BY fired_at ASC
 `
@@ -1143,6 +1156,7 @@ func (q *Queries) ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory,
 			&i.ResolvedBy,
 			&i.CreatedAt,
 			&i.NotificationSentAt,
+			&i.VmVmid,
 		); err != nil {
 			return nil, err
 		}

@@ -24,20 +24,15 @@ import { useAuth } from "@/hooks/useAuth";
 
 interface FolderAlertsTabProps {
   clusterId: string;
-  /** Current `vms.id` UUIDs of the folder's VMs — alerts are matched on
-   * `alert.vm_id`. Node- and cluster-level alerts never match, which is the
-   * point of a folder-scoped view.
-   *
-   * Known limitation: `alert_history.vm_id` is ON DELETE SET NULL and the
-   * collector re-creates VM rows with new UUIDs on churn, so an alert whose
-   * VM row churned drops out of this view (still visible on the global
-   * Alerts page). Durable fix is backend — expose the Proxmox VMID on
-   * alerts or rekey alert_history to (cluster_id, vmid) like 000068/000069
-   * did for memberships and rules. */
-  vmIds: Set<string>;
+  /** Proxmox VMIDs of the folder's VMs — alerts are matched on the stable
+   * `alert.vm_vmid` (migration 000077), which survives collector churn of
+   * the vms row. Node- and cluster-level alerts never match, which is the
+   * point of a folder-scoped view. Pre-000077 rows whose vm_id had already
+   * churned to NULL carry no vm_vmid and stay unmatchable (historical only). */
+  vmids: Set<number>;
 }
 
-export function FolderAlertsTab({ clusterId, vmIds }: FolderAlertsTabProps) {
+export function FolderAlertsTab({ clusterId, vmids }: FolderAlertsTabProps) {
   const [stateFilter, setStateFilter] = useState("");
   const [severityFilter, setSeverityFilter] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -60,9 +55,9 @@ export function FolderAlertsTab({ clusterId, vmIds }: FolderAlertsTabProps) {
   const folderAlerts = useMemo(
     () =>
       (alerts ?? []).filter(
-        (a) => a.vm_id !== undefined && vmIds.has(a.vm_id),
+        (a) => a.vm_vmid !== undefined && vmids.has(a.vm_vmid),
       ),
-    [alerts, vmIds],
+    [alerts, vmids],
   );
 
   const formatDate = (s?: string) => {

@@ -352,6 +352,9 @@ export interface AlertInstance {
   cluster_id?: string;
   node_id?: string;
   vm_id?: string;
+  /** Stable Proxmox guest VMID (alert_history.vm_vmid); absent for node/
+   * cluster alerts and for pre-000077 rows whose vm_id had already churned. */
+  vm_vmid?: number;
   resource_name: string;
   metric: string;
   current_value: number;

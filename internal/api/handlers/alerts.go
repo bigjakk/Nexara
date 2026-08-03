@@ -100,6 +100,7 @@ type alertHistoryResponse struct {
 	ClusterID       string    `json:"cluster_id,omitempty"`
 	NodeID          string    `json:"node_id,omitempty"`
 	VMID            string    `json:"vm_id,omitempty"`
+	VMVmid          *int32    `json:"vm_vmid,omitempty"`
 	ResourceName    string    `json:"resource_name"`
 	Metric          string    `json:"metric"`
 	CurrentValue    float64   `json:"current_value"`
@@ -142,6 +143,10 @@ func toAlertHistoryResponse(a db.AlertHistory) alertHistoryResponse {
 	if a.VmID.Valid {
 		id, _ := uuid.FromBytes(a.VmID.Bytes[:])
 		resp.VMID = id.String()
+	}
+	if a.VmVmid.Valid {
+		v := a.VmVmid.Int32
+		resp.VMVmid = &v
 	}
 	if a.ChannelID.Valid {
 		id, _ := uuid.FromBytes(a.ChannelID.Bytes[:])

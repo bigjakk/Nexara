@@ -1,6 +1,14 @@
+-- Both insert queries derive vmid from the UPID id field (field 7 of
+-- UPID:node:pid:pstart:starttime:type:id:user@realm:) in SQL — the same
+-- expression migration 000076 used to backfill — so no insert path can
+-- forget it. Non-guest tasks (empty/non-numeric id) store NULL; the {1,9}
+-- bound (VMIDs cap at 999999999) keeps a pathological all-numeric id from
+-- overflowing the ::int cast.
 -- name: InsertTaskHistory :one
-INSERT INTO task_history (cluster_id, user_id, upid, description, status, node, task_type)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO task_history (cluster_id, user_id, upid, description, status, node, task_type, vmid)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+    CASE WHEN split_part($3, ':', 7) ~ '^[0-9]{1,9}$'
+         THEN split_part($3, ':', 7)::int END)
 ON CONFLICT (upid) DO NOTHING
 RETURNING *;
 
@@ -12,9 +20,11 @@ RETURNING *;
 -- name: InsertExternalTaskHistory :exec
 INSERT INTO task_history (
     cluster_id, user_id, upid, description, status, exit_status,
-    node, task_type, started_at, finished_at, source
+    node, task_type, started_at, finished_at, source, vmid
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'proxmox')
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'proxmox',
+    CASE WHEN split_part($3, ':', 7) ~ '^[0-9]{1,9}$'
+         THEN split_part($3, ':', 7)::int END)
 ON CONFLICT (upid) DO NOTHING;
 
 -- name: UpdateTaskHistory :exec
@@ -67,13 +77,15 @@ UPDATE task_history
 SET status = $2, exit_status = $3, finished_at = $4, updated_at = now()
 WHERE upid = $1 AND status = 'running';
 
--- ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status
--- filters with offset pagination. Mirrors ListAuditLogFiltered. NULL narg = no
--- filter on that column.
+-- ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
+-- vmids filters with offset pagination. Mirrors ListAuditLogFiltered. NULL
+-- narg = no filter on that column. vmids matches the guest VMID parsed from
+-- the UPID at insert (folder detail view passes a folder's VMID set).
 -- name: ListTaskHistoryFiltered :many
 SELECT * FROM task_history
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
   AND (sqlc.narg('status')::text   IS NULL OR status     = sqlc.narg('status'))
+  AND (sqlc.narg('vmids')::int[]   IS NULL OR vmid       = ANY(sqlc.narg('vmids')::int[]))
 ORDER BY started_at DESC
 LIMIT $1 OFFSET $2;
 
@@ -82,4 +94,5 @@ LIMIT $1 OFFSET $2;
 -- name: CountTaskHistoryFiltered :one
 SELECT count(*) FROM task_history
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
-  AND (sqlc.narg('status')::text   IS NULL OR status     = sqlc.narg('status'));
+  AND (sqlc.narg('status')::text   IS NULL OR status     = sqlc.narg('status'))
+  AND (sqlc.narg('vmids')::int[]   IS NULL OR vmid       = ANY(sqlc.narg('vmids')::int[]));

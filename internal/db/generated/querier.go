@@ -311,6 +311,9 @@ type Querier interface {
 	HasRunningJobForCluster(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	IncrementJobCleanupAttempts(ctx context.Context, id uuid.UUID) (int32, error)
 	// Alert History
+	// vm_vmid is the stable Proxmox guest identity (from alert_rules.vm_vmid) —
+	// vm_id is the churn-prone vms.id surrogate kept for compat; see migration
+	// 000077.
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
 	// Alert Rules
 	InsertAlertRule(ctx context.Context, arg InsertAlertRuleParams) (AlertRule, error)
@@ -342,6 +345,12 @@ type Querier interface {
 	InsertRollingUpdateJob(ctx context.Context, arg InsertRollingUpdateJobParams) (RollingUpdateJob, error)
 	InsertRollingUpdateNode(ctx context.Context, arg InsertRollingUpdateNodeParams) (RollingUpdateNode, error)
 	InsertScheduledTask(ctx context.Context, arg InsertScheduledTaskParams) (ScheduledTask, error)
+	// Both insert queries derive vmid from the UPID id field (field 7 of
+	// UPID:node:pid:pstart:starttime:type:id:user@realm:) in SQL — the same
+	// expression migration 000076 used to backfill — so no insert path can
+	// forget it. Non-guest tasks (empty/non-numeric id) store NULL; the {1,9}
+	// bound (VMIDs cap at 999999999) keeps a pathological all-numeric id from
+	// overflowing the ::int cast.
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	InsertVMImportJob(ctx context.Context, arg InsertVMImportJobParams) (VmImportJob, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ListAPIKeysByUserRow, error)
@@ -476,9 +485,10 @@ type Querier interface {
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
 	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
 	ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHistoryByClusterParams) ([]TaskHistory, error)
-	// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status
-	// filters with offset pagination. Mirrors ListAuditLogFiltered. NULL narg = no
-	// filter on that column.
+	// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
+	// vmids filters with offset pagination. Mirrors ListAuditLogFiltered. NULL
+	// narg = no filter on that column. vmids matches the guest VMID parsed from
+	// the UPID at insert (folder detail view passes a folder's VMID set).
 	ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]TaskHistory, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)

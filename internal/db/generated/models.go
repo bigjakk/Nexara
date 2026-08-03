@@ -35,6 +35,7 @@ type AlertHistory struct {
 	ResolvedBy         pgtype.UUID        `json:"resolved_by"`
 	CreatedAt          time.Time          `json:"created_at"`
 	NotificationSentAt pgtype.Timestamptz `json:"notification_sent_at"`
+	VmVmid             pgtype.Int4        `json:"vm_vmid"`
 }
 
 type AlertRule struct {
@@ -912,6 +913,7 @@ type TaskHistory struct {
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
 	Source      string             `json:"source"`
+	Vmid        pgtype.Int4        `json:"vmid"`
 }
 
 type TotpRecoveryCode struct {

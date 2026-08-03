@@ -192,6 +192,8 @@ func buildFiberConfig(cfg *config.Config) fiber.Config {
 		ErrorHandler:                 errorHandler,
 		BodyLimit:                    32 * 1024 * 1024, // 32MB — bodies above this are streamed, not buffered
 		StreamRequestBody:            true,             // Enable streaming for large uploads (ISO/vztmpl)
+		ReadBufferSize:               16 * 1024,        // fasthttp default is 4KB for the whole request line + headers; Bearer JWT + long filter query strings (?vmids= from big folders) overflow it into opaque 431s
+
 		DisablePreParseMultipartForm: true,             // Don't buffer multipart bodies; upload handler parses the stream itself
 		ProxyHeader:                  cfg.ProxyHeader,
 		TrustProxy:                   true,

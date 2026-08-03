@@ -13,6 +13,8 @@ export interface TaskRecord {
   task_type: string;
   source: string;
   progress: number | null;
+  /** Guest VMID parsed from the UPID at insert; absent for non-guest tasks. */
+  vmid?: number;
   started_at: string;
   finished_at: string | null;
 }
@@ -22,30 +24,58 @@ export interface TaskListResponse {
   total: number;
 }
 
+/** Server-side bound on the ?vmids= list (maxVmidsFilter in
+ * internal/api/handlers/tasks.go) — requests above it are rejected with 400,
+ * so callers must not fire them. */
+export const MAX_TASK_VMIDS_FILTER = 500;
+
 interface TaskListParams {
   limit: number;
   offset: number;
   clusterId?: string | undefined;
   status?: string | undefined;
+  /** Server-side guest filter (task_history.vmid). Never pass an empty array —
+   * the server treats an absent param as "no filter"; gate with `enabled`. */
+  vmids?: number[] | undefined;
+  enabled?: boolean | undefined;
 }
 
 /**
- * useTasks backs the Tasks page. Server-side cluster + status filtering with
- * offset pagination (mirrors useAuditLog). The queryKey is prefixed with
- * "tasks" so a WS task_created/task_update event can invalidate every page/
- * filter combination at once (see useEventInvalidation).
+ * useTasks backs the Tasks page. Server-side cluster + status + vmids
+ * filtering with offset pagination (mirrors useAuditLog). The queryKey is
+ * prefixed with "tasks" so a WS task_created/task_update event can invalidate
+ * every page/filter combination at once (see useEventInvalidation).
  */
-export function useTasks({ limit, offset, clusterId, status }: TaskListParams) {
+export function useTasks({
+  limit,
+  offset,
+  clusterId,
+  status,
+  vmids,
+  enabled,
+}: TaskListParams) {
+  // Sorted so semantically-equal sets share a cache entry.
+  const vmidsKey =
+    vmids && vmids.length > 0
+      ? [...vmids].sort((a, b) => a - b).join(",")
+      : "";
+
   const params = new URLSearchParams();
   params.set("limit", String(limit));
   params.set("offset", String(offset));
   if (clusterId) params.set("cluster_id", clusterId);
   if (status) params.set("status", status);
+  if (vmidsKey) params.set("vmids", vmidsKey);
 
   return useQuery({
-    queryKey: ["tasks", limit, offset, clusterId, status],
+    queryKey: ["tasks", limit, offset, clusterId, status, vmidsKey],
     queryFn: () =>
       apiClient.get<TaskListResponse>(`/api/v1/tasks?${params.toString()}`),
+    enabled: enabled ?? true,
+    // Keep the previous page's rows (and, crucially, its `total`) visible
+    // while the next page loads — consumers derive page counts from `total`,
+    // which would otherwise collapse to 0 during every page transition.
+    placeholderData: (prev) => prev,
     refetchInterval: 60_000, // WS events invalidate immediately; this is a fallback
   });
 }

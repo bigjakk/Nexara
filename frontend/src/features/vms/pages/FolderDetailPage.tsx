@@ -336,7 +336,7 @@ export function FolderDetailPage() {
 
         {canViewAlerts && (
           <TabsContent value="alerts" className="mt-4">
-            <FolderAlertsTab clusterId={clusterId} vmIds={folderVmIdSet} />
+            <FolderAlertsTab clusterId={clusterId} vmids={vmids} />
           </TabsContent>
         )}
       </Tabs>
