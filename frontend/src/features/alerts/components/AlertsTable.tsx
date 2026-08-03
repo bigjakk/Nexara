@@ -127,7 +127,7 @@ export function AlertsTable() {
   );
 }
 
-function AlertRow({
+export function AlertRow({
   alert,
   expanded,
   onToggle,

@@ -38,6 +38,11 @@ const VMDetailPage = lazy(() =>
     default: m.VMDetailPage,
   })),
 );
+const FolderDetailPage = lazy(() =>
+  import("@/features/vms/pages/FolderDetailPage").then((m) => ({
+    default: m.FolderDetailPage,
+  })),
+);
 const StoragePage = lazy(() =>
   import("@/features/storage/pages/StoragePage").then((m) => ({
     default: m.StoragePage,
@@ -190,6 +195,14 @@ const router = createBrowserRouter([
           {
             path: "clusters/:clusterId/nodes/:nodeId",
             element: <LazyPage><NodeDetailPage /></LazyPage>,
+          },
+          {
+            path: "clusters/:clusterId/folders/:folderId",
+            element: (
+              <RequirePermission action="view" resource="vm_folder">
+                <LazyPage><FolderDetailPage /></LazyPage>
+              </RequirePermission>
+            ),
           },
           {
             path: "inventory",

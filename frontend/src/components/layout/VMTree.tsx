@@ -32,11 +32,16 @@ import {
   useAssignVMToFolder,
 } from "@/features/vms/api/folder-queries";
 import { useSidebarStore } from "@/stores/sidebar-store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useDragAutoScroll } from "@/hooks/useDragAutoScroll";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { CreateFolderDialog } from "@/features/vms/components/CreateFolderDialog";
 import { RenameFolderDialog } from "@/features/vms/components/RenameFolderDialog";
-import { buildFolderTree, type FolderNode } from "@/features/vms/lib/folder-tree";
+import {
+  UNASSIGNED_FOLDER_SEGMENT,
+  buildFolderTree,
+  type FolderNode,
+} from "@/features/vms/lib/folder-tree";
 import type { ClusterResponse, VMFolder, VMResponse } from "@/types/api";
 
 function VMIcon({ type, template }: { type: string; template?: boolean }) {
@@ -122,7 +127,10 @@ function FolderBranch({
   onRename,
   onDelete,
 }: FolderRowProps) {
-  const { expandedNodes, toggleNode } = useSidebarStore();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { hasPermission } = usePermissions();
+  const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
   const key = `vm-folder:${node.folder.id}`;
   const expanded = expandedNodes.has(key);
   const assign = useAssignVMToFolder();
@@ -130,6 +138,11 @@ function FolderBranch({
 
   const vms = vmsByFolder.get(node.folder.id) ?? [];
   const hasChildren = node.children.length > 0 || vms.length > 0;
+  const path = `/clusters/${clusterId}/folders/${node.folder.id}`;
+  const active = location.pathname === path;
+  // Without view:vm_folder the detail route would just show Access denied —
+  // keep the pre-navigation expand/collapse behavior for such roles.
+  const canOpen = hasPermission("view", "vm_folder");
 
   function handleDragOver(e: React.DragEvent) {
     if (e.dataTransfer.types.includes("application/x-nexara-vm")) {
@@ -159,6 +172,7 @@ function FolderBranch({
             onDrop={handleDrop}
             className={cn(
               "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
+              active && "bg-primary/10 text-foreground",
               dropActive && "bg-accent/70 ring-1 ring-primary",
             )}
           >
@@ -179,7 +193,12 @@ function FolderBranch({
             </button>
             <button
               onClick={() => {
-                if (hasChildren) toggleNode(key);
+                if (!canOpen) {
+                  if (hasChildren) toggleNode(key);
+                  return;
+                }
+                if (hasChildren) expandNode(key);
+                void navigate(path);
               }}
               className="flex min-w-0 flex-1 items-center gap-1.5"
             >
@@ -259,11 +278,17 @@ interface UnassignedBranchProps {
 }
 
 function UnassignedBranch({ vms, clusterId }: UnassignedBranchProps) {
-  const { expandedNodes, toggleNode } = useSidebarStore();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { hasPermission } = usePermissions();
+  const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
   const assign = useAssignVMToFolder();
   const [dropActive, setDropActive] = useState(false);
   const key = `vm-folder-unassigned:${clusterId}`;
   const expanded = expandedNodes.has(key);
+  const path = `/clusters/${clusterId}/folders/${UNASSIGNED_FOLDER_SEGMENT}`;
+  const active = location.pathname === path;
+  const canOpen = hasPermission("view", "vm_folder");
 
   function handleDragOver(e: React.DragEvent) {
     if (e.dataTransfer.types.includes("application/x-nexara-vm")) {
@@ -291,6 +316,7 @@ function UnassignedBranch({ vms, clusterId }: UnassignedBranchProps) {
         onDrop={handleDrop}
         className={cn(
           "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
+          active && "bg-primary/10 text-foreground",
           dropActive && "bg-accent/70 ring-1 ring-primary",
         )}
       >
@@ -307,7 +333,14 @@ function UnassignedBranch({ vms, clusterId }: UnassignedBranchProps) {
           />
         </button>
         <button
-          onClick={() => { if (vms.length > 0) toggleNode(key); }}
+          onClick={() => {
+            if (!canOpen) {
+              if (vms.length > 0) toggleNode(key);
+              return;
+            }
+            if (vms.length > 0) expandNode(key);
+            void navigate(path);
+          }}
           className="flex min-w-0 flex-1 items-center gap-1.5"
         >
           <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />

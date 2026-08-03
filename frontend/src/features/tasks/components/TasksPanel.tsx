@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -15,20 +15,10 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
 import { isOkExit } from "@/components/layout/task-status";
 import { useTaskLogStore } from "@/stores/task-log-store";
+import { selectClass, statusFilters } from "../lib/task-filters";
 import { useTasks, type TaskRecord } from "../api/tasks-queries";
 
 const PAGE_SIZE = 50;
-
-const selectClass =
-  "flex h-9 w-[200px] rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
-
-const statusFilters = [
-  { value: "", label: "All Statuses" },
-  { value: "running", label: "Running" },
-  { value: "completed", label: "Completed" },
-  { value: "failed", label: "Failed" },
-  { value: "stopped", label: "Stopped" },
-] as const;
 
 type DisplayStatus = "running" | "ok" | "failed";
 
@@ -92,14 +82,19 @@ function formatDuration(start: string, end: string | null): string {
   return `${String(Math.floor(sec / 3600))}h ${String(Math.floor((sec % 3600) / 60))}m`;
 }
 
-function TaskRow({
+export function TaskRow({
   task,
   clusterName,
+  vmName,
   expanded,
   onToggle,
 }: {
   task: TaskRecord;
   clusterName: string;
+  /** When provided (folder/VM-scoped views), an extra VM column is rendered
+   * between Description and Node — the parent table must add a matching
+   * header cell. */
+  vmName?: ReactNode;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -164,6 +159,7 @@ function TaskRow({
             )}
           </div>
         </td>
+        {vmName !== undefined && <td className="px-4 py-2">{vmName}</td>}
         <td className="px-4 py-2 text-muted-foreground">{task.node || "—"}</td>
         <td className="px-4 py-2">
           <span
@@ -175,7 +171,7 @@ function TaskRow({
       </tr>
       {expanded && (
         <tr className="border-b bg-muted/10">
-          <td colSpan={6} className="px-4 py-3">
+          <td colSpan={vmName !== undefined ? 7 : 6} className="px-4 py-3">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               <span className="text-muted-foreground">Description</span>
               <span>{task.description || "—"}</span>

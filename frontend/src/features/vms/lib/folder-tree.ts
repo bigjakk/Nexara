@@ -1,5 +1,10 @@
 import type { VMFolder } from "@/types/api";
 
+/** Route segment used by the folder detail page for the "Discovered"
+ * pseudo-folder (VMs with no folder assignment). Never collides with a real
+ * folder id — those are UUIDs. */
+export const UNASSIGNED_FOLDER_SEGMENT = "unassigned";
+
 export interface FolderNode {
   folder: VMFolder;
   children: FolderNode[];
@@ -29,6 +34,32 @@ export function buildFolderTree(folders: VMFolder[]): FolderNode[] {
   };
   sortRec(roots);
   return roots;
+}
+
+/** Collect a folder's own id plus the ids of every descendant folder.
+ * Cycle-safe (a corrupt parent chain can't loop) and tolerant of a rootId
+ * that isn't in the list (returns just the root id). */
+export function collectSubtreeFolderIds(
+  folders: VMFolder[],
+  rootId: string,
+): Set<string> {
+  const childrenOf = new Map<string, string[]>();
+  for (const f of folders) {
+    if (f.parent_id !== null) {
+      const list = childrenOf.get(f.parent_id) ?? [];
+      list.push(f.id);
+      childrenOf.set(f.parent_id, list);
+    }
+  }
+  const out = new Set<string>();
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || out.has(id)) continue;
+    out.add(id);
+    for (const child of childrenOf.get(id) ?? []) stack.push(child);
+  }
+  return out;
 }
 
 export interface FlatFolderEntry {
