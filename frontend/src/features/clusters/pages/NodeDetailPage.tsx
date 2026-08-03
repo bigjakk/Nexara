@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Terminal, Cpu, MemoryStick, HardDrive, Info,
@@ -8,6 +8,8 @@ import {
   Server,
 } from "lucide-react";
 import { StatusBadge } from "@/features/inventory/components/StatusBadge";
+import { ResourceTable } from "@/features/inventory/components/ResourceTable";
+import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { DetailChip } from "@/components/DetailChip";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +31,7 @@ import {
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import {
   useClusterNodes,
+  useClusterVMs,
   useNodeDisks,
   useNodePCIDevices,
   useDiskSMART,
@@ -99,6 +102,24 @@ export function NodeDetailPage() {
   const node = nodes?.find((n) => n.id === nodeId);
 
   const clusterMetrics = useClusterMetrics(clusterId);
+
+  // Guests resident on this node, as inventory rows so the VMs tab gets the
+  // full ResourceTable (context menu, bulk actions) like the folder view.
+  const { data: clusterVMs } = useClusterVMs(clusterId);
+  const { rows: inventoryRows } = useInventoryData();
+  const nodeVmRows = useMemo(() => {
+    const onNode = new Set(
+      (clusterVMs ?? [])
+        .filter((vm) => vm.node_id === nodeId)
+        .map((vm) => vm.id),
+    );
+    return inventoryRows.filter(
+      (row) =>
+        row.clusterId === clusterId &&
+        row.type !== "node" &&
+        onNode.has(row.id),
+    );
+  }, [clusterVMs, inventoryRows, clusterId, nodeId]);
   const liveMetric = clusterMetrics?.nodeMetrics.get(nodeId);
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
@@ -194,6 +215,7 @@ export function NodeDetailPage() {
       <Tabs value={tabParam || "summary"} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="summary">Summary</TabsTrigger>
+          <TabsTrigger value="vms">VMs ({nodeVmRows.length})</TabsTrigger>
           <TabsTrigger value="network">Network</TabsTrigger>
           <TabsTrigger value="disks">Disks</TabsTrigger>
           <TabsTrigger value="services">Services</TabsTrigger>
@@ -269,6 +291,11 @@ export function NodeDetailPage() {
             nodeId={nodeId}
             liveMetric={liveMetric}
           />
+        </TabsContent>
+
+        {/* VMs Tab */}
+        <TabsContent value="vms" className="mt-4">
+          <ResourceTable data={nodeVmRows} />
         </TabsContent>
 
         {/* Network Tab */}

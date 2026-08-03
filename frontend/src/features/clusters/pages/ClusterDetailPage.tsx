@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +21,8 @@ import { useCluster, useClusterNodes } from "../api/cluster-queries";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
+import { ResourceTable } from "@/features/inventory/components/ResourceTable";
+import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { ClusterCephTab } from "../components/ClusterCephTab";
 import { ClusterNetworksTab } from "../components/ClusterNetworksTab";
 import { ClusterFirewallTab } from "../components/ClusterFirewallTab";
@@ -54,6 +57,17 @@ export function ClusterDetailPage() {
   const clusterQuery = useCluster(clusterId ?? "");
   const nodesQuery = useClusterNodes(clusterId ?? "");
   const cluster = clusterQuery.data;
+
+  // All guests in the cluster, as inventory rows so the VMs tab gets the
+  // full ResourceTable (context menu, bulk actions) like the folder view.
+  const { rows: inventoryRows } = useInventoryData();
+  const clusterVmRows = useMemo(
+    () =>
+      inventoryRows.filter(
+        (row) => row.clusterId === clusterId && row.type !== "node",
+      ),
+    [inventoryRows, clusterId],
+  );
   const nodes = nodesQuery.data ?? [];
 
   const addTab = useConsoleStore((s) => s.addTab);
@@ -123,6 +137,7 @@ export function ClusterDetailPage() {
           <Tabs value={tabParam || "nodes"} onValueChange={setTab}>
             <TabsList>
               <TabsTrigger value="nodes">Nodes</TabsTrigger>
+              <TabsTrigger value="vms">VMs ({clusterVmRows.length})</TabsTrigger>
               <TabsTrigger value="options">Options</TabsTrigger>
               <TabsTrigger value="ha">HA</TabsTrigger>
               <TabsTrigger value="pools">Pools</TabsTrigger>
@@ -247,6 +262,10 @@ export function ClusterDetailPage() {
 
             <TabsContent value="firewall">
               <ClusterFirewallTab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="vms">
+              <ResourceTable data={clusterVmRows} />
             </TabsContent>
 
             <TabsContent value="options">
