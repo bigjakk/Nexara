@@ -80,8 +80,21 @@ export function NodeDetailPage() {
     clusterId: string;
     nodeId: string;
   }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab") ?? "";
+  // Controlled + URL-synced tabs — same rationale as ClusterDetailPage: a
+  // bare `value` without onValueChange froze the tab bar for ?tab= arrivals.
+  const setTab = (v: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (v === "summary") next.delete("tab");
+        else next.set("tab", v);
+        return next;
+      },
+      { replace: true },
+    );
+  };
   const { data: nodes, isLoading } = useClusterNodes(clusterId);
   const node = nodes?.find((n) => n.id === nodeId);
 
@@ -178,7 +191,7 @@ export function NodeDetailPage() {
       </div>
 
       {/* Tabbed content */}
-      <Tabs defaultValue={tabParam || "summary"} {...(tabParam ? { value: tabParam } : {})}>
+      <Tabs value={tabParam || "summary"} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="summary">Summary</TabsTrigger>
           <TabsTrigger value="network">Network</TabsTrigger>

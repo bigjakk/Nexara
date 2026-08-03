@@ -33,8 +33,24 @@ import { ClusterMetricServersTab } from "../components/ClusterMetricServersTab";
 
 export function ClusterDetailPage() {
   const { clusterId } = useParams<{ clusterId: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab") ?? "";
+  // Controlled + URL-synced tabs: ?tab= deep links (SearchBar shortcuts,
+  // GlobalHealthIndicator, DRSConfigCard) select a tab even when the page is
+  // already mounted, and clicking a tab rewrites the param (replace, so tab
+  // hops don't pollute history). A bare `value` without onValueChange froze
+  // the tab bar for anyone arriving via a ?tab= link.
+  const setTab = (v: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (v === "nodes") next.delete("tab");
+        else next.set("tab", v);
+        return next;
+      },
+      { replace: true },
+    );
+  };
   const clusterQuery = useCluster(clusterId ?? "");
   const nodesQuery = useClusterNodes(clusterId ?? "");
   const cluster = clusterQuery.data;
@@ -104,7 +120,7 @@ export function ClusterDetailPage() {
             </div>
           )}
 
-          <Tabs defaultValue={tabParam || "nodes"} {...(tabParam ? { value: tabParam } : {})}>
+          <Tabs value={tabParam || "nodes"} onValueChange={setTab}>
             <TabsList>
               <TabsTrigger value="nodes">Nodes</TabsTrigger>
               <TabsTrigger value="options">Options</TabsTrigger>
