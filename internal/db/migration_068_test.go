@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -37,10 +36,7 @@ import (
 // Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the
 // live nexara DB, since this round-trips the schema up and down).
 func TestMigration068_RekeyPreservesAndDecouplesMembership(t *testing.T) {
-	dbURL := os.Getenv("NEXARA_TEST_DB_URL")
-	if dbURL == "" {
-		t.Skip("NEXARA_TEST_DB_URL not set; skipping migration round-trip test")
-	}
+	dbURL := testDBURL(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

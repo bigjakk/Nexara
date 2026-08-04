@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -30,23 +29,20 @@ import (
 //
 // Sequence:
 //
-//   1. migrate up to 57 (the 4.8a state — both representations exist)
-//   2. seed config + 2 channels + populate BOTH the array and the join
-//      table with [u1, u2] (mimics what 4.8a's transactional dual-write
-//      would have produced)
-//   3. migrate up to 58 (the 4.8c state — array column dropped, join
-//      table is the only source of truth). Assert the column is gone
-//      and the join table still holds [u1, u2].
-//   4. migrate down to 57 (the rollback path). Assert the column is
-//      back AND its contents match [u1, u2] — rebuilt by the .down.sql
-//      via array_agg over the join table.
+//  1. migrate up to 57 (the 4.8a state — both representations exist)
+//  2. seed config + 2 channels + populate BOTH the array and the join
+//     table with [u1, u2] (mimics what 4.8a's transactional dual-write
+//     would have produced)
+//  3. migrate up to 58 (the 4.8c state — array column dropped, join
+//     table is the only source of truth). Assert the column is gone
+//     and the join table still holds [u1, u2].
+//  4. migrate down to 57 (the rollback path). Assert the column is
+//     back AND its contents match [u1, u2] — rebuilt by the .down.sql
+//     via array_agg over the join table.
 //
 // Skipped unless NEXARA_TEST_DB_URL is set.
 func TestMigration058_DropArrayRoundTripsViaJoinTable(t *testing.T) {
-	dbURL := os.Getenv("NEXARA_TEST_DB_URL")
-	if dbURL == "" {
-		t.Skip("NEXARA_TEST_DB_URL not set; skipping migration round-trip test")
-	}
+	dbURL := testDBURL(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

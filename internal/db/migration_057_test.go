@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -34,10 +33,7 @@ import (
 // 2.3 "fresh DB CLI test") used a throwaway nexara_freshtest database in
 // the same Postgres instance — same shape applies here.
 func TestMigration057_RoundTripPreservesChannelIds(t *testing.T) {
-	dbURL := os.Getenv("NEXARA_TEST_DB_URL")
-	if dbURL == "" {
-		t.Skip("NEXARA_TEST_DB_URL not set; skipping migration round-trip test")
-	}
+	dbURL := testDBURL(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

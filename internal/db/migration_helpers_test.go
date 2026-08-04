@@ -2,7 +2,10 @@ package db
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +16,79 @@ import (
 
 	"github.com/bigjakk/nexara/migrations"
 )
+
+// testDBURL returns NEXARA_TEST_DB_URL after two gates: t.Skip when unset,
+// and a hard t.Fatal when assertThrowawayDB rejects the URL.
+//
+// The second gate exists because these tests migrate the schema down to
+// zero — pointed at a real database they destroy every row in it, which is
+// exactly what happened to the live dev database on 2026-08-04 when the URL
+// was assembled with database name "nexara" instead of "nexara_chaintest".
+// Every migration test MUST obtain the URL through this function (or via
+// setupMigration), never os.Getenv directly —
+// TestGuard_NoDirectTestDBURLReads enforces that mechanically.
+func testDBURL(t *testing.T) string {
+	t.Helper()
+
+	dbURL := os.Getenv("NEXARA_TEST_DB_URL")
+	if dbURL == "" {
+		t.Skip("NEXARA_TEST_DB_URL not set; skipping migration test")
+	}
+	if err := assertThrowawayDB(dbURL); err != nil {
+		t.Fatalf("refusing to run migration tests: %v "+
+			"(these tests migrate the schema down to zero and destroy all data; "+
+			"NEXARA_TEST_DB_URL must name a throwaway database such as nexara_chaintest)", err)
+	}
+	return dbURL
+}
+
+// assertThrowawayDB returns nil only when dbURL names a disposable database.
+// A name is disposable when some '_'/'-'-separated segment of it is "test"
+// or ends in "test" — accepting the names in real use (nexara_chaintest,
+// nexara_test in CI, nexara_freshtest) while rejecting live-shaped names
+// (nexara, nexara_dev, prod).
+//
+// The database name is resolved the way pgx actually resolves it: from the
+// URL path, then overridden by a dbname/database query parameter if present
+// (pgconn's parseURLSettings applies query params after the path, and
+// golang-migrate forwards every non-x- param through). Checking only the
+// path would let ?dbname=nexara silently retarget a guard-passing URL at
+// the live database.
+//
+// Scope: this constrains the database NAME only — the host is deliberately
+// unconstrained (CI and dev point at different servers), so a *_test
+// database on any reachable server is fair game. Keyword/value DSNs are
+// rejected outright: golang-migrate needs a scheme anyway, and the parse
+// below would treat the whole DSN as an opaque path.
+func assertThrowawayDB(dbURL string) error {
+	if !strings.HasPrefix(dbURL, "postgres://") && !strings.HasPrefix(dbURL, "postgresql://") {
+		return fmt.Errorf("NEXARA_TEST_DB_URL must be a postgres:// URL, not a keyword/value DSN")
+	}
+	u, err := url.Parse(dbURL)
+	if err != nil {
+		return fmt.Errorf("NEXARA_TEST_DB_URL is not a valid URL: %w", err)
+	}
+
+	dbName := strings.TrimPrefix(u.Path, "/")
+	q := u.Query()
+	for _, key := range []string{"dbname", "database"} {
+		if v := q.Get(key); v != "" {
+			dbName = v
+		}
+	}
+	if dbName == "" {
+		return fmt.Errorf("NEXARA_TEST_DB_URL names no database")
+	}
+
+	for _, segment := range strings.FieldsFunc(strings.ToLower(dbName), func(r rune) bool {
+		return r == '_' || r == '-'
+	}) {
+		if strings.HasSuffix(segment, "test") {
+			return nil
+		}
+	}
+	return fmt.Errorf("database %q does not look like a throwaway test database", dbName)
+}
 
 // migrationTestEnv is the shared scaffolding every migration round-trip
 // test needs. Constructing the pgx pool, opening the embedded migrations
@@ -50,10 +126,7 @@ type migrationTestEnv struct {
 func setupMigration(t *testing.T) *migrationTestEnv {
 	t.Helper()
 
-	dbURL := os.Getenv("NEXARA_TEST_DB_URL")
-	if dbURL == "" {
-		t.Skip("NEXARA_TEST_DB_URL not set; skipping migration test")
-	}
+	dbURL := testDBURL(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 
