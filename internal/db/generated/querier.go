@@ -39,6 +39,11 @@ type Querier interface {
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
+	// ClearDRSEvalRequest clears the queue slot after the scheduler has serviced
+	// it. The `<= $2` guard is load-bearing: $2 is the timestamp captured when the
+	// tick began, so a request that lands *during* a long evaluation is newer and
+	// survives to be serviced by the following tick instead of being swallowed.
+	ClearDRSEvalRequest(ctx context.Context, arg ClearDRSEvalRequestParams) error
 	// ClearJobCleanupPending is self-guarding: the flag only clears when no
 	// job-level marker and no node-level record still holds state, so a release
 	// racing a concurrent record-write cannot retire the job from the sweep
@@ -532,6 +537,11 @@ type Querier interface {
 	RegisterMobileDevice(ctx context.Context, arg RegisterMobileDeviceParams) (MobileDevice, error)
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)
+	// RequestDRSEvaluation queues an out-of-band evaluation for the scheduler
+	// leader to pick up on its next tick. The API's manual-trigger endpoint uses
+	// this instead of executing migrations itself, so every dispatch goes through
+	// the single leader-held executor (see migration 000079).
+	RequestDRSEvaluation(ctx context.Context, clusterID uuid.UUID) error
 	ResolveAlert(ctx context.Context, arg ResolveAlertParams) error
 	ResumeRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	RevokeAPIKey(ctx context.Context, id uuid.UUID) error

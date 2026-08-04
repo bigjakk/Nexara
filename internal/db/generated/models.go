@@ -283,16 +283,17 @@ type CveScanVuln struct {
 }
 
 type DrsConfig struct {
-	ID                  uuid.UUID       `json:"id"`
-	ClusterID           uuid.UUID       `json:"cluster_id"`
-	Mode                string          `json:"mode"`
-	Enabled             bool            `json:"enabled"`
-	Weights             json.RawMessage `json:"weights"`
-	ImbalanceThreshold  float64         `json:"imbalance_threshold"`
-	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
-	CreatedAt           time.Time       `json:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at"`
-	IncludeContainers   bool            `json:"include_containers"`
+	ID                  uuid.UUID          `json:"id"`
+	ClusterID           uuid.UUID          `json:"cluster_id"`
+	Mode                string             `json:"mode"`
+	Enabled             bool               `json:"enabled"`
+	Weights             json.RawMessage    `json:"weights"`
+	ImbalanceThreshold  float64            `json:"imbalance_threshold"`
+	EvalIntervalSeconds int32              `json:"eval_interval_seconds"`
+	CreatedAt           time.Time          `json:"created_at"`
+	UpdatedAt           time.Time          `json:"updated_at"`
+	IncludeContainers   bool               `json:"include_containers"`
+	EvalRequestedAt     pgtype.Timestamptz `json:"eval_requested_at"`
 }
 
 type DrsHistory struct {

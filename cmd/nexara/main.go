@@ -21,14 +21,11 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api"
-	"github.com/bigjakk/nexara/internal/auth"
+	"github.com/bigjakk/nexara/internal/app"
 	"github.com/bigjakk/nexara/internal/collector"
 	"github.com/bigjakk/nexara/internal/config"
 	"github.com/bigjakk/nexara/internal/db"
-	dbgen "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/debug"
-	"github.com/bigjakk/nexara/internal/events"
-	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/scheduler"
 	"github.com/bigjakk/nexara/internal/ws"
 	"github.com/bigjakk/nexara/pkg/redisutil"
@@ -124,23 +121,25 @@ func main() {
 		debug.StartPprof(cfg.PprofPort, logger)
 	}
 
+	// ---- Composition root ----
+	// Every long-lived domain service is constructed once, here, and handed
+	// to the API server, the scheduler, the collector, and the WS server.
+	// See internal/app for the bugs the previous per-site construction caused.
+	// ctx is the process shutdown context: engines root their detached
+	// goroutines in it so a graceful SIGTERM cancels in-flight Proxmox/SSH
+	// calls instead of orphaning them.
+	application := app.New(ctx, cfg, pool, rdb, logger)
+	// Tear down the Proxmox client cache's pub/sub goroutine on shutdown.
+	// Belt-and-braces: ctx cancellation already exits the runSubscriber loop,
+	// but Close also handles paths where ctx might be reused.
+	defer application.Close()
+
 	// ---- API server (registers /api/v1/* and /healthz) ----
-	// ctx is the per-server shutdown context; the API server threads it
-	// into handlers and orchestrators that spawn detached goroutines
-	// (migration, DRS, rolling update) so a graceful SIGTERM cancels
-	// in-flight Proxmox/SSH calls instead of orphaning them.
-	srv := api.New(ctx, cfg, pool, rdb)
-	// Tear down the Proxmox client cache's pub/sub goroutine on
-	// shutdown. Belt-and-braces: ctx cancellation already exits the
-	// runSubscriber loop, but Close also handles paths where ctx
-	// might be reused.
-	if cache := srv.ProxmoxCache(); cache != nil {
-		defer cache.Close()
-	}
+	srv := api.New(application)
 
 	// ---- WebSocket server (registers /ws/* on the API's Fiber app) ----
-	queries := dbgen.New(pool)
-	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+	queries := application.Queries
+	jwtSvc := application.JWT
 
 	hub := ws.NewHub(logger.With("component", "ws-hub"), cfg.WSMaxConnections)
 	hub.Run()
@@ -150,11 +149,11 @@ func main() {
 	if cfg.EncryptionKey != "" {
 		consoleHandler = ws.NewConsoleHandler(queries, cfg.EncryptionKey, jwtSvc, logger.With("component", "console"))
 		vncHandler = ws.NewVNCHandler(queries, cfg.EncryptionKey, jwtSvc, logger.With("component", "vnc"))
-		// Share the API server's Proxmox client cache so WS console/VNC
+		// Share the process-wide Proxmox client cache so WS console/VNC
 		// connections reuse the same cached *Client instance that the
 		// HTTP handlers do — avoids a fresh TLS handshake every time a
 		// user opens a node shell or VM console.
-		if cache := srv.ProxmoxCache(); cache != nil {
+		if cache := application.ProxmoxCache; cache != nil {
 			consoleHandler.SetProxmoxCache(cache)
 			vncHandler.SetProxmoxCache(cache)
 		}
@@ -163,13 +162,13 @@ func main() {
 	wsServer := ws.NewServer(hub, jwtSvc, logger.With("component", "ws"), cfg.WSPingInterval, cfg.WSPongTimeout, ws.ServerConfig{
 		ConsoleHandler: consoleHandler,
 		VNCHandler:     vncHandler,
-		// RBAC engine is reused from the API server so view:cluster
+		// RBAC engine comes from the composition root, so view:cluster
 		// permission lookups go through the same Redis-cached engine
-		// instance. The WS subscribe path uses it to enforce per-cluster
-		// view permissions on metric / alert / event channels (security
-		// review H1). If srv.RBACEngine() is nil here, the WS server
-		// will warn at startup and fall open on cluster channels.
-		RBACEngine: srv.RBACEngine(),
+		// instance the HTTP handlers use. The WS subscribe path uses it to
+		// enforce per-cluster view permissions on metric / alert / event
+		// channels (security review H1). If application.RBAC is nil here,
+		// the WS server warns at startup and falls open on cluster channels.
+		RBACEngine: application.RBAC,
 		// Origin allow-list for /ws, /ws/console, /ws/vnc upgrades.
 		// Empty/wildcard preserves the legacy "accept any origin"
 		// behaviour and triggers a startup warning; explicit values
@@ -195,10 +194,10 @@ func main() {
 	srv.RegisterFrontend(distFS)
 
 	// ---- Collector goroutine ----
-	go runCollector(ctx, cfg, pool, rdb, srv.ProxmoxCache(), logger.With("component", "collector"))
+	go runCollector(ctx, cfg, application, logger.With("component", "collector"))
 
 	// ---- Scheduler goroutine ----
-	go runScheduler(ctx, cfg, pool, rdb, srv.ProxmoxCache(), logger.With("component", "scheduler"))
+	go runScheduler(ctx, cfg, application, logger.With("component", "scheduler"))
 
 	// ---- Start server ----
 	addr := fmt.Sprintf(":%d", cfg.APIPort)
@@ -432,29 +431,31 @@ func runWithLeaderRetry(ctx context.Context, pool *pgxpool.Pool, role string, lo
 
 // runCollector runs the metric collection loop. Uses leader election so only
 // one instance across the Swarm cluster runs the collector at any time.
-func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, cache *proxmox.ClientCache, logger *slog.Logger) {
+func runCollector(ctx context.Context, cfg *config.Config, application *app.App, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("collector panic", "error", r)
 		}
 	}()
 
-	queries := dbgen.New(pool)
+	queries := application.Queries
 	syncer := collector.NewSyncer(queries, cfg.EncryptionKey, logger)
-	syncer.SetProxmoxCache(cache)
+	syncer.SetProxmoxCache(application.ProxmoxCache)
 
-	if rdb != nil {
-		eventPub := events.NewPublisher(rdb, logger)
-		syncer.SetEventPublisher(eventPub)
+	// The process-wide publisher — the API server attached the syslog
+	// forwarder to it, so collector-written audit entries reach a configured
+	// SIEM instead of being dropped by a private forwarder-less publisher.
+	if application.EventPub != nil {
+		syncer.SetEventPublisher(application.EventPub)
 	}
 
-	publisher := collector.NewPublisher(rdb, logger)
+	publisher := collector.NewPublisher(application.Redis, logger)
 	health := collector.NewHealthMonitor(queries, publisher, logger)
 	syncer.SetHealthMonitor(health)
 
-	mc := collector.NewMetricCollector(pool, publisher, logger)
+	mc := collector.NewMetricCollector(application.Pool, publisher, logger)
 
-	runWithLeaderRetry(ctx, pool, "collector", logger, func(ctx context.Context) {
+	runWithLeaderRetry(ctx, application.Pool, "collector", logger, func(ctx context.Context) {
 		logger.Info("collector started",
 			"metrics_interval", cfg.MetricsCollectInterval,
 			"resource_sync_interval", cfg.ResourceSyncInterval)
@@ -512,24 +513,34 @@ func runCollector(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, r
 }
 
 // runScheduler runs all scheduler tickers (mirrors cmd/scheduler logic).
-func runScheduler(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, cache *proxmox.ClientCache, logger *slog.Logger) {
+func runScheduler(ctx context.Context, cfg *config.Config, application *app.App, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("scheduler panic", "error", r)
 		}
 	}()
 
-	queries := dbgen.New(pool)
+	queries := application.Queries
 
-	var eventPub *events.Publisher
-	if rdb != nil {
-		eventPub = events.NewPublisher(rdb, logger.With("component", "events"))
-	}
+	// Every engine here is the same instance the HTTP handlers act on, so a
+	// manual rolling-update confirmation, an alert-DLQ replay, or an
+	// API-triggered CVE scan behaves identically to its scheduled twin.
+	sched := scheduler.New(scheduler.Deps{
+		Queries:       queries,
+		EncryptionKey: cfg.EncryptionKey,
+		TaskRetention: cfg.TaskHistoryRetention,
+		Logger:        logger,
+		EventPub:      application.EventPub,
+		Cache:         application.ProxmoxCache,
+		DRSEngine:     application.DRSEngine,
+		DRSExecutor:   application.DRSExecutor,
+		CVEScanner:    application.CVEScanner,
+		AlertEngine:   application.AlertEngine,
+		ReportGen:     application.ReportGen,
+		RollingOrch:   application.RollingOrch,
+	})
 
-	sched := scheduler.New(ctx, queries, cfg.EncryptionKey, cfg.TaskHistoryRetention, logger, eventPub)
-	sched.SetProxmoxCache(cache)
-
-	runWithLeaderRetry(ctx, pool, "scheduler", logger, func(ctx context.Context) {
+	runWithLeaderRetry(ctx, application.Pool, "scheduler", logger, func(ctx context.Context) {
 		logger.Info("scheduler started",
 			"task_interval", "60s",
 			"drs_interval", "60s",

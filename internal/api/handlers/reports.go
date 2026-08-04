@@ -32,15 +32,16 @@ type ReportHandler struct {
 	logger        *slog.Logger
 }
 
-// NewReportHandler creates a new ReportHandler.
-func NewReportHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *ReportHandler {
-	logger := slog.Default().With("handler", "reports")
+// NewReportHandler creates a new ReportHandler. generator comes from the
+// composition root, so an on-demand report renders through the same instance
+// as a scheduled one.
+func NewReportHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher, generator *reports.Generator) *ReportHandler {
 	return &ReportHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
-		generator:     reports.NewGenerator(queries, logger),
-		logger:        logger,
+		generator:     generator,
+		logger:        slog.Default().With("handler", "reports"),
 	}
 }
 

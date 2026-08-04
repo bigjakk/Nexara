@@ -10,14 +10,14 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
+	// nexapp, not app: Server.app is the Fiber app.
+	nexapp "github.com/bigjakk/nexara/internal/app"
 	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/changelog"
 	"github.com/bigjakk/nexara/internal/config"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
-	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
-	"github.com/bigjakk/nexara/internal/rolling"
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
 )
 
@@ -93,6 +93,12 @@ type serverDeps struct {
 	rbacEngine    *auth.RBACEngine
 	encryptionKey string
 	shutdownCtx   context.Context
+
+	// app is the composition root. Handlers that need a domain engine take
+	// it from here rather than constructing one — see internal/app for why
+	// the per-site construction this replaced was a bug source, not a style
+	// issue. Never nil: New requires it.
+	app *nexapp.App
 }
 
 // hasDB reports whether the queries struct is wired (DB pool present).
@@ -111,46 +117,43 @@ func (d *serverDeps) hasRBAC() bool { return d.queries != nil && d.rbacEngine !=
 // crypto + RBAC.
 func (d *serverDeps) hasFullSecure() bool { return d.hasCrypto() && d.rdb != nil }
 
-// New creates a new API server with the given dependencies. shutdownCtx is
-// the per-server context cancelled on SIGTERM; it's passed to handlers and
-// orchestrators that need to launch detached goroutines (migrations, DRS,
-// rolling updates) so those goroutines abort cleanly on graceful shutdown
-// instead of orphaning their work past the lifetime of the process.
+// New creates a new API server over an already-constructed composition root.
+// Every long-lived service (engines, caches, RBAC, JWT, the event publisher)
+// comes from a; the server constructs only HTTP handlers. a.ShutdownCtx is the
+// per-process context cancelled on SIGTERM, threaded into handlers that launch
+// detached goroutines so they abort cleanly instead of orphaning their work.
 //
-// Construction order matters in three places (call them out so future
+// Construction order matters in two places (call them out so future
 // edits don't accidentally reorder past a hidden dependency):
-//   1. eventPub must be built before any handler so handlers receive
-//      a non-nil publisher.
-//   2. rbacEngine must be built before authHandler so auth can call it
-//      directly for permission lookups.
-//   3. apiDocsHandler.SetApp must run AFTER setupRoutes so app.GetRoutes()
+//   1. registerInfra must run before registerAuth so authHandler receives
+//      the RBAC engine it calls directly for permission lookups.
+//   2. apiDocsHandler.SetApp must run AFTER setupRoutes so app.GetRoutes()
 //      returns the populated route table.
 //
-// Outside those three constraints, the per-domain factory functions
+// Outside those two constraints, the per-domain factory functions
 // (registerAuth, registerInventory, …) can be reordered without ill effect.
-func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client) *Server {
+func New(a *nexapp.App) *Server {
+	cfg := a.Cfg
+	shutdownCtx := a.ShutdownCtx
 	if shutdownCtx == nil {
 		shutdownCtx = context.Background()
 	}
 
 	d := &serverDeps{
 		cfg:           cfg,
-		pool:          pool,
-		rdb:           rdb,
+		pool:          a.Pool,
+		queries:       a.Queries,
+		rdb:           a.Redis,
+		eventPub:      a.EventPub,
 		encryptionKey: cfg.EncryptionKey,
 		shutdownCtx:   shutdownCtx,
-	}
-	if pool != nil {
-		d.queries = db.New(pool)
-	}
-	if rdb != nil {
-		d.eventPub = events.NewPublisher(rdb, slog.Default())
+		app:           a,
 	}
 
 	// Apply the refresh-cookie Secure policy (SECURE_COOKIES) once, before serving.
 	handlers.SetCookieSecureMode(cfg.SecureCookies)
 
-	s := &Server{config: cfg, db: pool, redis: rdb, queries: d.queries, eventPub: d.eventPub}
+	s := &Server{config: cfg, db: a.Pool, redis: a.Redis, queries: d.queries, eventPub: d.eventPub}
 
 	s.registerInfra(d)
 	s.registerAuth(d)
@@ -202,49 +205,28 @@ func buildFiberConfig(cfg *config.Config) fiber.Config {
 	}
 }
 
-// registerInfra constructs the cross-cutting services that downstream
-// handlers depend on: the Proxmox client cache, the JWT service, the
-// session manager, the RBAC engine, and the syslog forwarder.
+// registerInfra wires the cross-cutting services that downstream handlers
+// depend on. The Proxmox client cache, JWT service, session manager and RBAC
+// engine all come from the composition root; the syslog forwarder is the one
+// thing still built here, because loading its destination needs the settings
+// tables.
 func (s *Server) registerInfra(d *serverDeps) {
-	// Proxmox client cache: per-cluster *Client / *PBSClient memoised
-	// so the per-tick collector/scheduler/scanner/rolling/drs flows
-	// reuse the http.Transport idle-conn pool instead of paying TLS
-	// handshake + AES key schedule on every call. Subscriber starts
-	// immediately so Redis pub/sub invalidations from peer replicas
-	// land while the process is alive; ctx cancellation tears it down
-	// on SIGTERM.
-	if d.hasCrypto() {
-		s.proxmoxCache = proxmox.NewClientCache(d.queries, d.encryptionKey, d.rdb, slog.Default().With("component", "proxmox-cache"))
-		s.proxmoxCache.StartSubscriber(d.shutdownCtx)
-	}
+	// These all come from the composition root — including the Proxmox client
+	// cache, whose pub/sub subscriber app.New already started.
+	s.proxmoxCache = d.app.ProxmoxCache
+	s.jwtService = d.app.JWT
+	d.jwt = d.app.JWT
+	s.sessionManager = d.app.SessionMgr
+	d.sessionMgr = d.app.SessionMgr
+	s.rbacEngine = d.app.RBAC
+	d.rbacEngine = d.app.RBAC
 
-	if d.cfg.JWTSecret != "" {
-		s.jwtService = auth.NewJWTService(d.cfg.JWTSecret, d.cfg.AccessTokenTTL, d.cfg.RefreshTokenTTL)
-		d.jwt = s.jwtService
-	}
-
-	if d.hasDB() && d.rdb != nil {
-		s.sessionManager = auth.NewSessionManager(d.queries, d.rdb)
-		d.sessionMgr = s.sessionManager
-	}
-
-	// rdb may be nil (REDIS_URL unset / parse failure / connection
-	// rejected at startup); the engine's read + write-back paths
-	// already guard `if e.redis != nil` so it falls through to a
-	// straight Postgres lookup. The 5.1 helper-side fail-loud requires
-	// the engine itself to be present, so don't gate construction on
-	// Redis — that would brick every authenticated request when Redis
-	// is misconfigured.
-	if d.hasDB() {
-		if d.rdb == nil {
-			slog.Default().Warn("rbac engine: Redis unavailable, permission lookups will hit Postgres on every check")
-		}
-		s.rbacEngine = auth.NewRBACEngine(d.queries, d.rdb)
-		d.rbacEngine = s.rbacEngine
-	}
-
-	// Syslog forwarder is attached to the event publisher and runs
-	// best-effort; failure to load config doesn't block the server.
+	// Syslog forwarding is attached here rather than in app.New because
+	// loading the destination needs the settings tables. It mutates the
+	// process-wide publisher, so scheduler- and collector-written audit rows
+	// are forwarded too — they previously held forwarder-less publishers of
+	// their own and never reached a configured SIEM. Best-effort: a config
+	// load failure doesn't block the server.
 	if s.eventPub != nil {
 		fwd := proxsyslog.NewForwarder(slog.Default().With("component", "syslog"))
 		s.eventPub.SetSyslogForwarder(fwd)
@@ -301,7 +283,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 // shutdownCtx, so they receive it explicitly.
 func (s *Server) registerOps(d *serverDeps) {
 	if d.hasCrypto() {
-		s.drsHandler = handlers.NewDRSHandler(d.shutdownCtx, d.queries, d.encryptionKey, d.eventPub)
+		s.drsHandler = handlers.NewDRSHandler(d.queries, d.encryptionKey, d.eventPub, d.app.DRSEngine)
 		s.migrationHandler = handlers.NewMigrationHandler(d.shutdownCtx, d.queries, d.encryptionKey, d.eventPub)
 		s.networkHandler = handlers.NewNetworkHandler(d.queries, d.encryptionKey, d.eventPub)
 	}
@@ -319,18 +301,17 @@ func (s *Server) registerSecurity(d *serverDeps) {
 	if !d.hasCrypto() {
 		return
 	}
-	registry := notifications.BuildRegistry(d.queries)
-	s.cveHandler = handlers.NewCVEHandler(d.pool, d.queries, d.encryptionKey, d.eventPub, registry)
-	s.alertHandler = handlers.NewAlertHandler(d.queries, d.encryptionKey, d.eventPub, registry)
-	// The DLQ handler shares an alert engine instance with the
-	// scheduler's evaluator. The replay path delegates back to that
-	// engine so the same retry schedule applies whether the
-	// notification was triggered automatically or by an operator.
-	alertEngine := notifications.NewEngine(d.shutdownCtx, d.queries, slog.Default().With("component", "alert-engine-replay"), d.eventPub, registry, d.encryptionKey)
-	s.notificationDLQHandler = handlers.NewNotificationDLQHandler(d.queries, alertEngine, d.eventPub)
-	s.reportHandler = handlers.NewReportHandler(d.queries, d.encryptionKey, d.eventPub)
-	rollingOrch := rolling.NewOrchestrator(d.shutdownCtx, d.queries, d.encryptionKey, slog.Default().With("component", "rolling-update"), d.eventPub, nil)
-	s.rollingUpdateHandler = handlers.NewRollingUpdateHandler(d.queries, d.encryptionKey, d.eventPub, rollingOrch)
+	// Engines come from the composition root. The DLQ handler genuinely does
+	// share the scheduler's alert engine now, so an operator replay follows
+	// the same retry schedule and rate limits as an automatic dispatch; the
+	// rolling orchestrator is the fully-wired one, so a reboot failure
+	// confirmed over HTTP sends the job's configured notification instead of
+	// silently dropping it against a nil registry.
+	s.cveHandler = handlers.NewCVEHandler(d.pool, d.queries, d.encryptionKey, d.eventPub, d.app.NotifyRegistry, d.app.CVEScanner)
+	s.alertHandler = handlers.NewAlertHandler(d.queries, d.encryptionKey, d.eventPub, d.app.NotifyRegistry)
+	s.notificationDLQHandler = handlers.NewNotificationDLQHandler(d.queries, d.app.AlertEngine, d.eventPub)
+	s.reportHandler = handlers.NewReportHandler(d.queries, d.encryptionKey, d.eventPub, d.app.ReportGen)
+	s.rollingUpdateHandler = handlers.NewRollingUpdateHandler(d.queries, d.encryptionKey, d.eventPub, d.app.RollingOrch)
 	s.clusterOptionsHandler = handlers.NewClusterOptionsHandler(d.queries, d.encryptionKey, d.eventPub)
 	s.haHandler = handlers.NewHAHandler(d.queries, d.encryptionKey, d.eventPub)
 	s.poolHandler = handlers.NewPoolHandler(d.queries, d.encryptionKey, d.eventPub)

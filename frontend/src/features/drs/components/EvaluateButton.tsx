@@ -52,6 +52,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   const [evaluated, setEvaluated] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [blockReason, setBlockReason] = useState("");
+  const [queued, setQueued] = useState(false);
 
   // Reset state when switching clusters.
   useEffect(() => {
@@ -62,6 +63,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
     setEvaluated(false);
     setBlocked(false);
     setBlockReason("");
+    setQueued(false);
   }, [clusterId]);
 
   const handleEvaluate = () => {
@@ -73,6 +75,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
         setThreshold(data.threshold);
         setBlocked(data.blocked ?? false);
         setBlockReason(data.block_reason ?? "");
+        setQueued(data.queued ?? false);
         setEvaluated(true);
       },
       onError: () => {
@@ -80,6 +83,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
         setNodeScores(null);
         setBlocked(false);
         setBlockReason("");
+        setQueued(false);
         setEvaluated(true);
       },
     });
@@ -215,6 +219,15 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
                 <span className="text-xs font-medium text-muted-foreground">
                   Recommended Migrations
                 </span>
+                {queued && (
+                  <p className="text-xs text-muted-foreground">
+                    Automatic mode: an evaluation has been queued. The scheduler
+                    re-plans against live cluster state on its next pass (usually
+                    within a minute) and executes what it finds then, so the moves
+                    below are the plan as of now and may differ. Results appear in
+                    DRS history.
+                  </p>
+                )}
                 {results.map((rec, i) => (
                   <div
                     key={i}

@@ -39,32 +39,44 @@ type Scheduler struct {
 	drsLastEval   map[uuid.UUID]time.Time
 }
 
-// New creates a new Scheduler. shutdownCtx should be the per-server context
-// cancelled on SIGTERM; it's threaded into the DRS executor and rolling
-// orchestrator so detached goroutines they spawn (poll loops, SSH upgrades)
-// abort cleanly on graceful shutdown instead of orphaning past the process.
-func New(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, taskRetention time.Duration, logger *slog.Logger, eventPub *events.Publisher) *Scheduler {
-	if shutdownCtx == nil {
-		shutdownCtx = context.Background()
+// Deps are the pre-built domain engines the scheduler ticks. They come from
+// the composition root (internal/app) so the HTTP handlers act on the same
+// instances — the scheduler no longer constructs any of them itself.
+type Deps struct {
+	Queries       *db.Queries
+	EncryptionKey string
+	TaskRetention time.Duration
+	Logger        *slog.Logger
+	EventPub      *events.Publisher
+	Cache         *proxmox.ClientCache
+
+	DRSEngine   *drs.Engine
+	DRSExecutor *drs.Executor
+	CVEScanner  *scanner.Engine
+	AlertEngine *notifications.Engine
+	ReportGen   *reports.Generator
+	RollingOrch *rolling.Orchestrator
+}
+
+// New creates a Scheduler over the shared engines in d.
+func New(d Deps) *Scheduler {
+	logger := d.Logger
+	if logger == nil {
+		logger = slog.Default()
 	}
-	registry := notifications.BuildRegistry(queries)
-	cveScanner := scanner.NewEngine(queries, encryptionKey, logger.With("component", "cve-scanner"), registry)
-	rollingOrch := rolling.NewOrchestrator(shutdownCtx, queries, encryptionKey, logger.With("component", "rolling-update"), eventPub, registry)
-	// Refresh security posture as soon as a rolling update finishes rather
-	// than waiting for the next 6-hour scheduled scan tick.
-	rollingOrch.SetCVEScanner(cveScanner)
 	return &Scheduler{
-		queries:       queries,
-		encryptionKey: encryptionKey,
-		taskRetention: taskRetention,
+		queries:       d.Queries,
+		encryptionKey: d.EncryptionKey,
+		taskRetention: d.TaskRetention,
 		logger:        logger,
-		drsEngine:     drs.NewEngine(queries, encryptionKey, logger.With("component", "drs-engine")),
-		drsExecutor:   drs.NewExecutor(shutdownCtx, queries, logger.With("component", "drs-executor"), eventPub),
-		cveScanner:    cveScanner,
-		alertEngine:   notifications.NewEngine(shutdownCtx, queries, logger.With("component", "alert-engine"), eventPub, registry, encryptionKey),
-		reportGen:     reports.NewGenerator(queries, logger.With("component", "report-gen")),
-		rollingOrch:   rollingOrch,
-		eventPub:      eventPub,
+		drsEngine:     d.DRSEngine,
+		drsExecutor:   d.DRSExecutor,
+		cveScanner:    d.CVEScanner,
+		alertEngine:   d.AlertEngine,
+		reportGen:     d.ReportGen,
+		rollingOrch:   d.RollingOrch,
+		eventPub:      d.EventPub,
+		cache:         d.Cache,
 		drsLastEval:   make(map[uuid.UUID]time.Time),
 	}
 }
@@ -173,16 +185,9 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 	now := time.Now()
 
 	for _, cfg := range configs {
-		// Respect the per-cluster evaluation interval.
-		interval := time.Duration(cfg.EvalIntervalSeconds) * time.Second
-		if interval <= 0 {
-			interval = 300 * time.Second // default 5 minutes
-		}
-
-		if lastEval, ok := s.drsLastEval[cfg.ClusterID]; ok {
-			if now.Sub(lastEval) < interval {
-				continue
-			}
+		lastEval, seen := s.drsLastEval[cfg.ClusterID]
+		if !drsShouldEvaluate(cfg, lastEval, seen, now) {
+			continue
 		}
 
 		s.drsLastEval[cfg.ClusterID] = now
@@ -191,8 +196,21 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 		if err != nil {
 			s.logger.Error("DRS evaluation failed",
 				"cluster_id", cfg.ClusterID, "error", err)
+			// Leave a queued request set so the next tick retries it, unless
+			// it has aged past its own interval — otherwise a cluster whose
+			// evaluation fails persistently would keep the bypass latched and
+			// re-evaluate every tick forever.
+			if cfg.EvalRequestedAt.Valid && now.Sub(cfg.EvalRequestedAt.Time) > drsEvalInterval(cfg) {
+				s.clearDRSEvalRequest(ctx, cfg)
+			}
 			continue
 		}
+
+		// Evaluation succeeded, so an operator's queued request has been
+		// honoured. Clear it against the timestamp we READ rather than now():
+		// a request stamped while this pass was running is newer, fails the
+		// `<=` guard, and survives to be serviced by the following tick.
+		s.clearDRSEvalRequest(ctx, cfg)
 
 		if result != nil && result.BlockedByNativeCRS {
 			s.logger.Info("DRS skipped: Proxmox native CRS auto-rebalance is active",
@@ -219,6 +237,63 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 			s.logger.Error("DRS execution failed",
 				"cluster_id", cfg.ClusterID, "error", err)
 		}
+	}
+}
+
+// defaultDRSEvalInterval applies when a config carries a non-positive
+// eval_interval_seconds.
+const defaultDRSEvalInterval = 300 * time.Second
+
+// drsEvalInterval is the per-cluster evaluation interval, defaulted.
+func drsEvalInterval(cfg db.DrsConfig) time.Duration {
+	if interval := time.Duration(cfg.EvalIntervalSeconds) * time.Second; interval > 0 {
+		return interval
+	}
+	return defaultDRSEvalInterval
+}
+
+// drsShouldEvaluate decides whether a cluster is due. seen reports whether
+// lastEval came from the in-memory map (a cluster never evaluated by this
+// process always runs, which is what makes a new leader pick up the whole
+// fleet on its first pass).
+//
+// A queued operator request (eval_requested_at, migration 000079) bypasses the
+// interval for exactly one pass — that is the whole reason the manual trigger
+// can hand execution to the leader without waiting out the interval.
+func drsShouldEvaluate(cfg db.DrsConfig, lastEval time.Time, seen bool, now time.Time) bool {
+	if cfg.EvalRequestedAt.Valid {
+		return true
+	}
+	if !seen {
+		return true
+	}
+	return now.Sub(lastEval) >= drsEvalInterval(cfg)
+}
+
+// drsEvalRequestClearer is the one-method slice of db.Querier that
+// clearDRSEvalRequest needs, carved out so the params can be asserted with a
+// fake (same shape as dueTaskClaimer).
+type drsEvalRequestClearer interface {
+	ClearDRSEvalRequest(ctx context.Context, arg db.ClearDRSEvalRequestParams) error
+}
+
+// clearDRSEvalRequestOn clears the queue slot using the timestamp read from
+// cfg, never now(): the `eval_requested_at <= $2` guard in the query is what
+// keeps a request stamped mid-pass alive for the next tick.
+func clearDRSEvalRequestOn(ctx context.Context, clearer drsEvalRequestClearer, cfg db.DrsConfig) error {
+	if !cfg.EvalRequestedAt.Valid {
+		return nil
+	}
+	return clearer.ClearDRSEvalRequest(ctx, db.ClearDRSEvalRequestParams{
+		ClusterID:       cfg.ClusterID,
+		EvalRequestedAt: cfg.EvalRequestedAt,
+	})
+}
+
+func (s *Scheduler) clearDRSEvalRequest(ctx context.Context, cfg db.DrsConfig) {
+	if err := clearDRSEvalRequestOn(ctx, s.queries, cfg); err != nil {
+		s.logger.Warn("failed to clear DRS evaluation request",
+			"cluster_id", cfg.ClusterID, "error", err)
 	}
 }
 
@@ -523,27 +598,9 @@ func (s *Scheduler) trackTask(ctx context.Context, task db.ScheduledTask, upid, 
 	}
 }
 
-// SetProxmoxCache attaches the per-server cache so createClient can
-// reuse cached *Client instances. Also propagates the cache to the DRS,
-// CVE, and rolling-update sub-engines that build Proxmox clients of
-// their own. drsExecutor is intentionally NOT included: it takes a
-// *Client as a parameter (built by Engine.createClient) rather than
-// constructing one itself. The notifications alertEngine never talks
-// to the Proxmox API (alerts evaluate against DB metrics), so it is
-// also excluded. Nil-safe.
-func (s *Scheduler) SetProxmoxCache(cache *proxmox.ClientCache) {
-	s.cache = cache
-	if s.drsEngine != nil {
-		s.drsEngine.SetProxmoxCache(cache)
-	}
-	if s.cveScanner != nil {
-		s.cveScanner.SetProxmoxCache(cache)
-	}
-	if s.rollingOrch != nil {
-		s.rollingOrch.SetProxmoxCache(cache)
-	}
-}
-
+// createClient returns a cached *Client when the composition root supplied a
+// cache (Deps.Cache), falling back to a per-call build. The sub-engines get
+// the same cache wired directly in app.New, so nothing propagates it here.
 func (s *Scheduler) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
 	if s.cache != nil {
 		client, err := s.cache.Get(ctx, clusterID)

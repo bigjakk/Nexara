@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	nexapp "github.com/bigjakk/nexara/internal/app"
 	"github.com/bigjakk/nexara/internal/config"
 )
 
@@ -23,7 +25,10 @@ func newTestServer(t *testing.T) *Server {
 		AccessTokenTTL:      15 * time.Minute,
 		RefreshTokenTTL:     7 * 24 * time.Hour,
 	}
-	return New(context.Background(), cfg, nil, nil)
+	// Nil pool and nil Redis: app.New leaves every DB- and Redis-backed
+	// singleton nil, which is the same degraded shape the server has always
+	// been constructed with in tests.
+	return New(nexapp.New(context.Background(), cfg, nil, nil, slog.Default()))
 }
 
 func TestHealthEndpoint_ReturnsOK(t *testing.T) {

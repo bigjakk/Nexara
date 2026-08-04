@@ -43,14 +43,17 @@ type CVEHandler struct {
 // transaction that keeps cve_notification_configs.channel_ids and the new
 // cve_notification_config_channels join table in lockstep; passing nil is
 // supported for unit tests that exercise paths above the DB layer.
-func NewCVEHandler(pool *pgxpool.Pool, queries *db.Queries, encryptionKey string, eventPub *events.Publisher, registry *notifications.Registry) *CVEHandler {
+// engine comes from the composition root so an API-triggered scan reuses the
+// scheduler's warm in-memory feed caches (the Debian tracker map alone is
+// ~80MB) instead of duplicating them per process.
+func NewCVEHandler(pool *pgxpool.Pool, queries *db.Queries, encryptionKey string, eventPub *events.Publisher, registry *notifications.Registry, engine *scanner.Engine) *CVEHandler {
 	return &CVEHandler{
 		pool:          pool,
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
 		registry:      registry,
-		engine:        scanner.NewEngine(queries, encryptionKey, slog.Default().With("component", "cve-engine"), registry),
+		engine:        engine,
 	}
 }
 

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -25,23 +24,26 @@ type DRSHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
-	// shutdownCtx is the parent for the manual-trigger goroutine so a
-	// long-running ad-hoc DRS pass aborts cleanly on SIGTERM rather than
-	// orphaning. Falls back to context.Background() if nil for tests.
-	shutdownCtx context.Context
+	// engine is the process-wide DRS engine from the composition root,
+	// sharing the Proxmox client cache with the scheduler's evaluations.
+	// Evaluate is read-only, so serving it from the API process is safe;
+	// EXECUTION is not — see TriggerEvaluate. May be nil in tests.
+	engine *drs.Engine
 }
 
-// NewDRSHandler creates a new DRS handler. shutdownCtx should be the
-// per-server shutdown context; nil falls back to context.Background().
-func NewDRSHandler(shutdownCtx context.Context, queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *DRSHandler {
-	if shutdownCtx == nil {
-		shutdownCtx = context.Background()
-	}
+// NewDRSHandler creates a new DRS handler. engine comes from the composition
+// root (internal/app).
+//
+// No shutdown context: this handler no longer spawns detached goroutines.
+// Manual evaluation used to execute migrations in a background goroutine here;
+// it now queues the request for the scheduler leader, which owns the only
+// executor.
+func NewDRSHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher, engine *drs.Engine) *DRSHandler {
 	return &DRSHandler{
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
-		shutdownCtx:   shutdownCtx,
+		engine:        engine,
 	}
 }
 
@@ -397,8 +399,13 @@ func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx) error {
 		return err
 	}
 
-	engine := drs.NewEngine(h.queries, h.encryptionKey, slog.Default())
-	result, err := engine.Evaluate(c.Context(), clusterID)
+	if h.engine == nil {
+		return fiber.NewError(fiber.StatusServiceUnavailable, "DRS engine not configured")
+	}
+	// Evaluate is read-only — it scores nodes and proposes moves without
+	// touching Proxmox state — so the API process runs it directly to build
+	// the response. Executing those moves is a different matter; see below.
+	result, err := h.engine.Evaluate(c.Context(), clusterID)
 	if err != nil {
 		slog.Error("DRS evaluate failed", "cluster_id", clusterID, "error", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "DRS evaluation failed")
@@ -428,28 +435,26 @@ func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx) error {
 	// Look up the DRS mode to decide whether to execute or just advise.
 	cfg, cfgErr := h.queries.GetDRSConfig(c.Context(), clusterID)
 
+	queued := false
 	if len(recommendations) > 0 && cfgErr == nil && cfg.Mode == "automatic" {
-		// Automatic mode: create a Proxmox client and execute migrations in background.
-		client, clientErr := h.createProxmoxClient(c, clusterID)
-		if clientErr != nil {
-			slog.Default().Error("DRS manual trigger: failed to create client", "error", clientErr)
-		} else {
-			executor := drs.NewExecutor(h.shutdownCtx, h.queries, slog.Default(), h.eventPub)
-			// Execute in a goroutine so the API response is not blocked by
-			// potentially long-running migrations. Detach from the request
-			// scope but stay rooted in shutdownCtx so SIGTERM cancels the
-			// migration cleanly instead of orphaning it.
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						slog.Default().Error("DRS manual execution panicked", "panic", r)
-					}
-				}()
-				if execErr := executor.Execute(h.shutdownCtx, client, clusterID, cfg.Mode, recommendations); execErr != nil {
-					slog.Default().Error("DRS manual trigger execution failed", "error", execErr)
-				}
-			}()
+		// Automatic mode: queue the execution for the scheduler leader rather
+		// than dispatching migrations here.
+		//
+		// Executing in the API process ran outside the scheduler's leader
+		// election and outside its per-cluster interval bookkeeping, so this
+		// trigger and the 60s tick could both dispatch a move for the same
+		// guest — the loser failing with "VM is locked (migrate)" and writing
+		// a spurious failure row. Delegating to a shared in-process executor
+		// would not fix it either: leader election is cross-process, and the
+		// replica serving this request may not be the leader.
+		//
+		// The leader picks the request up on its next pass (worst case 60s),
+		// bypassing the evaluation interval for that one run.
+		if reqErr := h.queries.RequestDRSEvaluation(c.Context(), clusterID); reqErr != nil {
+			slog.Error("DRS manual trigger: failed to queue evaluation", "cluster_id", clusterID, "error", reqErr)
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to queue DRS evaluation")
 		}
+		queued = true
 	} else {
 		// Advisory mode or no config: record as advisory.
 		for _, rec := range recommendations {
@@ -512,7 +517,10 @@ func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx) error {
 		threshold = result.Threshold
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{"recommendation_count": len(resp)})
+	details, _ := json.Marshal(map[string]interface{}{
+		"recommendation_count": len(resp),
+		"queued":               queued,
+	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs", clusterID.String(), "evaluate_triggered", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindDRSAction, "drs", clusterID.String(), "evaluate_triggered")
 
@@ -523,6 +531,11 @@ func (h *DRSHandler) TriggerEvaluate(c fiber.Ctx) error {
 		"node_scores":     nodeScores,
 		"imbalance":       imbalance,
 		"threshold":       threshold,
+		// queued=true means an evaluation was queued for the scheduler
+		// leader. It re-plans against live state before executing, so these
+		// recommendations are a snapshot, not a committed work list — the UI
+		// says "queued", never "migrating".
+		"queued": queued,
 	})
 }
 

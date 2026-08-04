@@ -95,6 +95,13 @@ export interface EvaluateResponse {
   /** True when DRS automatic migrations were suppressed by Proxmox native CRS. */
   blocked?: boolean;
   block_reason?: string;
+  /**
+   * True when automatic mode queued an evaluation for the scheduler leader,
+   * which owns the only executor. The leader re-plans against live state on
+   * its next pass, so `recommendations` is the plan as of this response, not
+   * a committed work list.
+   */
+  queued?: boolean;
 }
 
 export interface DRSHistoryEntry {

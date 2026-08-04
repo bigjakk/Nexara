@@ -17,6 +17,25 @@ RETURNING *;
 -- name: ListEnabledDRSConfigs :many
 SELECT * FROM drs_configs WHERE enabled = true AND mode != 'disabled';
 
+-- RequestDRSEvaluation queues an out-of-band evaluation for the scheduler
+-- leader to pick up on its next tick. The API's manual-trigger endpoint uses
+-- this instead of executing migrations itself, so every dispatch goes through
+-- the single leader-held executor (see migration 000079).
+-- name: RequestDRSEvaluation :exec
+UPDATE drs_configs SET eval_requested_at = now() WHERE cluster_id = $1;
+
+-- ClearDRSEvalRequest clears the queue slot once the scheduler has honoured
+-- it. The `<= $2` guard is load-bearing: $2 is the eval_requested_at the
+-- scheduler READ for this cluster, not now(). A request stamped after that
+-- read — while earlier clusters in the same pass were still evaluating, or
+-- while this cluster's own evaluation ran — is newer, fails the comparison,
+-- and survives to be serviced by the following tick instead of being cleared
+-- without ever being acted on.
+-- name: ClearDRSEvalRequest :exec
+UPDATE drs_configs
+SET eval_requested_at = NULL
+WHERE cluster_id = $1 AND eval_requested_at <= $2;
+
 -- name: ListDRSRules :many
 SELECT * FROM drs_rules WHERE cluster_id = $1 ORDER BY created_at;
 

@@ -24,6 +24,26 @@ func (q *Queries) CleanupStaleDRSHistory(ctx context.Context) error {
 	return err
 }
 
+const clearDRSEvalRequest = `-- name: ClearDRSEvalRequest :exec
+UPDATE drs_configs
+SET eval_requested_at = NULL
+WHERE cluster_id = $1 AND eval_requested_at <= $2
+`
+
+type ClearDRSEvalRequestParams struct {
+	ClusterID       uuid.UUID          `json:"cluster_id"`
+	EvalRequestedAt pgtype.Timestamptz `json:"eval_requested_at"`
+}
+
+// ClearDRSEvalRequest clears the queue slot after the scheduler has serviced
+// it. The `<= $2` guard is load-bearing: $2 is the timestamp captured when the
+// tick began, so a request that lands *during* a long evaluation is newer and
+// survives to be serviced by the following tick instead of being swallowed.
+func (q *Queries) ClearDRSEvalRequest(ctx context.Context, arg ClearDRSEvalRequestParams) error {
+	_, err := q.db.Exec(ctx, clearDRSEvalRequest, arg.ClusterID, arg.EvalRequestedAt)
+	return err
+}
+
 const deleteDRSRule = `-- name: DeleteDRSRule :exec
 DELETE FROM drs_rules WHERE id = $1
 `
@@ -34,7 +54,7 @@ func (q *Queries) DeleteDRSRule(ctx context.Context, id uuid.UUID) error {
 }
 
 const getDRSConfig = `-- name: GetDRSConfig :one
-SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers FROM drs_configs WHERE cluster_id = $1
+SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers, eval_requested_at FROM drs_configs WHERE cluster_id = $1
 `
 
 func (q *Queries) GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error) {
@@ -51,6 +71,7 @@ func (q *Queries) GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsCon
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.IncludeContainers,
+		&i.EvalRequestedAt,
 	)
 	return i, err
 }
@@ -272,7 +293,7 @@ func (q *Queries) ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsR
 }
 
 const listEnabledDRSConfigs = `-- name: ListEnabledDRSConfigs :many
-SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers FROM drs_configs WHERE enabled = true AND mode != 'disabled'
+SELECT id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers, eval_requested_at FROM drs_configs WHERE enabled = true AND mode != 'disabled'
 `
 
 func (q *Queries) ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error) {
@@ -295,6 +316,7 @@ func (q *Queries) ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.IncludeContainers,
+			&i.EvalRequestedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -304,6 +326,19 @@ func (q *Queries) ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error
 		return nil, err
 	}
 	return items, nil
+}
+
+const requestDRSEvaluation = `-- name: RequestDRSEvaluation :exec
+UPDATE drs_configs SET eval_requested_at = now() WHERE cluster_id = $1
+`
+
+// RequestDRSEvaluation queues an out-of-band evaluation for the scheduler
+// leader to pick up on its next tick. The API's manual-trigger endpoint uses
+// this instead of executing migrations itself, so every dispatch goes through
+// the single leader-held executor (see migration 000079).
+func (q *Queries) RequestDRSEvaluation(ctx context.Context, clusterID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, requestDRSEvaluation, clusterID)
+	return err
 }
 
 const setDRSEnabled = `-- name: SetDRSEnabled :exec
@@ -371,7 +406,7 @@ ON CONFLICT (cluster_id) DO UPDATE SET
     eval_interval_seconds = EXCLUDED.eval_interval_seconds,
     include_containers = EXCLUDED.include_containers,
     updated_at = now()
-RETURNING id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers
+RETURNING id, cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, created_at, updated_at, include_containers, eval_requested_at
 `
 
 type UpsertDRSConfigParams struct {
@@ -406,6 +441,7 @@ func (q *Queries) UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.IncludeContainers,
+		&i.EvalRequestedAt,
 	)
 	return i, err
 }
