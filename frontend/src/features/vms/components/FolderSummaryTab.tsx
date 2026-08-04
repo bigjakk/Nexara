@@ -157,7 +157,11 @@ export function FolderSummaryTab({
           <UsageRow
             icon={<Cpu className="h-3.5 w-3.5" />}
             label="CPU"
-            valueText={`${usage.usedVcpu.toFixed(1)} / ${String(usage.allocVcpu)} vCPU`}
+            valueText={
+              usage.allocVcpu > 0
+                ? `${((usage.usedVcpu / usage.allocVcpu) * 100).toFixed(2)}% of ${String(usage.allocVcpu)} vCPUs`
+                : "—"
+            }
             percent={
               usage.allocVcpu > 0
                 ? (usage.usedVcpu / usage.allocVcpu) * 100
@@ -167,7 +171,11 @@ export function FolderSummaryTab({
           <UsageRow
             icon={<MemoryStick className="h-3.5 w-3.5" />}
             label="Memory"
-            valueText={`${formatBytes(usage.usedMem)} / ${formatBytes(usage.totalMem)}`}
+            valueText={
+              usage.totalMem > 0
+                ? `${((usage.usedMem / usage.totalMem) * 100).toFixed(2)}% (${formatBytes(usage.usedMem)} of ${formatBytes(usage.totalMem)})`
+                : "—"
+            }
             percent={
               usage.totalMem > 0 ? (usage.usedMem / usage.totalMem) * 100 : null
             }
