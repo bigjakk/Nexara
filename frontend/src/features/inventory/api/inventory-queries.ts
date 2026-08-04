@@ -7,7 +7,7 @@ import type {
   NodeResponse,
   VMResponse,
 } from "@/types/api";
-import type { VmLiveMetric } from "@/types/ws";
+import type { AggregatedMetrics, VmLiveMetric } from "@/types/ws";
 import type { InventoryRow, ResourceStatus, ResourceType } from "../types/inventory";
 
 function normalizeStatus(raw: string): ResourceStatus {
@@ -106,6 +106,44 @@ function nodeToRow(
   };
 }
 
+export interface ClusterInventoryEntry {
+  cluster: ClusterResponse;
+  nodes: NodeResponse[] | undefined;
+  vms: VMResponse[] | undefined;
+  /** True when a nodes/vms query for this cluster is in error state. */
+  errored: boolean;
+}
+
+/** Build display rows from per-cluster results, isolating failures: a cluster
+ * with no data is skipped (and reported in failedClusterIds when its queries
+ * errored) instead of blanking every other cluster's rows. A cluster whose
+ * refetch failed but still has cached data keeps rendering that stale data —
+ * TanStack keeps `data` alongside `error` in that case, and it beats showing
+ * nothing. */
+export function buildInventoryRows(
+  entries: ClusterInventoryEntry[],
+  metricsMap: Map<string, AggregatedMetrics>,
+): { rows: InventoryRow[]; failedClusterIds: string[] } {
+  const rows: InventoryRow[] = [];
+  const failedClusterIds: string[] = [];
+
+  for (const { cluster, nodes, vms, errored } of entries) {
+    if (!nodes || !vms) {
+      if (errored) failedClusterIds.push(cluster.id);
+      continue;
+    }
+    const nodeMap = buildNodeMap(nodes);
+    const clusterMetrics = metricsMap.get(cluster.id);
+    const vmLive = clusterMetrics?.vmMetrics ?? new Map<string, VmLiveMetric>();
+    const nodeLive = clusterMetrics?.nodeMetrics ?? new Map<string, VmLiveMetric>();
+
+    for (const vm of vms) rows.push(vmToRow(vm, cluster, nodeMap, vmLive));
+    for (const node of nodes) rows.push(nodeToRow(node, cluster, nodeLive));
+  }
+
+  return { rows, failedClusterIds };
+}
+
 export function useInventoryData() {
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
@@ -139,29 +177,20 @@ export function useInventoryData() {
     nodeQueries.some((q) => q.isLoading) ||
     vmQueries.some((q) => q.isLoading);
 
-  const error =
-    clustersQuery.error ??
-    nodeQueries.find((q) => q.error)?.error ??
-    vmQueries.find((q) => q.error)?.error ??
-    null;
+  // Only a failure of the cluster list itself is fatal — per-cluster failures
+  // degrade to failedClusterIds so one unreachable cluster doesn't hide the
+  // healthy ones' guests.
+  const error = clustersQuery.error ?? null;
 
-  let rows: InventoryRow[] = [];
+  const { rows, failedClusterIds } = buildInventoryRows(
+    clusters.map((cluster, i) => ({
+      cluster,
+      nodes: nodeQueries[i]?.data,
+      vms: vmQueries[i]?.data,
+      errored: Boolean(nodeQueries[i]?.error ?? vmQueries[i]?.error),
+    })),
+    metricsMap,
+  );
 
-  if (!isLoading && !error && clustersQuery.data) {
-    rows = clusters.flatMap((cluster, i) => {
-      const nodes = nodeQueries[i]?.data ?? [];
-      const vms = vmQueries[i]?.data ?? [];
-      const nodeMap = buildNodeMap(nodes);
-
-      const clusterMetrics = metricsMap.get(cluster.id);
-      const vmLive = clusterMetrics?.vmMetrics ?? new Map<string, VmLiveMetric>();
-      const nodeLive = clusterMetrics?.nodeMetrics ?? new Map<string, VmLiveMetric>();
-
-      const vmRows = vms.map((vm) => vmToRow(vm, cluster, nodeMap, vmLive));
-      const nodeRows = nodes.map((node) => nodeToRow(node, cluster, nodeLive));
-      return [...vmRows, ...nodeRows];
-    });
-  }
-
-  return { rows, isLoading, error };
+  return { rows, isLoading, error, failedClusterIds };
 }

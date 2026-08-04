@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { StatusBadge } from "@/features/inventory/components/StatusBadge";
 import { ResourceTable } from "@/features/inventory/components/ResourceTable";
+import { InventoryUnavailableNote } from "@/features/inventory/components/InventoryUnavailableNote";
 import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { DetailChip } from "@/components/DetailChip";
 import { Button } from "@/components/ui/button";
@@ -106,7 +107,7 @@ export function NodeDetailPage() {
   // Guests resident on this node, as inventory rows so the VMs tab gets the
   // full ResourceTable (context menu, bulk actions) like the folder view.
   const { data: clusterVMs } = useClusterVMs(clusterId);
-  const { rows: inventoryRows } = useInventoryData();
+  const { rows: inventoryRows, failedClusterIds } = useInventoryData();
   const nodeVmRows = useMemo(() => {
     const onNode = new Set(
       (clusterVMs ?? [])
@@ -295,6 +296,7 @@ export function NodeDetailPage() {
 
         {/* VMs Tab */}
         <TabsContent value="vms" className="mt-4">
+          {failedClusterIds.includes(clusterId) && <InventoryUnavailableNote />}
           <ResourceTable data={nodeVmRows} />
         </TabsContent>
 

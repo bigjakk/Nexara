@@ -15,6 +15,7 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useClusterVMs } from "@/features/clusters/api/cluster-queries";
 import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { ResourceTable } from "@/features/inventory/components/ResourceTable";
+import { InventoryUnavailableNote } from "@/features/inventory/components/InventoryUnavailableNote";
 import {
   useDeleteVMFolder,
   useVMFolders,
@@ -47,7 +48,7 @@ export function FolderDetailPage() {
   const { data: folderData, isLoading: foldersLoading } =
     useVMFolders(clusterId);
   const { data: vms, isLoading: vmsLoading } = useClusterVMs(clusterId);
-  const { rows: inventoryRows } = useInventoryData();
+  const { rows: inventoryRows, failedClusterIds } = useInventoryData();
   const deleteFolder = useDeleteVMFolder();
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -320,6 +321,7 @@ export function FolderDetailPage() {
         </TabsContent>
 
         <TabsContent value="vms" className="mt-4">
+          {failedClusterIds.includes(clusterId) && <InventoryUnavailableNote />}
           <ResourceTable data={tableRows} />
         </TabsContent>
 

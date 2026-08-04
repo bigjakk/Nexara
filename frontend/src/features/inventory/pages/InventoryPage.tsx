@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertCircle, Loader2, Package, Rocket } from "lucide-react";
+import { AlertCircle, AlertTriangle, Loader2, Package, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/EmptyState";
@@ -15,9 +15,12 @@ export function InventoryPage() {
   const { t } = useTranslation("inventory");
   const { t: tc } = useTranslation("common");
   const { t: td } = useTranslation("dashboard");
-  const { rows, isLoading, error } = useInventoryData();
+  const { rows, isLoading, error, failedClusterIds } = useInventoryData();
   const { data: clusters } = useClusters();
   const hasClusters = (clusters?.length ?? 0) > 0;
+  const failedClusterNames = failedClusterIds
+    .map((id) => clusters?.find((c) => c.id === id)?.name ?? id.slice(0, 8))
+    .join(", ");
 
   const [deployTarget, setDeployTarget] = useState<{
     clusterId: string;
@@ -53,7 +56,14 @@ export function InventoryPage() {
         </div>
       )}
 
-      {!isLoading && !error && rows.length === 0 && (
+      {!isLoading && !error && failedClusterIds.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {t("partialInventoryWarning", { clusters: failedClusterNames })}
+        </div>
+      )}
+
+      {!isLoading && !error && rows.length === 0 && failedClusterIds.length === 0 && (
         hasClusters ? (
           <EmptyState
             icon={Package}

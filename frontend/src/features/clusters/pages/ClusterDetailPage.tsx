@@ -22,6 +22,7 @@ import { formatBytes, formatUptime } from "@/lib/format";
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { ResourceTable } from "@/features/inventory/components/ResourceTable";
+import { InventoryUnavailableNote } from "@/features/inventory/components/InventoryUnavailableNote";
 import { useInventoryData } from "@/features/inventory/api/inventory-queries";
 import { ClusterCephTab } from "../components/ClusterCephTab";
 import { ClusterNetworksTab } from "../components/ClusterNetworksTab";
@@ -60,7 +61,7 @@ export function ClusterDetailPage() {
 
   // All guests in the cluster, as inventory rows so the VMs tab gets the
   // full ResourceTable (context menu, bulk actions) like the folder view.
-  const { rows: inventoryRows } = useInventoryData();
+  const { rows: inventoryRows, failedClusterIds } = useInventoryData();
   const clusterVmRows = useMemo(
     () =>
       inventoryRows.filter(
@@ -265,6 +266,9 @@ export function ClusterDetailPage() {
             </TabsContent>
 
             <TabsContent value="vms">
+              {clusterId !== undefined && failedClusterIds.includes(clusterId) && (
+                <InventoryUnavailableNote />
+              )}
               <ResourceTable data={clusterVmRows} />
             </TabsContent>
 

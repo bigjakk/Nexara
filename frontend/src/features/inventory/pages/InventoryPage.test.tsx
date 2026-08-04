@@ -29,6 +29,7 @@ describe("InventoryPage", () => {
       rows: [],
       isLoading: true,
       error: null,
+      failedClusterIds: [],
     });
     renderWithProviders(<InventoryPage />);
     expect(screen.getByText("Inventory")).toBeInTheDocument();
@@ -39,6 +40,7 @@ describe("InventoryPage", () => {
       rows: [],
       isLoading: false,
       error: new Error("Network error"),
+      failedClusterIds: [],
     });
     renderWithProviders(<InventoryPage />);
     expect(
@@ -51,6 +53,7 @@ describe("InventoryPage", () => {
       rows: [],
       isLoading: false,
       error: null,
+      failedClusterIds: [],
     });
     renderWithProviders(<InventoryPage />);
     expect(screen.getByText("No clusters registered")).toBeInTheDocument();
@@ -89,9 +92,68 @@ describe("InventoryPage", () => {
       ],
       isLoading: false,
       error: null,
+      failedClusterIds: [],
     });
     renderWithProviders(<InventoryPage />);
     expect(screen.getByText("web-server")).toBeInTheDocument();
     expect(screen.getByText("1 resource total")).toBeInTheDocument();
+  });
+
+  it("shows healthy clusters' rows alongside the unreachable-cluster warning", () => {
+    mockUseInventoryData.mockReturnValue({
+      rows: [
+        {
+          key: "c1:vm:1",
+          id: "vm-1",
+          type: "vm" as const,
+          name: "web-server",
+          status: "running" as const,
+          clusterName: "Production",
+          clusterId: "c1",
+          nodeName: "node1",
+          vmid: 100,
+          cpuCount: 4,
+          memTotal: 8589934592,
+          diskTotal: 107374182400,
+          uptime: 86400,
+          tags: "",
+          haState: "",
+          pool: "",
+          template: false,
+          ostype: "",
+          configOstype: "",
+          cpuPercent: 50,
+          memPercent: 60,
+          diskReadBps: null,
+          diskWriteBps: null,
+          netInBps: null,
+          netOutBps: null,
+        },
+      ],
+      isLoading: false,
+      error: null,
+      failedClusterIds: ["c2"],
+    });
+    renderWithProviders(<InventoryPage />);
+    expect(
+      screen.getByText(/Couldn't load inventory from/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("web-server")).toBeInTheDocument();
+  });
+
+  it("warns about unreachable clusters instead of blanking the page", () => {
+    mockUseInventoryData.mockReturnValue({
+      rows: [],
+      isLoading: false,
+      error: null,
+      failedClusterIds: ["c2"],
+    });
+    renderWithProviders(<InventoryPage />);
+    expect(
+      screen.getByText(/Couldn't load inventory from/),
+    ).toBeInTheDocument();
+    // The empty state must not claim "no clusters" while a cluster is
+    // merely unreachable.
+    expect(screen.queryByText("No clusters registered")).toBeNull();
   });
 });
