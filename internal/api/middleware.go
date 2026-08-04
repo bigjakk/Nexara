@@ -154,7 +154,16 @@ func (s *Server) setupMiddleware() {
 				"/api/v1/auth/totp/verify-login",
 				"/api/v1/auth/totp",
 				"/api/v1/auth/totp/",
-				"/api/v1/auth/totp/recovery-codes/regenerate":
+				"/api/v1/auth/totp/recovery-codes/regenerate",
+				// The OIDC flow is unauthenticated and every call does real
+				// work: /authorize performs an outbound discovery fetch to the
+				// IdP and writes a 10-minute Redis state key. Everything under
+				// /api/v1/auth/ is exempt from the general limiter, so without
+				// these two entries an anonymous loop can pin the server on
+				// outbound HTTP, hammer the operator's IdP, and grow the Redis
+				// instance that also holds sessions.
+				"/api/v1/auth/oidc/authorize",
+				"/api/v1/auth/oidc/callback":
 				return false
 			}
 			return true

@@ -39,10 +39,13 @@ type Querier interface {
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
-	// ClearDRSEvalRequest clears the queue slot after the scheduler has serviced
-	// it. The `<= $2` guard is load-bearing: $2 is the timestamp captured when the
-	// tick began, so a request that lands *during* a long evaluation is newer and
-	// survives to be serviced by the following tick instead of being swallowed.
+	// ClearDRSEvalRequest clears the queue slot once the scheduler has honoured
+	// it. The `<= $2` guard is load-bearing: $2 is the eval_requested_at the
+	// scheduler READ for this cluster, not now(). A request stamped after that
+	// read — while earlier clusters in the same pass were still evaluating, or
+	// while this cluster's own evaluation ran — is newer, fails the comparison,
+	// and survives to be serviced by the following tick instead of being cleared
+	// without ever being acted on.
 	ClearDRSEvalRequest(ctx context.Context, arg ClearDRSEvalRequestParams) error
 	// ClearJobCleanupPending is self-guarding: the flag only clears when no
 	// job-level marker and no node-level record still holds state, so a release
@@ -118,7 +121,11 @@ type Querier interface {
 	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
 	DeleteMobileDevice(ctx context.Context, id uuid.UUID) error
 	DeleteMobileDeviceByExpoToken(ctx context.Context, expoPushToken string) error
-	DeleteMobileDeviceForUser(ctx context.Context, arg DeleteMobileDeviceForUserParams) error
+	// :execrows, not :exec — the caller needs the row count to tell "deleted your
+	// device" from "that id isn't yours". With :exec pgx returns no error for a
+	// zero-row DELETE, so a request naming another user's device id returned 200
+	// and wrote an audit row for a deletion that never happened.
+	DeleteMobileDeviceForUser(ctx context.Context, arg DeleteMobileDeviceForUserParams) (int64, error)
 	DeleteNotificationChannel(ctx context.Context, id uuid.UUID) error
 	DeleteNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error

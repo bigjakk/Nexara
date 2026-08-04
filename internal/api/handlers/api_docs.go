@@ -66,7 +66,7 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/auth/refresh":             {Description: "Refresh an expired access token", Group: "Authentication"},
 	"POST /api/v1/auth/logout":              {Description: "End the current session", Group: "Authentication"},
 	"POST /api/v1/auth/logout-all":          {Description: "End all sessions for the current user", Group: "Authentication"},
-	"POST /api/v1/auth/console-token":       {Description: "Mint a short-lived scope-locked JWT for a specific console WebSocket (mobile)", Permission: "view:vm|view:container|view:node", Group: "Authentication"},
+	"POST /api/v1/auth/console-token":       {Description: "Mint a short-lived scope-locked JWT for a specific console WebSocket (mobile)", Permission: "console:node|console:vm|console:container", Group: "Authentication"},
 	"POST /api/v1/auth/ws-token":            {Description: "Mint a short-lived JWT for the /ws hub upgrade (subscription channels)", Group: "Authentication"},
 	"GET /api/v1/auth/me":                   {Description: "Get current user profile", Group: "Authentication"},
 	"PUT /api/v1/auth/profile":              {Description: "Update display name", Group: "Authentication"},
@@ -116,13 +116,13 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id":                                {Description: "Get VM details", Permission: "view:vm", Group: "Virtual Machines"},
 	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/status":                        {Description: "Change VM power state", Permission: "execute:vm", Group: "Virtual Machines"},
 	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/clone":                         {Description: "Clone a VM", Permission: "manage:vm", Group: "Virtual Machines"},
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/migrate":                       {Description: "Migrate VM to another node", Permission: "manage:vm", Group: "Virtual Machines"},
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/migrate":                       {Description: "Migrate VM to another node", Permission: "execute:vm", Group: "Virtual Machines"},
 	"DELETE /api/v1/clusters/:cluster_id/vms/:vm_id":                             {Description: "Destroy a VM", Permission: "delete:vm", Group: "Virtual Machines"},
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshot-capability":            {Description: "Check whether the VM's configuration supports snapshots", Permission: "view:vm", Group: "Virtual Machines"},
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots":                      {Description: "List VM snapshots", Permission: "view:vm", Group: "Virtual Machines"},
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots":                     {Description: "Create a snapshot", Permission: "manage:vm", Group: "Virtual Machines"},
-	"DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name":        {Description: "Delete a snapshot", Permission: "manage:vm", Group: "Virtual Machines"},
-	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback": {Description: "Rollback to snapshot", Permission: "manage:vm", Group: "Virtual Machines"},
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots":                     {Description: "Create a snapshot", Permission: "execute:vm", Group: "Virtual Machines"},
+	"DELETE /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name":        {Description: "Delete a snapshot", Permission: "delete:vm", Group: "Virtual Machines"},
+	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots/:snap_name/rollback": {Description: "Rollback to snapshot", Permission: "execute:vm", Group: "Virtual Machines"},
 	"GET /api/v1/clusters/:cluster_id/vms/:vm_id/config":                         {Description: "Get VM configuration", Permission: "view:vm", Group: "Virtual Machines"},
 	"PUT /api/v1/clusters/:cluster_id/vms/:vm_id/config":                         {Description: "Update VM configuration", Permission: "manage:vm", Group: "Virtual Machines"},
 	"POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize":                  {Description: "Resize VM disk", Permission: "manage:vm", Group: "Virtual Machines"},
@@ -134,11 +134,11 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/clusters/:cluster_id/containers/:ct_id":                     {Description: "Get container details", Permission: "view:container", Group: "Containers"},
 	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/status":             {Description: "Change container power state", Permission: "execute:container", Group: "Containers"},
 	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/clone":              {Description: "Clone a container", Permission: "manage:container", Group: "Containers"},
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/migrate":            {Description: "Migrate container", Permission: "manage:container", Group: "Containers"},
+	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/migrate":            {Description: "Migrate container", Permission: "execute:container", Group: "Containers"},
 	"DELETE /api/v1/clusters/:cluster_id/containers/:ct_id":                  {Description: "Destroy a container", Permission: "delete:container", Group: "Containers"},
 	"GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshot-capability": {Description: "Check whether the container's configuration supports snapshots", Permission: "view:container", Group: "Containers"},
 	"GET /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots":           {Description: "List container snapshots", Permission: "view:container", Group: "Containers"},
-	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots":          {Description: "Create a snapshot", Permission: "manage:container", Group: "Containers"},
+	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots":          {Description: "Create a snapshot", Permission: "execute:container", Group: "Containers"},
 	"GET /api/v1/clusters/:cluster_id/containers/:ct_id/config":              {Description: "Get container config", Permission: "view:container", Group: "Containers"},
 	"PUT /api/v1/clusters/:cluster_id/containers/:ct_id/config":              {Description: "Update container config", Permission: "manage:container", Group: "Containers"},
 	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/disks/resize":       {Description: "Resize container disk", Permission: "manage:container", Group: "Containers"},
@@ -174,7 +174,7 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/alerts/summary":          {Description: "Get alert summary counts", Permission: "view:alert", Group: "Alerts"},
 	"GET /api/v1/alerts/:id":              {Description: "Get alert details", Permission: "view:alert", Group: "Alerts"},
 	"POST /api/v1/alerts/:id/acknowledge": {Description: "Acknowledge an alert", Permission: "acknowledge:alert", Group: "Alerts"},
-	"POST /api/v1/alerts/:id/resolve":     {Description: "Resolve an alert", Permission: "manage:alert", Group: "Alerts"},
+	"POST /api/v1/alerts/:id/resolve":     {Description: "Resolve an alert", Permission: "acknowledge:alert", Group: "Alerts"},
 	"GET /api/v1/alert-rules":             {Description: "List alert rules", Permission: "view:alert", Group: "Alerts"},
 	"POST /api/v1/alert-rules":            {Description: "Create an alert rule", Permission: "manage:alert", Group: "Alerts"},
 	"GET /api/v1/alert-rules/:id":         {Description: "Get alert rule details", Permission: "view:alert", Group: "Alerts"},
@@ -260,6 +260,19 @@ func EndpointMetaKeys() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// EndpointMetaPermissions returns the curated "METHOD path" → permission
+// mapping. It exists for the RBAC guard test in internal/api, which asserts
+// the documented permission matches the action the handler actually enforces —
+// operators build roles from this field, so drift here is a security-relevant
+// lie rather than a cosmetic one.
+func EndpointMetaPermissions() map[string]string {
+	out := make(map[string]string, len(endpointMeta))
+	for k, v := range endpointMeta {
+		out[k] = v.Permission
+	}
+	return out
 }
 
 // groupFromPath derives a Group label from a path when the curated

@@ -35,10 +35,13 @@ type ClearDRSEvalRequestParams struct {
 	EvalRequestedAt pgtype.Timestamptz `json:"eval_requested_at"`
 }
 
-// ClearDRSEvalRequest clears the queue slot after the scheduler has serviced
-// it. The `<= $2` guard is load-bearing: $2 is the timestamp captured when the
-// tick began, so a request that lands *during* a long evaluation is newer and
-// survives to be serviced by the following tick instead of being swallowed.
+// ClearDRSEvalRequest clears the queue slot once the scheduler has honoured
+// it. The `<= $2` guard is load-bearing: $2 is the eval_requested_at the
+// scheduler READ for this cluster, not now(). A request stamped after that
+// read — while earlier clusters in the same pass were still evaluating, or
+// while this cluster's own evaluation ran — is newer, fails the comparison,
+// and survives to be serviced by the following tick instead of being cleared
+// without ever being acted on.
 func (q *Queries) ClearDRSEvalRequest(ctx context.Context, arg ClearDRSEvalRequestParams) error {
 	_, err := q.db.Exec(ctx, clearDRSEvalRequest, arg.ClusterID, arg.EvalRequestedAt)
 	return err

@@ -35,7 +35,11 @@ SELECT * FROM mobile_devices WHERE id = $1;
 -- name: DeleteMobileDevice :exec
 DELETE FROM mobile_devices WHERE id = $1;
 
--- name: DeleteMobileDeviceForUser :exec
+-- :execrows, not :exec — the caller needs the row count to tell "deleted your
+-- device" from "that id isn't yours". With :exec pgx returns no error for a
+-- zero-row DELETE, so a request naming another user's device id returned 200
+-- and wrote an audit row for a deletion that never happened.
+-- name: DeleteMobileDeviceForUser :execrows
 DELETE FROM mobile_devices WHERE id = $1 AND user_id = $2;
 
 -- name: DeleteMobileDeviceByExpoToken :exec

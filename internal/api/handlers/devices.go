@@ -222,14 +222,18 @@ func (h *MobileDeviceHandler) Delete(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid device ID")
 	}
 
-	if err := h.queries.DeleteMobileDeviceForUser(c.Context(), db.DeleteMobileDeviceForUserParams{
+	// Scoped by id AND the session user, so another user's device is simply
+	// not matched. Zero rows therefore means "not yours or not there" — a 404,
+	// not a success, and no audit row for a deletion that did not happen.
+	rows, err := h.queries.DeleteMobileDeviceForUser(c.Context(), db.DeleteMobileDeviceForUserParams{
 		ID:     id,
 		UserID: userID,
-	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusNotFound, "Device not found")
-		}
+	})
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete device")
+	}
+	if rows == 0 {
+		return fiber.NewError(fiber.StatusNotFound, "Device not found")
 	}
 
 	h.auditDevice(c, id.String(), "mobile_device_deleted", map[string]any{

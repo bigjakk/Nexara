@@ -41,7 +41,7 @@ func (q *Queries) DeleteMobileDeviceByExpoToken(ctx context.Context, expoPushTok
 	return err
 }
 
-const deleteMobileDeviceForUser = `-- name: DeleteMobileDeviceForUser :exec
+const deleteMobileDeviceForUser = `-- name: DeleteMobileDeviceForUser :execrows
 DELETE FROM mobile_devices WHERE id = $1 AND user_id = $2
 `
 
@@ -50,9 +50,16 @@ type DeleteMobileDeviceForUserParams struct {
 	UserID uuid.UUID `json:"user_id"`
 }
 
-func (q *Queries) DeleteMobileDeviceForUser(ctx context.Context, arg DeleteMobileDeviceForUserParams) error {
-	_, err := q.db.Exec(ctx, deleteMobileDeviceForUser, arg.ID, arg.UserID)
-	return err
+// :execrows, not :exec — the caller needs the row count to tell "deleted your
+// device" from "that id isn't yours". With :exec pgx returns no error for a
+// zero-row DELETE, so a request naming another user's device id returned 200
+// and wrote an audit row for a deletion that never happened.
+func (q *Queries) DeleteMobileDeviceForUser(ctx context.Context, arg DeleteMobileDeviceForUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteMobileDeviceForUser, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getMobileDevice = `-- name: GetMobileDevice :one
