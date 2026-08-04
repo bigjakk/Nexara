@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -28,17 +30,11 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool, databaseURL string, l
 		return fmt.Errorf("seed schema_migrations from legacy table: %w", err)
 	}
 
-	src, err := iofs.New(migrations.FS, ".")
+	m, cleanup, err := NewMigrator(databaseURL)
 	if err != nil {
-		return fmt.Errorf("init iofs migration source: %w", err)
+		return err
 	}
-	defer src.Close()
-
-	m, err := migrate.NewWithSourceInstance("iofs", src, toPgx5URL(databaseURL))
-	if err != nil {
-		return fmt.Errorf("init migrate: %w", err)
-	}
-	defer m.Close()
+	defer cleanup()
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("apply migrations: %w", err)
@@ -48,6 +44,52 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool, databaseURL string, l
 		logger.Info("database schema up to date", "version", version, "dirty", dirty)
 	}
 	return nil
+}
+
+// NewMigrator constructs a migrate.Migrate over the embedded migration FS,
+// pointed at databaseURL. Shared by the automatic startup path (EnsureSchema)
+// and the `nexara migrate` operator CLI, so both always act on the exact
+// migration set baked into this binary. The returned cleanup releases the
+// source and database handles.
+func NewMigrator(databaseURL string) (*migrate.Migrate, func(), error) {
+	// Pre-validate the URL ourselves: url.Error embeds the raw URL — password
+	// included — and the message below ends up in container logs via both the
+	// startup fatal and the migrate CLI's stderr. pgx redacts its own connect
+	// errors, so this parse is the only leak path.
+	if _, err := url.Parse(toPgx5URL(databaseURL)); err != nil {
+		return nil, nil, errors.New("init migrate: DATABASE_URL is not a valid URL (value withheld from logs)")
+	}
+
+	src, err := iofs.New(migrations.FS, ".")
+	if err != nil {
+		return nil, nil, fmt.Errorf("init iofs migration source: %w", err)
+	}
+
+	m, err := migrate.NewWithSourceInstance("iofs", src, toPgx5URL(databaseURL))
+	if err != nil {
+		_ = src.Close()
+		return nil, nil, fmt.Errorf("init migrate: %w", err)
+	}
+
+	// migrate.Close closes both the source and database drivers.
+	cleanup := func() { _, _ = m.Close() }
+	return m, cleanup, nil
+}
+
+// LatestMigrationVersion reports the highest migration version embedded in
+// this binary — the version a fully migrated database should be at.
+func LatestMigrationVersion() (uint64, error) {
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		return 0, fmt.Errorf("read embedded migrations: %w", err)
+	}
+	var latest uint64
+	for _, entry := range entries {
+		if v, ok := parseMigrationVersion(entry.Name()); ok && v > latest {
+			latest = v
+		}
+	}
+	return latest, nil
 }
 
 // toPgx5URL rewrites a libpq-style postgres URL to the pgx5 scheme used by the

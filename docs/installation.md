@@ -159,6 +159,39 @@ docker compose up -d
 
 Database migrations are applied automatically when the API server starts. There is no need to run them manually.
 
+### Recovering from a failed upgrade
+
+If a migration fails partway through an upgrade, the schema is marked
+**dirty** and every subsequent container start refuses to boot (the logs show
+`failed to ensure database schema` and the container restart-loops). The
+recovery tooling ships inside the image — no extra tools needed:
+
+```bash
+# 1. See where the schema is stuck (prints applied version, dirty flag,
+#    and the version this image expects)
+docker compose run --rm nexara migrate status
+
+# 2. Take a database backup before touching anything
+docker compose exec nexara-db pg_dump -U nexara -Fc nexara > nexara-backup.dump
+
+# 3. Clear the dirty flag. Check what the failed migration's .up.sql does
+#    (the status output names the version; the SQL is in the repo's
+#    migrations/ directory), then record the version that is actually
+#    fully applied — usually the one BEFORE the failure:
+docker compose run --rm nexara migrate force <version>
+
+# 4. Retry the pending migrations, or just restart:
+docker compose run --rm nexara migrate up
+docker compose up -d
+```
+
+If the migration fails again the error is real — restore the backup, pin the
+previous image version (`NEXARA_VERSION`), and report the migration error.
+
+`nexara migrate down <n>` rolls back the last `n` migrations (running their
+`.down.sql`). Down migrations can drop data — only use it as part of a
+deliberate rollback to a matching older image, and always back up first.
+
 ## Backup & Restore
 
 ### Database Backup

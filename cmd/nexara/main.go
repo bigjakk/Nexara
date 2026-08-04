@@ -49,6 +49,15 @@ func main() {
 		return
 	}
 
+	// Operator recovery CLI for the automatic startup migrations: inspect
+	// state, clear a dirty flag after a failed upgrade, or step the schema
+	// up/down without starting the server. See docs/installation.md
+	// ("Recovering from a failed upgrade").
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		runMigrateCLI(os.Args[2:])
+		return
+	}
+
 	// Load configuration first so we can apply LOG_LEVEL to the logger.
 	cfg, err := config.Load()
 	if err != nil {
