@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useConsoleStore } from "@/stores/console-store";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { VMResponse, NodeResponse } from "@/types/api";
 
 interface VMEntry {
@@ -29,6 +30,7 @@ export function QuickConnect() {
   const [open, setOpen] = useState(false);
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
+  const { canConsole } = usePermissions();
 
   const { data: clusters } = useClusters();
   const clusterIds = clusters?.map((c) => c.id) ?? [];
@@ -70,6 +72,9 @@ export function QuickConnect() {
 
       for (const vm of vms) {
         if (vm.template) continue;
+        // Only list guests the user can actually console — the mint 403s
+        // without the console:* permission for the guest's kind.
+        if (!canConsole(vm.type === "qemu" ? "vm" : "container")) continue;
         entries.push({
           clusterId: cluster.id,
           clusterName: cluster.name,
@@ -84,7 +89,7 @@ export function QuickConnect() {
     }
 
     return entries.sort((a, b) => a.vmid - b.vmid);
-  }, [clusters, nodeQueries, vmQueries]);
+  }, [clusters, nodeQueries, vmQueries, canConsole]);
 
   function openConsole(vm: VMEntry, consoleType: "vnc" | "serial" | "attach") {
     const type =

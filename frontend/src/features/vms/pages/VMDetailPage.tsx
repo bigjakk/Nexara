@@ -16,6 +16,7 @@ import { useConsoleStore } from "@/stores/console-store";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useVM, useSetResourceConfig, useGuestAgentInfo, useResourcePools, useSetVMPool } from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
 import { VMConsolePreview } from "../components/VMConsolePreview";
@@ -55,6 +56,7 @@ export function VMDetailPage() {
   const { data: nodes } = useClusterNodes(clusterId);
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
+  const { canConsole } = usePermissions();
   const updateTabNode = useConsoleStore((s) => s.updateTabNode);
 
   // Resolve node name from node_id
@@ -105,6 +107,7 @@ export function VMDetailPage() {
   }
 
   const normalizedStatus = vm.status.toLowerCase() as ResourceStatus;
+  const consoleAllowed = canConsole(kind === "ct" ? "container" : "vm");
 
   function openConsole(type: "terminal" | "vnc") {
     if (!vm) return;
@@ -137,7 +140,7 @@ export function VMDetailPage() {
       {/* Floating live console preview — absolute so it doesn't stretch the
           header row. Desktop-only: at phone widths it would sit on top of
           the header; the VNC Console button stays as the mobile entry. */}
-      {!isMobile && kind === "vm" && normalizedStatus === "running" && nodeName !== "" && (
+      {!isMobile && kind === "vm" && consoleAllowed && normalizedStatus === "running" && nodeName !== "" && (
         <div className="absolute right-6 top-6 z-10">
           <VMConsolePreview
             clusterId={clusterId}
@@ -231,8 +234,9 @@ export function VMDetailPage() {
       <div className="flex flex-wrap items-center gap-2">
         {/* Consoles open regardless of power state (iLO-style): a stopped
             guest parks as "powered off" with a Start button and connects
-            automatically on power-on. Only templates can't be consoled. */}
-        {kind === "vm" && (
+            automatically on power-on. Only templates can't be consoled.
+            Hidden without the console:* permission — the mint would 403. */}
+        {kind === "vm" && consoleAllowed && (
           <Button
             variant="outline"
             size="sm"
@@ -244,7 +248,7 @@ export function VMDetailPage() {
             VNC Console
           </Button>
         )}
-        {kind === "ct" && (
+        {kind === "ct" && consoleAllowed && (
           <Button
             variant="outline"
             size="sm"

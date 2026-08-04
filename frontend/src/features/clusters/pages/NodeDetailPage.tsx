@@ -73,6 +73,7 @@ import {
 import type { UpdateNetworkInterfaceRequest } from "@/features/networks/types/network";
 import { CreateInterfaceDialog } from "@/features/networks/components/CreateInterfaceDialog";
 import { useConsoleStore } from "@/stores/console-store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { NodeAptRepositories } from "../components/NodeAptRepositories";
 import { NodePowerActions } from "../components/node/NodePowerActions";
 import { NodeMetricsPanel } from "../components/node/NodeMetricsPanel";
@@ -124,6 +125,7 @@ export function NodeDetailPage() {
   const liveMetric = clusterMetrics?.nodeMetrics.get(nodeId);
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
+  const { canConsole } = usePermissions();
 
   function openShell() {
     if (!node) return;
@@ -198,15 +200,17 @@ export function NodeDetailPage() {
         </div>
         {node.status === "online" && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={openShell}
-            >
-              <Terminal className="h-4 w-4" />
-              Shell
-            </Button>
+            {canConsole("node") && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={openShell}
+              >
+                <Terminal className="h-4 w-4" />
+                Shell
+              </Button>
+            )}
             <NodePowerActions clusterId={clusterId} nodeName={node.name} inMaintenance={node.ha_state === "maintenance"} otherNodes={(nodes ?? []).filter((n) => n.name !== node.name && n.status === "online").map((n) => n.name)} />
           </div>
         )}

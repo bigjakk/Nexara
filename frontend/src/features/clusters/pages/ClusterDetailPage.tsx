@@ -17,6 +17,7 @@ import { DetailChip } from "@/components/DetailChip";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
 import { Button } from "@/components/ui/button";
 import { useConsoleStore } from "@/stores/console-store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useCluster, useClusterNodes } from "../api/cluster-queries";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { useClusterMetrics } from "@/hooks/useMetrics";
@@ -73,6 +74,7 @@ export function ClusterDetailPage() {
 
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
+  const { canConsole } = usePermissions();
 
   const clusterMetrics = useClusterMetrics(clusterId ?? "");
 
@@ -231,7 +233,7 @@ export function ClusterDetailPage() {
                             <TableCell>{node.pve_version}</TableCell>
                             <TableCell>{formatUptime(node.uptime)}</TableCell>
                             <TableCell>
-                              {node.status === "online" && (
+                              {node.status === "online" && canConsole("node") && (
                                 <Button
                                   variant="ghost"
                                   size="sm"

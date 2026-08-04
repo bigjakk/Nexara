@@ -51,6 +51,7 @@ import {
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useConsoleStore } from "@/stores/console-store";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { VMAction } from "@/features/vms/types/vm";
 import { applyFilter } from "../lib/search-parser";
 import {
@@ -115,9 +116,11 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
   const actionMutation = useVMAction();
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
+  const { canConsole } = usePermissions();
 
   const { target } = menu;
   const normalizedStatus = target.status.toLowerCase();
+  const consoleAllowed = canConsole(target.kind === "ct" ? "container" : "vm");
 
   const visibleLifecycle = lifecycleActions.filter((a) =>
     a.showWhen(normalizedStatus, target.kind),
@@ -223,7 +226,7 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
         </button>
       ))}
 
-      {normalizedStatus === "running" && (
+      {normalizedStatus === "running" && consoleAllowed && (
         <>
           <div className="-mx-1 my-1 h-px bg-border" />
           <button

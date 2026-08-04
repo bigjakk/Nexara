@@ -34,6 +34,13 @@ export function usePermissions() {
     [hasPermission],
   );
 
+  // Console access is its own permission family ("console:node" etc.) —
+  // deliberately not implied by view:* so read-only roles can't open shells.
+  const canConsole = useCallback(
+    (resource: string) => hasPermission("console", resource),
+    [hasPermission],
+  );
+
   const isAdmin =
     user?.role === "admin" ||
     (hasPermission("manage", "user") && hasPermission("manage", "role"));
@@ -45,6 +52,7 @@ export function usePermissions() {
     canManage,
     canExecute,
     canDelete,
+    canConsole,
     isAdmin,
   };
 }

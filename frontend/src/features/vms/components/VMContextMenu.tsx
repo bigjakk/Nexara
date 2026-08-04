@@ -16,6 +16,7 @@ import {
 } from "@/stores/vm-context-menu-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useConsoleStore } from "@/stores/console-store";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { VMAction } from "../types/vm";
 
 interface VMContextMenuProps {
@@ -34,8 +35,10 @@ export function VMContextMenu({ target, children, onAction }: VMContextMenuProps
   const actionMutation = useVMAction();
   const addTab = useConsoleStore((s) => s.addTab);
   const showConsole = useConsoleStore((s) => s.showConsole);
+  const { canConsole } = usePermissions();
 
   const normalizedStatus = target.status.toLowerCase();
+  const consoleAllowed = canConsole(target.kind === "ct" ? "container" : "vm");
 
   const visibleLifecycle = lifecycleActions.filter((a) =>
     a.showWhen(normalizedStatus, target.kind),
@@ -118,7 +121,7 @@ export function VMContextMenu({ target, children, onAction }: VMContextMenuProps
           </ContextMenuItem>
         ))}
 
-        {normalizedStatus === "running" && (
+        {normalizedStatus === "running" && consoleAllowed && (
           <>
             <ContextMenuSeparator />
             <ContextMenuItem onClick={handleOpenConsole}>

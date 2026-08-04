@@ -8,7 +8,7 @@ interface PermissionMatrixProps {
   onChange: (ids: string[]) => void;
 }
 
-const ACTION_ORDER = ["view", "manage", "execute", "delete"];
+const ACTION_ORDER = ["view", "console", "manage", "execute", "delete"];
 
 export function PermissionMatrix({
   permissions,

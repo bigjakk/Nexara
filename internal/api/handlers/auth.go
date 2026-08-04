@@ -593,13 +593,14 @@ type consoleTokenResponse struct {
 	ExpiresIn int    `json:"expires_in"`
 }
 
-// ConsoleToken mints a short-lived (5 minute), scope-locked JWT that can ONLY
+// ConsoleToken mints a short-lived (60 second), scope-locked JWT that can ONLY
 // be used to open a single console WebSocket matching cluster_id/node/vmid/type.
 // Designed for mobile WebView clients that cannot attach Authorization headers
 // to the WebSocket upgrade and must pass the token via query string.
 //
-// The underlying access token + regular RBAC check happens first — a user who
-// cannot normally open this console cannot mint a token for it either.
+// The underlying access token + RBAC check happens first — minting requires
+// the dedicated console:<resource> permission on the target cluster (view:*
+// is deliberately not enough; see migration 000078).
 func (h *AuthHandler) ConsoleToken(c fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
@@ -649,9 +650,14 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx) error {
 	}
 
 	// Console tokens scope to a specific cluster — gate on per-cluster perm so
-	// a user with view:vm only on cluster X cannot mint a console token for
-	// cluster Y.
-	if err := requireClusterPerm(c, "view", resource, clusterUUID); err != nil {
+	// a user with console:vm only on cluster X cannot mint a console token
+	// for cluster Y.
+	//
+	// The action is the dedicated "console" family (migration 000078), NOT
+	// "view": the built-in Viewer role holds every view:* permission, and
+	// gating on view:node handed read-only accounts a root shell on the
+	// hypervisor. console_token_authz_test.go pins this invariant.
+	if err := requireClusterPerm(c, "console", resource, clusterUUID); err != nil {
 		return err
 	}
 

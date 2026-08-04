@@ -175,10 +175,21 @@ Permissions follow the pattern `action:resource`. Examples:
 | `view:cluster` | View cluster information |
 | `manage:cluster` | Create, edit, delete clusters |
 | `manage:vm` | Start, stop, migrate VMs |
+| `console:vm` | Open VM serial and VNC consoles |
+| `console:container` | Open container attach and VNC consoles |
+| `console:node` | Open node shell consoles (root shell on the Proxmox host) |
 | `view:audit_log` | View audit log entries |
 | `manage:alert` | Create and manage alert rules |
 | `manage:user` | Manage user accounts |
 | `manage:rbac` | Manage roles and permissions |
+
+> **Console access is not implied by `view:*`.** Opening a shell or console
+> requires the dedicated `console:*` permissions, which the built-in Admin
+> and Operator roles hold. The built-in Viewer role deliberately does not —
+> a read-only account cannot open a root shell on a node or a guest console.
+> To build a "viewer plus consoles" role, grant `console:vm` /
+> `console:container` (and `console:node` only if node shells are intended)
+> alongside the view permissions.
 
 ### Assigning Roles
 
