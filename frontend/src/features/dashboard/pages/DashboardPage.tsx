@@ -5,7 +5,11 @@ import { LayoutGrid, Lock, ServerCrash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDashboardData } from "../api/dashboard-queries";
 import type { ClusterSummary } from "../api/dashboard-queries";
-import { useHistoricalMetrics, useSeedMetrics } from "../api/historical-queries";
+import {
+  useHistoricalMetrics,
+  useSeedMetrics,
+  useSeedMetricsForClusters,
+} from "../api/historical-queries";
 import { useDashboardMetrics } from "@/hooks/useMetrics";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -88,6 +92,7 @@ export function DashboardPage() {
   }, [data?.clusters]);
 
   const liveMetrics = useDashboardMetrics(clusterIds);
+  const seedMetrics = useSeedMetricsForClusters(clusterIds);
 
   // Build default preset based on actual clusters
   const computedDefaultPreset = useMemo(
@@ -121,10 +126,19 @@ export function DashboardPage() {
           return tmpl?.perCluster === true && !id.includes(":");
         });
         if (!isStale) {
+          // Saved layouts may predate the trend strips added to the stats and
+          // live-metrics cards — grow those widgets once so they don't clip.
+          // Keyed on the old minH so a later deliberate user resize sticks.
+          const layouts = saved.layouts.map((l) =>
+            (l.i === "stats-overview" || l.i.startsWith("live-metrics")) &&
+            (l.minH ?? 0) < 3
+              ? { ...l, h: Math.max(l.h, 4), minH: 3 }
+              : l,
+          );
           setActivePreset({
             name: saved.name ?? "Custom",
             widgetIds: saved.widgetIds,
-            layouts: saved.layouts,
+            layouts,
           });
           setInitializedFromBackend(true);
           return;
@@ -252,6 +266,7 @@ export function DashboardPage() {
               totalStorageUsedBytes={data.totalStorageUsedBytes}
               isLoading={isLoading}
               metrics={liveMetrics}
+              seeds={seedMetrics}
             />
           );
 
@@ -313,7 +328,12 @@ export function DashboardPage() {
           ) : null;
 
         case "live-metrics":
-          return <LiveMetricCards metrics={clusterLiveMetrics} />;
+          return (
+            <LiveMetricCards
+              metrics={clusterLiveMetrics}
+              clusterId={clusterId ?? undefined}
+            />
+          );
 
         case "top-consumers": {
           const combinedConsumers = data.clusters.flatMap((s) => {
@@ -336,7 +356,7 @@ export function DashboardPage() {
           );
       }
     },
-    [data, clusterMap, isLoading, liveMetrics, timeRange, t],
+    [data, clusterMap, isLoading, liveMetrics, seedMetrics, timeRange, t],
   );
 
   return (

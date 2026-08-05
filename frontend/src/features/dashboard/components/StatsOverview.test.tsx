@@ -45,7 +45,7 @@ describe("StatsOverview", () => {
     expect(screen.getByText("50% used")).toBeInTheDocument();
   });
 
-  it("shows a placeholder on the CPU card until live metrics arrive", () => {
+  it("shows placeholders on the CPU and memory cards until live metrics arrive", () => {
     renderWithProviders(
       <StatsOverview
         totalNodes={5}
@@ -60,8 +60,53 @@ describe("StatsOverview", () => {
       />,
     );
 
-    expect(screen.getByText("—")).toBeInTheDocument();
-    expect(screen.getByText("Waiting for data...")).toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(2);
+    expect(screen.getAllByText("Waiting for data...")).toHaveLength(2);
+  });
+
+  it("renders datacenter CPU and memory from live metrics", () => {
+    const metrics = new Map([
+      [
+        "cluster-1",
+        {
+          cpuPercent: 12.5,
+          memPercent: 50,
+          memUsed: 34359738368,
+          memTotal: 68719476736,
+          diskReadBps: 0,
+          diskWriteBps: 0,
+          netInBps: 0,
+          netOutBps: 0,
+          nodeCount: 3,
+          vmCount: 10,
+          history: [],
+          topConsumers: [],
+          vmMetrics: new Map(),
+          nodeMetrics: new Map(),
+        },
+      ],
+    ]);
+
+    renderWithProviders(
+      <StatsOverview
+        totalNodes={3}
+        totalNodesOnline={3}
+        totalVMs={10}
+        totalVMsRunning={8}
+        totalContainers={0}
+        totalContainersRunning={0}
+        totalStorageBytes={1099511627776}
+        totalStorageUsedBytes={549755813888}
+        isLoading={false}
+        metrics={metrics}
+      />,
+    );
+
+    expect(screen.getByText("12.5%")).toBeInTheDocument();
+    expect(screen.getByText("50.0%")).toBeInTheDocument();
+    expect(
+      screen.getByText("32.0 GB of 64.0 GB used"),
+    ).toBeInTheDocument();
   });
 
   it("shows skeletons when loading", () => {
@@ -80,7 +125,7 @@ describe("StatsOverview", () => {
     );
 
     const skeletons = screen.getAllByTestId("stat-skeleton");
-    expect(skeletons).toHaveLength(4);
+    expect(skeletons).toHaveLength(5);
   });
 
   it("renders all stat labels", () => {
@@ -101,6 +146,7 @@ describe("StatsOverview", () => {
     expect(screen.getByText("Nodes")).toBeInTheDocument();
     expect(screen.getByText("Guests")).toBeInTheDocument();
     expect(screen.getByText("Datacenter CPU")).toBeInTheDocument();
+    expect(screen.getByText("Datacenter Memory")).toBeInTheDocument();
     expect(screen.getByText("Total Storage")).toBeInTheDocument();
   });
 });

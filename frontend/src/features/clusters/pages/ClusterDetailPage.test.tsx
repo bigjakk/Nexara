@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
 import { ClusterDetailPage } from "./ClusterDetailPage";
 
@@ -88,11 +90,51 @@ describe("ClusterDetailPage", () => {
     expect(screen.getByText("10d 0h")).toBeInTheDocument();
 
     // Tab triggers should be present
-    expect(screen.getByRole("tab", { name: "Nodes" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Ceph" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Networks" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Firewall" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "DRS" })).toBeInTheDocument();
+  });
+
+  it("maps legacy ?tab=nodes deep links to the Overview tab", () => {
+    mockUseCluster.mockReturnValue({
+      data: {
+        id: "test-cluster-id",
+        name: "Test Cluster",
+        api_url: "https://pve.example.com:8006",
+        token_id: "root@pam!token",
+        tls_fingerprint: "",
+        sync_interval_seconds: 60,
+        is_active: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+      isLoading: false,
+      error: null,
+    });
+    mockUseClusterNodes.mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter
+          initialEntries={["/clusters/test-cluster-id?tab=nodes"]}
+        >
+          <ClusterDetailPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByRole("tab", { name: "Overview", selected: true }),
+    ).toBeInTheDocument();
   });
 
   it("shows error state", () => {

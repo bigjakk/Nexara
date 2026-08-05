@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { TimeRange, HistoricalMetricPoint } from "@/types/api";
 import type { MetricDataPoint } from "@/types/ws";
@@ -48,6 +48,36 @@ export function useSeedMetrics(clusterId: string) {
     staleTime: 5 * 60_000,
   });
   return query.data;
+}
+
+/**
+ * Seed data for several clusters at once (shares the per-cluster seed cache).
+ * Returns a map of clusterId → seed points; clusters still loading are absent.
+ */
+export function useSeedMetricsForClusters(
+  clusterIds: string[],
+): Map<string, MetricDataPoint[]> {
+  return useQueries({
+    queries: clusterIds.map((id) => ({
+      queryKey: ["clusters", id, "metrics", "seed"],
+      queryFn: async () => {
+        const data = await apiClient.get<HistoricalMetricPoint[]>(
+          `/api/v1/clusters/${id}/metrics?range=1h`,
+        );
+        return toMetricDataPoints(data);
+      },
+      enabled: id.length > 0,
+      staleTime: 5 * 60_000,
+    })),
+    combine: (results) => {
+      const map = new Map<string, MetricDataPoint[]>();
+      clusterIds.forEach((id, i) => {
+        const data = results[i]?.data;
+        if (data) map.set(id, data);
+      });
+      return map;
+    },
+  });
 }
 
 export function useNodeHistoricalMetrics(clusterId: string, nodeId: string, range: TimeRange) {

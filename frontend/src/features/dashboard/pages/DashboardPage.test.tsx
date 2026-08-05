@@ -62,6 +62,7 @@ vi.mock("../api/historical-queries", () => ({
     error: null,
   }),
   useSeedMetrics: () => undefined,
+  useSeedMetricsForClusters: () => new Map(),
 }));
 
 vi.mock("react-grid-layout", async () => {

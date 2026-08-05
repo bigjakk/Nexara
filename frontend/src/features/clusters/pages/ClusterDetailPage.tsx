@@ -21,6 +21,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useCluster, useClusterNodes } from "../api/cluster-queries";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { useClusterMetrics } from "@/hooks/useMetrics";
+import { LiveMetricCards } from "@/features/dashboard/components/LiveMetricCards";
 import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { ResourceTable } from "@/features/inventory/components/ResourceTable";
 import { InventoryUnavailableNote } from "@/features/inventory/components/InventoryUnavailableNote";
@@ -39,7 +40,10 @@ import { ClusterMetricServersTab } from "../components/ClusterMetricServersTab";
 export function ClusterDetailPage() {
   const { clusterId } = useParams<{ clusterId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tabParam = searchParams.get("tab") ?? "";
+  const rawTabParam = searchParams.get("tab") ?? "";
+  // "nodes" was the default tab's value before it became "overview" — keep old
+  // ?tab=nodes deep links landing on the same content.
+  const tabParam = rawTabParam === "nodes" ? "" : rawTabParam;
   // Controlled + URL-synced tabs: ?tab= deep links (SearchBar shortcuts,
   // GlobalHealthIndicator, DRSConfigCard) select a tab even when the page is
   // already mounted, and clicking a tab rewrites the param (replace, so tab
@@ -49,7 +53,7 @@ export function ClusterDetailPage() {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        if (v === "nodes") next.delete("tab");
+        if (v === "overview") next.delete("tab");
         else next.set("tab", v);
         return next;
       },
@@ -137,9 +141,9 @@ export function ClusterDetailPage() {
             </div>
           )}
 
-          <Tabs value={tabParam || "nodes"} onValueChange={setTab}>
+          <Tabs value={tabParam || "overview"} onValueChange={setTab}>
             <TabsList>
-              <TabsTrigger value="nodes">Nodes</TabsTrigger>
+              <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="vms">VMs ({clusterVmRows.length})</TabsTrigger>
               <TabsTrigger value="options">Options</TabsTrigger>
               <TabsTrigger value="ha">HA</TabsTrigger>
@@ -153,7 +157,11 @@ export function ClusterDetailPage() {
               <TabsTrigger value="drs">DRS</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="nodes">
+            <TabsContent value="overview" className="space-y-4">
+              <LiveMetricCards
+                metrics={clusterMetrics}
+                clusterId={clusterId ?? ""}
+              />
               <Card>
                 <CardHeader>
                   <CardTitle>Nodes</CardTitle>

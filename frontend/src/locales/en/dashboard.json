@@ -77,6 +77,8 @@
   "storage": "Storage",
   "guests": "Guests",
   "datacenterCpu": "Datacenter CPU",
+  "datacenterMemory": "Datacenter Memory",
+  "statBytesUsedOf": "{{used}} of {{total}} used",
   "statGuestMix": "{{vms}} VMs · {{cts}} CTs",
   "statAcrossClusters": "across {{count}} clusters",
   "statOnline": "{{online}}/{{total}} online",
