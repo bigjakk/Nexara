@@ -10,29 +10,41 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	proxsyslog "github.com/bigjakk/nexara/internal/syslog"
+
+	"github.com/google/uuid"
 )
 
 // Event kinds published through the WebSocket pipeline.
 const (
-	KindTaskCreated      = "task_created"
-	KindTaskUpdate       = "task_update"
-	KindAuditEntry       = "audit_entry"
-	KindVMStateChange    = "vm_state_change"
-	KindInventoryChange  = "inventory_change"
-	KindMigrationUpdate  = "migration_update"
-	KindDRSAction        = "drs_action"
-	KindPBSChange        = "pbs_change"
-	KindCVEScan          = "cve_scan"
-	KindAlertFired       = "alert_fired"
-	KindAlertStateChange = "alert_state_change"
-	KindReportGenerated  = "report_generated"
-	KindRollingUpdate    = "rolling_update"
-	KindHAChange         = "ha_change"
-	KindPoolChange       = "pool_change"
+	KindTaskCreated       = "task_created"
+	KindTaskUpdate        = "task_update"
+	KindAuditEntry        = "audit_entry"
+	KindVMStateChange     = "vm_state_change"
+	KindInventoryChange   = "inventory_change"
+	KindMigrationUpdate   = "migration_update"
+	KindDRSAction         = "drs_action"
+	KindPBSChange         = "pbs_change"
+	KindCVEScan           = "cve_scan"
+	KindAlertFired        = "alert_fired"
+	KindAlertStateChange  = "alert_state_change"
+	KindReportGenerated   = "report_generated"
+	KindRollingUpdate     = "rolling_update"
+	KindHAChange          = "ha_change"
+	KindPoolChange        = "pool_change"
 	KindReplicationChange = "replication_change"
-	KindACMEChange       = "acme_change"
-	KindAptRepoChange    = "apt_repo_change"
-	KindVMImport         = "vm_import"
+	KindACMEChange        = "acme_change"
+	KindAptRepoChange     = "apt_repo_change"
+	KindVMImport          = "vm_import"
+)
+
+// Redis pub/sub channels for non-cluster events. Cluster events use
+// "nexara:events:<cluster-uuid>".
+//
+// The identifier after "nexara:events:" must not contain a colon —
+// ws.RedisChannelToClient splits on the first one.
+const (
+	SystemRedisChannel      = "nexara:events:system"
+	SystemAuditRedisChannel = "nexara:events:system-audit"
 )
 
 // Event is a lightweight notification pushed through Redis pub/sub.
@@ -99,15 +111,45 @@ func (p *Publisher) Publish(ctx context.Context, event Event) {
 		return
 	}
 
-	var channel string
-	if event.ClusterID != "" {
-		channel = fmt.Sprintf("nexara:events:%s", event.ClusterID)
-	} else {
-		channel = "nexara:events:system"
-	}
-
+	channel := publishChannel(event)
 	if err := p.client.Publish(ctx, channel, data).Err(); err != nil {
 		p.logger.Warn("failed to publish event", "channel", channel, "error", err)
+	}
+}
+
+// publishChannel decides which Redis channel an event fans out on, which in
+// turn decides which permission a WS subscriber needs to receive it. Extracted
+// from Publish so the routing — the entirety of the audit-stream gate — is
+// table-testable without Redis. See TestPublishChannelRouting.
+func publishChannel(event Event) string {
+	// A nil-UUID cluster id is not a cluster — it comes from callers that pass
+	// ClusterUUID(uuid.Nil) for a genuinely global resource. Treating it as one
+	// would route the event to a cluster room that any holder of a GLOBAL
+	// view:cluster grant can join (RBACEngine.HasPermission short-circuits on
+	// global scope regardless of the requested id), which is not the audit gate.
+	clusterID := event.ClusterID
+	if clusterID == uuid.Nil.String() {
+		clusterID = ""
+	}
+
+	switch {
+	case clusterID != "" && event.Kind == KindAuditEntry:
+		// Cluster audit entries name what was done to a cluster's resources.
+		// The REST audit endpoints require view:audit for that cluster, so the
+		// live stream rides its own room with the same gate rather than the
+		// view:cluster-gated events room.
+		return fmt.Sprintf("nexara:audit:%s", clusterID)
+	case clusterID != "":
+		return fmt.Sprintf("nexara:events:%s", clusterID)
+	case event.Kind == KindAuditEntry:
+		// Non-cluster audit entries name the subject of an administrative
+		// action — the user whose password changed, the setting that was
+		// written, the role that was granted. They ride a separate room the WS
+		// layer gates on view:audit, rather than the general system room every
+		// authenticated session may join.
+		return SystemAuditRedisChannel
+	default:
+		return SystemRedisChannel
 	}
 }
 

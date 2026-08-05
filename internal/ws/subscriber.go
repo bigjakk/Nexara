@@ -58,7 +58,7 @@ func (s *RedisSubscriber) Run(ctx context.Context) {
 // runOnce subscribes and consumes until ctx is cancelled (returns nil) or
 // the pub/sub channel closes (returns an error so Run reconnects).
 func (s *RedisSubscriber) runOnce(ctx context.Context) error {
-	patterns := []string{"nexara:metrics:*", "nexara:alerts:*", "nexara:events:*"}
+	patterns := []string{"nexara:metrics:*", "nexara:alerts:*", "nexara:events:*", "nexara:audit:*"}
 	pubsub := s.client.PSubscribe(ctx, patterns...)
 	defer pubsub.Close()
 

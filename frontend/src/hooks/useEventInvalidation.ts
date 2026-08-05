@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWebSocketStore } from "@/stores/websocket-store";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { NexaraEvent } from "@/types/ws";
 
 const DEBOUNCE_MS = 300;
@@ -12,6 +13,8 @@ const DEBOUNCE_MS = 300;
  */
 export function useEventInvalidation(clusterIds: string[]): void {
   const queryClient = useQueryClient();
+  const { hasPermission } = usePermissions();
+  const canViewAudit = hasPermission("view", "audit");
   const subscribe = useWebSocketStore((s) => s.subscribe);
   const unsubscribe = useWebSocketStore((s) => s.unsubscribe);
 
@@ -212,6 +215,18 @@ export function useEventInvalidation(clusterIds: string[]): void {
       channels.push(`cluster:${cid}:events`);
     }
 
+    // Audit rooms are gated on view:audit server-side (globally for
+    // system:audit, per-cluster for cluster:<id>:audit). Subscribing without
+    // the grant is harmless — the store ignores the rejection — but it costs
+    // an RBAC lookup and a "forbidden" log line on every connect and
+    // reconnect, for every such user. Ask only when we can be served.
+    if (canViewAudit) {
+      channels.push("system:audit");
+      for (const cid of clusterIds) {
+        channels.push(`cluster:${cid}:audit`);
+      }
+    }
+
     for (const ch of channels) {
       subscribe(ch, handleEvent);
     }
@@ -225,5 +240,5 @@ export function useEventInvalidation(clusterIds: string[]): void {
         timerRef.current = null;
       }
     };
-  }, [clusterIds, subscribe, unsubscribe, handleEvent]);
+  }, [clusterIds, canViewAudit, subscribe, unsubscribe, handleEvent]);
 }

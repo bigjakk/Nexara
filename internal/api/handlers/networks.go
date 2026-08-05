@@ -10,6 +10,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -1457,7 +1458,7 @@ func (h *NetworkHandler) CreateTemplate(c fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "template_id": tmpl.ID.String()})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(uuid.Nil), "firewall_template", tmpl.ID.String(), "template_created", details)
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "firewall_template", tmpl.ID.String(), "template_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(toTemplateResponse(tmpl))
 }
@@ -1500,7 +1501,7 @@ func (h *NetworkHandler) UpdateTemplate(c fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"name": req.Name, "template_id": templateID.String()})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(uuid.Nil), "firewall_template", templateID.String(), "template_updated", details)
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "firewall_template", templateID.String(), "template_updated", details)
 
 	return c.JSON(toTemplateResponse(tmpl))
 }
@@ -1521,7 +1522,7 @@ func (h *NetworkHandler) DeleteTemplate(c fiber.Ctx) error {
 	}
 
 	details, _ := json.Marshal(map[string]string{"template_id": templateID.String()})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(uuid.Nil), "firewall_template", templateID.String(), "template_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "firewall_template", templateID.String(), "template_deleted", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }

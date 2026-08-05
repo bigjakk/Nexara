@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/bigjakk/nexara/internal/events"
 )
 
 // Client → Server message types.
@@ -23,10 +25,42 @@ const (
 	MsgTypePong       = "pong"
 )
 
-// channelPattern validates client-facing channel names like "cluster:<uuid>:metrics" or "system:events".
+// channelPattern validates client-facing channel names like
+// "cluster:<uuid>:metrics", "system:events" or "system:audit".
+//
+// system:events and system:audit are deliberately separate rooms. Audit
+// entries name who did what to which user, setting, role or API key, so the
+// audit stream is gated on view:audit at subscribe time (see
+// Client.canSubscribe). Operational system events — task updates, report
+// completion, PBS changes — carry no such subject and stay open to any
+// authenticated session, which is what keeps the task feed working for roles
+// that cannot read the audit log.
 var channelPattern = regexp.MustCompile(
-	`^(cluster:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(metrics|alerts|events)|system:events)$`,
+	`^(cluster:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(metrics|alerts|events|audit)|system:(events|audit))$`,
 )
+
+const (
+	// SystemEventsChannel carries non-cluster operational events.
+	SystemEventsChannel = "system:events"
+	// SystemAuditChannel carries non-cluster audit entries.
+	SystemAuditChannel = "system:audit"
+	// AuditChannelKind is the trailing segment of a cluster audit room
+	// (cluster:<uuid>:audit).
+	AuditChannelKind = "audit"
+)
+
+// ChannelKind returns the trailing segment of a cluster channel
+// ("metrics", "alerts", "events", "audit"). Returns "" for system channels.
+func ChannelKind(ch string) string {
+	if !strings.HasPrefix(ch, "cluster:") {
+		return ""
+	}
+	parts := strings.SplitN(ch, ":", 3)
+	if len(parts) != 3 {
+		return ""
+	}
+	return parts[2]
+}
 
 // IncomingMessage is a message sent from a WebSocket client.
 type IncomingMessage struct {
@@ -72,8 +106,11 @@ func ClientChannelToRedis(ch string) (string, error) {
 	if !ValidateChannel(ch) {
 		return "", fmt.Errorf("invalid channel format: %s", ch)
 	}
-	if ch == "system:events" {
-		return "nexara:events:system", nil
+	if ch == SystemEventsChannel {
+		return events.SystemRedisChannel, nil
+	}
+	if ch == SystemAuditChannel {
+		return events.SystemAuditRedisChannel, nil
 	}
 	parts := strings.SplitN(ch, ":", 3)
 	// parts = ["cluster", "<uuid>", "metrics|alerts|events"]
@@ -99,9 +136,14 @@ func RedisChannelToClient(ch string) (string, error) {
 	switch kind {
 	case "metrics", "alerts":
 		return fmt.Sprintf("cluster:%s:%s", identifier, kind), nil
+	case "audit":
+		return fmt.Sprintf("cluster:%s:audit", identifier), nil
 	case "events":
-		if identifier == "system" {
-			return "system:events", nil
+		switch identifier {
+		case "system":
+			return SystemEventsChannel, nil
+		case "system-audit":
+			return SystemAuditChannel, nil
 		}
 		return fmt.Sprintf("cluster:%s:events", identifier), nil
 	default:

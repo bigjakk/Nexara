@@ -233,3 +233,204 @@ func TestClientCanSubscribe_InvalidUUIDFailsClosed(t *testing.T) {
 		t.Errorf("expected canSubscribe to reject invalid cluster UUID")
 	}
 }
+
+// TestClientCanSubscribe_SystemAuditRequiresViewAudit is the regression test
+// for the audit-stream gap: before the system room was split, any
+// authenticated session — including a custom role holding no grants at all —
+// could subscribe to the non-cluster event stream and watch live metadata for
+// every login, password change, TOTP enrollment, settings write, and
+// user/role/API-key administration.
+//
+// The audit half now requires the same view:audit the REST audit endpoints do.
+func TestClientCanSubscribe_SystemAuditRequiresViewAudit(t *testing.T) {
+	userID := uuid.New()
+
+	t.Run("holder of view:audit may subscribe", func(t *testing.T) {
+		var sawAction, sawResource, sawScopeType string
+		var sawScopeID, sawUserID uuid.UUID
+
+		c := &Client{
+			id:     "test",
+			logger: testLogger(),
+			userID: userID,
+			checkPermission: func(_ context.Context, uid uuid.UUID, action, resource, scopeType string, scopeID uuid.UUID) (bool, error) {
+				sawUserID, sawAction, sawResource, sawScopeType, sawScopeID = uid, action, resource, scopeType, scopeID
+				return true, nil
+			},
+		}
+
+		if !c.canSubscribe(SystemAuditChannel) {
+			t.Fatal("expected a view:audit holder to be allowed")
+		}
+		if sawUserID != userID {
+			t.Errorf("checker got user %v, want %v", sawUserID, userID)
+		}
+		if sawAction != "view" || sawResource != "audit" {
+			t.Errorf("checked %s:%s, want view:audit", sawAction, sawResource)
+		}
+		if sawScopeType != "global" || sawScopeID != uuid.Nil {
+			t.Errorf("checked scope %s/%v, want global/%v", sawScopeType, sawScopeID, uuid.Nil)
+		}
+	})
+
+	t.Run("user without view:audit is denied", func(t *testing.T) {
+		c := &Client{
+			id:     "test",
+			logger: testLogger(),
+			userID: userID,
+			checkPermission: func(_ context.Context, _ uuid.UUID, _, _, _ string, _ uuid.UUID) (bool, error) {
+				return false, nil
+			},
+		}
+		if c.canSubscribe(SystemAuditChannel) {
+			t.Error("a user without view:audit must not receive the audit stream")
+		}
+	})
+
+	t.Run("rbac error fails closed", func(t *testing.T) {
+		c := &Client{
+			id:     "test",
+			logger: testLogger(),
+			userID: userID,
+			checkPermission: func(_ context.Context, _ uuid.UUID, _, _, _ string, _ uuid.UUID) (bool, error) {
+				return false, errors.New("engine down")
+			},
+		}
+		if c.canSubscribe(SystemAuditChannel) {
+			t.Error("a transient RBAC failure must not open the audit stream")
+		}
+	})
+
+	t.Run("nil checker fails closed", func(t *testing.T) {
+		c := &Client{id: "test", logger: testLogger(), userID: userID}
+		if c.canSubscribe(SystemAuditChannel) {
+			t.Error("a missing permission checker must not open the audit stream")
+		}
+	})
+}
+
+// TestSystemAuditChannelRoundTrip pins the client↔Redis channel mapping for
+// the audit room. The Redis identifier uses a hyphen because
+// RedisChannelToClient splits on the first colon after the kind — a colon
+// there would parse as a cluster id.
+func TestSystemAuditChannelRoundTrip(t *testing.T) {
+	if !ValidateChannel(SystemAuditChannel) {
+		t.Fatalf("%s must be a valid client channel", SystemAuditChannel)
+	}
+
+	redisCh, err := ClientChannelToRedis(SystemAuditChannel)
+	if err != nil {
+		t.Fatalf("ClientChannelToRedis: %v", err)
+	}
+	if redisCh != "nexara:events:system-audit" {
+		t.Errorf("redis channel = %q, want nexara:events:system-audit", redisCh)
+	}
+
+	back, err := RedisChannelToClient(redisCh)
+	if err != nil {
+		t.Fatalf("RedisChannelToClient: %v", err)
+	}
+	if back != SystemAuditChannel {
+		t.Errorf("round trip = %q, want %q", back, SystemAuditChannel)
+	}
+
+	// The operational room must remain distinct and still map cleanly.
+	if got, _ := ClientChannelToRedis("system:events"); got != "nexara:events:system" {
+		t.Errorf("system:events maps to %q, want nexara:events:system", got)
+	}
+}
+
+// TestClientCanSubscribe_ClusterAuditRequiresViewAudit closes the larger half
+// of the audit-stream gap: cluster-scoped audit entries outnumber non-cluster
+// ones roughly 150 call sites to 58, and they used to ride
+// cluster:<uuid>:events, gated only on view:cluster. A role with view:cluster
+// but not view:audit therefore streamed token rotations, SSH credential
+// updates, node shutdowns and firewall changes live.
+//
+// The room now mirrors AuditHandler.List, which filters rows through
+// accessibleClusters(c, "view", "audit").
+func TestClientCanSubscribe_ClusterAuditRequiresViewAudit(t *testing.T) {
+	clusterUUID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+	auditChannel := "cluster:550e8400-e29b-41d4-a716-446655440000:audit"
+	eventsChannel := "cluster:550e8400-e29b-41d4-a716-446655440000:events"
+
+	t.Run("audit room checks view:audit on that cluster", func(t *testing.T) {
+		var sawAction, sawResource, sawScopeType string
+		var sawScopeID uuid.UUID
+
+		c := &Client{
+			id:     "test",
+			logger: testLogger(),
+			userID: uuid.New(),
+			checkPermission: func(_ context.Context, _ uuid.UUID, action, resource, scopeType string, scopeID uuid.UUID) (bool, error) {
+				sawAction, sawResource, sawScopeType, sawScopeID = action, resource, scopeType, scopeID
+				return true, nil
+			},
+		}
+
+		if !c.canSubscribe(auditChannel) {
+			t.Fatal("expected a view:audit holder to be allowed")
+		}
+		if sawAction != "view" || sawResource != "audit" {
+			t.Errorf("checked %s:%s, want view:audit", sawAction, sawResource)
+		}
+		if sawScopeType != "cluster" || sawScopeID != clusterUUID {
+			t.Errorf("checked scope %s/%v, want cluster/%v", sawScopeType, sawScopeID, clusterUUID)
+		}
+	})
+
+	t.Run("events room still checks view:cluster", func(t *testing.T) {
+		var sawResource string
+		c := &Client{
+			id:     "test",
+			logger: testLogger(),
+			userID: uuid.New(),
+			checkPermission: func(_ context.Context, _ uuid.UUID, _, resource, _ string, _ uuid.UUID) (bool, error) {
+				sawResource = resource
+				return true, nil
+			},
+		}
+		if !c.canSubscribe(eventsChannel) {
+			t.Fatal("expected a view:cluster holder to be allowed")
+		}
+		if sawResource != "cluster" {
+			t.Errorf("events room checked resource %q, want cluster", sawResource)
+		}
+	})
+
+	t.Run("view:cluster alone does not open the audit room", func(t *testing.T) {
+		c := &Client{
+			id:     "test",
+			logger: testLogger(),
+			userID: uuid.New(),
+			// Grants view:cluster but not view:audit.
+			checkPermission: func(_ context.Context, _ uuid.UUID, _, resource, _ string, _ uuid.UUID) (bool, error) {
+				return resource == "cluster", nil
+			},
+		}
+		if c.canSubscribe(auditChannel) {
+			t.Error("view:cluster must not grant the cluster audit stream")
+		}
+		if !c.canSubscribe(eventsChannel) {
+			t.Error("view:cluster should still grant the cluster events stream")
+		}
+	})
+}
+
+// TestClientCanSubscribe_UnclassifiedSystemChannelDenied pins the allow-list.
+// The non-cluster arm used to default to allow, which is how the system room
+// shipped ungated; a channel added to channelPattern without being classified
+// must now be denied rather than silently world-readable.
+func TestClientCanSubscribe_UnclassifiedSystemChannelDenied(t *testing.T) {
+	c := &Client{
+		id:     "test",
+		logger: testLogger(),
+		userID: uuid.New(),
+		checkPermission: func(_ context.Context, _ uuid.UUID, _, _, _ string, _ uuid.UUID) (bool, error) {
+			return true, nil
+		},
+	}
+	if c.canSubscribe("system:something-new") {
+		t.Error("an unclassified non-cluster channel must be denied, not allowed by default")
+	}
+}
