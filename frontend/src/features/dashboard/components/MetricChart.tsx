@@ -22,6 +22,8 @@ interface MetricChartProps {
   color: string;
   formatValue?: (value: number) => string;
   timeRange?: TimeRange;
+  /** Extra context shown next to the current value (e.g. "65.2 GB of 125.7 GB"). */
+  headerDetail?: string | undefined;
 }
 
 function getTimestampFormatter(timeRange?: TimeRange): (ts: number) => string {
@@ -34,10 +36,12 @@ function ChartHeader({
   title,
   color,
   currentValue,
+  detail,
 }: {
   title: string;
   color: string;
   currentValue?: string | undefined;
+  detail?: string | undefined;
 }) {
   return (
     <CardHeader className="flex-row items-center gap-2 space-y-0 p-4 pb-2">
@@ -48,9 +52,18 @@ function ChartHeader({
       <CardTitle className="truncate text-xs font-medium text-muted-foreground">
         {title}
       </CardTitle>
-      {currentValue !== undefined && (
-        <span className="ml-auto shrink-0 text-base font-semibold tabular-nums tracking-tight">
-          {currentValue}
+      {(currentValue !== undefined || detail !== undefined) && (
+        <span className="ml-auto flex shrink-0 items-baseline gap-2">
+          {detail !== undefined && (
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {detail}
+            </span>
+          )}
+          {currentValue !== undefined && (
+            <span className="text-base font-semibold tabular-nums tracking-tight">
+              {currentValue}
+            </span>
+          )}
         </span>
       )}
     </CardHeader>
@@ -64,6 +77,7 @@ export function MetricChart({
   color,
   formatValue,
   timeRange,
+  headerDetail,
 }: MetricChartProps) {
   const formatter = formatValue ?? ((v: number) => {
     if (dataKey === "cpuPercent" || dataKey === "memPercent") {
@@ -100,7 +114,12 @@ export function MetricChart({
 
   return (
     <Card className="flex h-full flex-col">
-      <ChartHeader title={title} color={color} currentValue={currentValue} />
+      <ChartHeader
+        title={title}
+        color={color}
+        currentValue={currentValue}
+        detail={headerDetail}
+      />
       <CardContent className="min-h-0 flex-1 p-2 pt-0">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>

@@ -295,6 +295,7 @@ export function NodeDetailPage() {
             clusterId={clusterId}
             nodeId={nodeId}
             liveMetric={liveMetric}
+            memTotalBytes={node.mem_total}
           />
         </TabsContent>
 

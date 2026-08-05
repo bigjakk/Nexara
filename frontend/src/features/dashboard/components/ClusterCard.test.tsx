@@ -82,6 +82,31 @@ describe("ClusterCard", () => {
     expect(screen.getAllByText("—")).toHaveLength(2);
   });
 
+  it("shows exact memory used of total once live metrics arrive", () => {
+    renderWithProviders(
+      <ClusterCard
+        summary={mockSummary}
+        metrics={{
+          cpuPercent: 14,
+          memPercent: 50,
+          memUsed: 34359738368,
+          memTotal: 68719476736,
+          diskReadBps: 0,
+          diskWriteBps: 0,
+          netInBps: 0,
+          netOutBps: 0,
+          nodeCount: 3,
+          vmCount: 12,
+          history: [],
+          topConsumers: [],
+          vmMetrics: new Map(),
+          nodeMetrics: new Map(),
+        }}
+      />,
+    );
+    expect(screen.getByText("32.0 GB of 64.0 GB used")).toBeInTheDocument();
+  });
+
   it("renders a PVE version chip when version is known", () => {
     const versioned: ClusterSummary = {
       ...mockSummary,

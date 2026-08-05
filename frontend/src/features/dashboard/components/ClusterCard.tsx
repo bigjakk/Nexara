@@ -31,10 +31,13 @@ function UtilBar({
   label,
   percent,
   barClass,
+  detail,
 }: {
   label: string;
   percent: number | null;
   barClass: string;
+  /** Optional exact-amount line rendered under the bar (e.g. "210 GB of 361 GB"). */
+  detail?: string | null | undefined;
 }) {
   const clamped = percent === null ? null : Math.min(100, Math.max(0, percent));
   const fillClass =
@@ -47,24 +50,31 @@ function UtilBar({
           : barClass;
 
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="w-14 shrink-0 text-xs text-muted-foreground">
-        {label}
-      </span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
-        {clamped !== null && (
-          <div
-            className={cn(
-              "h-full rounded-full transition-[width] duration-700",
-              fillClass,
-            )}
-            style={{ width: `${String(Math.round(clamped))}%` }}
-          />
-        )}
+    <div>
+      <div className="flex items-center gap-2.5">
+        <span className="w-14 shrink-0 text-xs text-muted-foreground">
+          {label}
+        </span>
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
+          {clamped !== null && (
+            <div
+              className={cn(
+                "h-full rounded-full transition-[width] duration-700",
+                fillClass,
+              )}
+              style={{ width: `${String(Math.round(clamped))}%` }}
+            />
+          )}
+        </div>
+        <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+          {clamped === null ? "—" : `${String(Math.round(clamped))}%`}
+        </span>
       </div>
-      <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-        {clamped === null ? "—" : `${String(Math.round(clamped))}%`}
-      </span>
+      {detail != null && (
+        <div className="mt-0.5 text-right text-[11px] leading-none tabular-nums text-muted-foreground/80">
+          {detail}
+        </div>
+      )}
     </div>
   );
 }
@@ -144,6 +154,14 @@ export function ClusterCard({ summary, metrics }: ClusterCardProps) {
           label={t("memory")}
           percent={memPercent}
           barClass="bg-violet-500"
+          detail={
+            metrics && metrics.memTotal > 0
+              ? t("statBytesUsedOf", {
+                  used: formatBytes(metrics.memUsed),
+                  total: formatBytes(metrics.memTotal),
+                })
+              : null
+          }
         />
         <UtilBar
           label={t("storage")}
