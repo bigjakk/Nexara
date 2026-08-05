@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Monitor, Terminal, Pencil, Check, X, Container, Server } from "lucide-react";
 import { OSIcon } from "@/components/OSIcon";
@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/features/inventory/components/StatusBadge";
-import { MetricMiniBar } from "@/features/inventory/components/MetricMiniBar";
 import { MetricChart } from "@/features/dashboard/components/MetricChart";
 import { useVMHistoricalMetrics } from "@/features/dashboard/api/historical-queries";
 import { useConsoleStore } from "@/stores/console-store";
@@ -36,6 +35,7 @@ import { BackupPanel } from "../components/BackupPanel";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
+import type { MetricDataPoint, VmLiveMetric } from "@/types/ws";
 import { formatBytes, formatUptime } from "@/lib/format";
 
 
@@ -323,6 +323,7 @@ export function VMDetailPage() {
             clusterId={clusterId}
             vmId={vmId}
             liveMetric={liveMetric}
+            memTotalBytes={vm.mem_total}
           />
         </TabsContent>
 
@@ -514,48 +515,85 @@ function GuestAgentSection({ clusterId, vmId }: { clusterId: string; vmId: strin
 }
 
 const TIME_RANGES: { label: string; value: TimeRange }[] = [
+  { label: "Live", value: "live" },
   { label: "1h", value: "1h" },
   { label: "6h", value: "6h" },
   { label: "24h", value: "24h" },
   { label: "7d", value: "7d" },
 ];
 
+const MAX_LIVE_POINTS = 60;
+
 function VMMetricsPanel({
   clusterId,
   vmId,
   liveMetric,
+  memTotalBytes,
 }: {
   clusterId: string;
   vmId: string;
-  liveMetric: { cpuPercent: number; memPercent: number } | undefined;
+  liveMetric: VmLiveMetric | undefined;
+  /** VM configured memory size; turns the memory percent into exact used/total bytes. */
+  memTotalBytes?: number | undefined;
 }) {
-  const [timeRange, setTimeRange] = useState<TimeRange>("1h");
-  const { data: historicalData, isLoading } = useVMHistoricalMetrics(clusterId, vmId, timeRange);
-  const chartData = historicalData ?? [];
+  const [timeRange, setTimeRange] = useState<TimeRange>("live");
+  const isLive = timeRange === "live";
+  // Live charts are seeded with the last hour of stored data so they're full
+  // on page load; WS ticks are appended on top.
+  const { data: historicalData, isLoading } = useVMHistoricalMetrics(
+    clusterId,
+    vmId,
+    isLive ? "1h" : timeRange,
+  );
+
+  // Accumulate per-VM live ticks locally — the WS store only keeps the
+  // latest snapshot per VM, not a history. The ref guards against the same
+  // snapshot being appended twice (StrictMode's dev double-mount).
+  const [liveHistory, setLiveHistory] = useState<MetricDataPoint[]>([]);
+  const lastAppendedRef = useRef<VmLiveMetric | undefined>(undefined);
+  useEffect(() => {
+    if (!liveMetric || liveMetric === lastAppendedRef.current) return;
+    lastAppendedRef.current = liveMetric;
+    setLiveHistory((prev) => {
+      const next = [
+        ...prev,
+        {
+          timestamp: Date.now(),
+          cpuPercent: liveMetric.cpuPercent,
+          memPercent: liveMetric.memPercent,
+          diskReadBps: liveMetric.diskReadBps,
+          diskWriteBps: liveMetric.diskWriteBps,
+          netInBps: liveMetric.netInBps,
+          netOutBps: liveMetric.netOutBps,
+        },
+      ];
+      return next.length > MAX_LIVE_POINTS
+        ? next.slice(next.length - MAX_LIVE_POINTS)
+        : next;
+    });
+  }, [liveMetric]);
+
+  const chartData = useMemo(() => {
+    const seed = historicalData ?? [];
+    if (!isLive) return seed;
+    if (liveHistory.length === 0) return seed;
+    const firstLiveTs = liveHistory[0]?.timestamp ?? 0;
+    return [...seed.filter((p) => p.timestamp < firstLiveTs), ...liveHistory];
+  }, [isLive, historicalData, liveHistory]);
+
+  const lastMemPercent = chartData[chartData.length - 1]?.memPercent;
+  const memDetail =
+    lastMemPercent !== undefined &&
+    memTotalBytes !== undefined &&
+    memTotalBytes > 0
+      ? `${formatBytes((lastMemPercent / 100) * memTotalBytes)} of ${formatBytes(memTotalBytes)}`
+      : undefined;
 
   return (
     <div className="space-y-4">
-      {/* Live gauges */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-muted-foreground">CPU Usage (Live)</p>
-          <MetricMiniBar value={liveMetric?.cpuPercent ?? null} />
-          <p className="mt-1 text-xs text-muted-foreground">
-            {liveMetric ? `${liveMetric.cpuPercent.toFixed(1)}%` : "No live data"}
-          </p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <p className="mb-2 text-sm font-medium text-muted-foreground">Memory Usage (Live)</p>
-          <MetricMiniBar value={liveMetric?.memPercent ?? null} />
-          <p className="mt-1 text-xs text-muted-foreground">
-            {liveMetric ? `${liveMetric.memPercent.toFixed(1)}%` : "No live data"}
-          </p>
-        </div>
-      </div>
-
       {/* Time range selector */}
       <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground">Historical:</span>
+        <span className="text-sm font-medium text-muted-foreground">Range:</span>
         <div className="flex gap-1">
           {TIME_RANGES.map((tr) => (
             <Button
@@ -574,13 +612,13 @@ function VMMetricsPanel({
         )}
       </div>
 
-      {/* Historical charts */}
+      {/* Charts (live = seeded 1h + WS ticks) */}
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="h-64">
           <MetricChart title="CPU Usage" data={chartData} dataKey="cpuPercent" color="hsl(221, 83%, 53%)" timeRange={timeRange} />
         </div>
         <div className="h-64">
-          <MetricChart title="Memory Usage" data={chartData} dataKey="memPercent" color="hsl(142, 71%, 45%)" timeRange={timeRange} />
+          <MetricChart title="Memory Usage" data={chartData} dataKey="memPercent" color="hsl(142, 71%, 45%)" timeRange={timeRange} headerDetail={memDetail} />
         </div>
         <div className="h-64">
           <MetricChart title="Disk Read" data={chartData} dataKey="diskReadBps" color="hsl(38, 92%, 50%)" timeRange={timeRange} />
