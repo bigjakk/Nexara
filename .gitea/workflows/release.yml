@@ -41,7 +41,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version-file: go.mod
           cache: true
 
       - name: Lint
@@ -130,6 +130,7 @@ jobs:
         run: |
           IMAGE="${{ env.REGISTRY }}/${{ env.OWNER }}/nexara"
           docker build \
+            --pull \
             -f docker/nexara/Dockerfile \
             --build-arg "VERSION=${{ steps.version.outputs.version }}" \
             --build-arg "COMMIT=${{ steps.version.outputs.commit }}" \
