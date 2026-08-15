@@ -257,7 +257,7 @@ export function AlertRuleForm() {
           </div>
 
           <div className="space-y-2">
-            <Label>Cluster</Label>
+            <Label htmlFor="cluster">Cluster</Label>
             <Select
               value={clusterId}
               onValueChange={(v) => {
@@ -267,7 +267,7 @@ export function AlertRuleForm() {
                 setNodeId("");
               }}
             >
-              <SelectTrigger aria-label="Cluster">
+              <SelectTrigger id="cluster">
                 <SelectValue placeholder="Select cluster" />
               </SelectTrigger>
               <SelectContent>
