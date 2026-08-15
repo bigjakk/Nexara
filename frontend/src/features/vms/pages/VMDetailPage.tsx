@@ -655,16 +655,24 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
   // Sync local state when prop changes (e.g. after mutation invalidates query).
   useEffect(() => { setSelected(currentPool); }, [currentPool]);
 
+  // Both branches live in a fixed 1fr grid track whose right-hand neighbour is
+  // the Tags cell. Without min-w-0 the value keeps its intrinsic width — a
+  // <select> sized to its widest option, or a pool name with no break
+  // opportunity — and pushes the trailing buttons outside the track, where the
+  // later-painting Tags cell covers them and swallows the clicks. Let the value
+  // shrink and pin the buttons instead.
   if (!editing) {
     return (
-      <div className="py-1">
+      <div className="min-w-0 py-1">
         <p className="text-xs text-muted-foreground">Pool</p>
-        <div className="flex items-center gap-1">
-          <p className="text-sm font-medium">{currentPool || "--"}</p>
+        <div className="flex min-w-0 items-center gap-1">
+          <p className="min-w-0 truncate text-sm font-medium" title={currentPool || undefined}>
+            {currentPool || "--"}
+          </p>
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 w-5 p-0"
+            className="h-5 w-5 shrink-0 p-0"
             onClick={() => { setEditing(true); }}
             title="Change pool"
           >
@@ -676,14 +684,15 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
   }
 
   return (
-    <div className="py-1">
+    <div className="min-w-0 py-1">
       <p className="text-xs text-muted-foreground">Pool</p>
-      <div className="flex items-center gap-1">
+      <div className="flex min-w-0 items-center gap-1">
         <select
-          className="h-7 rounded-md border bg-transparent px-1.5 text-sm outline-hidden focus:ring-2 focus:ring-ring"
+          className="h-7 min-w-0 flex-1 rounded-md border bg-transparent px-1.5 text-sm outline-hidden focus:ring-2 focus:ring-ring"
           value={selected}
           onChange={(e) => { setSelected(e.target.value); }}
           disabled={setPool.isPending}
+          title={selected || "None"}
         >
           <option value="">None</option>
           {pools?.map((p) => (
@@ -693,8 +702,9 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
         <Button
           variant="ghost"
           size="sm"
-          className="h-5 w-5 p-0 text-emerald-600"
+          className="h-5 w-5 shrink-0 p-0 text-emerald-600"
           disabled={setPool.isPending}
+          title="Save pool"
           onClick={() => {
             setPool.mutate(selected, {
               onSuccess: () => { setEditing(false); },
@@ -706,8 +716,9 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
         <Button
           variant="ghost"
           size="sm"
-          className="h-5 w-5 p-0 text-destructive"
+          className="h-5 w-5 shrink-0 p-0 text-destructive"
           disabled={setPool.isPending}
+          title="Cancel"
           onClick={() => { setSelected(currentPool); setEditing(false); }}
         >
           <X className="h-3 w-3" />
