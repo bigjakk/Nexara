@@ -679,7 +679,10 @@ func (h *ContainerHandler) DeleteSnapshot(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := requireClusterPerm(c, "execute", "container", clusterID); err != nil {
+	// delete, not execute: destroying a snapshot is a delete-class action,
+	// matching VMHandler.DeleteSnapshot and DestroyContainer. The previous
+	// execute gate was a copy of the rollback handler's.
+	if err := requireClusterPerm(c, "delete", "container", clusterID); err != nil {
 		return err
 	}
 
