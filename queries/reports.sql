@@ -9,8 +9,20 @@ RETURNING *;
 -- name: GetReportSchedule :one
 SELECT * FROM report_schedules WHERE id = $1;
 
+-- ListReportSchedules backs the Reports page. accessible_cluster_ids carries
+-- the caller's view:report RBAC scope: NULL means global access (no
+-- restriction); an array restricts rows ('{}' matches nothing).
+-- report_schedules.cluster_id is NOT NULL, so every row belongs to exactly one
+-- cluster and there is no global-entry case.
+--
+-- Applied in SQL rather than after the fetch because the handler's cap runs
+-- first: taking 100 rows across every cluster and trimming afterwards silently
+-- hides a scoped caller's schedules on an install with more than 100 of them,
+-- with nothing in the response marking the result incomplete.
 -- name: ListReportSchedules :many
 SELECT * FROM report_schedules
+WHERE (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+       OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
@@ -51,8 +63,14 @@ RETURNING *;
 -- name: GetReportRun :one
 SELECT * FROM report_runs WHERE id = $1;
 
+-- ListReportRuns backs the Reports run history, and takes the caller's
+-- view:report scope for the same reason as ListReportSchedules above: the cap
+-- is applied before the trim, so an unscoped fetch quietly drops a scoped
+-- caller's runs once the install has more runs than the cap.
 -- name: ListReportRuns :many
 SELECT * FROM report_runs
+WHERE (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+       OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 

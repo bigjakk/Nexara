@@ -9,8 +9,24 @@ RETURNING *;
 -- name: GetAlertRule :one
 SELECT * FROM alert_rules WHERE id = $1;
 
+-- ListAlertRules backs the Alerts page. accessible_cluster_ids carries the
+-- caller's view:alert RBAC scope: NULL means global access (no restriction);
+-- an array restricts rows to those clusters ('{}' matches nothing).
+--
+-- alert_rules.cluster_id is NULLABLE, and a NULL marks a GLOBAL rule that only
+-- a holder of global view:alert may see — the same shape as audit_log, and the
+-- same rule AlertHandler.ListRules applies per row. `cluster_id = ANY(array)`
+-- yields NULL, not true, for those rows, so this clause already excludes them
+-- from a scoped caller. Do NOT add an `OR cluster_id IS NULL` disjunct: that
+-- hands every global rule to every cluster-scoped user.
+--
+-- Applied in SQL rather than after the fact because LIMIT/OFFSET run before the
+-- trim: paging over every cluster's rules and filtering afterwards gives a
+-- scoped caller short pages with holes in them.
 -- name: ListAlertRules :many
 SELECT * FROM alert_rules
+WHERE (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+       OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
@@ -60,11 +76,17 @@ WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- ListAlertHistoryFiltered backs the Alerts history page. cluster_id is the
+-- caller's optional filter; accessible_cluster_ids is their view:alert RBAC
+-- scope and is not optional — see the note on ListAlertRules, including why a
+-- NULL cluster_id row is excluded from a scoped caller by the clause alone.
 -- name: ListAlertHistoryFiltered :many
 SELECT * FROM alert_history
 WHERE (@state::text = '' OR state = @state::text)
   AND (@severity::text = '' OR severity = @severity::text)
   AND (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
+  AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+       OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
 ORDER BY created_at DESC
 LIMIT @limit_val OFFSET @offset_val;
 

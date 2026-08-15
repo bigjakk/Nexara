@@ -30,7 +30,7 @@ type CountTaskHistoryFilteredParams struct {
 }
 
 // CountTaskHistoryFiltered returns the total matching the same filters, for the
-// Tasks page pagination. Mirrors CountAuditLog. Must stay filter-for-filter in
+// Tasks page pagination. Mirrors CountAuditLogAdvanced. Must stay filter-for-filter in
 // sync with ListTaskHistoryFiltered — in particular accessible_cluster_ids, or
 // the Total leaks other clusters' task counts to scoped users.
 func (q *Queries) CountTaskHistoryFiltered(ctx context.Context, arg CountTaskHistoryFilteredParams) (int64, error) {
@@ -397,7 +397,7 @@ type ListTaskHistoryFilteredParams struct {
 }
 
 // ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
-// vmids filters with offset pagination. Mirrors ListAuditLogFiltered. NULL
+// vmids filters with offset pagination. Mirrors ListAuditLogAdvanced. NULL
 // narg = no filter on that column. vmids matches the guest VMID parsed from
 // the UPID at insert (folder detail view passes a folder's VMID set).
 // accessible_cluster_ids carries the caller's view:task RBAC scope: NULL means

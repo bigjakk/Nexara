@@ -144,6 +144,34 @@ func (a clusterAccess) ScopedIDs() []uuid.UUID {
 	return ids
 }
 
+// clusterScopeFilter pairs ScopedIDs with the question every list endpoint
+// that uses it then asks: is any row reachable at all?
+//
+// ids is the uuid[] SQL filter — nil for global access (no restriction), the
+// granted set for a scoped caller, '{}' for a caller with no grant anywhere.
+// query is false only in that last case, and it is advice rather than a guard:
+// '{}' already matches nothing, so a caller that ignores it still reads
+// nothing. It exists to skip round-trips that could not return a row.
+//
+// One definition, because the rule is easy to restate slightly differently in
+// each handler and the difference is a cross-cluster leak. Where a listing has
+// a companion count, stamp the same ids on both — a Total computed under a
+// wider scope than the rows is a leak no per-row guard can repair.
+//
+// On a NULLABLE cluster_id column, `cluster_id = ANY(ids)` evaluates to NULL
+// for the null rows, so a scoped caller never matches one. That is deliberate
+// wherever a NULL cluster means "global entry, global permission required"
+// (audit_log, alert_rules, alert_history) and matches the per-row guards. Check
+// it against the table before reusing this on a new one.
+// query is derived from the ids themselves rather than from len(Allowed), so
+// the two cannot disagree: ScopedIDs skips explicit-false map entries, and an
+// access set holding only those would otherwise report "worth querying" while
+// filtering to '{}'.
+func clusterScopeFilter(access clusterAccess) (ids []uuid.UUID, query bool) {
+	ids = access.ScopedIDs()
+	return ids, access.HasGlobal || len(ids) > 0
+}
+
 // accessibleClusters returns the set of cluster IDs the user can perform
 // (action, resource) against, used to filter top-level list endpoints
 // (e.g. /clusters, /search, /migrations) to entries the user is allowed to see.

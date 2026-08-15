@@ -11,8 +11,24 @@ RETURNING *;
 -- name: GetMigrationJob :one
 SELECT * FROM migration_jobs WHERE id = $1;
 
+-- ListMigrationJobs backs the Migrations page. accessible_cluster_ids carries
+-- the caller's view:migration RBAC scope: NULL means global access (no
+-- restriction); an array restricts rows ('{}' matches nothing).
+--
+-- A migration straddles two clusters, and the rule — matching what
+-- MigrationHandler.List enforces per row — is that visibility on EITHER end is
+-- enough to know the job exists. Hence the OR across both columns rather than
+-- a single membership test. Both columns are NOT NULL, so unlike the alert and
+-- audit scopes there is no three-valued-logic case to reason about here.
+--
+-- Applied in SQL because LIMIT/OFFSET run before the per-row trim, so paging
+-- over every cluster's jobs and filtering afterwards gives a scoped caller
+-- short pages with holes in them.
 -- name: ListMigrationJobs :many
 SELECT * FROM migration_jobs
+WHERE (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+       OR source_cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[])
+       OR target_cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 

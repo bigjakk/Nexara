@@ -365,9 +365,18 @@ func (h *AlertHandler) ListRules(c fiber.Ctx) error {
 		return c.JSON(result)
 	}
 
+	// Scoped in SQL, not after the fetch: LIMIT/OFFSET run before the per-row
+	// trim below, so paging over every cluster's rules and filtering afterwards
+	// hands a scoped caller short pages with holes in them.
+	scope, query := clusterScopeFilter(access)
+	if !query {
+		return c.JSON([]alertRuleResponse{})
+	}
+
 	rules, err := h.queries.ListAlertRules(c.Context(), db.ListAlertRulesParams{
-		Limit:  safeconv.Int32(limit),
-		Offset: safeconv.Int32(offset),
+		Limit:                safeconv.Int32(limit),
+		Offset:               safeconv.Int32(offset),
+		AccessibleClusterIds: scope,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list alert rules")
@@ -375,8 +384,10 @@ func (h *AlertHandler) ListRules(c fiber.Ctx) error {
 
 	result := make([]alertRuleResponse, 0, len(rules))
 	for _, r := range rules {
-		// Cluster-scoped rules visible only to users with view:alert on the cluster.
-		// Global rules (no cluster_id) require global view:alert.
+		// Defense-in-depth: the SQL scope already restricts rows to the caller's
+		// clusters and excludes the NULL-cluster global rules from anyone
+		// without global view:alert. Kept so a future edit to the query cannot
+		// silently reopen either.
 		if r.ClusterID.Valid {
 			if !access.PermitsCluster(uuid.UUID(r.ClusterID.Bytes)) {
 				continue
@@ -803,12 +814,20 @@ func (h *AlertHandler) ListAlerts(c fiber.Ctx) error {
 		clusterID = pgtype.UUID{Bytes: parsed, Valid: true}
 	}
 
+	// Scoped in SQL for the same reason as ListRules: the page is cut before
+	// the per-row trim, so an unscoped fetch pages over the global rowset.
+	scope, query := clusterScopeFilter(access)
+	if !query {
+		return c.JSON([]alertHistoryResponse{})
+	}
+
 	alerts, err := h.queries.ListAlertHistoryFiltered(c.Context(), db.ListAlertHistoryFilteredParams{
-		State:     state,
-		Severity:  severity,
-		ClusterID: clusterID,
-		LimitVal:  safeconv.Int32(limit),
-		OffsetVal: safeconv.Int32(offset),
+		State:                state,
+		Severity:             severity,
+		ClusterID:            clusterID,
+		LimitVal:             safeconv.Int32(limit),
+		OffsetVal:            safeconv.Int32(offset),
+		AccessibleClusterIds: scope,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list alerts")
@@ -816,8 +835,7 @@ func (h *AlertHandler) ListAlerts(c fiber.Ctx) error {
 
 	result := make([]alertHistoryResponse, 0, len(alerts))
 	for _, a := range alerts {
-		// Each alert is tied to a cluster — only surface it if the user
-		// has view:alert on that cluster (or globally).
+		// Defense-in-depth, as in ListRules.
 		if a.ClusterID.Valid {
 			if !access.PermitsCluster(uuid.UUID(a.ClusterID.Bytes)) {
 				continue

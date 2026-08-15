@@ -125,18 +125,20 @@ func parseVmidsParam(raw string) ([]int32, error) {
 // list and count query params — the same value on both, so Items and the
 // pagination Total can never disagree. Counting without this scope leaked how
 // many tasks other clusters have and broke pagination for scoped users. The
-// SQL filter is the access control (nil = global = no restriction; a non-nil
-// set restricts, '{}' matches nothing); the false return for a user with no
-// grants anywhere merely lets the caller skip the DB round-trips for the
-// page that would come back empty anyway.
+// SQL filter is the access control: nil = global = no restriction; a non-nil
+// set restricts, and '{}' matches nothing.
+//
+// The scope is stamped even for a caller holding no grant at all, so ignoring
+// the return value stays safe — '{}' is exactly what that caller should match.
+// Returning early instead, as this did, left both structs nil, which reaches
+// SQL as NULL and means every cluster; it was safe only for as long as the one
+// caller kept honouring the bool. The false return is now advice, not a guard:
+// permission to skip round-trips that could not come back with a row.
 func applyTaskListScope(access clusterAccess, listP *db.ListTaskHistoryFilteredParams, countP *db.CountTaskHistoryFilteredParams) bool {
-	if !access.HasGlobal && len(access.Allowed) == 0 {
-		return false
-	}
-	scopeIDs := access.ScopedIDs()
+	scopeIDs, query := clusterScopeFilter(access)
 	listP.AccessibleClusterIds = scopeIDs
 	countP.AccessibleClusterIds = scopeIDs
-	return true
+	return query
 }
 
 // List returns task history with optional cluster_id + status filters and offset

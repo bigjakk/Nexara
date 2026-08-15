@@ -67,7 +67,6 @@ type Querier interface {
 	CountActiveAPIKeysByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) (CountActiveAlertsByClusterRow, error)
 	CountActiveNodes(ctx context.Context, jobID uuid.UUID) (int64, error)
-	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	// CountAuditLogAdvanced returns the total matching the same filters, for the
 	// audit page pagination. Must stay filter-for-filter in sync with
 	// ListAuditLogAdvanced — in particular accessible_cluster_ids, or the Total
@@ -80,7 +79,7 @@ type Querier interface {
 	CountNotificationDLQByState(ctx context.Context) (CountNotificationDLQByStateRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	// CountTaskHistoryFiltered returns the total matching the same filters, for the
-	// Tasks page pagination. Mirrors CountAuditLog. Must stay filter-for-filter in
+	// Tasks page pagination. Mirrors CountAuditLogAdvanced. Must stay filter-for-filter in
 	// sync with ListTaskHistoryFiltered — in particular accessible_cluster_ids, or
 	// the Total leaks other clusters' task counts to scoped users.
 	CountTaskHistoryFiltered(ctx context.Context, arg CountTaskHistoryFilteredParams) (int64, error)
@@ -408,7 +407,25 @@ type Querier interface {
 	ListActiveVMImportJobs(ctx context.Context) ([]VmImportJob, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	ListAlertHistoryByCluster(ctx context.Context, arg ListAlertHistoryByClusterParams) ([]AlertHistory, error)
+	// ListAlertHistoryFiltered backs the Alerts history page. cluster_id is the
+	// caller's optional filter; accessible_cluster_ids is their view:alert RBAC
+	// scope and is not optional — see the note on ListAlertRules, including why a
+	// NULL cluster_id row is excluded from a scoped caller by the clause alone.
 	ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHistoryFilteredParams) ([]AlertHistory, error)
+	// ListAlertRules backs the Alerts page. accessible_cluster_ids carries the
+	// caller's view:alert RBAC scope: NULL means global access (no restriction);
+	// an array restricts rows to those clusters ('{}' matches nothing).
+	//
+	// alert_rules.cluster_id is NULLABLE, and a NULL marks a GLOBAL rule that only
+	// a holder of global view:alert may see — the same shape as audit_log, and the
+	// same rule AlertHandler.ListRules applies per row. `cluster_id = ANY(array)`
+	// yields NULL, not true, for those rows, so this clause already excludes them
+	// from a scoped caller. Do NOT add an `OR cluster_id IS NULL` disjunct: that
+	// hands every global rule to every cluster-scoped user.
+	//
+	// Applied in SQL rather than after the fact because LIMIT/OFFSET run before the
+	// trim: paging over every cluster's rules and filtering afterwards gives a
+	// scoped caller short pages with holes in them.
 	ListAlertRules(ctx context.Context, arg ListAlertRulesParams) ([]AlertRule, error)
 	ListAlertRulesByCluster(ctx context.Context, arg ListAlertRulesByClusterParams) ([]AlertRule, error)
 	ListAllAPIKeys(ctx context.Context) ([]ListAllAPIKeysRow, error)
@@ -419,7 +436,6 @@ type Querier interface {
 	ListAllGuestSnapshots(ctx context.Context) ([]ListAllGuestSnapshotsRow, error)
 	ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error)
 	ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error)
-	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
 	// ListAuditLogAdvanced backs the audit log page and the CSV/JSON/syslog export:
 	// the optional cluster/type/user/action/source/time filters plus offset
 	// pagination. accessible_cluster_ids carries the caller's view:audit RBAC
@@ -433,12 +449,9 @@ type Querier interface {
 	// — for a NULL cluster_id, so this one clause already excludes those rows from
 	// a scoped caller. Do NOT "repair" it into
 	// `(a.cluster_id IS NULL OR a.cluster_id = ANY(...))`: that hands every global
-	// entry to every cluster-scoped user. TestAuditScopeSQL_ExcludesNullCluster
-	// pins both halves.
+	// entry to every cluster-scoped user. TestScopeSQL_ScopedClausesExcludeNullCluster
+	// pins the shape, and TestAuditScope_NullClusterRowsAreGlobal the behaviour.
 	ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error)
-	ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error)
-	ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnrichedParams) ([]ListAuditLogEnrichedRow, error)
-	ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilteredParams) ([]AuditLog, error)
 	ListCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) ([]uuid.UUID, error)
 	ListCVEScanNodes(ctx context.Context, scanID uuid.UUID) ([]CveScanNode, error)
 	ListCVEScanVulns(ctx context.Context, scanID uuid.UUID) ([]CveScanVuln, error)
@@ -495,6 +508,19 @@ type Querier interface {
 	ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error)
 	ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
 	ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error)
+	// ListMigrationJobs backs the Migrations page. accessible_cluster_ids carries
+	// the caller's view:migration RBAC scope: NULL means global access (no
+	// restriction); an array restricts rows ('{}' matches nothing).
+	//
+	// A migration straddles two clusters, and the rule — matching what
+	// MigrationHandler.List enforces per row — is that visibility on EITHER end is
+	// enough to know the job exists. Hence the OR across both columns rather than
+	// a single membership test. Both columns are NOT NULL, so unlike the alert and
+	// audit scopes there is no three-valued-logic case to reason about here.
+	//
+	// Applied in SQL because LIMIT/OFFSET run before the per-row trim, so paging
+	// over every cluster's jobs and filtering afterwards gives a scoped caller
+	// short pages with holes in them.
 	ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error)
 	ListMigrationJobsByCluster(ctx context.Context, arg ListMigrationJobsByClusterParams) ([]MigrationJob, error)
 	ListMobileDevicesByUser(ctx context.Context, userID uuid.UUID) ([]MobileDevice, error)
@@ -532,9 +558,23 @@ type Querier interface {
 	// Failed tasks in the last 24h, grouped by type so we surface a count, not spam.
 	ListRecentFailedTasksByType(ctx context.Context) ([]ListRecentFailedTasksByTypeRow, error)
 	ListRecoveryCodes(ctx context.Context, userID uuid.UUID) ([]ListRecoveryCodesRow, error)
+	// ListReportRuns backs the Reports run history, and takes the caller's
+	// view:report scope for the same reason as ListReportSchedules above: the cap
+	// is applied before the trim, so an unscoped fetch quietly drops a scoped
+	// caller's runs once the install has more runs than the cap.
 	ListReportRuns(ctx context.Context, arg ListReportRunsParams) ([]ReportRun, error)
 	ListReportRunsByCluster(ctx context.Context, arg ListReportRunsByClusterParams) ([]ReportRun, error)
 	ListReportRunsBySchedule(ctx context.Context, arg ListReportRunsByScheduleParams) ([]ReportRun, error)
+	// ListReportSchedules backs the Reports page. accessible_cluster_ids carries
+	// the caller's view:report RBAC scope: NULL means global access (no
+	// restriction); an array restricts rows ('{}' matches nothing).
+	// report_schedules.cluster_id is NOT NULL, so every row belongs to exactly one
+	// cluster and there is no global-entry case.
+	//
+	// Applied in SQL rather than after the fetch because the handler's cap runs
+	// first: taking 100 rows across every cluster and trimming afterwards silently
+	// hides a scoped caller's schedules on an install with more than 100 of them,
+	// with nothing in the response marking the result incomplete.
 	ListReportSchedules(ctx context.Context, arg ListReportSchedulesParams) ([]ReportSchedule, error)
 	ListReportSchedulesByCluster(ctx context.Context, arg ListReportSchedulesByClusterParams) ([]ReportSchedule, error)
 	ListRolePermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
@@ -562,7 +602,7 @@ type Querier interface {
 	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
 	ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHistoryByClusterParams) ([]TaskHistory, error)
 	// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
-	// vmids filters with offset pagination. Mirrors ListAuditLogFiltered. NULL
+	// vmids filters with offset pagination. Mirrors ListAuditLogAdvanced. NULL
 	// narg = no filter on that column. vmids matches the guest VMID parsed from
 	// the UPID at insert (folder detail view passes a folder's VMID set).
 	// accessible_cluster_ids carries the caller's view:task RBAC scope: NULL means

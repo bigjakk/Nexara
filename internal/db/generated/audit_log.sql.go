@@ -14,24 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countAuditLog = `-- name: CountAuditLog :one
-SELECT count(*) FROM audit_log
-WHERE ($1::uuid IS NULL OR cluster_id = $1)
-  AND ($2::text IS NULL OR resource_type = $2)
-`
-
-type CountAuditLogParams struct {
-	ClusterID    pgtype.UUID `json:"cluster_id"`
-	ResourceType pgtype.Text `json:"resource_type"`
-}
-
-func (q *Queries) CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAuditLog, arg.ClusterID, arg.ResourceType)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countAuditLogAdvanced = `-- name: CountAuditLogAdvanced :one
 SELECT count(*) FROM audit_log
 WHERE ($1::uuid IS NULL OR cluster_id = $1)
@@ -132,45 +114,6 @@ func (q *Queries) InsertAuditLogWithSource(ctx context.Context, arg InsertAuditL
 	return err
 }
 
-const listAuditLog = `-- name: ListAuditLog :many
-SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at, source FROM audit_log ORDER BY created_at DESC LIMIT $1 OFFSET $2
-`
-
-type ListAuditLogParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
-}
-
-func (q *Queries) ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error) {
-	rows, err := q.db.Query(ctx, listAuditLog, arg.Limit, arg.Offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AuditLog{}
-	for rows.Next() {
-		var i AuditLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.ClusterID,
-			&i.UserID,
-			&i.ResourceType,
-			&i.ResourceID,
-			&i.Action,
-			&i.Details,
-			&i.CreatedAt,
-			&i.Source,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAuditLogAdvanced = `-- name: ListAuditLogAdvanced :many
 SELECT
   a.id,
@@ -247,8 +190,8 @@ type ListAuditLogAdvancedRow struct {
 // — for a NULL cluster_id, so this one clause already excludes those rows from
 // a scoped caller. Do NOT "repair" it into
 // `(a.cluster_id IS NULL OR a.cluster_id = ANY(...))`: that hands every global
-// entry to every cluster-scoped user. TestAuditScopeSQL_ExcludesNullCluster
-// pins both halves.
+// entry to every cluster-scoped user. TestScopeSQL_ScopedClausesExcludeNullCluster
+// pins the shape, and TestAuditScope_NullClusterRowsAreGlobal the behaviour.
 func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error) {
 	rows, err := q.db.Query(ctx, listAuditLogAdvanced,
 		arg.Limit,
@@ -284,185 +227,6 @@ func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdva
 			&i.ClusterName,
 			&i.ResourceVmid,
 			&i.ResourceName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAuditLogByCluster = `-- name: ListAuditLogByCluster :many
-SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at, source FROM audit_log WHERE cluster_id = $1 ORDER BY created_at DESC LIMIT $2
-`
-
-type ListAuditLogByClusterParams struct {
-	ClusterID pgtype.UUID `json:"cluster_id"`
-	Limit     int32       `json:"limit"`
-}
-
-func (q *Queries) ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error) {
-	rows, err := q.db.Query(ctx, listAuditLogByCluster, arg.ClusterID, arg.Limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AuditLog{}
-	for rows.Next() {
-		var i AuditLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.ClusterID,
-			&i.UserID,
-			&i.ResourceType,
-			&i.ResourceID,
-			&i.Action,
-			&i.Details,
-			&i.CreatedAt,
-			&i.Source,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAuditLogEnriched = `-- name: ListAuditLogEnriched :many
-SELECT
-  a.id,
-  a.cluster_id,
-  a.user_id,
-  a.resource_type,
-  a.resource_id,
-  a.action,
-  a.details,
-  a.created_at,
-  a.source,
-  u.email AS user_email,
-  u.display_name AS user_display_name,
-  COALESCE(c.name, '') AS cluster_name,
-  COALESCE(v.vmid, 0) AS resource_vmid,
-  COALESCE(v.name, '') AS resource_name
-FROM audit_log a
-LEFT JOIN users u ON u.id = a.user_id
-LEFT JOIN clusters c ON c.id = a.cluster_id
-LEFT JOIN vms v ON v.id::text = a.resource_id
-WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
-  AND ($4::text IS NULL OR a.resource_type = $4)
-ORDER BY a.created_at DESC
-LIMIT $1 OFFSET $2
-`
-
-type ListAuditLogEnrichedParams struct {
-	Limit        int32       `json:"limit"`
-	Offset       int32       `json:"offset"`
-	ClusterID    pgtype.UUID `json:"cluster_id"`
-	ResourceType pgtype.Text `json:"resource_type"`
-}
-
-type ListAuditLogEnrichedRow struct {
-	ID              uuid.UUID       `json:"id"`
-	ClusterID       pgtype.UUID     `json:"cluster_id"`
-	UserID          pgtype.UUID     `json:"user_id"`
-	ResourceType    string          `json:"resource_type"`
-	ResourceID      string          `json:"resource_id"`
-	Action          string          `json:"action"`
-	Details         json.RawMessage `json:"details"`
-	CreatedAt       time.Time       `json:"created_at"`
-	Source          string          `json:"source"`
-	UserEmail       pgtype.Text     `json:"user_email"`
-	UserDisplayName pgtype.Text     `json:"user_display_name"`
-	ClusterName     string          `json:"cluster_name"`
-	ResourceVmid    int32           `json:"resource_vmid"`
-	ResourceName    string          `json:"resource_name"`
-}
-
-func (q *Queries) ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnrichedParams) ([]ListAuditLogEnrichedRow, error) {
-	rows, err := q.db.Query(ctx, listAuditLogEnriched,
-		arg.Limit,
-		arg.Offset,
-		arg.ClusterID,
-		arg.ResourceType,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListAuditLogEnrichedRow{}
-	for rows.Next() {
-		var i ListAuditLogEnrichedRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.ClusterID,
-			&i.UserID,
-			&i.ResourceType,
-			&i.ResourceID,
-			&i.Action,
-			&i.Details,
-			&i.CreatedAt,
-			&i.Source,
-			&i.UserEmail,
-			&i.UserDisplayName,
-			&i.ClusterName,
-			&i.ResourceVmid,
-			&i.ResourceName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAuditLogFiltered = `-- name: ListAuditLogFiltered :many
-SELECT id, cluster_id, user_id, resource_type, resource_id, action, details, created_at, source FROM audit_log
-WHERE ($3::uuid IS NULL OR cluster_id = $3)
-  AND ($4::text IS NULL OR resource_type = $4)
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2
-`
-
-type ListAuditLogFilteredParams struct {
-	Limit        int32       `json:"limit"`
-	Offset       int32       `json:"offset"`
-	ClusterID    pgtype.UUID `json:"cluster_id"`
-	ResourceType pgtype.Text `json:"resource_type"`
-}
-
-func (q *Queries) ListAuditLogFiltered(ctx context.Context, arg ListAuditLogFilteredParams) ([]AuditLog, error) {
-	rows, err := q.db.Query(ctx, listAuditLogFiltered,
-		arg.Limit,
-		arg.Offset,
-		arg.ClusterID,
-		arg.ResourceType,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AuditLog{}
-	for rows.Next() {
-		var i AuditLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.ClusterID,
-			&i.UserID,
-			&i.ResourceType,
-			&i.ResourceID,
-			&i.Action,
-			&i.Details,
-			&i.CreatedAt,
-			&i.Source,
 		); err != nil {
 			return nil, err
 		}

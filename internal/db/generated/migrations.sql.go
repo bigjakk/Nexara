@@ -168,17 +168,34 @@ func (q *Queries) GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJ
 
 const listMigrationJobs = `-- name: ListMigrationJobs :many
 SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage FROM migration_jobs
+WHERE ($3::uuid[] IS NULL
+       OR source_cluster_id = ANY($3::uuid[])
+       OR target_cluster_id = ANY($3::uuid[]))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListMigrationJobsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit                int32       `json:"limit"`
+	Offset               int32       `json:"offset"`
+	AccessibleClusterIds []uuid.UUID `json:"accessible_cluster_ids"`
 }
 
+// ListMigrationJobs backs the Migrations page. accessible_cluster_ids carries
+// the caller's view:migration RBAC scope: NULL means global access (no
+// restriction); an array restricts rows ('{}' matches nothing).
+//
+// A migration straddles two clusters, and the rule — matching what
+// MigrationHandler.List enforces per row — is that visibility on EITHER end is
+// enough to know the job exists. Hence the OR across both columns rather than
+// a single membership test. Both columns are NOT NULL, so unlike the alert and
+// audit scopes there is no three-valued-logic case to reason about here.
+//
+// Applied in SQL because LIMIT/OFFSET run before the per-row trim, so paging
+// over every cluster's jobs and filtering afterwards gives a scoped caller
+// short pages with holes in them.
 func (q *Queries) ListMigrationJobs(ctx context.Context, arg ListMigrationJobsParams) ([]MigrationJob, error) {
-	rows, err := q.db.Query(ctx, listMigrationJobs, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listMigrationJobs, arg.Limit, arg.Offset, arg.AccessibleClusterIds)
 	if err != nil {
 		return nil, err
 	}

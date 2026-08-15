@@ -85,14 +85,14 @@ func TestApplyAuditListScope(t *testing.T) {
 			}
 
 			// The bare form Export and ListRecent use must agree with it.
-			bare, bareQuery := auditScope(tt.access)
+			bare, bareQuery := clusterScopeFilter(tt.access)
 			if bareQuery != tt.wantQuery {
-				t.Fatalf("auditScope() query = %v, want %v", bareQuery, tt.wantQuery)
+				t.Fatalf("clusterScopeFilter() query = %v, want %v", bareQuery, tt.wantQuery)
 			}
 
 			assertScope(t, "list", listP.AccessibleClusterIds, tt.wantNil, tt.wantIDs)
 			assertScope(t, "count", countP.AccessibleClusterIds, tt.wantNil, tt.wantIDs)
-			assertScope(t, "auditScope", bare, tt.wantNil, tt.wantIDs)
+			assertScope(t, "clusterScopeFilter", bare, tt.wantNil, tt.wantIDs)
 		})
 	}
 }
@@ -284,7 +284,7 @@ func assertScope(t *testing.T, label string, got []uuid.UUID, wantNil bool, want
 // while Export and ListRecent fetched global rows and trimmed them after.
 // Here any DB access panics on the nil Queries and fails loudly. The SQL scope
 // filter is the actual access control; TestApplyAuditListScope pins the
-// wiring, and TestAuditScopeSQL_ExcludesNullCluster (internal/db) pins the
+// wiring, and TestScopeSQL_ScopedClausesExcludeNullCluster (internal/db) pins the
 // clause it wires to.
 func newAuditScopeTestApp(t *testing.T) *fiber.App {
 	t.Helper()

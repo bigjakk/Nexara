@@ -78,7 +78,7 @@ SET status = $2, exit_status = $3, finished_at = $4, updated_at = now()
 WHERE upid = $1 AND status = 'running';
 
 -- ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
--- vmids filters with offset pagination. Mirrors ListAuditLogFiltered. NULL
+-- vmids filters with offset pagination. Mirrors ListAuditLogAdvanced. NULL
 -- narg = no filter on that column. vmids matches the guest VMID parsed from
 -- the UPID at insert (folder detail view passes a folder's VMID set).
 -- accessible_cluster_ids carries the caller's view:task RBAC scope: NULL means
@@ -95,7 +95,7 @@ ORDER BY started_at DESC
 LIMIT $1 OFFSET $2;
 
 -- CountTaskHistoryFiltered returns the total matching the same filters, for the
--- Tasks page pagination. Mirrors CountAuditLog. Must stay filter-for-filter in
+-- Tasks page pagination. Mirrors CountAuditLogAdvanced. Must stay filter-for-filter in
 -- sync with ListTaskHistoryFiltered — in particular accessible_cluster_ids, or
 -- the Total leaks other clusters' task counts to scoped users.
 -- name: CountTaskHistoryFiltered :one

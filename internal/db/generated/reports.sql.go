@@ -287,17 +287,24 @@ func (q *Queries) ListDueReportSchedules(ctx context.Context) ([]ReportSchedule,
 
 const listReportRuns = `-- name: ListReportRuns :many
 SELECT id, schedule_id, report_type, cluster_id, status, time_range_hours, report_data, report_html, report_csv, error_message, created_by, started_at, completed_at, created_at FROM report_runs
+WHERE ($3::uuid[] IS NULL
+       OR cluster_id = ANY($3::uuid[]))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListReportRunsParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit                int32       `json:"limit"`
+	Offset               int32       `json:"offset"`
+	AccessibleClusterIds []uuid.UUID `json:"accessible_cluster_ids"`
 }
 
+// ListReportRuns backs the Reports run history, and takes the caller's
+// view:report scope for the same reason as ListReportSchedules above: the cap
+// is applied before the trim, so an unscoped fetch quietly drops a scoped
+// caller's runs once the install has more runs than the cap.
 func (q *Queries) ListReportRuns(ctx context.Context, arg ListReportRunsParams) ([]ReportRun, error) {
-	rows, err := q.db.Query(ctx, listReportRuns, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listReportRuns, arg.Limit, arg.Offset, arg.AccessibleClusterIds)
 	if err != nil {
 		return nil, err
 	}
@@ -429,17 +436,30 @@ func (q *Queries) ListReportRunsBySchedule(ctx context.Context, arg ListReportRu
 
 const listReportSchedules = `-- name: ListReportSchedules :many
 SELECT id, name, report_type, cluster_id, time_range_hours, schedule, format, email_enabled, email_channel_id, email_recipients, parameters, enabled, last_run_at, next_run_at, created_by, created_at, updated_at FROM report_schedules
+WHERE ($3::uuid[] IS NULL
+       OR cluster_id = ANY($3::uuid[]))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListReportSchedulesParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit                int32       `json:"limit"`
+	Offset               int32       `json:"offset"`
+	AccessibleClusterIds []uuid.UUID `json:"accessible_cluster_ids"`
 }
 
+// ListReportSchedules backs the Reports page. accessible_cluster_ids carries
+// the caller's view:report RBAC scope: NULL means global access (no
+// restriction); an array restricts rows ('{}' matches nothing).
+// report_schedules.cluster_id is NOT NULL, so every row belongs to exactly one
+// cluster and there is no global-entry case.
+//
+// Applied in SQL rather than after the fetch because the handler's cap runs
+// first: taking 100 rows across every cluster and trimming afterwards silently
+// hides a scoped caller's schedules on an install with more than 100 of them,
+// with nothing in the response marking the result incomplete.
 func (q *Queries) ListReportSchedules(ctx context.Context, arg ListReportSchedulesParams) ([]ReportSchedule, error) {
-	rows, err := q.db.Query(ctx, listReportSchedules, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listReportSchedules, arg.Limit, arg.Offset, arg.AccessibleClusterIds)
 	if err != nil {
 		return nil, err
 	}

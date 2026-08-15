@@ -220,30 +220,17 @@ func (h *AuditHandler) parseAuditFilters(c fiber.Ctx, access clusterAccess) (lis
 	return listP, countP, query, nil
 }
 
-// auditScope resolves the caller's view:audit cluster scope into the uuid[] SQL
-// filter every audit read carries: nil for global view:audit (no restriction),
-// the granted set for a scoped caller, and '{}' — which matches nothing — for a
-// caller holding no grant at all.
+// applyAuditListScope stamps the caller's view:audit scope onto BOTH the list
+// and the count params. Taking the two together is the whole point: a Total
+// computed under a wider scope than the Items is precisely the leak this fixes
+// — it counted every cluster's entries and paginated over them — and unlike a
+// row, a number no per-row guard can repair.
 //
-// query is false only in that last case. The filter is already correct there,
-// so a caller may ignore the flag and still read nothing; it exists to skip
-// round-trips that could not come back with a row.
-//
-// Rows with a NULL cluster_id are global entries (settings changes, logins).
-// The SQL clause excludes them from every scoped caller on its own — see the
-// note on ListAuditLogAdvanced in queries/audit_log.sql — which is what the
-// per-row guards below do by requiring access.HasGlobal for them.
-func auditScope(access clusterAccess) (ids []uuid.UUID, query bool) {
-	return access.ScopedIDs(), access.HasGlobal || len(access.Allowed) > 0
-}
-
-// applyAuditListScope stamps that scope onto BOTH the list and the count
-// params. Taking the two together is the whole point: a Total computed under a
-// wider scope than the Items is precisely the leak this fixes — it counted
-// every cluster's entries and paginated over them — and unlike a row, a number
-// no per-row guard can repair.
+// NULL-cluster rows are global entries (settings changes, logins); see the note
+// on ListAuditLogAdvanced in queries/audit_log.sql for why the clause excludes
+// them from a scoped caller without a predicate of its own.
 func applyAuditListScope(access clusterAccess, listP *db.ListAuditLogAdvancedParams, countP *db.CountAuditLogAdvancedParams) bool {
-	ids, query := auditScope(access)
+	ids, query := clusterScopeFilter(access)
 	listP.AccessibleClusterIds = ids
 	countP.AccessibleClusterIds = ids
 	return query
@@ -317,7 +304,7 @@ func (h *AuditHandler) ListRecent(c fiber.Ctx) error {
 	// Scoped in SQL rather than trimmed afterwards: LIMIT 50 over every
 	// cluster's entries, trimmed after, hands a cluster-scoped user whatever
 	// survives of the newest 50 global rows — usually a near-empty feed.
-	scope, query := auditScope(access)
+	scope, query := clusterScopeFilter(access)
 	var items []db.ListRecentAuditLogEnrichedRow
 	if query {
 		items, err = h.queries.ListRecentAuditLogEnriched(c.Context(), scope)

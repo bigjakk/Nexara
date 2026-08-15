@@ -908,23 +908,31 @@ SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, 
 WHERE ($1::text = '' OR state = $1::text)
   AND ($2::text = '' OR severity = $2::text)
   AND ($3::uuid IS NULL OR cluster_id = $3)
+  AND ($4::uuid[] IS NULL
+       OR cluster_id = ANY($4::uuid[]))
 ORDER BY created_at DESC
-LIMIT $5 OFFSET $4
+LIMIT $6 OFFSET $5
 `
 
 type ListAlertHistoryFilteredParams struct {
-	State     string      `json:"state"`
-	Severity  string      `json:"severity"`
-	ClusterID pgtype.UUID `json:"cluster_id"`
-	OffsetVal int32       `json:"offset_val"`
-	LimitVal  int32       `json:"limit_val"`
+	State                string      `json:"state"`
+	Severity             string      `json:"severity"`
+	ClusterID            pgtype.UUID `json:"cluster_id"`
+	AccessibleClusterIds []uuid.UUID `json:"accessible_cluster_ids"`
+	OffsetVal            int32       `json:"offset_val"`
+	LimitVal             int32       `json:"limit_val"`
 }
 
+// ListAlertHistoryFiltered backs the Alerts history page. cluster_id is the
+// caller's optional filter; accessible_cluster_ids is their view:alert RBAC
+// scope and is not optional — see the note on ListAlertRules, including why a
+// NULL cluster_id row is excluded from a scoped caller by the clause alone.
 func (q *Queries) ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHistoryFilteredParams) ([]AlertHistory, error) {
 	rows, err := q.db.Query(ctx, listAlertHistoryFiltered,
 		arg.State,
 		arg.Severity,
 		arg.ClusterID,
+		arg.AccessibleClusterIds,
 		arg.OffsetVal,
 		arg.LimitVal,
 	)
@@ -972,17 +980,34 @@ func (q *Queries) ListAlertHistoryFiltered(ctx context.Context, arg ListAlertHis
 
 const listAlertRules = `-- name: ListAlertRules :many
 SELECT id, name, description, enabled, severity, metric, operator, threshold, duration_seconds, scope_type, cluster_id, node_id, cooldown_seconds, escalation_chain, created_by, created_at, updated_at, message_template, vm_vmid FROM alert_rules
+WHERE ($3::uuid[] IS NULL
+       OR cluster_id = ANY($3::uuid[]))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListAlertRulesParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit                int32       `json:"limit"`
+	Offset               int32       `json:"offset"`
+	AccessibleClusterIds []uuid.UUID `json:"accessible_cluster_ids"`
 }
 
+// ListAlertRules backs the Alerts page. accessible_cluster_ids carries the
+// caller's view:alert RBAC scope: NULL means global access (no restriction);
+// an array restricts rows to those clusters ('{}' matches nothing).
+//
+// alert_rules.cluster_id is NULLABLE, and a NULL marks a GLOBAL rule that only
+// a holder of global view:alert may see — the same shape as audit_log, and the
+// same rule AlertHandler.ListRules applies per row. `cluster_id = ANY(array)`
+// yields NULL, not true, for those rows, so this clause already excludes them
+// from a scoped caller. Do NOT add an `OR cluster_id IS NULL` disjunct: that
+// hands every global rule to every cluster-scoped user.
+//
+// Applied in SQL rather than after the fact because LIMIT/OFFSET run before the
+// trim: paging over every cluster's rules and filtering afterwards gives a
+// scoped caller short pages with holes in them.
 func (q *Queries) ListAlertRules(ctx context.Context, arg ListAlertRulesParams) ([]AlertRule, error) {
-	rows, err := q.db.Query(ctx, listAlertRules, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listAlertRules, arg.Limit, arg.Offset, arg.AccessibleClusterIds)
 	if err != nil {
 		return nil, err
 	}

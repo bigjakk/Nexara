@@ -151,9 +151,19 @@ func (h *ReportHandler) ListSchedules(c fiber.Ctx) error {
 		return err
 	}
 
+	// Scoped in SQL, not after the fetch: the 100-row cap is applied first, so
+	// an unscoped fetch silently hides a scoped caller's schedules once the
+	// install has more than 100 of them, with nothing in the response marking
+	// the result incomplete.
+	scope, query := clusterScopeFilter(access)
+	if !query {
+		return c.JSON([]reportScheduleResponse{})
+	}
+
 	schedules, err := h.queries.ListReportSchedules(c.Context(), db.ListReportSchedulesParams{
-		Limit:  100,
-		Offset: 0,
+		Limit:                100,
+		Offset:               0,
+		AccessibleClusterIds: scope,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list schedules")
@@ -161,6 +171,7 @@ func (h *ReportHandler) ListSchedules(c fiber.Ctx) error {
 
 	out := make([]reportScheduleResponse, 0, len(schedules))
 	for _, s := range schedules {
+		// Defense-in-depth, as in the audit and alert listings.
 		if !access.PermitsCluster(s.ClusterID) {
 			continue
 		}
@@ -555,9 +566,18 @@ func (h *ReportHandler) ListRuns(c fiber.Ctx) error {
 		return err
 	}
 
+	// Scoped in SQL for the same reason as ListSchedules — the cap runs before
+	// the trim, so run history is the first thing to disappear on a busy
+	// install.
+	scope, query := clusterScopeFilter(access)
+	if !query {
+		return c.JSON([]reportRunResponse{})
+	}
+
 	runs, err := h.queries.ListReportRuns(c.Context(), db.ListReportRunsParams{
-		Limit:  100,
-		Offset: 0,
+		Limit:                100,
+		Offset:               0,
+		AccessibleClusterIds: scope,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list runs")
@@ -565,6 +585,7 @@ func (h *ReportHandler) ListRuns(c fiber.Ctx) error {
 
 	out := make([]reportRunResponse, 0, len(runs))
 	for _, r := range runs {
+		// Defense-in-depth, as in the audit and alert listings.
 		if !access.PermitsCluster(r.ClusterID) {
 			continue
 		}

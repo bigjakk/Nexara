@@ -26,7 +26,7 @@ var (
 )
 
 // TestAuditScope_NullClusterRowsAreGlobal executes the real generated queries
-// against Postgres and pins the behaviour that TestAuditScopeSQL_ExcludesNullCluster
+// against Postgres and pins the behaviour that TestScopeSQL_ScopedClausesExcludeNullCluster
 // can only pin the shape of.
 //
 // audit_log.cluster_id is nullable, unlike task_history's. A NULL cluster_id

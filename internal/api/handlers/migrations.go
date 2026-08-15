@@ -335,11 +335,27 @@ func (h *MigrationHandler) List(c fiber.Ctx) error {
 	if l := fiber.Query[int](c, "limit", 50); l > 0 && l <= 500 {
 		limit = safeconv.Int32(l)
 	}
-	offset := safeconv.Int32(fiber.Query[int](c, "offset", 0))
+	// Clamped low, not just converted: safeconv.Int32 bounds the int32 range
+	// only, so ?offset=-1 reached Postgres as `OFFSET -1` and came back a 500.
+	rawOffset := fiber.Query[int](c, "offset", 0)
+	if rawOffset < 0 {
+		rawOffset = 0
+	}
+	offset := safeconv.Int32(rawOffset)
+
+	// Scoped in SQL, not after the fetch: LIMIT/OFFSET run before the per-row
+	// trim below, so paging over every cluster's jobs and filtering afterwards
+	// hands a scoped caller short pages with holes in them. The query applies
+	// the same either-end rule the guard below does.
+	scope, query := clusterScopeFilter(access)
+	if !query {
+		return c.JSON([]migrationJobResponse{})
+	}
 
 	jobs, err := h.queries.ListMigrationJobs(c.Context(), db.ListMigrationJobsParams{
-		Limit:  limit,
-		Offset: offset,
+		Limit:                limit,
+		Offset:               offset,
+		AccessibleClusterIds: scope,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list migration jobs")
@@ -347,8 +363,9 @@ func (h *MigrationHandler) List(c fiber.Ctx) error {
 
 	resp := make([]migrationJobResponse, 0, len(jobs))
 	for _, j := range jobs {
-		// A migration straddles two clusters; require visibility on at least
-		// one to know it exists, the same as the cluster-detail pages.
+		// Defense-in-depth: a migration straddles two clusters; visibility on
+		// at least one is enough to know it exists, the same as the
+		// cluster-detail pages, and the same rule the SQL scope applies.
 		if !access.PermitsCluster(j.SourceClusterID) && !access.PermitsCluster(j.TargetClusterID) {
 			continue
 		}
@@ -536,7 +553,13 @@ func (h *MigrationHandler) ListByCluster(c fiber.Ctx) error {
 	if l := fiber.Query[int](c, "limit", 50); l > 0 && l <= 500 {
 		limit = safeconv.Int32(l)
 	}
-	offset := safeconv.Int32(fiber.Query[int](c, "offset", 0))
+	// Clamped low, not just converted: safeconv.Int32 bounds the int32 range
+	// only, so ?offset=-1 reached Postgres as `OFFSET -1` and came back a 500.
+	rawOffset := fiber.Query[int](c, "offset", 0)
+	if rawOffset < 0 {
+		rawOffset = 0
+	}
+	offset := safeconv.Int32(rawOffset)
 
 	jobs, err := h.queries.ListMigrationJobsByCluster(c.Context(), db.ListMigrationJobsByClusterParams{
 		SourceClusterID: clusterID,

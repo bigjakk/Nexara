@@ -73,6 +73,10 @@ func TestParseVmidsParamCap(t *testing.T) {
 // scope must land on BOTH query params — the count one especially, since
 // Total goes to the client unfiltered and no per-row guard can repair it.
 // Dropping the countP assignment (the original leak) fails here.
+//
+// The no-grant cases are asserted rather than skipped: they used to return
+// early, which meant nothing checked the params on the one path where the
+// helper left them nil — nil being SQL NULL, i.e. every cluster.
 func TestApplyTaskListScope(t *testing.T) {
 	clusterA := uuid.New()
 	clusterB := uuid.New()
@@ -97,14 +101,18 @@ func TestApplyTaskListScope(t *testing.T) {
 			wantIDs:  []uuid.UUID{clusterA, clusterB},
 		},
 		{
-			name:     "no grants anywhere skips the DB",
+			// '{}' matches nothing, so a caller that ignores the false return
+			// reads an empty set rather than every cluster's tasks.
+			name:     "no grants stamps an empty scope and reports skippable",
 			access:   clusterAccess{Allowed: map[uuid.UUID]bool{}},
 			wantScan: false,
+			wantIDs:  []uuid.UUID{},
 		},
 		{
-			name:     "zero-value access skips the DB",
+			name:     "zero-value access stamps an empty scope and reports skippable",
 			access:   clusterAccess{},
 			wantScan: false,
+			wantIDs:  []uuid.UUID{},
 		},
 	}
 
@@ -115,9 +123,6 @@ func TestApplyTaskListScope(t *testing.T) {
 			got := applyTaskListScope(tt.access, &listP, &countP)
 			if got != tt.wantScan {
 				t.Fatalf("applyTaskListScope() = %v, want %v", got, tt.wantScan)
-			}
-			if !tt.wantScan {
-				return
 			}
 			if tt.wantNil {
 				if listP.AccessibleClusterIds != nil || countP.AccessibleClusterIds != nil {
@@ -131,7 +136,8 @@ func TestApplyTaskListScope(t *testing.T) {
 				"count": countP.AccessibleClusterIds,
 			} {
 				if ids == nil {
-					t.Fatalf("%s params: scope must be non-nil for scoped access", label)
+					t.Fatalf("%s params: scope must be non-nil for scoped access "+
+						"(nil reads as SQL NULL = every cluster)", label)
 				}
 				if len(ids) != len(tt.wantIDs) {
 					t.Fatalf("%s params: scope = %v, want %d IDs", label, ids, len(tt.wantIDs))

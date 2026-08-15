@@ -15,26 +15,25 @@ import (
 // edits, and because the generated package's query strings are unexported.
 const queriesGlob = "../../queries/*.sql"
 
-// auditScopeClause is the exact predicate an RBAC-scoped audit read must
-// carry, in the two spellings the file uses (aliased in the JOIN queries, bare
-// in the count). Matching the whole shape rather than searching for fragments
-// is deliberate: it pins that the clause has exactly two disjuncts and that
-// membership is tested by a bare `cluster_id = ANY(...)`, so
-// `COALESCE(cluster_id, ...) = ANY(...)`, `cluster_id IS NOT DISTINCT FROM
-// ANY(...)` and an added `cluster_id IS NULL` arm each fail here instead of
-// sliding past a looser check.
+// scopeClauseRe matches the exact predicate an RBAC-scoped read must carry:
+// the NULL guard followed by one or more `<col>cluster_id = ANY(<same narg>)`
+// disjuncts and nothing else inside the parens, introduced by WHERE or AND.
 //
-// Comparison is whitespace-normalized and case-insensitive, so reflowing or
-// re-casing the SQL is fine; changing its structure is not. What it does NOT
+// Matching the whole shape rather than searching for fragments is what makes
+// this a guard. `COALESCE(cluster_id, …) = ANY(…)`, `cluster_id IS NOT DISTINCT
+// FROM ANY(…)` and an added `cluster_id IS NULL` arm all fail to match, so a
+// query "repaired" into any of them reads as unscoped and the guard fires.
+// The one-or-more repetition admits migration_jobs, which tests two columns
+// because a job straddles a source and a target cluster.
+//
+// Comparison is against a whitespace-normalized, lowercased body, so reflowing
+// or re-casing the SQL is fine; changing its structure is not. What it does NOT
 // verify is that the clause sits at the top level of the WHERE — a clause
-// nested inside an OR branch or a subquery would still match. Pinning that
-// needs a parser; the DB-backed test is what actually holds the behaviour.
-var auditScopeClause = []string{
-	"(sqlc.narg('accessible_cluster_ids')::uuid[] is null " +
-		"or cluster_id = any(sqlc.narg('accessible_cluster_ids')::uuid[]))",
-	"(sqlc.narg('accessible_cluster_ids')::uuid[] is null " +
-		"or a.cluster_id = any(sqlc.narg('accessible_cluster_ids')::uuid[]))",
-}
+// nested inside an OR branch would still match. Pinning that needs a parser;
+// the DB-backed tests in scope_db_test.go are what hold the behaviour.
+var scopeClauseRe = regexp.MustCompile(
+	`(?:where|and) \(sqlc\.narg\('accessible_cluster_ids'\)::uuid\[\] is null` +
+		`(?: or [a-z_]*\.?[a-z_]*cluster_id = any\(sqlc\.narg\('accessible_cluster_ids'\)::uuid\[\]\))+\)`)
 
 // auditReadsExemptFromScope names every query that reads audit_log WITHOUT the
 // caller's RBAC scope, and why that is safe. Keys are "file.sql.QueryName".
@@ -42,17 +41,6 @@ var auditScopeClause = []string{
 // so omitting the scope stops being something a new query can do by
 // inattention: it becomes a line someone has to write down and justify.
 var auditReadsExemptFromScope = map[string]string{
-	// No caller outside internal/db/generated as of this writing. Left unscoped
-	// rather than fixed, because scoping a query nothing runs mostly teaches the
-	// next reader that it is load-bearing. Wiring any of these to a handler
-	// means scoping it and deleting its line here — the exemption is a record
-	// that the query is unreachable, not a licence to read across clusters.
-	"audit_log.sql.ListAuditLog":          "unused; no caller outside internal/db/generated",
-	"audit_log.sql.ListAuditLogByCluster": "unused; AuditHandler.ListByCluster runs ListAuditLogAdvanced instead",
-	"audit_log.sql.ListAuditLogFiltered":  "unused; superseded by ListAuditLogAdvanced",
-	"audit_log.sql.ListAuditLogEnriched":  "unused; superseded by ListAuditLogAdvanced",
-	"audit_log.sql.CountAuditLog":         "unused; superseded by CountAuditLogAdvanced",
-
 	// Column projections rather than entry reads — they return the set of
 	// distinct actions and users, never a row's cluster, resource or details.
 	// Both are gated on GLOBAL view:audit by requirePerm in ListActions /
@@ -89,7 +77,7 @@ func TestAuditScopeSQL_EveryReadIsScopedOrExempt(t *testing.T) {
 		if !readsAuditLogRe.MatchString(body) {
 			continue // INSERT, or a query against some other table
 		}
-		scoped := hasAuditScopeClause(body)
+		scoped := hasScopeClause(body)
 		reason, exempt := auditReadsExemptFromScope[name]
 
 		switch {
@@ -108,76 +96,87 @@ func TestAuditScopeSQL_EveryReadIsScopedOrExempt(t *testing.T) {
 	}
 }
 
-// TestAuditScopeSQL_ExcludesNullCluster pins the property that makes the scope
-// clause correct on a NULLABLE cluster_id — the way audit_log differs from
-// task_history, whose column is NOT NULL.
+// TestScopeSQL_ScopedClausesExcludeNullCluster pins the property that makes
+// every scope clause correct on a NULLABLE cluster column — the way audit_log,
+// alert_rules and alert_history differ from task_history, migration_jobs and
+// the report tables, whose columns are NOT NULL.
 //
-// A NULL cluster_id marks a global entry (a settings change, a login) that
-// only a holder of global view:audit may read; AuditHandler's per-row guards
-// show them to access.HasGlobal alone. In SQL that falls out of three-valued
-// logic for free: `cluster_id = ANY(array)` evaluates to NULL, not true, for a
-// NULL cluster_id, so a scoped caller's WHERE clause drops those rows without
-// a predicate of its own.
+// A NULL cluster_id marks a GLOBAL row: an audit entry for a settings change or
+// a login, an alert rule that watches every cluster, an alert fired by one.
+// Only a holder of the global view permission may read those, and each
+// handler's per-row guard says so by requiring access.HasGlobal. In SQL it
+// falls out of three-valued logic for free: `cluster_id = ANY(array)` evaluates
+// to NULL, not true, for such a row, so a scoped caller's WHERE clause drops it
+// without a predicate of its own.
 //
-// This test pins the clause's SHAPE. TestAuditScope_NullClusterRowsAreGlobal
-// (audit_scope_db_test.go) executes the real queries against Postgres and pins
-// the BEHAVIOUR; it needs NEXARA_TEST_DB_URL, which CI sets and a local run
-// usually does not, so both exist.
+// Applied to EVERY query carrying the clause, not just the audit ones: the same
+// "repair" is available in each file, and on the nullable tables it has the same
+// effect — handing every global row to every cluster-scoped user. On the NOT
+// NULL tables the check simply never has anything to complain about.
 //
-// The failure mode guarded here is someone reading the bare clause as an
-// oversight and "repairing" it into `(cluster_id IS NULL OR cluster_id =
-// ANY(...))`, which hands every global entry to every cluster-scoped user.
-func TestAuditScopeSQL_ExcludesNullCluster(t *testing.T) {
+// This pins the clause's SHAPE. The tests in scope_db_test.go execute the real
+// queries against Postgres and pin the BEHAVIOUR; they need NEXARA_TEST_DB_URL,
+// which CI sets and a local run usually does not, so both exist.
+func TestScopeSQL_ScopedClausesExcludeNullCluster(t *testing.T) {
 	t.Parallel()
 
 	queries := namedSQLQueries(t)
 
+	scopedFound := 0
 	for name, body := range queries {
-		if !readsAuditLogRe.MatchString(body) || !hasAuditScopeClause(body) {
+		if !hasScopeClause(body) {
 			continue
 		}
+		scopedFound++
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			stripped := stripSQLComments(body)
 			if loc := bareNullClusterRe.FindStringIndex(stripped); loc != nil {
-				t.Fatalf("%s tests cluster_id IS NULL (%q).\n"+
-					"\taudit_log rows with a NULL cluster_id are GLOBAL entries, readable only\n"+
-					"\tby a holder of global view:audit. `cluster_id = ANY(...)` already yields\n"+
-					"\tNULL for them, so a scoped caller never matches one. Adding an IS NULL\n"+
-					"\tdisjunct hands every global entry to every cluster-scoped user.",
+				t.Fatalf("%s carries the RBAC scope clause and also tests %q.\n"+
+					"\tA NULL cluster column marks a GLOBAL row, readable only by a holder of\n"+
+					"\tthe global view permission. `cluster_id = ANY(...)` already yields NULL\n"+
+					"\tfor those rows, so a scoped caller never matches one. Adding an IS NULL\n"+
+					"\tdisjunct hands every global row to every cluster-scoped user.",
 					name, strings.TrimSpace(stripped[loc[0]:loc[1]]))
 			}
 		})
 	}
 
-	// The clause is only worth pinning if the reads that must carry it do.
+	if scopedFound == 0 {
+		t.Fatal("no query carried the scope clause — either the matcher broke or the " +
+			"scoping was reverted wholesale; either way this guard was passing vacuously")
+	}
+
+	// The clause is only worth pinning if the reads that must carry it do. Each
+	// backs a list endpoint that serves cluster-scoped callers.
 	for _, name := range []string{
 		"audit_log.sql.ListAuditLogAdvanced",
 		"audit_log.sql.CountAuditLogAdvanced",
 		"audit_log.sql.ListRecentAuditLogEnriched",
+		"tasks.sql.ListTaskHistoryFiltered",
+		"tasks.sql.CountTaskHistoryFiltered",
+		"alerts.sql.ListAlertRules",
+		"alerts.sql.ListAlertHistoryFiltered",
+		"migrations.sql.ListMigrationJobs",
+		"reports.sql.ListReportSchedules",
+		"reports.sql.ListReportRuns",
 	} {
-		if body, ok := queries[name]; !ok || !hasAuditScopeClause(body) {
-			t.Errorf("%s must carry the scope clause — it backs a handler that serves "+
-				"cluster-scoped callers", name)
+		if body, ok := queries[name]; !ok || !hasScopeClause(body) {
+			t.Errorf("%s must carry the accessible_cluster_ids scope clause — it backs a "+
+				"list endpoint that serves cluster-scoped callers", name)
 		}
 	}
 }
 
-// hasAuditScopeClause reports whether a query body carries the scope predicate
-// in its canonical shape, introduced by WHERE or AND.
+// hasScopeClause reports whether a query body carries the scope predicate in
+// its canonical shape.
 //
 // Comments are stripped first, so a one-line `-- AND (…)` comment-out reads as
 // unscoped rather than as scoped — the failure direction that matters.
-func hasAuditScopeClause(body string) bool {
+func hasScopeClause(body string) bool {
 	normalized := strings.ToLower(strings.Join(strings.Fields(stripSQLComments(body)), " "))
-	for _, clause := range auditScopeClause {
-		if strings.Contains(normalized, "where "+clause) ||
-			strings.Contains(normalized, "and "+clause) {
-			return true
-		}
-	}
-	return false
+	return scopeClauseRe.MatchString(normalized)
 }
 
 // stripSQLComments removes `--`-to-end-of-line comments. String literals

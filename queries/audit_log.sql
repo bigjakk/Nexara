@@ -6,44 +6,6 @@ VALUES ($1, $2, $3, $4, $5, $6);
 INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details, source, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
--- name: ListAuditLogByCluster :many
-SELECT * FROM audit_log WHERE cluster_id = $1 ORDER BY created_at DESC LIMIT $2;
-
--- name: ListAuditLog :many
-SELECT * FROM audit_log ORDER BY created_at DESC LIMIT $1 OFFSET $2;
-
--- name: ListAuditLogFiltered :many
-SELECT * FROM audit_log
-WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
-  AND (sqlc.narg('resource_type')::text IS NULL OR resource_type = sqlc.narg('resource_type'))
-ORDER BY created_at DESC
-LIMIT $1 OFFSET $2;
-
--- name: ListAuditLogEnriched :many
-SELECT
-  a.id,
-  a.cluster_id,
-  a.user_id,
-  a.resource_type,
-  a.resource_id,
-  a.action,
-  a.details,
-  a.created_at,
-  a.source,
-  u.email AS user_email,
-  u.display_name AS user_display_name,
-  COALESCE(c.name, '') AS cluster_name,
-  COALESCE(v.vmid, 0) AS resource_vmid,
-  COALESCE(v.name, '') AS resource_name
-FROM audit_log a
-LEFT JOIN users u ON u.id = a.user_id
-LEFT JOIN clusters c ON c.id = a.cluster_id
-LEFT JOIN vms v ON v.id::text = a.resource_id
-WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluster_id'))
-  AND (sqlc.narg('resource_type')::text IS NULL OR a.resource_type = sqlc.narg('resource_type'))
-ORDER BY a.created_at DESC
-LIMIT $1 OFFSET $2;
-
 -- ListRecentAuditLogEnriched backs the dashboard activity feed. It takes the
 -- caller's view:audit scope (see the accessible_cluster_ids note on
 -- ListAuditLogAdvanced) rather than trimming afterwards: LIMIT 50 applied
@@ -78,11 +40,6 @@ WHERE (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
 ORDER BY a.created_at DESC
 LIMIT 50;
 
--- name: CountAuditLog :one
-SELECT count(*) FROM audit_log
-WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
-  AND (sqlc.narg('resource_type')::text IS NULL OR resource_type = sqlc.narg('resource_type'));
-
 -- ListAuditLogAdvanced backs the audit log page and the CSV/JSON/syslog export:
 -- the optional cluster/type/user/action/source/time filters plus offset
 -- pagination. accessible_cluster_ids carries the caller's view:audit RBAC
@@ -96,8 +53,8 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_
 -- — for a NULL cluster_id, so this one clause already excludes those rows from
 -- a scoped caller. Do NOT "repair" it into
 -- `(a.cluster_id IS NULL OR a.cluster_id = ANY(...))`: that hands every global
--- entry to every cluster-scoped user. TestAuditScopeSQL_ExcludesNullCluster
--- pins both halves.
+-- entry to every cluster-scoped user. TestScopeSQL_ScopedClausesExcludeNullCluster
+-- pins the shape, and TestAuditScope_NullClusterRowsAreGlobal the behaviour.
 -- name: ListAuditLogAdvanced :many
 SELECT
   a.id,
