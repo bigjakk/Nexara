@@ -40,7 +40,12 @@ export function useCreateAlertRule() {
 export function useUpdateAlertRule() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: AlertRuleRequest & { id: string }) =>
+    // The backend merges the PUT body field by field: omitted fields keep
+    // their stored values. A present numeric/boolean zero IS applied (a
+    // placeholder threshold: 0 would zero the rule's real threshold), while
+    // empty strings are treated as absent, not as clears. Send only the
+    // fields actually being changed.
+    mutationFn: ({ id, ...data }: Partial<AlertRuleRequest> & { id: string }) =>
       apiClient.put<AlertRule>(`/api/v1/alert-rules/${id}`, data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["alert-rules"] });

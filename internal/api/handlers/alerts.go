@@ -567,6 +567,143 @@ func (h *AlertHandler) GetRule(c fiber.Ctx) error {
 	return c.JSON(toAlertRuleResponse(rule))
 }
 
+// mergeAlertRuleUpdate validates a partial update request and merges it onto
+// the existing rule. Absent fields — empty strings, nil pointers, empty
+// escalation chain — keep the stored values, so a body of just
+// {"enabled":false} (the UI enable/disable toggle) must not disturb the
+// threshold or anything else. A present zero is applied: {"threshold":0}
+// really sets 0.
+func mergeAlertRuleUpdate(existing db.AlertRule, req createAlertRuleRequest) (db.UpdateAlertRuleParams, error) {
+	var zero db.UpdateAlertRuleParams
+
+	name := existing.Name
+	if req.Name != "" {
+		if len(req.Name) > maxNameLen {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Name must be <= 255 characters")
+		}
+		name = req.Name
+	}
+	description := existing.Description
+	if req.Description != "" {
+		if len(req.Description) > maxDescriptionLen {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Description must be <= 1024 characters")
+		}
+		description = req.Description
+	}
+	enabled := existing.Enabled
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	severity := existing.Severity
+	if req.Severity != "" {
+		if !validSeveritiesAlert[req.Severity] {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid severity")
+		}
+		severity = req.Severity
+	}
+	metric := existing.Metric
+	if req.Metric != "" {
+		if !notifications.ValidMetric(req.Metric) {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid metric")
+		}
+		metric = req.Metric
+	}
+	operator := existing.Operator
+	if req.Operator != "" {
+		if !validOperators[req.Operator] {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid operator")
+		}
+		operator = req.Operator
+	}
+	threshold := existing.Threshold
+	if req.Threshold != nil {
+		threshold = *req.Threshold
+	}
+	durationSeconds := existing.DurationSeconds
+	if req.DurationSeconds != nil {
+		if *req.DurationSeconds < 0 || *req.DurationSeconds > maxDurationSec {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "duration_seconds must be between 0 and 86400")
+		}
+		durationSeconds = *req.DurationSeconds
+	}
+	scopeType := existing.ScopeType
+	if req.ScopeType != "" {
+		if !validScopeTypes[req.ScopeType] {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid scope_type")
+		}
+		scopeType = req.ScopeType
+	}
+	// Checked on the MERGED values: either side of the pair can arrive via
+	// this update while the other comes from the existing row.
+	if metric == "snapshot_age_days" && scopeType == "node" {
+		return zero, fiber.NewError(fiber.StatusBadRequest, "snapshot_age_days supports cluster or vm scope")
+	}
+	cooldownSeconds := existing.CooldownSeconds
+	if req.CooldownSeconds != nil {
+		if *req.CooldownSeconds < 0 || *req.CooldownSeconds > maxCooldownSec {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "cooldown_seconds must be between 0 and 604800")
+		}
+		cooldownSeconds = *req.CooldownSeconds
+	}
+	escalationChain := existing.EscalationChain
+	if len(req.EscalationChain) > 0 {
+		if err := validateEscalationChain(req.EscalationChain); err != nil {
+			return zero, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid escalation_chain: %v", err))
+		}
+		escalationChain = req.EscalationChain
+	}
+	messageTemplate := existing.MessageTemplate
+	if req.MessageTemplate != "" {
+		if len(req.MessageTemplate) > maxTemplateLen {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "message_template must be <= 4096 characters")
+		}
+		messageTemplate = req.MessageTemplate
+	}
+
+	clusterID := existing.ClusterID
+	if req.ClusterID != "" {
+		cid, parseErr := uuid.Parse(req.ClusterID)
+		if parseErr != nil {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+		}
+		clusterID = pgtype.UUID{Bytes: cid, Valid: true}
+	}
+	nodeID := existing.NodeID
+	if req.NodeID != "" {
+		nid, parseErr := uuid.Parse(req.NodeID)
+		if parseErr != nil {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid node_id")
+		}
+		nodeID = pgtype.UUID{Bytes: nid, Valid: true}
+	}
+	vmVmid := existing.VmVmid
+	if req.VMVmid != nil {
+		if *req.VMVmid <= 0 {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "vm_vmid must be a positive Proxmox VMID")
+		}
+		vmVmid = pgtype.Int4{Int32: *req.VMVmid, Valid: true}
+	}
+
+	return db.UpdateAlertRuleParams{
+		ID:              existing.ID,
+		Name:            name,
+		Description:     description,
+		Enabled:         enabled,
+		Severity:        severity,
+		Metric:          metric,
+		Operator:        operator,
+		Threshold:       threshold,
+		DurationSeconds: durationSeconds,
+		ScopeType:       scopeType,
+		ClusterID:       clusterID,
+		NodeID:          nodeID,
+		VmVmid:          vmVmid,
+		CooldownSeconds: cooldownSeconds,
+		EscalationChain: escalationChain,
+		MessageTemplate: messageTemplate,
+	}, nil
+}
+
 // UpdateRule updates an existing alert rule.
 func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
@@ -603,133 +740,12 @@ func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 		}
 	}
 
-	// Apply defaults from existing.
-	name := existing.Name
-	if req.Name != "" {
-		if len(req.Name) > maxNameLen {
-			return fiber.NewError(fiber.StatusBadRequest, "Name must be <= 255 characters")
-		}
-		name = req.Name
-	}
-	description := existing.Description
-	if req.Description != "" {
-		if len(req.Description) > maxDescriptionLen {
-			return fiber.NewError(fiber.StatusBadRequest, "Description must be <= 1024 characters")
-		}
-		description = req.Description
-	}
-	enabled := existing.Enabled
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
-	severity := existing.Severity
-	if req.Severity != "" {
-		if !validSeveritiesAlert[req.Severity] {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid severity")
-		}
-		severity = req.Severity
-	}
-	metric := existing.Metric
-	if req.Metric != "" {
-		if !notifications.ValidMetric(req.Metric) {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid metric")
-		}
-		metric = req.Metric
-	}
-	operator := existing.Operator
-	if req.Operator != "" {
-		if !validOperators[req.Operator] {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid operator")
-		}
-		operator = req.Operator
-	}
-	threshold := existing.Threshold
-	if req.Threshold != nil {
-		threshold = *req.Threshold
-	}
-	durationSeconds := existing.DurationSeconds
-	if req.DurationSeconds != nil {
-		if *req.DurationSeconds < 0 || *req.DurationSeconds > maxDurationSec {
-			return fiber.NewError(fiber.StatusBadRequest, "duration_seconds must be between 0 and 86400")
-		}
-		durationSeconds = *req.DurationSeconds
-	}
-	scopeType := existing.ScopeType
-	if req.ScopeType != "" {
-		if !validScopeTypes[req.ScopeType] {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid scope_type")
-		}
-		scopeType = req.ScopeType
-	}
-	// Checked on the MERGED values: either side of the pair can arrive via
-	// this update while the other comes from the existing row.
-	if metric == "snapshot_age_days" && scopeType == "node" {
-		return fiber.NewError(fiber.StatusBadRequest, "snapshot_age_days supports cluster or vm scope")
-	}
-	cooldownSeconds := existing.CooldownSeconds
-	if req.CooldownSeconds != nil {
-		if *req.CooldownSeconds < 0 || *req.CooldownSeconds > maxCooldownSec {
-			return fiber.NewError(fiber.StatusBadRequest, "cooldown_seconds must be between 0 and 604800")
-		}
-		cooldownSeconds = *req.CooldownSeconds
-	}
-	escalationChain := existing.EscalationChain
-	if len(req.EscalationChain) > 0 {
-		if err := validateEscalationChain(req.EscalationChain); err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid escalation_chain: %v", err))
-		}
-		escalationChain = req.EscalationChain
-	}
-	messageTemplate := existing.MessageTemplate
-	if req.MessageTemplate != "" {
-		if len(req.MessageTemplate) > maxTemplateLen {
-			return fiber.NewError(fiber.StatusBadRequest, "message_template must be <= 4096 characters")
-		}
-		messageTemplate = req.MessageTemplate
+	params, err := mergeAlertRuleUpdate(existing, req)
+	if err != nil {
+		return err
 	}
 
-	clusterID := existing.ClusterID
-	if req.ClusterID != "" {
-		cid, parseErr := uuid.Parse(req.ClusterID)
-		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
-		}
-		clusterID = pgtype.UUID{Bytes: cid, Valid: true}
-	}
-	nodeID := existing.NodeID
-	if req.NodeID != "" {
-		nid, parseErr := uuid.Parse(req.NodeID)
-		if parseErr != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid node_id")
-		}
-		nodeID = pgtype.UUID{Bytes: nid, Valid: true}
-	}
-	vmVmid := existing.VmVmid
-	if req.VMVmid != nil {
-		if *req.VMVmid <= 0 {
-			return fiber.NewError(fiber.StatusBadRequest, "vm_vmid must be a positive Proxmox VMID")
-		}
-		vmVmid = pgtype.Int4{Int32: *req.VMVmid, Valid: true}
-	}
-
-	rule, err := h.queries.UpdateAlertRule(c.Context(), db.UpdateAlertRuleParams{
-		ID:              id,
-		Name:            name,
-		Description:     description,
-		Enabled:         enabled,
-		Severity:        severity,
-		Metric:          metric,
-		Operator:        operator,
-		Threshold:       threshold,
-		DurationSeconds: durationSeconds,
-		ScopeType:       scopeType,
-		ClusterID:       clusterID,
-		NodeID:          nodeID,
-		VmVmid:          vmVmid,
-		CooldownSeconds: cooldownSeconds,
-		EscalationChain: escalationChain,
-		MessageTemplate: messageTemplate,
-	})
+	rule, err := h.queries.UpdateAlertRule(c.Context(), params)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update alert rule")
 	}

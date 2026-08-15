@@ -24,7 +24,7 @@ export function AlertRulesTable() {
   const canManage = hasPermission("manage", "alert");
 
   const toggleEnabled = (id: string, currentEnabled: boolean) => {
-    updateMutation.mutate({ id, name: "", metric: "", operator: "", threshold: 0, enabled: !currentEnabled });
+    updateMutation.mutate({ id, enabled: !currentEnabled });
   };
 
   return (
@@ -85,6 +85,7 @@ export function AlertRulesTable() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    aria-label={rule.enabled ? "Disable rule" : "Enable rule"}
                     onClick={() => { toggleEnabled(rule.id, rule.enabled); }}
                     disabled={updateMutation.isPending}
                   >
@@ -105,6 +106,7 @@ export function AlertRulesTable() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    aria-label="Delete rule"
                     onClick={() => { deleteMutation.mutate(rule.id); }}
                     disabled={deleteMutation.isPending}
                   >
