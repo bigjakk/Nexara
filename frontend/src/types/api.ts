@@ -462,7 +462,9 @@ export interface AlertRuleRequest {
   scope_type?: "cluster" | "node" | "vm" | undefined;
   cluster_id?: string | undefined;
   node_id?: string | undefined;
-  vm_id?: string | undefined;
+  // Stable Proxmox VMID, matching the response type — the backend binds
+  // vm_vmid and ignores anything else, so a vm_id here would be dropped.
+  vm_vmid?: number | undefined;
   cooldown_seconds?: number | undefined;
   escalation_chain?: EscalationStep[] | undefined;
   message_template?: string | undefined;

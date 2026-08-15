@@ -259,9 +259,15 @@ var validChannelTypes = map[string]bool{
 	"pagerduty": true, "teams": true, "telegram": true,
 }
 
+// createAlertRuleRequest is the body of both POST and PUT. On an update every
+// absent field keeps its stored value, so the free-text fields a caller may
+// legitimately want to blank out are pointers: "" on a bare string is
+// indistinguishable from absent, which left a rule's custom message_template
+// impossible to clear (and "" is the sentinel the engine reads as "use the
+// built-in message").
 type createAlertRuleRequest struct {
 	Name            string          `json:"name"`
-	Description     string          `json:"description"`
+	Description     *string         `json:"description"`
 	Enabled         *bool           `json:"enabled"`
 	Severity        string          `json:"severity"`
 	Metric          string          `json:"metric"`
@@ -274,7 +280,7 @@ type createAlertRuleRequest struct {
 	VMVmid          *int32          `json:"vm_vmid"`
 	CooldownSeconds *int32          `json:"cooldown_seconds"`
 	EscalationChain json.RawMessage `json:"escalation_chain"`
-	MessageTemplate string          `json:"message_template"`
+	MessageTemplate *string         `json:"message_template"`
 }
 
 const maxTemplateLen = 4096
@@ -400,6 +406,247 @@ func (h *AlertHandler) ListRules(c fiber.Ctx) error {
 	return c.JSON(result)
 }
 
+// alertRuleScope is an alert rule's resolved scope: the scope type plus the
+// binding columns the engine selects on for that type.
+type alertRuleScope struct {
+	ScopeType string
+	ClusterID pgtype.UUID
+	NodeID    pgtype.UUID
+	VMVmid    pgtype.Int4
+}
+
+// alertRuleFields is the fully-merged view of a rule that both the create and
+// the update path validate. Create and update used to carry their own copies
+// of these checks and had already drifted — vm_vmid's cluster requirement was
+// enforced on POST only — so the merged values go through one validator.
+type alertRuleFields struct {
+	Name            string
+	Description     string
+	Severity        string
+	Metric          string
+	Operator        string
+	DurationSeconds int32
+	CooldownSeconds int32
+	MessageTemplate string
+	EscalationChain json.RawMessage
+	Scope           alertRuleScope
+}
+
+// validateAlertRuleFields checks everything that does not depend on resolved
+// UUIDs. Callers pass merged values, so an update that changes one half of a
+// constrained pair is checked against the stored other half.
+func validateAlertRuleFields(f alertRuleFields) error {
+	if len(f.Name) > maxNameLen {
+		return fiber.NewError(fiber.StatusBadRequest, "Name must be <= 255 characters")
+	}
+	if len(f.Description) > maxDescriptionLen {
+		return fiber.NewError(fiber.StatusBadRequest, "Description must be <= 1024 characters")
+	}
+	if !validSeveritiesAlert[f.Severity] {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid severity")
+	}
+	if !notifications.ValidMetric(f.Metric) {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid metric")
+	}
+	if !validOperators[f.Operator] {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid operator")
+	}
+	if f.DurationSeconds < 0 || f.DurationSeconds > maxDurationSec {
+		return fiber.NewError(fiber.StatusBadRequest, "duration_seconds must be between 0 and 86400")
+	}
+	if f.CooldownSeconds < 0 || f.CooldownSeconds > maxCooldownSec {
+		return fiber.NewError(fiber.StatusBadRequest, "cooldown_seconds must be between 0 and 604800")
+	}
+	if len(f.MessageTemplate) > maxTemplateLen {
+		return fiber.NewError(fiber.StatusBadRequest, "message_template must be <= 4096 characters")
+	}
+	if len(f.EscalationChain) > 0 {
+		if err := validateEscalationChain(f.EscalationChain); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid escalation_chain: %v", err))
+		}
+	}
+	if !validScopeTypes[f.Scope.ScopeType] {
+		return fiber.NewError(fiber.StatusBadRequest, "Invalid scope_type")
+	}
+	if f.Metric == "snapshot_age_days" && f.Scope.ScopeType == "node" {
+		// The snapshot inventory is keyed per guest; a node scope would need
+		// a placement join against churning data for marginal value.
+		return fiber.NewError(fiber.StatusBadRequest, "snapshot_age_days supports cluster or vm scope")
+	}
+	return nil
+}
+
+// normalizeAlertRuleScope drops the bindings a scope type does not select on.
+// Rescoping used to leave the old binding in the row: a vm rule changed to
+// cluster scope kept its vm_vmid, which the engine then stamped onto every
+// alert it raised, so cluster-wide alerts were filed under whichever guest the
+// rule used to watch. Clearing here is also the only way to drop a vm_vmid or
+// node_id, neither of which has an "empty" value on the wire.
+func normalizeAlertRuleScope(s alertRuleScope) alertRuleScope {
+	switch s.ScopeType {
+	case "cluster":
+		s.NodeID = pgtype.UUID{}
+		s.VMVmid = pgtype.Int4{}
+	case "node":
+		s.VMVmid = pgtype.Int4{}
+	case "vm":
+		s.NodeID = pgtype.UUID{}
+	}
+	return s
+}
+
+// validateAlertRuleScope requires the binding each scope type evaluates on.
+// evaluateRule errors out for a rule missing its binding, once per tick and
+// forever, so a rule accepted without one silently never fires.
+func validateAlertRuleScope(s alertRuleScope) error {
+	switch s.ScopeType {
+	case "cluster":
+		if !s.ClusterID.Valid {
+			return fiber.NewError(fiber.StatusBadRequest, "cluster scope requires cluster_id")
+		}
+	case "node":
+		if !s.NodeID.Valid {
+			return fiber.NewError(fiber.StatusBadRequest, "node scope requires node_id")
+		}
+	case "vm":
+		// VM scope keys on the stable (cluster_id, vmid) identity. The guest
+		// is allowed to not exist yet — the rule binds to the inventory slot
+		// and the engine starts evaluating when the VMID appears.
+		if !s.ClusterID.Valid {
+			return fiber.NewError(fiber.StatusBadRequest, "vm scope requires cluster_id")
+		}
+		if !s.VMVmid.Valid {
+			return fiber.NewError(fiber.StatusBadRequest, "vm scope requires vm_vmid")
+		}
+	}
+	return nil
+}
+
+// alertRuleScopeTouched reports whether a request carries any scope field.
+// Updates re-check the scope only when it does: rules stored before these
+// checks existed may hold an incoherent scope, and a body that just flips
+// `enabled` (the UI toggle) has to keep working against them.
+func alertRuleScopeTouched(req createAlertRuleRequest) bool {
+	return req.ScopeType != "" || req.ClusterID != "" || req.NodeID != "" || req.VMVmid != nil
+}
+
+// resolveNodeCluster looks up a node and authorizes the caller against the
+// cluster that owns it. The owning cluster is the authority for anything
+// pinned to a node: checking only the request's cluster_id let a caller who
+// manages cluster A point a rule at a node in cluster B and read B's metrics
+// and hostname back out of the alerts it raised.
+func resolveNodeCluster(c fiber.Ctx, queries *db.Queries, nodeID uuid.UUID, resource string) (uuid.UUID, error) {
+	node, err := queries.GetNode(c.Context(), nodeID)
+	if err != nil {
+		return uuid.Nil, fiber.NewError(fiber.StatusBadRequest, "Unknown node_id")
+	}
+	// Pinning something to a node is always a manage operation on the cluster
+	// that owns it.
+	if err := requireClusterPerm(c, "manage", resource, node.ClusterID); err != nil {
+		return uuid.Nil, err
+	}
+	return node.ClusterID, nil
+}
+
+// resolveAlertRuleScope merges the request's scope fields onto a base scope —
+// zero for a create, the stored row for an update — and authorizes the result.
+// Binding to a node adopts that node's cluster, so the rule always lands in a
+// cluster the caller was checked against.
+//
+// recheckInherited re-authorizes a node the request did not itself supply; see
+// the block at the end for when a caller must ask for that.
+//
+// On error the returned scope is zero: a partially merged one has had the
+// node's cluster written into it, and no caller should act on that.
+func (h *AlertHandler) resolveAlertRuleScope(c fiber.Ctx, base alertRuleScope, req createAlertRuleRequest, recheckInherited bool) (alertRuleScope, error) {
+	var zero alertRuleScope
+
+	s := base
+	if req.ScopeType != "" {
+		s.ScopeType = req.ScopeType
+	}
+
+	clusterFromRequest := false
+	if req.ClusterID != "" {
+		cid, err := uuid.Parse(req.ClusterID)
+		if err != nil {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+		}
+		// Reassigning to a different cluster also needs manage:alert there.
+		if !s.ClusterID.Valid || uuid.UUID(s.ClusterID.Bytes) != cid {
+			if err := requireClusterPerm(c, "manage", "alert", cid); err != nil {
+				return zero, err
+			}
+		}
+		s.ClusterID = ClusterUUID(cid)
+		clusterFromRequest = true
+	}
+
+	if req.NodeID != "" {
+		nid, err := uuid.Parse(req.NodeID)
+		if err != nil {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid node_id")
+		}
+		owner, err := resolveNodeCluster(c, h.queries, nid, "alert")
+		if err != nil {
+			return zero, err
+		}
+		if clusterFromRequest && uuid.UUID(s.ClusterID.Bytes) != owner {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "node_id belongs to a different cluster than cluster_id")
+		}
+		// The node's cluster wins over the stored one: re-pinning a rule to a
+		// node in another cluster moves the rule there, and both clusters have
+		// been permission-checked by the time we get here.
+		s.ClusterID = ClusterUUID(owner)
+		s.NodeID = pgtype.UUID{Bytes: nid, Valid: true}
+	}
+
+	if req.VMVmid != nil {
+		if *req.VMVmid <= 0 {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "vm_vmid must be a positive Proxmox VMID")
+		}
+		s.VMVmid = pgtype.Int4{Int32: *req.VMVmid, Valid: true}
+	}
+
+	if err := validateAlertRuleBindings(req, s.ScopeType); err != nil {
+		return zero, err
+	}
+
+	// An INHERITED node binding — one the request did not supply — is only as
+	// trustworthy as the row it came from, and a row written before these
+	// checks existed may point at a node in another cluster. Re-authorize it
+	// whenever the caller asks, which is whenever the update leaves the rule
+	// live: otherwise "enable it" or "set the threshold to 0" would arm a
+	// probe reporting cluster B's node telemetry into cluster A's alerts.
+	if req.NodeID == "" && s.ScopeType == "node" && s.NodeID.Valid && recheckInherited {
+		owner, err := resolveNodeCluster(c, h.queries, uuid.UUID(s.NodeID.Bytes), "alert")
+		if err != nil {
+			return zero, err
+		}
+		if s.ClusterID.Valid && uuid.UUID(s.ClusterID.Bytes) != owner {
+			return zero, fiber.NewError(fiber.StatusBadRequest, "the rule's node_id belongs to a different cluster")
+		}
+		s.ClusterID = ClusterUUID(owner)
+	}
+
+	return s, nil
+}
+
+// validateAlertRuleBindings rejects a binding the merged scope does not select
+// on. normalizeAlertRuleScope drops STORED bindings a rescope leaves behind,
+// but quietly dropping one the caller just sent would answer 200 to a request
+// we did not honour — and for a node_id that would also move the rule to the
+// node's cluster while discarding the node itself.
+func validateAlertRuleBindings(req createAlertRuleRequest, scopeType string) error {
+	if req.NodeID != "" && scopeType != "node" {
+		return fiber.NewError(fiber.StatusBadRequest, "node_id is only valid for node scope")
+	}
+	if req.VMVmid != nil && scopeType != "vm" {
+		return fiber.NewError(fiber.StatusBadRequest, "vm_vmid is only valid for vm scope")
+	}
+	return nil
+}
+
 // CreateRule creates a new alert rule.
 func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 	var req createAlertRuleRequest
@@ -407,139 +654,121 @@ func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	// Permission check defers until we know the rule's cluster (or lack thereof,
-	// for a global rule). Validation that doesn't depend on RBAC runs first below;
-	// the actual auth gate is right before we parse cluster_id from the request.
-
-	if req.Name == "" || len(req.Name) > maxNameLen {
-		return fiber.NewError(fiber.StatusBadRequest, "Name is required and must be <= 255 characters")
-	}
-	if len(req.Description) > maxDescriptionLen {
-		return fiber.NewError(fiber.StatusBadRequest, "Description must be <= 1024 characters")
-	}
-	if !notifications.ValidMetric(req.Metric) {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid metric")
-	}
-	if !validOperators[req.Operator] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid operator")
+	// Required on create only: an update leaves an absent field alone, but a
+	// new rule has no stored value to fall back to.
+	if req.Name == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "Name is required")
 	}
 	if req.Threshold == nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Threshold is required")
 	}
+
 	if req.Severity == "" {
 		req.Severity = "warning"
-	}
-	if !validSeveritiesAlert[req.Severity] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid severity")
 	}
 	if req.ScopeType == "" {
 		req.ScopeType = "cluster"
 	}
-	if !validScopeTypes[req.ScopeType] {
-		return fiber.NewError(fiber.StatusBadRequest, "Invalid scope_type")
-	}
-	if req.Metric == "snapshot_age_days" && req.ScopeType == "node" {
-		// The snapshot inventory is keyed per guest; a node scope would need
-		// a placement join against churning data for marginal value.
-		return fiber.NewError(fiber.StatusBadRequest, "snapshot_age_days supports cluster or vm scope")
-	}
-
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
 	durationSeconds := int32(300)
 	if req.DurationSeconds != nil {
-		if *req.DurationSeconds < 0 || *req.DurationSeconds > maxDurationSec {
-			return fiber.NewError(fiber.StatusBadRequest, "duration_seconds must be between 0 and 86400")
-		}
 		durationSeconds = *req.DurationSeconds
 	}
 	cooldownSeconds := int32(3600)
 	if req.CooldownSeconds != nil {
-		if *req.CooldownSeconds < 0 || *req.CooldownSeconds > maxCooldownSec {
-			return fiber.NewError(fiber.StatusBadRequest, "cooldown_seconds must be between 0 and 604800")
-		}
 		cooldownSeconds = *req.CooldownSeconds
 	}
 	escalationChain := json.RawMessage("[]")
 	if len(req.EscalationChain) > 0 {
-		if err := validateEscalationChain(req.EscalationChain); err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid escalation_chain: %v", err))
-		}
 		escalationChain = req.EscalationChain
 	}
-	if len(req.MessageTemplate) > maxTemplateLen {
-		return fiber.NewError(fiber.StatusBadRequest, "message_template must be <= 4096 characters")
+	description := ""
+	if req.Description != nil {
+		description = *req.Description
+	}
+	messageTemplate := ""
+	if req.MessageTemplate != nil {
+		messageTemplate = *req.MessageTemplate
 	}
 
-	var clusterID, nodeID pgtype.UUID
-	var vmVmid pgtype.Int4
-	if req.ClusterID != "" {
-		cid, err := uuid.Parse(req.ClusterID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
-		}
-		clusterID = pgtype.UUID{Bytes: cid, Valid: true}
-		if err := requireClusterPerm(c, "manage", "alert", cid); err != nil {
-			return err
-		}
-	} else {
-		// Global rule — require global manage:alert.
+	// This route carries no RBAC middleware, so every path below has to reach a
+	// permission check before it touches the database. Naming the cluster makes
+	// that possible for a node-scoped create: resolveAlertRuleScope checks
+	// manage:alert on the named cluster before it looks the node up, so an
+	// unauthorized caller never learns from "Unknown node_id" versus 403
+	// whether a node UUID exists. Updates are already gated on the stored rule.
+	if req.NodeID != "" && req.ClusterID == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "node scope requires cluster_id")
+	}
+	if req.ClusterID == "" && req.NodeID == "" {
+		// Names no cluster at all. The scope check below rejects such a rule —
+		// every scope type needs a binding and the engine could never evaluate
+		// one — but an unauthorized caller must not get that far.
 		if err := requirePerm(c, "manage", "alert"); err != nil {
 			return err
 		}
 	}
-	if req.NodeID != "" {
-		nid, err := uuid.Parse(req.NodeID)
-		if err != nil {
-			return fiber.NewError(fiber.StatusBadRequest, "Invalid node_id")
-		}
-		nodeID = pgtype.UUID{Bytes: nid, Valid: true}
+
+	// Resolving the scope carries the real RBAC gate: a cluster_id is checked
+	// against manage:alert on that cluster, a node_id against the cluster that
+	// owns the node. Every scope type resolves to a cluster — a node binding
+	// adopts its node's — so a rule with none is rejected by the scope check
+	// below; the engine could never evaluate one anyway. Rows with a NULL
+	// cluster predating this still load, list, and update normally.
+	// recheckInherited is moot on create: the base scope carries no node, so
+	// the only node in play is the one this request supplies and resolves.
+	scope, err := h.resolveAlertRuleScope(c, alertRuleScope{ScopeType: req.ScopeType}, req, true)
+	if err != nil {
+		return err
 	}
-	if req.VMVmid != nil {
-		// VM scope keys on the stable (cluster_id, vmid) identity. The guest
-		// is allowed to not exist yet — the rule binds to the inventory slot
-		// and the engine starts evaluating when the VMID appears.
-		if *req.VMVmid <= 0 {
-			return fiber.NewError(fiber.StatusBadRequest, "vm_vmid must be a positive Proxmox VMID")
-		}
-		if !clusterID.Valid {
-			return fiber.NewError(fiber.StatusBadRequest, "vm_vmid requires cluster_id")
-		}
-		vmVmid = pgtype.Int4{Int32: *req.VMVmid, Valid: true}
+	scope = normalizeAlertRuleScope(scope)
+	if err := validateAlertRuleScope(scope); err != nil {
+		return err
+	}
+
+	if err := validateAlertRuleFields(alertRuleFields{
+		Name:            req.Name,
+		Description:     description,
+		Severity:        req.Severity,
+		Metric:          req.Metric,
+		Operator:        req.Operator,
+		DurationSeconds: durationSeconds,
+		CooldownSeconds: cooldownSeconds,
+		MessageTemplate: messageTemplate,
+		EscalationChain: escalationChain,
+		Scope:           scope,
+	}); err != nil {
+		return err
 	}
 
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	rule, err := h.queries.InsertAlertRule(c.Context(), db.InsertAlertRuleParams{
 		Name:            req.Name,
-		Description:     req.Description,
+		Description:     description,
 		Enabled:         enabled,
 		Severity:        req.Severity,
 		Metric:          req.Metric,
 		Operator:        req.Operator,
 		Threshold:       *req.Threshold,
 		DurationSeconds: durationSeconds,
-		ScopeType:       req.ScopeType,
-		ClusterID:       clusterID,
-		NodeID:          nodeID,
-		VmVmid:          vmVmid,
+		ScopeType:       scope.ScopeType,
+		ClusterID:       scope.ClusterID,
+		NodeID:          scope.NodeID,
+		VmVmid:          scope.VMVmid,
 		CooldownSeconds: cooldownSeconds,
 		EscalationChain: escalationChain,
 		CreatedBy:       userID,
-		MessageTemplate: req.MessageTemplate,
+		MessageTemplate: messageTemplate,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create alert rule")
 	}
 
-	if clusterID.Valid {
-		cid, _ := uuid.FromBytes(clusterID.Bytes[:])
-		AuditLog(c, h.queries, h.eventPub, ClusterUUID(cid), "alert_rule", rule.ID.String(), "alert_rule_created", nil)
-	} else {
-		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert_rule", rule.ID.String(), "alert_rule_created", nil)
-	}
+	AuditLog(c, h.queries, h.eventPub, rule.ClusterID, "alert_rule", rule.ID.String(), "alert_rule_created", nil)
 
 	return c.Status(fiber.StatusCreated).JSON(toAlertRuleResponse(rule))
 }
@@ -567,28 +796,25 @@ func (h *AlertHandler) GetRule(c fiber.Ctx) error {
 	return c.JSON(toAlertRuleResponse(rule))
 }
 
-// mergeAlertRuleUpdate validates a partial update request and merges it onto
-// the existing rule. Absent fields — empty strings, nil pointers, empty
-// escalation chain — keep the stored values, so a body of just
+// mergeAlertRuleUpdate merges a partial update onto the existing rule and
+// validates the result. Absent fields — empty strings, nil pointers, an empty
+// escalation chain — keep their stored values, so a body of just
 // {"enabled":false} (the UI enable/disable toggle) must not disturb the
 // threshold or anything else. A present zero is applied: {"threshold":0}
-// really sets 0.
-func mergeAlertRuleUpdate(existing db.AlertRule, req createAlertRuleRequest) (db.UpdateAlertRuleParams, error) {
+// really sets 0, and "" on a pointer field really clears it.
+//
+// scope arrives already resolved and authorized (resolveAlertRuleScope), which
+// keeps this function pure and testable without a database.
+func mergeAlertRuleUpdate(existing db.AlertRule, req createAlertRuleRequest, scope alertRuleScope) (db.UpdateAlertRuleParams, error) {
 	var zero db.UpdateAlertRuleParams
 
 	name := existing.Name
 	if req.Name != "" {
-		if len(req.Name) > maxNameLen {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "Name must be <= 255 characters")
-		}
 		name = req.Name
 	}
 	description := existing.Description
-	if req.Description != "" {
-		if len(req.Description) > maxDescriptionLen {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "Description must be <= 1024 characters")
-		}
-		description = req.Description
+	if req.Description != nil {
+		description = *req.Description
 	}
 	enabled := existing.Enabled
 	if req.Enabled != nil {
@@ -596,23 +822,14 @@ func mergeAlertRuleUpdate(existing db.AlertRule, req createAlertRuleRequest) (db
 	}
 	severity := existing.Severity
 	if req.Severity != "" {
-		if !validSeveritiesAlert[req.Severity] {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid severity")
-		}
 		severity = req.Severity
 	}
 	metric := existing.Metric
 	if req.Metric != "" {
-		if !notifications.ValidMetric(req.Metric) {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid metric")
-		}
 		metric = req.Metric
 	}
 	operator := existing.Operator
 	if req.Operator != "" {
-		if !validOperators[req.Operator] {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid operator")
-		}
 		operator = req.Operator
 	}
 	threshold := existing.Threshold
@@ -621,67 +838,44 @@ func mergeAlertRuleUpdate(existing db.AlertRule, req createAlertRuleRequest) (db
 	}
 	durationSeconds := existing.DurationSeconds
 	if req.DurationSeconds != nil {
-		if *req.DurationSeconds < 0 || *req.DurationSeconds > maxDurationSec {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "duration_seconds must be between 0 and 86400")
-		}
 		durationSeconds = *req.DurationSeconds
-	}
-	scopeType := existing.ScopeType
-	if req.ScopeType != "" {
-		if !validScopeTypes[req.ScopeType] {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid scope_type")
-		}
-		scopeType = req.ScopeType
-	}
-	// Checked on the MERGED values: either side of the pair can arrive via
-	// this update while the other comes from the existing row.
-	if metric == "snapshot_age_days" && scopeType == "node" {
-		return zero, fiber.NewError(fiber.StatusBadRequest, "snapshot_age_days supports cluster or vm scope")
 	}
 	cooldownSeconds := existing.CooldownSeconds
 	if req.CooldownSeconds != nil {
-		if *req.CooldownSeconds < 0 || *req.CooldownSeconds > maxCooldownSec {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "cooldown_seconds must be between 0 and 604800")
-		}
 		cooldownSeconds = *req.CooldownSeconds
 	}
 	escalationChain := existing.EscalationChain
 	if len(req.EscalationChain) > 0 {
-		if err := validateEscalationChain(req.EscalationChain); err != nil {
-			return zero, fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid escalation_chain: %v", err))
-		}
 		escalationChain = req.EscalationChain
 	}
 	messageTemplate := existing.MessageTemplate
-	if req.MessageTemplate != "" {
-		if len(req.MessageTemplate) > maxTemplateLen {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "message_template must be <= 4096 characters")
-		}
-		messageTemplate = req.MessageTemplate
+	if req.MessageTemplate != nil {
+		messageTemplate = *req.MessageTemplate
 	}
 
-	clusterID := existing.ClusterID
-	if req.ClusterID != "" {
-		cid, parseErr := uuid.Parse(req.ClusterID)
-		if parseErr != nil {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id")
+	// Only a request that actually touches the scope has to answer for it:
+	// rules stored before these checks existed may hold an incoherent scope,
+	// and the enable/disable toggle has to keep working against them.
+	if alertRuleScopeTouched(req) {
+		scope = normalizeAlertRuleScope(scope)
+		if err := validateAlertRuleScope(scope); err != nil {
+			return zero, err
 		}
-		clusterID = pgtype.UUID{Bytes: cid, Valid: true}
 	}
-	nodeID := existing.NodeID
-	if req.NodeID != "" {
-		nid, parseErr := uuid.Parse(req.NodeID)
-		if parseErr != nil {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "Invalid node_id")
-		}
-		nodeID = pgtype.UUID{Bytes: nid, Valid: true}
-	}
-	vmVmid := existing.VmVmid
-	if req.VMVmid != nil {
-		if *req.VMVmid <= 0 {
-			return zero, fiber.NewError(fiber.StatusBadRequest, "vm_vmid must be a positive Proxmox VMID")
-		}
-		vmVmid = pgtype.Int4{Int32: *req.VMVmid, Valid: true}
+
+	if err := validateAlertRuleFields(alertRuleFields{
+		Name:            name,
+		Description:     description,
+		Severity:        severity,
+		Metric:          metric,
+		Operator:        operator,
+		DurationSeconds: durationSeconds,
+		CooldownSeconds: cooldownSeconds,
+		MessageTemplate: messageTemplate,
+		EscalationChain: escalationChain,
+		Scope:           scope,
+	}); err != nil {
+		return zero, err
 	}
 
 	return db.UpdateAlertRuleParams{
@@ -694,10 +888,10 @@ func mergeAlertRuleUpdate(existing db.AlertRule, req createAlertRuleRequest) (db
 		Operator:        operator,
 		Threshold:       threshold,
 		DurationSeconds: durationSeconds,
-		ScopeType:       scopeType,
-		ClusterID:       clusterID,
-		NodeID:          nodeID,
-		VmVmid:          vmVmid,
+		ScopeType:       scope.ScopeType,
+		ClusterID:       scope.ClusterID,
+		NodeID:          scope.NodeID,
+		VmVmid:          scope.VMVmid,
 		CooldownSeconds: cooldownSeconds,
 		EscalationChain: escalationChain,
 		MessageTemplate: messageTemplate,
@@ -729,18 +923,29 @@ func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	// If the user is reassigning the rule to a different cluster, also check
-	// manage:alert on the target cluster.
-	if req.ClusterID != "" {
-		cid, perr := uuid.Parse(req.ClusterID)
-		if perr == nil && (!existing.ClusterID.Valid || uuid.UUID(existing.ClusterID.Bytes) != cid) {
-			if err := requireClusterPerm(c, "manage", "alert", cid); err != nil {
-				return err
-			}
-		}
+	// Resolving the scope re-runs the RBAC gate for whatever the request
+	// reassigns: a new cluster_id against that cluster, a node_id against the
+	// cluster that owns the node.
+	//
+	// A stored node binding is re-authorized too, but only when this update
+	// leaves the rule live. Turning a rule off has to stay possible for anyone
+	// who can reach it — that is how an operator stops a bad one — while
+	// enabling or retuning it must answer for the node it points at.
+	staysEnabled := existing.Enabled
+	if req.Enabled != nil {
+		staysEnabled = *req.Enabled
+	}
+	scope, err := h.resolveAlertRuleScope(c, alertRuleScope{
+		ScopeType: existing.ScopeType,
+		ClusterID: existing.ClusterID,
+		NodeID:    existing.NodeID,
+		VMVmid:    existing.VmVmid,
+	}, req, alertRuleScopeTouched(req) || staysEnabled)
+	if err != nil {
+		return err
 	}
 
-	params, err := mergeAlertRuleUpdate(existing, req)
+	params, err := mergeAlertRuleUpdate(existing, req, scope)
 	if err != nil {
 		return err
 	}
@@ -750,7 +955,11 @@ func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update alert rule")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert_rule", id.String(), "alert_rule_updated", nil)
+	// Attribute to the rule's cluster after the merge, so a reassignment lands
+	// in the new cluster's audit log. A cluster-less audit row is readable only
+	// with global view:audit, which would hide the edit from the very operators
+	// who can see the rule.
+	AuditLog(c, h.queries, h.eventPub, rule.ClusterID, "alert_rule", id.String(), "alert_rule_updated", nil)
 
 	return c.JSON(toAlertRuleResponse(rule))
 }
@@ -779,7 +988,7 @@ func (h *AlertHandler) DeleteRule(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete alert rule")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert_rule", id.String(), "alert_rule_deleted", nil)
+	AuditLog(c, h.queries, h.eventPub, existing.ClusterID, "alert_rule", id.String(), "alert_rule_deleted", nil)
 
 	return c.SendStatus(fiber.StatusNoContent)
 }
@@ -1371,6 +1580,13 @@ func (h *AlertHandler) CreateMaintenanceWindow(c fiber.Ctx) error {
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid node_id")
 		}
+		owner, err := resolveNodeCluster(c, h.queries, nid, "maintenance_window")
+		if err != nil {
+			return err
+		}
+		if owner != clusterID {
+			return fiber.NewError(fiber.StatusBadRequest, "node_id belongs to a different cluster")
+		}
 		nodeID = pgtype.UUID{Bytes: nid, Valid: true}
 	}
 
@@ -1454,6 +1670,13 @@ func (h *AlertHandler) UpdateMaintenanceWindow(c fiber.Ctx) error {
 		nid, parseErr := uuid.Parse(req.NodeID)
 		if parseErr != nil {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid node_id")
+		}
+		owner, ownerErr := resolveNodeCluster(c, h.queries, nid, "maintenance_window")
+		if ownerErr != nil {
+			return ownerErr
+		}
+		if owner != clusterID {
+			return fiber.NewError(fiber.StatusBadRequest, "node_id belongs to a different cluster")
 		}
 		nodeID = pgtype.UUID{Bytes: nid, Valid: true}
 	}
