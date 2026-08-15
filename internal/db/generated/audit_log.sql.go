@@ -41,18 +41,25 @@ WHERE ($1::uuid IS NULL OR cluster_id = $1)
   AND ($5::text IS NULL OR source = $5)
   AND ($6::timestamptz IS NULL OR created_at >= $6)
   AND ($7::timestamptz IS NULL OR created_at <= $7)
+  AND ($8::uuid[] IS NULL
+       OR cluster_id = ANY($8::uuid[]))
 `
 
 type CountAuditLogAdvancedParams struct {
-	ClusterID    pgtype.UUID        `json:"cluster_id"`
-	ResourceType pgtype.Text        `json:"resource_type"`
-	UserID       pgtype.UUID        `json:"user_id"`
-	Action       pgtype.Text        `json:"action"`
-	Source       pgtype.Text        `json:"source"`
-	StartTime    pgtype.Timestamptz `json:"start_time"`
-	EndTime      pgtype.Timestamptz `json:"end_time"`
+	ClusterID            pgtype.UUID        `json:"cluster_id"`
+	ResourceType         pgtype.Text        `json:"resource_type"`
+	UserID               pgtype.UUID        `json:"user_id"`
+	Action               pgtype.Text        `json:"action"`
+	Source               pgtype.Text        `json:"source"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	AccessibleClusterIds []uuid.UUID        `json:"accessible_cluster_ids"`
 }
 
+// CountAuditLogAdvanced returns the total matching the same filters, for the
+// audit page pagination. Must stay filter-for-filter in sync with
+// ListAuditLogAdvanced — in particular accessible_cluster_ids, or the Total
+// leaks how many entries the caller's inaccessible clusters hold.
 func (q *Queries) CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAdvancedParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countAuditLogAdvanced,
 		arg.ClusterID,
@@ -62,6 +69,7 @@ func (q *Queries) CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAd
 		arg.Source,
 		arg.StartTime,
 		arg.EndTime,
+		arg.AccessibleClusterIds,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -190,20 +198,23 @@ WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
   AND ($7::text IS NULL OR a.source = $7)
   AND ($8::timestamptz IS NULL OR a.created_at >= $8)
   AND ($9::timestamptz IS NULL OR a.created_at <= $9)
+  AND ($10::uuid[] IS NULL
+       OR a.cluster_id = ANY($10::uuid[]))
 ORDER BY a.created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListAuditLogAdvancedParams struct {
-	Limit        int32              `json:"limit"`
-	Offset       int32              `json:"offset"`
-	ClusterID    pgtype.UUID        `json:"cluster_id"`
-	ResourceType pgtype.Text        `json:"resource_type"`
-	UserID       pgtype.UUID        `json:"user_id"`
-	Action       pgtype.Text        `json:"action"`
-	Source       pgtype.Text        `json:"source"`
-	StartTime    pgtype.Timestamptz `json:"start_time"`
-	EndTime      pgtype.Timestamptz `json:"end_time"`
+	Limit                int32              `json:"limit"`
+	Offset               int32              `json:"offset"`
+	ClusterID            pgtype.UUID        `json:"cluster_id"`
+	ResourceType         pgtype.Text        `json:"resource_type"`
+	UserID               pgtype.UUID        `json:"user_id"`
+	Action               pgtype.Text        `json:"action"`
+	Source               pgtype.Text        `json:"source"`
+	StartTime            pgtype.Timestamptz `json:"start_time"`
+	EndTime              pgtype.Timestamptz `json:"end_time"`
+	AccessibleClusterIds []uuid.UUID        `json:"accessible_cluster_ids"`
 }
 
 type ListAuditLogAdvancedRow struct {
@@ -223,6 +234,21 @@ type ListAuditLogAdvancedRow struct {
 	ResourceName    string          `json:"resource_name"`
 }
 
+// ListAuditLogAdvanced backs the audit log page and the CSV/JSON/syslog export:
+// the optional cluster/type/user/action/source/time filters plus offset
+// pagination. accessible_cluster_ids carries the caller's view:audit RBAC
+// scope: NULL means global access (no restriction); an array restricts rows —
+// and the Total that CountAuditLogAdvanced feeds into pagination — to those
+// clusters ('{}' matches nothing).
+//
+// audit_log.cluster_id is NULLABLE, unlike task_history's. A NULL cluster_id
+// marks a global entry (a settings change, a login) that only a holder of
+// global view:audit may read. `cluster_id = ANY(array)` yields NULL — not true
+// — for a NULL cluster_id, so this one clause already excludes those rows from
+// a scoped caller. Do NOT "repair" it into
+// `(a.cluster_id IS NULL OR a.cluster_id = ANY(...))`: that hands every global
+// entry to every cluster-scoped user. TestAuditScopeSQL_ExcludesNullCluster
+// pins both halves.
 func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error) {
 	rows, err := q.db.Query(ctx, listAuditLogAdvanced,
 		arg.Limit,
@@ -234,6 +260,7 @@ func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdva
 		arg.Source,
 		arg.StartTime,
 		arg.EndTime,
+		arg.AccessibleClusterIds,
 	)
 	if err != nil {
 		return nil, err
@@ -528,6 +555,8 @@ LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
 LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
+WHERE ($1::uuid[] IS NULL
+       OR a.cluster_id = ANY($1::uuid[]))
 ORDER BY a.created_at DESC
 LIMIT 50
 `
@@ -552,8 +581,13 @@ type ListRecentAuditLogEnrichedRow struct {
 	TaskProgress    pgtype.Float8   `json:"task_progress"`
 }
 
-func (q *Queries) ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentAuditLogEnrichedRow, error) {
-	rows, err := q.db.Query(ctx, listRecentAuditLogEnriched)
+// ListRecentAuditLogEnriched backs the dashboard activity feed. It takes the
+// caller's view:audit scope (see the accessible_cluster_ids note on
+// ListAuditLogAdvanced) rather than trimming afterwards: LIMIT 50 applied
+// before the scope would hand a cluster-scoped user whatever survives of the
+// newest 50 global rows — usually far fewer than 50, sometimes none.
+func (q *Queries) ListRecentAuditLogEnriched(ctx context.Context, accessibleClusterIds []uuid.UUID) ([]ListRecentAuditLogEnrichedRow, error) {
+	rows, err := q.db.Query(ctx, listRecentAuditLogEnriched, accessibleClusterIds)
 	if err != nil {
 		return nil, err
 	}

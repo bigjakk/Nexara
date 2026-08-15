@@ -128,23 +128,41 @@ func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow, visible map[string]bo
 	return resp
 }
 
-// parseAuditFilters extracts all filter params from the request query string.
-func (h *AuditHandler) parseAuditFilters(c fiber.Ctx) (db.ListAuditLogAdvancedParams, db.CountAuditLogAdvancedParams, error) {
+// parseAuditFilters extracts all filter params from the request query string
+// and stamps the caller's view:audit cluster scope onto both param structs.
+//
+// The scope is applied here, in the one place both structs are built, rather
+// than left to each caller: List and Export share this function, and params
+// that left it unscoped are the bug being fixed — a Total counting every
+// cluster's entries, and an export silently trimmed to whatever survived a
+// global LIMIT. Stamped before any parse can fail, so no return path — error
+// or not — hands back a struct that would read across clusters.
+//
+// query is false when the caller holds no view:audit grant anywhere. The
+// params are correct regardless ('{}' matches nothing); the flag only lets the
+// caller skip a round-trip that could not come back with a row.
+func (h *AuditHandler) parseAuditFilters(c fiber.Ctx, access clusterAccess) (listP db.ListAuditLogAdvancedParams, countP db.CountAuditLogAdvancedParams, query bool, err error) {
 	limit := fiber.Query[int](c, "limit", 50)
 	offset := fiber.Query[int](c, "offset", 0)
-	if limit > 200 {
+	if limit < 1 {
+		limit = 1
+	} else if limit > 200 {
 		limit = 200
 	}
+	// Clamped low as well as high: safeconv.Int32 only bounds the int32 range,
+	// so a negative ?limit= reached Postgres as `LIMIT -1` and came back a 500.
+	if offset < 0 {
+		offset = 0
+	}
 
-	var listP db.ListAuditLogAdvancedParams
-	var countP db.CountAuditLogAdvancedParams
+	query = applyAuditListScope(access, &listP, &countP)
 	listP.Limit = safeconv.Int32(limit)
 	listP.Offset = safeconv.Int32(offset)
 
 	if cid := c.Query("cluster_id"); cid != "" {
 		parsed, err := uuid.Parse(cid)
 		if err != nil {
-			return listP, countP, fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id filter")
+			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid cluster_id filter")
 		}
 		v := pgtype.UUID{Bytes: parsed, Valid: true}
 		listP.ClusterID = v
@@ -160,7 +178,7 @@ func (h *AuditHandler) parseAuditFilters(c fiber.Ctx) (db.ListAuditLogAdvancedPa
 	if uid := c.Query("user_id"); uid != "" {
 		parsed, err := uuid.Parse(uid)
 		if err != nil {
-			return listP, countP, fiber.NewError(fiber.StatusBadRequest, "Invalid user_id filter")
+			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid user_id filter")
 		}
 		v := pgtype.UUID{Bytes: parsed, Valid: true}
 		listP.UserID = v
@@ -182,7 +200,7 @@ func (h *AuditHandler) parseAuditFilters(c fiber.Ctx) (db.ListAuditLogAdvancedPa
 	if st := c.Query("start_time"); st != "" {
 		t, err := time.Parse(time.RFC3339, st)
 		if err != nil {
-			return listP, countP, fiber.NewError(fiber.StatusBadRequest, "Invalid start_time (use RFC3339)")
+			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid start_time (use RFC3339)")
 		}
 		v := pgtype.Timestamptz{Time: t, Valid: true}
 		listP.StartTime = v
@@ -192,14 +210,43 @@ func (h *AuditHandler) parseAuditFilters(c fiber.Ctx) (db.ListAuditLogAdvancedPa
 	if et := c.Query("end_time"); et != "" {
 		t, err := time.Parse(time.RFC3339, et)
 		if err != nil {
-			return listP, countP, fiber.NewError(fiber.StatusBadRequest, "Invalid end_time (use RFC3339)")
+			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid end_time (use RFC3339)")
 		}
 		v := pgtype.Timestamptz{Time: t, Valid: true}
 		listP.EndTime = v
 		countP.EndTime = v
 	}
 
-	return listP, countP, nil
+	return listP, countP, query, nil
+}
+
+// auditScope resolves the caller's view:audit cluster scope into the uuid[] SQL
+// filter every audit read carries: nil for global view:audit (no restriction),
+// the granted set for a scoped caller, and '{}' — which matches nothing — for a
+// caller holding no grant at all.
+//
+// query is false only in that last case. The filter is already correct there,
+// so a caller may ignore the flag and still read nothing; it exists to skip
+// round-trips that could not come back with a row.
+//
+// Rows with a NULL cluster_id are global entries (settings changes, logins).
+// The SQL clause excludes them from every scoped caller on its own — see the
+// note on ListAuditLogAdvanced in queries/audit_log.sql — which is what the
+// per-row guards below do by requiring access.HasGlobal for them.
+func auditScope(access clusterAccess) (ids []uuid.UUID, query bool) {
+	return access.ScopedIDs(), access.HasGlobal || len(access.Allowed) > 0
+}
+
+// applyAuditListScope stamps that scope onto BOTH the list and the count
+// params. Taking the two together is the whole point: a Total computed under a
+// wider scope than the Items is precisely the leak this fixes — it counted
+// every cluster's entries and paginated over them — and unlike a row, a number
+// no per-row guard can repair.
+func applyAuditListScope(access clusterAccess, listP *db.ListAuditLogAdvancedParams, countP *db.CountAuditLogAdvancedParams) bool {
+	ids, query := auditScope(access)
+	listP.AccessibleClusterIds = ids
+	countP.AccessibleClusterIds = ids
+	return query
 }
 
 // List handles GET /api/v1/audit-log.
@@ -209,7 +256,7 @@ func (h *AuditHandler) List(c fiber.Ctx) error {
 		return err
 	}
 
-	listP, countP, err := h.parseAuditFilters(c)
+	listP, countP, query, err := h.parseAuditFilters(c, access)
 	if err != nil {
 		return err
 	}
@@ -217,6 +264,10 @@ func (h *AuditHandler) List(c fiber.Ctx) error {
 	// If a cluster filter was supplied, the user must have access to it.
 	if listP.ClusterID.Valid && !access.PermitsCluster(uuid.UUID(listP.ClusterID.Bytes)) {
 		return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
+	}
+
+	if !query {
+		return c.JSON(auditListResponse{Items: []auditLogResponse{}})
 	}
 
 	items, err := h.queries.ListAuditLogAdvanced(c.Context(), listP)
@@ -239,8 +290,10 @@ func (h *AuditHandler) List(c fiber.Ctx) error {
 		Total: total,
 	}
 	for _, a := range items {
-		// Per-row filter: cluster-scoped audit entries require cluster access;
-		// global entries (no cluster_id) require global view:audit.
+		// Defense-in-depth: the SQL scope above already restricts rows to the
+		// caller's clusters, and excludes the NULL-cluster global entries from
+		// anyone without global view:audit. Kept so a future edit to the query
+		// cannot silently reopen either leak.
 		if a.ClusterID.Valid {
 			if !access.PermitsCluster(uuid.UUID(a.ClusterID.Bytes)) {
 				continue
@@ -261,9 +314,16 @@ func (h *AuditHandler) ListRecent(c fiber.Ctx) error {
 		return err
 	}
 
-	items, err := h.queries.ListRecentAuditLogEnriched(c.Context())
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list recent activity")
+	// Scoped in SQL rather than trimmed afterwards: LIMIT 50 over every
+	// cluster's entries, trimmed after, hands a cluster-scoped user whatever
+	// survives of the newest 50 global rows — usually a near-empty feed.
+	scope, query := auditScope(access)
+	var items []db.ListRecentAuditLogEnrichedRow
+	if query {
+		items, err = h.queries.ListRecentAuditLogEnriched(c.Context(), scope)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list recent activity")
+		}
 	}
 
 	visible, err := reservedSettingVisibility(c)
@@ -273,6 +333,7 @@ func (h *AuditHandler) ListRecent(c fiber.Ctx) error {
 
 	resp := make([]auditLogResponse, 0, len(items))
 	for _, a := range items {
+		// Defense-in-depth, as in List.
 		if a.ClusterID.Valid {
 			if !access.PermitsCluster(uuid.UUID(a.ClusterID.Bytes)) {
 				continue
@@ -340,10 +401,24 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
 		limit = 200
 	}
 
+	// Scoped too, though requireClusterPerm above has already authorized this
+	// exact cluster and the ClusterID filter pins the result set to it. The
+	// stamp is a no-op against either of those — a global caller scopes to nil,
+	// and a cluster-scoped one to a set containing the very cluster being
+	// filtered on (rbac.go: a global grant satisfies a cluster check, so
+	// passing requireClusterPerm implies one or the other). It is here so this
+	// endpoint is not the one audit read whose safety rests on a single lock in
+	// a query the other three now share.
+	access, err := accessibleClusters(c, "view", "audit")
+	if err != nil {
+		return err
+	}
+
 	items, err := h.queries.ListAuditLogAdvanced(c.Context(), db.ListAuditLogAdvancedParams{
-		Limit:     int32(limit), //nolint:gosec // bounds checked above (1-200)
-		Offset:    0,
-		ClusterID: pgtype.UUID{Bytes: clusterID, Valid: true},
+		Limit:                int32(limit), //nolint:gosec // bounds checked above (1-200)
+		Offset:               0,
+		ClusterID:            pgtype.UUID{Bytes: clusterID, Valid: true},
+		AccessibleClusterIds: access.ScopedIDs(),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log")
@@ -358,9 +433,20 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
 		return err
 	}
 
-	resp := make([]auditLogResponse, len(items))
-	for i, a := range items {
-		resp[i] = toAdvancedAuditResponse(a, visible)
+	resp := make([]auditLogResponse, 0, len(items))
+	for _, a := range items {
+		// Defense-in-depth, as in List. Cannot drop a row today — every row
+		// carries the one authorized cluster_id — which is the point: the four
+		// audit reads now answer to the same rule, so none of them is the one
+		// that quietly stops checking.
+		if a.ClusterID.Valid {
+			if !access.PermitsCluster(uuid.UUID(a.ClusterID.Bytes)) {
+				continue
+			}
+		} else if !access.HasGlobal {
+			continue
+		}
+		resp = append(resp, toAdvancedAuditResponse(a, visible))
 	}
 
 	return c.JSON(resp)
@@ -416,8 +502,13 @@ func (h *AuditHandler) Export(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "format must be 'json', 'csv', or 'syslog'")
 	}
 
-	// Parse same filters but override limit for export (max 10000).
-	listP, _, err := h.parseAuditFilters(c)
+	// Parse same filters but override limit for export (max 10000). The scope
+	// rides along on listP, and it matters more here than on a page: the
+	// 10000-row cap applied over every cluster's entries and trimmed after
+	// would silently drop a scoped user's accessible rows that fall beyond the
+	// newest 10000 global ones, producing a short export that nothing in the
+	// file marks as incomplete.
+	listP, _, query, err := h.parseAuditFilters(c, access)
 	if err != nil {
 		return err
 	}
@@ -428,11 +519,15 @@ func (h *AuditHandler) Export(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusForbidden, "Insufficient permissions")
 	}
 
-	rawItems, err := h.queries.ListAuditLogAdvanced(c.Context(), listP)
-	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log for export")
+	var rawItems []db.ListAuditLogAdvancedRow
+	if query {
+		rawItems, err = h.queries.ListAuditLogAdvanced(c.Context(), listP)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log for export")
+		}
 	}
 
+	// Defense-in-depth, as in List.
 	items := make([]db.ListAuditLogAdvancedRow, 0, len(rawItems))
 	for _, a := range rawItems {
 		if a.ClusterID.Valid {

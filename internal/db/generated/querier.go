@@ -68,6 +68,10 @@ type Querier interface {
 	CountActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) (CountActiveAlertsByClusterRow, error)
 	CountActiveNodes(ctx context.Context, jobID uuid.UUID) (int64, error)
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
+	// CountAuditLogAdvanced returns the total matching the same filters, for the
+	// audit page pagination. Must stay filter-for-filter in sync with
+	// ListAuditLogAdvanced — in particular accessible_cluster_ids, or the Total
+	// leaks how many entries the caller's inaccessible clusters hold.
 	CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAdvancedParams) (int64, error)
 	CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (CountCompletedNodesRow, error)
 	// Used to enforce a per-user device cap (security review H3).
@@ -416,6 +420,21 @@ type Querier interface {
 	ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error)
 	ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error)
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
+	// ListAuditLogAdvanced backs the audit log page and the CSV/JSON/syslog export:
+	// the optional cluster/type/user/action/source/time filters plus offset
+	// pagination. accessible_cluster_ids carries the caller's view:audit RBAC
+	// scope: NULL means global access (no restriction); an array restricts rows —
+	// and the Total that CountAuditLogAdvanced feeds into pagination — to those
+	// clusters ('{}' matches nothing).
+	//
+	// audit_log.cluster_id is NULLABLE, unlike task_history's. A NULL cluster_id
+	// marks a global entry (a settings change, a login) that only a holder of
+	// global view:audit may read. `cluster_id = ANY(array)` yields NULL — not true
+	// — for a NULL cluster_id, so this one clause already excludes those rows from
+	// a scoped caller. Do NOT "repair" it into
+	// `(a.cluster_id IS NULL OR a.cluster_id = ANY(...))`: that hands every global
+	// entry to every cluster-scoped user. TestAuditScopeSQL_ExcludesNullCluster
+	// pins both halves.
 	ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error)
 	ListAuditLogByCluster(ctx context.Context, arg ListAuditLogByClusterParams) ([]AuditLog, error)
 	ListAuditLogEnriched(ctx context.Context, arg ListAuditLogEnrichedParams) ([]ListAuditLogEnrichedRow, error)
@@ -504,7 +523,12 @@ type Querier interface {
 	ListPBSSyncJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsSyncJob, error)
 	ListPBSVerifyJobsByServer(ctx context.Context, pbsServerID uuid.UUID) ([]PbsVerifyJob, error)
 	ListPermissions(ctx context.Context) ([]Permission, error)
-	ListRecentAuditLogEnriched(ctx context.Context) ([]ListRecentAuditLogEnrichedRow, error)
+	// ListRecentAuditLogEnriched backs the dashboard activity feed. It takes the
+	// caller's view:audit scope (see the accessible_cluster_ids note on
+	// ListAuditLogAdvanced) rather than trimming afterwards: LIMIT 50 applied
+	// before the scope would hand a cluster-scoped user whatever survives of the
+	// newest 50 global rows — usually far fewer than 50, sometimes none.
+	ListRecentAuditLogEnriched(ctx context.Context, accessibleClusterIds []uuid.UUID) ([]ListRecentAuditLogEnrichedRow, error)
 	// Failed tasks in the last 24h, grouped by type so we surface a count, not spam.
 	ListRecentFailedTasksByType(ctx context.Context) ([]ListRecentFailedTasksByTypeRow, error)
 	ListRecoveryCodes(ctx context.Context, userID uuid.UUID) ([]ListRecoveryCodesRow, error)
