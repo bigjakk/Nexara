@@ -33,11 +33,11 @@ type mockQueries struct {
 	clusters       []db.Cluster
 	nodesByCluster []db.Node // returned by ListNodesByCluster (failover candidates)
 
-	upsertNodeCalls             []db.UpsertNodeParams
-	upsertVMCalls               []db.UpsertVMParams
-	upsertStorageCalls          []db.UpsertStoragePoolParams
-	replicationUpserts          []db.UpsertReplicationJobParams
-	deleteStaleReplicationCalls int
+	upsertNodeCalls               []db.UpsertNodeParams
+	upsertVMCalls                 []db.UpsertVMParams
+	upsertStorageCalls            []db.UpsertStoragePoolParams
+	replicationUpserts            []db.UpsertReplicationJobParams
+	deleteStaleReplicationCalls   int
 	deleteStaleVMsForNodesCalls   []db.DeleteStaleVMsForNodesParams
 	deleteStaleVMsForNodesRemoved int64
 	nodeStatusFastCalls           []db.UpdateNodeStatusFastParams
@@ -51,6 +51,15 @@ type mockQueries struct {
 	externalTaskCalls   []db.InsertExternalTaskHistoryParams
 	taskHistUPIDErr     error // when set, ListExistingTaskHistoryUPIDs fails (dedup error)
 	upsertTaskSyncCalls []db.UpsertTaskSyncStateParams
+
+	// Guest snapshot inventory
+	vmsByCluster             []db.Vm            // returned by ListVMsByCluster
+	guestSnapshotsByCluster  []db.GuestSnapshot // returned by ListGuestSnapshotsByCluster
+	guestSnapUpserts         []db.UpsertGuestSnapshotParams
+	guestSnapNotInSetCalls   []db.DeleteGuestSnapshotsNotInSetParams
+	guestSnapNotInSetRemoved int64
+	guestSnapVanishedCalls   []db.DeleteGuestSnapshotsForVanishedGuestsParams
+	guestSnapVanishedRemoved int64
 }
 
 func newMockQueries() *mockQueries {
@@ -63,6 +72,29 @@ func newMockQueries() *mockQueries {
 
 func (m *mockQueries) ListActiveClusters(_ context.Context) ([]db.Cluster, error) {
 	return m.clusters, nil
+}
+
+func (m *mockQueries) ListVMsByCluster(_ context.Context, _ uuid.UUID) ([]db.Vm, error) {
+	return m.vmsByCluster, nil
+}
+
+func (m *mockQueries) ListGuestSnapshotsByCluster(_ context.Context, _ uuid.UUID) ([]db.GuestSnapshot, error) {
+	return m.guestSnapshotsByCluster, nil
+}
+
+func (m *mockQueries) UpsertGuestSnapshot(_ context.Context, arg db.UpsertGuestSnapshotParams) (db.GuestSnapshot, error) {
+	m.guestSnapUpserts = append(m.guestSnapUpserts, arg)
+	return db.GuestSnapshot{ClusterID: arg.ClusterID, Vmid: arg.Vmid, Name: arg.Name}, nil
+}
+
+func (m *mockQueries) DeleteGuestSnapshotsNotInSet(_ context.Context, arg db.DeleteGuestSnapshotsNotInSetParams) (int64, error) {
+	m.guestSnapNotInSetCalls = append(m.guestSnapNotInSetCalls, arg)
+	return m.guestSnapNotInSetRemoved, nil
+}
+
+func (m *mockQueries) DeleteGuestSnapshotsForVanishedGuests(_ context.Context, arg db.DeleteGuestSnapshotsForVanishedGuestsParams) (int64, error) {
+	m.guestSnapVanishedCalls = append(m.guestSnapVanishedCalls, arg)
+	return m.guestSnapVanishedRemoved, nil
 }
 
 func (m *mockQueries) UpsertNode(_ context.Context, arg db.UpsertNodeParams) (db.Node, error) {

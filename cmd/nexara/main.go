@@ -458,7 +458,8 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 	runWithLeaderRetry(ctx, application.Pool, "collector", logger, func(ctx context.Context) {
 		logger.Info("collector started",
 			"metrics_interval", cfg.MetricsCollectInterval,
-			"resource_sync_interval", cfg.ResourceSyncInterval)
+			"resource_sync_interval", cfg.ResourceSyncInterval,
+			"snapshot_sync_interval", cfg.SnapshotSyncInterval)
 
 		ticker := cfg.NewMetricsTicker()
 		defer ticker.Stop()
@@ -484,6 +485,37 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 					select {
 					case <-fastTicker.C:
 						syncer.SyncAllResources(ctx)
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+		}
+
+		// Guest snapshot inventory loop: one snapshot listing per guest per
+		// pass (no bulk endpoint exists), so it gets its own slow cadence
+		// instead of riding the metrics tick. Floored at 60s; 0 disables.
+		// Same leader-ctx lifetime as the fast loop above.
+		if cfg.SnapshotSyncInterval > 0 {
+			snapInterval := cfg.SnapshotSyncInterval
+			if snapInterval < time.Minute {
+				snapInterval = time.Minute
+			}
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("guest snapshot sync loop panicked", "panic", r)
+					}
+				}()
+				// One immediate pass so the central page has data shortly
+				// after boot instead of after the first full interval.
+				syncer.SyncAllGuestSnapshots(ctx)
+				snapTicker := time.NewTicker(snapInterval)
+				defer snapTicker.Stop()
+				for {
+					select {
+					case <-snapTicker.C:
+						syncer.SyncAllGuestSnapshots(ctx)
 					case <-ctx.Done():
 						return
 					}

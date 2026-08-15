@@ -35,6 +35,7 @@ const (
 	KindACMEChange        = "acme_change"
 	KindAptRepoChange     = "apt_repo_change"
 	KindVMImport          = "vm_import"
+	KindSnapshotChange    = "snapshot_change"
 )
 
 // Redis pub/sub channels for non-cluster events. Cluster events use

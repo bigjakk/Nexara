@@ -85,6 +85,12 @@ type SyncQueries interface {
 	DeleteStalePBSSnapshots(ctx context.Context, arg db.DeleteStalePBSSnapshotsParams) error
 	DeleteStalePBSSyncJobs(ctx context.Context, arg db.DeleteStalePBSSyncJobsParams) error
 	DeleteStalePBSVerifyJobs(ctx context.Context, arg db.DeleteStalePBSVerifyJobsParams) error
+	// Guest snapshot inventory
+	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.Vm, error)
+	UpsertGuestSnapshot(ctx context.Context, arg db.UpsertGuestSnapshotParams) (db.GuestSnapshot, error)
+	ListGuestSnapshotsByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.GuestSnapshot, error)
+	DeleteGuestSnapshotsNotInSet(ctx context.Context, arg db.DeleteGuestSnapshotsNotInSetParams) (int64, error)
+	DeleteGuestSnapshotsForVanishedGuests(ctx context.Context, arg db.DeleteGuestSnapshotsForVanishedGuestsParams) (int64, error)
 	// Node hardware detail queries
 	UpsertNodeDisk(ctx context.Context, arg db.UpsertNodeDiskParams) (db.NodeDisk, error)
 	DeleteStaleNodeDisks(ctx context.Context, arg db.DeleteStaleNodeDisksParams) error
@@ -119,6 +125,8 @@ type ProxmoxClient interface {
 	GetTaskStatus(ctx context.Context, node string, upid string) (*proxmox.TaskStatus, error)
 	GetVersion(ctx context.Context) (*proxmox.Version, error)
 	GetHAManagerStatus(ctx context.Context) (map[string]json.RawMessage, error)
+	ListVMSnapshots(ctx context.Context, node string, vmid int) ([]proxmox.Snapshot, error)
+	ListCTSnapshots(ctx context.Context, node string, vmid int) ([]proxmox.Snapshot, error)
 }
 
 // ClientFactory creates a ProxmoxClient from cluster credentials.
@@ -167,17 +175,18 @@ func DefaultPBSClientFactory(apiURL, tokenID, tokenSecret, tlsFingerprint string
 
 // Syncer discovers and persists Proxmox inventory data.
 type Syncer struct {
-	queries          SyncQueries
-	encryptionKey    string
-	clientFactory    ClientFactory
-	pbsClientFactory PBSClientFactory
-	cache            *proxmox.ClientCache // nil-safe; tests may leave unset
-	healthMonitor    *HealthMonitor
-	eventPub         eventPublisher
-	logger           *slog.Logger
-	lastSyncErrorMu  sync.Mutex
-	lastSyncError    map[uuid.UUID]time.Time // rate-limit sync error reporting per cluster
-	fastSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllResources
+	queries              SyncQueries
+	encryptionKey        string
+	clientFactory        ClientFactory
+	pbsClientFactory     PBSClientFactory
+	cache                *proxmox.ClientCache // nil-safe; tests may leave unset
+	healthMonitor        *HealthMonitor
+	eventPub             eventPublisher
+	logger               *slog.Logger
+	lastSyncErrorMu      sync.Mutex
+	lastSyncError        map[uuid.UUID]time.Time // rate-limit sync error reporting per cluster
+	fastSyncInFlight     atomic.Bool             // re-entrancy guard for SyncAllResources
+	snapshotSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllGuestSnapshots
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.

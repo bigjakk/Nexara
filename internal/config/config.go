@@ -33,7 +33,7 @@ type Config struct {
 	// ProxyHeader is the request header consulted for the client IP when
 	// the remote address is on the TrustedProxies list. Override only if
 	// the upstream proxy uses a non-standard header.
-	ProxyHeader            string        `envconfig:"PROXY_HEADER" default:"X-Forwarded-For"`
+	ProxyHeader string `envconfig:"PROXY_HEADER" default:"X-Forwarded-For"`
 	// CORSAllowOrigins is the comma-separated list of `Origin:` values the
 	// browser API will accept (and echo back in Access-Control-Allow-Origin).
 	// Empty default — cross-origin browsers (mobile apps, separately-served
@@ -52,10 +52,17 @@ type Config struct {
 	// 2s in the collector; 0 disables the fast loop entirely (the slow
 	// MetricsCollectInterval pass then owns all freshness, as before).
 	ResourceSyncInterval time.Duration `envconfig:"RESOURCE_SYNC_INTERVAL" default:"5s"`
+	// SnapshotSyncInterval drives the guest snapshot inventory loop feeding
+	// the central snapshots page and the snapshot_age_days alert metric.
+	// Proxmox has no bulk snapshot endpoint — each pass issues one listing
+	// per guest — so this runs well below the metrics cadence. Floored at
+	// 60s in the collector; 0 disables collection entirely (the central
+	// page then only refreshes via per-guest resyncs).
+	SnapshotSyncInterval time.Duration `envconfig:"SNAPSHOT_SYNC_INTERVAL" default:"5m"`
 	TaskHistoryRetention time.Duration `envconfig:"TASK_HISTORY_RETENTION" default:"24h"`
-	WSPort                 int           `envconfig:"WS_PORT" default:"8081"`
-	WSPingInterval         time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
-	WSPongTimeout          time.Duration `envconfig:"WS_PONG_TIMEOUT" default:"30s"`
+	WSPort               int           `envconfig:"WS_PORT" default:"8081"`
+	WSPingInterval       time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
+	WSPongTimeout        time.Duration `envconfig:"WS_PONG_TIMEOUT" default:"30s"`
 	// WSAllowedOrigins is a comma-separated list of origins (scheme +
 	// host + optional port, e.g. "https://nexara.example.com") that the
 	// /ws, /ws/console, and /ws/vnc upgrade endpoints accept the
