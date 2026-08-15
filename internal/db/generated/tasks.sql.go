@@ -18,18 +18,28 @@ SELECT count(*) FROM task_history
 WHERE ($1::uuid IS NULL OR cluster_id = $1)
   AND ($2::text   IS NULL OR status     = $2)
   AND ($3::int[]   IS NULL OR vmid       = ANY($3::int[]))
+  AND ($4::uuid[] IS NULL
+       OR cluster_id = ANY($4::uuid[]))
 `
 
 type CountTaskHistoryFilteredParams struct {
-	ClusterID pgtype.UUID `json:"cluster_id"`
-	Status    pgtype.Text `json:"status"`
-	Vmids     []int32     `json:"vmids"`
+	ClusterID            pgtype.UUID `json:"cluster_id"`
+	Status               pgtype.Text `json:"status"`
+	Vmids                []int32     `json:"vmids"`
+	AccessibleClusterIds []uuid.UUID `json:"accessible_cluster_ids"`
 }
 
 // CountTaskHistoryFiltered returns the total matching the same filters, for the
-// Tasks page pagination. Mirrors CountAuditLog.
+// Tasks page pagination. Mirrors CountAuditLog. Must stay filter-for-filter in
+// sync with ListTaskHistoryFiltered — in particular accessible_cluster_ids, or
+// the Total leaks other clusters' task counts to scoped users.
 func (q *Queries) CountTaskHistoryFiltered(ctx context.Context, arg CountTaskHistoryFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countTaskHistoryFiltered, arg.ClusterID, arg.Status, arg.Vmids)
+	row := q.db.QueryRow(ctx, countTaskHistoryFiltered,
+		arg.ClusterID,
+		arg.Status,
+		arg.Vmids,
+		arg.AccessibleClusterIds,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -371,22 +381,28 @@ SELECT id, cluster_id, user_id, upid, description, status, exit_status, node, ta
 WHERE ($3::uuid IS NULL OR cluster_id = $3)
   AND ($4::text   IS NULL OR status     = $4)
   AND ($5::int[]   IS NULL OR vmid       = ANY($5::int[]))
+  AND ($6::uuid[] IS NULL
+       OR cluster_id = ANY($6::uuid[]))
 ORDER BY started_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListTaskHistoryFilteredParams struct {
-	Limit     int32       `json:"limit"`
-	Offset    int32       `json:"offset"`
-	ClusterID pgtype.UUID `json:"cluster_id"`
-	Status    pgtype.Text `json:"status"`
-	Vmids     []int32     `json:"vmids"`
+	Limit                int32       `json:"limit"`
+	Offset               int32       `json:"offset"`
+	ClusterID            pgtype.UUID `json:"cluster_id"`
+	Status               pgtype.Text `json:"status"`
+	Vmids                []int32     `json:"vmids"`
+	AccessibleClusterIds []uuid.UUID `json:"accessible_cluster_ids"`
 }
 
 // ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
 // vmids filters with offset pagination. Mirrors ListAuditLogFiltered. NULL
 // narg = no filter on that column. vmids matches the guest VMID parsed from
 // the UPID at insert (folder detail view passes a folder's VMID set).
+// accessible_cluster_ids carries the caller's view:task RBAC scope: NULL means
+// global access (no restriction); an array restricts rows — and the Total the
+// count query feeds into pagination — to those clusters ('{}' matches nothing).
 func (q *Queries) ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]TaskHistory, error) {
 	rows, err := q.db.Query(ctx, listTaskHistoryFiltered,
 		arg.Limit,
@@ -394,6 +410,7 @@ func (q *Queries) ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHisto
 		arg.ClusterID,
 		arg.Status,
 		arg.Vmids,
+		arg.AccessibleClusterIds,
 	)
 	if err != nil {
 		return nil, err

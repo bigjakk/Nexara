@@ -193,3 +193,87 @@ func TestClusterAccess_PermitsCluster(t *testing.T) {
 		})
 	}
 }
+
+// TestClusterAccess_ScopedIDs pins the nil/non-nil contract the SQL scope
+// filters depend on: nil (SQL NULL) only for global access, a non-nil —
+// possibly empty — slice for scoped access. A regression that returns nil
+// for an empty scoped set would read as "no restriction" in the queries.
+func TestClusterAccess_ScopedIDs(t *testing.T) {
+	clusterA := uuid.New()
+	clusterB := uuid.New()
+
+	tests := []struct {
+		name    string
+		access  clusterAccess
+		wantNil bool
+		wantIDs []uuid.UUID
+	}{
+		{
+			name:    "global access returns nil (no SQL filter)",
+			access:  clusterAccess{HasGlobal: true},
+			wantNil: true,
+		},
+		{
+			name: "global wins even with a populated Allowed map",
+			access: clusterAccess{
+				HasGlobal: true,
+				Allowed:   map[uuid.UUID]bool{clusterA: true},
+			},
+			wantNil: true,
+		},
+		{
+			name:    "no grants returns non-nil empty slice (matches nothing)",
+			access:  clusterAccess{Allowed: map[uuid.UUID]bool{}},
+			wantIDs: []uuid.UUID{},
+		},
+		{
+			name:    "zero-value access returns non-nil empty slice",
+			access:  clusterAccess{},
+			wantIDs: []uuid.UUID{},
+		},
+		{
+			name: "scoped access returns exactly the granted IDs",
+			access: clusterAccess{Allowed: map[uuid.UUID]bool{
+				clusterA: true,
+				clusterB: true,
+			}},
+			wantIDs: []uuid.UUID{clusterA, clusterB},
+		},
+		{
+			name: "explicit false entry is excluded, matching PermitsCluster",
+			access: clusterAccess{Allowed: map[uuid.UUID]bool{
+				clusterA: true,
+				clusterB: false,
+			}},
+			wantIDs: []uuid.UUID{clusterA},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.access.ScopedIDs()
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("ScopedIDs() = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("ScopedIDs() = nil, want non-nil slice")
+			}
+			if len(got) != len(tt.wantIDs) {
+				t.Fatalf("ScopedIDs() = %v (len %d), want len %d", got, len(got), len(tt.wantIDs))
+			}
+			// Map iteration order is unspecified — compare as sets.
+			gotSet := make(map[uuid.UUID]bool, len(got))
+			for _, id := range got {
+				gotSet[id] = true
+			}
+			for _, id := range tt.wantIDs {
+				if !gotSet[id] {
+					t.Fatalf("ScopedIDs() = %v, missing %v", got, id)
+				}
+			}
+		})
+	}
+}

@@ -76,7 +76,9 @@ type Querier interface {
 	CountNotificationDLQByState(ctx context.Context) (CountNotificationDLQByStateRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
 	// CountTaskHistoryFiltered returns the total matching the same filters, for the
-	// Tasks page pagination. Mirrors CountAuditLog.
+	// Tasks page pagination. Mirrors CountAuditLog. Must stay filter-for-filter in
+	// sync with ListTaskHistoryFiltered — in particular accessible_cluster_ids, or
+	// the Total leaks other clusters' task counts to scoped users.
 	CountTaskHistoryFiltered(ctx context.Context, arg CountTaskHistoryFilteredParams) (int64, error)
 	// Counts every login-capable row in users, including deactivated accounts.
 	// Excludes only the well-known system actor seeded by 000013_system_user —
@@ -539,6 +541,9 @@ type Querier interface {
 	// vmids filters with offset pagination. Mirrors ListAuditLogFiltered. NULL
 	// narg = no filter on that column. vmids matches the guest VMID parsed from
 	// the UPID at insert (folder detail view passes a folder's VMID set).
+	// accessible_cluster_ids carries the caller's view:task RBAC scope: NULL means
+	// global access (no restriction); an array restricts rows — and the Total the
+	// count query feeds into pagination — to those clusters ('{}' matches nothing).
 	ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]TaskHistory, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)

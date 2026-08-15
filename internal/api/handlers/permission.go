@@ -123,6 +123,27 @@ func (a clusterAccess) PermitsCluster(id uuid.UUID) bool {
 	return a.Allowed[id]
 }
 
+// ScopedIDs returns the access set as a uuid[] SQL filter parameter: nil for
+// global access, otherwise the granted cluster IDs. The nil/non-nil split is
+// load-bearing — pgx sends a nil slice as SQL NULL, which the narg-style
+// queries read as "no restriction", while a non-nil empty slice becomes '{}'
+// and matches nothing. Skipping false map entries keeps this in exact
+// agreement with PermitsCluster: SQL-filtered counts (which no per-row guard
+// can re-check) and per-row checks must derive from the same set. Order is
+// unspecified (map iteration).
+func (a clusterAccess) ScopedIDs() []uuid.UUID {
+	if a.HasGlobal {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(a.Allowed))
+	for id, allowed := range a.Allowed {
+		if allowed {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 // accessibleClusters returns the set of cluster IDs the user can perform
 // (action, resource) against, used to filter top-level list endpoints
 // (e.g. /clusters, /search, /migrations) to entries the user is allowed to see.

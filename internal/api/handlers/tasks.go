@@ -121,6 +121,24 @@ func parseVmidsParam(raw string) ([]int32, error) {
 	return vmids, nil
 }
 
+// applyTaskListScope stamps the caller's view:task cluster scope onto BOTH the
+// list and count query params — the same value on both, so Items and the
+// pagination Total can never disagree. Counting without this scope leaked how
+// many tasks other clusters have and broke pagination for scoped users. The
+// SQL filter is the access control (nil = global = no restriction; a non-nil
+// set restricts, '{}' matches nothing); the false return for a user with no
+// grants anywhere merely lets the caller skip the DB round-trips for the
+// page that would come back empty anyway.
+func applyTaskListScope(access clusterAccess, listP *db.ListTaskHistoryFilteredParams, countP *db.CountTaskHistoryFilteredParams) bool {
+	if !access.HasGlobal && len(access.Allowed) == 0 {
+		return false
+	}
+	scopeIDs := access.ScopedIDs()
+	listP.AccessibleClusterIds = scopeIDs
+	countP.AccessibleClusterIds = scopeIDs
+	return true
+}
+
 // List returns task history with optional cluster_id + status filters and offset
 // pagination (mirrors AuditHandler.List). Includes DRS/system tasks. Status is
 // served from the reconciled task_history row, so the client need not poll
@@ -184,6 +202,10 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 		countP.Vmids = vmids
 	}
 
+	if !applyTaskListScope(access, &listP, &countP) {
+		return c.JSON(taskListResponse{Items: []taskResponse{}})
+	}
+
 	total, err := h.queries.CountTaskHistoryFiltered(c.Context(), countP)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to count tasks")
@@ -199,8 +221,9 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 		Total: total,
 	}
 	for _, t := range tasks {
-		// Per-row guard for the unfiltered case: a user without global view:task
-		// only sees rows for clusters they can access.
+		// Defense-in-depth: SQL already restricts rows via
+		// accessible_cluster_ids; the per-row guard keeps a future query edit
+		// from silently reopening the cross-cluster leak.
 		if !access.PermitsCluster(t.ClusterID) {
 			continue
 		}

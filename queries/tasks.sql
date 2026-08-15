@@ -81,18 +81,27 @@ WHERE upid = $1 AND status = 'running';
 -- vmids filters with offset pagination. Mirrors ListAuditLogFiltered. NULL
 -- narg = no filter on that column. vmids matches the guest VMID parsed from
 -- the UPID at insert (folder detail view passes a folder's VMID set).
+-- accessible_cluster_ids carries the caller's view:task RBAC scope: NULL means
+-- global access (no restriction); an array restricts rows — and the Total the
+-- count query feeds into pagination — to those clusters ('{}' matches nothing).
 -- name: ListTaskHistoryFiltered :many
 SELECT * FROM task_history
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
   AND (sqlc.narg('status')::text   IS NULL OR status     = sqlc.narg('status'))
   AND (sqlc.narg('vmids')::int[]   IS NULL OR vmid       = ANY(sqlc.narg('vmids')::int[]))
+  AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+       OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
 ORDER BY started_at DESC
 LIMIT $1 OFFSET $2;
 
 -- CountTaskHistoryFiltered returns the total matching the same filters, for the
--- Tasks page pagination. Mirrors CountAuditLog.
+-- Tasks page pagination. Mirrors CountAuditLog. Must stay filter-for-filter in
+-- sync with ListTaskHistoryFiltered — in particular accessible_cluster_ids, or
+-- the Total leaks other clusters' task counts to scoped users.
 -- name: CountTaskHistoryFiltered :one
 SELECT count(*) FROM task_history
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_id'))
   AND (sqlc.narg('status')::text   IS NULL OR status     = sqlc.narg('status'))
-  AND (sqlc.narg('vmids')::int[]   IS NULL OR vmid       = ANY(sqlc.narg('vmids')::int[]));
+  AND (sqlc.narg('vmids')::int[]   IS NULL OR vmid       = ANY(sqlc.narg('vmids')::int[]))
+  AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
+       OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]));
