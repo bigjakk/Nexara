@@ -97,14 +97,22 @@ var validDLQStates = map[string]bool{
 
 // List returns DLQ entries optionally filtered by state and channel_id.
 //
-// Although `view:notification_dlq` is a global RBAC permission, individual
-// rows carry a denormalised cluster_id (set at write time from the rule's
-// cluster). Rows are filtered down to the caller's accessible clusters
-// (via the same `accessibleClusters` helper that gates alert history) so
-// a Viewer of Cluster A cannot see DLQ entries belonging to Cluster B.
-// Rows with a NULL cluster_id (global rules + rule-less test dispatches)
-// are visible to anyone with the global permission, since there is no
-// cluster boundary to honour.
+// This endpoint is global-only: requirePerm below demands view:notification_dlq
+// at GLOBAL scope, and a cluster-scoped grant satisfies no global check
+// (internal/auth/rbac.go), so a Viewer of one cluster is refused outright
+// rather than served a filtered listing.
+//
+// Which makes the per-row cluster guard further down unreachable today — every
+// caller that gets past requirePerm holds a global grant, so accessibleClusters
+// returns HasGlobal and the guard keeps every row. It is kept because rows do
+// carry a denormalised cluster_id (set at write time from the rule's cluster),
+// so the row-level rule is worth stating and worth having already correct.
+//
+// It is NOT, however, a licence to widen the gate on its own. Opening this to
+// cluster-scoped callers means scoping ListNotificationDLQ in SQL as well:
+// LIMIT/OFFSET are applied across every cluster's rows and the guard trims
+// afterwards, so a scoped caller would page through the global rowset and get
+// short pages with holes. queries/audit_log.sql shows the shape that fixes it.
 func (h *NotificationDLQHandler) List(c fiber.Ctx) error {
 	if err := requirePerm(c, "view", "notification_dlq"); err != nil {
 		return err
@@ -150,10 +158,11 @@ func (h *NotificationDLQHandler) List(c fiber.Ctx) error {
 
 	out := make([]notificationDLQResponse, 0, len(rows))
 	for _, r := range rows {
-		// Cross-cluster view guard. Cluster-scoped rows (cluster_id set)
-		// require either global access or per-cluster access; rows with
-		// no cluster (global rules / test dispatches) require global
-		// access only — they have no cluster boundary to honour.
+		// Cross-cluster view guard, unreachable while the gate above is
+		// global-only (see the doc comment): cluster-scoped rows require
+		// global or per-cluster access, and rows with no cluster (global
+		// rules / test dispatches) require global access, which every caller
+		// here has. Retained so the rule is already right if that changes.
 		if r.ClusterID.Valid {
 			if !access.PermitsCluster(uuid.UUID(r.ClusterID.Bytes)) {
 				continue
