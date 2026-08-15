@@ -31,6 +31,7 @@ const METRICS = [
   { value: "disk_write", label: "Disk Write (bytes/s)" },
   { value: "net_in", label: "Network In (bytes/s)" },
   { value: "net_out", label: "Network Out (bytes/s)" },
+  { value: "snapshot_age_days", label: "Snapshot Age (days)" },
 ];
 
 const OPERATORS = [
@@ -157,7 +158,17 @@ export function AlertRuleForm() {
 
             <div className="space-y-2">
               <Label>Metric</Label>
-              <Select value={metric} onValueChange={setMetric}>
+              <Select
+                value={metric}
+                onValueChange={(v) => {
+                  setMetric(v);
+                  // snapshot_age_days reads the per-guest snapshot inventory;
+                  // the backend rejects node scope for it.
+                  if (v === "snapshot_age_days" && scopeType === "node") {
+                    setScopeType("cluster");
+                  }
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -179,7 +190,9 @@ export function AlertRuleForm() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="cluster">Cluster</SelectItem>
-                  <SelectItem value="node">Node</SelectItem>
+                  {metric !== "snapshot_age_days" && (
+                    <SelectItem value="node">Node</SelectItem>
+                  )}
                   <SelectItem value="vm">VM</SelectItem>
                 </SelectContent>
               </Select>

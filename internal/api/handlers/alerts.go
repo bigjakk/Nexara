@@ -427,6 +427,11 @@ func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 	if !validScopeTypes[req.ScopeType] {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid scope_type")
 	}
+	if req.Metric == "snapshot_age_days" && req.ScopeType == "node" {
+		// The snapshot inventory is keyed per guest; a node scope would need
+		// a placement join against churning data for marginal value.
+		return fiber.NewError(fiber.StatusBadRequest, "snapshot_age_days supports cluster or vm scope")
+	}
 
 	enabled := true
 	if req.Enabled != nil {
@@ -644,6 +649,11 @@ func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 			return fiber.NewError(fiber.StatusBadRequest, "Invalid scope_type")
 		}
 		scopeType = req.ScopeType
+	}
+	// Checked on the MERGED values: either side of the pair can arrive via
+	// this update while the other comes from the existing row.
+	if metric == "snapshot_age_days" && scopeType == "node" {
+		return fiber.NewError(fiber.StatusBadRequest, "snapshot_age_days supports cluster or vm scope")
 	}
 	cooldownSeconds := existing.CooldownSeconds
 	if req.CooldownSeconds != nil {

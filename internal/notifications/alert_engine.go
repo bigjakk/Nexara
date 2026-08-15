@@ -27,6 +27,10 @@ var validMetrics = map[string]bool{
 	"disk_write":  true,
 	"net_in":      true,
 	"net_out":     true,
+	// snapshot_age_days reads the guest_snapshots inventory, not the metric
+	// hypertables — evaluateRule branches before the scope dispatch. The
+	// threshold unit is days; supported scopes are cluster and vm only.
+	"snapshot_age_days": true,
 }
 
 // ValidMetric returns true if the metric name is supported.
@@ -98,6 +102,12 @@ func (e *Engine) Evaluate(ctx context.Context) {
 
 // evaluateRule evaluates a single rule against its target resources.
 func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []db.MaintenanceWindow) error {
+	// Inventory-backed metrics evaluate against their own tables and scope
+	// semantics, not the per-node/per-VM metric read path below.
+	if rule.Metric == "snapshot_age_days" {
+		return e.evaluateSnapshotAgeRule(ctx, rule, windows)
+	}
+
 	switch rule.ScopeType {
 	case "node":
 		if !rule.NodeID.Valid {
@@ -159,6 +169,85 @@ func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []
 
 	default:
 		return fmt.Errorf("unsupported scope_type: %s", rule.ScopeType)
+	}
+}
+
+// evaluateSnapshotAgeRule handles the snapshot_age_days metric, which reads
+// the guest_snapshots inventory instead of the metric hypertables. The value
+// is the age in days of the oldest dated snapshot in scope; rows with
+// snap_time = 0 are excluded by the queries (age unknown must never
+// false-fire as ~56 years). No dated snapshots at all → condition false, so
+// the alert auto-resolves once the offenders are cleaned up.
+//
+// Scopes: cluster and vm — node is rejected at create/update time and
+// surfaces here as an error only for pre-existing rows. The node dedupe
+// dimension stays NULL so there is exactly one alert stream per rule: a
+// valid-but-zero UUID would never match GetLatestAlertForRule (see the query
+// comment) and the alert would re-insert every tick.
+func (e *Engine) evaluateSnapshotAgeRule(ctx context.Context, rule db.AlertRule, windows []db.MaintenanceWindow) error {
+	if !rule.ClusterID.Valid {
+		return fmt.Errorf("snapshot rule %s has no cluster_id", rule.ID)
+	}
+	if e.isInMaintenanceWindow(rule.ClusterID, pgtype.UUID{}, windows) {
+		return nil
+	}
+	clusterID := uuidFromPgtype(rule.ClusterID)
+
+	switch rule.ScopeType {
+	case "cluster":
+		label := clusterID.String()
+		if cluster, err := e.queries.GetCluster(ctx, clusterID); err == nil {
+			label = cluster.Name
+		}
+		stats, err := e.queries.GetClusterSnapshotAgeStats(ctx, db.GetClusterSnapshotAgeStatsParams{
+			ClusterID:     clusterID,
+			ThresholdDays: rule.Threshold,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return e.handleRuleResult(ctx, rule, false, 0, label, pgtype.UUID{}, pgtype.UUID{})
+			}
+			return fmt.Errorf("cluster snapshot age stats: %w", err)
+		}
+		resourceName := fmt.Sprintf("%s — %d snapshot(s) over threshold, oldest %q on guest %d",
+			label, stats.OverCount, stats.OldestName, stats.OldestVmid)
+		conditionMet := compareValue(stats.OldestAgeDays, rule.Operator, rule.Threshold)
+		return e.handleRuleResult(ctx, rule, conditionMet, stats.OldestAgeDays, resourceName, pgtype.UUID{}, pgtype.UUID{})
+
+	case "vm":
+		if !rule.VmVmid.Valid {
+			return fmt.Errorf("snapshot vm rule %s has no vmid", rule.ID)
+		}
+		// Resolve the live vms row from the stable (cluster_id, vmid)
+		// identity at evaluation time, mirroring evaluateRule's vm scope.
+		vm, err := e.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
+			ClusterID: clusterID,
+			Vmid:      rule.VmVmid.Int32,
+		})
+		if err != nil {
+			e.logger.Debug("snapshot vm rule target not in inventory",
+				"rule_id", rule.ID, "vmid", rule.VmVmid.Int32)
+			return nil
+		}
+		vmID := pgtype.UUID{Bytes: vm.ID, Valid: true}
+		stats, err := e.queries.GetVMSnapshotAgeStats(ctx, db.GetVMSnapshotAgeStatsParams{
+			ClusterID:     clusterID,
+			Vmid:          rule.VmVmid.Int32,
+			ThresholdDays: rule.Threshold,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return e.handleRuleResult(ctx, rule, false, 0, vm.Name, pgtype.UUID{}, vmID)
+			}
+			return fmt.Errorf("vm snapshot age stats: %w", err)
+		}
+		resourceName := fmt.Sprintf("%s (vmid %d) — oldest snapshot %q",
+			vm.Name, vm.Vmid, stats.OldestName)
+		conditionMet := compareValue(stats.OldestAgeDays, rule.Operator, rule.Threshold)
+		return e.handleRuleResult(ctx, rule, conditionMet, stats.OldestAgeDays, resourceName, pgtype.UUID{}, vmID)
+
+	default:
+		return fmt.Errorf("snapshot_age_days does not support scope_type %q", rule.ScopeType)
 	}
 }
 

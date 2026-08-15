@@ -183,7 +183,7 @@ func TestIsInMaintenanceWindow(t *testing.T) {
 }
 
 func TestValidMetric(t *testing.T) {
-	for _, m := range []string{"cpu_usage", "mem_percent", "disk_read", "disk_write", "net_in", "net_out"} {
+	for _, m := range []string{"cpu_usage", "mem_percent", "disk_read", "disk_write", "net_in", "net_out", "snapshot_age_days"} {
 		if !ValidMetric(m) {
 			t.Errorf("ValidMetric(%q) = false, want true", m)
 		}
