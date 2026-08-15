@@ -162,8 +162,16 @@ jobs:
         run: |
           BODY=$(cat /tmp/release-notes.md)
           BODY_JSON=$(printf '%s' "$BODY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-          curl -s -X POST \
-            "${{ env.REGISTRY }}/api/v1/repos/${{ env.OWNER }}/nexara/releases" \
+          # REGISTRY is a bare host — it has to be, for `docker login` and the
+          # image ref — so the scheme belongs here, the way the package-link
+          # step above already does it. Without it curl assumes http://, the
+          # instance answers 308, and curl was not given -L so it never follows
+          # and the body is dropped. Paired with `curl -s` and no status check
+          # that still exited 0. v1.8.6 was the first release run to get this
+          # far — v1.8.2..v1.8.5 died earlier on the stale Go toolchain (fixed
+          # in dff08ea) — and it reported success while publishing nothing.
+          STATUS=$(curl -sS -o /tmp/release-resp.json -w '%{http_code}' -X POST \
+            "https://${{ env.REGISTRY }}/api/v1/repos/${{ env.OWNER }}/nexara/releases" \
             -H "Authorization: token ${{ secrets.REGISTRY_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d "{
@@ -172,4 +180,17 @@ jobs:
               \"body\": ${BODY_JSON},
               \"draft\": false,
               \"prerelease\": false
-            }"
+            }")
+          # 409 means a release for this tag already exists, which is the
+          # desired end state — keep re-runs after a flake (say, a registry 500
+          # mid-job) idempotent rather than red.
+          if [ "$STATUS" = "409" ]; then
+            echo "Gitea release ${{ steps.version.outputs.tag }} already exists — nothing to do"
+            exit 0
+          fi
+          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
+            echo "Gitea release API returned HTTP $STATUS"
+            cat /tmp/release-resp.json
+            exit 1
+          fi
+          echo "Created Gitea release ${{ steps.version.outputs.tag }} (HTTP $STATUS)"
