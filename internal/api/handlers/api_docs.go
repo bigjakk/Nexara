@@ -145,6 +145,10 @@ var endpointMeta = map[string]APIEndpoint{
 	"PUT /api/v1/clusters/:cluster_id/containers/:ct_id/config":                         {Description: "Update container config", Permission: "manage:container", Group: "Containers"},
 	"POST /api/v1/clusters/:cluster_id/containers/:ct_id/disks/resize":                  {Description: "Resize container disk", Permission: "manage:container", Group: "Containers"},
 
+	// ── Guest Snapshots ───────────────────────────────────────────────
+	"GET /api/v1/guest-snapshots":                              {Description: "List collected guest snapshots across all clusters (QEMU rows need view:vm, LXC rows view:container)", Permission: "view:vm|view:container", Group: "Guest Snapshots"},
+	"POST /api/v1/clusters/:cluster_id/guest-snapshots/resync": {Description: "Refresh one guest's snapshot inventory from Proxmox", Permission: "view:vm|view:container", Group: "Guest Snapshots"},
+
 	// ── Storage ───────────────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/storage":                     {Description: "List storage pools", Permission: "view:storage", Group: "Storage"},
 	"POST /api/v1/clusters/:cluster_id/storage":                    {Description: "Create a storage pool", Permission: "manage:storage", Group: "Storage"},

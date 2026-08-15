@@ -23,57 +23,58 @@ import (
 
 // Server is the API server that holds all dependencies.
 type Server struct {
-	app                   *fiber.App
-	config                *config.Config
-	db                    *pgxpool.Pool
-	queries               *db.Queries
-	redis                 *redis.Client
-	jwtService            *auth.JWTService
-	sessionManager        *auth.SessionManager
-	authHandler           *handlers.AuthHandler
-	clusterHandler        *handlers.ClusterHandler
-	pbsHandler            *handlers.PBSHandler
-	nodeHandler           *handlers.NodeHandler
-	vmHandler             *handlers.VMHandler
-	containerHandler      *handlers.ContainerHandler
-	storageHandler        *handlers.StorageHandler
-	vmImportHandler       *handlers.VMImportHandler
-	vmFoldersHandler      *handlers.VMFoldersHandler
-	metricsHandler        *handlers.MetricsHandler
-	cephHandler           *handlers.CephHandler
-	backupHandler         *handlers.BackupHandler
-	taskHandler           *handlers.TaskHandler
-	scheduleHandler       *handlers.ScheduleHandler
-	auditHandler          *handlers.AuditHandler
-	drsHandler            *handlers.DRSHandler
-	migrationHandler      *handlers.MigrationHandler
-	networkHandler        *handlers.NetworkHandler
-	rbacHandler           *handlers.RBACHandler
-	userHandler           *handlers.UserHandler
-	ldapHandler           *handlers.LDAPHandler
-	oidcHandler           *handlers.OIDCHandler
-	totpHandler           *handlers.TOTPHandler
-	cveHandler            *handlers.CVEHandler
-	alertHandler          *handlers.AlertHandler
+	app                    *fiber.App
+	config                 *config.Config
+	db                     *pgxpool.Pool
+	queries                *db.Queries
+	redis                  *redis.Client
+	jwtService             *auth.JWTService
+	sessionManager         *auth.SessionManager
+	authHandler            *handlers.AuthHandler
+	clusterHandler         *handlers.ClusterHandler
+	pbsHandler             *handlers.PBSHandler
+	nodeHandler            *handlers.NodeHandler
+	vmHandler              *handlers.VMHandler
+	containerHandler       *handlers.ContainerHandler
+	storageHandler         *handlers.StorageHandler
+	vmImportHandler        *handlers.VMImportHandler
+	vmFoldersHandler       *handlers.VMFoldersHandler
+	metricsHandler         *handlers.MetricsHandler
+	cephHandler            *handlers.CephHandler
+	backupHandler          *handlers.BackupHandler
+	guestSnapshotHandler   *handlers.GuestSnapshotHandler
+	taskHandler            *handlers.TaskHandler
+	scheduleHandler        *handlers.ScheduleHandler
+	auditHandler           *handlers.AuditHandler
+	drsHandler             *handlers.DRSHandler
+	migrationHandler       *handlers.MigrationHandler
+	networkHandler         *handlers.NetworkHandler
+	rbacHandler            *handlers.RBACHandler
+	userHandler            *handlers.UserHandler
+	ldapHandler            *handlers.LDAPHandler
+	oidcHandler            *handlers.OIDCHandler
+	totpHandler            *handlers.TOTPHandler
+	cveHandler             *handlers.CVEHandler
+	alertHandler           *handlers.AlertHandler
 	notificationDLQHandler *handlers.NotificationDLQHandler
-	reportHandler         *handlers.ReportHandler
-	rollingUpdateHandler  *handlers.RollingUpdateHandler
-	settingsHandler       *handlers.SettingsHandler
-	clusterOptionsHandler *handlers.ClusterOptionsHandler
-	haHandler             *handlers.HAHandler
-	poolHandler           *handlers.PoolHandler
-	replicationHandler    *handlers.ReplicationHandler
-	acmeHandler           *handlers.ACMEHandler
-	aptRepositoryHandler  *handlers.AptRepositoryHandler
-	metricServerHandler   *handlers.MetricServerHandler
-	searchHandler         *handlers.SearchHandler
-	apiKeyHandler         *handlers.APIKeyHandler
-	apiDocsHandler        *handlers.APIDocsHandler
-	changelogHandler      *handlers.ChangelogHandler
-	mobileDeviceHandler   *handlers.MobileDeviceHandler
-	rbacEngine            *auth.RBACEngine
-	eventPub              *events.Publisher
-	proxmoxCache          *proxmox.ClientCache
+	reportHandler          *handlers.ReportHandler
+	rollingUpdateHandler   *handlers.RollingUpdateHandler
+	settingsHandler        *handlers.SettingsHandler
+	clusterOptionsHandler  *handlers.ClusterOptionsHandler
+	haHandler              *handlers.HAHandler
+	poolHandler            *handlers.PoolHandler
+	replicationHandler     *handlers.ReplicationHandler
+	acmeHandler            *handlers.ACMEHandler
+	aptRepositoryHandler   *handlers.AptRepositoryHandler
+	metricServerHandler    *handlers.MetricServerHandler
+	searchHandler          *handlers.SearchHandler
+	apiKeyHandler          *handlers.APIKeyHandler
+	apiDocsHandler         *handlers.APIDocsHandler
+	changelogHandler       *handlers.ChangelogHandler
+	mobileDeviceHandler    *handlers.MobileDeviceHandler
+	rbacEngine             *auth.RBACEngine
+	eventPub               *events.Publisher
+	proxmoxCache           *proxmox.ClientCache
 }
 
 // serverDeps captures the resolved dependencies that handler factories
@@ -125,10 +126,10 @@ func (d *serverDeps) hasFullSecure() bool { return d.hasCrypto() && d.rdb != nil
 //
 // Construction order matters in two places (call them out so future
 // edits don't accidentally reorder past a hidden dependency):
-//   1. registerInfra must run before registerAuth so authHandler receives
-//      the RBAC engine it calls directly for permission lookups.
-//   2. apiDocsHandler.SetApp must run AFTER setupRoutes so app.GetRoutes()
-//      returns the populated route table.
+//  1. registerInfra must run before registerAuth so authHandler receives
+//     the RBAC engine it calls directly for permission lookups.
+//  2. apiDocsHandler.SetApp must run AFTER setupRoutes so app.GetRoutes()
+//     returns the populated route table.
 //
 // Outside those two constraints, the per-domain factory functions
 // (registerAuth, registerInventory, …) can be reordered without ill effect.
@@ -192,12 +193,12 @@ func New(a *nexapp.App) *Server {
 // for remotes on the TRUSTED_PROXIES allowlist).
 func buildFiberConfig(cfg *config.Config) fiber.Config {
 	return fiber.Config{
-		ErrorHandler:                 errorHandler,
-		BodyLimit:                    32 * 1024 * 1024, // 32MB — bodies above this are streamed, not buffered
-		StreamRequestBody:            true,             // Enable streaming for large uploads (ISO/vztmpl)
-		ReadBufferSize:               16 * 1024,        // fasthttp default is 4KB for the whole request line + headers; Bearer JWT + long filter query strings (?vmids= from big folders) overflow it into opaque 431s
+		ErrorHandler:      errorHandler,
+		BodyLimit:         32 * 1024 * 1024, // 32MB — bodies above this are streamed, not buffered
+		StreamRequestBody: true,             // Enable streaming for large uploads (ISO/vztmpl)
+		ReadBufferSize:    16 * 1024,        // fasthttp default is 4KB for the whole request line + headers; Bearer JWT + long filter query strings (?vmids= from big folders) overflow it into opaque 431s
 
-		DisablePreParseMultipartForm: true,             // Don't buffer multipart bodies; upload handler parses the stream itself
+		DisablePreParseMultipartForm: true, // Don't buffer multipart bodies; upload handler parses the stream itself
 		ProxyHeader:                  cfg.ProxyHeader,
 		TrustProxy:                   true,
 		TrustProxyConfig:             fiber.TrustProxyConfig{Proxies: cfg.TrustedProxies},
@@ -267,6 +268,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 		s.vmImportHandler = handlers.NewVMImportHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.cephHandler = handlers.NewCephHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.backupHandler = handlers.NewBackupHandler(d.queries, d.encryptionKey, d.eventPub)
+		s.guestSnapshotHandler = handlers.NewGuestSnapshotHandler(d.queries, d.encryptionKey, d.eventPub)
 	}
 	if d.hasDB() {
 		s.metricsHandler = handlers.NewMetricsHandler(d.queries)

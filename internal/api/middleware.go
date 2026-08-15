@@ -202,6 +202,21 @@ func (s *Server) setupMiddleware() {
 		},
 	}))
 
+	// Snapshot-resync limiter — each call makes one Proxmox listing plus one
+	// DB write per snapshot, and the endpoint is view-gated, so without a
+	// dedicated cap a read-only account could pin both the DB and PVE well
+	// within the general limiter's budget.
+	s.app.Use(limiter.New(limiter.Config{
+		Max:        30,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() + ":snapshot-resync"
+		},
+		Next: func(c fiber.Ctx) bool {
+			return !strings.HasSuffix(c.Path(), "/guest-snapshots/resync")
+		},
+	}))
+
 	// General rate limiting (in-memory storage).
 	// Skip auth endpoints so token refresh is never blocked — a 429 on
 	// /auth/refresh causes the frontend to interpret it as an auth failure

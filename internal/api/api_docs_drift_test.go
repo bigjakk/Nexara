@@ -33,6 +33,7 @@ func newRouteStubServer() *Server {
 		metricsHandler:         &handlers.MetricsHandler{},
 		cephHandler:            &handlers.CephHandler{},
 		backupHandler:          &handlers.BackupHandler{},
+		guestSnapshotHandler:   &handlers.GuestSnapshotHandler{},
 		taskHandler:            &handlers.TaskHandler{},
 		scheduleHandler:        &handlers.ScheduleHandler{},
 		auditHandler:           &handlers.AuditHandler{},

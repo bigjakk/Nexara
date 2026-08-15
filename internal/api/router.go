@@ -161,6 +161,9 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/tasks/:upid", s.vmHandler.GetTaskStatus)
 			clusters.Get("/:cluster_id/tasks/:upid/log", s.vmHandler.GetTaskLog)
 		}
+		if s.guestSnapshotHandler != nil {
+			clusters.Post("/:cluster_id/guest-snapshots/resync", s.guestSnapshotHandler.Resync)
+		}
 		if s.containerHandler != nil {
 			clusters.Get("/:cluster_id/containers", s.containerHandler.ListByCluster)
 			clusters.Post("/:cluster_id/containers", s.containerHandler.CreateContainer)
@@ -643,6 +646,12 @@ func (s *Server) setupRoutes() {
 		tasks.Post("/", s.taskHandler.Create)
 		tasks.Put("/:upid", s.taskHandler.Update)
 		tasks.Delete("/", s.taskHandler.ClearCompleted)
+	}
+
+	// Central guest snapshot inventory.
+	if s.guestSnapshotHandler != nil {
+		snaps := v1.Group("/guest-snapshots", s.authRequired())
+		snaps.Get("/", s.guestSnapshotHandler.List)
 	}
 
 	// RBAC routes.
