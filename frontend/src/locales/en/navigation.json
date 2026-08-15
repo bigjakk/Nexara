@@ -5,6 +5,7 @@
   "console": "Console",
   "storage": "Storage",
   "backup": "Backup",
+  "snapshots": "Snapshots",
   "alerts": "Alerts",
   "reports": "Reports",
   "security": "Security",

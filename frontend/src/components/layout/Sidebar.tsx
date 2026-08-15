@@ -14,6 +14,7 @@ import {
   Upload,
   PanelLeftClose,
   PanelLeftOpen,
+  Camera,
   ChevronDown,
   ChevronRight,
   Server,
@@ -58,6 +59,7 @@ const navSections: NavSection[] = [
     labelKey: "sectionOperations",
     items: [
       { labelKey: "backup", to: "/backup", icon: Shield },
+      { labelKey: "snapshots", to: "/snapshots", icon: Camera },
       { labelKey: "alerts", to: "/alerts", icon: Bell, requiredPermission: "view:alert" },
       { labelKey: "reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
       { labelKey: "security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },

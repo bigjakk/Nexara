@@ -142,7 +142,8 @@ export type EventKind =
   | "ha_change"
   | "pool_change"
   | "replication_change"
-  | "acme_change";
+  | "acme_change"
+  | "snapshot_change";
 
 /** Event pushed from the backend through the WS pipeline. */
 export interface NexaraEvent {

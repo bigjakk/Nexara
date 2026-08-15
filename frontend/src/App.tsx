@@ -38,6 +38,11 @@ const VMDetailPage = lazy(() =>
     default: m.VMDetailPage,
   })),
 );
+const SnapshotsPage = lazy(() =>
+  import("@/features/snapshots/pages/SnapshotsPage").then((m) => ({
+    default: m.SnapshotsPage,
+  })),
+);
 const FolderDetailPage = lazy(() =>
   import("@/features/vms/pages/FolderDetailPage").then((m) => ({
     default: m.FolderDetailPage,
@@ -223,6 +228,10 @@ const router = createBrowserRouter([
           {
             path: "backup",
             element: <LazyPage><BackupDashboardPage /></LazyPage>,
+          },
+          {
+            path: "snapshots",
+            element: <LazyPage><SnapshotsPage /></LazyPage>,
           },
           {
             path: "events",

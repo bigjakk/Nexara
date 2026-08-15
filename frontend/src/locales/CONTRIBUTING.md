@@ -26,7 +26,8 @@ frontend/src/locales/
 │   ├── reports.json         ← Reports page
 │   ├── audit.json           ← Audit log
 │   ├── ceph.json            ← Ceph storage
-│   └── networks.json        ← Network management
+│   ├── networks.json        ← Network management
+│   └── snapshots.json       ← Central guest snapshots page
 ```
 
 ## Adding a New Language

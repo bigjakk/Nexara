@@ -1,0 +1,50 @@
+{
+  "title": "Snapshots",
+  "subtitle": "All guest snapshots across your clusters — find and clean up the ones you forgot",
+  "lastSynced": "Last synced {{time}}",
+  "loadError": "Failed to load snapshots.",
+  "empty": "No snapshots found. The inventory refreshes on the collector's snapshot pass (every 5 minutes by default).",
+  "emptyFiltered": "No snapshots match the current filters.",
+  "stats": {
+    "total": "Total Snapshots",
+    "guests": "Guests with Snapshots",
+    "olderThan7": "Older than 7 days",
+    "olderThan30": "Older than 30 days"
+  },
+  "table": {
+    "age": "Age",
+    "name": "Name",
+    "guest": "Guest",
+    "cluster": "Cluster",
+    "node": "Node",
+    "created": "Created"
+  },
+  "filters": {
+    "search": "Search snapshots…",
+    "allClusters": "All clusters",
+    "allTypes": "All types",
+    "vms": "VMs",
+    "containers": "Containers",
+    "allAges": "All ages",
+    "olderThan7": "Older than 7 days",
+    "olderThan30": "Older than 30 days",
+    "unknownAge": "Unknown age"
+  },
+  "detail": {
+    "description": "Description",
+    "parent": "Parent",
+    "vmid": "VMID",
+    "lastSeen": "Last seen",
+    "guestStatus": "Guest status"
+  },
+  "ramState": "RAM",
+  "openGuest": "Open guest",
+  "openGuestUnavailable": "Guest not in inventory",
+  "refreshRow": "Refresh from Proxmox",
+  "delete": "Delete snapshot",
+  "deleteDenied": "Requires delete permission",
+  "confirm": "Confirm",
+  "cancel": "Cancel",
+  "taskDescription": "Snapshot delete",
+  "orphanHint": "This guest is no longer in the inventory — the row clears on the next collector pass."
+}

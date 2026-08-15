@@ -37,6 +37,7 @@ describe("i18n configuration", () => {
       "audit",
       "ceph",
       "networks",
+      "snapshots",
     ];
     const actualNamespaces = Object.keys(resources.en);
     for (const ns of expectedNamespaces) {

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link } from "react-router-dom";
 import { ArrowLeft, Monitor, Terminal, Pencil, Check, X, Container, Server } from "lucide-react";
 import { OSIcon } from "@/components/OSIcon";
 import { DetailChip } from "@/components/DetailChip";
@@ -47,6 +47,16 @@ export function VMDetailPage() {
     kind: string;
   }>();
   const kind: ResourceKind = rawKind === "ct" || rawKind === "lxc" ? "ct" : "vm";
+  // Read-only ?tab= deep link (e.g. the central Snapshots page links to
+  // ?tab=snapshots). Only trusted on mount — AppShell remounts per pathname.
+  const [searchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const validTabs =
+    kind === "vm"
+      ? ["overview", "hardware", "snapshots", "cloud-init", "backups", "schedules"]
+      : ["overview", "resources", "snapshots", "backups", "schedules"];
+  const initialTab =
+    requestedTab && validTabs.includes(requestedTab) ? requestedTab : "overview";
   const isMobile = useIsMobile();
   const { data: vm, isLoading, error } = useVM(clusterId, vmId, kind);
 
@@ -279,7 +289,7 @@ export function VMDetailPage() {
       />
 
       {/* Tabs */}
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           {kind === "vm" && (

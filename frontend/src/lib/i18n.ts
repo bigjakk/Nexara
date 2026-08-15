@@ -21,6 +21,7 @@ import reportsEN from "@/locales/en/reports.json";
 import auditEN from "@/locales/en/audit.json";
 import cephEN from "@/locales/en/ceph.json";
 import networksEN from "@/locales/en/networks.json";
+import snapshotsEN from "@/locales/en/snapshots.json";
 
 export const defaultNS = "common";
 
@@ -45,6 +46,7 @@ export const resources = {
     audit: auditEN,
     ceph: cephEN,
     networks: networksEN,
+    snapshots: snapshotsEN,
   },
 } as const;
 

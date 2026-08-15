@@ -139,6 +139,23 @@ export function useEventInvalidation(clusterIds: string[]): void {
           );
           break;
 
+        case "snapshot_change":
+          scheduleInvalidation(["guest-snapshots"]);
+          // A per-guest resync names the guest; refresh its detail-tab
+          // queries too. Never prefix-invalidate ["clusters", cid] here —
+          // see the inventory_change note above.
+          if (
+            cid &&
+            event.resource_id &&
+            (event.resource_type === "vm" || event.resource_type === "container")
+          ) {
+            scheduleInvalidation(
+              ["clusters", cid, "vms", event.resource_id, "snapshots"],
+              ["clusters", cid, "containers", event.resource_id, "snapshots"],
+            );
+          }
+          break;
+
         case "cve_scan":
           if (cid) {
             scheduleInvalidation(
