@@ -117,6 +117,24 @@ type Querier interface {
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
+	// DeleteGuestSnapshotsForVanishedGuests removes snapshot rows for guests that
+	// no longer exist in the cluster's vms inventory. Callers feed vmids from the
+	// vms table (not from a live listing), so this inherits the grace protection
+	// DeleteStaleVMsForNodes gives vms rows — a transient per-node Proxmox blip
+	// cannot cascade into snapshot-inventory loss. The vmid list must be a
+	// non-nil (possibly empty) slice: pgx encodes nil as SQL NULL and the DELETE
+	// then silently matches nothing.
+	DeleteGuestSnapshotsForVanishedGuests(ctx context.Context, arg DeleteGuestSnapshotsForVanishedGuestsParams) (int64, error)
+	// DeleteGuestSnapshotsNotInSet removes a single guest's snapshots that are
+	// absent from a freshly listed set. The snapshot listing endpoint is
+	// config-authoritative (it reads the guest's config file), so no grace window
+	// is needed — but callers must only invoke this for guests whose listing
+	// succeeded this pass, and must treat a raw-empty listing as anomalous (PVE
+	// always returns at least the synthetic "current" entry). An empty name list
+	// is valid: a guest whose real snapshots were all deleted prunes everything —
+	// but it must be a non-nil empty slice. pgx encodes a nil slice as SQL NULL,
+	// and NOT (x = ANY(NULL)) is NULL, so a nil list silently deletes nothing.
+	DeleteGuestSnapshotsNotInSet(ctx context.Context, arg DeleteGuestSnapshotsNotInSetParams) (int64, error)
 	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
 	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
 	DeleteMobileDevice(ctx context.Context, id uuid.UUID) error
@@ -220,6 +238,13 @@ type Querier interface {
 	GetClusterMetricsDailyAvg(ctx context.Context, arg GetClusterMetricsDailyAvgParams) ([]GetClusterMetricsDailyAvgRow, error)
 	GetClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (ClusterSshCredential, error)
 	GetClusterSecuritySummary(ctx context.Context, clusterID uuid.UUID) (GetClusterSecuritySummaryRow, error)
+	// GetClusterSnapshotAgeStats backs the snapshot_age_days alert metric for
+	// cluster-scoped rules: the oldest dated snapshot in the cluster plus how many
+	// exceed the rule threshold. Rows with snap_time = 0 (age unknown) are
+	// excluded — computing an age from 0 would read as ~56 years and false-fire.
+	// Zero dated snapshots → no row (ErrNoRows), which callers treat as
+	// condition-not-met so the alert auto-resolves after cleanup.
+	GetClusterSnapshotAgeStats(ctx context.Context, arg GetClusterSnapshotAgeStatsParams) (GetClusterSnapshotAgeStatsRow, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
 	GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
@@ -319,6 +344,9 @@ type Querier interface {
 	GetVMMetrics5m(ctx context.Context, arg GetVMMetrics5mParams) ([]GetVMMetrics5mRow, error)
 	GetVMMetricsDailyAvg(ctx context.Context, arg GetVMMetricsDailyAvgParams) ([]GetVMMetricsDailyAvgRow, error)
 	GetVMRecentMetrics(ctx context.Context, arg GetVMRecentMetricsParams) ([]GetVMRecentMetricsRow, error)
+	// GetVMSnapshotAgeStats is the vm-scoped counterpart of
+	// GetClusterSnapshotAgeStats; same snap_time > 0 and ErrNoRows semantics.
+	GetVMSnapshotAgeStats(ctx context.Context, arg GetVMSnapshotAgeStatsParams) (GetVMSnapshotAgeStatsRow, error)
 	HasClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	HasRunningJobForCluster(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	IncrementJobCleanupAttempts(ctx context.Context, id uuid.UUID) (int32, error)
@@ -378,6 +406,11 @@ type Querier interface {
 	ListAlertRules(ctx context.Context, arg ListAlertRulesParams) ([]AlertRule, error)
 	ListAlertRulesByCluster(ctx context.Context, arg ListAlertRulesByClusterParams) ([]AlertRule, error)
 	ListAllAPIKeys(ctx context.Context) ([]ListAllAPIKeysRow, error)
+	// ListAllGuestSnapshots feeds the central snapshots page. vms is LEFT JOINed
+	// on the stable (cluster_id, vmid) identity so rows whose guest row is mid-
+	// churn (or gone) still render; vm_id/vm_name/vm_status are NULL then and the
+	// frontend disables the guest link. Unknown ages (snap_time = 0) sort last.
+	ListAllGuestSnapshots(ctx context.Context) ([]ListAllGuestSnapshotsRow, error)
 	ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error)
 	ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error)
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
@@ -425,6 +458,7 @@ type Querier interface {
 	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
 	// No row-level tiebreak, for the reasons noted on ListSettingsByScope above.
 	ListGlobalSettings(ctx context.Context) ([]Setting, error)
+	ListGuestSnapshotsByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSnapshot, error)
 	// Guests whose HA resource state is "error" (needs manual intervention).
 	ListHAErrorGuests(ctx context.Context) ([]ListHAErrorGuestsRow, error)
 	// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).
@@ -661,6 +695,7 @@ type Querier interface {
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
 	UpsertEPSSEntry(ctx context.Context, arg UpsertEPSSEntryParams) error
 	UpsertExternalFeedCache(ctx context.Context, arg UpsertExternalFeedCacheParams) error
+	UpsertGuestSnapshot(ctx context.Context, arg UpsertGuestSnapshotParams) (GuestSnapshot, error)
 	UpsertKEVEntry(ctx context.Context, arg UpsertKEVEntryParams) error
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertNodeDisk(ctx context.Context, arg UpsertNodeDiskParams) (NodeDisk, error)

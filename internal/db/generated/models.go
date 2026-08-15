@@ -345,6 +345,21 @@ type FirewallTemplate struct {
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
+type GuestSnapshot struct {
+	ClusterID   uuid.UUID `json:"cluster_id"`
+	Vmid        int32     `json:"vmid"`
+	Name        string    `json:"name"`
+	GuestType   string    `json:"guest_type"`
+	Node        string    `json:"node"`
+	Description string    `json:"description"`
+	Parent      string    `json:"parent"`
+	// RAM state included in the snapshot (QEMU only)
+	Vmstate bool `json:"vmstate"`
+	// Snapshot creation time as unix seconds; 0 = Proxmox omitted snaptime, age unknown
+	SnapTime   int64     `json:"snap_time"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
 type KevCache struct {
 	CveID             string      `json:"cve_id"`
 	DateAdded         pgtype.Date `json:"date_added"`
