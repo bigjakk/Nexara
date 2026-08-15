@@ -34,6 +34,7 @@ const REPORT_TYPES = [
   { value: "backup_compliance", label: "Backup Compliance" },
   { value: "patch_status", label: "Patch Status" },
   { value: "uptime_summary", label: "Uptime Summary" },
+  { value: "snapshot_inventory", label: "Snapshot Inventory" },
 ] as const;
 
 interface ReportScheduleFormProps {

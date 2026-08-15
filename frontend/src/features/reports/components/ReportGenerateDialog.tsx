@@ -25,6 +25,7 @@ import type { ClusterResponse } from "@/types/api";
 const REPORT_TYPES = [
   { value: "resource_utilization", label: "Resource Utilization" },
   { value: "vm_resource_usage", label: "VM Resource Usage" },
+  { value: "snapshot_inventory", label: "Snapshot Inventory" },
   { value: "capacity_forecast", label: "Capacity Forecast" },
   { value: "backup_compliance", label: "Backup Compliance" },
   { value: "patch_status", label: "Patch Status" },

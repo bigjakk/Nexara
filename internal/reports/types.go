@@ -12,13 +12,15 @@ const (
 	TypePatchStatus         ReportType = "patch_status"
 	TypeUptimeSummary       ReportType = "uptime_summary"
 	TypeVMResourceUsage     ReportType = "vm_resource_usage"
+	TypeSnapshotInventory   ReportType = "snapshot_inventory"
 )
 
 // ValidReportType returns true if the report type is supported.
 func ValidReportType(t string) bool {
 	switch ReportType(t) {
 	case TypeResourceUtilization, TypeCapacityForecast, TypeBackupCompliance,
-		TypePatchStatus, TypeUptimeSummary, TypeVMResourceUsage:
+		TypePatchStatus, TypeUptimeSummary, TypeVMResourceUsage,
+		TypeSnapshotInventory:
 		return true
 	}
 	return false

@@ -279,6 +279,65 @@ func (q *Queries) ListGuestSnapshotsByCluster(ctx context.Context, clusterID uui
 	return items, nil
 }
 
+const listGuestSnapshotsForReport = `-- name: ListGuestSnapshotsForReport :many
+SELECT
+    gs.vmid,
+    gs.name,
+    gs.guest_type,
+    gs.node,
+    gs.description,
+    gs.vmstate,
+    gs.snap_time,
+    v.name AS vm_name
+FROM guest_snapshots gs
+LEFT JOIN vms v ON v.cluster_id = gs.cluster_id AND v.vmid = gs.vmid
+WHERE gs.cluster_id = $1
+ORDER BY (gs.snap_time = 0), gs.snap_time ASC, gs.vmid, gs.name
+`
+
+type ListGuestSnapshotsForReportRow struct {
+	Vmid        int32       `json:"vmid"`
+	Name        string      `json:"name"`
+	GuestType   string      `json:"guest_type"`
+	Node        string      `json:"node"`
+	Description string      `json:"description"`
+	Vmstate     bool        `json:"vmstate"`
+	SnapTime    int64       `json:"snap_time"`
+	VmName      pgtype.Text `json:"vm_name"`
+}
+
+// ListGuestSnapshotsForReport feeds the snapshot_inventory report type: one
+// cluster's rows, oldest dated first (unknown ages last), with the guest
+// name rejoined live (NULL when the guest is gone from inventory).
+func (q *Queries) ListGuestSnapshotsForReport(ctx context.Context, clusterID uuid.UUID) ([]ListGuestSnapshotsForReportRow, error) {
+	rows, err := q.db.Query(ctx, listGuestSnapshotsForReport, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGuestSnapshotsForReportRow{}
+	for rows.Next() {
+		var i ListGuestSnapshotsForReportRow
+		if err := rows.Scan(
+			&i.Vmid,
+			&i.Name,
+			&i.GuestType,
+			&i.Node,
+			&i.Description,
+			&i.Vmstate,
+			&i.SnapTime,
+			&i.VmName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertGuestSnapshot = `-- name: UpsertGuestSnapshot :one
 INSERT INTO guest_snapshots (cluster_id, vmid, name, guest_type, node, description, parent, vmstate, snap_time, last_seen_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())

@@ -64,9 +64,99 @@ func (g *Generator) Generate(ctx context.Context, reportType string, clusterID u
 	case TypeVMResourceUsage:
 		data.Title = fmt.Sprintf("VM Resource Usage Report - %s", cluster.Name)
 		return g.generateVMResourceUsage(ctx, data, clusterID, since)
+	case TypeSnapshotInventory:
+		data.Title = fmt.Sprintf("Snapshot Inventory Report - %s", cluster.Name)
+		return g.generateSnapshotInventory(ctx, data, clusterID)
 	default:
 		return nil, fmt.Errorf("unsupported report type: %s", reportType)
 	}
+}
+
+// generateSnapshotInventory reports the cluster's guest snapshot inventory
+// (collected by the snapshot sync loop): an age-bucket summary plus the
+// oldest snapshots, so forgotten snapshots surface in scheduled digests.
+// It is a point-in-time report — the schedule's time range is ignored, like
+// backup compliance. Ages come from snap_time (unix seconds); rows with
+// snap_time = 0 have unknown age and are counted separately, never aged
+// from epoch 0.
+func (g *Generator) generateSnapshotInventory(ctx context.Context, data *ReportData, clusterID uuid.UUID) (*ReportData, error) {
+	rows, err := g.queries.ListGuestSnapshotsForReport(ctx, clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("list guest snapshots: %w", err)
+	}
+
+	now := time.Now().Unix()
+	guests := make(map[int32]bool)
+	var over7, over30, unknown int
+	for _, row := range rows {
+		guests[row.Vmid] = true
+		if row.SnapTime <= 0 {
+			unknown++
+			continue
+		}
+		days := float64(now-row.SnapTime) / 86400
+		switch {
+		case days > 30:
+			over30++
+			over7++ // ">7 days" includes ">30 days", matching the UI stat cards
+		case days > 7:
+			over7++
+		}
+	}
+
+	data.Sections = append(data.Sections, ReportSection{
+		Title:   "Snapshot Summary",
+		Headers: []string{"Total Snapshots", "Guests With Snapshots", "Older Than 7 Days", "Older Than 30 Days", "Unknown Age"},
+		Rows: []map[string]string{{
+			"Total Snapshots":       fmt.Sprintf("%d", len(rows)),
+			"Guests With Snapshots": fmt.Sprintf("%d", len(guests)),
+			"Older Than 7 Days":     fmt.Sprintf("%d", over7),
+			"Older Than 30 Days":    fmt.Sprintf("%d", over30),
+			"Unknown Age":           fmt.Sprintf("%d", unknown),
+		}},
+	})
+
+	const maxOldestRows = 25
+	oldest := ReportSection{
+		Title:   "Oldest Snapshots",
+		Headers: []string{"Guest", "VMID", "Type", "Snapshot", "Age", "RAM", "Node", "Description"},
+		Rows:    []map[string]string{},
+	}
+	for i, row := range rows {
+		if i >= maxOldestRows {
+			break
+		}
+		guestName := fmt.Sprintf("#%d", row.Vmid)
+		if row.VmName.Valid {
+			guestName = row.VmName.String
+		}
+		age := "Unknown"
+		if row.SnapTime > 0 {
+			days := float64(now-row.SnapTime) / 86400
+			if days < 0 {
+				days = 0 // clock skew must not render "-0d"
+			}
+			// Floor, not round: 7.4 days must display as 7d so the summary's
+			// ">7 days" bucket and the visible ages agree at the boundary.
+			age = fmt.Sprintf("%dd", int(days))
+		}
+		ram := "No"
+		if row.Vmstate {
+			ram = "Yes"
+		}
+		oldest.Rows = append(oldest.Rows, map[string]string{
+			"Guest":       guestName,
+			"VMID":        fmt.Sprintf("%d", row.Vmid),
+			"Type":        row.GuestType,
+			"Snapshot":    row.Name,
+			"Age":         age,
+			"RAM":         ram,
+			"Node":        row.Node,
+			"Description": row.Description,
+		})
+	}
+	data.Sections = append(data.Sections, oldest)
+	return data, nil
 }
 
 func (g *Generator) generateResourceUtilization(ctx context.Context, data *ReportData, clusterID uuid.UUID, since time.Time) (*ReportData, error) {

@@ -459,6 +459,10 @@ type Querier interface {
 	// No row-level tiebreak, for the reasons noted on ListSettingsByScope above.
 	ListGlobalSettings(ctx context.Context) ([]Setting, error)
 	ListGuestSnapshotsByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSnapshot, error)
+	// ListGuestSnapshotsForReport feeds the snapshot_inventory report type: one
+	// cluster's rows, oldest dated first (unknown ages last), with the guest
+	// name rejoined live (NULL when the guest is gone from inventory).
+	ListGuestSnapshotsForReport(ctx context.Context, clusterID uuid.UUID) ([]ListGuestSnapshotsForReportRow, error)
 	// Guests whose HA resource state is "error" (needs manual intervention).
 	ListHAErrorGuests(ctx context.Context) ([]ListHAErrorGuestsRow, error)
 	// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).

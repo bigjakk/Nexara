@@ -69,6 +69,24 @@ JOIN clusters c ON c.id = gs.cluster_id
 LEFT JOIN vms v ON v.cluster_id = gs.cluster_id AND v.vmid = gs.vmid
 ORDER BY (gs.snap_time = 0), gs.snap_time ASC, gs.cluster_id, gs.vmid, gs.name;
 
+-- ListGuestSnapshotsForReport feeds the snapshot_inventory report type: one
+-- cluster's rows, oldest dated first (unknown ages last), with the guest
+-- name rejoined live (NULL when the guest is gone from inventory).
+-- name: ListGuestSnapshotsForReport :many
+SELECT
+    gs.vmid,
+    gs.name,
+    gs.guest_type,
+    gs.node,
+    gs.description,
+    gs.vmstate,
+    gs.snap_time,
+    v.name AS vm_name
+FROM guest_snapshots gs
+LEFT JOIN vms v ON v.cluster_id = gs.cluster_id AND v.vmid = gs.vmid
+WHERE gs.cluster_id = $1
+ORDER BY (gs.snap_time = 0), gs.snap_time ASC, gs.vmid, gs.name;
+
 -- GetClusterSnapshotAgeStats backs the snapshot_age_days alert metric for
 -- cluster-scoped rules: the oldest dated snapshot in the cluster plus how many
 -- exceed the rule threshold. Rows with snap_time = 0 (age unknown) are

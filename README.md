@@ -217,6 +217,7 @@ All settings are environment variables in `.env`. Secrets are auto-generated on 
 | `ENCRYPTION_KEY` | auto-generated | AES-256-GCM key for secrets at rest |
 | `API_PORT` | `8080` | Server listen port |
 | `METRICS_COLLECT_INTERVAL` | `30s` | How often to poll Proxmox for metrics (Docker deployments set `10s`) |
+| `SNAPSHOT_SYNC_INTERVAL` | `5m` | How often the guest snapshot inventory (central Snapshots page + snapshot-age alerts) refreshes. One Proxmox call per guest per pass; floored at `60s`, `0` disables |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `PUID` / `PGID` | `1000` | Container user/group ID |
 | `DATA_DIR` | Docker volume | Custom data path (e.g. NFS mount) |

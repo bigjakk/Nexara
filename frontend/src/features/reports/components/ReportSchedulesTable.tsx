@@ -20,6 +20,7 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
   backup_compliance: "Backup Compliance",
   patch_status: "Patch Status",
   uptime_summary: "Uptime Summary",
+  snapshot_inventory: "Snapshot Inventory",
 };
 
 interface ReportSchedulesTableProps {
