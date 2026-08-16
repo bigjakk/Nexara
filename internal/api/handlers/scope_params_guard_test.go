@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -319,8 +320,8 @@ func scopedParamsTypes(t *testing.T) map[string]bool {
 }
 
 // goSourceFiles walks the repository for non-test Go sources, skipping the
-// generated package (which defines the structs rather than filling them) and
-// anything vendored.
+// generated package (which defines the structs rather than filling them),
+// anything vendored, and any nested checkout.
 func goSourceFiles(t *testing.T) []string {
 	t.Helper()
 
@@ -331,6 +332,7 @@ func goSourceFiles(t *testing.T) []string {
 		".git":         true,
 	}
 	generated := filepath.Clean(filepath.Join(repoRoot, generatedDir))
+	root := filepath.Clean(repoRoot)
 
 	err := filepath.WalkDir(repoRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -338,6 +340,15 @@ func goSourceFiles(t *testing.T) []string {
 		}
 		if d.IsDir() {
 			if skipDirs[d.Name()] || filepath.Clean(path) == generated {
+				return filepath.SkipDir
+			}
+			// A nested checkout holds its own copy of these very sources,
+			// typically at an older commit — walking into one reports findings
+			// against paths that are not this repository, and that this
+			// repository may already have fixed. Agent worktrees land under
+			// .claude/worktrees/, which is gitignored but still on disk, so
+			// this fires on a normal dev box while CI's clean checkout passes.
+			if filepath.Clean(path) != root && isNestedCheckout(path) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -351,6 +362,15 @@ func goSourceFiles(t *testing.T) []string {
 		t.Fatalf("walk %s: %v", repoRoot, err)
 	}
 	return files
+}
+
+// isNestedCheckout reports whether dir is the root of its own git checkout.
+// A worktree and a submodule carry a .git FILE rather than a directory, so
+// neither is caught by the ".git" entry in skipDirs — that one only matches a
+// directory the walk is about to descend into.
+func isNestedCheckout(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
 }
 
 func stamperNames() string {
