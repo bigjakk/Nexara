@@ -88,18 +88,28 @@ func parsePBSID(c fiber.Ctx) (uuid.UUID, error) {
 // — so a user with cluster-scoped backup rights cannot drive a PBS bound to a
 // different cluster. Standalone PBS servers (no cluster_id) fall back to the
 // global requirePerm.
-func (h *BackupHandler) requirePBSPerm(c fiber.Ctx, pbsID uuid.UUID, action string) error {
+//
+// It returns the server's cluster so the caller can attribute its audit row to
+// the same cluster it was just authorized against. That value is why this
+// returns anything at all: the authorization here is the one place that already
+// holds the binding, and every PBS datastore mutation below used to audit with
+// a NULL cluster instead. A NULL cluster_id marks a GLOBAL audit entry, which
+// the scoped audit reads hand only to holders of global view:audit — so a
+// cluster-scoped operator could trigger a GC or delete a snapshot and then not
+// find their own action in the audit log. Invalid is correct only for a
+// standalone PBS, which genuinely belongs to no cluster.
+func (h *BackupHandler) requirePBSPerm(c fiber.Ctx, pbsID uuid.UUID, action string) (pgtype.UUID, error) {
 	server, err := h.queries.GetPBSServer(c.Context(), pbsID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusNotFound, "PBS server not found")
+			return pgtype.UUID{}, fiber.NewError(fiber.StatusNotFound, "PBS server not found")
 		}
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get PBS server")
+		return pgtype.UUID{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to get PBS server")
 	}
 	if server.ClusterID.Valid {
-		return requireClusterPerm(c, action, "backup", uuid.UUID(server.ClusterID.Bytes))
+		return server.ClusterID, requireClusterPerm(c, action, "backup", uuid.UUID(server.ClusterID.Bytes))
 	}
-	return requirePerm(c, action, "backup")
+	return pgtype.UUID{}, requirePerm(c, action, "backup")
 }
 
 // --- Live proxy endpoints ---
@@ -110,7 +120,7 @@ func (h *BackupHandler) ListDatastores(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -133,7 +143,7 @@ func (h *BackupHandler) GetDatastoreStatus(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -157,7 +167,8 @@ func (h *BackupHandler) TriggerGC(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
+	cluster, err := h.requirePBSPerm(c, pbsID, "manage")
+	if err != nil {
 		return err
 	}
 
@@ -176,7 +187,7 @@ func (h *BackupHandler) TriggerGC(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", store, "gc_triggered", nil)
+	AuditLog(c, h.queries, h.eventPub, cluster, "backup", store, "gc_triggered", nil)
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "gc_triggered")
 
 	return c.JSON(fiber.Map{"upid": upid})
@@ -194,7 +205,8 @@ func (h *BackupHandler) DeleteSnapshot(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "delete"); err != nil {
+	cluster, err := h.requirePBSPerm(c, pbsID, "delete")
+	if err != nil {
 		return err
 	}
 
@@ -226,7 +238,7 @@ func (h *BackupHandler) DeleteSnapshot(c fiber.Ctx) error {
 		"backup_id":   req.BackupID,
 		"backup_time": req.BackupTime,
 	})
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_deleted", details)
+	AuditLog(c, h.queries, h.eventPub, cluster, "backup", store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_deleted", details)
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "snapshot_deleted")
 
 	return c.JSON(fiber.Map{"status": "deleted"})
@@ -245,7 +257,8 @@ func (h *BackupHandler) ProtectSnapshot(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
+	cluster, err := h.requirePBSPerm(c, pbsID, "manage")
+	if err != nil {
 		return err
 	}
 
@@ -282,7 +295,7 @@ func (h *BackupHandler) ProtectSnapshot(c fiber.Ctx) error {
 		"backup_time": req.BackupTime,
 		"protected":   req.Protected,
 	})
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", store+"/"+req.BackupType+"/"+req.BackupID, action, details)
+	AuditLog(c, h.queries, h.eventPub, cluster, "backup", store+"/"+req.BackupType+"/"+req.BackupID, action, details)
 
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, action)
 
@@ -302,7 +315,8 @@ func (h *BackupHandler) UpdateSnapshotNotes(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
+	cluster, err := h.requirePBSPerm(c, pbsID, "manage")
+	if err != nil {
 		return err
 	}
 
@@ -328,7 +342,7 @@ func (h *BackupHandler) UpdateSnapshotNotes(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_notes_updated", nil)
+	AuditLog(c, h.queries, h.eventPub, cluster, "backup", store+"/"+req.BackupType+"/"+req.BackupID, "snapshot_notes_updated", nil)
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -339,7 +353,7 @@ func (h *BackupHandler) GetTaskLog(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -378,7 +392,8 @@ func (h *BackupHandler) PruneDatastore(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
+	cluster, err := h.requirePBSPerm(c, pbsID, "manage")
+	if err != nil {
 		return err
 	}
 
@@ -422,7 +437,7 @@ func (h *BackupHandler) PruneDatastore(c fiber.Ctx) error {
 			"keep_monthly": req.KeepMonthly,
 			"keep_yearly":  req.KeepYearly,
 		})
-		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", store, "datastore_pruned", details)
+		AuditLog(c, h.queries, h.eventPub, cluster, "backup", store, "datastore_pruned", details)
 		h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "datastore_pruned")
 	}
 
@@ -435,7 +450,7 @@ func (h *BackupHandler) GetDatastoreConfig(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -463,7 +478,8 @@ func (h *BackupHandler) RunSyncJob(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
+	cluster, err := h.requirePBSPerm(c, pbsID, "manage")
+	if err != nil {
 		return err
 	}
 
@@ -482,7 +498,7 @@ func (h *BackupHandler) RunSyncJob(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", jobID, "sync_job_triggered", nil)
+	AuditLog(c, h.queries, h.eventPub, cluster, "backup", jobID, "sync_job_triggered", nil)
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "sync_job_triggered")
 
 	return c.JSON(fiber.Map{"upid": upid})
@@ -494,7 +510,8 @@ func (h *BackupHandler) RunVerifyJob(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "manage"); err != nil {
+	cluster, err := h.requirePBSPerm(c, pbsID, "manage")
+	if err != nil {
 		return err
 	}
 
@@ -513,7 +530,7 @@ func (h *BackupHandler) RunVerifyJob(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "backup", jobID, "verify_job_triggered", nil)
+	AuditLog(c, h.queries, h.eventPub, cluster, "backup", jobID, "verify_job_triggered", nil)
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "verify_job_triggered")
 
 	return c.JSON(fiber.Map{"upid": upid})
@@ -525,7 +542,7 @@ func (h *BackupHandler) ListTasks(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -556,7 +573,7 @@ func (h *BackupHandler) GetTaskStatus(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -586,7 +603,7 @@ func (h *BackupHandler) ListSnapshots(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -616,7 +633,7 @@ func (h *BackupHandler) ListSyncJobs(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -634,7 +651,7 @@ func (h *BackupHandler) ListVerifyJobs(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -652,7 +669,7 @@ func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 
@@ -700,7 +717,7 @@ func (h *BackupHandler) GetDatastoreRRD(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
 		return err
 	}
 

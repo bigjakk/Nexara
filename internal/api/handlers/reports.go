@@ -262,7 +262,12 @@ func (h *ReportHandler) CreateSchedule(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create schedule")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "report_schedule", schedule.ID.String(), "created", nil)
+	// report_schedules.cluster_id is NOT NULL, so the schedule always belongs to
+	// one cluster and the audit row must say which. A cluster-less audit row is
+	// readable only with global view:audit (a NULL cluster_id marks a global
+	// entry, and the scoped reads exclude it), which would hide the schedule
+	// from the very operators who can see and manage it.
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(schedule.ClusterID), "report_schedule", schedule.ID.String(), "created", nil)
 	return c.Status(fiber.StatusCreated).JSON(toReportScheduleResponse(schedule))
 }
 
@@ -416,7 +421,9 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update schedule")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "report_schedule", id.String(), "updated", nil)
+	// Attribute to the cluster the schedule now belongs to, so a reassignment
+	// lands in the new cluster's audit log.
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(updated.ClusterID), "report_schedule", id.String(), "updated", nil)
 	return c.JSON(toReportScheduleResponse(updated))
 }
 
@@ -440,7 +447,7 @@ func (h *ReportHandler) DeleteSchedule(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete schedule")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "report_schedule", id.String(), "deleted", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(existing.ClusterID), "report_schedule", id.String(), "deleted", nil)
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
@@ -553,7 +560,7 @@ func (h *ReportHandler) GenerateReport(c fiber.Ctx) error {
 		h.eventPub.SystemEvent(c.Context(), events.KindReportGenerated, "completed")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "report", run.ID.String(), "generated", nil)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(run.ClusterID), "report", run.ID.String(), "generated", nil)
 	return c.Status(fiber.StatusCreated).JSON(toRunResponse(completed))
 }
 

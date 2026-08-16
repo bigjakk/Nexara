@@ -708,7 +708,13 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx) error {
 			"vmid":       req.VMID,
 			"type":       req.Type,
 		})
-		AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "console_token_mint", details)
+		// The mint is scoped to one cluster — the same clusterUUID the
+		// permission check above gates on — so the audit row carries it.
+		// Auditing NULL here marked the mint a global entry, which the scoped
+		// audit reads show only to holders of global view:audit: the operator
+		// who holds console:vm on this cluster, and who just opened the
+		// console, could not see their own mint.
+		AuditLogAs(c, h.queries, h.eventPub, userID, ClusterUUID(clusterUUID), "auth", userID.String(), "console_token_mint", details)
 	}
 
 	return c.JSON(consoleTokenResponse{

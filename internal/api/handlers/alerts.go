@@ -1149,7 +1149,12 @@ func (h *AlertHandler) AcknowledgeAlert(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to acknowledge alert")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert", id.String(), "alert_acknowledged", nil)
+	// Carry the alert's own cluster, the same value the permission check and the
+	// event below already use. alert_history.cluster_id is nullable and a NULL
+	// there means a global alert, so passing it through keeps the audit row as
+	// visible as the alert itself — rather than hiding every acknowledgement
+	// behind global view:audit.
+	AuditLog(c, h.queries, h.eventPub, alert.ClusterID, "alert", id.String(), "alert_acknowledged", nil)
 
 	if h.eventPub != nil {
 		clusterID := ""
@@ -1195,7 +1200,7 @@ func (h *AlertHandler) ResolveAlert(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to resolve alert")
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "alert", id.String(), "alert_resolved", nil)
+	AuditLog(c, h.queries, h.eventPub, alert.ClusterID, "alert", id.String(), "alert_resolved", nil)
 
 	if h.eventPub != nil {
 		clusterID := ""
