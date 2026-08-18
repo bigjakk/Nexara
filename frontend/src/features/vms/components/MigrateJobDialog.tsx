@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -21,6 +20,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
+import {
+  parseBwlimit,
+  resolveDiskFormat,
+} from "@/features/storage/lib/disk-move";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useClusterNodes,
@@ -106,8 +110,11 @@ export function MigrateJobDialog({
   const [targetNode, setTargetNode] = useState("");
   const [targetStorage, setTargetStorage] = useState("");
   const [online, setOnline] = useState(isRunning);
-  const [bwlimit, setBwlimit] = useState([0]);
-  const [deleteSource, setDeleteSource] = useState(false);
+  const [bwlimit, setBwlimit] = useState("");
+  // null = untouched (use the disks' current format where the target allows).
+  const [diskFormat, setDiskFormat] = useState<string | null>(null);
+  // null = follow the per-mode default in `deleteSource` below.
+  const [deleteSourceOverride, setDeleteSourceOverride] = useState<boolean | null>(null);
   const [targetVmid, setTargetVmid] = useState("");
   const [storageMap, setStorageMap] = useState<Record<string, string>>({});
   const [networkMap, setNetworkMap] = useState<Record<string, string>>({});
@@ -148,6 +155,13 @@ export function MigrateJobDialog({
   const needsDiskPlacement =
     migrationType === "intra-cluster" &&
     (migrationMode === "storage" || migrationMode === "both");
+
+  // Moving storage implies freeing the source, so default it on there. Across
+  // clusters "delete source" destroys the whole source guest, so it stays
+  // opt-in. With it off Proxmox keeps each source volume as an unused disk.
+  const deleteSource = deleteSourceOverride ?? needsDiskPlacement;
+  const showDeleteSource =
+    migrationType === "cross-cluster" || needsDiskPlacement;
   const { data: vmConfig } = useVMConfig(
     needsDiskPlacement && kind !== "ct" ? clusterId : "",
     needsDiskPlacement && kind !== "ct" ? resourceId : "",
@@ -163,7 +177,7 @@ export function MigrateJobDialog({
   // cloudinit drives); LXC rootfs/mp*. efidisk is intentionally excluded — the
   // backend never moves it.
   const guestDisks = useMemo(() => {
-    const out: { key: string; storage: string; size: string }[] = [];
+    const out: { key: string; storage: string; size: string; format: string }[] = [];
     if (!guestConfig) return out;
     const qemuDiskPrefixes = ["scsi", "virtio", "sata", "ide"];
     for (const [key, val] of Object.entries(guestConfig)) {
@@ -174,8 +188,8 @@ export function MigrateJobDialog({
         if (!qemuDiskPrefixes.some((p) => key.startsWith(p))) continue;
         if (val.includes("media=cdrom") || val.includes("cloudinit")) continue;
       }
-      const { storage, size } = parseDisk(val);
-      if (storage) out.push({ key, storage, size });
+      const { storage, size, format } = parseDisk(val);
+      if (storage) out.push({ key, storage, size, format: format || "" });
     }
     out.sort((a, b) => a.key.localeCompare(b.key));
     return out;
@@ -183,6 +197,13 @@ export function MigrateJobDialog({
 
   const currentDiskStorages = useMemo(
     () => new Set(guestDisks.map((d) => d.storage)),
+    [guestDisks],
+  );
+
+  // Distinct formats across the guest's disks. One format means the move can
+  // preselect it; a mix has no single answer, so the storage default is used.
+  const currentDiskFormats = useMemo(
+    () => new Set(guestDisks.map((d) => d.format).filter((f) => f !== "")),
     [guestDisks],
   );
 
@@ -223,8 +244,9 @@ export function MigrateJobDialog({
     setTargetNode("");
     setTargetStorage("");
     setOnline(isRunning);
-    setBwlimit([0]);
-    setDeleteSource(false);
+    setBwlimit("");
+    setDiskFormat(null);
+    setDeleteSourceOverride(null);
     setTargetVmid("");
     setStorageMap({});
     setNetworkMap({});
@@ -266,8 +288,9 @@ export function MigrateJobDialog({
       storage_map: storageMapPayload,
       network_map: migrationType === "cross-cluster" ? networkMap : {},
       online,
-      bwlimit_kib: bwlimit[0] ?? 0,
+      bwlimit_kib: bwlimitKib,
       delete_source: deleteSource,
+      disk_format: resolveDiskFormat(diskFormat, sourceDiskFormat, formatTargetType),
       target_vmid: targetVmid ? parseInt(targetVmid, 10) : 0,
       target_storage:
         (effectiveMode === "storage" || effectiveMode === "both") &&
@@ -391,8 +414,11 @@ export function MigrateJobDialog({
   );
 
   const hasPerDiskSelection = Object.values(diskTargets).some((v) => v !== "");
+  const { value: bwlimitKib, invalid: bwlimitInvalid } = parseBwlimit(bwlimit);
 
   const isFormValid = (() => {
+    // A malformed bandwidth limit blocks every mode.
+    if (bwlimitInvalid) return false;
     if (migrationType === "cross-cluster") {
       return targetNode.length > 0 && targetClusterId.length > 0;
     }
@@ -410,7 +436,20 @@ export function MigrateJobDialog({
     return targetNode.length > 0;
   })();
 
-  const bwlimitValue = bwlimit[0] ?? 0;
+
+  // A format only makes sense when every disk lands on one known storage, so
+  // per-disk targeting (mixed destinations) rules it out — as do containers,
+  // whose volumes have no format and whose jobs the API rejects if one is set.
+  const showFormat = needsDiskPlacement && !perDiskStorage && kind !== "ct";
+  const formatTargetType = showFormat
+    ? uniqueTargetStorage.find((s) => s.storage === targetStorage)?.type
+    : undefined;
+  // Guests whose disks are all in the same format can preselect it; mixed or
+  // unknown formats fall back to the storage default.
+  const sourceDiskFormat =
+    currentDiskFormats.size === 1
+      ? [...currentDiskFormats][0]
+      : undefined;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
@@ -762,30 +801,22 @@ export function MigrateJobDialog({
                   <Switch checked={online} onCheckedChange={setOnline} />
                 </div>
               )}
-              {migrationType === "cross-cluster" && (
-                <div className="flex items-center justify-between">
-                  <Label>Delete Source After Migration</Label>
-                  <Switch
-                    checked={deleteSource}
-                    onCheckedChange={setDeleteSource}
-                  />
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label>
-                  Bandwidth Limit:{" "}
-                  {bwlimitValue === 0
-                    ? "Unlimited"
-                    : `${String(bwlimitValue)} KiB/s`}
-                </Label>
-                <Slider
-                  value={bwlimit}
-                  onValueChange={setBwlimit}
-                  min={0}
-                  max={1048576}
-                  step={1024}
-                />
-              </div>
+              <DiskMoveOptions
+                idPrefix="migrate"
+                hideFormat={!showFormat}
+                targetStorageType={formatTargetType}
+                sourceFormat={sourceDiskFormat}
+                format={diskFormat}
+                onFormatChange={setDiskFormat}
+                bwlimit={bwlimit}
+                onBwlimitChange={setBwlimit}
+                deleteSource={deleteSource}
+                onDeleteSourceChange={setDeleteSourceOverride}
+                deleteSourceLabel="Delete Source After Migration"
+                {...(showDeleteSource && needsDiskPlacement
+                  ? { keptHint: "Source volumes are kept as unused disks on the guest." }
+                  : {})}
+              />
             </div>
 
             {(createMutation.isError || checkMutation.isError) && (

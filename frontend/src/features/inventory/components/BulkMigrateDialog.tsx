@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -19,6 +18,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
+import {
+  parseBwlimit,
+  resolveDiskFormat,
+} from "@/features/storage/lib/disk-move";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useClusterNodes,
@@ -83,8 +87,11 @@ export function BulkMigrateDialog({
   const [targetNode, setTargetNode] = useState("");
   const [targetStorage, setTargetStorage] = useState("");
   const [online, setOnline] = useState(true);
-  const [bwlimit, setBwlimit] = useState([0]);
-  const [deleteSource, setDeleteSource] = useState(false);
+  const [bwlimit, setBwlimit] = useState("");
+  // null = untouched (use each disk's current format where the target allows).
+  const [diskFormat, setDiskFormat] = useState<string | null>(null);
+  // null = follow the per-mode default in `deleteSource` below.
+  const [deleteSourceOverride, setDeleteSourceOverride] = useState<boolean | null>(null);
   const [storageMap, setStorageMap] = useState<Record<string, string>>({});
   const [networkMap, setNetworkMap] = useState<Record<string, string>>({});
 
@@ -117,6 +124,15 @@ export function BulkMigrateDialog({
     migrationType === "cross-cluster" ||
     migrationMode === "storage" ||
     migrationMode === "both";
+
+  // Moving storage implies freeing the source, so default it on there. Across
+  // clusters "delete source" destroys the source guests, so it stays opt-in.
+  // With it off Proxmox keeps each source volume as an unused disk.
+  const movesStorage =
+    migrationType === "intra-cluster" &&
+    (migrationMode === "storage" || migrationMode === "both");
+  const deleteSource = deleteSourceOverride ?? movesStorage;
+  const showDeleteSource = migrationType === "cross-cluster" || movesStorage;
   const { data: targetStorageList } = useClusterStorage(
     migrationType === "cross-cluster"
       ? targetClusterId
@@ -210,8 +226,23 @@ export function BulkMigrateDialog({
     return false;
   });
 
+  const { value: bwlimitKib, invalid: bwlimitInvalid } = parseBwlimit(bwlimit);
+
+  // A bulk move sends every selected guest's disks to one storage, so the
+  // format follows that single target. Containers in the selection can't take
+  // a format, so a mixed selection hides the field rather than sending one
+  // the backend would reject.
+  // Containers have no format choice, so a selection containing any CT hides
+  // the field rather than sending a format the backend rejects.
+  const showFormat = movesStorage && !hasCTs;
+  const formatTargetType =
+    showFormat
+      ? filteredTargetStorage.find((s) => s.storage === targetStorage)?.type
+      : undefined;
+
   // Form validation
   const isFormValid = (() => {
+    if (bwlimitInvalid) return false;
     if (!singleCluster) return false;
     if (migrationType === "cross-cluster") {
       return targetNode.length > 0 && targetClusterId.length > 0;
@@ -230,8 +261,9 @@ export function BulkMigrateDialog({
     setTargetNode("");
     setTargetStorage("");
     setOnline(true);
-    setBwlimit([0]);
-    setDeleteSource(false);
+    setBwlimit("");
+    setDiskFormat(null);
+    setDeleteSourceOverride(null);
     setStorageMap({});
     setNetworkMap({});
     setJobs([]);
@@ -272,8 +304,12 @@ export function BulkMigrateDialog({
           storage_map: migrationType === "cross-cluster" ? storageMap : {},
           network_map: migrationType === "cross-cluster" ? networkMap : {},
           online,
-          bwlimit_kib: bwlimit[0] ?? 0,
+          bwlimit_kib: bwlimitKib,
           delete_source: deleteSource,
+          disk_format:
+            vmType === "qemu"
+              ? resolveDiskFormat(diskFormat, undefined, formatTargetType)
+              : "",
           target_vmid: 0,
           target_storage:
             effectiveMode === "storage" || effectiveMode === "both"
@@ -364,7 +400,6 @@ export function BulkMigrateDialog({
     void queryClient.invalidateQueries({ queryKey: ["recent-activity"] });
   }
 
-  const bwlimitValue = bwlimit[0] ?? 0;
   const passingCount = jobs.filter((j) => j.preflightPassed).length;
   const failingCount = jobs.filter((j) => j.preflightPassed === false).length;
 
@@ -426,9 +461,14 @@ export function BulkMigrateDialog({
             setOnline={setOnline}
             bwlimit={bwlimit}
             setBwlimit={setBwlimit}
-            bwlimitValue={bwlimitValue}
+            showFormat={showFormat}
+            formatTargetType={formatTargetType}
+            diskFormat={diskFormat}
+            setDiskFormat={setDiskFormat}
             deleteSource={deleteSource}
-            setDeleteSource={setDeleteSource}
+            setDeleteSource={setDeleteSourceOverride}
+            showDeleteSource={showDeleteSource}
+            movesStorage={movesStorage}
             storageMap={storageMap}
             setStorageMap={setStorageMap}
             networkMap={networkMap}
@@ -578,11 +618,16 @@ interface ConfigStepProps {
   setTargetStorage: (v: string) => void;
   online: boolean;
   setOnline: (v: boolean) => void;
-  bwlimit: number[];
-  setBwlimit: (v: number[]) => void;
-  bwlimitValue: number;
+  bwlimit: string;
+  setBwlimit: (v: string) => void;
+  showFormat: boolean;
+  formatTargetType?: string | undefined;
+  diskFormat: string | null;
+  setDiskFormat: (v: string) => void;
   deleteSource: boolean;
   setDeleteSource: (v: boolean) => void;
+  showDeleteSource: boolean;
+  movesStorage: boolean;
   storageMap: Record<string, string>;
   setStorageMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   networkMap: Record<string, string>;
@@ -633,9 +678,14 @@ function ConfigStep({
   setOnline,
   bwlimit,
   setBwlimit,
-  bwlimitValue,
+  showFormat,
+  formatTargetType,
+  diskFormat,
+  setDiskFormat,
   deleteSource,
   setDeleteSource,
+  showDeleteSource,
+  movesStorage,
   storageMap,
   setStorageMap,
   networkMap,
@@ -900,30 +950,21 @@ function ConfigStep({
             <Switch checked={online} onCheckedChange={setOnline} />
           </div>
         )}
-        {migrationType === "cross-cluster" && (
-          <div className="flex items-center justify-between">
-            <Label>Delete Source After Migration</Label>
-            <Switch
-              checked={deleteSource}
-              onCheckedChange={setDeleteSource}
-            />
-          </div>
-        )}
-        <div className="space-y-2">
-          <Label>
-            Bandwidth Limit:{" "}
-            {bwlimitValue === 0
-              ? "Unlimited"
-              : `${String(bwlimitValue)} KiB/s`}
-          </Label>
-          <Slider
-            value={bwlimit}
-            onValueChange={setBwlimit}
-            min={0}
-            max={1048576}
-            step={1024}
-          />
-        </div>
+        <DiskMoveOptions
+          idPrefix="bulk-migrate"
+          hideFormat={!showFormat}
+          targetStorageType={formatTargetType}
+          format={diskFormat}
+          onFormatChange={setDiskFormat}
+          bwlimit={bwlimit}
+          onBwlimitChange={setBwlimit}
+          deleteSource={deleteSource}
+          onDeleteSourceChange={setDeleteSource}
+          deleteSourceLabel="Delete Source After Migration"
+          {...(showDeleteSource && movesStorage
+            ? { keptHint: "Source volumes are kept as unused disks on each guest." }
+            : {})}
+        />
       </div>
 
       {/* Resource list */}

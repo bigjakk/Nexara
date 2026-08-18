@@ -65,7 +65,10 @@ export interface DiskResizeRequest {
 export interface DiskMoveRequest {
   disk: string;
   storage: string;
+  /** Target image format; omit to let the target storage decide. */
+  format?: string;
   delete: boolean;
+  bwlimit_kib?: number;
 }
 
 /** Proxmox storage type identifiers */
@@ -198,6 +201,35 @@ export const STORAGE_TYPE_LABELS: Record<StorageType, string> = {
   cephfs: "CephFS",
   pbs: "Proxmox Backup Server",
 };
+
+/**
+ * Storage types whose `images` volumes can be allocated in a chosen format.
+ *
+ * These are the file-based plugins (raw | qcow2 | vmdk). Block-backed plugins
+ * (LVM, LVM-thin, ZFS, RBD, iSCSI) only ever hold raw, and BTRFS is limited to
+ * raw/subvol, so a format choice is meaningless — and rejected — for those.
+ */
+const FORMAT_CHOICE_STORAGE_TYPES = new Set<string>([
+  "dir",
+  "nfs",
+  "cifs",
+  "glusterfs",
+]);
+
+/** Image formats offered when the target storage is file-based. */
+export const DISK_IMAGE_FORMATS = [
+  { value: "qcow2", label: "QEMU image format (qcow2)" },
+  { value: "raw", label: "Raw disk image (raw)" },
+  { value: "vmdk", label: "VMware image format (vmdk)" },
+] as const;
+
+/**
+ * Whether a disk moved onto this storage type can have its format chosen.
+ * Mirrors how Proxmox greys out the Format field in its Move disk dialog.
+ */
+export function storageSupportsFormatChoice(type: string | undefined): boolean {
+  return type !== undefined && FORMAT_CHOICE_STORAGE_TYPES.has(type);
+}
 
 /** Type-specific fields for each storage type */
 export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {

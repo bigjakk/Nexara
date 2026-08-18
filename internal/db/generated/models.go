@@ -443,6 +443,8 @@ type MigrationJob struct {
 	UpdatedAt       time.Time          `json:"updated_at"`
 	MigrationMode   string             `json:"migration_mode"`
 	TargetStorage   string             `json:"target_storage"`
+	// Target image format for storage moves (raw|qcow2|vmdk). Empty means the target storage decides. QEMU only — LXC volumes have no format choice.
+	DiskFormat string `json:"disk_format"`
 }
 
 type MobileDevice struct {

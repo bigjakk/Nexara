@@ -438,6 +438,8 @@ type CloneParams struct {
 type MigrateParams struct {
 	Target string `json:"target"`
 	Online bool   `json:"online,omitempty"`
+	// BWLimit throttles the transfer in KiB/s (0 = the datacenter default).
+	BWLimit int `json:"bwlimit,omitempty"`
 }
 
 // TaskStatus represents the status of an async Proxmox task.
@@ -654,17 +656,29 @@ type DiskResizeParams struct {
 }
 
 // DiskMoveParams holds parameters for a VM disk move operation.
+//
+// Format converts the image on the way over ("raw", "qcow2", "vmdk"); it is
+// only honored when the *target* storage is file-based (dir/NFS/CIFS/Gluster).
+// Block storages (LVM, LVM-thin, ZFS, RBD) only ever hold raw, so leave it
+// empty there and let PVE pick. BWLimit throttles the copy in KiB/s (0 = the
+// storage's configured default).
 type DiskMoveParams struct {
 	Disk    string `json:"disk"`
 	Storage string `json:"storage"`
+	Format  string `json:"format,omitempty"`
 	Delete  bool   `json:"delete,omitempty"`
+	BWLimit int    `json:"bwlimit,omitempty"`
 }
 
 // CTVolumeMoveParams holds parameters for an LXC container volume move.
+//
+// There is no format option: LXC volumes are subvol or raw, decided by the
+// target storage. BWLimit throttles the copy in KiB/s (0 = storage default).
 type CTVolumeMoveParams struct {
 	Volume  string `json:"volume"`
 	Storage string `json:"storage"`
 	Delete  bool   `json:"delete,omitempty"`
+	BWLimit int    `json:"bwlimit,omitempty"`
 }
 
 // CephStatus represents the cluster-wide Ceph status from GET /nodes/{node}/ceph/status.

@@ -705,7 +705,9 @@ type diskResizeRequest struct {
 type diskMoveRequest struct {
 	Disk    string `json:"disk"`
 	Storage string `json:"storage"`
+	Format  string `json:"format"`
 	Delete  bool   `json:"delete"`
+	BWLimit int    `json:"bwlimit_kib"`
 }
 
 // ResizeDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/resize.
@@ -753,6 +755,13 @@ func (h *VMHandler) ResizeDisk(c fiber.Ctx) error {
 	})
 }
 
+// withVMID adds the guest's VMID to a disk-move detail map. The move spec is
+// storage-level and VMID-agnostic; every recorded task wants it alongside.
+func withVMID(extra map[string]any, vmid int32) map[string]any {
+	extra["vmid"] = vmid
+	return extra
+}
+
 // MoveDisk handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/disks/move.
 func (h *VMHandler) MoveDisk(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -773,8 +782,15 @@ func (h *VMHandler) MoveDisk(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	if req.Disk == "" || req.Storage == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "disk and storage are required")
+	spec := proxmox.DiskMoveSpec{
+		Disk:          req.Disk,
+		TargetStorage: req.Storage,
+		Format:        req.Format,
+		DeleteSource:  req.Delete,
+		BWLimitKiB:    req.BWLimit,
+	}
+	if err := spec.Validate(); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
@@ -782,15 +798,12 @@ func (h *VMHandler) MoveDisk(c fiber.Ctx) error {
 		return err
 	}
 
-	upid, err := pxClient.MoveDisk(c.Context(), node.Name, int(vm.Vmid), proxmox.DiskMoveParams{
-		Disk:    req.Disk,
-		Storage: req.Storage,
-		Delete:  req.Delete,
-	})
+	upid, err := pxClient.MoveDisk(c.Context(), node.Name, int(vm.Vmid), spec.VMParams())
 	if err != nil {
 		return mapProxmoxError(err)
 	}
 
+	description := "Move disk " + spec.Summary()
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    cluster.ID,
 		Node:         node.Name,
@@ -800,8 +813,8 @@ func (h *VMHandler) MoveDisk(c fiber.Ctx) error {
 		Action:       "disk_move",
 		UPID:         upid,
 		TaskType:     "qmmove",
-		Description:  "Move disk " + req.Disk + " → " + req.Storage,
-		Extra:        map[string]any{"vmid": vm.Vmid},
+		Description:  description,
+		Extra:        withVMID(spec.AuditExtra(), vm.Vmid),
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "vm", vm.ID.String(), "disk_move")
 

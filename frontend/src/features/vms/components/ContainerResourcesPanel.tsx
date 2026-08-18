@@ -31,8 +31,14 @@ import {
 } from "../api/vm-queries";
 import { useNodeBridges } from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
+import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
+import {
+  parseBwlimit,
+} from "@/features/storage/lib/disk-move";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { parseKVString, buildKVString } from "../lib/vm-config-parsers";
+import { parseCTNet, buildCTNet, emptyCTNet } from "../lib/ct-net";
+import type { CTNetEdit } from "../lib/ct-net";
 import type { VMConfig } from "../types/vm";
 
 const selectClass =
@@ -56,70 +62,6 @@ function num(val: unknown): number {
   if (val == null) return 0;
   const n = Number(val);
   return Number.isNaN(n) ? 0 : n;
-}
-
-// ---------------------------------------------------------------------------
-// LXC network parser/builder
-// ---------------------------------------------------------------------------
-
-interface CTNetEdit {
-  name: string;
-  bridge: string;
-  hwaddr: string;
-  ip: string;
-  gw: string;
-  ip6: string;
-  gw6: string;
-  firewall: boolean;
-  rate: string;
-  mtu: string;
-  tag: string;
-}
-
-function parseCTNet(raw: string): CTNetEdit {
-  const result: CTNetEdit = {
-    name: "",
-    bridge: "",
-    hwaddr: "",
-    ip: "",
-    gw: "",
-    ip6: "",
-    gw6: "",
-    firewall: false,
-    rate: "",
-    mtu: "",
-    tag: "",
-  };
-  if (!raw) return result;
-  const kv = parseKVString(raw);
-  result.name = kv.get("name") ?? "";
-  result.bridge = kv.get("bridge") ?? "";
-  result.hwaddr = kv.get("hwaddr") ?? "";
-  result.ip = kv.get("ip") ?? "";
-  result.gw = kv.get("gw") ?? "";
-  result.ip6 = kv.get("ip6") ?? "";
-  result.gw6 = kv.get("gw6") ?? "";
-  result.firewall = kv.get("firewall") === "1";
-  result.rate = kv.get("rate") ?? "";
-  result.mtu = kv.get("mtu") ?? "";
-  result.tag = kv.get("tag") ?? "";
-  return result;
-}
-
-function buildCTNet(n: CTNetEdit): string {
-  const m = new Map<string, string>();
-  if (n.name) m.set("name", n.name);
-  if (n.bridge) m.set("bridge", n.bridge);
-  if (n.hwaddr) m.set("hwaddr", n.hwaddr);
-  if (n.ip) m.set("ip", n.ip);
-  if (n.gw) m.set("gw", n.gw);
-  if (n.ip6) m.set("ip6", n.ip6);
-  if (n.gw6) m.set("gw6", n.gw6);
-  if (n.firewall) m.set("firewall", "1");
-  if (n.rate) m.set("rate", n.rate);
-  if (n.mtu) m.set("mtu", n.mtu);
-  if (n.tag) m.set("tag", n.tag);
-  return buildKVString(m);
 }
 
 // ---------------------------------------------------------------------------
@@ -295,14 +237,18 @@ function MoveVolumeDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [targetStorage, setTargetStorage] = useState("");
-  const [deleteOriginal, setDeleteOriginal] = useState(true);
+  // Off by default, matching Proxmox: the source volume is kept as an unused
+  // entry on the container so the move can be undone by hand.
+  const [deleteOriginal, setDeleteOriginal] = useState(false);
+  const [bwlimit, setBwlimit] = useState("");
   const moveMutation = useMoveContainerVolume();
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
   const filteredOptions = storageOptions.filter((s) => s !== currentStorage);
+  const { value: bwlimitKib, invalid: bwlimitInvalid } = parseBwlimit(bwlimit);
 
   function handleMove() {
-    if (!targetStorage) return;
+    if (!targetStorage || bwlimitInvalid) return;
     moveMutation.mutate(
       {
         clusterId,
@@ -310,6 +256,7 @@ function MoveVolumeDialog({
         volume: volumeKey,
         storage: targetStorage,
         deleteOriginal,
+        bwlimitKib,
       },
       {
         onSuccess: (data) => {
@@ -322,6 +269,8 @@ function MoveVolumeDialog({
           }
           setOpen(false);
           setTargetStorage("");
+          setDeleteOriginal(false);
+          setBwlimit("");
         },
       },
     );
@@ -368,21 +317,20 @@ function MoveVolumeDialog({
               ))}
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="ct-delete-original"
-              checked={deleteOriginal}
-              onCheckedChange={(v) => {
-                setDeleteOriginal(v === true);
-              }}
-            />
-            <Label htmlFor="ct-delete-original">
-              Delete original after move completes
-            </Label>
-          </div>
+          {/* Containers have no image-format choice, so the format field is
+              hidden; everything else matches the VM move dialog. */}
+          <DiskMoveOptions
+            idPrefix="ct-move"
+            hideFormat
+            bwlimit={bwlimit}
+            onBwlimitChange={setBwlimit}
+            deleteSource={deleteOriginal}
+            onDeleteSourceChange={setDeleteOriginal}
+            keptHint="The source volume is kept as an unused volume on this container. Remove it later to reclaim the space."
+          />
           <Button
             onClick={handleMove}
-            disabled={!targetStorage || moveMutation.isPending}
+            disabled={!targetStorage || bwlimitInvalid || moveMutation.isPending}
             className="w-full"
           >
             {moveMutation.isPending ? "Moving..." : "Move Volume"}
@@ -749,6 +697,9 @@ function NICRow({
 
 const NET_KEY_RE = /^net(\d+)$/;
 const MP_KEY_RE = /^mp(\d+)$/;
+// Volumes still owned by the container but not mounted anywhere — what a
+// move-volume without "delete source" leaves behind.
+const UNUSED_KEY_RE = /^unused(\d+)$/;
 
 const consoleModes = [
   { value: "tty", label: "TTY" },
@@ -813,6 +764,9 @@ export function ContainerResourcesPanel({
   // NICs to delete
   const [deleteNics, setDeleteNics] = useState<Set<string>>(new Set());
 
+  // Unused volumes to delete
+  const [deleteVolumes, setDeleteVolumes] = useState<Set<string>>(new Set());
+
   // Track original values for change detection
   const [origFields, setOrigFields] = useState<Record<string, string>>({});
 
@@ -846,6 +800,7 @@ export function ContainerResourcesPanel({
     setNics(nicMap);
     setPendingNics(new Map());
     setDeleteNics(new Set());
+    setDeleteVolumes(new Set());
 
     // Build original field snapshot
     const orig: Record<string, string> = {};
@@ -918,11 +873,14 @@ export function ContainerResourcesPanel({
     for (const key of deleteNics) {
       deletes.push(key);
     }
+    for (const key of deleteVolumes) {
+      deletes.push(key);
+    }
     if (deletes.length > 0) {
       diff["delete"] = deletes.join(",");
     }
     return diff;
-  }, [currentFields, origFields, deleteNics]);
+  }, [currentFields, origFields, deleteNics, deleteVolumes]);
 
   const hasChanges = Object.keys(changedFields).length > 0;
   const isRunning = ctStatus.toLowerCase() === "running";
@@ -937,6 +895,20 @@ export function ContainerResourcesPanel({
       }
     }
     return mps.sort((a, b) => a.key.localeCompare(b.key));
+  }, [config]);
+
+  // Unused volumes: still allocated and billed to the container, but not
+  // mounted. Moving a volume without "delete source" produces one, so they
+  // need a way out of the UI or the space is never reclaimed.
+  const unusedVolumes = useMemo(() => {
+    if (!config) return [];
+    const vols: { key: string; volume: string }[] = [];
+    for (const key of Object.keys(config)) {
+      if (UNUSED_KEY_RE.test(key)) {
+        vols.push({ key, volume: str(config[key]) });
+      }
+    }
+    return vols.sort((a, b) => a.key.localeCompare(b.key));
   }, [config]);
 
   // Find next available NIC index
@@ -1132,6 +1104,67 @@ export function ContainerResourcesPanel({
         </Section>
       )}
 
+      {/* Unused Volumes */}
+      {unusedVolumes.length > 0 && (
+        <Section title="Unused Volumes">
+          <div className="space-y-2">
+            {unusedVolumes.map(({ key, volume }) =>
+              deleteVolumes.has(key) ? (
+                <div
+                  key={key}
+                  className="flex items-center gap-2 rounded border border-destructive/30 bg-destructive/5 px-2 py-1 text-sm"
+                >
+                  <Badge variant="destructive" className="text-[10px]">
+                    removing
+                  </Badge>
+                  <span className="font-mono text-xs">{key}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-6 px-2 text-xs"
+                    onClick={() => {
+                      setDeleteVolumes((prev) => {
+                        const next = new Set(prev);
+                        next.delete(key);
+                        return next;
+                      });
+                    }}
+                  >
+                    Undo
+                  </Button>
+                </div>
+              ) : (
+                <div
+                  key={key}
+                  className="flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 dark:border-amber-800 dark:bg-amber-950"
+                >
+                  <span className="font-mono text-xs font-medium text-amber-700 dark:text-amber-400">
+                    {key}
+                  </span>
+                  <span className="truncate text-[10px] text-amber-600 dark:text-amber-400">
+                    {volume}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive"
+                    onClick={() => {
+                      setDeleteVolumes((prev) => new Set(prev).add(key));
+                    }}
+                    title="Remove volume"
+                  >
+                    <Trash2 className="h-3 w-3" /> Remove
+                  </Button>
+                </div>
+              ),
+            )}
+            <p className="text-[10px] text-muted-foreground">
+              Removing a volume deletes its data. Changes apply on Save.
+            </p>
+          </div>
+        </Section>
+      )}
+
       {/* Network */}
       <Section title="Network Interfaces">
         <div className="space-y-2">
@@ -1239,19 +1272,15 @@ export function ContainerResourcesPanel({
               const key = nextNicKey();
               setPendingNics((prev) => {
                 const next = new Map(prev);
-                next.set(key, {
-                  name: `eth${key.replace("net", "")}`,
-                  bridge: bridgeList[0] ?? "vmbr0",
-                  hwaddr: "",
-                  ip: "dhcp",
-                  gw: "",
-                  ip6: "",
-                  gw6: "",
-                  firewall: true,
-                  rate: "",
-                  mtu: "",
-                  tag: "",
-                });
+                next.set(
+                  key,
+                  emptyCTNet({
+                    name: `eth${key.replace("net", "")}`,
+                    bridge: bridgeList[0] ?? "vmbr0",
+                    ip: "dhcp",
+                    firewall: true,
+                  }),
+                );
                 return next;
               });
             }}

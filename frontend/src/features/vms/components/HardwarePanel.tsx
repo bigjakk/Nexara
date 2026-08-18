@@ -1419,8 +1419,9 @@ export function HardwarePanel({ clusterId, vmId, vmStatus, nodeName }: HardwareP
                         clusterId={clusterId}
                         vmId={vmId}
                         diskName={key}
-                        storageOptions={diskStorages.map((s) => s.storage)}
+                        storageOptions={diskStorages.map((s) => ({ storage: s.storage, type: s.type }))}
                         currentStorage={parsed.storage}
+                        currentFormat={parsed.format}
                       />
                       <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-[10px] text-destructive hover:text-destructive" onClick={() => { handleRemoveDisk(key); }}>
                         <Trash2 className="h-3 w-3" /> Remove

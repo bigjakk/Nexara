@@ -10,6 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useResizeDisk, useMoveDisk } from "@/features/vms/api/vm-queries";
+import { STORAGE_TYPE_LABELS } from "@/features/storage/types/storage";
+import type { StorageType } from "@/features/storage/types/storage";
+import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
+import {
+  parseBwlimit,
+  resolveDiskFormat,
+} from "@/features/storage/lib/disk-move";
 import { useTaskLogStore } from "@/stores/task-log-store";
 
 // --- Resize Disk Dialog ---
@@ -85,12 +92,19 @@ export function ResizeDiskDialog({
 
 // --- Move Disk Dialog ---
 
+/** A candidate target storage. `type` drives whether a format can be chosen. */
+export interface MoveDiskStorageOption {
+  storage: string;
+  type: string;
+}
+
 interface MoveDiskDialogProps {
   clusterId: string;
   vmId: string;
   diskName: string;
-  storageOptions: string[];
+  storageOptions: MoveDiskStorageOption[];
   currentStorage?: string;
+  currentFormat?: string;
 }
 
 export function MoveDiskDialog({
@@ -99,20 +113,37 @@ export function MoveDiskDialog({
   diskName,
   storageOptions,
   currentStorage,
+  currentFormat,
 }: MoveDiskDialogProps) {
   const [open, setOpen] = useState(false);
   const [targetStorage, setTargetStorage] = useState("");
-  const [deleteOriginal, setDeleteOriginal] = useState(true);
+  // null = untouched, so the source format is used; "" is an explicit "let the
+  // target storage decide".
+  const [format, setFormat] = useState<string | null>(null);
+  // Off by default, matching Proxmox: the source is kept as an unused disk on
+  // the guest so the move can be undone by hand.
+  const [deleteOriginal, setDeleteOriginal] = useState(false);
+  const [bwlimit, setBwlimit] = useState("");
   const moveMutation = useMoveDisk();
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
-  // Filter out current storage from options
+  // Proxmox rejects moving a disk onto the storage it already lives on.
   const filteredOptions = currentStorage
-    ? storageOptions.filter((s) => s !== currentStorage)
+    ? storageOptions.filter((s) => s.storage !== currentStorage)
     : storageOptions;
 
+  const target = filteredOptions.find((s) => s.storage === targetStorage);
+  const { value: bwlimitKib, invalid: bwlimitInvalid } = parseBwlimit(bwlimit);
+
+  function reset() {
+    setTargetStorage("");
+    setFormat(null);
+    setDeleteOriginal(false);
+    setBwlimit("");
+  }
+
   function handleMove() {
-    if (!targetStorage) return;
+    if (!targetStorage || bwlimitInvalid) return;
     moveMutation.mutate(
       {
         clusterId,
@@ -120,6 +151,8 @@ export function MoveDiskDialog({
         disk: diskName,
         storage: targetStorage,
         deleteOriginal,
+        format: resolveDiskFormat(format, currentFormat, target?.type),
+        bwlimitKib,
       },
       {
         onSuccess: (data) => {
@@ -131,7 +164,7 @@ export function MoveDiskDialog({
             });
           }
           setOpen(false);
-          setTargetStorage("");
+          reset();
         },
       },
     );
@@ -149,6 +182,18 @@ export function MoveDiskDialog({
           <DialogTitle>Move Disk: {diskName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          {currentStorage && (
+            <p className="text-sm text-muted-foreground">
+              Currently on{" "}
+              <span className="font-mono font-medium">{currentStorage}</span>
+              {currentFormat && (
+                <>
+                  {" "}
+                  as <span className="font-mono font-medium">{currentFormat}</span>
+                </>
+              )}
+            </p>
+          )}
           <div className="space-y-2">
             <Label htmlFor="target-storage">Target Storage</Label>
             <select
@@ -159,27 +204,30 @@ export function MoveDiskDialog({
             >
               <option value="">Select storage...</option>
               {filteredOptions.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+                <option key={s.storage} value={s.storage}>
+                  {s.storage}
+                  {STORAGE_TYPE_LABELS[s.type as StorageType]
+                    ? ` (${STORAGE_TYPE_LABELS[s.type as StorageType]})`
+                    : ""}
                 </option>
               ))}
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="delete-original"
-              checked={deleteOriginal}
-              onChange={(e) => { setDeleteOriginal(e.target.checked); }}
-              className="h-4 w-4 rounded border-gray-300"
-            />
-            <Label htmlFor="delete-original">
-              Delete original after move completes
-            </Label>
-          </div>
+          <DiskMoveOptions
+            idPrefix="move-disk"
+            targetStorageType={target?.type}
+            sourceFormat={currentFormat}
+            format={format}
+            onFormatChange={setFormat}
+            bwlimit={bwlimit}
+            onBwlimitChange={setBwlimit}
+            deleteSource={deleteOriginal}
+            onDeleteSourceChange={setDeleteOriginal}
+            keptHint="The source volume is kept as an unused disk on this VM. Remove it later to reclaim the space."
+          />
           <Button
             onClick={handleMove}
-            disabled={!targetStorage || moveMutation.isPending}
+            disabled={!targetStorage || bwlimitInvalid || moveMutation.isPending}
             className="w-full"
           >
             {moveMutation.isPending ? "Moving disk..." : "Move Disk"}

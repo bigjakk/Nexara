@@ -780,16 +780,20 @@ interface MoveDiskParams {
   disk: string;
   storage: string;
   deleteOriginal: boolean;
+  /** Target image format; omit to let the target storage decide. */
+  format?: string;
+  /** Copy throttle in KiB/s; omit or 0 for the storage default. */
+  bwlimitKib?: number;
 }
 
 export function useMoveDisk() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, vmId, disk, storage, deleteOriginal }: MoveDiskParams) =>
+    mutationFn: ({ clusterId, vmId, disk, storage, deleteOriginal, format, bwlimitKib }: MoveDiskParams) =>
       apiClient.post<VMActionResponse>(
         `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/move`,
-        { disk, storage, delete: deleteOriginal },
+        { disk, storage, delete: deleteOriginal, format: format ?? "", bwlimit_kib: bwlimitKib ?? 0 },
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -811,16 +815,18 @@ interface MoveContainerVolumeParams {
   volume: string;
   storage: string;
   deleteOriginal: boolean;
+  /** Copy throttle in KiB/s; omit or 0 for the storage default. */
+  bwlimitKib?: number;
 }
 
 export function useMoveContainerVolume() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, ctId, volume, storage, deleteOriginal }: MoveContainerVolumeParams) =>
+    mutationFn: ({ clusterId, ctId, volume, storage, deleteOriginal, bwlimitKib }: MoveContainerVolumeParams) =>
       apiClient.post<VMActionResponse>(
         `/api/v1/clusters/${clusterId}/containers/${ctId}/volumes/move`,
-        { volume, storage, delete: deleteOriginal },
+        { volume, storage, delete: deleteOriginal, bwlimit_kib: bwlimitKib ?? 0 },
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({

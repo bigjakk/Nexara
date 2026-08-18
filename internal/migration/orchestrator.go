@@ -293,6 +293,11 @@ func (o *Orchestrator) executeIntraCluster(ctx context.Context, client *proxmox.
 		Target: job.TargetNode,
 		Online: job.Online,
 	}
+	// 0 means "no limit set" — leave it off the request so PVE applies the
+	// datacenter/storage default, same as the cross-cluster path.
+	if job.BwlimitKib > 0 {
+		params.BWLimit = int(job.BwlimitKib)
+	}
 
 	switch job.VmType {
 	case VMTypeQEMU:
@@ -338,20 +343,13 @@ func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *prox
 	o.eventPub.ClusterEvent(ctx, job.SourceClusterID.String(), events.KindMigrationUpdate, "migration", jobID.String(), "migrating")
 
 	for i, m := range moves {
+		spec := diskMoveSpec(job, m)
 		var upid string
 		switch job.VmType {
 		case VMTypeQEMU:
-			upid, err = client.MoveDisk(ctx, job.SourceNode, int(job.Vmid), proxmox.DiskMoveParams{
-				Disk:    m.Disk,
-				Storage: m.Target,
-				Delete:  true,
-			})
+			upid, err = client.MoveDisk(ctx, job.SourceNode, int(job.Vmid), spec.VMParams())
 		case VMTypeLXC:
-			upid, err = client.MoveCTVolume(ctx, job.SourceNode, int(job.Vmid), proxmox.CTVolumeMoveParams{
-				Volume:  m.Disk,
-				Storage: m.Target,
-				Delete:  true,
-			})
+			upid, err = client.MoveCTVolume(ctx, job.SourceNode, int(job.Vmid), spec.CTParams())
 		default:
 			o.failJob(ctx, jobID, fmt.Sprintf("unsupported VM type: %s", job.VmType), mc)
 			return
@@ -366,7 +364,7 @@ func (o *Orchestrator) executeStorageMigration(ctx context.Context, client *prox
 			firstUpid = upid
 		}
 
-		o.recordDiskMove(ctx, mc, job.SourceNode, m.Disk, m.Target, upid, i+1, len(moves))
+		o.recordDiskMove(ctx, mc, job.SourceNode, spec, upid, i+1, len(moves))
 
 		// Update migration job progress and current UPID.
 		progress := float64(i) / float64(len(moves))
@@ -511,20 +509,13 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 
 	var lastDiskUpid string
 	for i, m := range moves {
+		spec := diskMoveSpec(job, m)
 		var diskUpid string
 		switch job.VmType {
 		case VMTypeQEMU:
-			diskUpid, err = client.MoveDisk(ctx, job.TargetNode, int(job.Vmid), proxmox.DiskMoveParams{
-				Disk:    m.Disk,
-				Storage: m.Target,
-				Delete:  true,
-			})
+			diskUpid, err = client.MoveDisk(ctx, job.TargetNode, int(job.Vmid), spec.VMParams())
 		case VMTypeLXC:
-			diskUpid, err = client.MoveCTVolume(ctx, job.TargetNode, int(job.Vmid), proxmox.CTVolumeMoveParams{
-				Volume:  m.Disk,
-				Storage: m.Target,
-				Delete:  true,
-			})
+			diskUpid, err = client.MoveCTVolume(ctx, job.TargetNode, int(job.Vmid), spec.CTParams())
 		}
 
 		if err != nil {
@@ -534,7 +525,7 @@ func (o *Orchestrator) executeBothMigration(ctx context.Context, client *proxmox
 
 		lastDiskUpid = diskUpid
 
-		o.recordDiskMove(ctx, mc, job.TargetNode, m.Disk, m.Target, diskUpid, i+1, len(moves))
+		o.recordDiskMove(ctx, mc, job.TargetNode, spec, diskUpid, i+1, len(moves))
 
 		progress := 0.5 + (float64(i)/float64(len(moves)))*0.5
 		_ = o.queries.UpdateMigrationJobProgress(ctx, db.UpdateMigrationJobProgressParams{
@@ -611,6 +602,21 @@ func volumeStorage(val string) string {
 		return first[:i]
 	}
 	return ""
+}
+
+// diskMoveSpec turns one planned move into the same spec the per-disk API
+// endpoints build, so a disk moved by a migration job and one moved from the
+// hardware tab go through identical rules: delete_source off keeps the
+// original as an unusedN entry, bwlimit 0 means the storage default, and the
+// format is dropped for containers.
+func diskMoveSpec(job db.MigrationJob, m diskMove) proxmox.DiskMoveSpec {
+	return proxmox.DiskMoveSpec{
+		Disk:          m.Disk,
+		TargetStorage: m.Target,
+		Format:        job.DiskFormat,
+		DeleteSource:  job.DeleteSource,
+		BWLimitKiB:    int(job.BwlimitKib),
+	}
 }
 
 // resolveDiskTargets decides where each discovered disk should move for a
@@ -935,17 +941,17 @@ func (o *Orchestrator) auditLog(ctx context.Context, mc *migrationContext, actio
 // track it and double-click to reopen), inserts a task_history row, and
 // publishes events. Both executeStorageMigration and executeBothMigration
 // call this instead of duplicating the logic.
-func (o *Orchestrator) recordDiskMove(ctx context.Context, mc *migrationContext, node, disk, targetStorage, upid string, index, total int) {
+func (o *Orchestrator) recordDiskMove(ctx context.Context, mc *migrationContext, node string, spec proxmox.DiskMoveSpec, upid string, index, total int) {
 	typeLabel := "VM"
 	if mc.job.VmType == VMTypeLXC {
 		typeLabel = "CT"
 	}
 
 	o.auditLog(ctx, mc, "disk_move_running",
-		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"disk":%q,"target_storage":%q,"disk_index":%d,"disk_total":%d}`,
-			upid, mc.job.Vmid, typeLabel, node, disk, targetStorage, index, total))
+		fmt.Sprintf(`{"upid":%q,"vmid":%d,"vm_type":%q,"node":%q,"disk":%q,"target_storage":%q,"format":%q,"delete_source":%t,"bwlimit_kib":%d,"disk_index":%d,"disk_total":%d}`,
+			upid, mc.job.Vmid, typeLabel, node, spec.Disk, spec.TargetStorage, spec.Format, spec.DeleteSource, spec.BWLimitKiB, index, total))
 
-	description := fmt.Sprintf("Move disk %s → %s (%s, %d/%d)", disk, targetStorage, mc.vmLabel, index, total)
+	description := fmt.Sprintf("Move disk %s (%s, %d/%d)", spec.Summary(), mc.vmLabel, index, total)
 	_, _ = o.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
 		ClusterID:   mc.job.SourceClusterID,
 		UserID:      mc.userID,

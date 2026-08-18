@@ -42,6 +42,8 @@ export interface MigrationJob {
   delete_source: boolean;
   target_vmid: number;
   target_storage: string;
+  /** Target image format for storage moves; "" lets the storage decide. */
+  disk_format: string;
   status: MigrationStatus;
   upid: string;
   progress: number;
@@ -69,4 +71,6 @@ export interface CreateMigrationRequest {
   delete_source: boolean;
   target_vmid: number;
   target_storage: string;
+  /** Target image format for storage moves; "" lets the storage decide. */
+  disk_format: string;
 }

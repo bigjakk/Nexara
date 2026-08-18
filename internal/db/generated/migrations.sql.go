@@ -53,9 +53,9 @@ INSERT INTO migration_jobs (
     vmid, vm_type, migration_type,
     storage_map, network_map,
     online, bwlimit_kib, delete_source, target_vmid,
-    created_by, migration_mode, target_storage
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-RETURNING id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage
+    created_by, migration_mode, target_storage, disk_format
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+RETURNING id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format
 `
 
 type CreateMigrationJobParams struct {
@@ -75,6 +75,7 @@ type CreateMigrationJobParams struct {
 	CreatedBy       pgtype.UUID     `json:"created_by"`
 	MigrationMode   string          `json:"migration_mode"`
 	TargetStorage   string          `json:"target_storage"`
+	DiskFormat      string          `json:"disk_format"`
 }
 
 func (q *Queries) CreateMigrationJob(ctx context.Context, arg CreateMigrationJobParams) (MigrationJob, error) {
@@ -95,6 +96,7 @@ func (q *Queries) CreateMigrationJob(ctx context.Context, arg CreateMigrationJob
 		arg.CreatedBy,
 		arg.MigrationMode,
 		arg.TargetStorage,
+		arg.DiskFormat,
 	)
 	var i MigrationJob
 	err := row.Scan(
@@ -124,12 +126,13 @@ func (q *Queries) CreateMigrationJob(ctx context.Context, arg CreateMigrationJob
 		&i.UpdatedAt,
 		&i.MigrationMode,
 		&i.TargetStorage,
+		&i.DiskFormat,
 	)
 	return i, err
 }
 
 const getMigrationJob = `-- name: GetMigrationJob :one
-SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage FROM migration_jobs WHERE id = $1
+SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format FROM migration_jobs WHERE id = $1
 `
 
 func (q *Queries) GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJob, error) {
@@ -162,12 +165,13 @@ func (q *Queries) GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJ
 		&i.UpdatedAt,
 		&i.MigrationMode,
 		&i.TargetStorage,
+		&i.DiskFormat,
 	)
 	return i, err
 }
 
 const listMigrationJobs = `-- name: ListMigrationJobs :many
-SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage FROM migration_jobs
+SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format FROM migration_jobs
 WHERE ($3::uuid[] IS NULL
        OR source_cluster_id = ANY($3::uuid[])
        OR target_cluster_id = ANY($3::uuid[]))
@@ -230,6 +234,7 @@ func (q *Queries) ListMigrationJobs(ctx context.Context, arg ListMigrationJobsPa
 			&i.UpdatedAt,
 			&i.MigrationMode,
 			&i.TargetStorage,
+			&i.DiskFormat,
 		); err != nil {
 			return nil, err
 		}
@@ -242,7 +247,7 @@ func (q *Queries) ListMigrationJobs(ctx context.Context, arg ListMigrationJobsPa
 }
 
 const listMigrationJobsByCluster = `-- name: ListMigrationJobsByCluster :many
-SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage FROM migration_jobs
+SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format FROM migration_jobs
 WHERE source_cluster_id = $1 OR target_cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -290,6 +295,7 @@ func (q *Queries) ListMigrationJobsByCluster(ctx context.Context, arg ListMigrat
 			&i.UpdatedAt,
 			&i.MigrationMode,
 			&i.TargetStorage,
+			&i.DiskFormat,
 		); err != nil {
 			return nil, err
 		}

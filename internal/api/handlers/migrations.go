@@ -14,6 +14,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/migration"
+	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/safeconv"
 )
 
@@ -84,6 +85,7 @@ type createMigrationRequest struct {
 	DeleteSource    bool            `json:"delete_source"`
 	TargetVMID      int32           `json:"target_vmid"`
 	TargetStorage   string          `json:"target_storage"`
+	DiskFormat      string          `json:"disk_format"`
 }
 
 // hasStorageMapEntries reports whether a storage_map JSON object has at least
@@ -121,6 +123,7 @@ type migrationJobResponse struct {
 	DeleteSource    bool            `json:"delete_source"`
 	TargetVMID      int32           `json:"target_vmid"`
 	TargetStorage   string          `json:"target_storage"`
+	DiskFormat      string          `json:"disk_format"`
 	Status          string          `json:"status"`
 	UPID            string          `json:"upid"`
 	Progress        float64         `json:"progress"`
@@ -150,6 +153,7 @@ func toMigrationJobResponse(j db.MigrationJob) migrationJobResponse {
 		DeleteSource:    j.DeleteSource,
 		TargetVMID:      j.TargetVmid,
 		TargetStorage:   j.TargetStorage,
+		DiskFormat:      j.DiskFormat,
 		Status:          j.Status,
 		UPID:            j.Upid,
 		Progress:        j.Progress,
@@ -228,6 +232,18 @@ func (h *MigrationHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
+	// Same format allowlist the per-disk move endpoint enforces. LXC volumes
+	// have no format choice, so reject it rather than silently dropping it.
+	if !proxmox.ValidImageFormat(req.DiskFormat) {
+		return fiber.NewError(fiber.StatusBadRequest, "disk_format must be one of: raw, qcow2, vmdk")
+	}
+	if req.DiskFormat != "" && req.VMType == migration.VMTypeLXC {
+		return fiber.NewError(fiber.StatusBadRequest, "disk_format is not supported for containers")
+	}
+	if req.DiskFormat != "" && req.MigrationMode != migration.ModeStorage && req.MigrationMode != migration.ModeBoth {
+		return fiber.NewError(fiber.StatusBadRequest, "disk_format only applies to storage and both migration modes")
+	}
+
 	srcClusterID, err := uuid.Parse(req.SourceClusterID)
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid source_cluster_id")
@@ -293,6 +309,7 @@ func (h *MigrationHandler) Create(c fiber.Ctx) error {
 		CreatedBy:       createdBy,
 		MigrationMode:   req.MigrationMode,
 		TargetStorage:   req.TargetStorage,
+		DiskFormat:      req.DiskFormat,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create migration job")

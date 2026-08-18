@@ -212,6 +212,9 @@ func (c *Client) MigrateCT(ctx context.Context, node string, vmid int, params Mi
 	if params.Online {
 		form.Set("restart", "1")
 	}
+	if params.BWLimit > 0 {
+		form.Set("bwlimit", strconv.Itoa(params.BWLimit))
+	}
 
 	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/migrate"
 	var upid string
@@ -235,6 +238,9 @@ func (c *Client) MigrateVM(ctx context.Context, node string, vmid int, params Mi
 	form.Set("target", params.Target)
 	if params.Online {
 		form.Set("online", "1")
+	}
+	if params.BWLimit > 0 {
+		form.Set("bwlimit", strconv.Itoa(params.BWLimit))
 	}
 
 	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/migrate"
@@ -286,8 +292,14 @@ func (c *Client) MoveDisk(ctx context.Context, node string, vmid int, params Dis
 	form := url.Values{}
 	form.Set("disk", params.Disk)
 	form.Set("storage", params.Storage)
+	if params.Format != "" {
+		form.Set("format", params.Format)
+	}
 	if params.Delete {
 		form.Set("delete", "1")
+	}
+	if params.BWLimit > 0 {
+		form.Set("bwlimit", strconv.Itoa(params.BWLimit))
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/move_disk"
 	var upid string
@@ -308,6 +320,9 @@ func (c *Client) MoveCTVolume(ctx context.Context, node string, vmid int, params
 	form.Set("storage", params.Storage)
 	if params.Delete {
 		form.Set("delete", "1")
+	}
+	if params.BWLimit > 0 {
+		form.Set("bwlimit", strconv.Itoa(params.BWLimit))
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/lxc/" + strconv.Itoa(vmid) + "/move_volume"
 	var upid string

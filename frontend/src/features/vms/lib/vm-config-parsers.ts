@@ -291,6 +291,18 @@ export interface ParsedDisk {
  *   "local-lvm:32"
  *   "none,media=cdrom" (empty CD drive)
  */
+/**
+ * Derive an image format from a volume id's file extension. Proxmox writes
+ * file-based volumes as vm-100-disk-0.qcow2 / .raw / .vmdk and typically omits
+ * a format= key, so the extension is the only record of what the image is.
+ * Returns "" for extension-less volumes (LVM, ZFS, RBD), which are raw by
+ * definition and take no format on a move.
+ */
+function formatFromVolume(volume: string): string {
+  const match = /\.(qcow2|raw|vmdk)$/.exec(volume);
+  return match?.[1] ?? "";
+}
+
 export function parseDisk(raw: string): ParsedDisk {
   const result: ParsedDisk = {
     storage: "",
@@ -315,6 +327,12 @@ export function parseDisk(raw: string): ParsedDisk {
   } else {
     result.volume = first;
   }
+
+  // File-based storages encode the format in the volume's file extension and
+  // usually omit format=, e.g. "synology:121/vm-121-disk-0.qcow2,size=81G".
+  // An explicit format= below still wins. Block-backed volumes have no
+  // extension and are always raw, which callers treat as "storage decides".
+  result.format = formatFromVolume(result.volume);
 
   for (let i = 1; i < segments.length; i++) {
     const seg = segments[i] ?? "";

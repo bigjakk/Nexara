@@ -60,6 +60,7 @@ type ctVolumeMoveRequest struct {
 	Volume  string `json:"volume"`
 	Storage string `json:"storage"`
 	Delete  bool   `json:"delete"`
+	BWLimit int    `json:"bwlimit_kib"`
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/containers.
@@ -971,8 +972,22 @@ func (h *ContainerHandler) MoveVolume(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
+	// Checked here rather than leaning on spec.Validate() so the message names
+	// the field this endpoint actually takes ("volume", not "disk").
 	if req.Volume == "" || req.Storage == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "volume and storage are required")
+	}
+
+	// Same spec the VM path uses; CTParams drops the format, which LXC has no
+	// concept of.
+	spec := proxmox.DiskMoveSpec{
+		Disk:          req.Volume,
+		TargetStorage: req.Storage,
+		DeleteSource:  req.Delete,
+		BWLimitKiB:    req.BWLimit,
+	}
+	if err := spec.Validate(); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
 	ct, node, cluster, pxClient, err := h.resolveCT(c, clusterID, ctID)
@@ -980,11 +995,7 @@ func (h *ContainerHandler) MoveVolume(c fiber.Ctx) error {
 		return err
 	}
 
-	upid, err := pxClient.MoveCTVolume(c.Context(), node.Name, int(ct.Vmid), proxmox.CTVolumeMoveParams{
-		Volume:  req.Volume,
-		Storage: req.Storage,
-		Delete:  req.Delete,
-	})
+	upid, err := pxClient.MoveCTVolume(c.Context(), node.Name, int(ct.Vmid), spec.CTParams())
 	if err != nil {
 		return mapProxmoxError(err)
 	}
@@ -997,8 +1008,8 @@ func (h *ContainerHandler) MoveVolume(c fiber.Ctx) error {
 		ResourceName: ct.Name,
 		Action:       "volume_move",
 		UPID:         upid,
-		Description:  "Move volume " + req.Volume + " → " + req.Storage,
-		Extra:        map[string]any{"vmid": ct.Vmid, "volume": req.Volume, "storage": req.Storage},
+		Description:  "Move volume " + spec.Summary(),
+		Extra:        withVMID(spec.AuditExtra(), ct.Vmid),
 	})
 	h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindVMStateChange, "container", ct.ID.String(), "volume_move")
 

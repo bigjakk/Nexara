@@ -18,7 +18,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Slider } from "@/components/ui/slider";
+import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
+import { parseBwlimit } from "@/features/storage/lib/disk-move";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useClusterNodes,
@@ -70,7 +71,7 @@ export function MigrateWizard() {
   const [migrationType, setMigrationType] =
     useState<MigrationType>("intra-cluster");
   const [online, setOnline] = useState(false);
-  const [bwlimit, setBwlimit] = useState([0]);
+  const [bwlimit, setBwlimit] = useState("");
   const [deleteSource, setDeleteSource] = useState(false);
   const [targetVmid, setTargetVmid] = useState("");
   const [storageMap, setStorageMap] = useState<Record<string, string>>({});
@@ -124,7 +125,7 @@ export function MigrateWizard() {
     setVmType("qemu");
     setMigrationType("intra-cluster");
     setOnline(false);
-    setBwlimit([0]);
+    setBwlimit("");
     setDeleteSource(false);
     setTargetVmid("");
     setStorageMap({});
@@ -147,10 +148,12 @@ export function MigrateWizard() {
       storage_map: migrationType === "cross-cluster" ? storageMap : {},
       network_map: migrationType === "cross-cluster" ? networkMap : {},
       online,
-      bwlimit_kib: bwlimit[0] ?? 0,
+      bwlimit_kib: bwlimitKib,
       delete_source: deleteSource,
       target_vmid: targetVmid ? parseInt(targetVmid, 10) : 0,
       target_storage: "",
+      // Live-only wizard: never converts a disk format.
+      disk_format: "",
     };
 
     void createMutation.mutateAsync(req).then((created) => {
@@ -207,7 +210,10 @@ export function MigrateWizard() {
     if (bestNode !== "") setTargetNode(bestNode);
   }, [availableTargetNodes, targetClusterMetrics?.nodeMetrics, targetNode.length]);
 
+  const { value: bwlimitKib, invalid: bwlimitInvalid } = parseBwlimit(bwlimit);
+
   const isFormValid =
+    !bwlimitInvalid &&
     sourceClusterId &&
     sourceNode &&
     vmid &&
@@ -215,7 +221,6 @@ export function MigrateWizard() {
       ? targetNode.length > 0
       : targetClusterId.length > 0);
 
-  const bwlimitValue = bwlimit[0] ?? 0;
 
   return (
     <Dialog
@@ -513,30 +518,16 @@ export function MigrateWizard() {
                 <Label>Live Migration</Label>
                 <Switch checked={online} onCheckedChange={setOnline} />
               </div>
-              {migrationType === "cross-cluster" && (
-                <div className="flex items-center justify-between">
-                  <Label>Delete Source After Migration</Label>
-                  <Switch
-                    checked={deleteSource}
-                    onCheckedChange={setDeleteSource}
-                  />
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label>
-                  Bandwidth Limit:{" "}
-                  {bwlimitValue === 0
-                    ? "Unlimited"
-                    : `${String(bwlimitValue)} KiB/s`}
-                </Label>
-                <Slider
-                  value={bwlimit}
-                  onValueChange={setBwlimit}
-                  min={0}
-                  max={1048576}
-                  step={1024}
-                />
-              </div>
+              {/* Live-only wizard: no disks change storage, so no format. */}
+              <DiskMoveOptions
+                idPrefix="migrate-wizard"
+                hideFormat
+                bwlimit={bwlimit}
+                onBwlimitChange={setBwlimit}
+                deleteSource={deleteSource}
+                onDeleteSourceChange={setDeleteSource}
+                deleteSourceLabel="Delete Source After Migration"
+              />
             </div>
 
             <Button

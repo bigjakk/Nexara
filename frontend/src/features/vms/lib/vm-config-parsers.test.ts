@@ -178,6 +178,28 @@ describe("parseDisk", () => {
     expect(d.iothread).toBe(true);
   });
 
+  it("derives the format from the volume extension when format= is absent", () => {
+    // How Proxmox actually writes file-based disks — the extension is the only
+    // record of the image format.
+    expect(parseDisk("synology:121/vm-121-disk-0.qcow2,size=81G").format).toBe(
+      "qcow2",
+    );
+    expect(parseDisk("local:100/vm-100-disk-0.raw,size=32G").format).toBe("raw");
+    expect(parseDisk("nfs:100/vm-100-disk-1.vmdk,size=10G").format).toBe("vmdk");
+  });
+
+  it("reports no format for block-backed volumes", () => {
+    // LVM/ZFS/RBD volumes have no extension and are raw by definition.
+    expect(parseDisk("local-lvm:vm-100-disk-0,size=32G").format).toBe("");
+    expect(parseDisk("test:vm-121-disk-0,size=81G").format).toBe("");
+  });
+
+  it("lets an explicit format= win over the extension", () => {
+    expect(
+      parseDisk("local:100/vm-100-disk-0.raw,format=qcow2,size=32G").format,
+    ).toBe("qcow2");
+  });
+
   it("parses minimal disk string", () => {
     const d = parseDisk("local-lvm:vm-100-disk-0,size=10G");
     expect(d.storage).toBe("local-lvm");
