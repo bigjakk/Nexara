@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { Terminal as XTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -7,7 +7,7 @@ import { MAX_CONSOLE_AUTO_RETRIES, type ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import {
-  mintConsoleToken,
+  createConsoleTokenMinter,
   wsAuthProtocols,
 } from "../api/console-queries";
 
@@ -62,6 +62,24 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
   const intentionalCloseRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  // Reuses a still-valid scoped token across this tab's reconnect cycle
+  // rather than minting — and auditing — one per attempt. Created once via
+  // the lazy useState initializer so the cache survives effect re-runs.
+  const [mintToken] = useState(createConsoleTokenMinter);
+
+  // A tab dials Proxmox the first time it becomes the active tab, and stays
+  // connected after that — switching away must never kill a live shell.
+  // Tabs restored from localStorage therefore sit idle until you actually
+  // look at them, instead of every persisted session reconnecting at once on
+  // login. An explicit reconnect (reconnectKey > 0) also counts as
+  // activation, so the tab-bar reconnect button works on a background tab.
+  const [activated, setActivated] = useState(visible || reconnectKey > 0);
+  useEffect(() => {
+    if (visible || reconnectKey > 0) {
+      setActivated(true);
+    }
+  }, [visible, reconnectKey]);
+
   // Park dead tabs while the guest is off; auto-resume when it powers on.
   useGuestPowerSync(tab);
 
@@ -76,7 +94,18 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
   }, [visible]);
 
   useEffect(() => {
+    if (!activated) return;
     if (!containerRef.current) return;
+
+    // Restored tabs rehydrate as "idle"; flip to connecting now that we are
+    // actually dialling. Any other status is left alone — notably the parked
+    // "guest-stopped", which connect() below deliberately declines to reopen.
+    if (
+      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
+      "idle"
+    ) {
+      updateTabStatus(tabId, "connecting");
+    }
 
     const term = new XTerminal({
       cursorBlink: true,
@@ -141,13 +170,12 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
         if (accessToken) {
           token = accessToken;
         } else {
-          const minted = await mintConsoleToken({
+          token = await mintToken({
             clusterId: clusterID,
             node,
             type: type,
             ...(vmid !== undefined ? { vmid } : {}),
           });
-          token = minted.token;
         }
       } catch (err) {
         if (intentionalCloseRef.current) return;
@@ -285,7 +313,7 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
       wsRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [tabId, clusterID, node, type, vmid, reconnectKey, accessToken, updateTabStatus, resolveAndReconnect]);
+  }, [tabId, clusterID, node, type, vmid, reconnectKey, activated, accessToken, mintToken, updateTabStatus, resolveAndReconnect]);
 
   // Re-fit when visibility changes.
   useEffect(() => {

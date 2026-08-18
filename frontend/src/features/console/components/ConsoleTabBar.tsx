@@ -1,10 +1,13 @@
-import { X, Terminal, Loader2, AlertCircle, Unplug, RotateCcw, PowerOff } from "lucide-react";
+import { X, Terminal, Loader2, AlertCircle, Unplug, RotateCcw, PowerOff, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConsoleStore } from "@/stores/console-store";
 import type { ConsoleStatus } from "../types/console";
 
 function StatusIcon({ status }: { status: ConsoleStatus }) {
   switch (status) {
+    // Restored tab that hasn't been opened yet — it connects on first click.
+    case "idle":
+      return <Circle className="h-3 w-3 text-muted-foreground/50" />;
     case "connecting":
       return <Loader2 className="h-3 w-3 animate-spin text-amber-500" />;
     case "connected":

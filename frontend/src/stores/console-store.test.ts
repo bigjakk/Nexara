@@ -208,4 +208,44 @@ describe("console-store", () => {
       expect(tab?.reconnectKey).toBe(1);
     });
   });
+
+  describe("updateTabNode", () => {
+    function addVmTabAt(node: string) {
+      return useConsoleStore.getState().addTab({
+        clusterID: "c1",
+        node,
+        vmid: 101,
+        type: "vm_serial",
+        label: "Serial: vm101",
+        resourceId: "vm-uuid-1",
+        kind: "vm",
+      });
+    }
+
+    it("retargets a live tab and triggers a reconnect", () => {
+      const id = addVmTabAt("n1");
+      useConsoleStore.getState().updateTabStatus(id, "connected");
+
+      useConsoleStore.getState().updateTabNode("c1", 101, "n2");
+
+      const tab = useConsoleStore.getState().tabs[0];
+      expect(tab?.node).toBe("n2");
+      expect(tab?.status).toBe("connecting");
+      expect(tab?.reconnectKey).toBe(1);
+    });
+
+    it("retargets an idle tab without waking it", () => {
+      // Restored-but-never-opened tabs must not dial a console just because
+      // the guest migrated — that is what the lazy-activation gate prevents.
+      const id = addVmTabAt("n1");
+      useConsoleStore.getState().updateTabStatus(id, "idle");
+
+      useConsoleStore.getState().updateTabNode("c1", 101, "n2");
+
+      const tab = useConsoleStore.getState().tabs[0];
+      expect(tab?.node).toBe("n2");
+      expect(tab?.status).toBe("idle");
+      expect(tab?.reconnectKey).toBe(0);
+    });
+  });
 });

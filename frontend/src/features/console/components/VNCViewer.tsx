@@ -21,7 +21,7 @@ import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import { VNCToolbar } from "./VNCToolbar";
 import {
   buildVncWsUrl,
-  mintConsoleToken,
+  createConsoleTokenMinter,
   wsAuthProtocols,
 } from "../api/console-queries";
 
@@ -63,6 +63,24 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
   const localStatusRef = useRef<ConsoleStatus>("connecting");
   const [localReconnectKey, setLocalReconnectKey] = useState(0);
 
+  // Reuses a still-valid scoped token across this tab's reconnect cycle
+  // rather than minting — and auditing — one per attempt. Created once via
+  // the lazy useState initializer so the cache survives effect re-runs.
+  const [mintToken] = useState(createConsoleTokenMinter);
+
+  // A tab dials Proxmox the first time it becomes the active tab, and stays
+  // connected after that — switching away must never tear down a live
+  // session. Tabs restored from localStorage therefore sit idle until you
+  // actually look at them, instead of every persisted session reconnecting
+  // at once on login. An explicit reconnect (reconnectKey > 0) also counts
+  // as activation, so the tab-bar reconnect button works on a background tab.
+  const [activated, setActivated] = useState(visible || reconnectKey > 0);
+  useEffect(() => {
+    if (visible || reconnectKey > 0) {
+      setActivated(true);
+    }
+  }, [visible, reconnectKey]);
+
   // Park dead tabs while the guest is off; auto-resume when it powers on.
   useGuestPowerSync(tab);
 
@@ -83,6 +101,18 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
   const guestType = tab.type === "ct_vnc" ? "lxc" : undefined;
 
   useEffect(() => {
+    if (!activated) return;
+
+    // Restored tabs rehydrate as "idle"; flip to connecting now that we are
+    // actually dialling. Any other status is left alone — notably the parked
+    // "guest-stopped", which connect() below deliberately declines to reopen.
+    if (
+      (useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
+        ?.status ?? localStatusRef.current) === "idle"
+    ) {
+      applyStatusRef.current("connecting");
+    }
+
     intentionalCloseRef.current = false;
     retryScheduledRef.current = false;
     let ws: WebSocket | null = null;
@@ -142,13 +172,12 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
           // uses node_shell/vm_serial/ct_attach, VNCViewer uses
           // vm_vnc/ct_vnc. The VNC subset is what tab.type can hold for
           // this component.
-          const minted = await mintConsoleToken({
+          token = await mintToken({
             clusterId: clusterID,
             node,
             type: tab.type,
             ...(vmid !== undefined ? { vmid } : {}),
           });
-          token = minted.token;
         }
       } catch (err) {
         if (intentionalCloseRef.current) return;
@@ -307,7 +336,7 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
       wsRef.current = null;
     };
     // Only re-run when the actual connection parameters change.
-  }, [tabId, tab.type, clusterID, node, vmid, guestType, reconnectKey, localReconnectKey, accessToken]);
+  }, [tabId, tab.type, clusterID, node, vmid, guestType, reconnectKey, localReconnectKey, activated, accessToken, mintToken]);
 
   const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
 
@@ -459,12 +488,20 @@ function ConsoleStateOverlay({
     );
   }
 
-  if (status === "connecting" || status === "reconnecting") {
+  // "idle" is the pre-dial state of a restored background tab. It only
+  // surfaces here for the frame between becoming visible and the connect
+  // effect firing, so show the same spinner rather than a stale "no
+  // connection" panel the user would be tempted to click.
+  if (
+    status === "idle" ||
+    status === "connecting" ||
+    status === "reconnecting"
+  ) {
     return (
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60 text-muted-foreground">
         <Loader2 className="h-6 w-6 animate-spin" />
         <p className="text-xs">
-          {status === "connecting" ? "Connecting…" : "Reconnecting…"}
+          {status === "reconnecting" ? "Reconnecting…" : "Connecting…"}
         </p>
       </div>
     );

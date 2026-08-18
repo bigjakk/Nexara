@@ -119,11 +119,17 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
 
       updateTabNode: (clusterID, vmid, newNode) => {
         set((state) => ({
-          tabs: state.tabs.map((t) =>
-            t.clusterID === clusterID && t.vmid === vmid && t.node !== newNode
-              ? { ...t, node: newNode, status: "connecting", reconnectKey: t.reconnectKey + 1 }
-              : t,
-          ),
+          tabs: state.tabs.map((t) => {
+            if (t.clusterID !== clusterID || t.vmid !== vmid || t.node === newNode) {
+              return t;
+            }
+            // A never-opened tab is retargeted silently. Bumping reconnectKey
+            // would activate it, dialling a console the user hasn't opened.
+            if (t.status === "idle") {
+              return { ...t, node: newNode };
+            }
+            return { ...t, node: newNode, status: "connecting" as const, reconnectKey: t.reconnectKey + 1 };
+          }),
         }));
       },
 
@@ -200,10 +206,27 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
     }),
     {
       name: "nexara-console-tabs",
+      // v1 persists tabs as "idle" rather than "connecting". Tabs written by
+      // v0 come back mid-flight ("connecting"/"connected") even though no
+      // socket survived the reload, which would leave a restored background
+      // tab spinning forever now that connecting is lazy — so reset them.
+      version: 1,
+      migrate: (persisted) => {
+        const state = persisted as Partial<ConsoleState> | undefined;
+        if (!state?.tabs) return state as ConsoleState & ConsoleActions;
+        const tabs: ConsoleTab[] = state.tabs.map((t) => ({
+          ...t,
+          status: "idle",
+          reconnectKey: 0,
+        }));
+        return { ...state, tabs } as ConsoleState & ConsoleActions;
+      },
       partialize: (state) => ({
         tabs: state.tabs.map((t) => ({
           ...t,
-          status: "connecting",
+          // Nothing is connected on rehydrate; the active tab dials on mount
+          // and the rest stay idle until you switch to them.
+          status: "idle",
           reconnectKey: 0,
         })),
         activeTabId: state.activeTabId,

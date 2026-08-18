@@ -66,6 +66,64 @@ export async function mintConsoleToken(
 }
 
 /**
+ * How early a cached console token is retired before its real expiry.
+ * Covers the cache-hit -> WS upgrade round-trip so a reused token can't
+ * lapse in the gap between us handing it over and the server validating it.
+ */
+const CONSOLE_TOKEN_REUSE_MARGIN_MS = 5_000;
+
+export type ConsoleTokenMinter = (
+  params: MintConsoleTokenParams,
+) => Promise<string>;
+
+/**
+ * Build a per-console-session minter that reuses a still-valid token for the
+ * same scope instead of minting a fresh one.
+ *
+ * Every non-silent mint writes an audit row, and the auto-reconnect backoff
+ * (1s/2s/4s/8s/10s — see MAX_CONSOLE_AUTO_RETRIES) fits comfortably inside
+ * the token's 60s TTL. Without reuse, one dropped connection emitted six
+ * identical `console_token_mint` entries; restoring a handful of persisted
+ * tabs on login turned that into a flood in the activity feed.
+ *
+ * Replay within the TTL is safe: console tokens carry no jti and the WS
+ * middleware validates signature + expiry + exact scope match only — there
+ * is no single-use enforcement to defeat (internal/ws/server.go).
+ *
+ * The cache is keyed on the whole scope tuple, so a tab whose guest migrated
+ * to another node re-mints — its old token is locked to the old node and
+ * would be rejected at upgrade.
+ */
+export function createConsoleTokenMinter(): ConsoleTokenMinter {
+  let cached: { key: string; token: string; expiresAt: number } | null = null;
+
+  return async (params) => {
+    const key = [
+      params.clusterId,
+      params.node,
+      params.type,
+      params.vmid ?? "",
+      params.silent === true ? "1" : "0",
+    ].join("|");
+
+    const now = Date.now();
+    if (cached !== null && cached.key === key && now < cached.expiresAt) {
+      return cached.token;
+    }
+
+    const minted = await mintConsoleToken(params);
+    cached = {
+      key,
+      token: minted.token,
+      expiresAt:
+        now +
+        Math.max(0, minted.expires_in * 1000 - CONSOLE_TOKEN_REUSE_MARGIN_MS),
+    };
+    return minted.token;
+  };
+}
+
+/**
  * Mint a short-lived (60 second) JWT for the generic /ws hub upgrade.
  *
  * Per remediation 2.7, the long-lived access token is no longer accepted

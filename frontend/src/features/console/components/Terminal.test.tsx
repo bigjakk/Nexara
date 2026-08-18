@@ -5,13 +5,17 @@ import { renderWithProviders } from "@/test/test-utils";
 import { Terminal } from "./Terminal";
 import type { ConsoleTab } from "../types/console";
 
-// Mock the console-token mint endpoint. The Terminal now mints a scoped JWT
-// before opening the WS (security review fix #1) — desktop callers never
-// pass accessToken; mobile passes its pre-minted token directly.
+// Mock the console-token minter. The Terminal mints a scoped JWT before
+// opening the WS (security review fix #1) — desktop callers never pass
+// accessToken; mobile passes its pre-minted token directly. The real minter
+// caches within the token's TTL; its own behaviour is covered in
+// api/console-queries.test.ts.
+const { mintSpy } = vi.hoisted(() => ({
+  mintSpy: vi.fn(() => Promise.resolve("scoped-test-token")),
+}));
+
 vi.mock("../api/console-queries", () => ({
-  mintConsoleToken: vi.fn(() =>
-    Promise.resolve({ token: "scoped-test-token", expires_in: 60 }),
-  ),
+  createConsoleTokenMinter: () => mintSpy,
   wsAuthProtocols: (token: string) => [
     "nexara.token",
     "nexara.token." + token,
@@ -86,6 +90,7 @@ Object.assign(globalThis, { WebSocket: MockWebSocket });
 
 beforeEach(() => {
   MockWebSocket.instances = [];
+  mintSpy.mockClear();
   vi.spyOn(Storage.prototype, "getItem").mockReturnValue("test-token");
 });
 
@@ -140,6 +145,51 @@ describe("Terminal", () => {
       "nexara.token",
       "nexara.token.mobile-prebaked-token",
     ]);
+  });
+
+  it("does not dial a background tab until it is first shown", async () => {
+    // Restored tabs all mount at once on login. Only the active one may
+    // connect — otherwise every persisted session mints an audited token and
+    // grabs a Proxmox console slot nobody is looking at.
+    const { rerender } = renderWithProviders(
+      <Terminal tab={testTab} visible={false} />,
+    );
+    await Promise.resolve();
+    expect(mintSpy).not.toHaveBeenCalled();
+    expect(MockWebSocket.instances).toHaveLength(0);
+
+    rerender(<Terminal tab={testTab} visible={true} />);
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    expect(mintSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("connects a background tab that was explicitly reconnected", async () => {
+    // reconnectTab bumps reconnectKey from the tab bar without switching
+    // tabs; without this the tab would spin on "connecting" forever.
+    renderWithProviders(
+      <Terminal tab={{ ...testTab, reconnectKey: 1 }} visible={false} />,
+    );
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+  });
+
+  it("keeps a live session open when switched away from", async () => {
+    const { rerender } = renderWithProviders(
+      <Terminal tab={testTab} visible={true} />,
+    );
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    const ws = MockWebSocket.instances[0];
+
+    rerender(<Terminal tab={testTab} visible={false} />);
+    await Promise.resolve();
+
+    expect(ws?.close).not.toHaveBeenCalled();
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 
   it("hides terminal when not visible", () => {

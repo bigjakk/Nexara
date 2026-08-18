@@ -9,6 +9,13 @@ export type ConsoleType = "node_shell" | "vm_serial" | "ct_attach" | "vm_vnc" | 
 export const MAX_CONSOLE_AUTO_RETRIES = 5;
 
 export type ConsoleStatus =
+  /**
+   * Restored or background tab that has never been the active tab — no
+   * connection has been dialled for it yet. Tabs connect lazily on first
+   * activation so a login doesn't reopen every persisted session at once
+   * (each one mints an audited token and holds a Proxmox console slot).
+   */
+  | "idle"
   | "connecting"
   | "connected"
   | "disconnected"
