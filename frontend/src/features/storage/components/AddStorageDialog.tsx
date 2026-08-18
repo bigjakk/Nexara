@@ -20,6 +20,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useCreateStorage } from "../api/storage-queries";
+import { ISCSITargetField, NodeRestrictionField } from "./StorageFormFields";
 import type {
   StorageType,
   StorageContentType,
@@ -69,9 +70,16 @@ export function AddStorageDialog({
   const [params, setParams] = useState<Record<string, string>>({});
   const [selectedContent, setSelectedContent] = useState<Set<StorageContentType>>(new Set());
   const [nodes, setNodes] = useState("");
+  const [enabled, setEnabled] = useState(true);
+  const [useLuns, setUseLuns] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const createMutation = useCreateStorage();
+
+  // PVE models "use LUNs directly" as the content type rather than a flag of its
+  // own, and offers it for the kernel iSCSI plugin only — iSCSI Direct always
+  // exposes its LUNs as disk images.
+  const isISCSI = storageType === "iscsi";
 
   const typeFields = STORAGE_TYPE_FIELDS[storageType];
   const availableContent = STORAGE_TYPE_CONTENT[storageType];
@@ -89,6 +97,8 @@ export function AddStorageDialog({
     setParams({});
     setSelectedContent(new Set());
     setNodes("");
+    setEnabled(true);
+    setUseLuns(true);
     setError(null);
     createMutation.reset();
   }
@@ -98,6 +108,7 @@ export function AddStorageDialog({
     setParams({});
     // Pre-select all available content types for new storage
     setSelectedContent(new Set(STORAGE_TYPE_CONTENT[newType]));
+    setUseLuns(true);
     setError(null);
   }
 
@@ -123,14 +134,23 @@ export function AddStorageDialog({
 
     const submitParams: Record<string, string> = { ...params };
 
-    // Add content types
-    if (selectedContent.size > 0) {
+    // Add content types. For iSCSI the choice is binary and carried by the LUNs
+    // toggle: "images" hands the LUNs to guests as disks, "none" leaves the
+    // target as a raw base for an LVM group stacked on top of it.
+    if (isISCSI) {
+      submitParams["content"] = useLuns ? "images" : "none";
+    } else if (selectedContent.size > 0) {
       submitParams["content"] = Array.from(selectedContent).join(",");
     }
 
     // Add nodes restriction
     if (nodes.trim()) {
       submitParams["nodes"] = nodes.trim();
+    }
+
+    // Only sent when off: Proxmox defaults new storage to enabled.
+    if (!enabled) {
+      submitParams["disable"] = "1";
     }
 
     createMutation.mutate(
@@ -225,7 +245,16 @@ export function AddStorageDialog({
                 {field.label}
                 {field.required && <span className="ml-1 text-destructive">*</span>}
               </Label>
-              {field.type === "select" && field.options ? (
+              {field.scan === "iscsi" ? (
+                <ISCSITargetField
+                  id={`field-${field.key}`}
+                  clusterId={clusterId}
+                  portal={params[field.scanFrom ?? "portal"] ?? ""}
+                  value={params[field.key] ?? ""}
+                  onChange={(v) => { handleParamChange(field.key, v); }}
+                  placeholder={field.placeholder}
+                />
+              ) : field.type === "select" && field.options ? (
                 <Select
                   value={params[field.key] ?? ""}
                   onValueChange={(v) => { handleParamChange(field.key, v); }}
@@ -266,36 +295,72 @@ export function AddStorageDialog({
             </div>
           ))}
 
-          {/* Content Types */}
-          <div className="space-y-1.5">
-            <Label>Content Types</Label>
-            <div className="flex flex-wrap gap-2">
-              {ALL_CONTENT_TYPES.filter((ct) =>
-                availableContent.includes(ct.value),
-              ).map((ct) => (
-                <Badge
-                  key={ct.value}
-                  variant={selectedContent.has(ct.value) ? "default" : "outline"}
-                  className="cursor-pointer select-none"
-                  onClick={() => { toggleContent(ct.value); }}
-                >
-                  {ct.label}
-                </Badge>
-              ))}
+          {/* Content Types (iSCSI expresses its single choice as the LUNs toggle) */}
+          {isISCSI ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="storage-luns"
+                  checked={useLuns}
+                  onCheckedChange={(checked) => { setUseLuns(checked === true); }}
+                />
+                <Label htmlFor="storage-luns" className="text-sm font-normal">
+                  Use LUNs directly
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Attach the target&apos;s LUNs to guests as disks. Turn off to use the target
+                only as a base for LVM on top of it.
+              </p>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>Content Types</Label>
+              <div className="flex flex-wrap gap-2">
+                {ALL_CONTENT_TYPES.filter((ct) =>
+                  availableContent.includes(ct.value),
+                ).map((ct) => (
+                  <Badge
+                    key={ct.value}
+                    variant={selectedContent.has(ct.value) ? "default" : "outline"}
+                    className="cursor-pointer select-none"
+                    onClick={() => { toggleContent(ct.value); }}
+                  >
+                    {ct.label}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Nodes restriction */}
           <div className="space-y-1.5">
             <Label htmlFor="storage-nodes">Nodes (optional)</Label>
-            <Input
+            <NodeRestrictionField
               id="storage-nodes"
+              clusterId={clusterId}
               value={nodes}
-              onChange={(e) => { setNodes(e.target.value); }}
-              placeholder="node1,node2 (leave empty for all)"
+              onChange={setNodes}
             />
             <p className="text-xs text-muted-foreground">
               Restrict storage to specific cluster nodes.
+            </p>
+          </div>
+
+          {/* Enabled */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="storage-enabled"
+                checked={enabled}
+                onCheckedChange={(checked) => { setEnabled(checked === true); }}
+              />
+              <Label htmlFor="storage-enabled" className="text-sm font-normal">
+                Enable
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Disabled storage stays configured but is not mounted or used by any node.
             </p>
           </div>
 

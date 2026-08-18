@@ -166,6 +166,27 @@ export interface StorageFieldDef {
   options?: { value: string; label: string }[];
   placeholder?: string;
   help?: string;
+  /**
+   * Renders the field as a discovery-backed combobox instead of a plain input.
+   * "iscsi" scans the portal named by `scanFrom` for advertised target IQNs,
+   * the way the PVE GUI fills its Target dropdown. Manual entry stays available
+   * for portals that refuse discovery.
+   */
+  scan?: "iscsi";
+  /** Key of the field whose value drives `scan` (e.g. the portal address). */
+  scanFrom?: string;
+  /**
+   * Set at creation only. Proxmox marks the backend-identifying options of some
+   * plugins `fixed => 1` and rejects a PUT that carries them, so the edit form
+   * shows them read-only rather than offering an edit that cannot succeed.
+   */
+  fixed?: boolean;
+}
+
+/** A target IQN advertised by an iSCSI portal, from GET /clusters/:id/scan/iscsi */
+export interface ISCSITarget {
+  target: string;
+  portal: string;
 }
 
 /** Which content types each storage type supports */
@@ -283,13 +304,23 @@ export const STORAGE_TYPE_FIELDS: Record<StorageType, StorageFieldDef[]> = {
     { key: "blocksize", label: "Block Size", placeholder: "8k" },
     { key: "sparse", label: "Sparse Volumes", type: "checkbox" },
   ],
+  // Both iSCSI plugins declare portal and target `fixed => 1` upstream — they
+  // identify the backend, so Proxmox only accepts them at creation.
   iscsi: [
-    { key: "portal", label: "Portal (IP/Host)", required: true, placeholder: "192.168.1.100" },
-    { key: "target", label: "Target IQN", required: true, placeholder: "iqn.2024-01.com.example:target" },
+    { key: "portal", label: "Portal (IP/Host)", required: true, placeholder: "192.168.1.100", fixed: true },
+    {
+      key: "target", label: "Target IQN", required: true,
+      placeholder: "iqn.2024-01.com.example:target",
+      scan: "iscsi", scanFrom: "portal", fixed: true,
+    },
   ],
   iscsidirect: [
-    { key: "portal", label: "Portal (IP/Host)", required: true, placeholder: "192.168.1.100" },
-    { key: "target", label: "Target IQN", required: true, placeholder: "iqn.2024-01.com.example:target" },
+    { key: "portal", label: "Portal (IP/Host)", required: true, placeholder: "192.168.1.100", fixed: true },
+    {
+      key: "target", label: "Target IQN", required: true,
+      placeholder: "iqn.2024-01.com.example:target",
+      scan: "iscsi", scanFrom: "portal", fixed: true,
+    },
   ],
   rbd: [
     { key: "monhost", label: "Monitor Hosts", placeholder: "10.0.0.1,10.0.0.2" },

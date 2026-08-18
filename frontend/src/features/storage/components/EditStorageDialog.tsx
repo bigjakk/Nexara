@@ -21,6 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useStorageConfig, useUpdateStorage } from "../api/storage-queries";
+import { ISCSITargetField, NodeRestrictionField } from "./StorageFormFields";
 import type {
   StorageType,
   StorageContentType,
@@ -69,6 +70,8 @@ export function EditStorageDialog({
   const [initialParams, setInitialParams] = useState<Record<string, string>>({});
   const [selectedContent, setSelectedContent] = useState<Set<StorageContentType>>(new Set());
   const [nodes, setNodes] = useState("");
+  const [enabled, setEnabled] = useState(true);
+  const [useLuns, setUseLuns] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
 
@@ -79,6 +82,9 @@ export function EditStorageDialog({
   const updateMutation = useUpdateStorage();
 
   const sType = storageType as StorageType;
+  // See AddStorageDialog: PVE carries "use LUNs directly" in the content field,
+  // and offers it for the kernel iSCSI plugin only.
+  const isISCSI = sType === "iscsi";
   const typeFields = useMemo(() => STORAGE_TYPE_FIELDS[sType], [sType]);
   const availableContent = STORAGE_TYPE_CONTENT[sType];
   const typeLabel = STORAGE_TYPE_LABELS[sType];
@@ -103,6 +109,10 @@ export function EditStorageDialog({
       setSelectedContent(contentSet);
 
       setNodes(cfg.nodes ?? "");
+      // Proxmox omits `disable` entirely when the storage is enabled.
+      setEnabled(getConfigValue(cfg, "disable") !== "1");
+      // An iSCSI storage with no explicit content is "images" by default.
+      setUseLuns(content === "" || contentSet.has("images"));
       setInitialized(true);
     }
   }, [configQuery.data, initialized, typeFields]);
@@ -129,6 +139,8 @@ export function EditStorageDialog({
   }
 
   function handleSubmit() {
+    const cfg = configQuery.data;
+    if (!cfg) return;
     setError(null);
 
     const submitParams: Record<string, string> = {};
@@ -138,23 +150,46 @@ export function EditStorageDialog({
     // fields like NFS `export` even when echoed back unchanged — sending them
     // would fail validation, so only forward what the user actually edited.
     for (const field of typeFields) {
+      if (field.fixed) continue;
       const v = params[field.key];
       if (v !== undefined && v !== "" && v !== (initialParams[field.key] ?? "")) {
         submitParams[field.key] = v;
       }
     }
 
-    const newContent = Array.from(selectedContent).join(",");
-    if (newContent !== (configQuery.data?.content ?? "") && selectedContent.size > 0) {
-      submitParams["content"] = newContent;
+    const currentContent = cfg.content ?? "";
+    if (isISCSI) {
+      const newContent = useLuns ? "images" : "none";
+      if (newContent !== currentContent) {
+        submitParams["content"] = newContent;
+      }
+    } else {
+      const newContent = Array.from(selectedContent).join(",");
+      if (newContent !== currentContent && selectedContent.size > 0) {
+        submitParams["content"] = newContent;
+      }
     }
+
+    // Params Proxmox only clears via its `delete` list — an empty value is
+    // dropped by the API layer, so "no nodes" has to be asked for explicitly.
+    const deleteKeys: string[] = [];
 
     const newNodes = nodes.trim();
-    if (newNodes !== (configQuery.data?.nodes ?? "") && newNodes !== "") {
-      submitParams["nodes"] = newNodes;
+    const currentNodes = cfg.nodes ?? "";
+    if (newNodes !== currentNodes) {
+      if (newNodes === "") {
+        deleteKeys.push("nodes");
+      } else {
+        submitParams["nodes"] = newNodes;
+      }
     }
 
-    if (Object.keys(submitParams).length === 0) {
+    const wasEnabled = getConfigValue(cfg, "disable") !== "1";
+    if (enabled !== wasEnabled) {
+      submitParams["disable"] = enabled ? "0" : "1";
+    }
+
+    if (Object.keys(submitParams).length === 0 && deleteKeys.length === 0) {
       setError("No changes to save");
       return;
     }
@@ -163,7 +198,10 @@ export function EditStorageDialog({
       {
         clusterId,
         storageId,
-        data: { params: submitParams },
+        data: {
+          params: submitParams,
+          ...(deleteKeys.length > 0 ? { delete: deleteKeys.join(",") } : {}),
+        },
       },
       {
         onSuccess: () => {
@@ -238,7 +276,23 @@ export function EditStorageDialog({
                   {field.label}
                   {field.required && <span className="ml-1 text-destructive">*</span>}
                 </Label>
-                {field.type === "select" && field.options ? (
+                {field.fixed ? (
+                  <>
+                    <Input id={`edit-${field.key}`} value={params[field.key] ?? ""} disabled />
+                    <p className="text-xs text-muted-foreground">
+                      Set when the storage was created — Proxmox does not allow changing it.
+                    </p>
+                  </>
+                ) : field.scan === "iscsi" ? (
+                  <ISCSITargetField
+                    id={`edit-${field.key}`}
+                    clusterId={clusterId}
+                    portal={params[field.scanFrom ?? "portal"] ?? ""}
+                    value={params[field.key] ?? ""}
+                    onChange={(v) => { handleParamChange(field.key, v); }}
+                    placeholder={field.placeholder}
+                  />
+                ) : field.type === "select" && field.options ? (
                   <Select
                     value={params[field.key] ?? ""}
                     onValueChange={(v) => { handleParamChange(field.key, v === "_empty" ? "" : v); }}
@@ -279,34 +333,73 @@ export function EditStorageDialog({
               </div>
             ))}
 
-            {/* Content Types */}
-            <div className="space-y-1.5">
-              <Label>Content Types</Label>
-              <div className="flex flex-wrap gap-2">
-                {ALL_CONTENT_TYPES.filter((ct) =>
-                  availableContent.includes(ct.value),
-                ).map((ct) => (
-                  <Badge
-                    key={ct.value}
-                    variant={selectedContent.has(ct.value) ? "default" : "outline"}
-                    className="cursor-pointer select-none"
-                    onClick={() => { toggleContent(ct.value); }}
-                  >
-                    {ct.label}
-                  </Badge>
-                ))}
+            {/* Content Types (iSCSI expresses its single choice as the LUNs toggle) */}
+            {isISCSI ? (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="edit-storage-luns"
+                    checked={useLuns}
+                    onCheckedChange={(checked) => { setUseLuns(checked === true); }}
+                  />
+                  <Label htmlFor="edit-storage-luns" className="text-sm font-normal">
+                    Use LUNs directly
+                  </Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Attach the target&apos;s LUNs to guests as disks. Turn off to use the target
+                  only as a base for LVM on top of it.
+                </p>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label>Content Types</Label>
+                <div className="flex flex-wrap gap-2">
+                  {ALL_CONTENT_TYPES.filter((ct) =>
+                    availableContent.includes(ct.value),
+                  ).map((ct) => (
+                    <Badge
+                      key={ct.value}
+                      variant={selectedContent.has(ct.value) ? "default" : "outline"}
+                      className="cursor-pointer select-none"
+                      onClick={() => { toggleContent(ct.value); }}
+                    >
+                      {ct.label}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Nodes */}
             <div className="space-y-1.5">
               <Label htmlFor="edit-nodes">Nodes (optional)</Label>
-              <Input
+              <NodeRestrictionField
                 id="edit-nodes"
+                clusterId={clusterId}
                 value={nodes}
-                onChange={(e) => { setNodes(e.target.value); }}
-                placeholder="node1,node2 (leave empty for all)"
+                onChange={setNodes}
               />
+              <p className="text-xs text-muted-foreground">
+                Restrict storage to specific cluster nodes.
+              </p>
+            </div>
+
+            {/* Enabled */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="edit-storage-enabled"
+                  checked={enabled}
+                  onCheckedChange={(checked) => { setEnabled(checked === true); }}
+                />
+                <Label htmlFor="edit-storage-enabled" className="text-sm font-normal">
+                  Enable
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Disabled storage stays configured but is not mounted or used by any node.
+              </p>
             </div>
 
             {error && (

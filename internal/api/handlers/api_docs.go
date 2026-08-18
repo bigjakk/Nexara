@@ -157,6 +157,8 @@ var endpointMeta = map[string]APIEndpoint{
 	"DELETE /api/v1/clusters/:cluster_id/storage/:storage_id":      {Description: "Delete a storage pool", Permission: "delete:storage", Group: "Storage"},
 	"GET /api/v1/clusters/:cluster_id/storage/:storage_id/content": {Description: "List storage content", Permission: "view:storage", Group: "Storage"},
 	"POST /api/v1/clusters/:cluster_id/storage/:storage_id/upload": {Description: "Upload an ISO or template", Permission: "manage:storage", Group: "Storage"},
+	// manage, not view: discovery makes a node dial a caller-supplied address.
+	"GET /api/v1/clusters/:cluster_id/scan/iscsi": {Description: "Discover iSCSI targets on a portal", Permission: "manage:storage", Group: "Storage"},
 
 	// ── Backup (PBS) ──────────────────────────────────────────────────
 	"GET /api/v1/pbs-servers":        {Description: "List PBS servers", Permission: "view:pbs", Group: "Backup"},

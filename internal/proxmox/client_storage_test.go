@@ -147,3 +147,86 @@ func TestDeleteStorageContent_RejectsInjectionWithoutIssuingRequest(t *testing.T
 		})
 	}
 }
+
+func TestValidateISCSIPortal(t *testing.T) {
+	tests := []struct {
+		name    string
+		portal  string
+		wantErr bool
+	}{
+		{"bare host", "192.168.5.2", false},
+		{"host with port", "192.168.5.2:3260", false},
+		{"hostname", "truenas.lan", false},
+		{"hostname with port", "truenas.lan:3260", false},
+		{"ipv6 bracketed", "[fd00::1]:3260", false},
+
+		{"empty", "", true},
+		{"space", "192.168.5.2 3260", true},
+		{"tab", "192.168.5.2\t", true},
+		{"path separator", "192.168.5.2/target", true},
+		{"query string", "192.168.5.2?x=1", true},
+		{"fragment", "192.168.5.2#x", true},
+		{"newline", "192.168.5.2\niscsi", true},
+		{"over length", strings.Repeat("a", 256), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateISCSIPortal(tt.portal)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateISCSIPortal(%q) error = %v, wantErr %v", tt.portal, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestScanISCSI_RequestShapeAndDecoding(t *testing.T) {
+	srv, seen := newCaptureServer(t,
+		`{"data":[{"target":"iqn.2005-10.org.freenas.ctl:test","portal":"192.168.5.2:3260"}]}`)
+	c := newTestClient(t, srv.URL)
+
+	targets, err := c.ScanISCSI(context.Background(), "pve1", "192.168.5.2")
+	if err != nil {
+		t.Fatalf("ScanISCSI: %v", err)
+	}
+
+	want := "/api2/json/nodes/pve1/scan/iscsi?portal=192.168.5.2"
+	if len(*seen) != 1 || (*seen)[0] != want {
+		t.Errorf("request target = %v, want [%s]", *seen, want)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("got %d targets, want 1", len(targets))
+	}
+	if targets[0].Target != "iqn.2005-10.org.freenas.ctl:test" {
+		t.Errorf("target = %q", targets[0].Target)
+	}
+	if targets[0].Portal != "192.168.5.2:3260" {
+		t.Errorf("portal = %q", targets[0].Portal)
+	}
+}
+
+func TestScanISCSI_RejectsBadInputWithoutIssuingRequest(t *testing.T) {
+	// Discovery makes the node dial a caller-supplied address, so a malformed
+	// portal must be refused here rather than forwarded with the cluster's token.
+	cases := []struct{ node, portal string }{
+		{"pve1", ""},
+		{"pve1", "192.168.5.2/../../access"},
+		{"pve1", "192.168.5.2?x=1"},
+		{"", "192.168.5.2"},
+		{"../other", "192.168.5.2"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.node+"|"+tc.portal, func(t *testing.T) {
+			srv, seen := newCaptureServer(t, `{"data":[]}`)
+			c := newTestClient(t, srv.URL)
+
+			if _, err := c.ScanISCSI(context.Background(), tc.node, tc.portal); err == nil {
+				t.Fatalf("ScanISCSI(%q, %q) succeeded, want rejection", tc.node, tc.portal)
+			}
+			if len(*seen) != 0 {
+				t.Errorf("issued %d request(s) %v, want none", len(*seen), *seen)
+			}
+		})
+	}
+}

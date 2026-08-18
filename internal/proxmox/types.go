@@ -530,6 +530,15 @@ type StorageConfig struct {
 	PruneBackups  string `json:"prune-backups,omitempty"`
 }
 
+// ISCSITarget is one entry from GET /nodes/{node}/scan/iscsi?portal=<portal> —
+// a target IQN advertised by an iSCSI portal, as discovered by iscsiadm
+// discovery on the node. Portal carries the address:port the target answered
+// on, which may differ from the portal that was probed.
+type ISCSITarget struct {
+	Target string `json:"target"`
+	Portal string `json:"portal"`
+}
+
 // StorageContent represents an item from GET /nodes/{node}/storage/{storage}/content.
 type StorageContent struct {
 	Volid   string `json:"volid"`

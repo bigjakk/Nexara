@@ -155,6 +155,7 @@ func validateVolumeID(volume string) error {
 	}
 	return nil
 }
+
 // PullOCIImage triggers POST /nodes/{node}/storage/{storage}/oci-registry-pull.
 // Available in Proxmox VE 9.1+. The storage must be file-based with vztmpl content
 // enabled, and skopeo must be installed on the node.
@@ -386,6 +387,47 @@ func ValidateStorageFilename(filename string) error {
 	}
 	if hasControlChar(filename) {
 		return fmt.Errorf("%w: filename %q contains a control character", ErrInvalidInput, filename)
+	}
+	return nil
+}
+
+// ScanISCSI performs GET /nodes/{node}/scan/iscsi?portal=<portal>, the discovery
+// call the PVE GUI makes to fill the target dropdown when adding iSCSI storage.
+// The node runs an iscsiadm sendtargets discovery against the portal, so callers
+// must be authorized to make it reach out to an arbitrary address.
+func (c *Client) ScanISCSI(ctx context.Context, node, portal string) ([]ISCSITarget, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := ValidateISCSIPortal(portal); err != nil {
+		return nil, err
+	}
+	q := url.Values{}
+	q.Set("portal", portal)
+	path := "/nodes/" + url.PathEscape(node) + "/scan/iscsi?" + q.Encode()
+	var targets []ISCSITarget
+	if err := c.do(ctx, path, &targets); err != nil {
+		return nil, fmt.Errorf("scan iscsi portal %s on %s: %w", portal, node, err)
+	}
+	return targets, nil
+}
+
+// ValidateISCSIPortal checks a caller-supplied iSCSI portal address before it is
+// handed to a node for discovery. Proxmox accepts "host" or "host:port"; anything
+// with whitespace or control characters is a malformed value, not a reachable
+// portal, and is rejected here rather than passed on.
+func ValidateISCSIPortal(portal string) error {
+	if portal == "" {
+		return fmt.Errorf("%w: portal is required", ErrInvalidInput)
+	}
+	if len(portal) > 255 {
+		return fmt.Errorf("%w: portal exceeds 255 characters", ErrInvalidInput)
+	}
+	if hasControlChar(portal) {
+		return fmt.Errorf("%w: portal %q contains a control character", ErrInvalidInput, portal)
+	}
+	if strings.ContainsAny(portal, " \t/?#") {
+		return fmt.Errorf("%w: portal %q must be a host or host:port address", ErrInvalidInput, portal)
 	}
 	return nil
 }

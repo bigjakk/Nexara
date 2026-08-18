@@ -403,6 +403,56 @@ func (h *StorageHandler) GetConfig(c fiber.Ctx) error {
 	return c.JSON(storageConfigResponse{*cfg})
 }
 
+// iscsiTargetResponse is one discovered target from an iSCSI portal scan.
+type iscsiTargetResponse struct {
+	Target string `json:"target"`
+	Portal string `json:"portal"`
+}
+
+// ScanISCSI handles GET /api/v1/clusters/:cluster_id/scan/iscsi?portal=.
+// It runs Proxmox's iSCSI discovery against the portal so the Add Storage dialog
+// can offer the advertised target IQNs instead of making the operator type one,
+// mirroring the PVE GUI's target dropdown.
+//
+// Discovery makes the node open an outbound connection to a caller-supplied
+// address (an SSRF-shaped primitive), so it is gated on manage:storage — the same
+// bar as creating the storage it precedes — not the lower view:storage.
+//
+// The scan runs from any online node. Which node answers doesn't change the
+// result, but reachability is not guaranteed on a segmented network — a portal
+// only some nodes can see reports no targets, and manual entry stays available
+// for exactly that case.
+func (h *StorageHandler) ScanISCSI(c fiber.Ctx) error {
+	clusterID, err := clusterIDFromParam(c)
+	if err != nil {
+		return err
+	}
+	if err := requireClusterPerm(c, "manage", "storage", clusterID); err != nil {
+		return err
+	}
+
+	portal := strings.TrimSpace(c.Query("portal"))
+	if err := proxmox.ValidateISCSIPortal(portal); err != nil {
+		return mapProxmoxError(err)
+	}
+
+	pxClient, nodeName, err := h.resolveOnlineNode(c, clusterID)
+	if err != nil {
+		return err
+	}
+
+	targets, err := pxClient.ScanISCSI(c.Context(), nodeName, portal)
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	resp := make([]iscsiTargetResponse, len(targets))
+	for i, t := range targets {
+		resp[i] = iscsiTargetResponse{Target: t.Target, Portal: t.Portal}
+	}
+	return c.JSON(resp)
+}
+
 // createStorageRequest is the JSON body for creating a new storage pool.
 type createStorageRequest struct {
 	Storage string            `json:"storage"`

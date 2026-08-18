@@ -11,6 +11,7 @@ import type {
   DownloadURLRequest,
   DownloadApplianceRequest,
   ApplianceTemplate,
+  ISCSITarget,
 } from "../types/storage";
 
 // --- Storage pools for a cluster ---
@@ -343,3 +344,27 @@ export function useDeleteStorage() {
   });
 }
 
+// --- iSCSI target discovery ---
+
+/**
+ * Discovers the target IQNs advertised by an iSCSI portal, so the storage
+ * dialogs can offer them instead of making the operator type one.
+ *
+ * The scan makes a Proxmox node open an outbound connection to the portal, so
+ * the endpoint requires manage:storage and the query stays disabled until the
+ * caller passes a portal worth probing. Failures are surfaced, not retried —
+ * an unreachable portal should fall back to manual entry immediately.
+ */
+export function useISCSITargets(clusterId: string, portal: string) {
+  const trimmed = portal.trim();
+  return useQuery({
+    queryKey: ["clusters", clusterId, "scan", "iscsi", trimmed],
+    queryFn: () =>
+      apiClient.get<ISCSITarget[]>(
+        `/api/v1/clusters/${clusterId}/scan/iscsi?portal=${encodeURIComponent(trimmed)}`,
+      ),
+    enabled: clusterId.length > 0 && trimmed.length > 0,
+    retry: false,
+    staleTime: 30_000,
+  });
+}

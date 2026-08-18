@@ -219,6 +219,7 @@ func (s *Server) setupRoutes() {
 			clusters.Post("/:cluster_id/storage/:storage_id/download-url", s.storageHandler.DownloadURL)
 			clusters.Post("/:cluster_id/storage/:storage_id/appliances", s.storageHandler.DownloadAppliance)
 			clusters.Get("/:cluster_id/appliances", s.storageHandler.ListAppliances)
+			clusters.Get("/:cluster_id/scan/iscsi", s.storageHandler.ScanISCSI)
 		}
 		if s.vmImportHandler != nil {
 			clusters.Post("/:cluster_id/import-metadata", s.vmImportHandler.GetImportMetadata)
