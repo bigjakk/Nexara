@@ -34,8 +34,12 @@ https://nexara.example.com/api/v1
    ```
    POST /api/v1/auth/login
    Body: { "email": "admin@example.com", "password": "..." }
-   Response: { "access_token": "...", "refresh_token": "...", "user": {...} }
+   Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": ["view:cluster", ...] }
    ```
+   The refresh token is **not** returned in the body by default — it is set as
+   an HttpOnly, SameSite=Strict cookie. Only a client that sends the header
+   `X-Nexara-Device-Type: mobile` gets a populated `refresh_token` field;
+   browsers receive an empty string. The same applies to `/auth/register`.
 
 3. **Use the token** on all subsequent requests:
    ```
@@ -45,9 +49,11 @@ https://nexara.example.com/api/v1
 4. **Refresh** when the access token expires:
    ```
    POST /api/v1/auth/refresh
-   Body: { "refresh_token": "..." }
-   Response: { "access_token": "...", "refresh_token": "..." }
+   Body: {}                            # web — the refresh cookie is read
+   Body: { "refresh_token": "..." }    # mobile — explicit token
+   Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...] }
    ```
+   A missing or stale refresh token returns `401` and clears the cookie.
 
 5. **Logout**:
    ```
@@ -56,18 +62,19 @@ https://nexara.example.com/api/v1
 
 ### TOTP Challenge
 
-If the user has 2FA enabled, the login response returns a `totp_pending` token instead of access/refresh tokens:
+If the user has 2FA enabled, the login response returns a pending token instead of access/refresh tokens:
 
 ```
 POST /api/v1/auth/login
-Response: { "totp_required": true, "totp_token": "..." }
+Response: { "totp_required": true, "totp_pending_token": "..." }
 ```
 
-Complete the challenge:
+Complete the challenge with a 6-digit TOTP code, or with a recovery code:
 ```
 POST /api/v1/auth/totp/verify-login
-Body: { "totp_token": "...", "code": "123456" }
-Response: { "access_token": "...", "refresh_token": "...", "user": {...} }
+Body: { "totp_pending_token": "...", "code": "123456" }
+Body: { "totp_pending_token": "...", "recovery_code": "..." }
+Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...] }
 ```
 
 ### OIDC Flow
@@ -75,7 +82,7 @@ Response: { "access_token": "...", "refresh_token": "...", "user": {...} }
 1. Check if SSO is available:
    ```
    GET /api/v1/auth/sso-status
-   Response: { "oidc_enabled": true, "providers": [...] }
+   Response: { "oidc_enabled": true, "oidc_provider_name": "Okta" }
    ```
 
 2. Start the OIDC flow:
@@ -87,9 +94,13 @@ Response: { "access_token": "...", "refresh_token": "...", "user": {...} }
 3. After the IdP redirects back, exchange the code:
    ```
    POST /api/v1/auth/oidc/token-exchange
-   Body: { "exchange_code": "..." }
-   Response: { "access_token": "...", "refresh_token": "...", "user": {...} }
+   Body: { "code": "..." }
+   Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...] }
    ```
+   As with password login, the refresh token is set as an HttpOnly cookie
+   rather than returned in the body, and a user with 2FA enabled gets
+   `{ "totp_required": true, "totp_pending_token": "..." }` here instead of
+   tokens — complete it against `/auth/totp/verify-login` as above.
 
 ## Error Format
 
@@ -97,11 +108,16 @@ All errors return a consistent envelope:
 
 ```json
 {
-  "error": "error_code",
-  "message": "Human-readable description",
-  "details": {}
+  "error": "bad_request",
+  "message": "Human-readable description"
 }
 ```
+
+`error` is a stable slug derived from the status code (`bad_request`,
+`unauthorized`, `forbidden`, `not_found`, `method_not_allowed`, `conflict`,
+`unprocessable_entity`, `too_many_requests`, `internal_server_error`);
+`message` is the human-readable detail. An optional `details` object is
+reserved in the envelope but no endpoint currently populates it.
 
 Common HTTP status codes:
 
@@ -115,18 +131,51 @@ Common HTTP status codes:
 | 429 | Rate limited |
 | 500 | Internal server error |
 
+## Rate Limits
+
+All limiters key on the client IP (`c.IP()` — see `TRUSTED_PROXIES` before
+deploying behind a reverse proxy) and return `429`. Note these responses come
+from the limiter middleware, not the API error handler: the body is the plain
+text `Too Many Requests` (`Content-Type: text/plain`), not the JSON error
+envelope documented above.
+
+| Scope | Budget | Applies to |
+|-------|--------|------------|
+| Auth | 15/min | `/auth/login`, `/auth/register`, `/auth/totp/verify-login`, `DELETE /auth/totp`, `/auth/totp/recovery-codes/regenerate`, `/auth/oidc/authorize`, `/auth/oidc/callback` |
+| Refresh | 30/min | `/auth/refresh` |
+| WS token | 60/min | `/auth/ws-token` |
+| Snapshot resync | 30/min | `/clusters/:id/guest-snapshots/resync` |
+| General | `RATE_LIMIT_MAX` per `RATE_LIMIT_EXPIRATION` (default 600/min) | Everything whose path does not start with `/api/v1/auth/` or `/ws` — `/healthz` included |
+
+The general limiter's exemption is by path prefix, not by coverage: the auth
+paths listed above carry their own budgets, but the remaining `/api/v1/auth/*`
+endpoints (`/auth/me`, `/auth/logout`, `/auth/change-password`,
+`/auth/totp/setup`, `/auth/oidc/token-exchange`, …) and the `/ws`,
+`/ws/console`, `/ws/vnc` upgrades have no request-rate limit at all.
+
 ## Pagination & Filtering
 
 List endpoints support query parameters:
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
-| `limit` | Max items to return (default: 50) | `?limit=100` |
-| `offset` | Skip N items | `?offset=50` |
-| `sort` | Sort field | `?sort=created_at` |
-| `order` | Sort direction: `asc` or `desc` | `?order=desc` |
+| `limit` | Max items to return. The default and the ceiling are per-endpoint — most list endpoints default to 50 and cap at 100 or 200, a few default to 500 and cap higher. Out-of-range values are clamped or fall back to the default rather than erroring | `?limit=100` |
+| `offset` | Skip N items (negative values are clamped to 0) | `?offset=50` |
+
+Result ordering is fixed per endpoint — there is no generic `sort`/`order`
+parameter.
 
 Some endpoints support additional filters documented in their sections below.
+
+Global list endpoints are **scoped to the caller's accessible clusters**
+before paging: `/alerts`, `/alert-rules`, `/audit-log`, `/audit-log/recent`,
+`/migrations`, `/tasks`, `/reports/schedules` and `/reports/runs` return only
+rows for clusters the caller can view with the endpoint's permission
+(`view:alert`, `view:audit`, `view:migration`, `view:task`, `view:report`),
+and any `total` in the response counts the scoped set. Rows with no cluster
+(global alert rules, non-cluster audit entries) are visible only to holders of
+the corresponding *global* permission. A caller with no grant at all gets an
+empty list rather than an error.
 
 ---
 
@@ -135,7 +184,7 @@ Some endpoints support additional filters documented in their sections below.
 ```
 GET /healthz
 ```
-Returns `200 OK` when the API server is ready. Not behind authentication or rate limiting.
+Returns `200 OK` when the API server is ready, or `503` when the database ping fails. Not behind authentication, but the general rate limiter does apply — only `/api/v1/auth/*` and `/ws*` are exempt, so a probe interval must stay inside `RATE_LIMIT_MAX` (default 600 per minute per IP).
 
 ```
 GET /api/v1/version
@@ -272,6 +321,7 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | POST | `/clusters/:id/vms/:vm_id/clone-to-template` | Clone VM as template |
 | POST | `/clusters/:id/vms/:vm_id/migrate` | Migrate VM to another node |
 | DELETE | `/clusters/:id/vms/:vm_id` | Destroy a VM |
+| GET | `/clusters/:id/vms/:vm_id/snapshot-capability` | Check whether the guest can be snapshotted — returns `{ "supported": bool, "blocking_volumes": [...] }` |
 | GET | `/clusters/:id/vms/:vm_id/snapshots` | List VM snapshots |
 | POST | `/clusters/:id/vms/:vm_id/snapshots` | Create a snapshot |
 | DELETE | `/clusters/:id/vms/:vm_id/snapshots/:name` | Delete a snapshot |
@@ -311,6 +361,7 @@ Organize guests into folders in the Nexara inventory tree (Nexara-side only — 
 | POST | `/clusters/:id/containers/:ct_id/clone-to-template` | Clone as template |
 | POST | `/clusters/:id/containers/:ct_id/migrate` | Migrate container |
 | DELETE | `/clusters/:id/containers/:ct_id` | Destroy a container |
+| GET | `/clusters/:id/containers/:ct_id/snapshot-capability` | Check whether the container can be snapshotted — returns `{ "supported": bool, "blocking_volumes": [...] }` |
 | GET | `/clusters/:id/containers/:ct_id/snapshots` | List snapshots |
 | POST | `/clusters/:id/containers/:ct_id/snapshots` | Create a snapshot |
 | DELETE | `/clusters/:id/containers/:ct_id/snapshots/:name` | Delete a snapshot |
@@ -319,6 +370,18 @@ Organize guests into folders in the Nexara inventory tree (Nexara-side only — 
 | PUT | `/clusters/:id/containers/:ct_id/config` | Update container config |
 | POST | `/clusters/:id/containers/:ct_id/disks/resize` | Resize a container disk |
 | POST | `/clusters/:id/containers/:ct_id/volumes/move` | Move a volume |
+
+### Guest Snapshots (central inventory)
+
+Cluster-wide snapshot inventory collected by the snapshot sync loop, so the
+snapshots page doesn't have to fan out to every guest. Access is split per
+row: QEMU rows require `view:vm` on the row's cluster, LXC rows
+`view:container`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/guest-snapshots` | List every guest snapshot the caller may see, across all clusters (optional `?cluster_id=` filter) |
+| POST | `/clusters/:id/guest-snapshots/resync` | Re-read one guest's snapshots from Proxmox — body `{ "vmid": 101 }`. Rate-limited to 30/min/IP on top of the general limiter |
 
 ### Storage
 
@@ -336,6 +399,7 @@ Organize guests into folders in the Nexara inventory tree (Nexara-side only — 
 | POST | `/clusters/:id/storage/:sid/download-url` | Download a file from a URL to storage |
 | POST | `/clusters/:id/storage/:sid/appliances` | Download a turnkey appliance |
 | GET | `/clusters/:id/appliances` | List available appliance templates |
+| GET | `/clusters/:id/scan/iscsi` | Discover iSCSI targets on a portal — `?portal=<host[:port]>`; returns `[{ "target", "portal" }]`. **Requires `manage:storage`** (node-side network probe) |
 
 ### VM Import
 
@@ -563,6 +627,7 @@ Import VMs from ESXi/vCenter sources, OVA/OVF appliances, or disk images. Reads 
 | GET | `/pbs-servers/:id` | Get PBS server |
 | PUT | `/pbs-servers/:id` | Update PBS server |
 | DELETE | `/pbs-servers/:id` | Remove PBS server |
+| GET | `/clusters/:id/pbs-servers` | List the PBS servers attached to a cluster (requires `view:pbs` on that cluster) |
 | GET | `/pbs-servers/:id/datastores` | List datastores |
 | GET | `/pbs-servers/:id/datastores/status` | Get datastore status |
 | POST | `/pbs-servers/:id/datastores/:store/gc` | Trigger garbage collection |
@@ -596,12 +661,31 @@ Import VMs from ESXi/vCenter sources, OVA/OVF appliances, or disk images. Reads 
 | DELETE | `/clusters/:id/backup-jobs/:job_id` | Delete backup job |
 | POST | `/clusters/:id/backup-jobs/:job_id/run` | Run backup job |
 
+A backup job carries exactly one guest selection, set on create and update:
+
+| Field | Meaning |
+|-------|---------|
+| `all: 1` | Back up every guest on the cluster |
+| `exclude: "101,102"` | Every guest except these VMIDs — implies `all: 1`, which the server sends for you |
+| `pool: "<name>"` | Every guest in a resource pool |
+| `vmid: "101,102"` | Exactly these VMIDs |
+
+They are mutually exclusive and evaluated in the order `exclude`, `all`, `pool`,
+`vmid` — an exclusion list wins (and travels with `all: 1`), then `all`, then a
+pool, then an explicit VMID list. On update, the selection keys the request does *not* name
+are unset on the job, so switching a job from an explicit VMID list to a pool
+clears the list. A request naming no selection at all leaves the job's current
+selection untouched.
+
+The `schedule` field is a Proxmox **systemd calendar event** (`02:00`,
+`mon,fri 22:30`, `*/6:00`, `*-*-01 04:00`), not a cron expression.
+
 ### Migrations (Cross-Cluster)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/migrations` | Create a cross-cluster migration |
-| GET | `/migrations` | List all migrations |
+| GET | `/migrations` | List migrations the caller can view on either endpoint cluster |
 | GET | `/migrations/:id` | Get migration details |
 | POST | `/migrations/:id/check` | Run pre-migration check |
 | POST | `/migrations/:id/execute` | Execute migration |
@@ -627,7 +711,7 @@ Import VMs from ESXi/vCenter sources, OVA/OVF appliances, or disk images. Reads 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/alerts` | List all alerts |
+| GET | `/alerts` | List alerts across the caller's accessible clusters |
 | GET | `/alerts/summary` | Get alert summary counts |
 | GET | `/alerts/:id` | Get alert details |
 | POST | `/alerts/:id/acknowledge` | Acknowledge an alert |
@@ -744,6 +828,10 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 | GET | `/reports/runs/:id/html` | Download report as HTML |
 | GET | `/reports/runs/:id/csv` | Download report as CSV |
 
+`report_type` accepts: `resource_utilization`, `capacity_forecast`,
+`backup_compliance`, `patch_status`, `uptime_summary`, `vm_resource_usage`,
+`snapshot_inventory`. Any other value is rejected with `400`.
+
 ### Tasks
 
 | Method | Path | Description |
@@ -759,7 +847,7 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/audit-log` | List all audit entries |
+| GET | `/audit-log` | List audit entries across the caller's accessible clusters |
 | GET | `/audit-log/recent` | List recent entries |
 | GET | `/audit-log/actions` | List distinct action types |
 | GET | `/audit-log/users` | List distinct users |
@@ -888,6 +976,14 @@ right before the upgrade:
 | `POST /api/v1/auth/ws-token` | Hub token for `/ws` subscription channels |
 | `POST /api/v1/auth/console-token` | Console token bound to a single `(cluster, node, vmid, type)` tuple for `/ws/console` or `/ws/vnc` |
 
+Minting a console token requires the dedicated **`console:*`** permission on
+the target cluster, not `view:*`: `console:node` for `node_shell`,
+`console:vm` for `vm_serial`/`vm_vnc`, and `console:container` for
+`ct_attach`/`ct_vnc`. The built-in Viewer role holds every `view:*`
+permission and deliberately holds none of these. Each mint is written to the
+audit log unless the request sets `"silent": true`, which is honoured only for
+the two VNC types (background thumbnail previews) and still enforces RBAC.
+
 The token rides in the WebSocket subprotocol so it never appears in URLs,
 proxy logs, or `Referer` headers:
 
@@ -907,16 +1003,32 @@ const ws = new WebSocket(
 
 ### Subscribing to channels
 
-Once `/ws` is open, send JSON messages to subscribe to real-time data:
+Once `/ws` is open, send JSON messages to subscribe to real-time data. The
+message carries a `type` and an array of `channels`:
 
 ```json
-{"action": "subscribe", "channel": "cluster:<cluster_id>:metrics"}
-{"action": "subscribe", "channel": "cluster:<cluster_id>:events"}
+{"type": "subscribe", "channels": ["cluster:<cluster_id>:metrics", "cluster:<cluster_id>:events"]}
+{"type": "unsubscribe", "channels": ["cluster:<cluster_id>:metrics"]}
+{"type": "ping"}
 ```
 
-The hub validates per-channel RBAC on subscribe; subscribing to a cluster
-you don't have `view:cluster` on returns an error message and closes the
-channel.
+Valid channels:
+
+| Channel | Contents | Required permission |
+|---------|----------|---------------------|
+| `cluster:<cluster_id>:metrics` | Live metric samples for the cluster | `view:cluster` on that cluster |
+| `cluster:<cluster_id>:alerts` | Alert state changes for the cluster | `view:cluster` on that cluster |
+| `cluster:<cluster_id>:events` | Operational events for the cluster | `view:cluster` on that cluster |
+| `cluster:<cluster_id>:audit` | Audit entries for the cluster | `view:audit` on that cluster |
+| `system:events` | Non-cluster operational events (task updates, report completion, PBS changes) | Any authenticated session |
+| `system:audit` | Non-cluster audit entries | Global `view:audit` |
+
+The server replies `{"type": "welcome"}` on connect, `{"type": "subscribed",
+"channel": "..."}` per accepted channel, `{"type": "data", "channel": "...",
+"payload": {...}}` for streamed data, `{"type": "pong"}` for a ping, and
+`{"type": "error", "message": "..."}` when a channel is malformed
+(`invalid channel format`) or denied (`forbidden`). A rejected channel is
+skipped — the connection and any other subscriptions stay open.
 
 ### Console connections
 

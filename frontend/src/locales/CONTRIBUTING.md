@@ -2,6 +2,8 @@
 
 Thank you for helping translate Nexara! This guide explains how to add a new language or improve existing translations.
 
+> **Status: the i18n rollout is partial.** Today 26 of 319 components call `useTranslation`, and half the namespace files below are wired into `i18n.ts` but have **no consumer in the UI yet** — `admin`, `audit`, `backup`, `ceph`, `clusters`, `console`, `networks`, `reports`, `storage` and `vms`. Translating those has no visible effect until the corresponding pages are converted, so start with the parts that are live: the app shell and sidebar, login/register, dashboard, inventory, storage overview cards, topology, security, snapshots, alerts and settings (`common`, `navigation`, `auth`, `dashboard`, `settings`, `snapshots`, `topology`, `security`, `inventory`, `alerts`). Converting hardcoded strings to `t()` as you go is a welcome contribution in its own right — just keep it in a separate commit from the translation itself.
+
 ## Directory Structure
 
 ```
@@ -145,4 +147,4 @@ Some languages need additional plural forms. See [i18next pluralization docs](ht
 
 1. Create a branch: `git checkout -b feat/i18n-<lang-code>`
 2. Commit your translations: `git commit -m "feat: add <language> translations"`
-3. Open a pull request with a summary of what was translated
+3. Open a pull request on GitHub with a summary of what was translated. GitHub is a one-way mirror of a private upstream repository, so a maintainer replays the commits upstream rather than merging your PR in place — the change appears in the mirror on the next sync and the PR is closed with thanks.

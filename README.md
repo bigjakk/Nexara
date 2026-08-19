@@ -81,7 +81,7 @@ To connect a cluster, you need a **Proxmox API token**. In your Proxmox web UI:
 2. Create a token for an admin user (e.g. `root@pam`) — uncheck "Privilege Separation" for full access
 3. Copy the **Token ID** (e.g. `root@pam!nexara`) and **Secret**
 
-Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:8006`) and token.
+Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:8006`), Token ID, and Secret. Proxmox's default self-signed certificate means you'll be shown its SHA-256 fingerprint to verify and accept before the cluster is saved.
 
 ---
 
@@ -96,9 +96,10 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 - Real-time CPU, memory, disk, network metrics
 - VM/CT lifecycle — create, migrate, snapshot, clone, destroy
 - **VM import** — bring VMs over from ESXi/vCenter, OVA/OVF appliances, or raw disk images (browser upload or URL)
-- Disk management — resize, move, attach/detach
+- Disk management — resize, attach/detach, and move between storages with format conversion (raw/qcow2/vmdk) and a bandwidth limit
 - Template management and resource pools
-- Live migration with pre-flight checks
+- **VM folders** — vCenter-style folder tree with a per-folder detail page (summary, guests, tasks, alerts)
+- Live migration with pre-flight checks — within a cluster or across clusters, with per-disk storage placement and network mapping
 - **Node evacuation** — bulk migrate all guests off a node
 - **Health rollup** — Ceph, disk S.M.A.R.T., quorum, storage, and task failures aggregated into one dismissible health indicator
 
@@ -109,6 +110,7 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 - **DNS & timezone** — edit directly from the UI
 - **Disks** — S.M.A.R.T. data, ZFS/LVM/LVM-Thin/Directory creation with Proxmox-populated disk selectors, init GPT, wipe
 - **Services** — view status, start/stop/restart node daemons
+- **APT repositories** — list, enable/disable and add the standard Proxmox repositories per node
 - **Firewall** — node-level rule CRUD with log viewer
 - **Syslog** — real-time system log viewer with service filtering
 - **Network** — create, edit, delete interfaces; apply/revert config
@@ -122,10 +124,13 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 - **Node shell** — direct Proxmox node access
 
 ### Storage & Backup
+- **Storage management** — add, edit and remove datastores across 13 storage types (Directory, BTRFS, NFS, CIFS/SMB, GlusterFS, LVM, LVM-Thin, ZFS, iSCSI, iSCSI Direct, RBD, CephFS, PBS), with iSCSI target discovery instead of hand-typed IQNs
+- **Content management** — ISO/template upload, download-from-URL, OCI pulls, and the Proxmox appliance browser
 - PBS integration with datastore monitoring
-- Scheduled backups with retention policies
+- Scheduled backups with retention policies — target all guests, all-except-a-list, a resource pool, or a picked set of guests, on a schedule built from hourly/daily/weekly/monthly presets or a raw calendar string
 - Restore to any cluster/node
-- Ceph monitoring (OSD, pools, CephFS)
+- **Snapshot inventory** — every guest snapshot across all clusters on one page, with age filters, snapshot-age alerts, and a scheduled snapshot report
+- Ceph management — health, OSD, pool and CephFS monitoring; pool create/delete; OSD mark in/out and daemon start/stop/restart with a redundancy pre-flight
 
 </td>
 </tr>
@@ -137,7 +142,7 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 - **Rolling updates** — drain/upgrade/reboot/restore pipeline (pauses native CRS auto-rebalance while running)
 - **Alert engine** — threshold alerts, escalation chains, 7 notification channels (SMTP, Slack, Discord, Teams, Telegram, Webhook, PagerDuty)
 - **CVE scanning** — automated vulnerability scanning
-- **Scheduled tasks** — cron-based snapshots, backups, reboots
+- **Scheduled tasks** — cron-based guest snapshots and reboots
 
 </td>
 <td>
@@ -172,7 +177,7 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 - **Command palette** — press Ctrl+K to search and jump anywhere
 - **Theming** — dark/light mode, 9 accent colors
 - **Custom branding** — logo, favicon, app title
-- **Localization** — i18n framework with language selector
+- **Localization** — i18n framework with a language selector (English ships today; translations welcome)
 
 </td>
 </tr>
@@ -201,21 +206,23 @@ Nexara runs as a **single Go binary** serving the API, WebSocket, embedded React
 | Container | Image | Port | Purpose |
 |-----------|-------|------|---------|
 | `nexara` | `ghcr.io/bigjakk/nexara` | 80 → 8080 | API + WS + SPA + collector + scheduler |
-| `nexara-db` | `timescale/timescaledb:latest-pg16` | 5432 (localhost only) | Database with time-series |
+| `nexara-db` | `timescale/timescaledb:latest-pg16` | 5432 (internal) | Database with time-series |
 | `nexara-redis` | `redis:7-alpine` | 6379 (internal) | Pub/sub, cache, sessions |
+
+> **Running more than one replica?** Every instance serves API, WebSocket, and SPA traffic, but the collector and scheduler are each guarded by a Postgres heartbeat lease — exactly one instance runs each role at a time, and a hard-killed leader is taken over within ~40 s (a 30 s lease expiry plus the follower's 10 s retry interval). Nothing extra to configure on the Nexara side; note that the bundled `docker-compose.yml` pins `container_name` and the host port `80:8080`, so scaling out means an orchestrator (Swarm/Kubernetes) or a compose override that drops both.
 
 ---
 
 ## Configuration
 
-All settings are environment variables in `.env`. Secrets are auto-generated on first start and persisted to the data volume.
+All settings are environment variables. `docker-compose.yml` injects a curated subset of `.env` into the container — variables it does not name in the `nexara` service's `environment:` block must be added there, or to a `docker-compose.override.yml`, before they take effect. Secrets are auto-generated on first start and persisted as `.secrets.json` under `DATA_DIR`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `POSTGRES_PASSWORD` | `changeme` | Database password (**change this**) |
 | `JWT_SECRET` | auto-generated | JWT signing key |
 | `ENCRYPTION_KEY` | auto-generated | AES-256-GCM key for secrets at rest |
-| `API_PORT` | `8080` | Server listen port |
+| `API_PORT` | `8080` | Listen port *inside* the container. Compose maps host `80` → `8080`; to move the port, change the compose mapping, not this (unless you run the binary directly) |
 | `METRICS_COLLECT_INTERVAL` | `30s` | How often to poll Proxmox for metrics (Docker deployments set `10s`) |
 | `SNAPSHOT_SYNC_INTERVAL` | `5m` | How often the guest snapshot inventory (central Snapshots page + snapshot-age alerts) refreshes. One Proxmox call per guest per pass; floored at `60s`, `0` disables |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
@@ -224,6 +231,8 @@ All settings are environment variables in `.env`. Secrets are auto-generated on 
 | `TRUSTED_PROXIES` | empty | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is trusted. **Set this when behind a reverse proxy** so rate limiters key on the real client IP. |
 | `PROXY_HEADER` | `X-Forwarded-For` | Header consulted for the client IP when the remote is on `TRUSTED_PROXIES`. |
 | `WS_ALLOWED_ORIGINS` | empty (allow all) | Comma-separated exact origins allowed to open WebSocket connections. **Set to your public origin in production** (CSRF defence). |
+| `SECURE_COOKIES` | `auto` | `auto` / `always` / `never` — `Secure` flag on the refresh-token cookie. `auto` infers HTTPS from `X-Forwarded-Proto`, but only from a `TRUSTED_PROXIES` upstream. **Set `always`** when TLS terminates at a reverse proxy. |
+| `HSTS_MAX_AGE` | `0` (off) | Seconds for `Strict-Transport-Security`. Enable only on HTTPS with a trusted certificate — over a self-signed origin it pins HTTPS and makes cert errors unbypassable. Otherwise emit HSTS at the proxy. |
 
 See [`.env.example`](.env.example) for the full reference.
 
@@ -241,7 +250,8 @@ server {
     listen 443 ssl;
     server_name nexara.example.com;
 
-    client_max_body_size 15G;  # for ISO uploads
+    client_max_body_size 15G;      # for ISO uploads
+    proxy_request_buffering off;   # stream large uploads straight through
 
     location / {
         proxy_pass http://127.0.0.1:80;
@@ -284,9 +294,11 @@ nexara.example.com {
 ```
 </details>
 
-> **Tips:** Set proxy max body size to at least 15 GB for ISO uploads. Ensure WebSocket `Upgrade` headers are forwarded. Use long read timeouts for persistent WebSocket connections.
+> **Tips:** Set proxy max body size to at least 15 GB for ISO uploads, and disable request buffering so the proxy streams them instead of spooling 15 GB to its own disk first. Ensure WebSocket `Upgrade` headers are forwarded. Use long read timeouts for persistent WebSocket connections.
 
 > **Set `TRUSTED_PROXIES`** to your reverse proxy's IP/CIDR (e.g. `127.0.0.1` or `10.0.0.0/8`). Without it, every request appears to come from the proxy and the per-IP auth/refresh/general rate limiters protect the *cluster*, not the *attacker*. If the proxy uses a non-standard header, also set `PROXY_HEADER`.
+
+> **TLS terminated at the proxy?** Nexara only sees plain HTTP, so set `SECURE_COOKIES=always` — the `auto` default only infers HTTPS from `X-Forwarded-Proto` on a `TRUSTED_PROXIES` upstream, and warns at startup when it can't. Set `WS_ALLOWED_ORIGINS=https://nexara.example.com` (exact scheme + host + port) to lock WebSocket upgrades to your own origin. Leave `HSTS_MAX_AGE` at `0` and emit HSTS from the proxy instead. Note that `SECURE_COOKIES` and `HSTS_MAX_AGE` are not in `docker-compose.yml`'s `environment:` block — add them to the `nexara` service (or a `docker-compose.override.yml`) for them to take effect.
 
 ---
 
@@ -306,9 +318,10 @@ nexara.example.com {
 
 | | |
 |--|--|
-| [Installation Guide](docs/installation.md) | Setup, configuration, backup, troubleshooting |
-| [Admin Guide](docs/admin-guide.md) | Cluster, user, RBAC, auth, alert management |
+| [Installation Guide](docs/installation.md) | Setup, configuration, updating, backup, troubleshooting |
+| [Admin Guide](docs/admin-guide.md) | Clusters, RBAC, auth, alerts, DRS, HA, rolling updates, imports, reports |
 | [API Reference](docs/api-reference.md) | REST API endpoints with examples |
+| [Contributing](docs/contributing.md) | Dev environment, project layout, testing, PR process |
 
 ---
 

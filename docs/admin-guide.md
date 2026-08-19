@@ -15,6 +15,7 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 - [Storage Management](#storage-management)
 - [VM Imports](#vm-imports)
 - [Backup Management](#backup-management)
+- [Snapshots](#snapshots)
 - [Alert Configuration](#alert-configuration)
 - [CVE Scanning](#cve-scanning)
 - [Rolling Updates](#rolling-updates)
@@ -35,11 +36,16 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 1. Navigate to **Clusters** from the sidebar
 2. Click **Add Cluster**
 3. Fill in:
-   - **Name** — a display name for the cluster
+   - **Cluster Name** — a display name for the cluster
    - **API URL** — the Proxmox VE API endpoint (e.g., `https://pve.example.com:8006`)
-   - **API Token** — format: `user@realm!tokenid=secret-value`
-4. For self-signed certificates, click **Fetch Fingerprint** to retrieve and trust the TLS fingerprint
-5. Click **Save**
+   - **API Token ID** — e.g. `root@pam!nexara`
+   - **API Token Secret** — the UUID Proxmox showed you when the token was created
+4. Click **Connect**. Nexara probes the endpoint's certificate:
+   - a CA-signed certificate is confirmed as **Trusted Certificate** and you continue
+   - a self-signed certificate shows its **SHA-256 fingerprint**; verify it against the Proxmox host, then tick *I have verified this fingerprint and trust this certificate*
+5. Click **Add Cluster**
+
+If the API URL resolves to a private address, Nexara warns before connecting — confirm to proceed. That is a guard against pointing the server at something on its own network by accident, not a block.
 
 The collector starts syncing inventory (nodes, VMs, containers, storage) and metrics immediately.
 
@@ -103,7 +109,9 @@ Navigate to **Admin > Users** to manage user accounts.
 
 ### Creating Users
 
-Users self-register via the registration page. The first user automatically receives the Admin role. Subsequent users get the Viewer role by default.
+The **first** user self-registers via the registration page and is automatically promoted to Admin — that is the install bootstrap. After that, self-registration is closed: only an administrator can create accounts.
+
+To add a user, go to **Admin > Users** and click **Create User**, then supply an email, a password, and an optional display name. New accounts receive the **Viewer** role globally; assign anything more from the user's role dialog.
 
 ### Managing Users
 
@@ -172,16 +180,26 @@ Permissions follow the pattern `action:resource`. Examples:
 
 | Permission | Description |
 |------------|-------------|
-| `view:cluster` | View cluster information |
-| `manage:cluster` | Create, edit, delete clusters |
-| `manage:vm` | Start, stop, migrate VMs |
+| `view:cluster` | View clusters |
+| `manage:cluster` | Create, update clusters |
+| `delete:cluster` | Delete clusters |
+| `manage:vm` | Create, update VM configuration |
+| `execute:vm` | Start, stop, migrate, snapshot VMs |
+| `manage:migration` | Create, execute, and cancel Nexara migration jobs (the planner) |
 | `console:vm` | Open VM serial and VNC consoles |
 | `console:container` | Open container attach and VNC consoles |
 | `console:node` | Open node shell consoles (root shell on the Proxmox host) |
-| `view:audit_log` | View audit log entries |
+| `view:audit` | View audit log |
 | `manage:alert` | Create and manage alert rules |
-| `manage:user` | Manage user accounts |
-| `manage:rbac` | Manage roles and permissions |
+| `manage:user` | Create, update, delete users |
+| `manage:role` | Create, update, delete roles and assignments |
+
+Note that acting on a guest and configuring it are separate: starting, stopping,
+migrating and snapshotting a VM is `execute:vm`, while editing its hardware or
+creating it is `manage:vm`. `manage:migration` governs Nexara's own migration
+jobs, not the per-guest migrate button.
+
+The complete catalog is whatever **Admin > Roles** lists — it is seeded from the database, so the role editor is always the authoritative list.
 
 > **Console access is not implied by `view:*`.** Opening a shell or console
 > requires the dedicated `console:*` permissions, which the built-in Admin
@@ -197,6 +215,18 @@ Permissions follow the pattern `action:resource`. Examples:
 2. Click a user to edit
 3. Assign one or more roles
 4. Permissions are the union of all assigned roles
+
+Every assignment carries a **scope**: `global` (all clusters) or `cluster` (one cluster). A global grant covers everything; a cluster-scoped grant covers only that cluster, and list views follow it — alert rules, migration jobs, report schedules and runs, task history and audit entries are all filtered to the clusters the caller can reach, so a scoped user sees a smaller, complete list rather than a full one with holes in it.
+
+The role dialog assigns global scope only. To scope a grant to one cluster, use the API:
+
+```bash
+curl -X POST https://nexara.example.com/api/v1/rbac/users/$USER_ID/roles \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"role_id":"'$ROLE_ID'","scope_type":"cluster","scope_id":"'$CLUSTER_ID'"}'
+```
+
+The assignment's scope shows as a badge next to the role name in the user's role dialog.
 
 ---
 
@@ -228,8 +258,13 @@ Navigate to **Admin > LDAP** to configure LDAP/AD authentication.
 #### How LDAP Login Works
 
 1. User enters username/password on the login page
-2. Nexara tries LDAP authentication first (if configured)
-3. On success, a local user is created (JIT provisioning) with `auth_source=ldap`
+2. Nexara looks the address up locally first:
+   - **no local user** — and LDAP is enabled: the credentials go to LDAP, and a successful bind provisions the account (JIT)
+   - **local user with `auth_source=ldap`** — the credentials go to LDAP
+   - **local user with `auth_source=local`** — the password is checked against the stored hash and LDAP is never contacted, so a local account shadows a directory account with the same address
+
+   The password is only ever sent to the directory on the first two paths — a local account's password never leaves Nexara.
+3. If no local account existed, one is JIT-provisioned with `auth_source=ldap`
 4. LDAP group memberships are mapped to Nexara roles
 5. Subsequent logins re-sync group memberships
 
@@ -394,6 +429,18 @@ same cluster that accept `images` or `rootdir` content. The "Delete
 original after move completes" checkbox is on by default — uncheck it
 if you want to keep both copies for a rollback window.
 
+> This dialog moves disks as they are: target storage and whether the
+> source is deleted, nothing else. To convert a disk's format on the way
+> across, or to throttle the copy, start the move from the guest instead —
+> the Hardware tab's per-disk **Move** dialog and the guest **Migrate**
+> dialog both add **Format** (*QEMU image format (qcow2)*, *Raw disk image
+> (raw)*, *VMware image format (vmdk)*, or *Storage default*) and
+> **Bandwidth Limit (KiB/s)**, blank meaning unlimited. Format is offered
+> only where Proxmox accepts a choice — a QEMU guest landing on file-based
+> storage (directory, NFS, CIFS, GlusterFS). Block-backed targets read *Set
+> by target storage*, because they store images as raw only, and containers
+> never get a format choice.
+
 ### Bulk Delete
 
 Multi-select with the checkbox column works on every tab. Once
@@ -458,11 +505,12 @@ Importing is gated by a dedicated VM-import permission (`manage:vm_import`). Two
 1. Navigate to **Backup** from the sidebar
 2. Click **Add PBS Server**
 3. Enter:
-   - **Name** — display name
+   - **Server Name** — display name
    - **API URL** — PBS API endpoint (e.g., `https://pbs.example.com:8007`)
-   - **API Token** — PBS API token
-   - **TLS Fingerprint** — for self-signed certificates
-4. Click **Save**
+   - **API Token ID** — e.g. `root@pam!nexara`
+   - **API Token Secret**
+   - **Associated Cluster** (optional) — links the PBS server to a PVE cluster for backup coverage reporting
+4. Click **Connect**, accept the certificate the same way as for a cluster, and confirm
 
 ### Managing Datastores
 
@@ -476,17 +524,36 @@ After adding a PBS server, Nexara syncs its datastores. For each datastore you c
 - **Prune** old snapshots based on retention rules
 - View **datastore metrics** over time
 
+### Sync, Verify and Coverage
+
+Beyond datastore management, the Backup dashboard carries four more tabs:
+
+- **Replication** — the PBS server's sync jobs (pulling datastores from a remote PBS). List them, and run one on demand
+- **Verification** — the PBS server's verify jobs, which re-check stored chunks for corruption. Same list-and-run treatment
+- **Tasks** — the PBS server's own task log, so a stuck garbage collection or verify is visible without leaving Nexara
+- **Coverage** — the one that matters at review time. Four cards count **Total VMs**, **Protected (<24h)**, **Stale (>24h)** and **No Backup**, over a searchable per-guest table showing how long ago each guest was last backed up. A guest that has never been backed up reads "Never"
+
 ### Backup Jobs
 
-1. Navigate to a cluster's backup section
-2. Click **Create Backup Job**
+1. Navigate to **Backup** from the sidebar and select a PBS server
+2. Open the **Schedules** tab (pick the cluster if you have more than one) and click **Add Schedule**
 3. Configure:
-   - **Schedule** — cron expression (e.g., `0 2 * * *` for daily at 2 AM)
-   - **Selection** — all VMs, specific VMs, or by pool
-   - **Storage** — target PBS datastore
+   - **Schedule** — pick **Hourly**, **Daily**, **Weekly** or **Monthly** and the time; the builder writes the Proxmox calendar event for you and shows it in plain English. Switch to **Custom** to type a calendar event directly (e.g. `mon..fri 02:00`). Note that these are systemd calendar events, *not* cron — `0 2 * * *` is not valid here
+   - **Storage** — the PVE storage ID the backup writes to (`local`, or a PBS-backed storage such as `pbs-store`)
+   - **Node** — restrict the job to one node, or leave it on all nodes
+   - **Guests** — how the job picks what to back up:
+     - **All guests** — everything on the cluster (or on the selected node)
+     - **Selected guests** — only the guests you pick
+     - **All except selected** — everything *except* the guests you pick
+     - **Resource pool** — every guest in one PVE pool
    - **Mode** — snapshot, suspend, or stop
-   - **Compression** — zstd (recommended), lzo, or gzip
-4. Run immediately or wait for the schedule
+   - **Compression** — zstd (recommended), lzo, gzip, or none
+   - **Comment** and **Enabled**
+4. Save. Use the **Run Now** (▶) button on the job's row to fire it outside its schedule; the **Next Run** column shows when it would fire on its own.
+
+> A job carries exactly **one** selection. Switching an existing job from, say, a VMID list to a pool clears the old selection rather than layering the two — that is deliberate, and it matches what vzdump accepts.
+
+The jobs table shows the schedule in plain English with the raw calendar event underneath, and the expanded row spells out the guest selection. Creating or editing a job writes an audit row naming the schedule, storage, node, selection and mode.
 
 ### Restoring from Backup
 
@@ -496,6 +563,30 @@ After adding a PBS server, Nexara syncs its datastores. For each datastore you c
 4. Choose the target storage
 5. Optionally change the VMID
 6. Click **Restore**
+
+---
+
+## Snapshots
+
+Navigate to **Snapshots** from the sidebar for every guest snapshot across every cluster in one table — the page exists to find the ones somebody took "just for a minute" eight months ago.
+
+### The Inventory
+
+Four cards summarise the fleet: **Total Snapshots**, **Guests with Snapshots**, **Older than 7 days** (amber) and **Older than 30 days** (red). Below them, one row per snapshot with **Age**, **Name**, **Guest**, **Cluster**, **Node** and **Created**. A **RAM** badge marks snapshots that captured guest memory. Expand a row for its description, parent snapshot, VMID, last-seen time and current guest status.
+
+Filter by cluster, guest type (VMs / containers), age bucket (older than 7 days, older than 30 days, unknown age), or free-text search across snapshot name, guest name, VMID, description, node and cluster.
+
+### Acting on a Snapshot
+
+- **Open guest** — jump to the guest's detail page
+- **Refresh from Proxmox** — re-read that one guest's snapshots immediately instead of waiting for the next collector pass
+- **Delete snapshot** — inline confirm, then the delete runs as a Proxmox task and the row clears when it succeeds. Deleting needs `delete:vm` for VMs or `delete:container` for containers; without it the button is disabled
+
+### How the Inventory Stays Current
+
+Proxmox has no bulk snapshot endpoint, so the collector walks one listing per guest on its own cadence — every **5 minutes** by default, tuned with `SNAPSHOT_SYNC_INTERVAL`. That pass is deliberately conservative about deleting rows: a guest on an offline node, a guest whose listing errored, or a listing that came back empty (which Proxmox never legitimately returns) leaves that guest's rows untouched, so a transient blip can never look like "all your snapshots vanished". Rows are only removed when the guest itself has left the inventory, or when a successful listing says the snapshot is gone.
+
+> Snapshot age is also an alertable metric — see the `snapshot_age_days` metric under [Alert Configuration](#alert-configuration) — and **Snapshot Inventory** is one of the [report](#reports) types.
 
 ---
 
@@ -510,12 +601,24 @@ Navigate to **Alerts** from the sidebar.
 3. Configure:
    - **Name** — descriptive rule name
    - **Scope** — **Cluster** (any matching resource in the cluster), **Node** (one specific node), or **VM** (one specific guest). VM-scoped rules are pinned to the guest's VMID within the cluster, so they keep working across migrations and inventory re-syncs.
-   - **Metric** — what to monitor (CPU, memory, disk, etc.)
+   - **Metric** — one of the seven supported metrics:
+
+     | Metric | Unit | Scopes |
+     |--------|------|--------|
+     | CPU Usage | % | cluster, node, VM |
+     | Memory Usage | % | cluster, node, VM |
+     | Disk Read | bytes/s | cluster, node, VM |
+     | Disk Write | bytes/s | cluster, node, VM |
+     | Network In | bytes/s | cluster, node, VM |
+     | Network Out | bytes/s | cluster, node, VM |
+     | Snapshot Age | **days** | cluster, VM |
+
+     **Snapshot Age (days)** reads the guest snapshot inventory rather than the metrics history, so it behaves differently from the rest: the value is the age of the oldest dated snapshot in scope, node scope is not offered (picking the metric switches a node-scoped rule to cluster scope), and snapshots whose creation time Proxmox does not report are excluded rather than counted as ancient. With no dated snapshots in scope the condition is false, so the alert auto-resolves once the offenders are cleaned up.
    - **Condition** — threshold and comparison (e.g., CPU > 90%)
    - **Duration** — how long the condition must persist before firing; `0` fires on the first breaching sample
    - **Severity** — info, warning, critical
    - **Cooldown** — minimum time between re-fires, measured from when the previous alert resolved
-4. Add notification channels and escalation chain (optional)
+4. Add an **Escalation Chain** — this is how the rule notifies; a rule with an empty chain never sends anything
 5. Add a custom message template (optional)
 6. Click **Save**
 
@@ -540,21 +643,30 @@ Navigate to **Alerts** from the sidebar.
 
 ### Escalation Chains
 
-When creating an alert rule, you can define escalation steps:
+The escalation chain is an ordered list of steps, each naming **one** notification channel and a **delay in minutes**. It is the rule's entire notification path — there is no separate "channels" field.
 
-1. **Step 1** — notify channels A and B immediately
-2. **Step 2** — if not acknowledged within 15 minutes, notify channel C
-3. **Step 3** — if still unresolved after 1 hour, notify channel D
+1. **Step 1** — dispatched the moment the alert fires. Its delay is ignored
+2. **Step 2 and later** — dispatched once the alert has been firing for that step's delay, counted **from when the alert fired** (not from the previous step). Give step 2 `15` and step 3 `60` and they land 15 and 60 minutes after the fire, respectively
+
+Escalation only advances while the alert is still firing **and** unacknowledged — acknowledging an alert stops the chain where it is. Resolution notifications go to whichever step the alert had reached.
 
 ### Maintenance Windows
 
-1. Navigate to a cluster's detail page
-2. Go to **Maintenance Windows**
-3. Create a window with:
-   - **Name** — description of the maintenance
-   - **Start/End** — time range
-   - **Recurring** — optional repeat schedule
-4. During a maintenance window, alerts for that cluster are suppressed
+Maintenance windows suppress alert evaluation for a cluster (or a single node in it) during a planned outage. They are currently **API-only** — there is no page for them yet:
+
+```bash
+curl -X POST https://nexara.example.com/api/v1/clusters/$CLUSTER_ID/maintenance-windows \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"description":"PVE 9.2 upgrade","starts_at":"2026-09-01T22:00:00Z","ends_at":"2026-09-02T04:00:00Z"}'
+```
+
+- **description** — free text shown in the window list
+- **starts_at** / **ends_at** — RFC 3339 timestamps; the end must be after the start
+- **node_id** (optional) — scope the window to one node instead of the whole cluster
+
+While a cluster-wide window is active, the alert engine skips every rule in that cluster. A node-scoped window is narrower but not rule-scoped: it skips node rules bound to that node, and it skips the per-node evaluation of cluster-wide rules for that node while the rest of the cluster keeps alarming. VM-scoped rules are suppressed only by a cluster-wide window.
+
+Windows do not repeat — create one per outage. Managing them needs `manage:maintenance_window`; listing them needs `view:maintenance_window`.
 
 ### Managing Alerts
 
@@ -562,6 +674,22 @@ From the **Alert History** tab:
 - **Acknowledge** — mark an alert as seen (stops escalation)
 - **Resolve** — mark an alert as resolved
 - Filter by severity, state, cluster, and time range
+
+### Failed Notifications (Dead-letter Queue)
+
+A notification that cannot be delivered is not lost. Every dispatch goes through three layers — a per-channel rate limiter, three retry attempts with backoff, and finally the dead-letter queue — so a dead Slack endpoint or a flapping rule leaves a durable record instead of silence.
+
+The **Dead-letter queue** tab appears on the Alerts page for anyone holding `view:notification_dlq`, with a badge counting open entries. Each row carries the channel, the alert it belonged to, the failure reason, and a state:
+
+| State | Meaning |
+|-------|---------|
+| **Failed** | All retries exhausted |
+| **Rate-limited** | Dropped by the per-channel token bucket rather than flooding the endpoint |
+| **Retrying** | A replay is in flight |
+| **Resolved** | A replay succeeded |
+| **Dismissed** | Acknowledged and set aside without replaying |
+
+Per row: **Retry** re-dispatches it, **Dismiss** files it away, and **Delete** removes it permanently. Managing entries needs `manage:notification_dlq`.
 
 ---
 
@@ -583,11 +711,11 @@ Navigate to **Security** from the sidebar.
 
 ### Automated Scanning
 
-The scheduler runs CVE scans automatically every 6 hours. You can configure the schedule per cluster:
+Each cluster is scanned automatically on its own interval — **every 24 hours** unless you change it. The scheduler checks every 6 hours which clusters are due, so intervals shorter than that are rounded up in practice.
 
-1. Click **Scan Schedule**
-2. Set the interval or disable automatic scanning
-3. Click **Save**
+1. Open the **Scan Schedule** card on the Security page
+2. Toggle **Automatic scanning** on or off, and pick an interval — hourly, 6 / 12 / 24 / 48 hours, or weekly
+3. Changes save immediately
 
 ### Security Posture
 
@@ -595,6 +723,29 @@ The posture card shows:
 - **Score** — overall security rating (0-100)
 - **Critical/High/Medium/Low** — vulnerability counts by severity
 - **Trend** — score change over time
+
+### How Severity Is Decided
+
+Nexara does not take the Debian tracker's rating at face value. Each CVE gets a 0–10 **risk score** combining three signals:
+
+- **CVSS base** — the Debian Security Tracker publishes no CVSS score, so Nexara substitutes the midpoint of the urgency band it *did* publish (critical → 9.5, high → 7.5, medium → 5.0, low → 2.5)
+- **EPSS** — FIRST's empirical probability of exploitation in the next 30 days
+- **KEV** — CISA's binary "actively exploited in the wild" flag, refreshed hourly
+
+A CVE on the KEV list is floored into the **critical** bucket regardless of its CVSS, because "actively exploited right now" outranks any paper score. A top-decile EPSS (≥ 0.9) is floored into **high**. Everything else grades by severity × probability, so a CVSS-9 with no public exploit lands low rather than screaming.
+
+The counts on the posture card are these derived buckets — which is why a CVE's severity here can differ from the Debian tracker's. The tracker rates the flaw; Nexara rates your exposure.
+
+The **actively exploited** callout on the posture card opens a per-CVE list: each CVE ID links to its NIST NVD page, and the flame badge beside it links to CISA's KEV catalog entry with the required action and due date.
+
+### CVE Notifications
+
+The **Notifications** card wires scan results into the same notification channels alerts use. Tick **Enable notifications**, then choose which SSVC-style bands to notify on:
+
+- **Act** — actively exploited (KEV) or high-likelihood (EPSS ≥ 0.5 with CVSS ≥ 7)
+- **Attend** — moderate likelihood (EPSS ≥ 0.1) or critical CVSS
+
+Tick one or more **Channels** — the same set serves whichever bands you enabled — set **Re-notify after** to bound repeats, and click **Save**. A newly discovered CVE always notifies immediately; the cooldown only gates re-notification while the same set of CVEs is still present.
 
 ### Reviewing Vulnerabilities
 
@@ -620,14 +771,16 @@ Navigate to **Security > Rolling Updates** tab.
 ### Creating an Update Job
 
 1. Click **Create Rolling Update**
-2. Configure:
-   - **Cluster** — target cluster
+2. Work through the wizard's three steps — **Select Nodes**, **HA Constraint Check**, **Configure Update**:
    - **Nodes** — select which nodes to update (or all)
-   - **Parallelism** — how many nodes to update simultaneously (default: 1)
-   - **Upgrade Mode**:
-     - **Manual** — pauses at each node for you to run `apt dist-upgrade` via Proxmox console
-     - **Automated** — runs `apt dist-upgrade -y` via SSH
-   - **HA Policy** — `strict` (abort on HA constraint violations) or `warn` (continue with warnings)
+   - **Conflict Policy** — offered on the **HA Constraint Check** step when the pre-flight finds conflicts: **Warn & Proceed** (continue despite the findings) or **Strict (fail on violation)**. With **Strict** selected you cannot move on to the configure step while the pre-flight report contains errors
+   - **Parallelism (max nodes updated at once)** — default 1
+   - **Reboot after update** — off means auto-detect (reboot only when kernel or critical updates require it); on means always reboot
+   - **Auto-restore guests** — migrate drained guests back after the node returns healthy
+   - **Automated upgrade (SSH)** — run `apt dist-upgrade` over SSH. Disabled until the cluster has SSH credentials; with it off, the job pauses at each node in the **Awaiting Upgrade** step until you click **Confirm Upgrade**
+   - **Package excludes** — comma-separated globs held back from the upgrade (e.g. `pve-kernel-*, grub-*`)
+   - **Notify on completion/failure** — an existing notification channel to message when the job ends
+   - **Start immediately** — begin right after creation instead of leaving the job idle
 3. Click **Create**
 
 ### Update Pipeline
@@ -635,10 +788,11 @@ Navigate to **Security > Rolling Updates** tab.
 Each node goes through these steps:
 
 1. **Draining** — live-migrates VMs off the node
-2. **Upgrading** — applies package updates (manual or automated)
-3. **Rebooting** — reboots the node if kernel updates were applied
-4. **Health Check** — waits for the node to come back online and healthy
-5. **Restoring** — migrates VMs back to the node
+2. **Awaiting Upgrade** — manual mode only; the job holds here until you click **Confirm Upgrade** for that node
+3. **Upgrading** — applies package updates (manual or automated)
+4. **Rebooting** — reboots the node if kernel updates were applied
+5. **Health Check** — waits for the node to come back online and healthy
+6. **Restoring** — migrates VMs back to the node
 
 > **Native CRS:** if the cluster runs Proxmox VE 9.2's native CRS dynamic balancer with auto-rebalance enabled, Nexara pauses `ha-auto-rebalance` for the duration of the job — so the balancer can't move guests back onto a node being drained — and restores it when the job finishes or fails.
 
@@ -662,23 +816,22 @@ Before starting, the pre-flight check analyzes:
 
 ## Scheduled Tasks
 
-Scheduled tasks run on cron expressions. They are managed per cluster.
+Scheduled tasks run on cron expressions and are attached to a single guest.
 
 ### Creating a Schedule
 
-1. Navigate to a cluster's detail page
+1. Open a VM or container's detail page
 2. Go to the **Schedules** tab
-3. Click **Create Schedule**
+3. Click **Create Scheduled Task**
 4. Configure:
-   - **Type** — snapshot, backup, or reboot
-   - **Target** — specific VMs/CTs or all
-   - **Cron Expression** — when to run (e.g., `0 3 * * 0` for Sundays at 3 AM)
-   - **Retention** — how many snapshots to keep (for snapshot tasks)
-5. Click **Save**
+   - **Action** — **Snapshot** or **Reboot**
+   - **Cron Expression** — minute hour day month weekday (e.g. `0 2 * * *` = daily at 2 AM)
+   - **Snapshot Name Template** (snapshot actions only, optional) — e.g. `auto-YYYYMMDD-HHMMSS`
+5. Click **Create**
 
-The scheduler evaluates schedules every 60 seconds (configurable via `SCHEDULER_TICK`).
+The table lists each schedule with its last status, next run, and last run, and a delete button.
 
-Every execution of a scheduled snapshot or reboot is recorded in the task history and the audit log, so scheduled activity is traceable exactly like manual actions.
+The scheduler evaluates schedules every 60 seconds. Every execution of a scheduled snapshot or reboot is recorded in the task history and the audit log, so scheduled activity is traceable exactly like manual actions.
 
 ---
 
@@ -691,6 +844,24 @@ Everything that happens — user-initiated, scheduled, or automated (DRS, rollin
 
 Failed tasks surface the error message from Proxmox in the UI — failures are never silently swallowed.
 
+Both live on the **Events** page in the sidebar: the **Audit Log** tab, and a **Tasks** tab for anyone holding `view:task`. Reaching the page at all requires `view:audit`, which every built-in role has — including Viewer, so assume audit rows are readable by any signed-in user.
+
+Filter the audit log by cluster, resource type, user, action, source, severity and time range. What you see is scoped to the clusters your roles reach.
+
+### Exporting the Audit Log
+
+The cluster, resource type, user, action and time-range filters carry into the export, offered as **JSON**, **CSV**, or **syslog** (RFC 5424) from the export menu — handy for a one-off handover to an auditor. The source and severity filters are applied in the browser only and do not narrow the exported file.
+
+### Forwarding to a SIEM
+
+For continuous delivery, expand **Syslog Forwarding** on the Audit Log tab:
+
+- **Host** and **Port** — your collector (default 514)
+- **Protocol** — UDP, TCP, or TLS (with an optional *Skip TLS certificate verification* for self-signed collectors)
+- **Facility** — the syslog facility to stamp on records
+
+**Test Connection** sends a single probe record so you can confirm the collector is receiving before turning it on. Records are RFC 5424 with STRUCTURED-DATA, every field quoted and the record length bounded, and forwarding happens off the request path so a slow or dead collector never stalls an API call. Authentication events are forwarded alongside resource changes, and changes to the forwarding configuration — plus the test probes themselves — are audited. Editing this configuration requires `manage:audit`.
+
 ---
 
 ## Reports
@@ -701,19 +872,34 @@ Navigate to **Reports** from the sidebar.
 
 1. Click **Generate Report**
 2. Select report type:
-   - **Cluster Summary** — overview of resources, utilization, and health
-   - **VM Inventory** — complete list of VMs/CTs with configuration
-   - **Capacity Planning** — resource trends and projections
-   - **Security** — CVE scan results and posture scores
-3. Select clusters and time range
+   - **Resource Utilization** — CPU, memory, and storage usage across the cluster
+   - **VM Resource Usage** — per-guest resource consumption
+   - **Snapshot Inventory** — every guest snapshot, its age, and the guests carrying stale ones
+   - **Capacity Forecast** — resource trends and projected exhaustion
+   - **Backup Compliance** — which guests are protected and how recently
+   - **Patch Status** — pending package updates per node
+   - **Uptime Summary** — node and guest availability over the period
+3. Pick a **Cluster** and a **Time Range (hours)** (1–8760)
 4. Click **Generate**
-5. Download as **HTML** or **CSV**
+5. The finished run appears on the **Report History** tab — click the eye icon to preview the rendered HTML, or the download icon for CSV
+
+Runs produced by a *schedule* are pruned automatically after 90 days. A report you generate on demand is kept indefinitely — there is no delete action for report runs yet.
 
 ### Scheduled Reports
 
-1. Click **Create Schedule**
-2. Configure report type, scope, and cron expression
-3. Reports are generated automatically and available in the **Report Runs** list
+1. Click **New Schedule**
+2. Configure:
+   - **Name** — e.g. `Weekly CPU Report`
+   - **Report Type** — the same seven types as an on-demand run
+   - **Cluster** — one cluster per schedule
+   - **Cron Schedule** — minute hour day month weekday (e.g. `0 8 * * 1` = Mondays at 8 AM)
+   - **Time Range (hours)** — how much history each run covers
+   - **Format** — **HTML** or **CSV**
+   - **Enabled**
+   - **Email delivery** (optional) — pick an email notification channel and every run is mailed to it
+3. Click **Create Schedule**
+
+Generated runs land on the **Report History** tab alongside on-demand ones. Scheduled runs are pruned after 90 days.
 
 ---
 

@@ -3,10 +3,11 @@
 ## Prerequisites
 
 - **Docker** 20.10+ and **Docker Compose** v2+
+- An **x86-64 (amd64)** host — the published image is amd64-only; there is no arm64 build yet
 - **2 CPU cores** and **2 GB RAM** minimum (4 GB recommended)
 - **10 GB disk** for the application and database
 - A **Proxmox VE** cluster (7.x, 8.x, or 9.x — including 9.2) with an API token
-- Ports **80** and **443** available (or configure alternatives)
+- Port **80** available on the host (or change the `80:8080` mapping in `docker-compose.yml`). Nexara serves plain HTTP on a single port — put your own reverse proxy in front of it for TLS.
 - A modern browser — **Chrome/Edge 111+, Firefox 128+, or Safari 16.4+**. Very old browsers that can't run the app at all show an upgrade notice instead of a blank page.
 
 ## Quick Install
@@ -17,11 +18,11 @@ Run the install script for an automated setup:
 curl -fsSL https://raw.githubusercontent.com/bigjakk/Nexara/master/scripts/install.sh | bash
 ```
 
-The script will:
-1. Check prerequisites (Docker, Docker Compose, openssl, git)
+The script needs **root or sudo** (it can install missing dependencies, including Docker itself) and is interactive — run it on a host where you can answer prompts. It will:
+1. Check prerequisites (Docker, Docker Compose, openssl, git, curl) and offer to install any that are missing
 2. Clone the repository
 3. Generate secure secrets
-4. Build and start all services
+4. Pull the prebuilt image and start all services
 5. Wait for health checks and print the access URL
 
 For manual setup, follow the steps below.
@@ -72,10 +73,11 @@ curl http://localhost/healthz
 
 ## Configuration Reference
 
-All configuration is via environment variables in `.env`:
+All configuration is via environment variables.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
+| `NEXARA_VERSION` | No | `latest` | Image tag the compose file pulls (`ghcr.io/bigjakk/nexara:<tag>`). Leave unset to track the newest release; pin it (e.g. `1.9.0` — the published image tag drops the leading `v` from the git tag) to control when you upgrade, or to roll back to the previous release after a failed one |
 | `POSTGRES_USER` | No | `nexara` | PostgreSQL username |
 | `POSTGRES_PASSWORD` | **Yes** | — | PostgreSQL password (change from default) |
 | `POSTGRES_DB` | No | `nexara` | PostgreSQL database name |
@@ -85,6 +87,7 @@ All configuration is via environment variables in `.env`:
 | `JWT_SECRET` | No | auto-generated | Secret for signing JWT tokens (min 16 chars) |
 | `ENCRYPTION_KEY` | No | auto-generated | 32-byte hex key for AES-256-GCM encryption of secrets at rest |
 | `METRICS_COLLECT_INTERVAL` | No | `30s` (Docker deployments set `10s`) | How often metrics are collected from Proxmox |
+| `RESOURCE_SYNC_INTERVAL` | No | `5s` | How often the fast inventory loop runs — one `GET /cluster/resources` per cluster per tick, so guest add/remove/move, status flips, renames and node status converge in seconds. Floored at `2s`; `0` disables the fast loop and leaves all freshness to `METRICS_COLLECT_INTERVAL` |
 | `SNAPSHOT_SYNC_INTERVAL` | No | `5m` | How often the guest snapshot inventory is collected (feeds the central Snapshots page and `snapshot_age_days` alerts). One Proxmox listing per guest per pass, so it runs well below the metrics cadence; floored at `60s`, `0` disables collection |
 | `TASK_HISTORY_RETENTION` | No | `24h` | How long finished Proxmox task records are kept before the retention sweep deletes them. Go duration in hours (`168h` = 7 days); running tasks are never removed. |
 | `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
@@ -96,6 +99,9 @@ All configuration is via environment variables in `.env`:
 | `WS_ALLOWED_ORIGINS` | **Recommended for production** | empty (allow all) | Comma-separated exact `Origin` values accepted on WebSocket upgrades (`/ws`, `/ws/console`, `/ws/vnc`), e.g. `https://nexara.example.com`. Empty or `*` keeps the permissive default (fine for labs, warned at startup). |
 | `SECURE_COOKIES` | No | `auto` | `Secure` attribute on the refresh-token cookie: `auto` (set when the request is detected as HTTPS), `always` (recommended behind a TLS-terminating proxy), `never` (intentional plain-HTTP lab only). |
 | `HSTS_MAX_AGE` | No | `0` (disabled) | `Strict-Transport-Security` max-age in seconds (e.g. `31536000`). Enable only on HTTPS with a trusted certificate — with a self-signed cert it makes certificate errors unbypassable. |
+| `CORS_ALLOW_ORIGINS` | No | empty | Comma-separated `Origin:` values the API accepts cross-origin. Only needed when the SPA is served from a different origin than the API — the normal single-container deployment is same-origin, so leaving it empty is correct there. Both empty and `*` log a startup warning so the posture is visible in the logs |
+
+> Compose reads `.env` only to substitute `${VAR}` references inside `docker-compose.yml` — it is **not** an env file for the container. A variable reaches Nexara only if the `nexara` service's `environment:` block passes it through. `API_PORT`, `RESOURCE_SYNC_INTERVAL`, `SNAPSHOT_SYNC_INTERVAL`, `CORS_ALLOW_ORIGINS`, `SECURE_COOKIES` and `HSTS_MAX_AGE` are not in that block today — add a line for the one you need (e.g. `SNAPSHOT_SYNC_INTERVAL: ${SNAPSHOT_SYNC_INTERVAL:-5m}`) before setting it in `.env`, or the value is silently ignored.
 
 ## First-Time Setup
 
@@ -142,21 +148,23 @@ user@realm!tokenid=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 | Service | Container | Port | Description |
 |---------|-----------|------|-------------|
 | Nexara | `nexara` | 8080 (mapped to 80) | Unified: API + WebSocket + frontend + collector + scheduler |
-| PostgreSQL | `nexara-db` | 5432 | Primary database + TimescaleDB |
-| Redis | `nexara-redis` | 6379 | Pub/sub, caching, session store |
+| PostgreSQL | `nexara-db` | 5432 (internal only) | Primary database + TimescaleDB |
+| Redis | `nexara-redis` | 6379 (internal only) | Pub/sub, caching, session store |
 
 ## Updating
 
 ```bash
 cd nexara
 
-# Pull latest changes
+# Pull the compose/.env.example changes that ship with the release
 git pull
 
-# Rebuild and restart (migrations run automatically)
-docker compose build
+# Pull the new image and recreate the containers (migrations run automatically)
+docker compose pull
 docker compose up -d
 ```
+
+The stack runs a prebuilt image from GHCR — there is nothing to compile locally. By default it tracks `latest`; pin `NEXARA_VERSION` in `.env` (e.g. `NEXARA_VERSION=1.9.0` — the published image tags drop the leading `v` from the git tag) when you want to control exactly which release you move to, or to roll back to the previous one.
 
 Database migrations are applied automatically when the API server starts. There is no need to run them manually.
 
@@ -185,6 +193,14 @@ docker compose run --rm nexara migrate force <version>
 docker compose run --rm nexara migrate up
 docker compose up -d
 ```
+
+One exception: if `migrate status` reports the schema is dirty at version 1,
+there is nothing to force back to — `migrate force 0` is rejected deliberately,
+because no `000000` migration exists and forcing it wedges the install. A
+first-migration failure means the database was never usable: fix the cause (the
+first migration needs only the `pgcrypto` extension and a writable database —
+check the Postgres logs), then drop and recreate the database — or restore your
+backup — and start the stack again.
 
 If the migration fails again the error is real — restore the backup, pin the
 previous image version (`NEXARA_VERSION`), and report the migration error.
@@ -261,15 +277,37 @@ Secrets are auto-generated on first start and persisted to `DATA_DIR/.secrets.js
 ### Database connection refused
 
 - Ensure `nexara-db` is healthy: `docker compose ps nexara-db`
-- Check that `DATABASE_URL` in `.env` matches the PostgreSQL credentials
+- Check that `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` in `.env` match the database. `docker-compose.yml` builds `DATABASE_URL` from those three values and sets it on the container, so a `DATABASE_URL` written into `.env` is ignored in the default compose deployment — it only applies when you run the binary outside compose
 - The API server waits for the database health check — if the DB is slow to start, the API will retry
+
+### Duplicate rows or corrupt indexes
+
+If the logs show `removed duplicate rows`, or inventory pages list the same guest
+twice after a hard crash, the image ships a repair command. Nexara already
+deduplicates the inventory tables on every startup; the CLI adds a hypertable
+REINDEX, which takes an exclusive lock and can run for a long time on a large
+metrics history — run it in a quiet window:
+
+```bash
+# Stop the app (keep the database running)
+docker compose stop nexara
+
+# Dedupe + REINDEX; Ctrl-C aborts it cleanly
+docker compose run --rm nexara repair-integrity
+
+docker compose up -d
+```
 
 ### Port conflicts
 
-If ports 80, 5432, or 6379 are already in use:
+Only the Nexara container publishes a host port. PostgreSQL and Redis are
+reachable only on the internal compose network, so they never collide with a
+database or cache you already run on the host.
 
-1. Edit `docker-compose.yml` to change the host port mappings
-2. For the Nexara service, change `"80:8080"` to e.g. `"8443:8080"`
+If port 80 is already in use:
+
+1. Edit `docker-compose.yml` and change only the host side of the Nexara mapping
+2. Change `"80:8080"` to e.g. `"8443:8080"` — leave `8080` (the container port) alone
 3. Internal service-to-service communication uses container names, not host ports
 
 ### Frontend shows blank page
