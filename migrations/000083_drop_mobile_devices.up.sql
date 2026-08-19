@@ -1,0 +1,31 @@
+-- 000083_drop_mobile_devices.up.sql
+-- Automatic in-place upgrade — no manual steps, no operator action required.
+--
+-- Drops mobile_devices, added in 000046 to hold Expo push tokens for the
+-- Nexara React Native app. That app was removed in v1.9.x: the responsive web
+-- UI + PWA replaced it, so nothing registers a device token any more and the
+-- expo_push dispatcher it fed has been deleted alongside this table.
+--
+-- What this deletes: every row in mobile_devices (one per registered device:
+-- device_id, device_name, platform, expo_push_token, last_seen_at). In
+-- practice the table is empty on every install — the `expo_push` channel type
+-- was blocked at the channel-creation API boundary in every release that
+-- shipped (see validChannelTypes in internal/api/handlers/alerts.go), so no
+-- alert could ever be routed to a device even if one had been registered.
+--
+-- What this keeps: nothing depends on the table. The FK to users(id) is
+-- dropped with it; users rows are untouched. Session device tagging
+-- (sessions.device_type / device_name / device_id) is a separate, generic
+-- mechanism and is NOT affected.
+--
+-- Why this matches a review trigger but is not breaking: it drops a table that
+-- sqlc-generated code referenced in prior releases (trigger #2). The generated
+-- code and its /me/devices + /admin/.../devices handlers are removed in the
+-- same commit, and Nexara deploys as a single container rather than a rolling
+-- fleet, so no running process outlives the drop. The upgrade completes
+-- unattended on container startup.
+--
+-- Recovery if interrupted: the whole migration is one statement in one
+-- transaction — it either drops or it does not. Re-running is safe.
+
+DROP TABLE IF EXISTS mobile_devices;

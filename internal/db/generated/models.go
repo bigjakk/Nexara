@@ -447,17 +447,6 @@ type MigrationJob struct {
 	DiskFormat string `json:"disk_format"`
 }
 
-type MobileDevice struct {
-	ID            uuid.UUID `json:"id"`
-	UserID        uuid.UUID `json:"user_id"`
-	DeviceID      string    `json:"device_id"`
-	DeviceName    string    `json:"device_name"`
-	Platform      string    `json:"platform"`
-	ExpoPushToken string    `json:"expo_push_token"`
-	LastSeenAt    time.Time `json:"last_seen_at"`
-	CreatedAt     time.Time `json:"created_at"`
-}
-
 type Node struct {
 	ID                 uuid.UUID `json:"id"`
 	ClusterID          uuid.UUID `json:"cluster_id"`

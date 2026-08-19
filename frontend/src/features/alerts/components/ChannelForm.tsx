@@ -25,15 +25,6 @@ import {
 } from "../api/alert-queries";
 import type { ChannelType } from "@/types/api";
 
-// expo_push is intentionally omitted from this list — the mobile push
-// dispatcher (internal/notifications/expo_push.go) is wired and the
-// mobile_devices table exists, but the mobile-side registration flow
-// isn't shipping for v1.0. The web UI doesn't expose the channel type;
-// re-enabling the surface end-to-end requires four reverts, all
-// documented in mobile/PLAN.md (alerts.go validChannelTypes, this list,
-// the mobile feature flag, and the EAS init). The expo_push entry on
-// the ChannelType union and CHANNEL_TYPE_LABELS Record stays for the
-// dispatcher's continued backend existence — see Phase 5.9.
 const CHANNEL_TYPES: { value: ChannelType; label: string }[] = [
   { value: "email", label: "Email (SMTP)" },
   { value: "slack", label: "Slack" },

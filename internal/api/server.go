@@ -71,7 +71,6 @@ type Server struct {
 	apiKeyHandler          *handlers.APIKeyHandler
 	apiDocsHandler         *handlers.APIDocsHandler
 	changelogHandler       *handlers.ChangelogHandler
-	mobileDeviceHandler    *handlers.MobileDeviceHandler
 	rbacEngine             *auth.RBACEngine
 	eventPub               *events.Publisher
 	proxmoxCache           *proxmox.ClientCache
@@ -331,7 +330,6 @@ func (s *Server) registerSettingsAndKeys(d *serverDeps) {
 	if d.hasDB() {
 		s.settingsHandler = handlers.NewSettingsHandler(d.queries, d.eventPub, d.cfg.DataDir)
 		s.apiKeyHandler = handlers.NewAPIKeyHandler(d.queries, d.eventPub)
-		s.mobileDeviceHandler = handlers.NewMobileDeviceHandler(d.queries, d.eventPub)
 	}
 	s.apiDocsHandler = handlers.NewAPIDocsHandler()
 

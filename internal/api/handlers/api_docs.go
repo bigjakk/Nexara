@@ -78,11 +78,6 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/auth/oidc/token-exchange": {Description: "Exchange the OIDC one-time code for an access+refresh token pair", Group: "Authentication"},
 
 	// ── Mobile Devices ────────────────────────────────────────────────
-	"POST /api/v1/me/devices":             {Description: "Register a mobile device for push notifications", Group: "Mobile Devices"},
-	"GET /api/v1/me/devices":              {Description: "List the current user's registered mobile devices", Group: "Mobile Devices"},
-	"DELETE /api/v1/me/devices/:id":       {Description: "Remove one of the current user's registered mobile devices", Group: "Mobile Devices"},
-	"GET /api/v1/admin/users/:id/devices": {Description: "List a user's registered mobile devices", Permission: "manage:user", Group: "Mobile Devices"},
-	"DELETE /api/v1/admin/devices/:id":    {Description: "Remove a mobile device (admin)", Permission: "manage:user", Group: "Mobile Devices"},
 
 	// ── Two-Factor Authentication ─────────────────────────────────────
 	"POST /api/v1/auth/totp/setup":                     {Description: "Generate TOTP setup QR code", Group: "Two-Factor Authentication"},

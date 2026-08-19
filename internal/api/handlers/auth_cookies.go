@@ -1,15 +1,16 @@
 package handlers
 
 import (
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 )
 
-// RefreshCookieName is the cookie name carrying the long-lived refresh token
-// for browser clients. Web clients receive only this cookie (HttpOnly + Secure
-// + SameSite=Strict); the refresh token never reaches JavaScript / localStorage.
+// RefreshCookieName is the cookie name carrying the long-lived refresh token.
+// This is now the ONLY delivery path: the cookie is HttpOnly + Secure +
+// SameSite=Strict, so the refresh token never reaches JavaScript /
+// localStorage. The native app that used to receive it in the response body
+// (it had no DOM cookie jar) was removed in v1.9.x.
 const RefreshCookieName = "nexara_refresh_token"
 
 // refreshCookiePath scopes the cookie to children of the auth subtree so it
@@ -89,12 +90,4 @@ func clearRefreshCookie(c fiber.Ctx) {
 // cookie, or "" if the cookie is absent.
 func readRefreshTokenFromCookie(c fiber.Ctx) string {
 	return c.Cookies(RefreshCookieName)
-}
-
-// isMobileClient reports whether the request comes from the native mobile
-// shell. Mobile clients have no DOM cookie jar and instead store the refresh
-// token in SecureStore, so the response keeps the refresh token in the body
-// for them.
-func isMobileClient(c fiber.Ctx) bool {
-	return strings.EqualFold(strings.TrimSpace(c.Get("X-Nexara-Device-Type")), "mobile")
 }

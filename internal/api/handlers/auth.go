@@ -80,9 +80,10 @@ func (h *AuthHandler) SetTOTPHandler(th *TOTPHandler) {
 }
 
 // deviceInfoFromRequest derives the DeviceInfo for a session being created.
-// Mobile clients can set X-Nexara-Device-Type (mobile|desktop), X-Nexara-Device-Name,
-// and X-Nexara-Device-ID headers to tag their sessions. If those headers are absent
-// the session is tagged as "web".
+// Any API client may set X-Nexara-Device-Type (mobile|desktop), X-Nexara-Device-Name
+// and X-Nexara-Device-ID to tag its sessions; browsers send none of them, so a
+// session with no headers is tagged "web". Purely descriptive metadata — it does
+// not change authentication behaviour.
 func deviceInfoFromRequest(c fiber.Ctx) auth.DeviceInfo {
 	deviceType := strings.ToLower(strings.TrimSpace(c.Get("X-Nexara-Device-Type")))
 	switch deviceType {
@@ -129,8 +130,12 @@ type logoutRequest struct {
 }
 
 type authResponse struct {
-	User         authUserResponse `json:"user"`
-	AccessToken  string           `json:"access_token"`
+	User        authUserResponse `json:"user"`
+	AccessToken string           `json:"access_token"`
+	// RefreshToken is always empty. The refresh token is delivered solely as an
+	// HttpOnly cookie (see RefreshCookieName); the native app that used to read it
+	// from the body was removed in v1.9.x. The field is retained so the response
+	// shape stays stable for existing API consumers.
 	RefreshToken string           `json:"refresh_token"`
 	ExpiresAt    int64            `json:"expires_at"`
 	Permissions  []string         `json:"permissions"`
@@ -311,11 +316,6 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 
 	setRefreshCookie(c, refreshToken, h.jwtService.RefreshTokenTTL())
 
-	bodyRefreshToken := ""
-	if isMobileClient(c) {
-		bodyRefreshToken = refreshToken
-	}
-
 	return c.Status(fiber.StatusCreated).JSON(authResponse{
 		User: authUserResponse{
 			ID:          user.ID,
@@ -324,7 +324,7 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 			Role:        user.Role,
 		},
 		AccessToken:  accessToken,
-		RefreshToken: bodyRefreshToken,
+		RefreshToken: "",
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
@@ -550,11 +550,6 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, auditAction string)
 
 	setRefreshCookie(c, refreshToken, h.jwtService.RefreshTokenTTL())
 
-	bodyRefreshToken := ""
-	if isMobileClient(c) {
-		bodyRefreshToken = refreshToken
-	}
-
 	return c.JSON(authResponse{
 		User: authUserResponse{
 			ID:          user.ID,
@@ -563,7 +558,7 @@ func (h *AuthHandler) issueTokens(c fiber.Ctx, user db.User, auditAction string)
 			Role:        user.Role,
 		},
 		AccessToken:  accessToken,
-		RefreshToken: bodyRefreshToken,
+		RefreshToken: "",
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})
@@ -595,8 +590,8 @@ type consoleTokenResponse struct {
 
 // ConsoleToken mints a short-lived (60 second), scope-locked JWT that can ONLY
 // be used to open a single console WebSocket matching cluster_id/node/vmid/type.
-// Designed for mobile WebView clients that cannot attach Authorization headers
-// to the WebSocket upgrade and must pass the token via query string.
+// Browsers cannot attach Authorization headers to a WebSocket upgrade, so the
+// token is passed via query string instead.
 //
 // The underlying access token + RBAC check happens first — minting requires
 // the dedicated console:<resource> permission on the target cluster (view:*
@@ -671,7 +666,7 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx) error {
 	}
 
 	// Console tokens are bound to a single immediate WS upgrade — the SPA
-	// (or mobile shell) mints and connects within ~50ms. 60 seconds is
+	// mints and connects within ~50ms. 60 seconds is
 	// generous but tight enough that a leaked URL or proxy access log
 	// entry is unusable by the time it surfaces. Reduced from 5 minutes
 	// per remediation 2.7 (≤60s scope for all WS-bound JWTs).
@@ -878,11 +873,6 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 
 	setRefreshCookie(c, newRefreshToken, h.jwtService.RefreshTokenTTL())
 
-	bodyRefreshToken := ""
-	if isMobileClient(c) {
-		bodyRefreshToken = newRefreshToken
-	}
-
 	return c.JSON(authResponse{
 		User: authUserResponse{
 			ID:          user.ID,
@@ -891,7 +881,7 @@ func (h *AuthHandler) Refresh(c fiber.Ctx) error {
 			Role:        user.Role,
 		},
 		AccessToken:  accessToken,
-		RefreshToken: bodyRefreshToken,
+		RefreshToken: "",
 		ExpiresAt:    expiresAt.Unix(),
 		Permissions:  perms,
 	})

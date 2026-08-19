@@ -247,13 +247,11 @@ var validScopeTypes = map[string]bool{
 	"cluster": true, "node": true, "vm": true,
 }
 
-// validChannelTypes intentionally excludes "expo_push" — push notifications
-// are wired in the backend (dispatcher is registered, devices table exists,
-// /me/devices endpoints work) but disabled at the channel-creation API
-// boundary because Nexara mobile is the only push consumer and it isn't
-// shipping the registration flow yet. To re-enable: add "expo_push": true
-// here, re-enable the mobile-side hooks in mobile/features/push/, and add
-// "Mobile push (Expo)" back to CHANNEL_TYPES in ChannelForm.tsx.
+// validChannelTypes is the complete set of channel types Nexara can deliver
+// to. "expo_push" used to be rejected here while its dispatcher sat unused
+// behind it; both the dispatcher and the mobile_devices table it read were
+// removed in v1.9.x along with the React Native app, so the type no longer
+// exists anywhere and needs no special-casing.
 var validChannelTypes = map[string]bool{
 	"email": true, "webhook": true, "slack": true, "discord": true,
 	"pagerduty": true, "teams": true, "telegram": true,

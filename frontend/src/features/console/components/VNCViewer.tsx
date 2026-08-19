@@ -30,9 +30,10 @@ interface VNCViewerProps {
   visible: boolean;
   /**
    * Optional pre-minted scoped console token. When provided, the component
-   * skips the inline mint and uses this token directly (mobile passes a
-   * token minted upstream by its native shell). When omitted, the desktop
-   * flow mints via POST /api/v1/auth/console-token before opening the WS.
+   * skips the inline mint and uses this token directly. No caller passes it
+   * today — it existed for the removed native app, whose WebView minted
+   * upstream. When omitted (i.e. always), the component mints via
+   * POST /api/v1/auth/console-token before opening the WS.
    *
    * Either way the token rides in `Sec-WebSocket-Protocol` (per remediation
    * 2.7) — never in the URL — so it's not exposed in proxy access logs or
@@ -55,10 +56,11 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
   const intentionalCloseRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // The mobile page (/mobile-console) passes a synthetic tab that does NOT
-  // live in the console store, so store-based status updates are no-ops
-  // there. Mirror the connection status (and a manual reconnect key) in
-  // local state so the overlay and retries work for storeless tabs too.
+  // A caller may pass a synthetic tab that does NOT live in the console store,
+  // so store-based status updates are no-ops for it. Mirror the connection
+  // status (and a manual reconnect key) in local state so the overlay and
+  // retries work for such storeless tabs too. (The removed native app's
+  // WebView was the only such caller; the web console always uses the store.)
   const [localStatus, setLocalStatus] = useState<ConsoleStatus>("connecting");
   const localStatusRef = useRef<ConsoleStatus>("connecting");
   const [localReconnectKey, setLocalReconnectKey] = useState(0);
@@ -340,11 +342,13 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
 
   const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
 
-  // Mobile mode: activated when an accessToken is passed (i.e. the
-  // /mobile-console route from the React Native WebView). In this mode we
-  // hide the desktop toolbar, render a hidden focusable input that brings
-  // up the soft keyboard when focused, and forward keystrokes from that
-  // input to noVNC's RFB.sendKey().
+  // Touch mode: activated when an accessToken is passed. It hides the desktop
+  // toolbar, renders a hidden focusable input that brings up the soft keyboard,
+  // and forwards keystrokes from it to noVNC's RFB.sendKey().
+  //
+  // DEAD as of v1.9.x: the removed native app's WebView was the only caller
+  // that passed accessToken, so this is always false. The responsive web UI
+  // handles phones through FloatingConsole's full-screen takeover instead.
   const isMobile = !!accessToken;
   const mobileInputRef = useRef<HTMLInputElement>(null);
 

@@ -36,10 +36,10 @@ https://nexara.example.com/api/v1
    Body: { "email": "admin@example.com", "password": "..." }
    Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": ["view:cluster", ...] }
    ```
-   The refresh token is **not** returned in the body by default — it is set as
-   an HttpOnly, SameSite=Strict cookie. Only a client that sends the header
-   `X-Nexara-Device-Type: mobile` gets a populated `refresh_token` field;
-   browsers receive an empty string. The same applies to `/auth/register`.
+   The refresh token is **never** returned in the body — it is set as an
+   HttpOnly, SameSite=Strict cookie, and the `refresh_token` response field is
+   always an empty string (retained only so the response shape stays stable).
+   The same applies to `/auth/register`.
 
 3. **Use the token** on all subsequent requests:
    ```
@@ -49,8 +49,8 @@ https://nexara.example.com/api/v1
 4. **Refresh** when the access token expires:
    ```
    POST /api/v1/auth/refresh
-   Body: {}                            # web — the refresh cookie is read
-   Body: { "refresh_token": "..." }    # mobile — explicit token
+   Body: {}                            # the refresh cookie is read
+   Body: { "refresh_token": "..." }    # or pass the token explicitly
    Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...] }
    ```
    A missing or stale refresh token returns `401` and clears the cookie.
@@ -929,18 +929,6 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 | DELETE | `/api-keys` | Revoke all your API keys |
 | GET | `/admin/api-keys` | Admin: list all API keys |
 | DELETE | `/admin/api-keys/:id` | Admin: revoke any API key |
-
-### Push Devices
-
-Mobile push-notification device registrations.
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/me/devices` | Register a push device for the current user |
-| GET | `/me/devices` | List your registered devices |
-| DELETE | `/me/devices/:id` | Unregister one of your devices |
-| GET | `/admin/users/:id/devices` | Admin: list a user's devices |
-| DELETE | `/admin/devices/:id` | Admin: unregister any device |
 
 ### Search
 

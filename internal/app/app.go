@@ -144,7 +144,7 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 	}
 
 	if a.Queries != nil {
-		a.NotifyRegistry = notifications.BuildRegistry(a.Queries)
+		a.NotifyRegistry = notifications.BuildRegistry()
 
 		a.AlertEngine = notifications.NewEngine(shutdownCtx, a.Queries,
 			logger.With("component", "alert-engine"), a.EventPub, a.NotifyRegistry, cfg.EncryptionKey)

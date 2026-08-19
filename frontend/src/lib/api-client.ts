@@ -87,9 +87,8 @@ export function getStoredUser() {
 }
 
 async function refreshTokens(): Promise<AuthResponse> {
-  // Body is empty — the HttpOnly cookie carries the refresh token. The mobile
-  // shell sends `X-Nexara-Device-Type: mobile` and a body refresh_token; web
-  // clients rely on the cookie alone.
+  // Body is empty — the HttpOnly cookie carries the refresh token, and since
+  // v1.9.x that is the only delivery path the server offers.
   const res = await fetch("/api/v1/auth/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

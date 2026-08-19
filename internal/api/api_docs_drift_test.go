@@ -62,7 +62,6 @@ func newRouteStubServer() *Server {
 		apiKeyHandler:          &handlers.APIKeyHandler{},
 		apiDocsHandler:         &handlers.APIDocsHandler{},
 		changelogHandler:       &handlers.ChangelogHandler{},
-		mobileDeviceHandler:    &handlers.MobileDeviceHandler{},
 	}
 }
 

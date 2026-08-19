@@ -20,9 +20,8 @@ window.addEventListener("vite:preloadError", (event) => {
   window.location.reload();
 });
 
-// Initialize auth state — calls /auth/refresh against the HttpOnly cookie
-// (or, on mobile, the body refresh_token) to validate the session before
-// rendering anything that depends on auth.
+// Initialize auth state — calls /auth/refresh against the HttpOnly cookie to
+// validate the session before rendering anything that depends on auth.
 void useAuthStore.getState().initialize();
 
 const rootEl = document.getElementById("root");

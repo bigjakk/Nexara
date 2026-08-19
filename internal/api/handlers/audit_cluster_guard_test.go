@@ -59,7 +59,6 @@ var auditClusterExempt = map[string]string{
 	"api_keys.go.Revoke":              "api_keys is user-owned; no cluster column",
 	"api_keys.go.RevokeAll":           "api_keys is user-owned; no cluster column",
 	"api_keys.go.AdminRevoke":         "api_keys is user-owned; no cluster column",
-	"devices.go.auditDevice":          "mobile_devices is user-owned; no cluster column",
 	"users.go.Update":                 "users is install-global; no cluster column",
 	"users.go.Delete":                 "users is install-global; no cluster column",
 

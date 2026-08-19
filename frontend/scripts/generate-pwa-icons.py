@@ -2,10 +2,9 @@
 """
 PWA icon generator for the web frontend — pure stdlib, no PIL required.
 
-Adapted from mobile/assets/generate-icons.py (same placeholder brand
-design: #22c55e green tile + stylized dark "N"). Like that one, this is a
-placeholder set until a real logo exists — but it satisfies the manifest
-icon requirements (192 + 512 + maskable) for add-to-home-screen installs.
+Placeholder brand design (#22c55e green tile + stylized dark "N") until a
+real logo exists — but it satisfies the manifest icon requirements
+(192 + 512 + maskable) for add-to-home-screen installs.
 
 Outputs (committed, referenced by public/manifest.webmanifest):
   public/icons/icon-192.png            192x192  dark square, green tile, N

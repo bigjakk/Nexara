@@ -1,7 +1,3 @@
-# Mobile app — completely unrelated to the backend Docker image and ships
-# multi-GB of Android intermediates, node_modules, and Gradle caches.
-mobile/
-
 # Backend artifacts
 bin/
 nexara

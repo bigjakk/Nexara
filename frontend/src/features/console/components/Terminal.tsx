@@ -16,9 +16,10 @@ interface TerminalProps {
   visible: boolean;
   /**
    * Optional pre-minted scoped console token. When provided, the component
-   * skips the inline mint and uses this token directly (mobile passes a
-   * token minted upstream by its native shell). When omitted, the desktop
-   * flow mints via POST /api/v1/auth/console-token before opening the WS.
+   * skips the inline mint and uses this token directly. No caller passes it
+   * today — it existed for the removed native app, whose WebView minted
+   * upstream. When omitted (i.e. always), the component mints via
+   * POST /api/v1/auth/console-token before opening the WS.
    *
    * Either way the token rides in `Sec-WebSocket-Protocol` (per remediation
    * 2.7) — never in the URL — so it's not exposed in proxy access logs or
@@ -162,9 +163,8 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
         return;
       }
 
-      // Acquire the WS upgrade token. Desktop callers omit accessToken and
-      // mint a short-lived scoped JWT; mobile passes its pre-minted token
-      // through the prop.
+      // Acquire the WS upgrade token: mint a short-lived scoped JWT, unless a
+      // caller supplied a pre-minted one through the accessToken prop.
       let token: string;
       try {
         if (accessToken) {

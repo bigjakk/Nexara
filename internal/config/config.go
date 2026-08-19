@@ -36,8 +36,8 @@ type Config struct {
 	ProxyHeader string `envconfig:"PROXY_HEADER" default:"X-Forwarded-For"`
 	// CORSAllowOrigins is the comma-separated list of `Origin:` values the
 	// browser API will accept (and echo back in Access-Control-Allow-Origin).
-	// Empty default — cross-origin browsers (mobile apps, separately-served
-	// SPAs, Docker deployments where the SPA lives on a different host)
+	// Empty default — cross-origin browsers (separately-served SPAs, Docker
+	// deployments where the SPA lives on a different host)
 	// MUST set CORS_ALLOW_ORIGINS explicitly to the public origin
 	// (e.g. "https://nexara.example.com"). The Vite dev server at
 	// http://localhost:3000 proxies /api and /ws to the backend, so dev
