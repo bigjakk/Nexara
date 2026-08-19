@@ -1618,13 +1618,21 @@ type BackupParams struct {
 
 // BackupJob represents a cluster-level vzdump backup job schedule.
 type BackupJob struct {
-	ID               string `json:"id"`
-	Enabled          int    `json:"enabled,omitempty"`
+	ID string `json:"id"`
+	// Enabled is a pointer so the three states PVE can report stay distinct:
+	// absent (the job never set it, which vzdump treats as enabled), 0 and 1.
+	// As a plain int with omitempty, a disabled job re-encoded to the frontend
+	// as "no enabled field" and read back as enabled — so opening it in the
+	// edit dialog and saving would have switched it back on.
+	Enabled          *int   `json:"enabled,omitempty"`
 	Type             string `json:"type,omitempty"`
 	Schedule         string `json:"schedule,omitempty"`
 	Storage          string `json:"storage,omitempty"`
 	Node             string `json:"node,omitempty"`
 	VMID             string `json:"vmid,omitempty"`
+	All              int    `json:"all,omitempty"`
+	Exclude          string `json:"exclude,omitempty"`
+	Pool             string `json:"pool,omitempty"`
 	Mode             string `json:"mode,omitempty"`
 	Compress         string `json:"compress,omitempty"`
 	MailNotification string `json:"mailnotification,omitempty"`
@@ -1641,11 +1649,17 @@ type BackupJobParams struct {
 	Storage          string `json:"storage,omitempty"`
 	Node             string `json:"node,omitempty"`
 	VMID             string `json:"vmid,omitempty"`
+	All              *int   `json:"all,omitempty"`
+	Exclude          string `json:"exclude,omitempty"`
+	Pool             string `json:"pool,omitempty"`
 	Mode             string `json:"mode,omitempty"`
 	Compress         string `json:"compress,omitempty"`
 	MailNotification string `json:"mailnotification,omitempty"`
 	MailTo           string `json:"mailto,omitempty"`
 	Comment          string `json:"comment,omitempty"`
+	// Delete names job properties to unset (PVE's "delete" parameter). Only
+	// honoured on update; used to clear the properties a job no longer uses.
+	Delete []string `json:"delete,omitempty"`
 }
 
 // --- Phase 9: Datacenter Feature Parity Types ---

@@ -886,17 +886,157 @@ func (h *BackupHandler) ListBackupJobs(c fiber.Ctx) error {
 }
 
 type backupJobRequest struct {
-	Enabled          *int   `json:"enabled"`
-	Type             string `json:"type"`
-	Schedule         string `json:"schedule"`
-	Storage          string `json:"storage"`
-	Node             string `json:"node"`
-	VMID             string `json:"vmid"`
-	Mode             string `json:"mode"`
-	Compress         string `json:"compress"`
-	MailNotification string `json:"mailnotification"`
-	MailTo           string `json:"mailto"`
-	Comment          string `json:"comment"`
+	Enabled  *int   `json:"enabled"`
+	Type     string `json:"type"`
+	Schedule string `json:"schedule"`
+	Storage  string `json:"storage"`
+	// Node and Comment are pointers because "" is a meaningful value for them
+	// — "run on any node", "no comment" — and PVE only unsets a property that
+	// is named in the delete list. A client that omits the field entirely
+	// leaves the job's current value alone.
+	Node             *string `json:"node"`
+	VMID             string  `json:"vmid"`
+	All              *int    `json:"all"`
+	Exclude          string  `json:"exclude"`
+	Pool             string  `json:"pool"`
+	Mode             string  `json:"mode"`
+	Compress         string  `json:"compress"`
+	MailNotification string  `json:"mailnotification"`
+	MailTo           string  `json:"mailto"`
+	Comment          *string `json:"comment"`
+}
+
+// backupSelectionKeys are the vzdump properties that decide which guests a job
+// backs up. A job carries one selection, so switching between them has to clear
+// the ones the job no longer uses.
+var backupSelectionKeys = []string{"all", "vmid", "exclude", "pool"}
+
+// selectionKeys reports which selection properties this request sets. "exclude"
+// is the one combination PVE allows: an exclusion list names guests to skip
+// from an all-guests job, so it travels with all=1. A nil result means the
+// request names no selection at all — an update then leaves the job's current
+// selection untouched.
+//
+// The precedence matches how vzdump itself resolves a config that carries more
+// than one (all, then pool, then the vmid list), so what Nexara displays for a
+// hand-edited job is what PVE will actually back up.
+func (r backupJobRequest) selectionKeys() map[string]bool {
+	switch {
+	case r.Exclude != "":
+		return map[string]bool{"all": true, "exclude": true}
+	case r.All != nil && *r.All != 0:
+		return map[string]bool{"all": true}
+	case r.Pool != "":
+		return map[string]bool{"pool": true}
+	case r.VMID != "":
+		return map[string]bool{"vmid": true}
+	}
+	return nil
+}
+
+// clearedProperties lists the job properties to unset (PVE's "delete"
+// parameter) so the job ends up matching this request rather than a mix of it
+// and whatever the job carried before.
+func (r backupJobRequest) clearedProperties() []string {
+	var cleared []string
+	if active := r.selectionKeys(); active != nil {
+		for _, k := range backupSelectionKeys {
+			if !active[k] {
+				cleared = append(cleared, k)
+			}
+		}
+	}
+	if r.Node != nil && *r.Node == "" {
+		cleared = append(cleared, "node")
+	}
+	if r.Comment != nil && *r.Comment == "" {
+		cleared = append(cleared, "comment")
+	}
+	return cleared
+}
+
+func (r backupJobRequest) toParams() proxmox.BackupJobParams {
+	params := proxmox.BackupJobParams{
+		Enabled:          r.Enabled,
+		Type:             r.Type,
+		Schedule:         r.Schedule,
+		Storage:          r.Storage,
+		Mode:             r.Mode,
+		Compress:         r.Compress,
+		MailNotification: r.MailNotification,
+		MailTo:           r.MailTo,
+	}
+	if r.Node != nil {
+		params.Node = *r.Node
+	}
+	if r.Comment != nil {
+		params.Comment = *r.Comment
+	}
+	// Send only the selection the request actually asked for. Copying every
+	// field through would let a request naming two selections set and delete
+	// the same property in one call.
+	active := r.selectionKeys()
+	if active["all"] {
+		all := 1
+		params.All = &all
+	}
+	if active["exclude"] {
+		params.Exclude = r.Exclude
+	}
+	if active["pool"] {
+		params.Pool = r.Pool
+	}
+	if active["vmid"] {
+		params.VMID = r.VMID
+	}
+	return params
+}
+
+// selectionSummary renders the guest selection for the audit row, or "" when
+// the request names none — an update then leaves the job's selection alone, and
+// claiming otherwise would put a change in the audit trail that never happened.
+func (r backupJobRequest) selectionSummary() string {
+	active := r.selectionKeys()
+	switch {
+	case active == nil:
+		return ""
+	case active["exclude"]:
+		return "all guests except " + r.Exclude
+	case active["pool"]:
+		return "pool " + r.Pool
+	case active["vmid"]:
+		return "vmids " + r.VMID
+	default:
+		return "all guests"
+	}
+}
+
+// auditDetails summarises a backup job for the audit row. PVE assigns the job
+// ID on create, so without this the audit trail records only that "a job" was
+// created. Fields the request left unspecified are omitted rather than
+// defaulted, so a partial update is not recorded as having set them.
+func (r backupJobRequest) auditDetails() json.RawMessage {
+	fields := map[string]any{}
+	if r.Schedule != "" {
+		fields["schedule"] = r.Schedule
+	}
+	if r.Storage != "" {
+		fields["storage"] = r.Storage
+	}
+	if r.Node != nil && *r.Node != "" {
+		fields["node"] = *r.Node
+	}
+	if r.Mode != "" {
+		fields["mode"] = r.Mode
+	}
+	if r.Enabled != nil {
+		fields["enabled"] = *r.Enabled != 0
+	}
+	if selection := r.selectionSummary(); selection != "" {
+		fields["selection"] = selection
+	}
+	details, _ := json.Marshal(fields)
+	return details
 }
 
 // CreateBackupJob handles POST /api/v1/clusters/:cluster_id/backup-jobs
@@ -919,23 +1059,11 @@ func (h *BackupHandler) CreateBackupJob(c fiber.Ctx) error {
 		return err
 	}
 
-	if err := client.CreateBackupJob(c.Context(), proxmox.BackupJobParams{
-		Enabled:          req.Enabled,
-		Type:             req.Type,
-		Schedule:         req.Schedule,
-		Storage:          req.Storage,
-		Node:             req.Node,
-		VMID:             req.VMID,
-		Mode:             req.Mode,
-		Compress:         req.Compress,
-		MailNotification: req.MailNotification,
-		MailTo:           req.MailTo,
-		Comment:          req.Comment,
-	}); err != nil {
+	if err := client.CreateBackupJob(c.Context(), req.toParams()); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", "backup-job", "backup_job_created", nil)
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", "backup-job", "backup_job_created", req.auditDetails())
 
 	return c.JSON(fiber.Map{"status": "created"})
 }
@@ -965,23 +1093,13 @@ func (h *BackupHandler) UpdateBackupJob(c fiber.Ctx) error {
 		return err
 	}
 
-	if err := client.UpdateBackupJob(c.Context(), jobID, proxmox.BackupJobParams{
-		Enabled:          req.Enabled,
-		Type:             req.Type,
-		Schedule:         req.Schedule,
-		Storage:          req.Storage,
-		Node:             req.Node,
-		VMID:             req.VMID,
-		Mode:             req.Mode,
-		Compress:         req.Compress,
-		MailNotification: req.MailNotification,
-		MailTo:           req.MailTo,
-		Comment:          req.Comment,
-	}); err != nil {
+	params := req.toParams()
+	params.Delete = req.clearedProperties()
+	if err := client.UpdateBackupJob(c.Context(), jobID, params); err != nil {
 		return mapProxmoxError(err)
 	}
 
-	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_updated", nil)
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{Valid: true, Bytes: clusterID}, "backup", jobID, "backup_job_updated", req.auditDetails())
 
 	return c.JSON(fiber.Map{"status": "updated"})
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 func (c *Client) TriggerBackup(ctx context.Context, node string, params BackupParams) (string, error) {
@@ -63,6 +64,15 @@ func (c *Client) CreateBackupJob(ctx context.Context, params BackupJobParams) er
 	if params.VMID != "" {
 		form.Set("vmid", params.VMID)
 	}
+	if params.All != nil {
+		form.Set("all", strconv.Itoa(*params.All))
+	}
+	if params.Exclude != "" {
+		form.Set("exclude", params.Exclude)
+	}
+	if params.Pool != "" {
+		form.Set("pool", params.Pool)
+	}
 	if params.Mode != "" {
 		form.Set("mode", params.Mode)
 	}
@@ -106,6 +116,15 @@ func (c *Client) UpdateBackupJob(ctx context.Context, id string, params BackupJo
 	if params.VMID != "" {
 		form.Set("vmid", params.VMID)
 	}
+	if params.All != nil {
+		form.Set("all", strconv.Itoa(*params.All))
+	}
+	if params.Exclude != "" {
+		form.Set("exclude", params.Exclude)
+	}
+	if params.Pool != "" {
+		form.Set("pool", params.Pool)
+	}
 	if params.Mode != "" {
 		form.Set("mode", params.Mode)
 	}
@@ -126,6 +145,9 @@ func (c *Client) UpdateBackupJob(ctx context.Context, id string, params BackupJo
 	}
 	if params.Type != "" {
 		form.Set("type", params.Type)
+	}
+	if len(params.Delete) > 0 {
+		form.Set("delete", strings.Join(params.Delete, ","))
 	}
 	if err := c.doPut(ctx, "/cluster/backup/"+url.PathEscape(id), form, nil); err != nil {
 		return fmt.Errorf("update backup job %s: %w", id, err)

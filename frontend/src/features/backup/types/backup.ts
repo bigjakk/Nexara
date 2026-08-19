@@ -175,6 +175,12 @@ export interface BackupJob {
   storage?: string;
   node?: string;
   vmid?: string;
+  /** 1 when the job backs up every guest (PVE's "all" selection mode). */
+  all?: number;
+  /** VMIDs skipped by an all-guests job. */
+  exclude?: string;
+  /** Resource pool whose members the job backs up. */
+  pool?: string;
   mode?: string;
   compress?: string;
   mailnotification?: string;
@@ -227,6 +233,9 @@ export interface BackupJobParams {
   storage?: string;
   node?: string;
   vmid?: string;
+  all?: number;
+  exclude?: string;
+  pool?: string;
   mode?: string;
   compress?: string;
   mailnotification?: string;

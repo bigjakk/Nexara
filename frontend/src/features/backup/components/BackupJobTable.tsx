@@ -12,11 +12,21 @@ import { Button } from "@/components/ui/button";
 import { Pencil, Trash2, Play, Loader2, ChevronRight, ChevronDown } from "lucide-react";
 import type { BackupJob } from "../types/backup";
 import { useDeleteBackupJob, useRunBackupJob } from "../api/backup-queries";
+import { describeSchedule } from "../lib/schedule";
 import { BackupJobDialog } from "./BackupJobDialog";
 
 function formatNextRun(ts?: number): string {
   if (!ts) return "-";
   return new Date(ts * 1000).toLocaleString();
+}
+
+/** Mirrors the dialog's guest-selection modes, in the same precedence. */
+function formatGuests(job: BackupJob): string {
+  if (job.exclude) return `All except ${job.exclude}`;
+  if (job.all) return "All";
+  if (job.pool) return `Pool: ${job.pool}`;
+  if (job.vmid) return job.vmid;
+  return "All";
 }
 
 interface BackupJobTableProps {
@@ -71,6 +81,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
             {jobs.map((job) => {
               const isExpanded = expanded.has(job.id);
               const isEnabled = job.enabled !== 0;
+              const scheduleText = describeSchedule(job.schedule);
 
               return (
                 <>
@@ -92,7 +103,18 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                       {job.id}
                     </TableCell>
                     <TableCell className="text-sm">
-                      {job.schedule ?? "-"}
+                      {job.schedule ? (
+                        <>
+                          <div>{scheduleText ?? job.schedule}</div>
+                          {scheduleText && (
+                            <div className="font-mono text-xs text-muted-foreground">
+                              {job.schedule}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        "-"
+                      )}
                     </TableCell>
                     <TableCell className="text-sm">
                       {job.storage ?? "-"}
@@ -187,9 +209,9 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                           </div>
                           <div>
                             <span className="text-muted-foreground">
-                              VMIDs:
+                              Guests:
                             </span>{" "}
-                            {job.vmid ?? "All"}
+                            {formatGuests(job)}
                           </div>
                           <div>
                             <span className="text-muted-foreground">
