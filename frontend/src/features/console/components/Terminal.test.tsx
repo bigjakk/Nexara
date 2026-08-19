@@ -5,9 +5,8 @@ import { renderWithProviders } from "@/test/test-utils";
 import { Terminal } from "./Terminal";
 import type { ConsoleTab } from "../types/console";
 
-// Mock the console-token minter. The Terminal mints a scoped JWT before
-// opening the WS (security review fix #1) unless a caller supplies a
-// pre-minted one via the accessToken prop. The real minter caches within the
+// Mock the console-token minter. The Terminal always mints a scoped JWT before
+// opening the WS (security review fix #1). The real minter caches within the
 // token's TTL; its own behaviour is covered in api/console-queries.test.ts.
 const { mintSpy } = vi.hoisted(() => ({
   mintSpy: vi.fn(() => Promise.resolve("scoped-test-token")),
@@ -124,25 +123,6 @@ describe("Terminal", () => {
     expect(ws?.protocols).toEqual([
       "nexara.token",
       "nexara.token.scoped-test-token",
-    ]);
-  });
-
-  it("uses the override accessToken instead of minting when provided", async () => {
-    renderWithProviders(
-      <Terminal
-        tab={testTab}
-        visible={true}
-        accessToken="prebaked-token"
-      />,
-    );
-    await waitFor(() => {
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-    const ws = MockWebSocket.instances[0];
-    expect(ws?.url).not.toContain("token=");
-    expect(ws?.protocols).toEqual([
-      "nexara.token",
-      "nexara.token.prebaked-token",
     ]);
   });
 

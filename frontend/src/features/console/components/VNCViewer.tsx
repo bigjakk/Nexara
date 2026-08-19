@@ -28,22 +28,9 @@ import {
 interface VNCViewerProps {
   tab: ConsoleTab;
   visible: boolean;
-  /**
-   * Optional pre-minted scoped console token. When provided, the component
-   * skips the inline mint and uses this token directly. No caller passes it
-   * today — it existed for the removed native app, whose WebView minted
-   * upstream. When omitted (i.e. always), the component mints via
-   * POST /api/v1/auth/console-token before opening the WS.
-   *
-   * Either way the token rides in `Sec-WebSocket-Protocol` (per remediation
-   * 2.7) — never in the URL — so it's not exposed in proxy access logs or
-   * Referer headers. The /ws/vnc endpoint rejects regular access tokens
-   * (per-cluster RBAC enforcement, security fix #1).
-   */
-  accessToken?: string;
 }
 
-export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
+export function VNCViewer({ tab, visible }: VNCViewerProps) {
   const { id: tabId, clusterID, node, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
@@ -55,15 +42,6 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
   const retryScheduledRef = useRef(false);
   const intentionalCloseRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  // A caller may pass a synthetic tab that does NOT live in the console store,
-  // so store-based status updates are no-ops for it. Mirror the connection
-  // status (and a manual reconnect key) in local state so the overlay and
-  // retries work for such storeless tabs too. (The removed native app's
-  // WebView was the only such caller; the web console always uses the store.)
-  const [localStatus, setLocalStatus] = useState<ConsoleStatus>("connecting");
-  const localStatusRef = useRef<ConsoleStatus>("connecting");
-  const [localReconnectKey, setLocalReconnectKey] = useState(0);
 
   // Reuses a still-valid scoped token across this tab's reconnect cycle
   // rather than minting — and auditing — one per attempt. Created once via
@@ -93,9 +71,7 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
   tabIdRef.current = tabId;
 
   const applyStatus = (status: ConsoleStatus) => {
-    updateTabStatus(tabId, status); // no-op for storeless (mobile) tabs
-    localStatusRef.current = status;
-    setLocalStatus(status);
+    updateTabStatus(tabId, status);
   };
   const applyStatusRef = useRef(applyStatus);
   applyStatusRef.current = applyStatus;
@@ -109,8 +85,8 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
     // actually dialling. Any other status is left alone — notably the parked
     // "guest-stopped", which connect() below deliberately declines to reopen.
     if (
-      (useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
-        ?.status ?? localStatusRef.current) === "idle"
+      useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
+        ?.status === "idle"
     ) {
       applyStatusRef.current("connecting");
     }
@@ -121,10 +97,9 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
     let stateLog1Timer: ReturnType<typeof setTimeout> | null = null;
     let stateLog2Timer: ReturnType<typeof setTimeout> | null = null;
 
-    // Storeless (mobile) tabs fall back to the local status mirror.
     const tabIsParked = () =>
-      (useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
-        ?.status ?? localStatusRef.current) === "guest-stopped";
+      useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
+        ?.status === "guest-stopped";
 
     // Single funnel for auto-reconnects. Both the RFB disconnect event and
     // ws.onclose fire for one drop — without the dedup flag they each
@@ -140,16 +115,9 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
         applyStatusRef.current("reconnecting");
         retryTimerRef.current = setTimeout(() => {
           retryScheduledRef.current = false;
-          const inStore = useConsoleStore
-            .getState()
-            .tabs.some((t) => t.id === tabIdRef.current);
-          if (inStore) {
-            void resolveAndReconnectRef.current(tabIdRef.current);
-          } else {
-            // Storeless (mobile) tab — reconnect via the local key.
-            applyStatusRef.current("connecting");
-            setLocalReconnectKey((k) => k + 1);
-          }
+          // Safe if the tab was closed in the meantime — resolveAndReconnect
+          // returns early for an id that is no longer in the store.
+          void resolveAndReconnectRef.current(tabIdRef.current);
         }, delay);
       } else {
         applyStatusRef.current("disconnected");
@@ -162,25 +130,23 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
       // resumes the tab when the guest powers on.
       if (tabIsParked()) return;
 
-      // Acquire the WS upgrade token. Desktop callers omit accessToken and
-      // mint a short-lived scoped JWT; mobile passes its pre-minted token
-      // through the prop.
+      // Mint the short-lived scoped WS upgrade token. It rides in
+      // `Sec-WebSocket-Protocol` (per remediation 2.7) — never in the URL — so
+      // it is not exposed in proxy access logs or Referer headers. The /ws/vnc
+      // endpoint rejects regular access tokens (per-cluster RBAC enforcement,
+      // security fix #1).
+      //
+      // The VNC scope type matches the tab type directly here — Terminal uses
+      // node_shell/vm_serial/ct_attach, VNCViewer uses vm_vnc/ct_vnc. The VNC
+      // subset is what tab.type can hold for this component.
       let token: string;
       try {
-        if (accessToken) {
-          token = accessToken;
-        } else {
-          // VNC scope type matches the tab type directly here — Terminal
-          // uses node_shell/vm_serial/ct_attach, VNCViewer uses
-          // vm_vnc/ct_vnc. The VNC subset is what tab.type can hold for
-          // this component.
-          token = await mintToken({
-            clusterId: clusterID,
-            node,
-            type: tab.type,
-            ...(vmid !== undefined ? { vmid } : {}),
-          });
-        }
+        token = await mintToken({
+          clusterId: clusterID,
+          node,
+          type: tab.type,
+          ...(vmid !== undefined ? { vmid } : {}),
+        });
       } catch (err) {
         if (intentionalCloseRef.current) return;
         console.error("[VNCViewer] failed to mint console token", err);
@@ -338,50 +304,12 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
       wsRef.current = null;
     };
     // Only re-run when the actual connection parameters change.
-  }, [tabId, tab.type, clusterID, node, vmid, guestType, reconnectKey, localReconnectKey, activated, accessToken, mintToken]);
+  }, [tabId, tab.type, clusterID, node, vmid, guestType, reconnectKey, activated, mintToken]);
 
   const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
 
-  // Touch mode: activated when an accessToken is passed. It hides the desktop
-  // toolbar, renders a hidden focusable input that brings up the soft keyboard,
-  // and forwards keystrokes from it to noVNC's RFB.sendKey().
-  //
-  // DEAD as of v1.9.x: the removed native app's WebView was the only caller
-  // that passed accessToken, so this is always false. The responsive web UI
-  // handles phones through FloatingConsole's full-screen takeover instead.
-  const isMobile = !!accessToken;
-  const mobileInputRef = useRef<HTMLInputElement>(null);
-
-  function focusMobileKeyboard() {
-    mobileInputRef.current?.focus();
-  }
-
-  function handleMobileKeyEvent(
-    e: React.KeyboardEvent<HTMLInputElement>,
-    down: boolean,
-  ) {
-    if (!rfbRef.current) return;
-    const keysym = mapBrowserKeyToKeysym(e);
-    if (keysym !== null) {
-      rfbRef.current.sendKey(keysym, e.code || null, down);
-      // Prevent the input from actually receiving characters — we don't
-      // want it to display anything, only act as a keyboard host.
-      e.preventDefault();
-    }
-  }
-
-  // Desktop tabs live in the store, so tab.status is authoritative (and is
-  // what external park/resume updates touch). Mobile's synthetic tab is
-  // static — use the local mirror there.
-  const effectiveStatus = isMobile ? localStatus : tab.status;
-
   function handleManualReconnect() {
-    if (isMobile) {
-      applyStatusRef.current("connecting");
-      setLocalReconnectKey((k) => k + 1);
-    } else {
-      useConsoleStore.getState().reconnectTab(tabId);
-    }
+    useConsoleStore.getState().reconnectTab(tabId);
   }
 
   return (
@@ -389,55 +317,19 @@ export function VNCViewer({ tab, visible, accessToken }: VNCViewerProps) {
       className="flex h-full flex-col"
       style={{ display: visible ? "flex" : "none" }}
     >
-      {!isMobile && !isMinimized && <VNCToolbar rfb={rfb} tab={tab} />}
+      {!isMinimized && <VNCToolbar rfb={rfb} tab={tab} />}
       <div className="relative flex-1 overflow-hidden">
         <div
           ref={containerRef}
           className="h-full w-full bg-black"
           data-tab-id={tab.id}
-          onClick={isMobile ? focusMobileKeyboard : undefined}
         />
         <ConsoleStateOverlay
           tab={tab}
-          status={effectiveStatus}
+          status={tab.status}
           onReconnect={handleManualReconnect}
         />
       </div>
-      {isMobile && (
-        <>
-          {/* Hidden input that holds the soft-keyboard focus. Positioned
-              off-screen so the user never sees it but the OS treats it as
-              an active text field. */}
-          <input
-            ref={mobileInputRef}
-            type="text"
-            autoCapitalize="off"
-            autoCorrect="off"
-            autoComplete="off"
-            spellCheck={false}
-            value=""
-            onChange={() => {
-              // We never accumulate value — keystrokes are forwarded to VNC.
-            }}
-            onKeyDown={(e) => { handleMobileKeyEvent(e, true); }}
-            onKeyUp={(e) => { handleMobileKeyEvent(e, false); }}
-            style={{
-              position: "absolute",
-              left: -9999,
-              top: 0,
-              width: 1,
-              height: 1,
-              opacity: 0,
-              pointerEvents: "none",
-            }}
-          />
-          {/* Floating bottom toolbar with key combos + show-keyboard. */}
-          <MobileConsoleToolbar
-            rfb={rfb}
-            onShowKeyboard={focusMobileKeyboard}
-          />
-        </>
-      )}
     </div>
   );
 }
@@ -455,7 +347,6 @@ function ConsoleStateOverlay({
   onReconnect,
 }: {
   tab: ConsoleTab;
-  /** Effective status — store-backed on desktop, local mirror on mobile. */
   status: ConsoleStatus;
   onReconnect: () => void;
 }) {
@@ -585,129 +476,4 @@ function ConsoleStateOverlay({
       </Button>
     </div>
   );
-}
-
-/**
- * Mobile-only floating toolbar with the most-used key combos and a button
- * to bring up the soft keyboard.
- */
-function MobileConsoleToolbar({
-  rfb,
-  onShowKeyboard,
-}: {
-  rfb: RFB | null;
-  onShowKeyboard: () => void;
-}) {
-  function sendCtrlAltDel() {
-    if (!rfb) return;
-    rfb.sendCtrlAltDel();
-  }
-  function sendKey(keysym: number, label: string) {
-    if (!rfb) return;
-    rfb.sendKey(keysym, label, true);
-    rfb.sendKey(keysym, label, false);
-  }
-  const disabled = !rfb;
-  const btnStyle: React.CSSProperties = {
-    background: "rgba(34, 197, 94, 0.15)",
-    border: "1px solid rgba(34, 197, 94, 0.4)",
-    color: "#10b981",
-    padding: "6px 10px",
-    borderRadius: 6,
-    fontSize: 11,
-    fontWeight: 600,
-    opacity: disabled ? 0.4 : 1,
-  };
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 6,
-        padding: 8,
-        background: "rgba(0,0,0,0.7)",
-        borderTop: "1px solid #262626",
-        flexWrap: "wrap",
-        justifyContent: "center",
-      }}
-    >
-      <button type="button" style={btnStyle} disabled={disabled} onClick={() => { onShowKeyboard(); }}>
-        ⌨ KEYBOARD
-      </button>
-      <button type="button" style={btnStyle} disabled={disabled} onClick={() => { sendCtrlAltDel(); }}>
-        CTRL+ALT+DEL
-      </button>
-      <button type="button" style={btnStyle} disabled={disabled} onClick={() => { sendKey(0xff1b, "Escape"); }}>
-        ESC
-      </button>
-      <button type="button" style={btnStyle} disabled={disabled} onClick={() => { sendKey(0xff09, "Tab"); }}>
-        TAB
-      </button>
-      <button type="button" style={btnStyle} disabled={disabled} onClick={() => { sendKey(0xff51, "ArrowLeft"); }}>
-        ←
-      </button>
-      <button type="button" style={btnStyle} disabled={disabled} onClick={() => { sendKey(0xff52, "ArrowUp"); }}>
-        ↑
-      </button>
-      <button type="button" style={btnStyle} disabled={disabled} onClick={() => { sendKey(0xff54, "ArrowDown"); }}>
-        ↓
-      </button>
-      <button type="button" style={btnStyle} disabled={disabled} onClick={() => { sendKey(0xff53, "ArrowRight"); }}>
-        →
-      </button>
-    </div>
-  );
-}
-
-/**
- * Translate a browser KeyboardEvent into an X11 keysym so it can be sent
- * via RFB.sendKey(). Covers ASCII printables, common control keys, and
- * the most-used special keys. Returns null for keys we don't know how to
- * map (in which case the caller should let the event through).
- */
-function mapBrowserKeyToKeysym(
-  e: React.KeyboardEvent<HTMLInputElement>,
-): number | null {
-  // Control / function keys via e.key
-  switch (e.key) {
-    case "Backspace": return 0xff08;
-    case "Tab": return 0xff09;
-    case "Enter": return 0xff0d;
-    case "Escape": return 0xff1b;
-    case "Delete": return 0xffff;
-    case "Home": return 0xff50;
-    case "End": return 0xff57;
-    case "PageUp": return 0xff55;
-    case "PageDown": return 0xff56;
-    case "ArrowLeft": return 0xff51;
-    case "ArrowUp": return 0xff52;
-    case "ArrowRight": return 0xff53;
-    case "ArrowDown": return 0xff54;
-    case "Insert": return 0xff63;
-    case "F1": return 0xffbe;
-    case "F2": return 0xffbf;
-    case "F3": return 0xffc0;
-    case "F4": return 0xffc1;
-    case "F5": return 0xffc2;
-    case "F6": return 0xffc3;
-    case "F7": return 0xffc4;
-    case "F8": return 0xffc5;
-    case "F9": return 0xffc6;
-    case "F10": return 0xffc7;
-    case "F11": return 0xffc8;
-    case "F12": return 0xffc9;
-    case "Shift": return 0xffe1;
-    case "Control": return 0xffe3;
-    case "Alt": return 0xffe9;
-    case "Meta": return 0xffe7;
-    case "CapsLock": return 0xffe5;
-  }
-  // Single printable characters: keysym is the unicode codepoint for
-  // Latin-1 chars, otherwise 0x01000000 + codepoint.
-  if (e.key.length === 1) {
-    const code = e.key.codePointAt(0);
-    if (code === undefined) return null;
-    if (code <= 0x00ff) return code;
-    return 0x01000000 + code;
-  }
-  return null;
 }

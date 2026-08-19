@@ -14,19 +14,6 @@ import {
 interface TerminalProps {
   tab: ConsoleTab;
   visible: boolean;
-  /**
-   * Optional pre-minted scoped console token. When provided, the component
-   * skips the inline mint and uses this token directly. No caller passes it
-   * today — it existed for the removed native app, whose WebView minted
-   * upstream. When omitted (i.e. always), the component mints via
-   * POST /api/v1/auth/console-token before opening the WS.
-   *
-   * Either way the token rides in `Sec-WebSocket-Protocol` (per remediation
-   * 2.7) — never in the URL — so it's not exposed in proxy access logs or
-   * Referer headers. The /ws/console endpoint rejects regular access tokens
-   * (per-cluster RBAC enforcement, security fix #1).
-   */
-  accessToken?: string;
 }
 
 function buildConsoleWsUrl(
@@ -51,7 +38,7 @@ function buildConsoleWsUrl(
   return `${protocol}//${host}/ws/console?${params.toString()}`;
 }
 
-export function Terminal({ tab, visible, accessToken }: TerminalProps) {
+export function Terminal({ tab, visible }: TerminalProps) {
   const { id: tabId, clusterID, node, type, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerminal | null>(null);
@@ -163,20 +150,19 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
         return;
       }
 
-      // Acquire the WS upgrade token: mint a short-lived scoped JWT, unless a
-      // caller supplied a pre-minted one through the accessToken prop.
+      // Mint the short-lived scoped WS upgrade token. It rides in
+      // `Sec-WebSocket-Protocol` (per remediation 2.7) — never in the URL — so
+      // it is not exposed in proxy access logs or Referer headers. The
+      // /ws/console endpoint rejects regular access tokens (per-cluster RBAC
+      // enforcement, security fix #1).
       let token: string;
       try {
-        if (accessToken) {
-          token = accessToken;
-        } else {
-          token = await mintToken({
-            clusterId: clusterID,
-            node,
-            type: type,
-            ...(vmid !== undefined ? { vmid } : {}),
-          });
-        }
+        token = await mintToken({
+          clusterId: clusterID,
+          node,
+          type: type,
+          ...(vmid !== undefined ? { vmid } : {}),
+        });
       } catch (err) {
         if (intentionalCloseRef.current) return;
         const msg = err instanceof Error ? err.message : "unknown error";
@@ -313,7 +299,7 @@ export function Terminal({ tab, visible, accessToken }: TerminalProps) {
       wsRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [tabId, clusterID, node, type, vmid, reconnectKey, activated, accessToken, mintToken, updateTabStatus, resolveAndReconnect]);
+  }, [tabId, clusterID, node, type, vmid, reconnectKey, activated, mintToken, updateTabStatus, resolveAndReconnect]);
 
   // Re-fit when visibility changes.
   useEffect(() => {
