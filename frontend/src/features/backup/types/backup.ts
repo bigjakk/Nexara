@@ -204,6 +204,7 @@ export interface PBSDatastoreConfig {
   "gc-schedule"?: string;
   "prune-schedule"?: string;
   "keep-last"?: number;
+  "keep-hourly"?: number;
   "keep-daily"?: number;
   "keep-weekly"?: number;
   "keep-monthly"?: number;
@@ -212,6 +213,8 @@ export interface PBSDatastoreConfig {
   notify?: string;
   "verify-new"?: boolean;
   "maintenance-mode"?: string;
+  /** PBS 3.x replacement for the notify/notify-user pair above. */
+  "notification-mode"?: string;
 }
 
 export interface BackupCoverageEntry {

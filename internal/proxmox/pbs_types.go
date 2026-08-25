@@ -22,52 +22,52 @@ type PBSGCStatus struct {
 
 // PBSBackupGroup represents a backup group from GET /api2/json/admin/datastore/{store}/groups.
 type PBSBackupGroup struct {
-	BackupType string `json:"backup-type"`
-	BackupID   string `json:"backup-id"`
-	LastBackup int64  `json:"last-backup"`
-	BackupCount int   `json:"backup-count"`
-	Owner      string `json:"owner,omitempty"`
+	BackupType  string `json:"backup-type"`
+	BackupID    string `json:"backup-id"`
+	LastBackup  int64  `json:"last-backup"`
+	BackupCount int    `json:"backup-count"`
+	Owner       string `json:"owner,omitempty"`
 }
 
 // PBSSnapshot represents a snapshot from GET /api2/json/admin/datastore/{store}/snapshots.
 type PBSSnapshot struct {
-	BackupType string `json:"backup-type"`
-	BackupID   string `json:"backup-id"`
-	BackupTime int64  `json:"backup-time"`
-	Size       int64  `json:"size,omitempty"`
+	BackupType   string                 `json:"backup-type"`
+	BackupID     string                 `json:"backup-id"`
+	BackupTime   int64                  `json:"backup-time"`
+	Size         int64                  `json:"size,omitempty"`
 	Verification *PBSVerificationStatus `json:"verification,omitempty"`
-	Protected  bool   `json:"protected,omitempty"`
-	Comment    string `json:"comment,omitempty"`
-	Owner      string `json:"owner,omitempty"`
+	Protected    bool                   `json:"protected,omitempty"`
+	Comment      string                 `json:"comment,omitempty"`
+	Owner        string                 `json:"owner,omitempty"`
 }
 
 // PBSVerificationStatus represents snapshot verification info.
 type PBSVerificationStatus struct {
-	State   string `json:"state"`
-	UPID    string `json:"upid,omitempty"`
+	State string `json:"state"`
+	UPID  string `json:"upid,omitempty"`
 }
 
 // PBSSyncJob represents a sync job from GET /api2/json/admin/sync.
 type PBSSyncJob struct {
-	ID          string `json:"id"`
-	Store       string `json:"store"`
-	Remote      string `json:"remote,omitempty"`
-	RemoteStore string `json:"remote-store,omitempty"`
-	Schedule    string `json:"schedule,omitempty"`
-	LastRunState string `json:"last-run-state,omitempty"`
-	LastRunEndtime int64 `json:"last-run-endtime,omitempty"`
-	NextRun     int64  `json:"next-run,omitempty"`
-	Comment     string `json:"comment,omitempty"`
+	ID             string `json:"id"`
+	Store          string `json:"store"`
+	Remote         string `json:"remote,omitempty"`
+	RemoteStore    string `json:"remote-store,omitempty"`
+	Schedule       string `json:"schedule,omitempty"`
+	LastRunState   string `json:"last-run-state,omitempty"`
+	LastRunEndtime int64  `json:"last-run-endtime,omitempty"`
+	NextRun        int64  `json:"next-run,omitempty"`
+	Comment        string `json:"comment,omitempty"`
 }
 
 // PBSVerifyJob represents a verify job from GET /api2/json/admin/verify.
 type PBSVerifyJob struct {
-	ID           string `json:"id"`
-	Store        string `json:"store"`
-	Schedule     string `json:"schedule,omitempty"`
-	LastRunState string `json:"last-run-state,omitempty"`
-	LastRunEndtime int64 `json:"last-run-endtime,omitempty"`
-	Comment      string `json:"comment,omitempty"`
+	ID             string `json:"id"`
+	Store          string `json:"store"`
+	Schedule       string `json:"schedule,omitempty"`
+	LastRunState   string `json:"last-run-state,omitempty"`
+	LastRunEndtime int64  `json:"last-run-endtime,omitempty"`
+	Comment        string `json:"comment,omitempty"`
 }
 
 // PBSTask represents a task from GET /api2/json/nodes/localhost/tasks.
@@ -134,20 +134,23 @@ type PBSDatastoreRRDEntry struct {
 
 // PBSDatastoreConfig represents the full configuration of a PBS datastore.
 type PBSDatastoreConfig struct {
-	Name           string `json:"name"`
-	Path           string `json:"path,omitempty"`
-	Comment        string `json:"comment,omitempty"`
-	GCSchedule     string `json:"gc-schedule,omitempty"`
-	PruneSchedule  string `json:"prune-schedule,omitempty"`
-	KeepLast       int    `json:"keep-last,omitempty"`
-	KeepDaily      int    `json:"keep-daily,omitempty"`
-	KeepWeekly     int    `json:"keep-weekly,omitempty"`
-	KeepMonthly    int    `json:"keep-monthly,omitempty"`
-	KeepYearly     int    `json:"keep-yearly,omitempty"`
-	NotifyUser     string `json:"notify-user,omitempty"`
-	Notify         string `json:"notify,omitempty"`
-	VerifyNew      bool   `json:"verify-new,omitempty"`
+	Name            string `json:"name"`
+	Path            string `json:"path,omitempty"`
+	Comment         string `json:"comment,omitempty"`
+	GCSchedule      string `json:"gc-schedule,omitempty"`
+	PruneSchedule   string `json:"prune-schedule,omitempty"`
+	KeepLast        int    `json:"keep-last,omitempty"`
+	KeepHourly      int    `json:"keep-hourly,omitempty"`
+	KeepDaily       int    `json:"keep-daily,omitempty"`
+	KeepWeekly      int    `json:"keep-weekly,omitempty"`
+	KeepMonthly     int    `json:"keep-monthly,omitempty"`
+	KeepYearly      int    `json:"keep-yearly,omitempty"`
+	NotifyUser      string `json:"notify-user,omitempty"`
+	Notify          string `json:"notify,omitempty"`
+	VerifyNew       bool   `json:"verify-new,omitempty"`
 	MaintenanceMode string `json:"maintenance-mode,omitempty"`
+	// PBS 3.x replaced the notify/notify-user pair above with a single mode.
+	NotificationMode string `json:"notification-mode,omitempty"`
 }
 
 // RestoreParams holds parameters for restoring a VM/CT from a PBS backup.

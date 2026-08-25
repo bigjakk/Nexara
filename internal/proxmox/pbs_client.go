@@ -228,11 +228,22 @@ func (c *PBSClient) PruneDatastore(ctx context.Context, store string, params PBS
 }
 
 // GetDatastoreConfig returns the full configuration of a PBS datastore.
+//
+// /config/datastore/{store}, not /admin/datastore/{store}: the latter is a
+// directory-only router node with no GET of its own, so it answers with the
+// list of subdirs below it — [{"subdir":"catalog"},{"subdir":"gc"},…]. Decoding
+// that array into this struct failed on "cannot unmarshal array", which
+// mapProxmoxError has no case for, so it surfaced as a 500 and the datastore
+// config card rendered nothing.
+//
+// Every other admin/datastore call here names a leaf below the node (or, for
+// GetDatastores, the collection above it). This is the only config read, and
+// datastore.cfg is not served from /admin.
 func (c *PBSClient) GetDatastoreConfig(ctx context.Context, store string) (*PBSDatastoreConfig, error) {
 	if store == "" {
 		return nil, fmt.Errorf("store name is required")
 	}
-	path := "/admin/datastore/" + url.PathEscape(store)
+	path := "/config/datastore/" + url.PathEscape(store)
 	var config PBSDatastoreConfig
 	if err := c.do(ctx, path, &config); err != nil {
 		return nil, fmt.Errorf("get datastore config for %s: %w", store, err)

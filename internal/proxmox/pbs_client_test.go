@@ -30,7 +30,6 @@ func pbsTestServer(t *testing.T, routes map[string]interface{}) *httptest.Server
 	}))
 }
 
-
 func TestPBSClient_GetDatastores(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -266,5 +265,67 @@ func TestNewPBSClient_Validation(t *testing.T) {
 				t.Errorf("NewPBSClient() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestPBSClient_GetDatastoreConfigUsesConfigEndpoint pins which PBS endpoint the
+// datastore config is read from.
+//
+// It used to read /admin/datastore/{store}, which is the API's directory node
+// for that datastore: PBS answers with the list of subdirs below it
+// ([{"subdir":"catalog"},{"subdir":"gc"},…]), an ARRAY. Decoding that into
+// PBSDatastoreConfig failed on "cannot unmarshal array", the handler mapped it
+// to a 500, and the datastore panel in the UI retried it forever while showing
+// nothing. The real configuration lives under /config/datastore/{store}.
+//
+// The fixtures below are the shapes a live PBS 3.x actually returned for the
+// two paths, so this fails again the moment the leading segment goes back.
+func TestPBSClient_GetDatastoreConfigUsesConfigEndpoint(t *testing.T) {
+	const store = "Test-Backup-Datastore"
+
+	srv := pbsTestServer(t, map[string]interface{}{
+		// The directory index, served where the old code looked.
+		"/admin/datastore/" + store: []map[string]string{
+			{"subdir": "catalog"}, {"subdir": "gc"}, {"subdir": "groups"},
+			{"subdir": "prune"}, {"subdir": "rrd"}, {"subdir": "snapshots"},
+		},
+		"/config/datastore/" + store: map[string]interface{}{
+			"name":           store,
+			"path":           "/mnt/backup",
+			"gc-schedule":    "daily",
+			"prune-schedule": "weekly",
+			"keep-last":      3,
+			"verify-new":     true,
+		},
+	})
+	defer srv.Close()
+
+	client := &PBSClient{apiClient: &apiClient{
+		httpClient: srv.Client(),
+		baseURL:    srv.URL,
+		authHeader: "PBSAPIToken=test@pam!token:secret",
+	}}
+
+	cfg, err := client.GetDatastoreConfig(context.Background(), store)
+	if err != nil {
+		t.Fatalf("GetDatastoreConfig: %v", err)
+	}
+
+	// Every field the UI's DatastoreConfigCard renders. Reading the directory
+	// index instead would leave all of them zero — the symptom this locks.
+	if cfg.Path != "/mnt/backup" {
+		t.Errorf("Path = %q, want /mnt/backup", cfg.Path)
+	}
+	if cfg.GCSchedule != "daily" {
+		t.Errorf("GCSchedule = %q, want daily", cfg.GCSchedule)
+	}
+	if cfg.PruneSchedule != "weekly" {
+		t.Errorf("PruneSchedule = %q, want weekly", cfg.PruneSchedule)
+	}
+	if cfg.KeepLast != 3 {
+		t.Errorf("KeepLast = %d, want 3", cfg.KeepLast)
+	}
+	if !cfg.VerifyNew {
+		t.Error("VerifyNew = false, want true")
 	}
 }

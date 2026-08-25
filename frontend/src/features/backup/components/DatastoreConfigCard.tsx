@@ -20,6 +20,7 @@ export function DatastoreConfigCard({ pbsId, store }: DatastoreConfigCardProps) 
 
   const pruneDefaults = [
     { label: "Keep Last", value: config["keep-last"] },
+    { label: "Keep Hourly", value: config["keep-hourly"] },
     { label: "Keep Daily", value: config["keep-daily"] },
     { label: "Keep Weekly", value: config["keep-weekly"] },
     { label: "Keep Monthly", value: config["keep-monthly"] },
