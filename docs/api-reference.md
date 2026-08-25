@@ -336,16 +336,29 @@ other's common case.
 
 | Parameter | Description |
 |-----------|-------------|
-| `since`, `until` | Window bounds. Accepts `YYYY-MM-DD`, `YYYY-MM-DD HH:MM[:SS]`, a relative offset (`-1h`, `30m ago`, `2d`), or a unix timestamp. Invalid values return `400`, not `500`. |
+| `since`, `until` | Window bounds. Accepts `YYYY-MM-DD`, `YYYY-MM-DD HH:MM[:SS]`, a relative offset (`-1h`, `30m ago`, `2d`), or a unix timestamp. Invalid or out-of-range values return `400`, not `500`. |
 | `start`, `limit` | Offset into the matched lines and page size (default 500, max 5000). `start` defaults to fetching the *newest* `limit` lines. |
 | `service` | Restrict to one systemd unit. |
 
 > **Timezone.** Proxmox hands `since`/`until` to `journalctl` on the node, which
-> reads a wall-clock string in the **node's local timezone** — the API cannot
-> resolve that ambiguity for you. Relative offsets and unix timestamps are
-> converted to UTC wall-clock before being sent, so on a node not running UTC
-> they land offset by that node's UTC offset. Use `journal` below when you need
-> an exact instant.
+> reads a wall-clock string in the **node's local timezone**. The two forms are
+> therefore handled differently, and the distinction is the whole ballgame:
+>
+> - A **wall-clock string** you supply is passed through untouched — you wrote
+>   it, and the node reads it, in its own local terms.
+> - A **relative offset or unix timestamp** names an absolute instant, so the
+>   API resolves the node's UTC offset (from Proxmox's `/nodes/{node}/time`) and
+>   renders the wall clock that node would show for it. `?since=1h` means one
+>   hour ago in real terms on every node, whatever its timezone.
+>
+> Rendering those as UTC instead — which is what v2.0.0's first cut did — points
+> at the node's *future* on any node behind UTC, and journalctl answers with its
+> literal `-- No entries --`. If the offset lookup fails the API falls back to
+> UTC and logs a warning, so an empty result on a non-UTC node is worth checking
+> the server log for.
+>
+> One residual: the offset is read as of *now*, so a window spanning a
+> daylight-saving transition is off by the DST delta for part of its span.
 >
 > When `since` is omitted it defaults to **the date 24 hours ago** — so between
 > 24 and 48 hours of journal, depending on the hour. Date-only because that is
@@ -368,7 +381,7 @@ other's common case.
 | Parameter | Description |
 |-----------|-------------|
 | `lastentries` | The newest N lines. The common case, and the one `syslog` cannot express. Capped at 5000; defaults to 500 when no other bound is given. |
-| `since`, `until` | Same accepted forms as above, but sent to Proxmox as **unix timestamps**, so there is no timezone ambiguity. |
+| `since`, `until` | Same accepted forms as above, but sent to Proxmox as **unix timestamps**, so no wall clock — and no node timezone — is involved at any point. A wall-clock string given here is read as UTC. |
 | `startcursor`, `endcursor` | Opaque journal cursors, for resuming a read. |
 
 `items` is a flat array of raw journal lines (strings), unlike `syslog`'s

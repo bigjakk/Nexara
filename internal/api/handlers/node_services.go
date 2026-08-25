@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -85,11 +86,12 @@ var pveWallClock = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)
 // relativeOffset matches the relative forms this API accepts on top of
 // Proxmox's own: "-90m", "2h", "7d ago". Sign and " ago" both mean "into the
 // past"; there is no forward form, since a future window returns nothing.
-// {1,7} digits, not {1,}: `time.Duration(n) * unit` is int64 nanoseconds and
-// overflows silently. Unbounded, `?since=9999999999999d` wraps to an arbitrary
-// — frequently FUTURE — instant, which is the "-- No entries --" symptom this
-// validation exists to remove, reachable straight from the query string.
-// 7 digits caps a week-unit offset at ~190,000 years, well inside int64.
+// The digit bound is a sanity limit on the input, NOT the overflow guard —
+// see boundedOffset. time.Duration is int64 nanoseconds and tops out at
+// ~292 years (2562047h47m16s), so `15251w` — five digits, comfortably inside
+// this pattern — wraps negative and yields a wall clock in 2318. A future
+// `since` is the "-- No entries --" symptom this validation exists to remove,
+// so the real check has to happen before the multiply.
 var relativeOffset = regexp.MustCompile(`^-?(\d{1,7})\s*([smhdw])(\s+ago)?$`)
 
 var relativeUnit = map[string]time.Duration{
@@ -105,18 +107,32 @@ var relativeUnit = map[string]time.Duration{
 //
 // Three accepted forms:
 //
-//   - Proxmox's own wall-clock strings, passed through unchanged;
+//   - Proxmox's own wall-clock strings, passed through unchanged — the caller
+//     wrote a wall clock, and the node reads it as one;
 //   - a relative offset ("-1h", "30m ago"), which is what people reach for
 //     first and which Proxmox rejects outright;
 //   - a unix timestamp, which is unambiguous and trivially machine-generated.
 //
-// The latter two are rendered as wall-clock UTC. Note the asymmetry that
-// creates and that no amount of validation here can remove: the node runs
-// journalctl, which reads a wall-clock string in the *node's* local timezone.
-// So "-1h" means "one hour before now, read as if the node were on UTC" —
-// documented in docs/api-reference.md, and the reason the caller-less default
-// below is a whole day back rather than an hour.
-func normalizeSyslogTime(param, value string) (string, error) {
+// The latter two name an absolute instant, and are rendered into node-local
+// wall clock using nodeOffset — because the node hands the string to
+// journalctl, which reads it in the NODE's timezone.
+//
+// Getting this wrong is not cosmetic. Rendering "1h ago" as UTC against a node
+// on America/Los_Angeles (UTC-7) produces a wall clock the node reads as seven
+// hours in its own FUTURE, and journalctl answers with its literal
+// "-- No entries --" — the exact symptom this endpoint was fixed to stop
+// producing. Verified against HV01, which runs America/Los_Angeles.
+//
+// DST: nodeOffset is the offset *now*, so a window spanning a transition is off
+// by the DST delta for part of its span. Harmless in the autumn direction (the
+// window merely widens). In the spring direction it shifts `since` up to an
+// hour later, and a short lookback landing just after spring-forward can render
+// a wall clock inside the nonexistent local hour — which glibc resolves with
+// the pre-transition offset, i.e. slightly after now, giving an empty result.
+// Reachable only by the shortest preset, twice a year; the cost of fixing it is
+// a full tzdata resolution at the target instant, which is not worth it. If
+// someone reports an empty "Last 1h" on a DST Sunday, this is why.
+func normalizeSyslogTime(param, value string, nodeOffset time.Duration) (string, error) {
 	if pveWallClock.MatchString(value) {
 		// Passed through in Proxmox's own form, but still bounded: an
 		// unbounded `since` makes journalctl walk the whole journal, and with
@@ -132,23 +148,100 @@ func normalizeSyslogTime(param, value string) (string, error) {
 		if err != nil {
 			return "", syslogTimeError(param)
 		}
-		d := time.Duration(n) * relativeUnit[m[2]]
-		if d > maxSyslogLookback {
+		d, ok := boundedOffset(n, relativeUnit[m[2]])
+		if !ok {
 			return "", syslogLookbackError(param)
 		}
-		return time.Now().UTC().Add(-d).Format("2006-01-02 15:04:05"), nil
+		return nodeWallClock(time.Now().Add(-d), nodeOffset), nil
 	}
 	if ts, err := strconv.ParseInt(value, 10, 64); err == nil {
 		if !plausibleUnixSeconds(ts) {
 			return "", syslogTimeError(param)
 		}
-		t := time.Unix(ts, 0).UTC()
+		t := time.Unix(ts, 0)
 		if time.Since(t) > maxSyslogLookback {
 			return "", syslogLookbackError(param)
 		}
-		return t.Format("2006-01-02 15:04:05"), nil
+		return nodeWallClock(t, nodeOffset), nil
 	}
 	return "", syslogTimeError(param)
+}
+
+// needsNodeClock reports whether a since/until value names an absolute instant
+// that has to be re-rendered into the node's wall clock.
+//
+// A value already in Proxmox's wall-clock form does not — the caller wrote it
+// in the node's terms. An empty one uses the default, which is a whole date and
+// safe at any offset. Malformed input does not either: it is about to be
+// rejected with a 400, and matching it here bought a Proxmox round trip on
+// every typo. TestNeedsNodeClock_MatchesNormalization pins this to the set of
+// values normalizeSyslogTime actually re-renders.
+func needsNodeClock(value string) bool {
+	if value == "" || pveWallClock.MatchString(value) {
+		return false
+	}
+	if relativeOffset.MatchString(value) {
+		return true
+	}
+	ts, err := strconv.ParseInt(value, 10, 64)
+	return err == nil && plausibleUnixSeconds(ts)
+}
+
+// nodeWallClock renders an absolute instant as the wall clock a node on the
+// given UTC offset would show for it.
+func nodeWallClock(t time.Time, nodeOffset time.Duration) string {
+	return t.UTC().Add(nodeOffset).Format("2006-01-02 15:04:05")
+}
+
+// nodeUTCOffset asks the node what time it thinks it is.
+//
+// PVE's /nodes/{node}/time returns both the UTC epoch and the same instant
+// shifted into node-local time, so the offset falls out by subtraction — no
+// timezone database and no guessing from the reported zone name. A failure is
+// not fatal: 0 means "assume UTC", which is the behaviour this had before.
+func nodeUTCOffset(ctx context.Context, pxClient *proxmox.Client, node string) time.Duration {
+	nt, err := pxClient.GetNodeTime(ctx, node)
+	if err != nil {
+		slog.Warn("could not read node time; treating syslog timestamps as UTC",
+			"node", node, "error", err)
+		return 0
+	}
+	if nt == nil {
+		slog.Warn("node time response was empty; treating syslog timestamps as UTC", "node", node)
+		return 0
+	}
+	offset := time.Duration(nt.Localtime-nt.Time) * time.Second
+	// Clamped because the offset is applied AFTER the lookback cap has been
+	// enforced, so a nonsense value walks the window straight back out of it.
+	// A response missing `localtime` decodes as 0, making the offset ~-56
+	// years — which renders `since` as a 1970 date and asks the node to scan
+	// its entire journal, the very thing maxSyslogLookback exists to prevent.
+	// 26h rather than 14h leaves slack for a node whose clock is simply skewed.
+	if offset < -maxNodeUTCOffset || offset > maxNodeUTCOffset {
+		slog.Warn("node reported an implausible UTC offset; treating syslog timestamps as UTC",
+			"node", node, "offset", offset)
+		return 0
+	}
+	return offset
+}
+
+// maxNodeUTCOffset bounds a plausible node UTC offset. Real zones span
+// -12h..+14h; the extra slack absorbs clock skew.
+const maxNodeUTCOffset = 26 * time.Hour
+
+// nodeTimeTimeout bounds the offset lookup. Short, because failing it just
+// means "assume UTC" and the syslog read itself still proceeds.
+const nodeTimeTimeout = 5 * time.Second
+
+// boundedOffset multiplies a count by a unit, rejecting anything past the
+// lookback cap — and doing the comparison on the COUNT, before the multiply,
+// because that is where int64 overflow happens. Checking the product instead
+// lets a wrapped-negative duration sail through as "not greater than the cap".
+func boundedOffset(n int, unit time.Duration) (time.Duration, bool) {
+	if unit <= 0 || n < 0 || n > int(maxSyslogLookback/unit) {
+		return 0, false
+	}
+	return time.Duration(n) * unit, true
 }
 
 // maxSyslogLookback bounds how far back a syslog window may reach. Journals are
@@ -156,6 +249,12 @@ func normalizeSyslogTime(param, value string) (string, error) {
 // keeping `?since=1` (the epoch) from turning into a full-journal scan.
 const maxSyslogLookback = 90 * 24 * time.Hour
 
+// Parsed as UTC even though the caller wrote node-local. The two differ by at
+// most ±14h against a 90-day cap, so the boundary is fuzzy by that much and
+// nothing else — not worth a round trip to sharpen. (In a mixed request the
+// offset has been fetched already, but it stays unused here so that the
+// wall-clock branch behaves identically whether or not the other parameter
+// happened to need one.)
 func withinLookback(param, wallClock string) error {
 	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"} {
 		t, err := time.ParseInLocation(layout, wallClock, time.UTC)
@@ -227,24 +326,47 @@ func (h *NodeHandler) GetNodeSyslog(c fiber.Ctx) error {
 		limit = maxSyslogEntries
 	}
 
-	since := c.Query("since")
-	if since == "" {
-		since = defaultSyslogSince()
-	} else if since, err = normalizeSyslogTime("since", since); err != nil {
+	pxClient, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
 		return err
 	}
-	until := c.Query("until")
+
+	rawSince, rawUntil := c.Query("since"), c.Query("until")
+
+	// The node's UTC offset is only needed to render an absolute instant as the
+	// wall clock that node would show. A caller who wrote a wall clock already
+	// wrote it in the node's terms, so that case costs no extra round trip.
+	var nodeOffset time.Duration
+	if needsNodeClock(rawSince) || needsNodeClock(rawUntil) {
+		// Deadlined: this is best-effort (a failure degrades to UTC), but
+		// fiber.Ctx.Context() is context.Background() unless something calls
+		// SetContext, and nothing here does — so without this the call inherits
+		// only the client's 5-minute timeout and doubles the worst case against
+		// a wedged node.
+		//
+		// Re-fetched per request rather than cached. The value is near-static,
+		// so a per-(cluster,node) TTL cache would remove a round trip from
+		// every syslog page load; not built yet because /nodes/{node}/time is
+		// a cheap local call and the cache is state to invalidate.
+		tctx, cancel := context.WithTimeout(c.Context(), nodeTimeTimeout)
+		nodeOffset = nodeUTCOffset(tctx, pxClient, nodeName)
+		cancel()
+	}
+
+	since := rawSince
+	if since == "" {
+		since = defaultSyslogSince()
+	} else if since, err = normalizeSyslogTime("since", since, nodeOffset); err != nil {
+		return err
+	}
+	until := rawUntil
 	if until != "" {
-		if until, err = normalizeSyslogTime("until", until); err != nil {
+		if until, err = normalizeSyslogTime("until", until, nodeOffset); err != nil {
 			return err
 		}
 	}
 	service := c.Query("service")
 
-	pxClient, err := h.createProxmoxClient(c, clusterID)
-	if err != nil {
-		return err
-	}
 	entries, total, err := pxClient.GetNodeSyslog(c.Context(), nodeName, start, limit, since, until, service)
 	if err != nil {
 		// Logged, not returned: the upstream string names internal paths and
@@ -330,7 +452,14 @@ func parseJournalTime(param, value string) (int64, error) {
 		if err != nil {
 			return 0, syslogTimeError(param)
 		}
-		return time.Now().Add(-time.Duration(n) * relativeUnit[m[2]]).Unix(), nil
+		// Same overflow guard as the syslog side. Without it the wrapped
+		// duration goes out as a future unix timestamp, which the journal
+		// endpoint has no wall-clock cap to catch.
+		d, ok := boundedOffset(n, relativeUnit[m[2]])
+		if !ok {
+			return 0, syslogLookbackError(param)
+		}
+		return time.Now().Add(-d).Unix(), nil
 	}
 	// Wall-clock forms are read as UTC. journalctl would read them as node
 	// local time, but this endpoint sends an absolute timestamp, so the
