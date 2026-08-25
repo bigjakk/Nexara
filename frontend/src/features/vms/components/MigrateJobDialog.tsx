@@ -160,6 +160,10 @@ export function MigrateJobDialog({
   // clusters "delete source" destroys the whole source guest, so it stays
   // opt-in. With it off Proxmox keeps each source volume as an unused disk.
   const deleteSource = deleteSourceOverride ?? needsDiskPlacement;
+  // Only meaningful where something is actually left behind: a cross-cluster
+  // migration (where it destroys the source guest) or an intra-cluster move
+  // that relocates disks. A same-cluster node migration leaves no copy, and
+  // executeIntraCluster never reads the flag.
   const showDeleteSource =
     migrationType === "cross-cluster" || needsDiskPlacement;
   const { data: vmConfig } = useVMConfig(
@@ -289,7 +293,9 @@ export function MigrateJobDialog({
       network_map: migrationType === "cross-cluster" ? networkMap : {},
       online,
       bwlimit_kib: bwlimitKib,
-      delete_source: deleteSource,
+      // Forced off where the control is hidden, so a value left over from a
+      // mode the user switched away from cannot ride along unseen.
+      delete_source: showDeleteSource && deleteSource,
       disk_format: resolveDiskFormat(diskFormat, sourceDiskFormat, formatTargetType),
       target_vmid: targetVmid ? parseInt(targetVmid, 10) : 0,
       target_storage:
@@ -480,6 +486,11 @@ export function MigrateJobDialog({
                   setTargetClusterId("");
                   setStorageMap({});
                   setNetworkMap({});
+                  // Back to the per-mode default. Cross-cluster delete-source
+                  // destroys the source guest, so it has to be chosen for THIS
+                  // migration — not inherited from a storage move the user was
+                  // configuring a moment ago.
+                  setDeleteSourceOverride(null);
                 }}
               >
                 <SelectTrigger>
@@ -813,7 +824,8 @@ export function MigrateJobDialog({
                 deleteSource={deleteSource}
                 onDeleteSourceChange={setDeleteSourceOverride}
                 deleteSourceLabel="Delete Source After Migration"
-                {...(showDeleteSource && needsDiskPlacement
+                hideDeleteSource={!showDeleteSource}
+                {...(needsDiskPlacement
                   ? { keptHint: "Source volumes are kept as unused disks on the guest." }
                   : {})}
               />

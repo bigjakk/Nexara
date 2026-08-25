@@ -37,6 +37,17 @@ export interface DiskMoveOptionsProps {
   deleteSourceLabel?: string | undefined;
   /** Shown when delete-source is off, naming what gets left behind. */
   keptHint?: string | undefined;
+  /**
+   * Omit the delete-source control entirely, for an operation that leaves no
+   * source behind to delete.
+   *
+   * Worth hiding rather than showing-and-ignoring: the same switch elsewhere
+   * deletes source volumes, and on a cross-cluster migration destroys the
+   * source guest. A control that visibly does nothing in one dialog teaches
+   * that it is harmless in the one where it is not. Each caller decides; see
+   * `showDeleteSource` in the migration dialogs.
+   */
+  hideDeleteSource?: boolean | undefined;
 }
 
 /**
@@ -57,6 +68,7 @@ export function DiskMoveOptions({
   onDeleteSourceChange,
   deleteSourceLabel = "Delete source after move completes",
   keptHint,
+  hideDeleteSource = false,
 }: DiskMoveOptionsProps) {
   const canChooseFormat = storageSupportsFormatChoice(targetStorageType);
   const effectiveFormat = resolveDiskFormat(
@@ -116,21 +128,23 @@ export function DiskMoveOptions({
         )}
       </div>
 
-      <div className="space-y-1">
-        <div className="flex items-center justify-between gap-4">
-          <Label htmlFor={`${idPrefix}-delete-source`}>
-            {deleteSourceLabel}
-          </Label>
-          <Switch
-            id={`${idPrefix}-delete-source`}
-            checked={deleteSource}
-            onCheckedChange={onDeleteSourceChange}
-          />
+      {!hideDeleteSource && (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-4">
+            <Label htmlFor={`${idPrefix}-delete-source`}>
+              {deleteSourceLabel}
+            </Label>
+            <Switch
+              id={`${idPrefix}-delete-source`}
+              checked={deleteSource}
+              onCheckedChange={onDeleteSourceChange}
+            />
+          </div>
+          {!deleteSource && keptHint && (
+            <p className="text-xs text-muted-foreground">{keptHint}</p>
+          )}
         </div>
-        {!deleteSource && keptHint && (
-          <p className="text-xs text-muted-foreground">{keptHint}</p>
-        )}
-      </div>
+      )}
     </>
   );
 }

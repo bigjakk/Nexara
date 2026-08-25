@@ -132,6 +132,7 @@ export function BulkMigrateDialog({
     migrationType === "intra-cluster" &&
     (migrationMode === "storage" || migrationMode === "both");
   const deleteSource = deleteSourceOverride ?? movesStorage;
+  // See MigrateJobDialog: only meaningful where something is left behind.
   const showDeleteSource = migrationType === "cross-cluster" || movesStorage;
   const { data: targetStorageList } = useClusterStorage(
     migrationType === "cross-cluster"
@@ -305,7 +306,8 @@ export function BulkMigrateDialog({
           network_map: migrationType === "cross-cluster" ? networkMap : {},
           online,
           bwlimit_kib: bwlimitKib,
-          delete_source: deleteSource,
+          // Forced off where the control is hidden — see MigrateJobDialog.
+          delete_source: showDeleteSource && deleteSource,
           disk_format:
             vmType === "qemu"
               ? resolveDiskFormat(diskFormat, undefined, formatTargetType)
@@ -439,6 +441,9 @@ export function BulkMigrateDialog({
               setTargetClusterId("");
               setStorageMap({});
               setNetworkMap({});
+              // See MigrateJobDialog: cross-cluster delete-source destroys the
+              // source guest, so it must not be inherited across a type change.
+              setDeleteSourceOverride(null);
             }}
             migrationMode={migrationMode}
             setMigrationMode={(v) => {
@@ -961,7 +966,8 @@ function ConfigStep({
           deleteSource={deleteSource}
           onDeleteSourceChange={setDeleteSource}
           deleteSourceLabel="Delete Source After Migration"
-          {...(showDeleteSource && movesStorage
+          hideDeleteSource={!showDeleteSource}
+          {...(movesStorage
             ? { keptHint: "Source volumes are kept as unused disks on each guest." }
             : {})}
         />

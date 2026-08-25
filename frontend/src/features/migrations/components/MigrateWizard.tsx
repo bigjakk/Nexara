@@ -73,6 +73,11 @@ export function MigrateWizard() {
   const [online, setOnline] = useState(false);
   const [bwlimit, setBwlimit] = useState("");
   const [deleteSource, setDeleteSource] = useState(false);
+  // This wizard is live-only — it hardcodes migration_mode "live" and never
+  // moves disks — so deleting the source only means anything across clusters,
+  // where it destroys the source guest. Named once so the control's visibility
+  // and the value actually sent cannot drift apart.
+  const showDeleteSource = migrationType === "cross-cluster";
   const [targetVmid, setTargetVmid] = useState("");
   const [storageMap, setStorageMap] = useState<Record<string, string>>({});
   const [networkMap, setNetworkMap] = useState<Record<string, string>>({});
@@ -149,7 +154,7 @@ export function MigrateWizard() {
       network_map: migrationType === "cross-cluster" ? networkMap : {},
       online,
       bwlimit_kib: bwlimitKib,
-      delete_source: deleteSource,
+      delete_source: showDeleteSource && deleteSource,
       target_vmid: targetVmid ? parseInt(targetVmid, 10) : 0,
       target_storage: "",
       // Live-only wizard: never converts a disk format.
@@ -527,6 +532,7 @@ export function MigrateWizard() {
                 deleteSource={deleteSource}
                 onDeleteSourceChange={setDeleteSource}
                 deleteSourceLabel="Delete Source After Migration"
+                hideDeleteSource={!showDeleteSource}
               />
             </div>
 
