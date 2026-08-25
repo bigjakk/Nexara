@@ -115,13 +115,16 @@ export function ChangelogDialog({
                 collapses to 0.
 
                 The height tracks the viewport rather than being a flat 60vh, so
-                a tall window shows most of the list instead of a third of it,
-                while the 10rem subtracted for the header, footer, gaps and
-                padding keeps the whole dialog on screen on short ones. */}
+                a tall window shows most of the list instead of a third of it.
+                DialogContent itself now caps at 85vh and scrolls, so the 11rem
+                subtracted for the header, footer, gaps and padding is what keeps
+                this scroller the *only* one — budget less than the chrome actually
+                measures (~164px) and the dialog grows a second, near-immobile
+                scrollbar of its own. Budget too much and you just waste rows. */}
             <div
               ref={scrollRef}
               onScroll={syncScrollCue}
-              className="max-h-[calc(85vh-10rem)] space-y-6 overflow-y-auto pr-1"
+              className="max-h-[calc(85vh-11rem)] space-y-6 overflow-y-auto pr-1"
             >
               {entries.map((entry) => (
                 <section key={entry.version} className="space-y-3">

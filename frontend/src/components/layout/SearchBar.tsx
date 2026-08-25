@@ -349,7 +349,7 @@ export function SearchBar() {
       </button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="top-[16%] max-w-[calc(100%-1.5rem)] translate-y-0 overflow-hidden p-0 sm:max-w-[560px]">
+        <DialogContent className="top-[16%] max-h-[calc(84vh-1rem)] max-w-[calc(100%-1.5rem)] translate-y-0 overflow-hidden p-0 sm:max-w-[560px]">
           <DialogTitle className="sr-only">Command palette</DialogTitle>
           <Command
             shouldFilter={false}
@@ -370,7 +370,7 @@ export function SearchBar() {
               value={query}
               onValueChange={setQuery}
             />
-            <CommandList className="max-h-[420px]">
+            <CommandList className="max-h-[min(420px,60vh)]">
               {inPicker ? (
                 <CommandGroup heading={view === "create-vm" ? "Create VM — choose cluster" : view === "create-import" ? "Import VM — choose cluster" : "Create CT — choose cluster"}>
                   {(clusters ?? [])

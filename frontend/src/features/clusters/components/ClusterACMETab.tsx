@@ -242,7 +242,7 @@ function CreatePluginForm({ clusterId, onSuccess }: { clusterId: string; onSucce
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+    <form onSubmit={handleSubmit} className="space-y-4 max-h-[calc(85vh-6rem)] overflow-y-auto pr-1">
       <div className="space-y-2">
         <Label>Plugin ID</Label>
         <Input value={id} onChange={(e) => { setId(e.target.value); }} placeholder="myplugin" required />

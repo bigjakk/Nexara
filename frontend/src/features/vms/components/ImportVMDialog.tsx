@@ -597,7 +597,12 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
             description={`Import ${name || "VM"}`}
           />
         ) : (
-          <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+          /* 13rem budgets the dialog chrome (header, step indicator, footer,
+             p-6 and the gaps) against DialogContent's own 85vh cap, so this
+             stays the only scroller. Measured at 194px with a single-line
+             header; below sm: the footer buttons stack and the budget is no
+             longer enough, so a phone can still show both scrollbars. */
+          <div className="max-h-[calc(85vh-13rem)] space-y-4 overflow-y-auto pr-1">
             {step === "source" && (
               <div className="space-y-4">
                 <div className="flex flex-wrap gap-2">
