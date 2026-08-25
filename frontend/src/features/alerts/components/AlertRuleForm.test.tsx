@@ -6,10 +6,10 @@ import { AlertRuleForm } from "./AlertRuleForm";
 import { apiClient } from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", () => ({
-  apiClient: { get: vi.fn(), post: vi.fn() },
+  apiClient: { list: vi.fn(), post: vi.fn() },
 }));
 
-const mockedGet = vi.mocked(apiClient.get);
+const mockedList = vi.mocked(apiClient.list);
 const mockedPost = vi.mocked(apiClient.post);
 
 // The body every case shares, so each test asserts only what it varies.
@@ -29,7 +29,7 @@ const commonFields = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedGet.mockImplementation((path: string) =>
+  mockedList.mockImplementation((path: string) =>
     path.endsWith("/nodes")
       ? Promise.resolve([{ id: "node-1", name: "pve1" }] as never)
       : Promise.resolve([

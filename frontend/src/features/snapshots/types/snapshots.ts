@@ -20,8 +20,3 @@ export interface GuestSnapshotRow {
   snap_time: number;
   last_seen_at: string;
 }
-
-export interface GuestSnapshotListResponse {
-  items: GuestSnapshotRow[];
-  total: number;
-}

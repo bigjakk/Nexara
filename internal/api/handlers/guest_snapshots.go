@@ -54,11 +54,6 @@ type guestSnapshotItem struct {
 	LastSeenAt  time.Time  `json:"last_seen_at"`
 }
 
-type guestSnapshotListResponse struct {
-	Items []guestSnapshotItem `json:"items"`
-	Total int                 `json:"total"`
-}
-
 // List returns every guest snapshot the caller may see, across all clusters,
 // oldest first (rows without a snapshot time sort last). QEMU rows require
 // view:vm on the row's cluster, LXC rows view:container — the split matters
@@ -89,7 +84,7 @@ func (h *GuestSnapshotHandler) List(c fiber.Ctx) error {
 	// Nothing this caller could see — skip the table scan entirely.
 	if !vmAccess.HasGlobal && len(vmAccess.Allowed) == 0 &&
 		!ctAccess.HasGlobal && len(ctAccess.Allowed) == 0 {
-		return c.JSON(guestSnapshotListResponse{Items: []guestSnapshotItem{}, Total: 0})
+		return RespondList(c, []guestSnapshotItem{}, 0)
 	}
 
 	rows, err := h.queries.ListAllGuestSnapshots(c.Context())
@@ -98,7 +93,7 @@ func (h *GuestSnapshotHandler) List(c fiber.Ctx) error {
 	}
 
 	items := filterGuestSnapshotRows(rows, vmAccess, ctAccess, clusterFilter)
-	return c.JSON(guestSnapshotListResponse{Items: items, Total: len(items)})
+	return RespondItems(c, items)
 }
 
 // filterGuestSnapshotRows applies the per-row RBAC split and the optional

@@ -235,5 +235,5 @@ func (h *ClusterOptionsHandler) ListCorosyncNodes(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(nodes)
+	return RespondItems(c, nodes)
 }

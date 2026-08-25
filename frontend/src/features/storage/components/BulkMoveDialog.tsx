@@ -93,7 +93,7 @@ export function BulkMoveDialog({
     // (an empty-array default would be a dead store).
     let vmList: VMListEntry[];
     try {
-      vmList = await apiClient.get<VMListEntry[]>(`/api/v1/clusters/${clusterId}/vms`);
+      vmList = await apiClient.list<VMListEntry>(`/api/v1/clusters/${clusterId}/vms`);
     } catch {
       setRunning(false);
       setBuildingJobs(false);

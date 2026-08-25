@@ -186,7 +186,7 @@ func (h *CephHandler) ListOSDs(c fiber.Ctx) error {
 	}
 
 	osds := flattenOSDTree(&osdResp.Root)
-	return c.JSON(osds)
+	return RespondItems(c, osds)
 }
 
 // flattenOSDTree walks the OSD tree and returns flat OSD entries.
@@ -267,7 +267,7 @@ func (h *CephHandler) ListPools(c fiber.Ctx) error {
 			WritOpPerSec: p.WritOpPerSec,
 		}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // ListMonitors handles GET /api/v1/clusters/:cluster_id/ceph/monitors
@@ -299,7 +299,7 @@ func (h *CephHandler) ListMonitors(c fiber.Ctx) error {
 			Rank: int(m.Rank),
 		}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // ListFS handles GET /api/v1/clusters/:cluster_id/ceph/fs
@@ -330,7 +330,7 @@ func (h *CephHandler) ListFS(c fiber.Ctx) error {
 			DataPool: f.DataPool,
 		}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // ListCrushRules handles GET /api/v1/clusters/:cluster_id/ceph/rules
@@ -363,7 +363,7 @@ func (h *CephHandler) ListCrushRules(c fiber.Ctx) error {
 			MaxSize:  r.MaxSize,
 		}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // CreatePool handles POST /api/v1/clusters/:cluster_id/ceph/pools
@@ -529,7 +529,7 @@ func (h *CephHandler) GetHistorical(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get ceph metrics")
 	}
 
-	return c.JSON(toCephClusterMetricResponses(metrics))
+	return RespondItems(c, toCephClusterMetricResponses(metrics))
 }
 
 // GetOSDMetrics handles GET /api/v1/clusters/:cluster_id/ceph/osds/metrics
@@ -547,7 +547,7 @@ func (h *CephHandler) GetOSDMetrics(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get OSD metrics")
 	}
 
-	return c.JSON(metrics)
+	return RespondItems(c, metrics)
 }
 
 // GetPoolMetrics handles GET /api/v1/clusters/:cluster_id/ceph/pools/metrics
@@ -565,7 +565,7 @@ func (h *CephHandler) GetPoolMetrics(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get pool metrics")
 	}
 
-	return c.JSON(metrics)
+	return RespondItems(c, metrics)
 }
 
 // --- Helpers ---

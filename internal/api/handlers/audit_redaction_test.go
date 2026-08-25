@@ -265,14 +265,14 @@ func TestListRecentRedactsForCallersWithoutTheOwningPermission(t *testing.T) {
 				t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusOK, body)
 			}
 
-			var got []auditLogResponse
+			var got ListResponse[auditLogResponse]
 			if err := json.Unmarshal(body, &got); err != nil {
 				t.Fatalf("decode body %s: %v", body, err)
 			}
 			// Both rows must survive the cluster filter — otherwise "no
 			// collector in the body" would pass for the wrong reason.
-			if len(got) != 2 {
-				t.Fatalf("got %d rows, want 2 — the entries were filtered out, not redacted: %s", len(got), body)
+			if len(got.Items) != 2 {
+				t.Fatalf("got %d rows, want 2 — the entries were filtered out, not redacted: %s", len(got.Items), body)
 			}
 
 			if strings.Contains(string(body), collector) != tt.wantValue {
@@ -281,11 +281,11 @@ func TestListRecentRedactsForCallersWithoutTheOwningPermission(t *testing.T) {
 			}
 			// The entry itself always survives: who changed the forwarding
 			// config, and when, is not the part that is owned.
-			if got[0].Action != syslogUpdatedAction || got[0].ResourceID != syslogSettingKey {
-				t.Errorf("the syslog entry lost its identity: %+v", got[0])
+			if got.Items[0].Action != syslogUpdatedAction || got.Items[0].ResourceID != syslogSettingKey {
+				t.Errorf("the syslog entry lost its identity: %+v", got.Items[0])
 			}
-			if !strings.Contains(got[1].Details, "branding.app_title") {
-				t.Errorf("an unreserved setting's details were redacted too: %s", got[1].Details)
+			if !strings.Contains(got.Items[1].Details, "branding.app_title") {
+				t.Errorf("an unreserved setting's details were redacted too: %s", got.Items[1].Details)
 			}
 		})
 	}

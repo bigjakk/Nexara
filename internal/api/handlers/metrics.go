@@ -146,7 +146,7 @@ func (h *MetricsHandler) GetClusterHistorical(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(computeRates(rows))
+	return RespondItems(c, computeRates(rows))
 }
 
 // GetVMHistorical handles GET /api/v1/clusters/:cluster_id/vms/:vm_id/metrics.
@@ -206,7 +206,7 @@ func (h *MetricsHandler) GetVMHistorical(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(computeRates(rows))
+	return RespondItems(c, computeRates(rows))
 }
 
 // GetNodeHistorical handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/metrics.
@@ -264,5 +264,5 @@ func (h *MetricsHandler) GetNodeHistorical(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(computeRates(rows))
+	return RespondItems(c, computeRates(rows))
 }

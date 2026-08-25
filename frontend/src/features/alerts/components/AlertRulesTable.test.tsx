@@ -8,11 +8,11 @@ import { useAuth } from "@/hooks/useAuth";
 import type { AlertRule } from "@/types/api";
 
 vi.mock("@/lib/api-client", () => ({
-  apiClient: { get: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  apiClient: { list: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: vi.fn() }));
 
-const mockedGet = vi.mocked(apiClient.get);
+const mockedList = vi.mocked(apiClient.list);
 const mockedPut = vi.mocked(apiClient.put);
 
 function makeRule(overrides: Partial<AlertRule> = {}): AlertRule {
@@ -42,7 +42,7 @@ beforeEach(() => {
   vi.mocked(useAuth).mockReturnValue({
     hasPermission: () => true,
   } as unknown as ReturnType<typeof useAuth>);
-  mockedGet.mockResolvedValue([makeRule()]);
+  mockedList.mockResolvedValue([makeRule()]);
   mockedPut.mockResolvedValue(makeRule({ enabled: false }));
 });
 

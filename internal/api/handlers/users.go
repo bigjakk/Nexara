@@ -88,7 +88,7 @@ func (h *UserHandler) List(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // Get handles GET /api/v1/users/:id.

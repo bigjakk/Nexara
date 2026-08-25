@@ -1,10 +1,48 @@
+-- Both insert queries derive vmid from the entry itself so app code cannot
+-- forget it (the same reasoning as queries/tasks.sql). Resolution order,
+-- most-authoritative first:
+--
+--   1. details.vmid, where the handler recorded it explicitly;
+--   2. the UPID id field (field 7 of
+--      UPID:<node>:<pid>:<pstart>:<starttime>:<type>:<id>:<user@realm>:),
+--      which every TrackTask entry carries — but ONLY for task types whose
+--      worker id is a VMID, per is_guest_upid(). That field is a plain integer
+--      for other task types too: cephdestroyosd's is the OSD number, and
+--      ceph_osd.go dispatches exactly that through TrackTask. Ungated, "destroy
+--      OSD 113" would be stamped vmid=113 and answer a ?vmids=113 query as a
+--      guest action;
+--   3. resource_id, for the handlers that record the VMID there (VM create);
+--   4. the vms row resource_id points at — resolved now, while the UUID is
+--      still live, because that is the whole point: vms.id churns on collector
+--      resync and this freezes the guest identity before it does.
+--
+-- Non-guest entries (settings, logins, node actions) resolve to NULL and stay
+-- NULL. {1,9} digits bounds the ::int cast, as in 000076.
 -- name: InsertAuditLog :exec
-INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details, vmid)
+VALUES ($1, $2, $3, $4, $5, $6,
+    CASE
+        WHEN $6::jsonb->>'vmid' ~ '^[0-9]{1,9}$'
+            THEN ($6::jsonb->>'vmid')::int
+        WHEN is_guest_upid($6::jsonb->>'upid')
+            THEN split_part($6::jsonb->>'upid', ':', 7)::int
+        WHEN $3 IN ('vm', 'container') AND $4 ~ '^[0-9]{1,9}$'
+            THEN $4::int
+        ELSE (SELECT v.vmid FROM vms v WHERE v.id::text = $4)
+    END);
 
 -- name: InsertAuditLogWithSource :exec
-INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details, source, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO audit_log (cluster_id, user_id, resource_type, resource_id, action, details, source, created_at, vmid)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+    CASE
+        WHEN $6::jsonb->>'vmid' ~ '^[0-9]{1,9}$'
+            THEN ($6::jsonb->>'vmid')::int
+        WHEN is_guest_upid($6::jsonb->>'upid')
+            THEN split_part($6::jsonb->>'upid', ':', 7)::int
+        WHEN $3 IN ('vm', 'container') AND $4 ~ '^[0-9]{1,9}$'
+            THEN $4::int
+        ELSE (SELECT v.vmid FROM vms v WHERE v.id::text = $4)
+    END);
 
 -- ListRecentAuditLogEnriched backs the dashboard activity feed. It takes the
 -- caller's view:audit scope (see the accessible_cluster_ids note on
@@ -25,8 +63,8 @@ SELECT
   u.email AS user_email,
   u.display_name AS user_display_name,
   COALESCE(c.name, '') AS cluster_name,
-  COALESCE(v.vmid, 0) AS resource_vmid,
-  COALESCE(v.name, '') AS resource_name,
+  COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
+  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name,
   COALESCE(th.status, '') AS task_status,
   COALESCE(th.exit_status, '') AS task_exit_status,
   th.progress AS task_progress
@@ -55,6 +93,12 @@ LIMIT 50;
 -- `(a.cluster_id IS NULL OR a.cluster_id = ANY(...))`: that hands every global
 -- entry to every cluster-scoped user. TestScopeSQL_ScopedClausesExcludeNullCluster
 -- pins the shape, and TestAuditScope_NullClusterRowsAreGlobal the behaviour.
+--
+-- vmids filters on the denormalized audit_log.vmid (000084), mirroring the
+-- same narg on ListTaskHistoryAdvanced. It deliberately reads the column and
+-- not the vms join: the column is the guest identity frozen at insert, so the
+-- filter keeps working for destroyed guests and across the collector's vms.id
+-- churn — which is the whole reason the column exists.
 -- name: ListAuditLogAdvanced :many
 SELECT
   a.id,
@@ -69,8 +113,8 @@ SELECT
   u.email AS user_email,
   u.display_name AS user_display_name,
   COALESCE(c.name, '') AS cluster_name,
-  COALESCE(v.vmid, 0) AS resource_vmid,
-  COALESCE(v.name, '') AS resource_name
+  COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
+  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
@@ -82,6 +126,7 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluste
   AND (sqlc.narg('source')::text IS NULL OR a.source = sqlc.narg('source'))
   AND (sqlc.narg('start_time')::timestamptz IS NULL OR a.created_at >= sqlc.narg('start_time'))
   AND (sqlc.narg('end_time')::timestamptz IS NULL OR a.created_at <= sqlc.narg('end_time'))
+  AND (sqlc.narg('vmids')::int[] IS NULL OR a.vmid = ANY(sqlc.narg('vmids')::int[]))
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
        OR a.cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]))
 ORDER BY a.created_at DESC
@@ -100,6 +145,7 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_
   AND (sqlc.narg('source')::text IS NULL OR source = sqlc.narg('source'))
   AND (sqlc.narg('start_time')::timestamptz IS NULL OR created_at >= sqlc.narg('start_time'))
   AND (sqlc.narg('end_time')::timestamptz IS NULL OR created_at <= sqlc.narg('end_time'))
+  AND (sqlc.narg('vmids')::int[] IS NULL OR vmid = ANY(sqlc.narg('vmids')::int[]))
   AND (sqlc.narg('accessible_cluster_ids')::uuid[] IS NULL
        OR cluster_id = ANY(sqlc.narg('accessible_cluster_ids')::uuid[]));
 

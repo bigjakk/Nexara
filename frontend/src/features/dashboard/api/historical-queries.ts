@@ -21,7 +21,7 @@ export function useHistoricalMetrics(clusterId: string, range: TimeRange) {
   return useQuery({
     queryKey: ["clusters", clusterId, "metrics", range],
     queryFn: async () => {
-      const data = await apiClient.get<HistoricalMetricPoint[]>(
+      const data = await apiClient.list<HistoricalMetricPoint>(
         `/api/v1/clusters/${clusterId}/metrics?range=${range}`,
       );
       return toMetricDataPoints(data);
@@ -39,7 +39,7 @@ export function useSeedMetrics(clusterId: string) {
   const query = useQuery({
     queryKey: ["clusters", clusterId, "metrics", "seed"],
     queryFn: async () => {
-      const data = await apiClient.get<HistoricalMetricPoint[]>(
+      const data = await apiClient.list<HistoricalMetricPoint>(
         `/api/v1/clusters/${clusterId}/metrics?range=1h`,
       );
       return toMetricDataPoints(data);
@@ -61,7 +61,7 @@ export function useSeedMetricsForClusters(
     queries: clusterIds.map((id) => ({
       queryKey: ["clusters", id, "metrics", "seed"],
       queryFn: async () => {
-        const data = await apiClient.get<HistoricalMetricPoint[]>(
+        const data = await apiClient.list<HistoricalMetricPoint>(
           `/api/v1/clusters/${id}/metrics?range=1h`,
         );
         return toMetricDataPoints(data);
@@ -84,7 +84,7 @@ export function useNodeHistoricalMetrics(clusterId: string, nodeId: string, rang
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeId, "metrics", range],
     queryFn: async () => {
-      const data = await apiClient.get<HistoricalMetricPoint[]>(
+      const data = await apiClient.list<HistoricalMetricPoint>(
         `/api/v1/clusters/${clusterId}/nodes/${nodeId}/metrics?range=${range}`,
       );
       return toMetricDataPoints(data);
@@ -98,7 +98,7 @@ export function useVMHistoricalMetrics(clusterId: string, vmId: string, range: T
   return useQuery({
     queryKey: ["clusters", clusterId, "vms", vmId, "metrics", range],
     queryFn: async () => {
-      const data = await apiClient.get<HistoricalMetricPoint[]>(
+      const data = await apiClient.list<HistoricalMetricPoint>(
         `/api/v1/clusters/${clusterId}/vms/${vmId}/metrics?range=${range}`,
       );
       return toMetricDataPoints(data);

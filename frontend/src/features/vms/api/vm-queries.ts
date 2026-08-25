@@ -32,7 +32,7 @@ export function useClusterVMIDs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vmids"],
     queryFn: async () => {
-      const vms = await apiClient.get<VMResponse[]>(
+      const vms = await apiClient.list<VMResponse>(
         `/api/v1/clusters/${clusterId}/vms`,
       );
       return new Set(vms.map((vm) => vm.vmid));
@@ -53,7 +53,7 @@ export function useResourcePools(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "pools"],
     queryFn: () =>
-      apiClient.get<ResourcePool[]>(
+      apiClient.list<ResourcePool>(
         `/api/v1/clusters/${clusterId}/pools`,
       ),
     enabled: clusterId.length > 0,
@@ -318,7 +318,7 @@ export function useSnapshots(
       resourceId,
       "snapshots",
     ],
-    queryFn: () => apiClient.get<Snapshot[]>(base),
+    queryFn: () => apiClient.list<Snapshot>(base),
     enabled: clusterId.length > 0 && resourceId.length > 0,
   });
 }
@@ -654,7 +654,7 @@ export function useTaskHistory(): UseQueryResult<TaskHistoryEntry[]> {
   return useQuery({
     queryKey: ["task-history"],
     queryFn: () =>
-      apiClient.get<TaskHistoryEntry[]>("/api/v1/tasks"),
+      apiClient.list<TaskHistoryEntry>("/api/v1/tasks"),
     refetchInterval: 60_000, // WS events handle immediate updates; polling is a safety fallback
   });
 }
@@ -916,7 +916,7 @@ export function useScheduledTasks(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "schedules"],
     queryFn: () =>
-      apiClient.get<ScheduledTask[]>(
+      apiClient.list<ScheduledTask>(
         `/api/v1/clusters/${clusterId}/schedules`,
       ),
     enabled: clusterId.length > 0,
@@ -987,7 +987,7 @@ export function useTaskLog(
   return useQuery({
     queryKey: ["task-log", clusterId, upid],
     queryFn: () =>
-      apiClient.get<TaskLogLine[]>(
+      apiClient.list<TaskLogLine>(
         `/api/v1/clusters/${clusterId ?? ""}/tasks/${encodeURIComponent(upid ?? "")}/log`,
       ),
     enabled: enabled && !!clusterId && !!upid,
@@ -1027,7 +1027,7 @@ export function useNodeUSBDevices(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "hardware", "usb"],
     queryFn: () =>
-      apiClient.get<NodeUSBDevice[]>(
+      apiClient.list<NodeUSBDevice>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/hardware/usb`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -1039,7 +1039,7 @@ export function useNodePCIDevices(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "hardware", "pci"],
     queryFn: () =>
-      apiClient.get<NodePCIDevice[]>(
+      apiClient.list<NodePCIDevice>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/hardware/pci`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,

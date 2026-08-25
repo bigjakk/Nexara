@@ -67,7 +67,7 @@ export function ReportScheduleForm({
   const { data: channels } = useNotificationChannels();
   const { data: clusters } = useQuery({
     queryKey: ["clusters"],
-    queryFn: () => apiClient.get<ClusterResponse[]>("/api/v1/clusters"),
+    queryFn: () => apiClient.list<ClusterResponse>("/api/v1/clusters"),
     enabled: open,
   });
 

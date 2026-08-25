@@ -89,11 +89,6 @@ func mapTaskHistory(t db.TaskHistory) taskResponse {
 	return resp
 }
 
-type taskListResponse struct {
-	Items []taskResponse `json:"items"`
-	Total int64          `json:"total"`
-}
-
 // validTaskStatuses bounds the ?status= filter to the known task_history states
 // so a typo surfaces as a 400 rather than silently returning an empty page.
 var validTaskStatuses = map[string]bool{
@@ -205,7 +200,7 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 	}
 
 	if !applyTaskListScope(access, &listP, &countP) {
-		return c.JSON(taskListResponse{Items: []taskResponse{}})
+		return RespondList(c, []taskResponse{}, 0)
 	}
 
 	total, err := h.queries.CountTaskHistoryFiltered(c.Context(), countP)
@@ -218,10 +213,7 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list tasks")
 	}
 
-	resp := taskListResponse{
-		Items: make([]taskResponse, 0, len(tasks)),
-		Total: total,
-	}
+	resp := make([]taskResponse, 0, len(tasks))
 	for _, t := range tasks {
 		// Defense-in-depth: SQL already restricts rows via
 		// accessible_cluster_ids; the per-row guard keeps a future query edit
@@ -229,9 +221,9 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 		if !access.PermitsCluster(t.ClusterID) {
 			continue
 		}
-		resp.Items = append(resp.Items, mapTaskHistory(t))
+		resp = append(resp, mapTaskHistory(t))
 	}
-	return c.JSON(resp)
+	return RespondList(c, resp, total)
 }
 
 // Create creates a new task history record.

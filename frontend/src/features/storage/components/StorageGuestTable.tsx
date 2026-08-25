@@ -62,14 +62,14 @@ export function StorageGuestTable({
   const vmsQuery = useQuery({
     queryKey: ["clusters", clusterId, "vms"],
     queryFn: () =>
-      apiClient.get<VMResponse[]>(`/api/v1/clusters/${clusterId}/vms`),
+      apiClient.list<VMResponse>(`/api/v1/clusters/${clusterId}/vms`),
     enabled: clusterId.length > 0,
     staleTime: 30_000,
   });
   const ctsQuery = useQuery({
     queryKey: ["clusters", clusterId, "containers"],
     queryFn: () =>
-      apiClient.get<VMResponse[]>(`/api/v1/clusters/${clusterId}/containers`),
+      apiClient.list<VMResponse>(`/api/v1/clusters/${clusterId}/containers`),
     enabled: clusterId.length > 0,
     staleTime: 30_000,
   });

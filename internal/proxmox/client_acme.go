@@ -3,7 +3,6 @@ package proxmox
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/url"
 )
@@ -139,7 +138,4 @@ func (c *Client) GetACMEChallengeSchema(ctx context.Context) ([]ACMEChallengeSch
 		return nil, fmt.Errorf("get ACME challenge schema: %w", err)
 	}
 	return schemas, nil
-}
-func (c *Client) GetACMEChallengeSchemaRaw(ctx context.Context, dst *json.RawMessage) error {
-	return c.do(ctx, "/cluster/acme/challenge-schema", dst)
 }

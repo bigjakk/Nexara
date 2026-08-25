@@ -295,7 +295,7 @@ func (h *SettingsHandler) ListSettings(c fiber.Ctx) error {
 		}
 		result = append(result, toSettingResponse(s))
 	}
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // GetSetting returns a single setting by key.

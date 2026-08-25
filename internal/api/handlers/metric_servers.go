@@ -48,7 +48,7 @@ func (h *MetricServerHandler) ListServers(c fiber.Ctx) error {
 	for i := range servers {
 		servers[i].Token = ""
 	}
-	return c.JSON(servers)
+	return RespondItems(c, servers)
 }
 
 // CreateServer handles POST /clusters/:cluster_id/metric-servers.

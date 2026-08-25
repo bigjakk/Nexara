@@ -153,6 +153,49 @@ endpoints (`/auth/me`, `/auth/logout`, `/auth/change-password`,
 `/auth/totp/setup`, `/auth/oidc/token-exchange`, …) and the `/ws`,
 `/ws/console`, `/ws/vnc` upgrades have no request-rate limit at all.
 
+## Response Envelope
+
+Every endpoint that returns a **collection** returns the same envelope:
+
+```json
+{ "items": [ ... ], "total": 128 }
+```
+
+- `items` is always a JSON array — never `null`, even when empty.
+- `total` is the number of rows matching the request's filters **before**
+  `limit`/`offset`, so `total > items.length` means the response is one page of
+  a larger set. On endpoints that return everything they have (most Proxmox
+  passthroughs), the two are equal.
+
+Single-resource endpoints (`GET /clusters/:id`, `GET /vms/:id`, …) return the
+object directly, unwrapped.
+
+> **Changed in v2.0.0 — breaking for API clients.** Collections previously
+> returned three different shapes: a bare JSON array on most routes,
+> `{items,total}` on `/audit-log` and `/tasks`, and `{entries,total}` on node
+> syslog. The same logical resource disagreed with itself across routes —
+> `/clusters/:id/audit-log` was a bare array while `/audit-log` was not — and a
+> bare array had nowhere to carry `total`, so a caller could not tell a full
+> page from a truncated one.
+>
+> All collections now use the envelope above. **A client doing `jq '.[]'` or
+> `for row in response:` over a bare array will not error — it will silently
+> read nothing, or iterate the envelope's two values.** Update such callers to
+> read `.items`:
+>
+> ```bash
+> # before
+> curl -s "$B/vms" | jq -r '.[].name'
+> # after
+> curl -s "$B/vms" | jq -r '.items[].name'
+> ```
+>
+> The bundled web UI ships in the same binary and was updated in the same
+> change, so no operator action is required — this affects external scripts and
+> integrations only.
+
+---
+
 ## Pagination & Filtering
 
 List endpoints support query parameters:
@@ -172,7 +215,7 @@ before paging: `/alerts`, `/alert-rules`, `/audit-log`, `/audit-log/recent`,
 `/migrations`, `/tasks`, `/reports/schedules` and `/reports/runs` return only
 rows for clusters the caller can view with the endpoint's permission
 (`view:alert`, `view:audit`, `view:migration`, `view:task`, `view:report`),
-and any `total` in the response counts the scoped set. Rows with no cluster
+and the response's `total` counts the scoped set. Rows with no cluster
 (global alert rules, non-cluster audit entries) are visible only to holders of
 the corresponding *global* permission. A caller with no grant at all gets an
 empty list rather than an error.
@@ -253,7 +296,10 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 
 ### Nodes
 
-> `:node` is the Proxmox node *name*; `:node_id` is Nexara's node UUID.
+> `:node` is the Proxmox node *name* (e.g. `HV01`); `:node_id` is Nexara's own
+> node UUID, as returned in the `id` field of `GET /clusters/:id/nodes`. They
+> are not interchangeable — a route taking `:node_id` rejects a node name with
+> `400 Invalid node ID`.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -278,7 +324,55 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | POST | `/clusters/:id/nodes/:node/evacuate` | Migrate all guests off a node |
 | GET | `/clusters/:id/nodes/:node/services` | List node services |
 | POST | `/clusters/:id/nodes/:node/services/:service/:action` | Start/stop/restart a node service |
-| GET | `/clusters/:id/nodes/:node/syslog` | Get node syslog (filterable) |
+| GET | `/clusters/:id/nodes/:node/syslog` | Read node syslog over a time window |
+| GET | `/clusters/:id/nodes/:node/journal` | Read the node's systemd journal by line count or cursor |
+
+#### Reading node logs
+
+Two endpoints, because Proxmox exposes two mechanisms and neither covers the
+other's common case.
+
+**`GET /clusters/:id/nodes/:node/syslog`** — a time window.
+
+| Parameter | Description |
+|-----------|-------------|
+| `since`, `until` | Window bounds. Accepts `YYYY-MM-DD`, `YYYY-MM-DD HH:MM[:SS]`, a relative offset (`-1h`, `30m ago`, `2d`), or a unix timestamp. Invalid values return `400`, not `500`. |
+| `start`, `limit` | Offset into the matched lines and page size (default 500, max 5000). `start` defaults to fetching the *newest* `limit` lines. |
+| `service` | Restrict to one systemd unit. |
+
+> **Timezone.** Proxmox hands `since`/`until` to `journalctl` on the node, which
+> reads a wall-clock string in the **node's local timezone** — the API cannot
+> resolve that ambiguity for you. Relative offsets and unix timestamps are
+> converted to UTC wall-clock before being sent, so on a node not running UTC
+> they land offset by that node's UTC offset. Use `journal` below when you need
+> an exact instant.
+>
+> When `since` is omitted it defaults to **the date 24 hours ago** — so between
+> 24 and 48 hours of journal, depending on the hour. Date-only because that is
+> the form Proxmox has always accepted, and a full day back because it is in the
+> past for any real UTC offset.
+>
+> Before v2.0.0 the default was *today's* date in UTC, which is a future
+> timestamp for any node west of UTC — those nodes answered with journalctl's
+> literal `-- No entries --`, which reads like a node with no logs. The web UI's
+> "Today" preset had the same bug against the browser's timezone; its presets
+> are now relative offsets, which carry no date to disagree about.
+>
+> `since`/`until` are capped at 90 days back. Unbounded, `?since=1` asks
+> journalctl to walk the entire journal — and with the default paging the API
+> first asks Proxmox to *count* every matching line, so the cost lands on the
+> hypervisor.
+
+**`GET /clusters/:id/nodes/:node/journal`** — a line count or a cursor.
+
+| Parameter | Description |
+|-----------|-------------|
+| `lastentries` | The newest N lines. The common case, and the one `syslog` cannot express. Capped at 5000; defaults to 500 when no other bound is given. |
+| `since`, `until` | Same accepted forms as above, but sent to Proxmox as **unix timestamps**, so there is no timezone ambiguity. |
+| `startcursor`, `endcursor` | Opaque journal cursors, for resuming a read. |
+
+`items` is a flat array of raw journal lines (strings), unlike `syslog`'s
+`{n, t}` objects.
 
 ### Node Disks
 
@@ -855,7 +949,45 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 | GET | `/audit-log/syslog-config` | Get syslog forwarding config |
 | PUT | `/audit-log/syslog-config` | Update syslog config |
 | POST | `/audit-log/syslog-test` | Test syslog forwarding |
-| GET | `/clusters/:id/audit-log` | List audit entries for a cluster |
+| GET | `/clusters/:id/audit-log` | List audit entries for a cluster (supports `limit`/`offset`) |
+
+Both audit routes share one filter set: `resource_type`, `user_id`, `action`,
+`source`, `start_time`/`end_time` (RFC 3339), and `vmids` — a comma-separated
+list of guest VMIDs, matching the same filter on `/tasks`. `/audit-log` also
+takes `cluster_id`; on `/clusters/:id/audit-log` the path's cluster wins.
+
+#### Guest identity on an audit entry
+
+Every entry carries `resource_vmid` and `resource_name` describing the guest it
+concerns (`0` and `""` when the entry names no guest — a login, a settings
+change, a node action).
+
+`resource_vmid` reads a VMID denormalized onto the row **at insert time**,
+derived from `details.vmid`, the task's UPID, or the guest the entry pointed at
+when it was written. `resource_name` prefers the name recorded in `details` at
+the time of the action, falling back to the guest's current name.
+
+This matters because the alternative — resolving the guest through
+`resource_id` at read time — silently stops working: Nexara's collector deletes
+and re-inserts a guest's inventory row on resync, so the UUID an entry recorded
+resolves until it doesn't, and a destroyed guest never resolves at all. Before
+v2.0.0 both fields were derived that way and were empty on the large majority
+of entries, including every `destroy`. Entries written before the upgrade are
+backfilled where the information survives in `details`; the few that recorded
+neither a VMID nor a UPID stay empty.
+
+Both fields are also emitted as first-class `vmid` and `resource_name` params in
+the RFC 5424 structured data of the syslog forwarder and the `format=syslog`
+export, so a SIEM decoder can key a rule on the guest without re-parsing the
+`details` JSON. They are appended after `details`, so params an existing decoder
+already matches keep their position.
+
+#### Export
+
+`GET /audit-log/export?format=json|csv|syslog` returns a downloadable file,
+capped at 10 000 rows. The JSON form uses the standard list envelope, so
+`total > items.length` tells you the export hit that cap — narrow the time range
+and re-run. The CSV and syslog forms are line-based and carry no such marker.
 
 ### RBAC
 

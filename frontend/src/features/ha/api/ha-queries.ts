@@ -84,7 +84,7 @@ export interface UpdateHARuleRequest {
 export function useHAResources(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "resources"],
-    queryFn: () => apiClient.get<HAResource[]>(`/api/v1/clusters/${clusterId}/ha/resources`),
+    queryFn: () => apiClient.list<HAResource>(`/api/v1/clusters/${clusterId}/ha/resources`),
     enabled: clusterId.length > 0,
   });
 }
@@ -119,7 +119,7 @@ export function useDeleteHAResource(clusterId: string) {
 export function useHAGroups(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "groups"],
-    queryFn: () => apiClient.get<HAGroup[]>(`/api/v1/clusters/${clusterId}/ha/groups`),
+    queryFn: () => apiClient.list<HAGroup>(`/api/v1/clusters/${clusterId}/ha/groups`),
     enabled: clusterId.length > 0,
   });
 }
@@ -176,7 +176,7 @@ export interface CreateHARuleRequest {
 export function useHARules(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "rules"],
-    queryFn: () => apiClient.get<HARuleEntry[]>(`/api/v1/clusters/${clusterId}/ha/rules`),
+    queryFn: () => apiClient.list<HARuleEntry>(`/api/v1/clusters/${clusterId}/ha/rules`),
     enabled: clusterId.length > 0,
   });
 }
@@ -220,7 +220,7 @@ export function useHAManagerStatus(clusterId: string) {
 export function useHAStatus(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "status"],
-    queryFn: () => apiClient.get<HAStatusEntry[]>(`/api/v1/clusters/${clusterId}/ha/status`),
+    queryFn: () => apiClient.list<HAStatusEntry>(`/api/v1/clusters/${clusterId}/ha/status`),
     enabled: clusterId.length > 0,
     refetchInterval: 30_000,
   });

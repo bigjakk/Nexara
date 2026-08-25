@@ -65,7 +65,7 @@ export function AlertRuleForm() {
 
   const { data: clusters } = useQuery({
     queryKey: ["clusters"],
-    queryFn: () => apiClient.get<ClusterResponse[]>("/api/v1/clusters"),
+    queryFn: () => apiClient.list<ClusterResponse>("/api/v1/clusters"),
   });
 
   const {

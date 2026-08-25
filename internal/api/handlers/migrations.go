@@ -366,7 +366,7 @@ func (h *MigrationHandler) List(c fiber.Ctx) error {
 	// the same either-end rule the guard below does.
 	scope, query := clusterScopeFilter(access)
 	if !query {
-		return c.JSON([]migrationJobResponse{})
+		return RespondItems(c, []migrationJobResponse{})
 	}
 
 	jobs, err := h.queries.ListMigrationJobs(c.Context(), db.ListMigrationJobsParams{
@@ -389,7 +389,7 @@ func (h *MigrationHandler) List(c fiber.Ctx) error {
 		resp = append(resp, toMigrationJobResponse(j))
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // Get handles GET /api/v1/migrations/:id.
@@ -592,5 +592,5 @@ func (h *MigrationHandler) ListByCluster(c fiber.Ctx) error {
 		resp[i] = toMigrationJobResponse(j)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }

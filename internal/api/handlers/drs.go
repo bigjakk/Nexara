@@ -319,7 +319,7 @@ func (h *DRSHandler) ListRules(c fiber.Ctx) error {
 		resp[i] = toDRSRuleResponse(r)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // CreateRule handles POST /api/v1/clusters/:cluster_id/drs/rules.
@@ -567,7 +567,7 @@ func (h *DRSHandler) ListHistory(c fiber.Ctx) error {
 		resp[i] = toDRSHistoryResponse(h)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // createProxmoxClient creates a Proxmox client for the given cluster ID.
@@ -658,7 +658,7 @@ func (h *DRSHandler) ListHARules(c fiber.Ctx) error {
 		resp = append(resp, haRuleToResponse(clusterID, entry))
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // CreateHARule handles POST /api/v1/clusters/:cluster_id/drs/ha-rules.

@@ -920,7 +920,7 @@ function MigrationProgress({
   const { data: logLines } = useQuery({
     queryKey: ["migration-log", clusterId, job.upid],
     queryFn: () =>
-      apiClient.get<TaskLogLine[]>(
+      apiClient.list<TaskLogLine>(
         `/api/v1/clusters/${clusterId}/tasks/${encodeURIComponent(job.upid)}/log`,
       ),
     enabled: hasUpid,

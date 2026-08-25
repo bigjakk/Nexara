@@ -22,7 +22,7 @@ export function useAlertRules(clusterId?: string) {
   return useQuery({
     queryKey: ["alert-rules", clusterId ?? "all"],
     queryFn: () =>
-      apiClient.get<AlertRule[]>(`/api/v1/alert-rules${qs ? `?${qs}` : ""}`),
+      apiClient.list<AlertRule>(`/api/v1/alert-rules${qs ? `?${qs}` : ""}`),
   });
 }
 
@@ -79,7 +79,7 @@ export function useAlerts(filters?: {
   return useQuery({
     queryKey: ["alerts", filters?.state, filters?.severity, filters?.clusterId],
     queryFn: () =>
-      apiClient.get<AlertInstance[]>(`/api/v1/alerts${qs ? `?${qs}` : ""}`),
+      apiClient.list<AlertInstance>(`/api/v1/alerts${qs ? `?${qs}` : ""}`),
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data) return false;
@@ -128,7 +128,7 @@ export function useNotificationChannels() {
   return useQuery({
     queryKey: ["notification-channels"],
     queryFn: () =>
-      apiClient.get<NotificationChannel[]>("/api/v1/notification-channels"),
+      apiClient.list<NotificationChannel>("/api/v1/notification-channels"),
   });
 }
 
@@ -196,7 +196,7 @@ export function useMaintenanceWindows(clusterId: string) {
   return useQuery({
     queryKey: ["maintenance-windows", clusterId],
     queryFn: () =>
-      apiClient.get<MaintenanceWindow[]>(
+      apiClient.list<MaintenanceWindow>(
         `/api/v1/clusters/${clusterId}/maintenance-windows`,
       ),
     enabled: !!clusterId,
@@ -259,7 +259,7 @@ export function useNotificationDLQ(state?: string) {
   return useQuery({
     queryKey: ["notification-dlq", state ?? "all"],
     queryFn: () =>
-      apiClient.get<NotificationDLQEntry[]>(
+      apiClient.list<NotificationDLQEntry>(
         `/api/v1/notification-dlq${qs ? `?${qs}` : ""}`,
       ),
     refetchInterval: 30000,

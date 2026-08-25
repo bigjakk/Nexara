@@ -25,7 +25,7 @@ func (h *NodeHandler) ListNodeFirewallRules(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list node firewall rules")
 	}
-	return c.JSON(rules)
+	return RespondItems(c, rules)
 }
 
 type nodeFirewallRuleRequest struct {
@@ -163,5 +163,5 @@ func (h *NodeHandler) GetNodeFirewallLog(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get node firewall log")
 	}
-	return c.JSON(entries)
+	return RespondItems(c, entries)
 }

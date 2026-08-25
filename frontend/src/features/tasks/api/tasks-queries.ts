@@ -19,11 +19,6 @@ export interface TaskRecord {
   finished_at: string | null;
 }
 
-export interface TaskListResponse {
-  items: TaskRecord[];
-  total: number;
-}
-
 /** Server-side bound on the ?vmids= list (maxVmidsFilter in
  * internal/api/handlers/tasks.go) — requests above it are rejected with 400,
  * so callers must not fire them. */
@@ -70,7 +65,7 @@ export function useTasks({
   return useQuery({
     queryKey: ["tasks", limit, offset, clusterId, status, vmidsKey],
     queryFn: () =>
-      apiClient.get<TaskListResponse>(`/api/v1/tasks?${params.toString()}`),
+      apiClient.page<TaskRecord>(`/api/v1/tasks?${params.toString()}`),
     enabled: enabled ?? true,
     // Keep the previous page's rows (and, crucially, its `total`) visible
     // while the next page loads — consumers derive page counts from `total`,

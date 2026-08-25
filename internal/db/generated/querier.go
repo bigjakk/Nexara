@@ -349,6 +349,26 @@ type Querier interface {
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
 	// Alert Rules
 	InsertAlertRule(ctx context.Context, arg InsertAlertRuleParams) (AlertRule, error)
+	// Both insert queries derive vmid from the entry itself so app code cannot
+	// forget it (the same reasoning as queries/tasks.sql). Resolution order,
+	// most-authoritative first:
+	//
+	//   1. details.vmid, where the handler recorded it explicitly;
+	//   2. the UPID id field (field 7 of
+	//      UPID:<node>:<pid>:<pstart>:<starttime>:<type>:<id>:<user@realm>:),
+	//      which every TrackTask entry carries — but ONLY for task types whose
+	//      worker id is a VMID, per is_guest_upid(). That field is a plain integer
+	//      for other task types too: cephdestroyosd's is the OSD number, and
+	//      ceph_osd.go dispatches exactly that through TrackTask. Ungated, "destroy
+	//      OSD 113" would be stamped vmid=113 and answer a ?vmids=113 query as a
+	//      guest action;
+	//   3. resource_id, for the handlers that record the VMID there (VM create);
+	//   4. the vms row resource_id points at — resolved now, while the UUID is
+	//      still live, because that is the whole point: vms.id churns on collector
+	//      resync and this freezes the guest identity before it does.
+	//
+	// Non-guest entries (settings, logins, node actions) resolve to NULL and stay
+	// NULL. {1,9} digits bounds the ::int cast, as in 000076.
 	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error
 	InsertAuditLogWithSource(ctx context.Context, arg InsertAuditLogWithSourceParams) error
 	InsertCVENotificationConfigChannel(ctx context.Context, arg InsertCVENotificationConfigChannelParams) error
@@ -438,6 +458,12 @@ type Querier interface {
 	// `(a.cluster_id IS NULL OR a.cluster_id = ANY(...))`: that hands every global
 	// entry to every cluster-scoped user. TestScopeSQL_ScopedClausesExcludeNullCluster
 	// pins the shape, and TestAuditScope_NullClusterRowsAreGlobal the behaviour.
+	//
+	// vmids filters on the denormalized audit_log.vmid (000084), mirroring the
+	// same narg on ListTaskHistoryAdvanced. It deliberately reads the column and
+	// not the vms join: the column is the guest identity frozen at insert, so the
+	// filter keeps working for destroyed guests and across the collector's vms.id
+	// churn — which is the whole reason the column exists.
 	ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error)
 	ListCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) ([]uuid.UUID, error)
 	ListCVEScanNodes(ctx context.Context, scanID uuid.UUID) ([]CveScanNode, error)

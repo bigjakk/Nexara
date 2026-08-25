@@ -134,7 +134,7 @@ func (h *BackupHandler) ListDatastores(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(stores)
+	return RespondItems(c, stores)
 }
 
 // GetDatastoreStatus handles GET /api/v1/pbs-servers/:pbs_id/datastores/status
@@ -158,7 +158,7 @@ func (h *BackupHandler) GetDatastoreStatus(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(status)
+	return RespondItems(c, status)
 }
 
 // TriggerGC handles POST /api/v1/pbs-servers/:pbs_id/datastores/:store/gc
@@ -372,7 +372,7 @@ func (h *BackupHandler) GetTaskLog(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(entries)
+	return RespondItems(c, entries)
 }
 
 type pruneDatastoreRequest struct {
@@ -441,7 +441,7 @@ func (h *BackupHandler) PruneDatastore(c fiber.Ctx) error {
 		h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "datastore_pruned")
 	}
 
-	return c.JSON(results)
+	return RespondItems(c, results)
 }
 
 // GetDatastoreConfig handles GET /api/v1/pbs-servers/:pbs_id/datastores/:store/config
@@ -564,7 +564,7 @@ func (h *BackupHandler) ListTasks(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(tasks)
+	return RespondItems(c, tasks)
 }
 
 // GetTaskStatus handles GET /api/v1/pbs-servers/:pbs_id/tasks/:upid
@@ -616,7 +616,7 @@ func (h *BackupHandler) ListSnapshots(c fiber.Ctx) error {
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list snapshots")
 		}
-		return c.JSON(snaps)
+		return RespondItems(c, snaps)
 	}
 
 	snaps, err := h.queries.ListPBSSnapshotsByServer(c.Context(), pbsID)
@@ -624,7 +624,7 @@ func (h *BackupHandler) ListSnapshots(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list snapshots")
 	}
 
-	return c.JSON(snaps)
+	return RespondItems(c, snaps)
 }
 
 // ListSyncJobs handles GET /api/v1/pbs-servers/:pbs_id/sync-jobs
@@ -642,7 +642,7 @@ func (h *BackupHandler) ListSyncJobs(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list sync jobs")
 	}
 
-	return c.JSON(jobs)
+	return RespondItems(c, jobs)
 }
 
 // ListVerifyJobs handles GET /api/v1/pbs-servers/:pbs_id/verify-jobs
@@ -660,7 +660,7 @@ func (h *BackupHandler) ListVerifyJobs(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list verify jobs")
 	}
 
-	return c.JSON(jobs)
+	return RespondItems(c, jobs)
 }
 
 // GetDatastoreMetrics handles GET /api/v1/pbs-servers/:pbs_id/metrics
@@ -680,7 +680,7 @@ func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx) error {
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to get datastore metrics")
 		}
-		return c.JSON(metrics)
+		return RespondItems(c, metrics)
 	}
 
 	now := time.Now()
@@ -707,7 +707,7 @@ func (h *BackupHandler) GetDatastoreMetrics(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get datastore metrics history")
 	}
 
-	return c.JSON(metrics)
+	return RespondItems(c, metrics)
 }
 
 // GetDatastoreRRD handles GET /api/v1/pbs-servers/:pbs_id/datastores/:store/rrd
@@ -739,7 +739,7 @@ func (h *BackupHandler) GetDatastoreRRD(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(entries)
+	return RespondItems(c, entries)
 }
 
 // ListSnapshotsByBackupID handles GET /api/v1/pbs-snapshots?backup_id=XXX
@@ -787,7 +787,7 @@ func (h *BackupHandler) ListSnapshotsByBackupID(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(filtered)
+	return RespondItems(c, filtered)
 }
 
 // --- Backup Job endpoints (PVE vzdump) ---
@@ -882,7 +882,7 @@ func (h *BackupHandler) ListBackupJobs(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(jobs)
+	return RespondItems(c, jobs)
 }
 
 type backupJobRequest struct {
@@ -1532,5 +1532,5 @@ func (h *BackupHandler) GetBackupCoverage(c fiber.Ctx) error {
 		entries = append(entries, entry)
 	}
 
-	return c.JSON(entries)
+	return RespondItems(c, entries)
 }

@@ -172,7 +172,7 @@ func (h *NotificationDLQHandler) List(c fiber.Ctx) error {
 		}
 		out = append(out, toNotificationDLQResponse(r))
 	}
-	return c.JSON(out)
+	return RespondItems(c, out)
 }
 
 // Summary returns counts grouped by state for the DLQ widget.

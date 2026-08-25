@@ -17,7 +17,7 @@ export interface MetricServerConfig {
 export function useMetricServers(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "metric-servers"],
-    queryFn: () => apiClient.get<MetricServerConfig[]>(`/api/v1/clusters/${clusterId}/metric-servers`),
+    queryFn: () => apiClient.list<MetricServerConfig>(`/api/v1/clusters/${clusterId}/metric-servers`),
     enabled: clusterId.length > 0,
   });
 }

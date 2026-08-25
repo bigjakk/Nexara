@@ -46,7 +46,7 @@ func (h *ACMEHandler) ListAccounts(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(accounts)
+	return RespondItems(c, accounts)
 }
 
 // CreateAccount handles POST /clusters/:cluster_id/acme/accounts.
@@ -182,7 +182,7 @@ func (h *ACMEHandler) ListPlugins(c fiber.Ctx) error {
 	for i := range plugins {
 		plugins[i].Data = ""
 	}
-	return c.JSON(plugins)
+	return RespondItems(c, plugins)
 }
 
 // CreatePlugin handles POST /clusters/:cluster_id/acme/plugins.
@@ -279,12 +279,19 @@ func (h *ACMEHandler) ListChallengeSchema(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	var raw json.RawMessage
-	if err := pxClient.GetACMEChallengeSchemaRaw(c.Context(), &raw); err != nil {
+	// Decoded rather than relayed verbatim: this is a collection, and every
+	// collection goes out in the ListResponse envelope. c.Send(raw) shipped the
+	// bare PVE array straight through — the one response in this package that
+	// TestGuard_ListEndpointsUseEnvelope could not see, because it inspects
+	// c.JSON arguments and this never called c.JSON.
+	//
+	// The typed client method already existed alongside the raw one; the raw
+	// variant is gone, so there is one way to read this endpoint.
+	schema, err := pxClient.GetACMEChallengeSchema(c.Context())
+	if err != nil {
 		return mapProxmoxError(err)
 	}
-	c.Set("Content-Type", "application/json")
-	return c.Send(raw)
+	return RespondItems(c, schema)
 }
 
 // ListDirectories handles GET /clusters/:cluster_id/acme/directories.
@@ -304,7 +311,7 @@ func (h *ACMEHandler) ListDirectories(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(dirs)
+	return RespondItems(c, dirs)
 }
 
 // GetTOS handles GET /clusters/:cluster_id/acme/tos.
@@ -405,7 +412,7 @@ func (h *ACMEHandler) ListNodeCertificates(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(certs)
+	return RespondItems(c, certs)
 }
 
 // OrderNodeCertificate handles POST /clusters/:cluster_id/nodes/:node/certificates/order.

@@ -10,7 +10,7 @@ export function useMigrationJobs(limit = 50, offset = 0) {
   return useQuery({
     queryKey: ["migrations", limit, offset],
     queryFn: () =>
-      apiClient.get<MigrationJob[]>(
+      apiClient.list<MigrationJob>(
         `/api/v1/migrations?limit=${String(limit)}&offset=${String(offset)}`,
       ),
   });
@@ -41,7 +41,7 @@ export function useMigrationJobsByCluster(
   return useQuery({
     queryKey: ["migrations", "cluster", clusterId, limit, offset],
     queryFn: () =>
-      apiClient.get<MigrationJob[]>(
+      apiClient.list<MigrationJob>(
         `/api/v1/clusters/${clusterId}/migrations?limit=${String(limit)}&offset=${String(offset)}`,
       ),
     enabled: clusterId.length > 0,

@@ -109,8 +109,9 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/nodes/:node_name/services", s.nodeHandler.ListNodeServices)
 			clusters.Post("/:cluster_id/nodes/:node_name/services/:service/:action", s.nodeHandler.ServiceAction)
 
-			// Node syslog.
+			// Node syslog / journal.
 			clusters.Get("/:cluster_id/nodes/:node_name/syslog", s.nodeHandler.GetNodeSyslog)
+			clusters.Get("/:cluster_id/nodes/:node_name/journal", s.nodeHandler.GetNodeJournal)
 
 			// Node firewall.
 			clusters.Get("/:cluster_id/nodes/:node_name/firewall/rules", s.nodeHandler.ListNodeFirewallRules)

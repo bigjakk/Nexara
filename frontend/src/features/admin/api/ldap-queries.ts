@@ -10,7 +10,7 @@ import type {
 export function useLDAPConfigs() {
   return useQuery({
     queryKey: ["ldap", "configs"],
-    queryFn: () => apiClient.get<LDAPConfig[]>("/api/v1/ldap/configs"),
+    queryFn: () => apiClient.list<LDAPConfig>("/api/v1/ldap/configs"),
   });
 }
 

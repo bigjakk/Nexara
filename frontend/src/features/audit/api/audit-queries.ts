@@ -23,16 +23,11 @@ export interface AuditLogEntry {
   task_progress?: number;
 }
 
-export interface AuditLogResponse {
-  items: AuditLogEntry[];
-  total: number;
-}
-
 export function useRecentActivity() {
   return useQuery({
     queryKey: ["recent-activity"],
     queryFn: () =>
-      apiClient.get<AuditLogEntry[]>("/api/v1/audit-log/recent"),
+      apiClient.list<AuditLogEntry>("/api/v1/audit-log/recent"),
     refetchInterval: 120_000,
   });
 }

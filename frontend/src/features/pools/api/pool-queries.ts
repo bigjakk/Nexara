@@ -28,7 +28,7 @@ export interface ResourcePoolDetail {
 export function useResourcePools(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "pools"],
-    queryFn: () => apiClient.get<ResourcePool[]>(`/api/v1/clusters/${clusterId}/pools`),
+    queryFn: () => apiClient.list<ResourcePool>(`/api/v1/clusters/${clusterId}/pools`),
     enabled: clusterId.length > 0,
   });
 }

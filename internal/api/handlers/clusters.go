@@ -262,7 +262,7 @@ func (h *ClusterHandler) List(c fiber.Ctx) error {
 		resp = append(resp, cr)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // Get handles GET /api/v1/clusters/:id.

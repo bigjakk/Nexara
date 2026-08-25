@@ -114,7 +114,7 @@ func (h *StorageHandler) ListByCluster(c fiber.Ctx) error {
 		resp[i] = toStorageResponse(p)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // GetContent handles GET /api/v1/clusters/:cluster_id/storage/:storage_id/content.
@@ -154,7 +154,7 @@ func (h *StorageHandler) GetContent(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // uploadContentAllowed reports whether a caller holding the given cluster-scoped grants may
@@ -450,7 +450,7 @@ func (h *StorageHandler) ScanISCSI(c fiber.Ctx) error {
 	for i, t := range targets {
 		resp[i] = iscsiTargetResponse{Target: t.Target, Portal: t.Portal}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // createStorageRequest is the JSON body for creating a new storage pool.

@@ -6,10 +6,10 @@ import { apiClient } from "@/lib/api-client";
 import { BackupJobDialog } from "./BackupJobDialog";
 
 vi.mock("@/lib/api-client", () => ({
-  apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
+  apiClient: { list: vi.fn(), post: vi.fn(), put: vi.fn() },
 }));
 
-const mockedGet = vi.mocked(apiClient.get);
+const mockedList = vi.mocked(apiClient.list);
 const mockedPost = vi.mocked(apiClient.post);
 const mockedPut = vi.mocked(apiClient.put);
 
@@ -26,7 +26,7 @@ const commonFields = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedGet.mockImplementation((path: string) => {
+  mockedList.mockImplementation((path: string) => {
     if (path.endsWith("/storage")) {
       return Promise.resolve([
         {

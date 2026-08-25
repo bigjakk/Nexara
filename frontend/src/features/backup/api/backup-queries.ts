@@ -33,7 +33,7 @@ import type {
 export function usePBSServers() {
   return useQuery({
     queryKey: ["pbs-servers"],
-    queryFn: () => apiClient.get<PBSServer[]>("/api/v1/pbs-servers"),
+    queryFn: () => apiClient.list<PBSServer>("/api/v1/pbs-servers"),
   });
 }
 
@@ -43,7 +43,7 @@ export function usePBSDatastores(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "datastores"],
     queryFn: () =>
-      apiClient.get<PBSDatastore[]>(
+      apiClient.list<PBSDatastore>(
         `/api/v1/pbs-servers/${pbsId}/datastores`,
       ),
     enabled: pbsId.length > 0,
@@ -54,7 +54,7 @@ export function usePBSDatastoreStatus(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "datastores", "status"],
     queryFn: () =>
-      apiClient.get<PBSDatastoreStatus[]>(
+      apiClient.list<PBSDatastoreStatus>(
         `/api/v1/pbs-servers/${pbsId}/datastores/status`,
       ),
     enabled: pbsId.length > 0,
@@ -69,7 +69,7 @@ export function usePBSSnapshots(pbsId: string, datastore?: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "snapshots", datastore ?? "all"],
     queryFn: () =>
-      apiClient.get<PBSSnapshot[]>(
+      apiClient.list<PBSSnapshot>(
         `/api/v1/pbs-servers/${pbsId}/snapshots${params}`,
       ),
     enabled: pbsId.length > 0,
@@ -82,7 +82,7 @@ export function usePBSSnapshotsByBackupID(backupId: string) {
   return useQuery({
     queryKey: ["pbs-snapshots", backupId],
     queryFn: () =>
-      apiClient.get<PBSSnapshot[]>(
+      apiClient.list<PBSSnapshot>(
         `/api/v1/pbs-snapshots?backup_id=${encodeURIComponent(backupId)}`,
       ),
     enabled: backupId.length > 0,
@@ -95,7 +95,7 @@ export function usePBSSyncJobs(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "sync-jobs"],
     queryFn: () =>
-      apiClient.get<PBSSyncJob[]>(
+      apiClient.list<PBSSyncJob>(
         `/api/v1/pbs-servers/${pbsId}/sync-jobs`,
       ),
     enabled: pbsId.length > 0,
@@ -108,7 +108,7 @@ export function usePBSVerifyJobs(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "verify-jobs"],
     queryFn: () =>
-      apiClient.get<PBSVerifyJob[]>(
+      apiClient.list<PBSVerifyJob>(
         `/api/v1/pbs-servers/${pbsId}/verify-jobs`,
       ),
     enabled: pbsId.length > 0,
@@ -121,7 +121,7 @@ export function usePBSTasks(pbsId: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "tasks"],
     queryFn: () =>
-      apiClient.get<PBSTask[]>(
+      apiClient.list<PBSTask>(
         `/api/v1/pbs-servers/${pbsId}/tasks?limit=50`,
       ),
     enabled: pbsId.length > 0,
@@ -138,7 +138,7 @@ export function usePBSDatastoreMetrics(
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "metrics", timeframe],
     queryFn: () =>
-      apiClient.get<PBSDatastoreMetric[]>(
+      apiClient.list<PBSDatastoreMetric>(
         `/api/v1/pbs-servers/${pbsId}/metrics?timeframe=${timeframe}`,
       ),
     enabled: pbsId.length > 0,
@@ -157,7 +157,7 @@ export function usePBSDatastoreRRD(
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "datastores", store, "rrd", timeframe, cf],
     queryFn: () =>
-      apiClient.get<PBSDatastoreRRDEntry[]>(
+      apiClient.list<PBSDatastoreRRDEntry>(
         `/api/v1/pbs-servers/${pbsId}/datastores/${encodeURIComponent(store)}/rrd?timeframe=${timeframe}&cf=${cf}`,
       ),
     enabled: pbsId.length > 0 && store.length > 0,
@@ -374,7 +374,7 @@ export function usePBSTaskLog(pbsId: string, upid: string) {
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "tasks", upid, "log"],
     queryFn: () =>
-      apiClient.get<PBSTaskLogEntry[]>(
+      apiClient.list<PBSTaskLogEntry>(
         `/api/v1/pbs-servers/${pbsId}/tasks/${encodeURIComponent(upid)}/log`,
       ),
     enabled: pbsId.length > 0 && upid.length > 0,
@@ -403,7 +403,7 @@ export function useBackupJobs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "backup-jobs"],
     queryFn: () =>
-      apiClient.get<BackupJob[]>(
+      apiClient.list<BackupJob>(
         `/api/v1/clusters/${clusterId}/backup-jobs`,
       ),
     enabled: clusterId.length > 0,
@@ -554,7 +554,7 @@ export function useBackupCoverage() {
   return useQuery({
     queryKey: ["backup-coverage"],
     queryFn: () =>
-      apiClient.get<BackupCoverageEntry[]>("/api/v1/backup-coverage"),
+      apiClient.list<BackupCoverageEntry>("/api/v1/backup-coverage"),
     staleTime: 60_000,
     refetchInterval: 120_000,
   });

@@ -134,10 +134,11 @@ func TestListEndpoints_ScopeGatesBeforeDB(t *testing.T) {
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("%s status = %d, want 200 (body: %s)", path, resp.StatusCode, body)
 			}
-			// Pin the wire shape too: these endpoints return a bare array, and
-			// it must serialize as [], never null.
-			if strings.TrimSpace(body) != "[]" {
-				t.Fatalf("%s must return an empty array for a scope-less caller, got %s", path, body)
+			// Pin the wire shape too: every collection returns the
+			// ListResponse envelope, and `items` must serialize as [], never
+			// null.
+			if strings.TrimSpace(body) != `{"items":[],"total":0}` {
+				t.Fatalf("%s must return an empty envelope for a scope-less caller, got %s", path, body)
 			}
 		})
 

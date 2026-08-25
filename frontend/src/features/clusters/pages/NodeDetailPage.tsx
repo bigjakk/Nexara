@@ -1434,17 +1434,24 @@ function ServicesTab({ clusterId, nodeName }: { clusterId: string; nodeName: str
   );
 }
 
+// Sent to the API as relative offsets (`24h`), which it resolves server-side.
+//
+// These used to be rendered into a `YYYY-MM-DD` date computed from the
+// BROWSER's clock, and the node reads that string in its OWN timezone — so on
+// any node behind the browser, the "Today" preset asked journalctl for a window
+// starting in the future and got back its literal "-- No entries --", which
+// reads as a node with no logs. A relative offset carries no wall-clock date,
+// so there is no timezone to disagree about.
+//
+// "Today" is gone with it: it was the preset that tripped the bug, and it
+// duplicated "Last 24h" anyway. "Last 1h" is the genuinely shorter window it
+// never provided.
 const SYSLOG_TIMESPANS = [
-  { label: "Today", hours: 0 },
+  { label: "Last 1h", hours: 1 },
   { label: "Last 24h", hours: 24 },
   { label: "Last 3 Days", hours: 72 },
   { label: "Last Week", hours: 168 },
 ] as const;
-
-function getSyslogSince(hours: number): string {
-  const d = hours === 0 ? new Date() : new Date(Date.now() - hours * 3600_000);
-  return `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 const SYSLOG_PAGE_SIZE = 500;
 
@@ -1453,7 +1460,7 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
   const [timespanHours, setTimespanHours] = useState(24);
   // null page = "newest" (server resolves to last page)
   const [page, setPage] = useState<number | null>(null);
-  const since = getSyslogSince(timespanHours);
+  const since = `${String(timespanHours)}h`;
 
   const startParam = page === null ? undefined : page * SYSLOG_PAGE_SIZE;
   const { data, isLoading, isFetching, isError } = useNodeSyslog(clusterId, nodeName, {
@@ -1462,7 +1469,7 @@ function SyslogTab({ clusterId, nodeName }: { clusterId: string; nodeName: strin
     service: serviceFilter || undefined,
     since,
   });
-  const entries = data?.entries;
+  const entries = data?.items;
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / SYSLOG_PAGE_SIZE));
   // When page is null (newest), we're on the last page

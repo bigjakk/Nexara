@@ -44,7 +44,7 @@ export function TaskProgressDialog() {
   const { data: logLines } = useQuery({
     queryKey: ["task-progress-dialog-log", clusterId, upid],
     queryFn: () =>
-      apiClient.get<TaskLogLine[]>(
+      apiClient.list<TaskLogLine>(
         `/api/v1/clusters/${clusterId}/tasks/${encodeURIComponent(upid)}/log`,
       ),
     enabled: !!upid && clusterId.length > 0,

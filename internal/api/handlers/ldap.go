@@ -145,7 +145,7 @@ func (h *LDAPHandler) List(c fiber.Ctx) error {
 		resp[i] = toLDAPConfigResponse(cfg)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // Get handles GET /api/v1/ldap/configs/:id.

@@ -30,7 +30,7 @@ export function useSettings(scope: string) {
   return useQuery({
     queryKey: settingsKeys.list(scope),
     queryFn: () =>
-      apiClient.get<SettingResponse[]>(
+      apiClient.list<SettingResponse>(
         `/api/v1/settings?scope=${encodeURIComponent(scope)}`,
       ),
   });

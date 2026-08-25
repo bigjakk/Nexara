@@ -15,7 +15,7 @@ export function useRollingUpdateJobs(clusterId: string) {
   return useQuery({
     queryKey: ["rolling-update-jobs", clusterId],
     queryFn: () =>
-      apiClient.get<RollingUpdateJob[]>(
+      apiClient.list<RollingUpdateJob>(
         `/api/v1/clusters/${clusterId}/rolling-updates?limit=50`,
       ),
     enabled: !!clusterId,
@@ -44,7 +44,7 @@ export function useRollingUpdateNodes(clusterId: string, jobId: string) {
   return useQuery({
     queryKey: ["rolling-update-nodes", clusterId, jobId],
     queryFn: () =>
-      apiClient.get<RollingUpdateNode[]>(
+      apiClient.list<RollingUpdateNode>(
         `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/nodes`,
       ),
     enabled: !!clusterId && !!jobId,
@@ -236,7 +236,7 @@ export function useNodePackagePreview(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["node-packages", clusterId, nodeName],
     queryFn: () =>
-      apiClient.get<AptPackage[]>(
+      apiClient.list<AptPackage>(
         `/api/v1/clusters/${clusterId}/nodes/${nodeName}/packages`,
       ),
     enabled: !!clusterId && !!nodeName,
@@ -337,7 +337,7 @@ export function useSSHKnownHosts(clusterId: string) {
   return useQuery({
     queryKey: ["ssh-known-hosts", clusterId],
     queryFn: () =>
-      apiClient.get<SSHKnownHost[]>(
+      apiClient.list<SSHKnownHost>(
         `/api/v1/clusters/${clusterId}/ssh-known-hosts`,
       ),
     enabled: !!clusterId,

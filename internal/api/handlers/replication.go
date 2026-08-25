@@ -45,7 +45,7 @@ func (h *ReplicationHandler) ListJobs(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(jobs)
+	return RespondItems(c, jobs)
 }
 
 // CreateJob handles POST /clusters/:cluster_id/replication.
@@ -234,5 +234,5 @@ func (h *ReplicationHandler) GetLog(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(entries)
+	return RespondItems(c, entries)
 }

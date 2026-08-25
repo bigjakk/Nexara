@@ -34,7 +34,7 @@ export function useCephOSDs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "osds"],
     queryFn: () =>
-      apiClient.get<CephOSD[]>(
+      apiClient.list<CephOSD>(
         `/api/v1/clusters/${clusterId}/ceph/osds`,
       ),
     enabled: clusterId.length > 0,
@@ -46,7 +46,7 @@ export function useCephPools(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "pools"],
     queryFn: () =>
-      apiClient.get<CephPool[]>(
+      apiClient.list<CephPool>(
         `/api/v1/clusters/${clusterId}/ceph/pools`,
       ),
     enabled: clusterId.length > 0,
@@ -58,7 +58,7 @@ export function useCephMonitors(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "monitors"],
     queryFn: () =>
-      apiClient.get<CephMon[]>(
+      apiClient.list<CephMon>(
         `/api/v1/clusters/${clusterId}/ceph/monitors`,
       ),
     enabled: clusterId.length > 0,
@@ -69,7 +69,7 @@ export function useCephFS(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "fs"],
     queryFn: () =>
-      apiClient.get<CephFS[]>(
+      apiClient.list<CephFS>(
         `/api/v1/clusters/${clusterId}/ceph/fs`,
       ),
     enabled: clusterId.length > 0,
@@ -80,7 +80,7 @@ export function useCephCrushRules(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "rules"],
     queryFn: () =>
-      apiClient.get<CephCrushRule[]>(
+      apiClient.list<CephCrushRule>(
         `/api/v1/clusters/${clusterId}/ceph/rules`,
       ),
     enabled: clusterId.length > 0,
@@ -93,7 +93,7 @@ export function useCephMetrics(clusterId: string, timeframe: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "metrics", timeframe],
     queryFn: () =>
-      apiClient.get<CephClusterMetric[]>(
+      apiClient.list<CephClusterMetric>(
         `/api/v1/clusters/${clusterId}/ceph/metrics?timeframe=${timeframe}`,
       ),
     enabled: clusterId.length > 0,
@@ -105,7 +105,7 @@ export function useCephOSDMetrics(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "osds", "metrics"],
     queryFn: () =>
-      apiClient.get<CephOSDMetric[]>(
+      apiClient.list<CephOSDMetric>(
         `/api/v1/clusters/${clusterId}/ceph/osds/metrics`,
       ),
     enabled: clusterId.length > 0,
@@ -116,7 +116,7 @@ export function useCephPoolMetrics(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "pools", "metrics"],
     queryFn: () =>
-      apiClient.get<CephPoolMetric[]>(
+      apiClient.list<CephPoolMetric>(
         `/api/v1/clusters/${clusterId}/ceph/pools/metrics`,
       ),
     enabled: clusterId.length > 0,

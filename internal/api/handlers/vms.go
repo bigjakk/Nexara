@@ -141,7 +141,7 @@ func (h *VMHandler) ListByCluster(c fiber.Ctx) error {
 		resp[i] = toVMResponse(v)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // GetVM handles GET /api/v1/clusters/:cluster_id/vms/:vm_id.
@@ -694,7 +694,7 @@ func (h *VMHandler) GetTaskLog(c fiber.Ctx) error {
 		result[i] = logLine{N: e.N, T: e.T}
 	}
 
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 type diskResizeRequest struct {
@@ -1248,7 +1248,7 @@ func (h *VMHandler) ListSnapshots(c fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/vms/:vm_id/snapshots.
@@ -1670,7 +1670,7 @@ func (h *VMHandler) ListMachineTypes(c fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // --- CPU models ---
@@ -1708,7 +1708,7 @@ func (h *VMHandler) ListCPUModels(c fiber.Ctx) error {
 		// frontend falls back to its built-in CPU model list.
 		var apiErr *proxmox.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == 501 {
-			return c.JSON([]cpuModelResponse{})
+			return RespondItems(c, []cpuModelResponse{})
 		}
 		return mapProxmoxError(err)
 	}
@@ -1722,7 +1722,7 @@ func (h *VMHandler) ListCPUModels(c fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // --- Resource pools ---
@@ -1760,7 +1760,7 @@ func (h *VMHandler) ListResourcePools(c fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // --- Network bridges ---
@@ -1809,7 +1809,7 @@ func (h *VMHandler) ListBridges(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(bridges)
+	return RespondItems(c, bridges)
 }
 
 // --- Guest Agent ---
@@ -1968,7 +1968,7 @@ func (h *VMHandler) ListNodeISOs(c fiber.Ctx) error {
 		isos = []isoResponse{}
 	}
 
-	return c.JSON(isos)
+	return RespondItems(c, isos)
 }
 
 type changeMediaRequest struct {
@@ -2148,7 +2148,7 @@ func (h *VMHandler) ListNodeUSBDevices(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(devices)
+	return RespondItems(c, devices)
 }
 
 // ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/hardware/pci.
@@ -2176,7 +2176,7 @@ func (h *VMHandler) ListNodePCIDevices(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(devices)
+	return RespondItems(c, devices)
 }
 
 // SetVMPool handles PUT /api/v1/clusters/:cluster_id/vms/:vm_id/pool.

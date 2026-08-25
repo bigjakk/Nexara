@@ -18,7 +18,7 @@ import type {
 export function useClusters() {
   return useQuery({
     queryKey: ["clusters"],
-    queryFn: () => apiClient.get<ClusterResponse[]>("/api/v1/clusters"),
+    queryFn: () => apiClient.list<ClusterResponse>("/api/v1/clusters"),
     // Refresh periodically so cluster status and Ceph health surfaced in the
     // header/dashboard/sidebar stay current without a manual reload.
     refetchInterval: 30_000,
@@ -59,7 +59,7 @@ export function useDashboardData() {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.get<NodeResponse[]>(`/api/v1/clusters/${cluster.id}/nodes`),
+        apiClient.list<NodeResponse>(`/api/v1/clusters/${cluster.id}/nodes`),
       enabled: clusters.length > 0,
     })),
   });
@@ -68,7 +68,7 @@ export function useDashboardData() {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "vms"],
       queryFn: () =>
-        apiClient.get<VMResponse[]>(`/api/v1/clusters/${cluster.id}/vms`),
+        apiClient.list<VMResponse>(`/api/v1/clusters/${cluster.id}/vms`),
       enabled: clusters.length > 0,
     })),
   });
@@ -77,7 +77,7 @@ export function useDashboardData() {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "storage"],
       queryFn: () =>
-        apiClient.get<StorageResponse[]>(
+        apiClient.list<StorageResponse>(
           `/api/v1/clusters/${cluster.id}/storage`,
         ),
       enabled: clusters.length > 0,

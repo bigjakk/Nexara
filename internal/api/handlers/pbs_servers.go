@@ -177,7 +177,7 @@ func (h *PBSHandler) List(c fiber.Ctx) error {
 		resp = append(resp, toPBSResponse(s))
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // ListByCluster handles GET /api/v1/clusters/:cluster_id/pbs-servers.
@@ -200,7 +200,7 @@ func (h *PBSHandler) ListByCluster(c fiber.Ctx) error {
 		resp[i] = toPBSResponse(s)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // Get handles GET /api/v1/pbs-servers/:id.

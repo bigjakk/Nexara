@@ -207,7 +207,7 @@ func (h *APIKeyHandler) List(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // Revoke handles DELETE /api/v1/api-keys/:id.
@@ -295,7 +295,7 @@ func (h *APIKeyHandler) AdminList(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // AdminRevoke handles DELETE /api/v1/admin/api-keys/:id.

@@ -20,7 +20,7 @@ export function useClusterStorage(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "storage"],
     queryFn: () =>
-      apiClient.get<StorageResponse[]>(
+      apiClient.list<StorageResponse>(
         `/api/v1/clusters/${clusterId}/storage`,
       ),
     enabled: clusterId.length > 0,
@@ -35,7 +35,7 @@ export function useStorageContent(clusterId: string, storageId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "storage", storageId, "content"],
     queryFn: () =>
-      apiClient.get<StorageContentItem[]>(
+      apiClient.list<StorageContentItem>(
         `/api/v1/clusters/${clusterId}/storage/${storageId}/content`,
       ),
     enabled: clusterId.length > 0 && storageId.length > 0,
@@ -282,7 +282,7 @@ export function useAppliances(clusterId: string, enabled = true) {
   return useQuery({
     queryKey: ["clusters", clusterId, "appliances"],
     queryFn: () =>
-      apiClient.get<ApplianceTemplate[]>(
+      apiClient.list<ApplianceTemplate>(
         `/api/v1/clusters/${clusterId}/appliances`,
       ),
     enabled: enabled && clusterId.length > 0,
@@ -360,7 +360,7 @@ export function useISCSITargets(clusterId: string, portal: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "scan", "iscsi", trimmed],
     queryFn: () =>
-      apiClient.get<ISCSITarget[]>(
+      apiClient.list<ISCSITarget>(
         `/api/v1/clusters/${clusterId}/scan/iscsi?portal=${encodeURIComponent(trimmed)}`,
       ),
     enabled: clusterId.length > 0 && trimmed.length > 0,

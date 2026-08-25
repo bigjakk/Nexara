@@ -424,6 +424,55 @@ func (c *Client) GetNodeSyslog(ctx context.Context, node string, start, limit in
 	}
 	return entries, total, nil
 }
+
+// JournalOptions selects a window of the systemd journal for GetNodeJournal.
+// A zero field means "not sent", leaving the choice to Proxmox.
+type JournalOptions struct {
+	Since       int64  // unix seconds, inclusive
+	Until       int64  // unix seconds, inclusive
+	LastEntries int    // return only the newest N lines
+	StartCursor string // opaque journal cursor, exclusive
+	EndCursor   string // opaque journal cursor, exclusive
+}
+
+// GetNodeJournal reads GET /nodes/{node}/journal, which returns raw journal
+// lines as a flat array of strings.
+//
+// Distinct from GetNodeSyslog in two ways that matter to callers: it takes
+// `since`/`until` as unix timestamps rather than a wall-clock string the node
+// parses in its own local timezone, and it supports `lastentries` — "the last
+// N lines", which the syslog endpoint cannot express at all.
+func (c *Client) GetNodeJournal(ctx context.Context, node string, opts JournalOptions) ([]string, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	q := url.Values{}
+	if opts.Since > 0 {
+		q.Set("since", strconv.FormatInt(opts.Since, 10))
+	}
+	if opts.Until > 0 {
+		q.Set("until", strconv.FormatInt(opts.Until, 10))
+	}
+	if opts.LastEntries > 0 {
+		q.Set("lastentries", strconv.Itoa(opts.LastEntries))
+	}
+	if opts.StartCursor != "" {
+		q.Set("startcursor", opts.StartCursor)
+	}
+	if opts.EndCursor != "" {
+		q.Set("endcursor", opts.EndCursor)
+	}
+	path := "/nodes/" + url.PathEscape(node) + "/journal"
+	if qs := q.Encode(); qs != "" {
+		path += "?" + qs
+	}
+	var lines []string
+	if err := c.do(ctx, path, &lines); err != nil {
+		return nil, fmt.Errorf("get node %s journal: %w", node, err)
+	}
+	return lines, nil
+}
+
 func (c *Client) GetNodePCIDevices(ctx context.Context, node string) ([]NodePCIDevice, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err

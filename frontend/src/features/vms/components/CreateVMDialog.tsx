@@ -706,7 +706,7 @@ export function CreateVMDialog({
                 void queryClient
                   .invalidateQueries({ queryKey: ["clusters", clusterId, "vms"] })
                   .then(() =>
-                    apiClient.get<VMResponse[]>(
+                    apiClient.list<VMResponse>(
                       `/api/v1/clusters/${clusterId}/vms`,
                     ),
                   )

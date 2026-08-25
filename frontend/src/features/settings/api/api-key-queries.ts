@@ -9,7 +9,7 @@ import type {
 export function useAPIKeys() {
   return useQuery({
     queryKey: ["api-keys"],
-    queryFn: () => apiClient.get<APIKeyResponse[]>("/api/v1/api-keys"),
+    queryFn: () => apiClient.list<APIKeyResponse>("/api/v1/api-keys"),
   });
 }
 

@@ -37,7 +37,7 @@ export function useImportSources(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "import-sources"],
     queryFn: () =>
-      apiClient.get<ImportSource[]>(
+      apiClient.list<ImportSource>(
         `/api/v1/clusters/${clusterId}/vm-import-sources`,
       ),
     enabled: clusterId.length > 0,
@@ -103,7 +103,7 @@ export function useImportJobs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vm-imports"],
     queryFn: () =>
-      apiClient.get<VMImportJob[]>(`/api/v1/clusters/${clusterId}/vm-imports`),
+      apiClient.list<VMImportJob>(`/api/v1/clusters/${clusterId}/vm-imports`),
     enabled: clusterId.length > 0,
     // Poll only while an import is in flight; stop once every job is terminal
     // (matches the CVE-scan / rolling-update query pattern).

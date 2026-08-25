@@ -37,7 +37,7 @@ export interface FirewallLogEntry {
 export function useFirewallAliases(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "firewall", "aliases"],
-    queryFn: () => apiClient.get<FirewallAlias[]>(`/api/v1/clusters/${clusterId}/firewall/aliases`),
+    queryFn: () => apiClient.list<FirewallAlias>(`/api/v1/clusters/${clusterId}/firewall/aliases`),
     enabled: clusterId.length > 0,
   });
 }
@@ -64,7 +64,7 @@ export function useDeleteFirewallAlias(clusterId: string) {
 export function useFirewallIPSets(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "firewall", "ipset"],
-    queryFn: () => apiClient.get<FirewallIPSet[]>(`/api/v1/clusters/${clusterId}/firewall/ipset`),
+    queryFn: () => apiClient.list<FirewallIPSet>(`/api/v1/clusters/${clusterId}/firewall/ipset`),
     enabled: clusterId.length > 0,
   });
 }
@@ -90,7 +90,7 @@ export function useDeleteFirewallIPSet(clusterId: string) {
 export function useFirewallIPSetEntries(clusterId: string, setName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "firewall", "ipset", setName, "entries"],
-    queryFn: () => apiClient.get<FirewallIPSetEntry[]>(`/api/v1/clusters/${clusterId}/firewall/ipset/${encodeURIComponent(setName)}/entries`),
+    queryFn: () => apiClient.list<FirewallIPSetEntry>(`/api/v1/clusters/${clusterId}/firewall/ipset/${encodeURIComponent(setName)}/entries`),
     enabled: clusterId.length > 0 && setName.length > 0,
   });
 }
@@ -117,7 +117,7 @@ export function useDeleteFirewallIPSetEntry(clusterId: string, setName: string) 
 export function useFirewallSecurityGroups(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "firewall", "groups"],
-    queryFn: () => apiClient.get<FirewallSecurityGroup[]>(`/api/v1/clusters/${clusterId}/firewall/groups`),
+    queryFn: () => apiClient.list<FirewallSecurityGroup>(`/api/v1/clusters/${clusterId}/firewall/groups`),
     enabled: clusterId.length > 0,
   });
 }
@@ -144,7 +144,7 @@ export function useDeleteFirewallSecurityGroup(clusterId: string) {
 export function useFirewallLog(clusterId: string, node: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "firewall", "log", node],
-    queryFn: () => apiClient.get<FirewallLogEntry[]>(`/api/v1/clusters/${clusterId}/firewall/log?node=${encodeURIComponent(node)}`),
+    queryFn: () => apiClient.list<FirewallLogEntry>(`/api/v1/clusters/${clusterId}/firewall/log?node=${encodeURIComponent(node)}`),
     enabled: clusterId.length > 0 && node.length > 0,
     refetchInterval: 10_000,
   });

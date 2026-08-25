@@ -245,7 +245,7 @@ func (h *StorageHandler) ListAppliances(c fiber.Ctx) error {
 			Architecture: a.Architecture,
 		}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // DownloadAppliance handles POST /api/v1/clusters/:cluster_id/storage/:storage_id/appliances.

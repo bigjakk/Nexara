@@ -143,7 +143,7 @@ func (h *OIDCHandler) List(c fiber.Ctx) error {
 		resp[i] = toOIDCConfigResponse(cfg)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // Get handles GET /api/v1/oidc/configs/:id.

@@ -1,16 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import type {
-  AuditLogEntry,
-  AuditLogResponse,
-} from "@/features/audit/api/audit-queries";
+import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 
-// Re-export the canonical audit entry/response types (owned by the audit
-// feature) so Events-tab consumers such as AuditLogPanel share one shape —
-// including the task_status/task_exit_status/task_progress fields the
-// /api/v1/audit-log endpoint returns — instead of a local copy that silently
-// drifted and omitted them.
-export type { AuditLogEntry, AuditLogResponse };
+// Re-export the canonical audit entry type (owned by the audit feature) so
+// Events-tab consumers such as AuditLogPanel share one shape — including the
+// task_status/task_exit_status/task_progress fields the /api/v1/audit-log
+// endpoint returns — instead of a local copy that silently drifted and
+// omitted them. The response envelope itself is ListResponse<AuditLogEntry>,
+// which every collection endpoint shares (@/lib/api-client).
+export type { AuditLogEntry };
 
 export interface AuditUserRef {
   id: string;
@@ -66,9 +64,7 @@ export function useEvents({
       endTime,
     ],
     queryFn: () =>
-      apiClient.get<AuditLogResponse>(
-        `/api/v1/audit-log?${params.toString()}`,
-      ),
+      apiClient.page<AuditLogEntry>(`/api/v1/audit-log?${params.toString()}`),
     refetchInterval: 120_000,
   });
 }
@@ -76,7 +72,7 @@ export function useEvents({
 export function useAuditActions() {
   return useQuery({
     queryKey: ["audit-actions"],
-    queryFn: () => apiClient.get<string[]>("/api/v1/audit-log/actions"),
+    queryFn: () => apiClient.list<string>("/api/v1/audit-log/actions"),
     staleTime: 300_000,
   });
 }
@@ -85,7 +81,7 @@ export function useAuditUsers() {
   return useQuery({
     queryKey: ["audit-users"],
     queryFn: () =>
-      apiClient.get<AuditUserRef[]>("/api/v1/audit-log/users"),
+      apiClient.list<AuditUserRef>("/api/v1/audit-log/users"),
     staleTime: 300_000,
   });
 }

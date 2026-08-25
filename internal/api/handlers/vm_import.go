@@ -325,7 +325,7 @@ func (h *VMImportHandler) ListImportSources(c fiber.Ctx) error {
 		}
 		return entries[i].Node < entries[j].Node
 	})
-	return c.JSON(entries)
+	return RespondItems(c, entries)
 }
 
 // parseNodeRestriction parses a PVE storage `nodes` field (comma-separated node names).
@@ -657,7 +657,7 @@ func (h *VMImportHandler) ListVMImports(c fiber.Ctx) error {
 	for _, j := range jobs {
 		out = append(out, toVMImportJobResponse(j))
 	}
-	return c.JSON(out)
+	return RespondItems(c, out)
 }
 
 // GetVMImport handles GET /api/v1/clusters/:cluster_id/vm-imports/:id.

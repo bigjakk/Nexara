@@ -83,6 +83,7 @@ type AuditLog struct {
 	Details      json.RawMessage `json:"details"`
 	CreatedAt    time.Time       `json:"created_at"`
 	Source       string          `json:"source"`
+	Vmid         pgtype.Int4     `json:"vmid"`
 }
 
 type CephClusterMetric struct {

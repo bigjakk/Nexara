@@ -31,7 +31,7 @@ export function ClustersListPage() {
     queries: (clusters ?? []).map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.get<NodeResponse[]>(`/api/v1/clusters/${cluster.id}/nodes`),
+        apiClient.list<NodeResponse>(`/api/v1/clusters/${cluster.id}/nodes`),
       enabled: clusters !== undefined && clusters.length > 0,
     })),
   });
@@ -40,7 +40,7 @@ export function ClustersListPage() {
     queries: (clusters ?? []).map((cluster) => ({
       queryKey: ["clusters", cluster.id, "vms"],
       queryFn: () =>
-        apiClient.get<VMResponse[]>(`/api/v1/clusters/${cluster.id}/vms`),
+        apiClient.list<VMResponse>(`/api/v1/clusters/${cluster.id}/vms`),
       enabled: clusters !== undefined && clusters.length > 0,
     })),
   });

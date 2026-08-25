@@ -20,8 +20,9 @@ import (
 // It goes through the method rather than re-deriving the format, which is the
 // whole point: exportSyslog is the side of the RFC 5424 rendering that
 // historically drifted from the live forwarder, and until this file it had no
-// test at all. FormatAuditSD takes six consecutive string parameters, so
-// transposing two of them at the call site compiles cleanly and ships.
+// test at all. FormatAuditSD now takes a named-field AuditSD struct — which is
+// what stops a transposed pair from compiling — but this still pins that
+// exportSyslog fills those fields from the right columns.
 func exportSyslogLines(t *testing.T, items []db.ListAuditLogAdvancedRow, visible map[string]bool) []string {
 	t.Helper()
 

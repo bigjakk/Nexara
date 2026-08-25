@@ -190,7 +190,7 @@ func (h *NodeHandler) ListByCluster(c fiber.Ctx) error {
 		resp[i] = toNodeResponse(n)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // --- Node sub-resource response types ---
@@ -263,7 +263,7 @@ func (h *NodeHandler) ListNodeDisks(c fiber.Ctx) error {
 			RPM: d.Rpm, Vendor: d.Vendor, WWN: d.Wwn,
 		}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // ListNodeNetworkInterfaces handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/network-interfaces.
@@ -293,7 +293,7 @@ func (h *NodeHandler) ListNodeNetworkInterfaces(c fiber.Ctx) error {
 			BridgePorts: f.BridgePorts, Comments: f.Comments,
 		}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // ListNodePCIDevices handles GET /api/v1/clusters/:cluster_id/nodes/:node_id/pci-devices.
@@ -323,7 +323,7 @@ func (h *NodeHandler) ListNodePCIDevices(c fiber.Ctx) error {
 			SubsystemDevice: d.SubsystemDevice, SubsystemVendor: d.SubsystemVendor,
 		}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // --- Node management endpoints (DNS, Time, Power) ---

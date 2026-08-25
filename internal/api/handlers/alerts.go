@@ -366,7 +366,7 @@ func (h *AlertHandler) ListRules(c fiber.Ctx) error {
 		for i, r := range rules {
 			result[i] = toAlertRuleResponse(r)
 		}
-		return c.JSON(result)
+		return RespondItems(c, result)
 	}
 
 	// Scoped in SQL, not after the fetch: LIMIT/OFFSET run before the per-row
@@ -374,7 +374,7 @@ func (h *AlertHandler) ListRules(c fiber.Ctx) error {
 	// hands a scoped caller short pages with holes in them.
 	scope, query := clusterScopeFilter(access)
 	if !query {
-		return c.JSON([]alertRuleResponse{})
+		return RespondItems(c, []alertRuleResponse{})
 	}
 
 	rules, err := h.queries.ListAlertRules(c.Context(), db.ListAlertRulesParams{
@@ -401,7 +401,7 @@ func (h *AlertHandler) ListRules(c fiber.Ctx) error {
 		}
 		result = append(result, toAlertRuleResponse(r))
 	}
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // alertRuleScope is an alert rule's resolved scope: the scope type plus the
@@ -1041,7 +1041,7 @@ func (h *AlertHandler) ListAlerts(c fiber.Ctx) error {
 	// the per-row trim, so an unscoped fetch pages over the global rowset.
 	scope, query := clusterScopeFilter(access)
 	if !query {
-		return c.JSON([]alertHistoryResponse{})
+		return RespondItems(c, []alertHistoryResponse{})
 	}
 
 	alerts, err := h.queries.ListAlertHistoryFiltered(c.Context(), db.ListAlertHistoryFilteredParams{
@@ -1068,7 +1068,7 @@ func (h *AlertHandler) ListAlerts(c fiber.Ctx) error {
 		}
 		result = append(result, toAlertHistoryResponse(a))
 	}
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // GetAlert returns a single alert.
@@ -1244,7 +1244,7 @@ func (h *AlertHandler) ListAlertsByCluster(c fiber.Ctx) error {
 	for i, a := range alerts {
 		result[i] = toAlertHistoryResponse(a)
 	}
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // CountActiveAlertsByCluster returns active alert counts for a cluster.
@@ -1286,7 +1286,7 @@ func (h *AlertHandler) ListChannels(c fiber.Ctx) error {
 	for i, ch := range channels {
 		result[i] = toNotificationChannelResponse(ch)
 	}
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // CreateChannel creates a new notification channel.
@@ -1543,7 +1543,7 @@ func (h *AlertHandler) ListMaintenanceWindows(c fiber.Ctx) error {
 	for i, w := range windows {
 		result[i] = toMaintenanceWindowResponse(w)
 	}
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // CreateMaintenanceWindow creates a new maintenance window.

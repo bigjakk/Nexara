@@ -87,7 +87,7 @@ func TestFormatAuditSDContainsHostileValues(t *testing.T) {
 			if user == "" {
 				user = "u1"
 			}
-			sd := FormatAuditSD(user, "c1", "vm", tt.resourceID, "start", tt.details)
+			sd := FormatAuditSD(AuditSD{User: user, Cluster: "c1", ResourceType: "vm", ResourceID: tt.resourceID, Action: "start", Details: tt.details})
 
 			if !strings.Contains(sd, tt.wantField) {
 				t.Errorf("SD did not contain the hostile value as one escaped param.\n got: %s\nwant substring: %s",
@@ -113,8 +113,10 @@ func TestFormatAuditSDContainsHostileValues(t *testing.T) {
 // recognition, which would make the audit stream useless in the ordinary case
 // the feature exists for.
 func TestFormatAuditSDRendersOrdinaryValues(t *testing.T) {
-	sd := FormatAuditSD("alice@example.com", "prod", "vm", "100", "vm_start",
-		`{"upid":"UPID:pve1:0001","node":"pve1"}`)
+	sd := FormatAuditSD(AuditSD{
+		User: "alice@example.com", Cluster: "prod", ResourceType: "vm", ResourceID: "100",
+		Action: "vm_start", Details: `{"upid":"UPID:pve1:0001","node":"pve1"}`,
+	})
 
 	want := `[nexara@32473 user="alice@example.com" cluster="prod" resource_type="vm" ` +
 		`resource_id="100" action="vm_start" ` +
@@ -129,11 +131,71 @@ func TestFormatAuditSDRendersOrdinaryValues(t *testing.T) {
 // carried.
 func TestFormatAuditSDOmitsEmptyDetails(t *testing.T) {
 	for _, details := range []string{"", "{}"} {
-		sd := FormatAuditSD("u1", "c1", "vm", "100", "vm_start", details)
+		sd := FormatAuditSD(AuditSD{User: "u1", Cluster: "c1", ResourceType: "vm", ResourceID: "100", Action: "vm_start", Details: details})
 		if strings.Contains(sd, "details=") {
 			t.Errorf("details=%q rendered a details param: %s", details, sd)
 		}
 	}
+}
+
+// TestFormatAuditSDGuestIdentity covers the two params added for SIEM rules
+// keyed on a guest. Both properties matter to a decoder: they are APPENDED
+// (after details), so every param an existing decoder already matches keeps its
+// position, and they are OMITTED rather than rendered empty, so "no guest" is
+// distinguishable from "guest unknown".
+func TestFormatAuditSDGuestIdentity(t *testing.T) {
+	t.Run("appended after details, in order", func(t *testing.T) {
+		sd := FormatAuditSD(AuditSD{
+			User: "alice", Cluster: "prod", ResourceType: "vm", ResourceID: "uuid-1",
+			Action: "destroy", VMID: "121", ResourceName: "Veeam13-appliance02",
+			Details: `{"node":"HV03"}`,
+		})
+		want := `[nexara@32473 user="alice" cluster="prod" resource_type="vm" ` +
+			`resource_id="uuid-1" action="destroy" details="{\"node\":\"HV03\"}" ` +
+			`vmid="121" resource_name="Veeam13-appliance02"]`
+		if sd != want {
+			t.Errorf("sd   = %s\nwant = %s", sd, want)
+		}
+	})
+
+	t.Run("omitted when the entry names no guest", func(t *testing.T) {
+		sd := FormatAuditSD(AuditSD{
+			User: "alice", Cluster: "prod", ResourceType: "setting",
+			ResourceID: "branding.app_title", Action: "setting_updated",
+		})
+		if strings.Contains(sd, "vmid=") || strings.Contains(sd, "resource_name=") {
+			t.Errorf("a guest-less entry rendered a guest param: %s", sd)
+		}
+	})
+
+	t.Run("escaped and bounded like every other param", func(t *testing.T) {
+		// A VM name is caller-chosen, so it is on the reachable side of the
+		// escaping boundary — same as resource_id.
+		sd := FormatAuditSD(AuditSD{
+			User: "u1", Cluster: "c1", ResourceType: "vm", ResourceID: "100", Action: "start",
+			ResourceName: "x\" action=\"login] [nexara@32473 forged=\"1",
+		})
+		if !strings.Contains(sd, `resource_name="x\" action=\"login\] [nexara@32473 forged=\"1"`) {
+			t.Errorf("resource_name was not escaped as one SD param: %s", sd)
+		}
+		// The property that matters is not how many "[" the value contains —
+		// "[" is not an SD metacharacter — but that the only UNESCAPED "]" is
+		// the one closing the element.
+		if idx := firstUnescapedBracket(sd); idx != len(sd)-1 {
+			t.Errorf("resource_name closed the SD element early at %d: %s", idx, sd)
+		}
+
+		long := FormatAuditSD(AuditSD{
+			User: "u1", Cluster: "c1", ResourceType: "vm", ResourceID: "100", Action: "start",
+			ResourceName: strings.Repeat("日", 4000),
+		})
+		if !strings.Contains(long, "…") {
+			t.Error("resource_name was not truncated")
+		}
+		if !utf8ValidString(long) {
+			t.Error("truncation split a multi-byte rune in resource_name")
+		}
+	})
 }
 
 // TestFormatAuditSDBoundsValues covers the length caps. They exist for framing,
@@ -145,7 +207,7 @@ func TestFormatAuditSDBoundsValues(t *testing.T) {
 	longDetails := `{"note":"` + strings.Repeat("日", 8000) + `"}`
 	longID := strings.Repeat("a", 4000)
 
-	sd := FormatAuditSD("u1", "c1", "vm", longID, "start", longDetails)
+	sd := FormatAuditSD(AuditSD{User: "u1", Cluster: "c1", ResourceType: "vm", ResourceID: longID, Action: "start", Details: longDetails})
 
 	if !strings.Contains(sd, "…") {
 		t.Error("nothing was truncated, so neither cap applied")
@@ -156,6 +218,21 @@ func TestFormatAuditSDBoundsValues(t *testing.T) {
 	if !utf8ValidString(sd) {
 		t.Error("truncation split a multi-byte rune and produced invalid UTF-8")
 	}
+}
+
+// firstUnescapedBracket returns the index of the first "]" not preceded by a
+// backslash, or -1. In a well-formed element that is the final byte.
+func firstUnescapedBracket(s string) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] != ']' {
+			continue
+		}
+		if i > 0 && s[i-1] == '\\' {
+			continue
+		}
+		return i
+	}
+	return -1
 }
 
 func utf8ValidString(s string) bool {

@@ -165,9 +165,19 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 		}
 	}
 
-	// Resolve VM/CT name from the database when the task targets a guest.
+	// Resolve the guest name from the database when the task targets a guest,
+	// and record it in the entry.
+	//
+	// Keyed on the UPID's worker type rather than mapping.ResourceType: the
+	// types that carry a VMID but have no entry in proxmoxTaskMap — hamigrate,
+	// hastart, hastop, resize — fall through to resource_type "proxmox_task",
+	// and those were exactly the entries that reached the audit log with no
+	// name at all. Recording it here is what lets the read side resolve the
+	// name from the entry instead of re-deriving it from a live vms row: VMIDs
+	// are reused, so a lookup done later can return whichever guest holds the
+	// id *now*, which for a destroy entry is a different guest entirely.
 	resourceName := ""
-	if task.ID != "" && (mapping.ResourceType == "vm" || mapping.ResourceType == "container" || mapping.ResourceType == "backup") {
+	if isGuestTaskType(task.Type) {
 		if vmid, err := strconv.ParseInt(task.ID, 10, 32); err == nil {
 			if vm, err := s.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
 				ClusterID: cluster.ID,

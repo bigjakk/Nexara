@@ -199,7 +199,7 @@ func (h *HAHandler) ListResources(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(resources)
+	return RespondItems(c, resources)
 }
 
 // CreateResource handles POST /clusters/:cluster_id/ha/resources.
@@ -407,11 +407,11 @@ func (h *HAHandler) ListGroups(c fiber.Ctx) error {
 		// PVE 9.x soft-disables the groups API once migrated to rules — there
 		// are simply no groups to list anymore, so return an empty array.
 		if proxmox.IsGroupsMigratedError(err) {
-			return c.JSON([]proxmox.HAGroup{})
+			return RespondItems(c, []proxmox.HAGroup{})
 		}
 		return mapProxmoxError(err)
 	}
-	return c.JSON(groups)
+	return RespondItems(c, groups)
 }
 
 // CreateGroup handles POST /clusters/:cluster_id/ha/groups.
@@ -567,11 +567,11 @@ func (h *HAHandler) ListRules(c fiber.Ctx) error {
 	if err != nil {
 		// Older PVE without rules support — return empty list
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
-			return c.JSON([]proxmox.HARuleEntry{})
+			return RespondItems(c, []proxmox.HARuleEntry{})
 		}
 		return mapProxmoxError(err)
 	}
-	return c.JSON(rules)
+	return RespondItems(c, rules)
 }
 
 // CreateRule handles POST /clusters/:cluster_id/ha/rules.
@@ -758,7 +758,7 @@ func (h *HAHandler) GetStatus(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(status)
+	return RespondItems(c, status)
 }
 
 // GetManagerStatus handles GET /clusters/:cluster_id/ha/manager-status.

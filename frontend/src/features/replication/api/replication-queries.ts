@@ -23,7 +23,7 @@ export interface ReplicationJob {
 export function useReplicationJobs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "replication"],
-    queryFn: () => apiClient.get<ReplicationJob[]>(`/api/v1/clusters/${clusterId}/replication`),
+    queryFn: () => apiClient.list<ReplicationJob>(`/api/v1/clusters/${clusterId}/replication`),
     enabled: clusterId.length > 0,
   });
 }

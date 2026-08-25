@@ -103,7 +103,9 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/clusters/fetch-fingerprint": {Description: "Fetch a remote cluster's TLS fingerprint", Permission: "manage:cluster", Group: "Clusters"},
 
 	// ── Nodes ─────────────────────────────────────────────────────────
-	"GET /api/v1/clusters/:cluster_id/nodes": {Description: "List cluster nodes", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes":                    {Description: "List cluster nodes", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/syslog":  {Description: "Read a node's syslog over a time window (since/until)", Permission: "view:node", Group: "Nodes"},
+	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/journal": {Description: "Read a node's systemd journal by line count (lastentries) or cursor", Permission: "view:node", Group: "Nodes"},
 
 	// ── Virtual Machines ──────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/vms":                                       {Description: "List all VMs in a cluster", Permission: "view:vm", Group: "Virtual Machines"},
@@ -366,5 +368,5 @@ func (h *APIDocsHandler) GetDocs(c fiber.Ctx) error {
 		return methodRank[out[i].Method] < methodRank[out[j].Method]
 	})
 
-	return c.JSON(out)
+	return RespondItems(c, out)
 }

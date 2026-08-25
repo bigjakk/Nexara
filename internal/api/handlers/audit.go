@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,11 +56,6 @@ type auditLogResponse struct {
 	TaskProgress   *float64 `json:"task_progress,omitempty"`
 }
 
-type auditListResponse struct {
-	Items []auditLogResponse `json:"items"`
-	Total int64              `json:"total"`
-}
-
 // reservedSettingVisibility resolves, once per request, which reserved setting
 // keys this caller may see the details of: those whose owning endpoint they
 // could have read the setting from directly.
@@ -90,16 +86,38 @@ func reservedSettingVisibility(c fiber.Ctx) (map[string]bool, error) {
 // alone that is owned. The replacement names the permission to ask for, so a
 // reader can tell a redaction from an entry that carried nothing.
 func auditDetailsFor(resourceType, resourceID, details string, visible map[string]bool) string {
-	if resourceType != settingResourceType || visible[resourceID] {
+	if !auditDetailsRedacted(resourceType, resourceID, visible) {
 		return details
 	}
-	owner, reserved := reservedGlobalSettings[resourceID]
-	if !reserved {
-		return details
-	}
+	owner := reservedGlobalSettings[resourceID]
 	// The interpolated halves come from reservedGlobalSettings, a table of
 	// literals, never from the request — so this needs no escaping.
 	return `{"redacted":true,"requires":"` + owner.Action + `:` + owner.Resource + `"}`
+}
+
+// auditDetailsRedacted reports whether this row's details are withheld from the
+// caller. Split out of auditDetailsFor because resource_vmid / resource_name are
+// now DERIVED from details in SQL (queries/audit_log.sql), so they have to
+// answer to the same rule — otherwise the redaction withholds the blob while a
+// sibling column hands back a value lifted straight out of it, and
+// TestGuard_AuditReadPathsRedact cannot see it because the extraction happens
+// in SQL rather than through a Go .Details read.
+func auditDetailsRedacted(resourceType, resourceID string, visible map[string]bool) bool {
+	if resourceType != settingResourceType || visible[resourceID] {
+		return false
+	}
+	_, reserved := reservedGlobalSettings[resourceID]
+	return reserved
+}
+
+// auditGuestIdentity applies the details redaction to the two guest fields
+// derived from details. Every path that emits them — the two response mappers,
+// the CSV export and the syslog export — goes through it.
+func auditGuestIdentity(resourceType, resourceID, name string, vmid int32, visible map[string]bool) (guestName string, guestVMID int32) {
+	if auditDetailsRedacted(resourceType, resourceID, visible) {
+		return "", 0
+	}
+	return name, vmid
 }
 
 func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow, visible map[string]bool) auditLogResponse {
@@ -117,6 +135,7 @@ func toAdvancedAuditResponse(a db.ListAuditLogAdvancedRow, visible map[string]bo
 		ResourceVMID:    a.ResourceVmid,
 		ResourceName:    a.ResourceName,
 	}
+	resp.ResourceName, resp.ResourceVMID = auditGuestIdentity(a.ResourceType, a.ResourceID, a.ResourceName, a.ResourceVmid, visible)
 	if a.UserID.Valid {
 		u := uuid.UUID(a.UserID.Bytes)
 		resp.UserID = &u
@@ -217,6 +236,18 @@ func (h *AuditHandler) parseAuditFilters(c fiber.Ctx, access clusterAccess) (lis
 		countP.EndTime = v
 	}
 
+	// Per-guest filter over the denormalized audit_log.vmid (000084). Shares
+	// parseVmidsParam — and therefore the bound on list length — with the
+	// identically-named filter on /tasks.
+	if raw := c.Query("vmids"); raw != "" {
+		vmids, err := parseVmidsParam(raw)
+		if err != nil {
+			return listP, countP, query, fiber.NewError(fiber.StatusBadRequest, "Invalid vmids filter")
+		}
+		listP.Vmids = vmids
+		countP.Vmids = vmids
+	}
+
 	return listP, countP, query, nil
 }
 
@@ -254,7 +285,7 @@ func (h *AuditHandler) List(c fiber.Ctx) error {
 	}
 
 	if !query {
-		return c.JSON(auditListResponse{Items: []auditLogResponse{}})
+		return RespondList(c, []auditLogResponse{}, 0)
 	}
 
 	items, err := h.queries.ListAuditLogAdvanced(c.Context(), listP)
@@ -272,10 +303,7 @@ func (h *AuditHandler) List(c fiber.Ctx) error {
 		return err
 	}
 
-	resp := auditListResponse{
-		Items: make([]auditLogResponse, 0, len(items)),
-		Total: total,
-	}
+	resp := make([]auditLogResponse, 0, len(items))
 	for _, a := range items {
 		// Defense-in-depth: the SQL scope above already restricts rows to the
 		// caller's clusters, and excludes the NULL-cluster global entries from
@@ -288,10 +316,10 @@ func (h *AuditHandler) List(c fiber.Ctx) error {
 		} else if !access.HasGlobal {
 			continue
 		}
-		resp.Items = append(resp.Items, toAdvancedAuditResponse(a, visible))
+		resp = append(resp, toAdvancedAuditResponse(a, visible))
 	}
 
-	return c.JSON(resp)
+	return RespondList(c, resp, total)
 }
 
 // ListRecent handles GET /api/v1/audit-log/recent — returns the 50 most recent entries.
@@ -331,7 +359,7 @@ func (h *AuditHandler) ListRecent(c fiber.Ctx) error {
 		resp = append(resp, toRecentAuditResponse(a, visible))
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow, visible map[string]bool) auditLogResponse {
@@ -349,6 +377,7 @@ func toRecentAuditResponse(a db.ListRecentAuditLogEnrichedRow, visible map[strin
 		ResourceVMID:    a.ResourceVmid,
 		ResourceName:    a.ResourceName,
 	}
+	resp.ResourceName, resp.ResourceVMID = auditGuestIdentity(a.ResourceType, a.ResourceID, a.ResourceName, a.ResourceVmid, visible)
 	if a.UserID.Valid {
 		u := uuid.UUID(a.UserID.Bytes)
 		resp.UserID = &u
@@ -381,13 +410,6 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
 		return err
 	}
 
-	limit := fiber.Query[int](c, "limit", 50)
-	if limit < 1 {
-		limit = 1
-	} else if limit > 200 {
-		limit = 200
-	}
-
 	// Scoped too, though requireClusterPerm above has already authorized this
 	// exact cluster and the ClusterID filter pins the result set to it. The
 	// stamp is a no-op against either of those — a global caller scopes to nil,
@@ -401,14 +423,32 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
 		return err
 	}
 
-	items, err := h.queries.ListAuditLogAdvanced(c.Context(), db.ListAuditLogAdvancedParams{
-		Limit:                int32(limit), //nolint:gosec // bounds checked above (1-200)
-		Offset:               0,
-		ClusterID:            pgtype.UUID{Bytes: clusterID, Valid: true},
-		AccessibleClusterIds: access.ScopedIDs(),
-	})
+	// The same parser the global route uses, so both audit routes accept the
+	// same filters (?vmids=, ?action=, ?start_time=, …) and clamp limit/offset
+	// identically. The path's cluster is stamped over whatever ?cluster_id=
+	// carried, after parsing: this route is scoped to one cluster by definition,
+	// and requireClusterPerm above authorized that one.
+	listP, countP, query, err := h.parseAuditFilters(c, access)
 	if err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log")
+		return err
+	}
+	cid := pgtype.UUID{Bytes: clusterID, Valid: true}
+	listP.ClusterID, countP.ClusterID = cid, cid
+
+	var items []db.ListAuditLogAdvancedRow
+	var total int64
+	if query {
+		items, err = h.queries.ListAuditLogAdvanced(c.Context(), listP)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log")
+		}
+		// Counted under the same filters and the same scope as the page, so a
+		// caller can tell a full page from a truncated one — which a bare array
+		// with no total could not express at all.
+		total, err = h.queries.CountAuditLogAdvanced(c.Context(), countP)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log")
+		}
 	}
 
 	// A reserved setting key is global, so its entries carry no cluster_id and
@@ -436,7 +476,7 @@ func (h *AuditHandler) ListByCluster(c fiber.Ctx) error {
 		resp = append(resp, toAdvancedAuditResponse(a, visible))
 	}
 
-	return c.JSON(resp)
+	return RespondList(c, resp, total)
 }
 
 // ListActions handles GET /api/v1/audit-log/actions — returns distinct action values.
@@ -450,7 +490,7 @@ func (h *AuditHandler) ListActions(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list actions")
 	}
 
-	return c.JSON(actions)
+	return RespondItems(c, actions)
 }
 
 // ListUsers handles GET /api/v1/audit-log/users — returns distinct users in audit log.
@@ -474,7 +514,7 @@ func (h *AuditHandler) ListUsers(c fiber.Ctx) error {
 		resp[i] = userRef{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName}
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // Export handles GET /api/v1/audit-log/export — exports audit log in CSV, JSON, or syslog format.
@@ -495,11 +535,11 @@ func (h *AuditHandler) Export(c fiber.Ctx) error {
 	// would silently drop a scoped user's accessible rows that fall beyond the
 	// newest 10000 global ones, producing a short export that nothing in the
 	// file marks as incomplete.
-	listP, _, query, err := h.parseAuditFilters(c, access)
+	listP, countP, query, err := h.parseAuditFilters(c, access)
 	if err != nil {
 		return err
 	}
-	listP.Limit = 10000
+	listP.Limit = exportRowCap
 	listP.Offset = 0
 
 	if listP.ClusterID.Valid && !access.PermitsCluster(uuid.UUID(listP.ClusterID.Bytes)) {
@@ -507,8 +547,17 @@ func (h *AuditHandler) Export(c fiber.Ctx) error {
 	}
 
 	var rawItems []db.ListAuditLogAdvancedRow
+	var total int64
 	if query {
 		rawItems, err = h.queries.ListAuditLogAdvanced(c.Context(), listP)
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log for export")
+		}
+		// The count under the same filters and scope, so a JSON export that hit
+		// exportRowCap says so in the file rather than looking complete. The
+		// line-based formats have nowhere to put it; a caller who needs the
+		// distinction should export JSON or narrow the time range.
+		total, err = h.queries.CountAuditLogAdvanced(c.Context(), countP)
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to list audit log for export")
 		}
@@ -542,11 +591,11 @@ func (h *AuditHandler) Export(c fiber.Ctx) error {
 	case "syslog":
 		return h.exportSyslog(c, items, timestamp, visible)
 	default:
-		return h.exportJSON(c, items, timestamp, visible)
+		return h.exportJSON(c, items, total, timestamp, visible)
 	}
 }
 
-func (h *AuditHandler) exportJSON(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string, visible map[string]bool) error {
+func (h *AuditHandler) exportJSON(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, total int64, timestamp string, visible map[string]bool) error {
 	resp := make([]auditLogResponse, len(items))
 	for i, a := range items {
 		resp[i] = toAdvancedAuditResponse(a, visible)
@@ -554,7 +603,10 @@ func (h *AuditHandler) exportJSON(c fiber.Ctx, items []db.ListAuditLogAdvancedRo
 
 	c.Set("Content-Type", "application/json; charset=utf-8")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=audit-log-%s.json", timestamp))
-	return c.JSON(resp)
+	// Enveloped like every other collection the API returns, rather than the
+	// bare array this used to be — and carrying the unclipped total, so
+	// total > len(items) is the file saying it was truncated at exportRowCap.
+	return RespondList(c, resp, total)
 }
 
 func (h *AuditHandler) exportCSV(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string, visible map[string]bool) error {
@@ -576,10 +628,12 @@ func (h *AuditHandler) exportCSV(c fiber.Ctx, items []db.ListAuditLogAdvancedRow
 		if clusterName == "" {
 			clusterName = "System"
 		}
-		resourceName := a.ResourceName
+		// Same rule as the details column beside them — these two are derived
+		// from details in SQL, so a redacted row must not leak them here.
+		resourceName, resourceVmid := auditGuestIdentity(a.ResourceType, a.ResourceID, a.ResourceName, a.ResourceVmid, visible)
 		vmid := ""
-		if a.ResourceVmid > 0 {
-			vmid = fmt.Sprintf("%d", a.ResourceVmid)
+		if resourceVmid > 0 {
+			vmid = strconv.FormatInt(int64(resourceVmid), 10)
 		}
 		userName := a.UserDisplayName.String
 		if userName == "" {
@@ -605,6 +659,11 @@ func (h *AuditHandler) exportCSV(c fiber.Ctx, items []db.ListAuditLogAdvancedRow
 	w.Flush()
 	return c.SendString(buf.String())
 }
+
+// exportRowCap bounds a single export. Rows beyond it are not returned; the
+// JSON envelope's total still reports the full match count, so a truncated
+// export is distinguishable from a complete one.
+const exportRowCap = 10000
 
 // exportSyslog outputs audit entries in RFC 5424 syslog format for SIEM integration.
 func (h *AuditHandler) exportSyslog(c fiber.Ctx, items []db.ListAuditLogAdvancedRow, timestamp string, visible map[string]bool) error {
@@ -635,10 +694,21 @@ func (h *AuditHandler) exportSyslog(c fiber.Ctx, items []db.ListAuditLogAdvanced
 		// bounds and escapes every value by the RFC 5424 SD-PARAM rules, which
 		// is what stops a details blob or a resource id from opening a field,
 		// closing the element or ending the record. See proxsyslog.FormatAuditSD.
-		sd := proxsyslog.FormatAuditSD(
-			userName, clusterName, a.ResourceType, a.ResourceID, a.Action,
-			auditDetailsFor(a.ResourceType, a.ResourceID, string(a.Details), visible),
-		)
+		resourceName, resourceVmid := auditGuestIdentity(a.ResourceType, a.ResourceID, a.ResourceName, a.ResourceVmid, visible)
+		vmid := ""
+		if resourceVmid != 0 {
+			vmid = strconv.FormatInt(int64(resourceVmid), 10)
+		}
+		sd := proxsyslog.FormatAuditSD(proxsyslog.AuditSD{
+			User:         userName,
+			Cluster:      clusterName,
+			ResourceType: a.ResourceType,
+			ResourceID:   a.ResourceID,
+			Action:       a.Action,
+			VMID:         vmid,
+			ResourceName: resourceName,
+			Details:      auditDetailsFor(a.ResourceType, a.ResourceID, string(a.Details), visible),
+		})
 
 		// One fewer "-" than before: the fields moved out of MSG into
 		// STRUCTURED-DATA, which occupies that slot.

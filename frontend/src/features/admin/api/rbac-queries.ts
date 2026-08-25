@@ -13,7 +13,7 @@ import type {
 export function useRoles() {
   return useQuery({
     queryKey: ["rbac", "roles"],
-    queryFn: () => apiClient.get<RBACRole[]>("/api/v1/rbac/roles"),
+    queryFn: () => apiClient.list<RBACRole>("/api/v1/rbac/roles"),
   });
 }
 
@@ -74,7 +74,7 @@ export function usePermissionCatalog() {
   return useQuery({
     queryKey: ["rbac", "permissions"],
     queryFn: () =>
-      apiClient.get<RBACPermission[]>("/api/v1/rbac/permissions"),
+      apiClient.list<RBACPermission>("/api/v1/rbac/permissions"),
   });
 }
 
@@ -84,7 +84,7 @@ export function useUserRoles(userId: string) {
   return useQuery({
     queryKey: ["rbac", "user-roles", userId],
     queryFn: () =>
-      apiClient.get<RBACUserRole[]>(`/api/v1/rbac/users/${userId}/roles`),
+      apiClient.list<RBACUserRole>(`/api/v1/rbac/users/${userId}/roles`),
     enabled: !!userId,
   });
 }
@@ -162,7 +162,7 @@ export function useCreateUser() {
 export function useUsers() {
   return useQuery({
     queryKey: ["admin", "users"],
-    queryFn: () => apiClient.get<UserListItem[]>("/api/v1/users"),
+    queryFn: () => apiClient.list<UserListItem>("/api/v1/users"),
   });
 }
 

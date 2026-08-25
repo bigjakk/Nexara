@@ -37,7 +37,7 @@ export function useNetworkInterfaces(clusterId: string) {
   return useQuery({
     queryKey: ["networks", "interfaces", clusterId],
     queryFn: () =>
-      apiClient.get<NodeInterfaces[]>(
+      apiClient.list<NodeInterfaces>(
         `/api/v1/clusters/${clusterId}/networks`,
       ),
     enabled: clusterId.length > 0,
@@ -51,7 +51,7 @@ export function useNodeNetworkInterfaces(
   return useQuery({
     queryKey: ["networks", "interfaces", clusterId, nodeName],
     queryFn: () =>
-      apiClient.get<NetworkInterface[]>(
+      apiClient.list<NetworkInterface>(
         `/api/v1/clusters/${clusterId}/networks/${nodeName}`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -156,7 +156,7 @@ export function useClusterFirewallRules(clusterId: string) {
   return useQuery({
     queryKey: ["firewall", "rules", clusterId],
     queryFn: () =>
-      apiClient.get<FirewallRule[]>(
+      apiClient.list<FirewallRule>(
         `/api/v1/clusters/${clusterId}/firewall/rules`,
       ),
     enabled: clusterId.length > 0,
@@ -216,7 +216,7 @@ export function useVMFirewallRules(clusterId: string, vmId: string) {
   return useQuery({
     queryKey: ["firewall", "vm-rules", clusterId, vmId],
     queryFn: () =>
-      apiClient.get<FirewallRule[]>(
+      apiClient.list<FirewallRule>(
         `/api/v1/clusters/${clusterId}/vms/${vmId}/firewall/rules`,
       ),
     enabled: clusterId.length > 0 && vmId.length > 0,
@@ -289,7 +289,7 @@ export function useSDNZones(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "zones", clusterId],
     queryFn: () =>
-      apiClient.get<SDNZone[]>(
+      apiClient.list<SDNZone>(
         `/api/v1/clusters/${clusterId}/sdn/zones`,
       ),
     enabled: clusterId.length > 0,
@@ -300,7 +300,7 @@ export function useSDNVNets(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "vnets", clusterId],
     queryFn: () =>
-      apiClient.get<SDNVNet[]>(
+      apiClient.list<SDNVNet>(
         `/api/v1/clusters/${clusterId}/sdn/vnets`,
       ),
     enabled: clusterId.length > 0,
@@ -417,7 +417,7 @@ export function useSDNSubnets(clusterId: string, vnet: string) {
   return useQuery({
     queryKey: ["sdn", "subnets", clusterId, vnet],
     queryFn: () =>
-      apiClient.get<SDNSubnet[]>(
+      apiClient.list<SDNSubnet>(
         `/api/v1/clusters/${clusterId}/sdn/vnets/${vnet}/subnets`,
       ),
     enabled: clusterId.length > 0 && vnet.length > 0,
@@ -498,7 +498,7 @@ export function useSDNControllers(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "controllers", clusterId],
     queryFn: () =>
-      apiClient.get<SDNController[]>(
+      apiClient.list<SDNController>(
         `/api/v1/clusters/${clusterId}/sdn/controllers`,
       ),
     enabled: clusterId.length > 0,
@@ -564,7 +564,7 @@ export function useSDNIPAMs(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "ipams", clusterId],
     queryFn: () =>
-      apiClient.get<SDNIPAM[]>(
+      apiClient.list<SDNIPAM>(
         `/api/v1/clusters/${clusterId}/sdn/ipams`,
       ),
     enabled: clusterId.length > 0,
@@ -630,7 +630,7 @@ export function useSDNDNSPlugins(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "dns", clusterId],
     queryFn: () =>
-      apiClient.get<SDNDNS[]>(
+      apiClient.list<SDNDNS>(
         `/api/v1/clusters/${clusterId}/sdn/dns`,
       ),
     enabled: clusterId.length > 0,
@@ -696,7 +696,7 @@ export function useFirewallTemplates() {
   return useQuery({
     queryKey: ["firewall", "templates"],
     queryFn: () =>
-      apiClient.get<FirewallTemplate[]>(`/api/v1/firewall-templates`),
+      apiClient.list<FirewallTemplate>(`/api/v1/firewall-templates`),
   });
 }
 

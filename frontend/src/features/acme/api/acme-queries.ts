@@ -61,7 +61,7 @@ export interface NodeCertificate {
 export function useACMEAccounts(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "accounts"],
-    queryFn: () => apiClient.get<ACMEAccount[]>(`/api/v1/clusters/${clusterId}/acme/accounts`),
+    queryFn: () => apiClient.list<ACMEAccount>(`/api/v1/clusters/${clusterId}/acme/accounts`),
     enabled: clusterId.length > 0,
   });
 }
@@ -87,7 +87,7 @@ export function useDeleteACMEAccount(clusterId: string) {
 export function useACMEPlugins(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "plugins"],
-    queryFn: () => apiClient.get<ACMEPlugin[]>(`/api/v1/clusters/${clusterId}/acme/plugins`),
+    queryFn: () => apiClient.list<ACMEPlugin>(`/api/v1/clusters/${clusterId}/acme/plugins`),
     enabled: clusterId.length > 0,
   });
 }
@@ -113,7 +113,7 @@ export function useDeleteACMEPlugin(clusterId: string) {
 export function useACMEChallengeSchema(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "challenge-schema"],
-    queryFn: () => apiClient.get<ACMEChallengeSchema[]>(`/api/v1/clusters/${clusterId}/acme/challenge-schema`),
+    queryFn: () => apiClient.list<ACMEChallengeSchema>(`/api/v1/clusters/${clusterId}/acme/challenge-schema`),
     enabled: clusterId.length > 0,
   });
 }
@@ -129,7 +129,7 @@ export function useACMETOS(clusterId: string) {
 export function useACMEDirectories(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "directories"],
-    queryFn: () => apiClient.get<ACMEDirectory[]>(`/api/v1/clusters/${clusterId}/acme/directories`),
+    queryFn: () => apiClient.list<ACMEDirectory>(`/api/v1/clusters/${clusterId}/acme/directories`),
     enabled: clusterId.length > 0,
   });
 }
@@ -167,7 +167,7 @@ export function useSetNodeACMEConfig(clusterId: string) {
 export function useNodeCertificates(clusterId: string, node: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", node, "certificates"],
-    queryFn: () => apiClient.get<NodeCertificate[]>(`/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates`),
+    queryFn: () => apiClient.list<NodeCertificate>(`/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates`),
     enabled: clusterId.length > 0 && node.length > 0,
   });
 }

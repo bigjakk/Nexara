@@ -3,10 +3,15 @@ import { useConsoleStore } from "./console-store";
 import { apiClient } from "@/lib/api-client";
 
 vi.mock("@/lib/api-client", () => ({
-  apiClient: { get: vi.fn() },
+  apiClient: { get: vi.fn(), list: vi.fn() },
 }));
 
 const mockedGet = vi.mocked(apiClient.get);
+// The node re-resolution reads a collection, so it goes through apiClient.list
+// (which unwraps the {items,total} envelope), not apiClient.get. Stubbing it as
+// `get` returning a bare array is how this suite kept passing against a shape
+// the server had stopped sending.
+const mockedList = vi.mocked(apiClient.list);
 
 describe("console-store", () => {
   beforeEach(() => {
@@ -152,6 +157,7 @@ describe("console-store", () => {
 
     beforeEach(() => {
       mockedGet.mockReset();
+      mockedList.mockReset();
     });
 
     it("parks the tab as guest-stopped when the guest is powered off", async () => {
@@ -163,17 +169,17 @@ describe("console-store", () => {
       const tab = useConsoleStore.getState().tabs[0];
       expect(tab?.status).toBe("guest-stopped");
       expect(tab?.reconnectKey).toBe(0); // no reconnect attempt scheduled
-      expect(mockedGet).toHaveBeenCalledTimes(1); // node lookup skipped
+      expect(mockedGet).toHaveBeenCalledTimes(1);
+      expect(mockedList).not.toHaveBeenCalled(); // node lookup skipped
     });
 
     it("reconnects to the new node after a migration (guest running)", async () => {
       const id = addVmTab();
-      mockedGet
-        .mockResolvedValueOnce({ node_id: "node-uuid-2", status: "running" })
-        .mockResolvedValueOnce([
-          { id: "node-uuid-1", name: "n1" },
-          { id: "node-uuid-2", name: "n2" },
-        ]);
+      mockedGet.mockResolvedValueOnce({ node_id: "node-uuid-2", status: "running" });
+      mockedList.mockResolvedValueOnce([
+        { id: "node-uuid-1", name: "n1" },
+        { id: "node-uuid-2", name: "n2" },
+      ]);
 
       await useConsoleStore.getState().resolveAndReconnect(id);
 
@@ -185,9 +191,8 @@ describe("console-store", () => {
 
     it("reconnects on the same node when the guest is running and unmoved", async () => {
       const id = addVmTab();
-      mockedGet
-        .mockResolvedValueOnce({ node_id: "node-uuid-1", status: "running" })
-        .mockResolvedValueOnce([{ id: "node-uuid-1", name: "n1" }]);
+      mockedGet.mockResolvedValueOnce({ node_id: "node-uuid-1", status: "running" });
+      mockedList.mockResolvedValueOnce([{ id: "node-uuid-1", name: "n1" }]);
 
       await useConsoleStore.getState().resolveAndReconnect(id);
 

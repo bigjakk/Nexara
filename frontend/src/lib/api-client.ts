@@ -220,8 +220,52 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
+/**
+ * The envelope every collection endpoint returns (Go: handlers.ListResponse).
+ * `total` is the count matching the request's filters before limit/offset, so
+ * it can exceed `items.length` on a paginated endpoint.
+ */
+export interface ListResponse<T> {
+  items: T[];
+  total: number;
+}
+
+/**
+ * Unwraps a list envelope, throwing if the response is not one.
+ *
+ * Deliberately strict rather than falling back to `Array.isArray(body)`. A
+ * tolerant unwrap would silently paper over an endpoint that never got
+ * converted, which is precisely the failure this envelope exists to remove —
+ * and it fails quietly, since iterating an object's values yields no error.
+ * A thrown error names the path, so a missed endpoint surfaces as a broken
+ * query with a usable message instead of an empty list.
+ */
+function unwrapList<T>(path: string, body: unknown): ListResponse<T> {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    Array.isArray((body as ListResponse<T>).items)
+  ) {
+    return body as ListResponse<T>;
+  }
+  throw new Error(
+    `GET ${path}: expected a {items,total} list envelope, got ${
+      Array.isArray(body) ? "a bare array" : typeof body
+    }`,
+  );
+}
+
 export const apiClient = {
   get: <T>(path: string) => request<T>("GET", path),
+  /**
+   * GET a collection, returning just the rows. The common case — reach for
+   * `page` instead when the caller needs `total` for pagination.
+   */
+  list: async <T>(path: string): Promise<T[]> =>
+    unwrapList<T>(path, await request<unknown>("GET", path)).items,
+  /** GET a collection with its total, for paginated views. */
+  page: async <T>(path: string): Promise<ListResponse<T>> =>
+    unwrapList<T>(path, await request<unknown>("GET", path)),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),

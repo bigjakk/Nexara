@@ -10,6 +10,11 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
+// defaultTaskHistoryRetention mirrors the `default:` tag on
+// Config.TaskHistoryRetention. Named so the tag and the clamp fallback in
+// Validate cannot drift apart — they did, back when both were 24h literals.
+const defaultTaskHistoryRetention = 168 * time.Hour
+
 // Config holds all configuration for the application.
 type Config struct {
 	APIPort             int           `envconfig:"API_PORT" default:"8080"`
@@ -59,7 +64,15 @@ type Config struct {
 	// 60s in the collector; 0 disables collection entirely (the central
 	// page then only refreshes via per-guest resyncs).
 	SnapshotSyncInterval time.Duration `envconfig:"SNAPSHOT_SYNC_INTERVAL" default:"5m"`
-	TaskHistoryRetention time.Duration `envconfig:"TASK_HISTORY_RETENTION" default:"24h"`
+	// TaskHistoryRetention bounds how far back /api/v1/tasks can answer. The
+	// hourly sweep deletes terminal rows older than this.
+	//
+	// 7d, not the 24h it defaulted to through v1.9.x: at 24h the task history
+	// aged out before the incident it was being used to investigate did, which
+	// is the opposite of what a forensics entry point is for. Rows are small
+	// and only terminal ones are swept, so the cost of the longer window is a
+	// table roughly 7x larger and still measured in megabytes.
+	TaskHistoryRetention time.Duration `envconfig:"TASK_HISTORY_RETENTION" default:"168h"`
 	WSPort               int           `envconfig:"WS_PORT" default:"8081"`
 	WSPingInterval       time.Duration `envconfig:"WS_PING_INTERVAL" default:"25s"`
 	WSPongTimeout        time.Duration `envconfig:"WS_PONG_TIMEOUT" default:"30s"`
@@ -152,9 +165,9 @@ func (c *Config) validate() error {
 	// land at or after now, deleting every finished task_history row each tick.
 	// Warn and clamp to the default rather than silently wiping task history.
 	if c.TaskHistoryRetention <= 0 {
-		slog.Warn("TASK_HISTORY_RETENTION must be positive — clamping to 24h to avoid purging all finished task history",
+		slog.Warn("TASK_HISTORY_RETENTION must be positive — clamping to 168h to avoid purging all finished task history",
 			"configured", c.TaskHistoryRetention)
-		c.TaskHistoryRetention = 24 * time.Hour
+		c.TaskHistoryRetention = defaultTaskHistoryRetention
 	}
 	switch strings.ToLower(strings.TrimSpace(c.SecureCookies)) {
 	case "auto", "always", "never":

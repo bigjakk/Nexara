@@ -83,7 +83,7 @@ func (h *ContainerHandler) ListByCluster(c fiber.Ctx) error {
 		resp[i] = toVMResponse(ct)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // GetContainer handles GET /api/v1/clusters/:cluster_id/containers/:ct_id.
@@ -616,7 +616,7 @@ func (h *ContainerHandler) ListSnapshots(c fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // CreateSnapshot handles POST /api/v1/clusters/:cluster_id/containers/:ct_id/snapshots.

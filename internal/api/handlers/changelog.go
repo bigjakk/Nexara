@@ -24,14 +24,14 @@ func NewChangelogHandler(svc *changelog.Service) *ChangelogHandler {
 // distinguish "no releases yet" from "GitHub is unreachable".
 func (h *ChangelogHandler) Get(c fiber.Ctx) error {
 	if h.svc == nil {
-		return c.JSON(fiber.Map{"entries": []changelog.Entry{}})
+		return RespondItems(c, []changelog.Entry{})
 	}
 	entries, err := h.svc.Get(c.Context())
 	if err != nil {
-		return c.JSON(fiber.Map{"entries": []changelog.Entry{}})
+		return RespondItems(c, []changelog.Entry{})
 	}
 	if entries == nil {
 		entries = []changelog.Entry{}
 	}
-	return c.JSON(fiber.Map{"entries": entries})
+	return RespondItems(c, entries)
 }

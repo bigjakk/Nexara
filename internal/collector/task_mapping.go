@@ -1,5 +1,7 @@
 package collector
 
+import "strings"
+
 type taskMapping struct {
 	ResourceType string
 	Action       string
@@ -64,4 +66,35 @@ var skipTaskTypes = map[string]bool{
 	"qmmonitor":  true,
 	"spiceproxy": true,
 	"login":      true,
+}
+
+// guestTaskPrefixes / guestTaskExact are the Proxmox worker types whose UPID id
+// field holds a guest VMID.
+//
+// The collector mirror of handlers.vmidFromUPID and the SQL is_guest_upid()
+// from migrations/000084 — all three must agree, because they decide the same
+// question about the same field. Kept as three because they run in three places
+// (Go request path, Go collector, and SQL backfill/insert) with no shared
+// vocabulary between them.
+//
+// Deliberately not "any numeric id": cephdestroyosd's worker id is the OSD
+// number, so an ungated read attributes a Ceph action to the guest holding that
+// VMID.
+var (
+	guestTaskPrefixes = []string{"qm", "vz", "ha"}
+	guestTaskExact    = map[string]bool{"resize": true, "move_volume": true}
+)
+
+// isGuestTaskType reports whether a Proxmox worker type's UPID id field is a
+// guest VMID.
+func isGuestTaskType(taskType string) bool {
+	if guestTaskExact[taskType] {
+		return true
+	}
+	for _, p := range guestTaskPrefixes {
+		if strings.HasPrefix(taskType, p) {
+			return true
+		}
+	}
+	return false
 }

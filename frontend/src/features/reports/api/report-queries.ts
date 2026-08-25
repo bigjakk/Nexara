@@ -8,7 +8,7 @@ export function useReportSchedules() {
   return useQuery({
     queryKey: ["report-schedules"],
     queryFn: () =>
-      apiClient.get<ReportSchedule[]>("/api/v1/reports/schedules"),
+      apiClient.list<ReportSchedule>("/api/v1/reports/schedules"),
   });
 }
 
@@ -93,7 +93,7 @@ export function useGenerateReport() {
 export function useReportRuns() {
   return useQuery({
     queryKey: ["report-runs"],
-    queryFn: () => apiClient.get<ReportRun[]>("/api/v1/reports/runs"),
+    queryFn: () => apiClient.list<ReportRun>("/api/v1/reports/runs"),
   });
 }
 

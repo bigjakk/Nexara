@@ -41,7 +41,7 @@ export function useDRSRules(clusterId: string) {
   return useQuery({
     queryKey: ["drs", "rules", clusterId],
     queryFn: () =>
-      apiClient.get<DRSRule[]>(
+      apiClient.list<DRSRule>(
         `/api/v1/clusters/${clusterId}/drs/rules`,
       ),
     enabled: clusterId.length > 0,
@@ -83,7 +83,7 @@ export function useHARules(clusterId: string) {
   return useQuery({
     queryKey: ["drs", "ha-rules", clusterId],
     queryFn: () =>
-      apiClient.get<DRSRule[]>(
+      apiClient.list<DRSRule>(
         `/api/v1/clusters/${clusterId}/drs/ha-rules`,
       ),
     enabled: clusterId.length > 0,
@@ -134,7 +134,7 @@ export function useDRSHistory(clusterId: string, limit: number = 25) {
   return useQuery({
     queryKey: ["drs", "history", clusterId, limit],
     queryFn: () =>
-      apiClient.get<DRSHistoryEntry[]>(
+      apiClient.list<DRSHistoryEntry>(
         `/api/v1/clusters/${clusterId}/drs/history?limit=${String(limit)}`,
       ),
     enabled: clusterId.length > 0,

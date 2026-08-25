@@ -199,7 +199,7 @@ export function useNodeISOs(
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "isos"],
     queryFn: () =>
-      apiClient.get<ISOImage[]>(
+      apiClient.list<ISOImage>(
         `/api/v1/clusters/${clusterId}/nodes/${nodeName}/isos`,
       ),
     enabled: enabled && clusterId.length > 0 && nodeName.length > 0,

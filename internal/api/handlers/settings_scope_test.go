@@ -717,12 +717,12 @@ func TestListSettingsExcludesReservedGlobalKeys(t *testing.T) {
 				t.Fatalf("status = %d, want %d, body: %s", resp.StatusCode, http.StatusOK, body)
 			}
 
-			var got []settingResponse
+			var got ListResponse[settingResponse]
 			if err := json.Unmarshal(body, &got); err != nil {
 				t.Fatalf("decode body %s: %v", body, err)
 			}
-			gotKeys := make([]string, len(got))
-			for i, s := range got {
+			gotKeys := make([]string, len(got.Items))
+			for i, s := range got.Items {
 				gotKeys[i] = s.Key
 			}
 			if strings.Join(gotKeys, ",") != strings.Join(tt.wantKeys, ",") {

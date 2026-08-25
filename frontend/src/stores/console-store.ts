@@ -156,7 +156,7 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
             }
 
             const nodesEndpoint = `/api/v1/clusters/${tab.clusterID}/nodes`;
-            const nodes = await apiClient.get<Array<{ id: string; name: string }>>(nodesEndpoint);
+            const nodes = await apiClient.list<{ id: string; name: string }>(nodesEndpoint);
             const resolved = nodes.find((n) => n.id === vm.node_id);
 
             if (resolved && resolved.name !== tab.node) {

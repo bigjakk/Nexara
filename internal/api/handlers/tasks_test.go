@@ -229,7 +229,7 @@ func TestTaskList_ScopeGatesBeforeDB(t *testing.T) {
 			if tt.status != http.StatusOK {
 				return
 			}
-			var got taskListResponse
+			var got ListResponse[taskResponse]
 			if err := json.Unmarshal(body, &got); err != nil {
 				t.Fatalf("decode body %q: %v", body, err)
 			}

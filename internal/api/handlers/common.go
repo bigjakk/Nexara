@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,18 +58,24 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 		details = json.RawMessage(`{}`)
 	}
 
+	// One decode serves two purposes: injecting api_key_id, and lifting the
+	// guest identity out for the syslog forwarder. Re-marshalled only when
+	// something was actually injected, so an untouched details blob reaches
+	// the row byte-for-byte as the handler wrote it.
+	var m map[string]any
+	if err := json.Unmarshal(details, &m); err != nil {
+		m = nil
+	}
+
 	// Inject api_key_id into details for API-key-authed requests so audit
 	// rows can be attributed to the specific key, not just the user.
 	if apiKeyID, ok := c.Locals("api_key_id").(uuid.UUID); ok {
-		var m map[string]any
-		if err := json.Unmarshal(details, &m); err == nil {
-			if m == nil {
-				m = map[string]any{}
-			}
-			m["api_key_id"] = apiKeyID.String()
-			if enriched, err := json.Marshal(m); err == nil {
-				details = enriched
-			}
+		if m == nil {
+			m = map[string]any{}
+		}
+		m["api_key_id"] = apiKeyID.String()
+		if enriched, err := json.Marshal(m); err == nil {
+			details = enriched
 		}
 	}
 
@@ -113,7 +121,10 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 
 	eventPub.ClusterEvent(c.Context(), cidStr, events.KindAuditEntry, resourceType, resourceID, action)
 
-	// Forward to syslog if configured.
+	// Forward to syslog if configured. vmid and resource_name are promoted to
+	// first-class fields so a SIEM decoder can key a rule on the guest without
+	// re-parsing the details JSON — the blind spot that made ~73% of forwarded
+	// entries unmatchable by any guest-scoped rule.
 	if fwd := eventPub.SyslogForwarder(); fwd != nil {
 		fwd.Forward(proxsyslog.Message{
 			Timestamp:    time.Now().UTC(),
@@ -122,8 +133,36 @@ func AuditLogAs(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, ac
 			ResourceType: resourceType,
 			ResourceID:   resourceID,
 			Action:       action,
+			VMID:         auditDetailString(m, "vmid"),
+			ResourceName: auditDetailString(m, "resource_name"),
 			Details:      string(details),
 		})
+	}
+}
+
+// auditDetailString reads one detail field as a string for the syslog message.
+//
+// json.Unmarshal into map[string]any decodes every JSON number as float64, so
+// a vmid written as 121 arrives as 121.0 and would render "121.000000" under
+// %v. Integral floats are formatted without a fractional part; anything else
+// falls back to its natural rendering.
+func auditDetailString(m map[string]any, key string) string {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		if t == math.Trunc(t) && math.Abs(t) < 1e15 {
+			return strconv.FormatInt(int64(t), 10)
+		}
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(t)
+	default:
+		return ""
 	}
 }
 
@@ -142,6 +181,11 @@ func auditTruncate(s string, maxRunes int) string {
 	}
 	return string(r[:maxRunes]) + "…"
 }
+
+// maxAuditResourceNameLen bounds a guest name recorded in an audit detail.
+// Proxmox hostnames cannot approach it, so it only ever truncates a value a
+// caller supplied to grow the row.
+const maxAuditResourceNameLen = 128
 
 // TrackTaskParams describes a dispatched Proxmox task to record.
 type TrackTaskParams struct {
@@ -169,7 +213,20 @@ type TrackTaskParams struct {
 func TrackTask(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, p TrackTaskParams) {
 	details := map[string]any{"upid": p.UPID, "node": p.Node}
 	if p.ResourceName != "" {
-		details["resource_name"] = p.ResourceName
+		// Bounded here rather than at each call site: VM create and CT create
+		// pass a caller-chosen req.Name/req.Hostname straight through, and this
+		// value is no longer detail-only — it is a response field, a CSV column
+		// and a syslog SD-PARAM. Capping at the funnel means a new caller
+		// cannot reintroduce the gap.
+		details["resource_name"] = auditTruncate(p.ResourceName, maxAuditResourceNameLen)
+	}
+	// The guest identity, recorded rather than left to be re-derived later.
+	// resource_id holds a vms.id UUID that the collector churns on resync, so
+	// anything resolved through it stops resolving at an arbitrary later time
+	// (see migrations/000084). Extra is applied after, so a handler that knows
+	// a better vmid than the UPID's id field still wins.
+	if vmid := vmidFromUPID(p.UPID); vmid != 0 {
+		details["vmid"] = vmid
 	}
 	for k, v := range p.Extra {
 		details[k] = v
@@ -207,6 +264,66 @@ func taskTypeFromUPID(upid string) string {
 		return parts[5]
 	}
 	return ""
+}
+
+// guestUPIDPrefixes / guestUPIDExact are the Proxmox worker types whose UPID id
+// field (index 6) holds a guest VMID. The Go mirror of the SQL is_guest_upid()
+// defined in migrations/000084 — keep the two in step.
+//
+// A numeric id is NOT sufficient on its own, which is the whole reason this
+// list exists: the field is a plain integer for other task types too, and
+// cephdestroyosd's is the OSD number. ceph_osd.go dispatches exactly that
+// through TrackTask, so an ungated read would record "destroy OSD 113" as an
+// action on VM 113 and forward it to a SIEM under that guest's identity.
+//
+// Prefix-matched for the three guest families (qm* QEMU, vz* LXC including
+// vzdump, ha* HA manager), plus the two observed outliers that carry a VMID
+// without one of those prefixes.
+var (
+	guestUPIDPrefixes = []string{"qm", "vz", "ha"}
+	guestUPIDExact    = map[string]bool{"resize": true, "move_volume": true}
+)
+
+func isGuestUPIDType(taskType string) bool {
+	if guestUPIDExact[taskType] {
+		return true
+	}
+	for _, p := range guestUPIDPrefixes {
+		if strings.HasPrefix(taskType, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// vmidFromUPID extracts the guest VMID from a UPID's id field (index 6),
+// returning 0 when the task names no guest.
+//
+// Fails closed: an unrecognised worker type yields 0 rather than a guess. An
+// audit row naming the wrong guest is worse than one naming none. Bounded at 9
+// digits to match the ::int guard the SQL side uses; Proxmox VMIDs top out
+// below that.
+//
+// The int return is deliberate: every handler already writes details.vmid as a
+// JSON number (containers.go, backup.go, guest_snapshots.go), and a string here
+// would make the field's type depend on which path recorded the entry.
+func vmidFromUPID(upid string) int {
+	parts := strings.Split(upid, ":")
+	if len(parts) < 7 {
+		return 0
+	}
+	if !isGuestUPIDType(parts[5]) {
+		return 0
+	}
+	id := parts[6]
+	if id == "" || len(id) > 9 {
+		return 0
+	}
+	n, err := strconv.Atoi(id)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // ClusterUUID is a convenience helper that converts a uuid.UUID to a valid pgtype.UUID.

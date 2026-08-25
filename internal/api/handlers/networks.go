@@ -74,7 +74,7 @@ func (h *NetworkHandler) ListNetworkInterfaces(c fiber.Ctx) error {
 		})
 	}
 
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // ListNodeNetworkInterfaces handles GET /clusters/:cluster_id/networks/:node_name.
@@ -102,7 +102,7 @@ func (h *NetworkHandler) ListNodeNetworkInterfaces(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get network interfaces")
 	}
 
-	return c.JSON(ifaces)
+	return RespondItems(c, ifaces)
 }
 
 // CreateNetworkInterface handles POST /clusters/:cluster_id/networks/:node_name.
@@ -297,7 +297,7 @@ func (h *NetworkHandler) ListClusterFirewallRules(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get firewall rules")
 	}
 
-	return c.JSON(rules)
+	return RespondItems(c, rules)
 }
 
 // CreateClusterFirewallRule handles POST /clusters/:cluster_id/firewall/rules.
@@ -452,7 +452,7 @@ func (h *NetworkHandler) ListVMFirewallRules(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get VM firewall rules")
 	}
 
-	return c.JSON(rules)
+	return RespondItems(c, rules)
 }
 
 // CreateVMFirewallRule handles POST /clusters/:cluster_id/vms/:vm_id/firewall/rules.
@@ -661,7 +661,7 @@ func (h *NetworkHandler) ListSDNZones(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(zones)
+	return RespondItems(c, zones)
 }
 
 // ListSDNVNets handles GET /clusters/:cluster_id/sdn/vnets.
@@ -684,7 +684,7 @@ func (h *NetworkHandler) ListSDNVNets(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(vnets)
+	return RespondItems(c, vnets)
 }
 
 // --- SDN CRUD Endpoints ---
@@ -912,7 +912,7 @@ func (h *NetworkHandler) ListSDNSubnets(c fiber.Ctx) error {
 		return mapProxmoxError(err)
 	}
 
-	return c.JSON(subnets)
+	return RespondItems(c, subnets)
 }
 
 // CreateSDNSubnet handles POST /clusters/:cluster_id/sdn/vnets/:vnet/subnets.
@@ -1067,7 +1067,7 @@ func (h *NetworkHandler) ListSDNControllers(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(controllers)
+	return RespondItems(c, controllers)
 }
 
 // CreateSDNController handles POST /clusters/:cluster_id/sdn/controllers.
@@ -1171,7 +1171,7 @@ func (h *NetworkHandler) ListSDNIPAMs(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(ipams)
+	return RespondItems(c, ipams)
 }
 
 // CreateSDNIPAM handles POST /clusters/:cluster_id/sdn/ipams.
@@ -1275,7 +1275,7 @@ func (h *NetworkHandler) ListSDNDNS(c fiber.Ctx) error {
 	if err != nil {
 		return mapProxmoxError(err)
 	}
-	return c.JSON(plugins)
+	return RespondItems(c, plugins)
 }
 
 // CreateSDNDNS handles POST /clusters/:cluster_id/sdn/dns.
@@ -1404,7 +1404,7 @@ func (h *NetworkHandler) ListTemplates(c fiber.Ctx) error {
 		resp[i] = toTemplateResponse(t)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // GetTemplate handles GET /api/v1/firewall-templates/:id.
@@ -1602,7 +1602,7 @@ func (h *NetworkHandler) ListFirewallAliases(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to get firewall aliases")
 	}
-	return c.JSON(aliases)
+	return RespondItems(c, aliases)
 }
 
 // CreateFirewallAlias handles POST /clusters/:cluster_id/firewall/aliases.
@@ -1700,7 +1700,7 @@ func (h *NetworkHandler) ListFirewallIPSets(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to get IP sets")
 	}
-	return c.JSON(sets)
+	return RespondItems(c, sets)
 }
 
 // CreateFirewallIPSet handles POST /clusters/:cluster_id/firewall/ipset.
@@ -1774,7 +1774,7 @@ func (h *NetworkHandler) ListFirewallIPSetEntries(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to get IP set entries")
 	}
-	return c.JSON(entries)
+	return RespondItems(c, entries)
 }
 
 // AddFirewallIPSetEntry handles POST /clusters/:cluster_id/firewall/ipset/:name/entries.
@@ -1848,7 +1848,7 @@ func (h *NetworkHandler) ListSecurityGroups(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to get security groups")
 	}
-	return c.JSON(groups)
+	return RespondItems(c, groups)
 }
 
 // CreateSecurityGroup handles POST /clusters/:cluster_id/firewall/groups.
@@ -1919,7 +1919,7 @@ func (h *NetworkHandler) ListSecurityGroupRules(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to get security group rules")
 	}
-	return c.JSON(rules)
+	return RespondItems(c, rules)
 }
 
 // CreateSecurityGroupRule handles POST /clusters/:cluster_id/firewall/groups/:group/rules.
@@ -2029,5 +2029,5 @@ func (h *NetworkHandler) GetFirewallLog(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, "Failed to get firewall log")
 	}
-	return c.JSON(entries)
+	return RespondItems(c, entries)
 }

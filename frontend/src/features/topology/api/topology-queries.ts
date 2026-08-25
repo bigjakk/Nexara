@@ -27,7 +27,7 @@ export function useTopologyData(): TopologyData {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.get<NodeResponse[]>(
+        apiClient.list<NodeResponse>(
           `/api/v1/clusters/${cluster.id}/nodes`,
         ),
       enabled: clusters.length > 0,
@@ -38,7 +38,7 @@ export function useTopologyData(): TopologyData {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "vms"],
       queryFn: () =>
-        apiClient.get<VMResponse[]>(
+        apiClient.list<VMResponse>(
           `/api/v1/clusters/${cluster.id}/vms`,
         ),
       enabled: clusters.length > 0,
@@ -49,7 +49,7 @@ export function useTopologyData(): TopologyData {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "storage"],
       queryFn: () =>
-        apiClient.get<StorageResponse[]>(
+        apiClient.list<StorageResponse>(
           `/api/v1/clusters/${cluster.id}/storage`,
         ),
       enabled: clusters.length > 0,

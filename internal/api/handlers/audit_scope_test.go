@@ -277,7 +277,7 @@ func assertScope(t *testing.T, label string, got []uuid.UUID, wantNil bool, want
 	}
 }
 
-// newAuditScopeTestApp wires the three scoped audit reads with NIL queries:
+// newAuditScopeTestApp wires the scoped audit reads with NIL queries:
 // every case below must resolve before any DB access. A caller with no
 // view:audit grant must short-circuit ahead of the DB — pre-fix, List reached
 // CountAuditLogAdvanced and leaked a cross-cluster entry count into Total,
@@ -371,7 +371,7 @@ func TestAuditList_ScopeGatesBeforeDB(t *testing.T) {
 			if tt.status != http.StatusOK {
 				return
 			}
-			var got auditListResponse
+			var got ListResponse[auditLogResponse]
 			if err := json.Unmarshal([]byte(body), &got); err != nil {
 				t.Fatalf("decode body %q: %v", body, err)
 			}
@@ -394,15 +394,17 @@ func TestAuditListRecent_ScopeGatesBeforeDB(t *testing.T) {
 		if status != http.StatusOK {
 			t.Fatalf("status = %d, want 200 (body: %s)", status, body)
 		}
-		var got []auditLogResponse
+		var got ListResponse[auditLogResponse]
 		if err := json.Unmarshal([]byte(body), &got); err != nil {
 			t.Fatalf("decode body %q: %v", body, err)
 		}
-		if len(got) != 0 {
+		if len(got.Items) != 0 {
 			t.Fatalf("scope-less user must get no entries, got %s", body)
 		}
-		if strings.TrimSpace(body) != "[]" {
-			t.Fatalf("feed must serialize as [], got %s", body)
+		// An empty envelope, not a bare [] and not `{"items":null}` — a caller
+		// iterating .items must not have to nil-check it.
+		if strings.TrimSpace(body) != `{"items":[],"total":0}` {
+			t.Fatalf("feed must serialize as an empty envelope, got %s", body)
 		}
 	})
 
@@ -428,11 +430,11 @@ func TestAuditExport_ScopeGatesBeforeDB(t *testing.T) {
 			check func(t *testing.T, body string)
 		}{
 			{
-				name:  "json defaults to an empty array",
+				name:  "json defaults to an empty envelope",
 				query: "",
 				check: func(t *testing.T, body string) {
-					if strings.TrimSpace(body) != "[]" {
-						t.Fatalf("want [], got %q", body)
+					if strings.TrimSpace(body) != `{"items":[],"total":0}` {
+						t.Fatalf("want an empty envelope, got %q", body)
 					}
 				},
 			},

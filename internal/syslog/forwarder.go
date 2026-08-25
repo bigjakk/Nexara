@@ -31,6 +31,8 @@ type Message struct {
 	ResourceType string
 	ResourceID   string
 	Action       string
+	VMID         string // guest VMID, "" when the entry names no guest
+	ResourceName string // guest/resource name as recorded at action time
 	Details      string // raw JSON
 }
 
@@ -418,6 +420,23 @@ func escapeSDParam(s string) string {
 	return b.String()
 }
 
+// AuditSD carries one audit record's fields for RFC 5424 rendering.
+//
+// A struct rather than the positional parameter list this used to be: at six
+// same-typed strings a transposed pair compiled cleanly and shipped (which is
+// what TestExportSyslogRendersFieldsInOrder was written to catch), and vmid
+// and resource_name would have made it eight.
+type AuditSD struct {
+	User         string
+	Cluster      string
+	ResourceType string
+	ResourceID   string
+	Action       string
+	VMID         string
+	ResourceName string
+	Details      string // raw JSON
+}
+
 // FormatAuditSD renders the RFC 5424 STRUCTURED-DATA element that both the live
 // forwarder and the audit-log syslog export emit. It is shared so the two cannot
 // drift — they already had, back when this was a flat key=value body and the
@@ -425,17 +444,23 @@ func escapeSDParam(s string) string {
 //
 // Every value is bounded and escaped by the rules above, so no caller-influenced
 // input can open a field, close the element, or end the record.
-func FormatAuditSD(user, cluster, resourceType, resourceID, action, details string) string {
+//
+// vmid and resource_name are appended after details rather than beside the
+// other identity fields, so that every param an existing SIEM decoder already
+// matches keeps its exact position in the element. They are the guest identity
+// a decoder needs to key a rule on, which before 000084 was reachable only by
+// re-parsing the details JSON — and absent from it on most entries.
+func FormatAuditSD(f AuditSD) string {
 	var b strings.Builder
 	b.WriteByte('[')
 	b.WriteString(sdID)
 
 	for _, p := range []struct{ name, value string }{
-		{"user", truncateRunes(user, maxSyslogFieldLen)},
-		{"cluster", truncateRunes(cluster, maxSyslogFieldLen)},
-		{"resource_type", truncateRunes(resourceType, maxSyslogFieldLen)},
-		{"resource_id", truncateRunes(resourceID, maxSyslogFieldLen)},
-		{"action", truncateRunes(action, maxSyslogFieldLen)},
+		{"user", truncateRunes(f.User, maxSyslogFieldLen)},
+		{"cluster", truncateRunes(f.Cluster, maxSyslogFieldLen)},
+		{"resource_type", truncateRunes(f.ResourceType, maxSyslogFieldLen)},
+		{"resource_id", truncateRunes(f.ResourceID, maxSyslogFieldLen)},
+		{"action", truncateRunes(f.Action, maxSyslogFieldLen)},
 	} {
 		b.WriteByte(' ')
 		b.WriteString(p.name)
@@ -444,11 +469,27 @@ func FormatAuditSD(user, cluster, resourceType, resourceID, action, details stri
 		b.WriteByte('"')
 	}
 
-	// details is the one optional field. An absent key and an empty one are
-	// different statements, so a record that carried nothing renders no key.
-	if details != "" && details != "{}" {
+	// details is optional. An absent key and an empty one are different
+	// statements, so a record that carried nothing renders no key.
+	if f.Details != "" && f.Details != "{}" {
 		b.WriteString(` details="`)
-		b.WriteString(escapeSDParam(truncateRunes(details, maxSyslogDetailsLen)))
+		b.WriteString(escapeSDParam(truncateRunes(f.Details, maxSyslogDetailsLen)))
+		b.WriteByte('"')
+	}
+
+	// Same rule for the two guest-identity params: omitted rather than
+	// rendered empty, so a decoder can tell "no guest" from "guest unknown".
+	for _, p := range []struct{ name, value string }{
+		{"vmid", f.VMID},
+		{"resource_name", f.ResourceName},
+	} {
+		if p.value == "" {
+			continue
+		}
+		b.WriteByte(' ')
+		b.WriteString(p.name)
+		b.WriteString(`="`)
+		b.WriteString(escapeSDParam(truncateRunes(p.value, maxSyslogFieldLen)))
 		b.WriteByte('"')
 	}
 
@@ -472,7 +513,16 @@ func (f *Forwarder) formatRFC5424(msg Message) []byte {
 		clusterID = "system"
 	}
 
-	sd := FormatAuditSD(msg.UserID, clusterID, msg.ResourceType, msg.ResourceID, msg.Action, msg.Details)
+	sd := FormatAuditSD(AuditSD{
+		User:         msg.UserID,
+		Cluster:      clusterID,
+		ResourceType: msg.ResourceType,
+		ResourceID:   msg.ResourceID,
+		Action:       msg.Action,
+		VMID:         msg.VMID,
+		ResourceName: msg.ResourceName,
+		Details:      msg.Details,
+	})
 
 	// <PRI>VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID STRUCTURED-DATA [MSG].
 	// The fields now live in STRUCTURED-DATA rather than a free-form MSG, so MSG

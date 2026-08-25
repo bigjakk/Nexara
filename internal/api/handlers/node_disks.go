@@ -53,7 +53,7 @@ func (h *NodeHandler) ListLiveDisks(c fiber.Ctx) error {
 			Used:     d.Used,
 		}
 	}
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // --- Disk SMART ---
@@ -101,7 +101,7 @@ func (h *NodeHandler) ListZFSPools(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list ZFS pools")
 	}
-	return c.JSON(pools)
+	return RespondItems(c, pools)
 }
 
 type createZFSPoolRequest struct {
@@ -210,7 +210,7 @@ func (h *NodeHandler) ListLVM(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list LVM volume groups")
 	}
-	return c.JSON(vgs)
+	return RespondItems(c, vgs)
 }
 
 type createLVMRequest struct {
@@ -315,7 +315,7 @@ func (h *NodeHandler) ListLVMThin(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list LVM thin pools")
 	}
-	return c.JSON(pools)
+	return RespondItems(c, pools)
 }
 
 type createLVMThinRequest struct {
@@ -424,7 +424,7 @@ func (h *NodeHandler) ListDirectories(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list directories")
 	}
-	return c.JSON(dirs)
+	return RespondItems(c, dirs)
 }
 
 type createDirectoryRequest struct {

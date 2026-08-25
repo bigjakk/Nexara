@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -92,26 +93,44 @@ func TestLoad_CustomValues(t *testing.T) {
 }
 
 func TestLoad_TaskHistoryRetention(t *testing.T) {
-	t.Run("defaults to 24h", func(t *testing.T) {
+	t.Run("defaults to 7d", func(t *testing.T) {
 		setRequiredEnv(t)
 		cfg, err := Load()
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		if cfg.TaskHistoryRetention != 24*time.Hour {
-			t.Errorf("TaskHistoryRetention = %v, want 24h", cfg.TaskHistoryRetention)
+		if cfg.TaskHistoryRetention != defaultTaskHistoryRetention {
+			t.Errorf("TaskHistoryRetention = %v, want %v", cfg.TaskHistoryRetention, defaultTaskHistoryRetention)
+		}
+	})
+
+	// Pins the tag and the named constant together: the `default:` struct tag is
+	// what envconfig actually reads, and nothing else would notice the two
+	// drifting apart.
+	t.Run("default tag matches the constant", func(t *testing.T) {
+		field, ok := reflect.TypeOf(Config{}).FieldByName("TaskHistoryRetention")
+		if !ok {
+			t.Fatal("Config has no TaskHistoryRetention field")
+		}
+		tag := field.Tag.Get("default")
+		got, err := time.ParseDuration(tag)
+		if err != nil {
+			t.Fatalf("default tag %q is not a duration: %v", tag, err)
+		}
+		if got != defaultTaskHistoryRetention {
+			t.Errorf("default tag = %v, constant = %v", got, defaultTaskHistoryRetention)
 		}
 	})
 
 	t.Run("honors a positive override", func(t *testing.T) {
 		setRequiredEnv(t)
-		t.Setenv("TASK_HISTORY_RETENTION", "168h")
+		t.Setenv("TASK_HISTORY_RETENTION", "72h")
 		cfg, err := Load()
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		if cfg.TaskHistoryRetention != 168*time.Hour {
-			t.Errorf("TaskHistoryRetention = %v, want 168h", cfg.TaskHistoryRetention)
+		if cfg.TaskHistoryRetention != 72*time.Hour {
+			t.Errorf("TaskHistoryRetention = %v, want 72h", cfg.TaskHistoryRetention)
 		}
 	})
 
@@ -125,8 +144,8 @@ func TestLoad_TaskHistoryRetention(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Load() error: %v", err)
 			}
-			if cfg.TaskHistoryRetention != 24*time.Hour {
-				t.Errorf("TaskHistoryRetention = %v, want clamp to 24h", cfg.TaskHistoryRetention)
+			if cfg.TaskHistoryRetention != defaultTaskHistoryRetention {
+				t.Errorf("TaskHistoryRetention = %v, want clamp to %v", cfg.TaskHistoryRetention, defaultTaskHistoryRetention)
 			}
 		})
 	}

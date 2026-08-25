@@ -157,7 +157,7 @@ func (h *ReportHandler) ListSchedules(c fiber.Ctx) error {
 	// the result incomplete.
 	scope, query := clusterScopeFilter(access)
 	if !query {
-		return c.JSON([]reportScheduleResponse{})
+		return RespondItems(c, []reportScheduleResponse{})
 	}
 
 	schedules, err := h.queries.ListReportSchedules(c.Context(), db.ListReportSchedulesParams{
@@ -177,7 +177,7 @@ func (h *ReportHandler) ListSchedules(c fiber.Ctx) error {
 		}
 		out = append(out, toReportScheduleResponse(s))
 	}
-	return c.JSON(out)
+	return RespondItems(c, out)
 }
 
 // CreateSchedule handles POST /api/v1/reports/schedules
@@ -578,7 +578,7 @@ func (h *ReportHandler) ListRuns(c fiber.Ctx) error {
 	// install.
 	scope, query := clusterScopeFilter(access)
 	if !query {
-		return c.JSON([]reportRunResponse{})
+		return RespondItems(c, []reportRunResponse{})
 	}
 
 	runs, err := h.queries.ListReportRuns(c.Context(), db.ListReportRunsParams{
@@ -598,7 +598,7 @@ func (h *ReportHandler) ListRuns(c fiber.Ctx) error {
 		}
 		out = append(out, toRunResponse(r))
 	}
-	return c.JSON(out)
+	return RespondItems(c, out)
 }
 
 // GetRun handles GET /api/v1/reports/runs/:id

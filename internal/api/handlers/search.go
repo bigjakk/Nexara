@@ -47,7 +47,7 @@ func (h *SearchHandler) GlobalSearch(c fiber.Ctx) error {
 
 	query := strings.TrimSpace(c.Query("q"))
 	if query == "" || len(query) < 2 {
-		return c.JSON([]searchResult{})
+		return RespondItems(c, []searchResult{})
 	}
 	queryLower := strings.ToLower(query)
 
@@ -94,7 +94,7 @@ func (h *SearchHandler) GlobalSearch(c fiber.Ctx) error {
 				})
 			}
 			if len(results) > 100 {
-				return c.JSON(results)
+				return RespondItems(c, results)
 			}
 		}
 	}
@@ -181,5 +181,5 @@ func (h *SearchHandler) GlobalSearch(c fiber.Ctx) error {
 		results = []searchResult{}
 	}
 
-	return c.JSON(results)
+	return RespondItems(c, results)
 }

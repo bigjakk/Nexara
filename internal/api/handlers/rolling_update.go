@@ -187,7 +187,7 @@ func (h *RollingUpdateHandler) ListJobs(c fiber.Ctx) error {
 		result[i] = toJobResponse(j)
 	}
 
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 type createRollingUpdateRequest struct {
@@ -588,7 +588,7 @@ func (h *RollingUpdateHandler) ListNodes(c fiber.Ctx) error {
 		result[i] = toRollingNodeResponse(n)
 	}
 
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // ConfirmUpgrade confirms that manual upgrade is done on a node.
@@ -715,7 +715,7 @@ func (h *RollingUpdateHandler) PreviewPackages(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get package updates")
 	}
 
-	return c.JSON(updates)
+	return RespondItems(c, updates)
 }
 
 // PreflightHA analyzes HA/DRS constraints and capacity feasibility for a proposed set of nodes.
@@ -1064,7 +1064,7 @@ func (h *RollingUpdateHandler) ListSSHKnownHosts(c fiber.Ctx) error {
 		}
 		out = append(out, resp)
 	}
-	return c.JSON(out)
+	return RespondItems(c, out)
 }
 
 type pinSSHHostKeyRequest struct {

@@ -245,7 +245,7 @@ func (h *CVEHandler) ListScans(c fiber.Ctx) error {
 	for i, s := range scans {
 		result[i] = toCVEScanResponse(s)
 	}
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // TriggerScan starts a new CVE scan for a cluster.
@@ -428,7 +428,7 @@ func (h *CVEHandler) ListVulnerabilities(c fiber.Ctx) error {
 	for i, v := range vulns {
 		result[i] = toCVEScanVulnResponse(v)
 	}
-	return c.JSON(result)
+	return RespondItems(c, result)
 }
 
 // DeleteScan deletes a CVE scan and its results.

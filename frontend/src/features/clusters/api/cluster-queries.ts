@@ -22,7 +22,7 @@ export function useClusterNodes(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes"],
     queryFn: () =>
-      apiClient.get<NodeResponse[]>(
+      apiClient.list<NodeResponse>(
         `/api/v1/clusters/${clusterId}/nodes`,
       ),
     enabled: clusterId.length > 0,
@@ -33,7 +33,7 @@ export function useClusterStorage(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "storage"],
     queryFn: () =>
-      apiClient.get<StorageResponse[]>(
+      apiClient.list<StorageResponse>(
         `/api/v1/clusters/${clusterId}/storage`,
       ),
     enabled: clusterId.length > 0,
@@ -51,7 +51,7 @@ export function useNodeBridges(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "bridges"],
     queryFn: () =>
-      apiClient.get<BridgeResponse[]>(
+      apiClient.list<BridgeResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/bridges`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -67,7 +67,7 @@ export function useMachineTypes(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "machine-types"],
     queryFn: () =>
-      apiClient.get<MachineTypeResponse[]>(
+      apiClient.list<MachineTypeResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/machine-types`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -85,7 +85,7 @@ export function useCPUModels(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "cpu-models"],
     queryFn: () =>
-      apiClient.get<CPUModelResponse[]>(
+      apiClient.list<CPUModelResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/cpu-models`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -97,7 +97,7 @@ export function useNodeDisks(clusterId: string, nodeId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeId, "disks"],
     queryFn: () =>
-      apiClient.get<NodeDiskResponse[]>(
+      apiClient.list<NodeDiskResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${nodeId}/disks`,
       ),
     enabled: clusterId.length > 0 && nodeId.length > 0,
@@ -108,7 +108,7 @@ export function useNodeNetworkInterfaces(clusterId: string, nodeId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeId, "network-interfaces"],
     queryFn: () =>
-      apiClient.get<NodeNetworkInterfaceResponse[]>(
+      apiClient.list<NodeNetworkInterfaceResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${nodeId}/network-interfaces`,
       ),
     enabled: clusterId.length > 0 && nodeId.length > 0,
@@ -119,7 +119,7 @@ export function useNodePCIDevices(clusterId: string, nodeId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeId, "pci-devices"],
     queryFn: () =>
-      apiClient.get<NodePCIDeviceResponse[]>(
+      apiClient.list<NodePCIDeviceResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${nodeId}/pci-devices`,
       ),
     enabled: clusterId.length > 0 && nodeId.length > 0,
@@ -189,7 +189,7 @@ export function useLiveDisks(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "live"],
     queryFn: () =>
-      apiClient.get<LiveDiskResponse[]>(
+      apiClient.list<LiveDiskResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/list`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -211,7 +211,7 @@ export function useNodeZFSPools(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "zfs"],
     queryFn: () =>
-      apiClient.get<ZFSPoolResponse[]>(
+      apiClient.list<ZFSPoolResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/zfs`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -258,7 +258,7 @@ export function useNodeLVM(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvm"],
     queryFn: () =>
-      apiClient.get<LVMVolumeGroupResponse[]>(
+      apiClient.list<LVMVolumeGroupResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvm`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -305,7 +305,7 @@ export function useNodeLVMThin(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvmthin"],
     queryFn: () =>
-      apiClient.get<LVMThinPoolResponse[]>(
+      apiClient.list<LVMThinPoolResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvmthin`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -360,7 +360,7 @@ export function useNodeDirectories(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "directory"],
     queryFn: () =>
-      apiClient.get<DirectoryEntryResponse[]>(
+      apiClient.list<DirectoryEntryResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/directory`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -475,7 +475,7 @@ export function useNodeFirewallRules(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "firewall", "rules"],
     queryFn: () =>
-      apiClient.get<NodeFirewallRuleResponse[]>(
+      apiClient.list<NodeFirewallRuleResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/firewall/rules`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -517,7 +517,7 @@ export function useNodeFirewallLog(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "firewall", "log"],
     queryFn: () =>
-      apiClient.get<FirewallLogEntryResponse[]>(
+      apiClient.list<FirewallLogEntryResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/firewall/log?limit=500`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -537,7 +537,7 @@ export function useNodeServices(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "services"],
     queryFn: () =>
-      apiClient.get<NodeServiceResponse[]>(
+      apiClient.list<NodeServiceResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/services`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -566,10 +566,6 @@ export interface SyslogEntryResponse {
   t: string;
 }
 
-export interface SyslogResponse {
-  entries: SyslogEntryResponse[];
-  total: number;
-}
 
 export function useNodeSyslog(clusterId: string, nodeName: string, params?: { start?: number | undefined; limit?: number | undefined; service?: string | undefined; since?: string | undefined; until?: string | undefined }) {
   const searchParams = new URLSearchParams();
@@ -583,7 +579,7 @@ export function useNodeSyslog(clusterId: string, nodeName: string, params?: { st
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "syslog", params],
     queryFn: () =>
-      apiClient.get<SyslogResponse>(
+      apiClient.page<SyslogEntryResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/syslog${qs ? `?${qs}` : ""}`,
       ),
     enabled: clusterId.length > 0 && nodeName.length > 0,
@@ -719,7 +715,7 @@ export function useClusterVMs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vms"],
     queryFn: () =>
-      apiClient.get<VMResponse[]>(
+      apiClient.list<VMResponse>(
         `/api/v1/clusters/${clusterId}/vms`,
       ),
     enabled: clusterId.length > 0,

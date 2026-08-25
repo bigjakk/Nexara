@@ -175,7 +175,7 @@ func (h *ScheduleHandler) List(c fiber.Ctx) error {
 		resp[i] = toScheduleResponse(t)
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // Update handles PUT /api/v1/clusters/:cluster_id/schedules/:id.

@@ -96,7 +96,7 @@ func (h *RBACHandler) ListRoles(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // GetRole handles GET /api/v1/rbac/roles/:id.
@@ -330,7 +330,7 @@ func (h *RBACHandler) ListPermissions(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // -- User Role Assignments --
@@ -387,7 +387,7 @@ func (h *RBACHandler) ListUserRoles(c fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(resp)
+	return RespondItems(c, resp)
 }
 
 // AssignUserRole handles POST /api/v1/rbac/users/:user_id/roles.

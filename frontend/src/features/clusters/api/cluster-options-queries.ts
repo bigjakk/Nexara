@@ -134,7 +134,7 @@ export function useClusterJoinInfo(clusterId: string) {
 export function useCorosyncNodes(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "config", "nodes"],
-    queryFn: () => apiClient.get<CorosyncNode[]>(`/api/v1/clusters/${clusterId}/config/nodes`),
+    queryFn: () => apiClient.list<CorosyncNode>(`/api/v1/clusters/${clusterId}/config/nodes`),
     enabled: clusterId.length > 0,
   });
 }

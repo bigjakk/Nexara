@@ -9,7 +9,7 @@ import type {
 export function useOIDCConfigs() {
   return useQuery({
     queryKey: ["oidc", "configs"],
-    queryFn: () => apiClient.get<OIDCConfig[]>("/api/v1/oidc/configs"),
+    queryFn: () => apiClient.list<OIDCConfig>("/api/v1/oidc/configs"),
   });
 }
 
