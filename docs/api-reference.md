@@ -170,7 +170,7 @@ Every endpoint that returns a **collection** returns the same envelope:
 Single-resource endpoints (`GET /clusters/:id`, `GET /vms/:id`, …) return the
 object directly, unwrapped.
 
-> **Changed in v2.0.0 — breaking for API clients.** Collections previously
+> **Changed in v1.10.0 — breaking for API clients.** Collections previously
 > returned three different shapes: a bare JSON array on most routes,
 > `{items,total}` on `/audit-log` and `/tasks`, and `{entries,total}` on node
 > syslog. The same logical resource disagreed with itself across routes —
@@ -191,8 +191,10 @@ object directly, unwrapped.
 > ```
 >
 > The bundled web UI ships in the same binary and was updated in the same
-> change, so no operator action is required — this affects external scripts and
-> integrations only.
+> change, so **no operator action is required on upgrade** — the container
+> starts, migrations apply, the UI works. That is why this lands in a minor
+> release despite changing the response contract: nothing about the deployment
+> changes. What changes is what an external caller has to parse.
 
 ---
 
@@ -351,9 +353,8 @@ other's common case.
 >   renders the wall clock that node would show for it. `?since=1h` means one
 >   hour ago in real terms on every node, whatever its timezone.
 >
-> Rendering those as UTC instead — which is what v2.0.0's first cut did — points
-> at the node's *future* on any node behind UTC, and journalctl answers with its
-> literal `-- No entries --`. If the offset lookup fails the API falls back to
+> Rendering those as UTC instead points at the node's *future* on any node
+> behind UTC, and journalctl answers with its literal `-- No entries --`. If the offset lookup fails the API falls back to
 > UTC and logs a warning, so an empty result on a non-UTC node is worth checking
 > the server log for.
 >
@@ -365,7 +366,7 @@ other's common case.
 > the form Proxmox has always accepted, and a full day back because it is in the
 > past for any real UTC offset.
 >
-> Before v2.0.0 the default was *today's* date in UTC, which is a future
+> Before v1.10.0 the default was *today's* date in UTC, which is a future
 > timestamp for any node west of UTC — those nodes answered with journalctl's
 > literal `-- No entries --`, which reads like a node with no logs. The web UI's
 > "Today" preset had the same bug against the browser's timezone; its presets
@@ -984,7 +985,7 @@ This matters because the alternative — resolving the guest through
 `resource_id` at read time — silently stops working: Nexara's collector deletes
 and re-inserts a guest's inventory row on resync, so the UUID an entry recorded
 resolves until it doesn't, and a destroyed guest never resolves at all. Before
-v2.0.0 both fields were derived that way and were empty on the large majority
+v1.10.0 both fields were derived that way and were empty on the large majority
 of entries, including every `destroy`. Entries written before the upgrade are
 backfilled where the information survives in `details`; the few that recorded
 neither a VMID nor a UPID stay empty.

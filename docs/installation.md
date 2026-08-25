@@ -89,7 +89,7 @@ All configuration is via environment variables.
 | `METRICS_COLLECT_INTERVAL` | No | `30s` (Docker deployments set `10s`) | How often metrics are collected from Proxmox |
 | `RESOURCE_SYNC_INTERVAL` | No | `5s` | How often the fast inventory loop runs — one `GET /cluster/resources` per cluster per tick, so guest add/remove/move, status flips, renames and node status converge in seconds. Floored at `2s`; `0` disables the fast loop and leaves all freshness to `METRICS_COLLECT_INTERVAL` |
 | `SNAPSHOT_SYNC_INTERVAL` | No | `5m` | How often the guest snapshot inventory is collected (feeds the central Snapshots page and `snapshot_age_days` alerts). One Proxmox listing per guest per pass, so it runs well below the metrics cadence; floored at `60s`, `0` disables collection |
-| `TASK_HISTORY_RETENTION` | No | `168h` | How long finished Proxmox task records are kept before the retention sweep deletes them. Go duration in hours (`168h` = 7 days, `720h` = 30 days); running tasks are never removed. Raised from `24h` in v2.0.0 — at a day, task history aged out before the incident it was being used to investigate. |
+| `TASK_HISTORY_RETENTION` | No | `168h` | How long finished Proxmox task records are kept before the retention sweep deletes them. Go duration in hours (`168h` = 7 days, `720h` = 30 days); running tasks are never removed. Raised from `24h` in v1.10.0 — at a day, task history aged out before the incident it was being used to investigate. |
 | `LOG_LEVEL` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `PUID` | No | `1000` | User ID for the container process and data directory |
 | `PGID` | No | `1000` | Group ID for the container process and data directory |
