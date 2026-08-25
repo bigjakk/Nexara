@@ -329,3 +329,60 @@ func TestPBSClient_GetDatastoreConfigUsesConfigEndpoint(t *testing.T) {
 		t.Error("VerifyNew = false, want true")
 	}
 }
+
+// TestPBSClient_GetPruneJobs covers the read behind the datastore panel's prune
+// section. /admin/prune rather than /config/prune because only the former
+// carries last-run/next-run, and PBS rejects a ?store= filter on either — so
+// the client returns every job and callers narrow it themselves.
+func TestPBSClient_GetPruneJobs(t *testing.T) {
+	// Shape taken from a live PBS 4.x response.
+	srv := pbsTestServer(t, map[string]interface{}{
+		"/admin/prune": []map[string]interface{}{
+			{
+				"id":               "default-Test-Backup-Datastore-4f",
+				"store":            "Test-Backup-Datastore",
+				"schedule":         "daily",
+				"keep-daily":       14,
+				"last-run-state":   "OK",
+				"last-run-endtime": 1787683680,
+				"next-run":         1787727600,
+			},
+			{
+				"id":         "default-PBS-Test-Datastore-24a8b",
+				"store":      "PBS-Test-Datastore",
+				"schedule":   "daily",
+				"keep-daily": 14,
+				"keep-last":  14,
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := &PBSClient{apiClient: &apiClient{
+		httpClient: srv.Client(),
+		baseURL:    srv.URL,
+		authHeader: "PBSAPIToken=test@pam!token:secret",
+	}}
+
+	jobs, err := client.GetPruneJobs(context.Background())
+	if err != nil {
+		t.Fatalf("GetPruneJobs: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("got %d jobs, want 2", len(jobs))
+	}
+
+	j := jobs[0]
+	if j.Store != "Test-Backup-Datastore" || j.Schedule != "daily" || j.KeepDaily != 14 {
+		t.Errorf("job = %+v, want store/schedule/keep-daily from the fixture", j)
+	}
+	// The reason for preferring /admin/prune: /config/prune carries none of these.
+	if j.LastRunState != "OK" || j.LastRunEndtime != 1787683680 || j.NextRun != 1787727600 {
+		t.Errorf("run state = %q/%d/%d, want OK/1787683680/1787727600 — /admin/prune's added fields",
+			j.LastRunState, j.LastRunEndtime, j.NextRun)
+	}
+	// A job with no run recorded yet must not invent one.
+	if jobs[1].LastRunState != "" || jobs[1].LastRunEndtime != 0 {
+		t.Errorf("never-run job carries a last run: %+v", jobs[1])
+	}
+}

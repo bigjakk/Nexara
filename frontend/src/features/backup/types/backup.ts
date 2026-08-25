@@ -197,6 +197,35 @@ export interface TriggerBackupRequest {
   node: string;
 }
 
+/**
+ * A prune job from GET /api/v1/pbs-servers/:id/prune-jobs.
+ *
+ * Prune is NOT part of a datastore's own config on any supported PBS — 2.2
+ * moved it into datastore-independent jobs — so a datastore can prune daily
+ * while its config reports no prune-schedule at all.
+ */
+export interface PBSPruneJob {
+  id: string;
+  store: string;
+  schedule?: string;
+  comment?: string;
+  /** PBS's own spelling: the job is disabled when true. */
+  disable?: boolean;
+  ns?: string;
+  "max-depth"?: number;
+  "keep-last"?: number;
+  "keep-hourly"?: number;
+  "keep-daily"?: number;
+  "keep-weekly"?: number;
+  "keep-monthly"?: number;
+  "keep-yearly"?: number;
+  "last-run-state"?: string;
+  /** Unix seconds; absent when the job has never run. */
+  "last-run-endtime"?: number;
+  "last-run-upid"?: string;
+  "next-run"?: number;
+}
+
 export interface PBSDatastoreConfig {
   name: string;
   path?: string;

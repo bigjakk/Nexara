@@ -25,6 +25,7 @@ import type {
   TriggerBackupRequest,
   PBSDatastoreRRDEntry,
   PBSDatastoreConfig,
+  PBSPruneJob,
   BackupCoverageEntry,
 } from "../types/backup";
 
@@ -543,6 +544,33 @@ export function useDatastoreConfig(pbsId: string, store: string) {
       apiClient.get<PBSDatastoreConfig>(
         `/api/v1/pbs-servers/${pbsId}/datastores/${encodeURIComponent(store)}/config`,
       ),
+    enabled: pbsId.length > 0 && store.length > 0,
+    staleTime: 120_000,
+  });
+}
+
+// --- Prune Jobs ---
+
+/**
+ * Prune jobs for one datastore.
+ *
+ * Separate from useDatastoreConfig because PBS keeps prune schedules outside
+ * datastore.cfg; reading only the datastore's own config is what made the
+ * config card report "Prune Schedule: Not set" on a datastore that prunes
+ * daily.
+ *
+ * One fetch of the whole job list, narrowed with `select`, rather than a
+ * per-store request: the overview renders a card per datastore, and the
+ * endpoint reads every job from PBS whatever the filter, so keying on `store`
+ * would issue N identical round-trips for N datastores. The API's ?store= is
+ * kept for external callers.
+ */
+export function usePruneJobs(pbsId: string, store: string) {
+  return useQuery({
+    queryKey: ["pbs-servers", pbsId, "prune-jobs"],
+    queryFn: () =>
+      apiClient.list<PBSPruneJob>(`/api/v1/pbs-servers/${pbsId}/prune-jobs`),
+    select: (jobs: PBSPruneJob[]) => jobs.filter((j) => j.store === store),
     enabled: pbsId.length > 0 && store.length > 0,
     staleTime: 120_000,
   });

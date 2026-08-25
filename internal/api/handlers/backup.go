@@ -645,6 +645,55 @@ func (h *BackupHandler) ListSyncJobs(c fiber.Ctx) error {
 	return RespondItems(c, jobs)
 }
 
+// ListPruneJobs handles GET /api/v1/pbs-servers/:pbs_id/prune-jobs
+//
+// Read live from PBS rather than from a collected table, like the datastore
+// config beside it: prune jobs have no local mirror the way sync and verify
+// jobs do, and the one consumer is a per-datastore panel.
+//
+// ?store= narrows to one datastore, applied here rather than passed upstream
+// (see proxmox.GetPruneJobs for why). It is a convenience for API callers, not
+// a boundary: anyone past the permission gate can omit it and get every job,
+// exactly as ListSyncJobs already returns.
+func (h *BackupHandler) ListPruneJobs(c fiber.Ctx) error {
+	pbsID, err := parsePBSID(c)
+	if err != nil {
+		return err
+	}
+	if _, err := h.requirePBSPerm(c, pbsID, "view"); err != nil {
+		return err
+	}
+
+	client, err := h.createPBSClient(c, pbsID)
+	if err != nil {
+		return err
+	}
+
+	jobs, err := client.GetPruneJobs(c.Context())
+	if err != nil {
+		return mapProxmoxError(err)
+	}
+
+	return RespondItems(c, filterPruneJobsByStore(jobs, c.Query("store")))
+}
+
+// filterPruneJobsByStore narrows a job list to one datastore. An empty store
+// means "no filter", so a caller that omits the parameter gets everything.
+// Always returns a non-nil slice: RespondItems renders nil as [], but an
+// explicit empty slice keeps that from depending on the envelope helper.
+func filterPruneJobsByStore(jobs []proxmox.PBSPruneJob, store string) []proxmox.PBSPruneJob {
+	if store == "" {
+		return jobs
+	}
+	filtered := make([]proxmox.PBSPruneJob, 0, len(jobs))
+	for _, j := range jobs {
+		if j.Store == store {
+			filtered = append(filtered, j)
+		}
+	}
+	return filtered
+}
+
 // ListVerifyJobs handles GET /api/v1/pbs-servers/:pbs_id/verify-jobs
 func (h *BackupHandler) ListVerifyJobs(c fiber.Ctx) error {
 	pbsID, err := parsePBSID(c)

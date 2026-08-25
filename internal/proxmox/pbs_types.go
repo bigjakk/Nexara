@@ -70,6 +70,43 @@ type PBSVerifyJob struct {
 	Comment        string `json:"comment,omitempty"`
 }
 
+// PBSPruneJob represents a prune job from GET /api2/json/admin/prune.
+//
+// Prune is not part of a datastore's own configuration on any currently
+// supported PBS: 2.2 moved it out of datastore.cfg into datastore-independent
+// jobs in prune.cfg. A datastore can therefore be pruned on a schedule while
+// its own config reports no prune-schedule and no keep-* values at all, which
+// is what made the datastore config card claim "Prune Schedule: Not set" on a
+// datastore that prunes daily.
+//
+// Read from /admin/prune rather than /config/prune: the two return the same
+// jobs, but /admin adds last-run-state, last-run-endtime, last-run-upid and
+// next-run. That is the same split PBSSyncJob and PBSVerifyJob already use.
+type PBSPruneJob struct {
+	ID       string `json:"id"`
+	Store    string `json:"store"`
+	Schedule string `json:"schedule,omitempty"`
+	Comment  string `json:"comment,omitempty"`
+	// Disable is PBS's own spelling: a job is disabled when this is true.
+	Disable bool `json:"disable,omitempty"`
+	// Namespace and MaxDepth scope the job within the datastore; empty/0 mean
+	// the root namespace and PBS's default depth.
+	Namespace string `json:"ns,omitempty"`
+	MaxDepth  int    `json:"max-depth,omitempty"`
+
+	KeepLast    int `json:"keep-last,omitempty"`
+	KeepHourly  int `json:"keep-hourly,omitempty"`
+	KeepDaily   int `json:"keep-daily,omitempty"`
+	KeepWeekly  int `json:"keep-weekly,omitempty"`
+	KeepMonthly int `json:"keep-monthly,omitempty"`
+	KeepYearly  int `json:"keep-yearly,omitempty"`
+
+	LastRunState   string `json:"last-run-state,omitempty"`
+	LastRunEndtime int64  `json:"last-run-endtime,omitempty"`
+	LastRunUpid    string `json:"last-run-upid,omitempty"`
+	NextRun        int64  `json:"next-run,omitempty"`
+}
+
 // PBSTask represents a task from GET /api2/json/nodes/localhost/tasks.
 type PBSTask struct {
 	UPID      string `json:"upid"`

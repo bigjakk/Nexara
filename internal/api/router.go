@@ -595,6 +595,7 @@ func (s *Server) setupRoutes() {
 			pbs.Get("/:pbs_id/snapshots", s.backupHandler.ListSnapshots)
 			pbs.Get("/:pbs_id/sync-jobs", s.backupHandler.ListSyncJobs)
 			pbs.Post("/:pbs_id/sync-jobs/:job_id/run", s.backupHandler.RunSyncJob)
+			pbs.Get("/:pbs_id/prune-jobs", s.backupHandler.ListPruneJobs)
 			pbs.Get("/:pbs_id/verify-jobs", s.backupHandler.ListVerifyJobs)
 			pbs.Post("/:pbs_id/verify-jobs/:job_id/run", s.backupHandler.RunVerifyJob)
 			pbs.Get("/:pbs_id/tasks", s.backupHandler.ListTasks)

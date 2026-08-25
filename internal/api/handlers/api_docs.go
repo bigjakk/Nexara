@@ -158,11 +158,12 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/clusters/:cluster_id/scan/iscsi": {Description: "Discover iSCSI targets on a portal", Permission: "manage:storage", Group: "Storage"},
 
 	// ── Backup (PBS) ──────────────────────────────────────────────────
-	"GET /api/v1/pbs-servers":        {Description: "List PBS servers", Permission: "view:pbs", Group: "Backup"},
-	"POST /api/v1/pbs-servers":       {Description: "Add a PBS server", Permission: "manage:pbs", Group: "Backup"},
-	"GET /api/v1/pbs-servers/:id":    {Description: "Get PBS server details", Permission: "view:pbs", Group: "Backup"},
-	"PUT /api/v1/pbs-servers/:id":    {Description: "Update PBS server", Permission: "manage:pbs", Group: "Backup"},
-	"DELETE /api/v1/pbs-servers/:id": {Description: "Remove a PBS server", Permission: "delete:pbs", Group: "Backup"},
+	"GET /api/v1/pbs-servers":                    {Description: "List PBS servers", Permission: "view:pbs", Group: "Backup"},
+	"POST /api/v1/pbs-servers":                   {Description: "Add a PBS server", Permission: "manage:pbs", Group: "Backup"},
+	"GET /api/v1/pbs-servers/:id":                {Description: "Get PBS server details", Permission: "view:pbs", Group: "Backup"},
+	"PUT /api/v1/pbs-servers/:id":                {Description: "Update PBS server", Permission: "manage:pbs", Group: "Backup"},
+	"DELETE /api/v1/pbs-servers/:id":             {Description: "Remove a PBS server", Permission: "delete:pbs", Group: "Backup"},
+	"GET /api/v1/pbs-servers/:pbs_id/prune-jobs": {Description: "List prune jobs, optionally narrowed to one datastore with ?store=", Permission: "view:backup", Group: "Backup"},
 
 	// ── DRS ───────────────────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/drs/config":            {Description: "Get DRS configuration", Permission: "view:drs", Group: "DRS"},

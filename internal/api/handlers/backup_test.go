@@ -3,7 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 func intPtr(v int) *int       { return &v }
@@ -222,4 +225,40 @@ func TestBackupJobRequestAuditDetails(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestFilterPruneJobsByStore(t *testing.T) {
+	jobs := []proxmox.PBSPruneJob{
+		{ID: "a", Store: "Test-Backup-Datastore"},
+		{ID: "b", Store: "PBS-Test-Datastore"},
+		{ID: "c", Store: "Test-Backup-Datastore"},
+	}
+
+	tests := []struct {
+		name    string
+		store   string
+		wantIDs []string
+	}{
+		{"empty store is no filter", "", []string{"a", "b", "c"}},
+		{"narrows to one datastore", "Test-Backup-Datastore", []string{"a", "c"}},
+		{"unknown store yields nothing", "nope", []string{}},
+		// Datastore names are case-sensitive in PBS; a near-miss must not match.
+		{"case-sensitive", "test-backup-datastore", []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterPruneJobsByStore(jobs, tt.store)
+			if got == nil {
+				t.Fatal("returned nil, want a non-nil slice")
+			}
+			var ids []string
+			for _, j := range got {
+				ids = append(ids, j.ID)
+			}
+			if strings.Join(ids, ",") != strings.Join(tt.wantIDs, ",") {
+				t.Errorf("ids = %v, want %v", ids, tt.wantIDs)
+			}
+		})
+	}
 }

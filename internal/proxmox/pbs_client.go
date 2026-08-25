@@ -116,6 +116,22 @@ func (c *PBSClient) RunSyncJob(ctx context.Context, jobID string) (string, error
 	return upid, nil
 }
 
+// GetPruneJobs returns every prune job configured on the server, with its
+// last/next run.
+//
+// Returns every job and lets callers narrow it. /admin/prune does accept an
+// optional `store`, but /config/prune rejects it outright ("schema does not
+// allow additional properties"), so filtering locally keeps this independent
+// of which of the two a future PBS serves — and the one consumer needs the
+// full list anyway, to avoid a round-trip per datastore.
+func (c *PBSClient) GetPruneJobs(ctx context.Context) ([]PBSPruneJob, error) {
+	var jobs []PBSPruneJob
+	if err := c.do(ctx, "/admin/prune", &jobs); err != nil {
+		return nil, fmt.Errorf("get PBS prune jobs: %w", err)
+	}
+	return jobs, nil
+}
+
 // GetVerifyJobs returns all configured verify jobs.
 func (c *PBSClient) GetVerifyJobs(ctx context.Context) ([]PBSVerifyJob, error) {
 	var jobs []PBSVerifyJob
