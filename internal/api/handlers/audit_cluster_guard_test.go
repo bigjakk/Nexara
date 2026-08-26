@@ -94,6 +94,19 @@ var auditClusterExempt = map[string]string{
 	"networks.go.UpdateTemplate": "firewall_templates has no cluster_id column",
 	"networks.go.DeleteTemplate": "firewall_templates has no cluster_id column",
 
+	// Deleting a cluster. audit_log.cluster_id is ON DELETE CASCADE, so a row
+	// naming the cluster it records the deletion of cannot survive: written
+	// before the delete it is cascaded away, written after it violates the FK.
+	// NULL is the only way this action gets recorded at all; the cluster id and
+	// name travel in the details body. Gated on delete:cluster, and the
+	// credential-revocation half additionally on global manage:cluster.
+	"clusters.go.Delete": "audit_log.cluster_id CASCADEs with the cluster; NULL is the only way the row survives its own event",
+
+	// A failed cluster onboarding: there is no cluster row, because creating
+	// one is what failed. Gated on global manage:cluster, so the global-only
+	// readership of a NULL-cluster row is exactly who can attempt it.
+	"clusters_bootstrap.go.auditBootstrapFailure": "onboarding failed before a cluster existed; gated on global manage:cluster",
+
 	// Genuinely cross-cluster: deletes completed task history for EVERY cluster
 	// in one statement, and is gated on global manage:task for that reason, so
 	// no single cluster owns the row.

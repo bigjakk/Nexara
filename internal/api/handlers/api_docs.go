@@ -96,10 +96,10 @@ var endpointMeta = map[string]APIEndpoint{
 
 	// ── Clusters ──────────────────────────────────────────────────────
 	"GET /api/v1/clusters":                    {Description: "List all clusters", Permission: "view:cluster", Group: "Clusters"},
-	"POST /api/v1/clusters":                   {Description: "Add a new Proxmox cluster", Permission: "manage:cluster", Group: "Clusters"},
+	"POST /api/v1/clusters":                   {Description: "Add a Proxmox cluster, with a pasted API token or a Nexara-minted one", Permission: "manage:cluster", Group: "Clusters"},
 	"GET /api/v1/clusters/:id":                {Description: "Get cluster details", Permission: "view:cluster", Group: "Clusters"},
 	"PUT /api/v1/clusters/:id":                {Description: "Update cluster settings", Permission: "manage:cluster", Group: "Clusters"},
-	"DELETE /api/v1/clusters/:id":             {Description: "Remove a cluster", Permission: "delete:cluster", Group: "Clusters"},
+	"DELETE /api/v1/clusters/:id":             {Description: "Remove a cluster, optionally revoking the credential Nexara created for it", Permission: "delete:cluster", Group: "Clusters"},
 	"POST /api/v1/clusters/fetch-fingerprint": {Description: "Fetch a remote cluster's TLS fingerprint", Permission: "manage:cluster", Group: "Clusters"},
 
 	// ── Nodes ─────────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -53,6 +54,9 @@ type createClusterRequest struct {
 	// loopback/link-local IP (typical homelab setup). Cloud metadata,
 	// unspecified, and multicast addresses are still rejected.
 	AllowPrivateAddress bool `json:"allow_private_address,omitempty"`
+	// Bootstrap asks Nexara to mint the cluster's credential itself instead of
+	// being handed one. Mutually exclusive with token_id/token_secret.
+	Bootstrap *bootstrapRequest `json:"bootstrap,omitempty"`
 }
 
 type updateClusterRequest struct {
@@ -78,6 +82,10 @@ type clusterResponse struct {
 	PVEVersion          string    `json:"pve_version"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// CredentialSource is "manual" or "bootstrap". The UI reads it to decide
+	// whether deleting the cluster can offer to revoke the Proxmox-side
+	// credential — an offer that is only ever valid for one Nexara created.
+	CredentialSource string `json:"credential_source"`
 	// Issues is the cluster's current infrastructure-health problems (Ceph, HA,
 	// disks, storage, failed tasks, …), computed server-side so the UI can
 	// surface them app-wide. Empty/omitted when the cluster is healthy.
@@ -92,6 +100,10 @@ type connectivityResult struct {
 type createClusterResponse struct {
 	Cluster      clusterResponse    `json:"cluster"`
 	Connectivity connectivityResult `json:"connectivity"`
+	// Bootstrap reports what onboarding created on the Proxmox side. Present
+	// only when the cluster was onboarded with a bootstrap block; it carries
+	// object names, never the minted secret.
+	Bootstrap *bootstrapSummary `json:"bootstrap,omitempty"`
 }
 
 type updateClusterResponse struct {
@@ -134,6 +146,7 @@ func toClusterResponse(c db.Cluster, nsi nodeStatusInfo) clusterResponse {
 		PVEVersion:          c.PveVersion,
 		CreatedAt:           c.CreatedAt,
 		UpdatedAt:           c.UpdatedAt,
+		CredentialSource:    c.CredentialSource,
 	}
 }
 
@@ -148,12 +161,27 @@ func (h *ClusterHandler) Create(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	if req.Name == "" || req.APIURL == "" || req.TokenID == "" || req.TokenSecret == "" {
-		return fiber.NewError(fiber.StatusBadRequest, "name, api_url, token_id, and token_secret are required")
+	if req.Name == "" || req.APIURL == "" {
+		return fiber.NewError(fiber.StatusBadRequest, "name and api_url are required")
 	}
 
 	if len(req.Name) > 255 {
 		return fiber.NewError(fiber.StatusBadRequest, "name must be 255 characters or fewer")
+	}
+
+	// Either the operator hands us a token, or they hand us a password and we
+	// mint one. Accepting both would leave it ambiguous which credential the
+	// cluster actually ends up authenticating with.
+	switch {
+	case req.Bootstrap != nil && (req.TokenID != "" || req.TokenSecret != ""):
+		return fiber.NewError(fiber.StatusBadRequest,
+			"Supply either token_id and token_secret, or a bootstrap block — not both")
+	case req.Bootstrap != nil:
+		if err := req.Bootstrap.validate(); err != nil {
+			return err
+		}
+	case req.TokenID == "" || req.TokenSecret == "":
+		return fiber.NewError(fiber.StatusBadRequest, "name, api_url, token_id, and token_secret are required")
 	}
 
 	if err := validateURLFormat(req.APIURL); err != nil {
@@ -171,7 +199,33 @@ func (h *ClusterHandler) Create(c fiber.Ctx) error {
 		syncInterval = *req.SyncIntervalSeconds
 	}
 
-	encrypted, err := crypto.Encrypt(req.TokenSecret, h.encryptionKey)
+	// Resolve the credential BEFORE writing anything. If the mint fails there
+	// is no half-configured cluster row to explain or clean up, and the
+	// operator sees the Proxmox-side reason instead of a cluster that exists
+	// but cannot talk to anything.
+	cred := &clusterCredential{
+		TokenID: req.TokenID,
+		Secret:  req.TokenSecret,
+		Source:  credentialSourceManual,
+	}
+	var bootClient *proxmox.BootstrapClient
+	if req.Bootstrap != nil {
+		minted, client, mintErr := runClusterBootstrap(c.Context(), req.APIURL, req.TLSFingerprint, req.Bootstrap)
+		if client != nil {
+			// Held open past the mint so the insert below can revoke the token
+			// it just created without a second login.
+			defer client.Close()
+		}
+		if mintErr != nil {
+			// Recorded before answering: a failed attempt can leave objects on
+			// the hypervisor that no cluster row will ever account for.
+			h.auditBootstrapFailure(c, req.APIURL, req.Bootstrap, mintErr)
+			return renderBootstrapError(c, mintErr, req.Bootstrap)
+		}
+		cred, bootClient = minted, client
+	}
+
+	encrypted, err := crypto.Encrypt(cred.Secret, h.encryptionKey)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to encrypt token secret")
 	}
@@ -179,20 +233,65 @@ func (h *ClusterHandler) Create(c fiber.Ctx) error {
 	cluster, err := h.queries.CreateCluster(c.Context(), db.CreateClusterParams{
 		Name:                 req.Name,
 		ApiUrl:               req.APIURL,
-		TokenID:              req.TokenID,
+		TokenID:              cred.TokenID,
 		TokenSecretEncrypted: encrypted,
 		TlsFingerprint:       req.TLSFingerprint,
 		SyncIntervalSeconds:  syncInterval,
 		IsActive:             true,
+		CredentialSource:     cred.Source,
+		BootstrapUserID:      cred.UserID,
+		BootstrapTokenName:   cred.TokenName,
+		BootstrapCreatedUser: cred.CreatedUser,
+		BootstrapCreatedAcl:  cred.CreatedACL,
+		BootstrapCreatedAt:   cred.mintedAtColumn(),
 	})
 	if err != nil {
+		// A minted token with no cluster row to hold its secret is an orphaned
+		// privsep=0 Administrator credential nobody has — the same artefact
+		// post-mint verification exists to prevent, so it gets the same
+		// treatment. RollbackMint removes only what THIS request created, so an
+		// adopted pre-existing user or grant is left alone.
+		if bootClient != nil {
+			rb := bootClient.RollbackMint(c.Context(), proxmox.MintParams{
+				UserID:    cred.UserID,
+				TokenName: cred.TokenName,
+			}, cred.CreatedUser, cred.CreatedACL)
+
+			h.auditBootstrapFailure(c, req.APIURL, req.Bootstrap, &proxmox.MintError{
+				Err:         errors.New("cluster row could not be written after the credential was minted"),
+				UserID:      cred.UserID,
+				CreatedUser: rb.RemainingUser,
+				CreatedACL:  rb.RemainingACL,
+				Steps:       rb.Steps,
+			})
+
+			if rb.RemainingUser || rb.RemainingACL {
+				slog.Error("cluster insert failed after minting a credential, and rolling it back left objects behind",
+					"token_id", cred.TokenID, "user_id", cred.UserID,
+					"remaining_user", rb.RemainingUser, "remaining_acl", rb.RemainingACL)
+				return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf(
+					"Failed to create the cluster, and the Proxmox objects created for it could not all be removed. Check %s in Proxmox before retrying.",
+					cred.UserID))
+			}
+		}
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create cluster")
 	}
 
-	details, _ := json.Marshal(map[string]string{"name": cluster.Name})
+	auditDetails := map[string]any{
+		"name":              cluster.Name,
+		"credential_source": cred.Source,
+	}
+	if cred.Source == credentialSourceBootstrap {
+		// Names only. The secret exists in exactly one place — the encrypted
+		// column — and view:audit is held by every built-in Viewer.
+		auditDetails["bootstrap_token_id"] = cred.TokenID
+		auditDetails["bootstrap_created_user"] = cred.CreatedUser
+		auditDetails["bootstrap_created_acl"] = cred.CreatedACL
+	}
+	details, _ := json.Marshal(auditDetails)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(cluster.ID), "cluster", cluster.ID.String(), "cluster_created", details)
 
-	testResult := testClusterConnectivity(req.APIURL, req.TokenID, req.TokenSecret, req.TLSFingerprint)
+	testResult := testClusterConnectivity(req.APIURL, cred.TokenID, cred.Secret, req.TLSFingerprint)
 
 	// Pre-populate node entries with addresses from corosync discovery.
 	if testResult.Result.Reachable {
@@ -221,10 +320,14 @@ func (h *ClusterHandler) Create(c fiber.Ctx) error {
 		}
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(createClusterResponse{
+	resp := createClusterResponse{
 		Cluster:      toClusterResponse(cluster, nodeStatusInfo{}),
 		Connectivity: testResult.Result,
-	})
+	}
+	if cred.Source == credentialSourceBootstrap {
+		resp.Bootstrap = &bootstrapSummary{TokenID: cred.TokenID, Steps: cred.Steps}
+	}
+	return c.Status(fiber.StatusCreated).JSON(resp)
 }
 
 // List handles GET /api/v1/clusters.
@@ -376,6 +479,45 @@ func (h *ClusterHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update cluster")
 	}
 
+	// Re-pointing a cluster at a different endpoint or a different token
+	// invalidates its credential provenance: bootstrap_user_id and
+	// bootstrap_token_name name objects on the target it USED to have. Left
+	// stale, a later delete-with-revoke would issue DELETE /access/users
+	// against a host where Nexara created nothing.
+	//
+	// A changed secret alone is not re-pointing — that is a token regenerate,
+	// same user, same token name — so it deliberately does not clear.
+	if params.ApiUrl != existing.ApiUrl || params.TokenID != existing.TokenID {
+		if existing.CredentialSource == credentialSourceBootstrap {
+			if clearErr := h.queries.ClearClusterCredentialProvenance(c.Context(), id); clearErr != nil {
+				slog.Error("failed to clear stale cluster credential provenance",
+					"cluster_id", id, "error", clearErr)
+				return fiber.NewError(fiber.StatusInternalServerError, "Failed to update cluster credential provenance")
+			}
+
+			// Forgetting the provenance also forgets the objects Nexara created
+			// on the OLD host — after this, deleting the cluster can never offer
+			// to revoke them. Name them here or they are lost for good.
+			forgotten, _ := json.Marshal(map[string]any{
+				"reason":            "cluster re-pointed at a different endpoint or token; credential provenance cleared",
+				"previous_api_url":  existing.ApiUrl,
+				"previous_token_id": existing.TokenID,
+				"orphaned_user_id":  existing.BootstrapUserID,
+				"orphaned_token":    existing.BootstrapUserID + "!" + existing.BootstrapTokenName,
+				"created_user":      existing.BootstrapCreatedUser,
+				"created_acl":       existing.BootstrapCreatedAcl,
+				"warning":           "these were created by Nexara on the previous host and must now be removed there by hand",
+			})
+			AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_credential_provenance_cleared", forgotten)
+
+			cluster.CredentialSource = credentialSourceManual
+			cluster.BootstrapUserID = ""
+			cluster.BootstrapTokenName = ""
+			cluster.BootstrapCreatedUser = false
+			cluster.BootstrapCreatedAcl = false
+		}
+	}
+
 	// Drop any cached *proxmox.Client built from the prior credentials so
 	// the next API call rebuilds against the new BaseURL/TokenID/TokenSecret/
 	// fingerprint. Same channel fans out to peer replicas so a multi-replica
@@ -423,8 +565,7 @@ func (h *ClusterHandler) Delete(c fiber.Ctx) error {
 		return err
 	}
 
-	// Verify the cluster exists.
-	_, err = h.queries.GetCluster(c.Context(), id)
+	cluster, err := h.queries.GetCluster(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fiber.NewError(fiber.StatusNotFound, "Cluster not found")
@@ -450,23 +591,77 @@ func (h *ClusterHandler) Delete(c fiber.Ctx) error {
 	// often one that's gone for good, and its cleanup could never succeed.
 	// Record what leaks so the audit trail explains the cluster-side residue
 	// (paused CRS, disabled HA rules) if the cluster is ever re-added.
-	deleteDetails := json.RawMessage(nil)
+	auditFields := map[string]any{
+		// Carried in the body because the row itself cannot name the cluster —
+		// see the AuditLog call at the end of this function.
+		"cluster_id": id.String(),
+		"name":       cluster.Name,
+		"api_url":    cluster.ApiUrl,
+	}
 	if pending, pendErr := h.queries.ListCleanupPendingJobsForCluster(c.Context(), id); pendErr == nil && len(pending) > 0 {
 		ids := make([]string, len(pending))
 		for i, pj := range pending {
 			ids[i] = pj.ID.String()
 		}
-		deleteDetails, _ = json.Marshal(map[string]any{
-			"warning":                 "deleted with unreleased rolling-update state; CRS pause / HA-rule disables may persist on the Proxmox cluster",
-			"cleanup_pending_job_ids": ids,
-		})
+		auditFields["warning"] = "deleted with unreleased rolling-update state; CRS pause / HA-rule disables may persist on the Proxmox cluster"
+		auditFields["cleanup_pending_job_ids"] = ids
 	}
 
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_deleted", deleteDetails)
+	// Opt-in Proxmox-side cleanup. Off by default: removing a cluster from
+	// Nexara is a local act, and silently deleting users and tokens on a live
+	// hypervisor is not something to infer from it.
+	//
+	// The permission is checked here, before anything is destroyed, but the
+	// revocation itself runs after the row is gone. Revoking first would mean a
+	// failed DeleteCluster leaves the operator with a cluster whose credential
+	// has already been deleted on the hypervisor — present in Nexara, unable to
+	// authenticate, and unfixable except by hand. `cluster` is a value copy, so
+	// the credential is still readable after the row is deleted.
+	revoke := wantsCredentialRevocation(c)
+	if revoke {
+		// Deleting the cluster needs delete:cluster, which can be granted
+		// scoped to a single cluster. Mutating Proxmox's own access control is
+		// a different act, and minting the credential in the first place
+		// required GLOBAL manage:cluster — so removing it asks for the same
+		// thing. Without this, a role holding only a cluster-scoped
+		// delete:cluster could drive DELETE /access/users against a live
+		// hypervisor.
+		if err := requirePerm(c, "manage", "cluster"); err != nil {
+			return err
+		}
+	}
 
 	if err := h.queries.DeleteCluster(c.Context(), id); err != nil {
+		// The old ordering audited before deleting, so a failed delete was the
+		// one case that DID leave a row (nothing cascaded it away). Auditing
+		// only on success would quietly lose that.
+		auditFields["result"] = "failed"
+		auditFields["error"] = auditSafe(err.Error())
+		failDetails, _ := json.Marshal(auditFields)
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(), "cluster_deleted", failDetails)
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete cluster")
 	}
+
+	if revoke {
+		auditFields["revoke_pve_credentials"] = revocationOutcome(c.Context(), h.queries, cluster, h.encryptionKey)
+	}
+
+	// Audited after the delete succeeds, so the row records something that
+	// actually happened — and so it can carry the revocation outcome.
+	//
+	// The row deliberately carries a NULL cluster_id, with the cluster's
+	// identity in the details body instead. audit_log.cluster_id is
+	// `REFERENCES clusters(id) ON DELETE CASCADE`, which makes a
+	// cluster_deleted row that names its own cluster impossible to keep: write
+	// it before the delete and the cascade destroys it; write it after and the
+	// insert has nothing to point at. Either way the row vanished — this action
+	// had never once been recorded in any install before this change.
+	//
+	// That matters more now than it did: this row carries the report of what
+	// revocation left behind on the Proxmox side, which is the only durable
+	// record an operator has to reconcile against.
+	deleteDetails, _ := json.Marshal(auditFields)
+	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "cluster", id.String(), "cluster_deleted", deleteDetails)
 
 	if cache := proxmoxCacheFromCtx(c); cache != nil {
 		cache.PublishInvalidation(c.Context(), proxmox.CacheKindPVE, id)

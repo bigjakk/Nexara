@@ -62,7 +62,7 @@ func (s *Server) setupRoutes() {
 	// Cluster routes — single group for all cluster-scoped endpoints.
 	if s.clusterHandler != nil {
 		clusters := v1.Group("/clusters", s.authRequired())
-		clusters.Post("/", s.clusterHandler.Create)
+		clusters.Post("/", s.clusterCreateLimiter(), s.clusterHandler.Create)
 		clusters.Post("/fetch-fingerprint", s.clusterHandler.FetchFingerprint)
 		clusters.Get("/", s.clusterHandler.List)
 		clusters.Get("/:id", s.clusterHandler.Get)

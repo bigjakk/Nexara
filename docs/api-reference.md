@@ -145,6 +145,7 @@ envelope documented above.
 | Refresh | 30/min | `/auth/refresh` |
 | WS token | 60/min | `/auth/ws-token` |
 | Snapshot resync | 30/min | `/clusters/:id/guest-snapshots/resync` |
+| Cluster create | 10/min | `POST /clusters` — in bootstrap mode each call spends a Proxmox login attempt |
 | General | `RATE_LIMIT_MAX` per `RATE_LIMIT_EXPIRATION` (default 600/min) | Everything whose path does not start with `/api/v1/auth/` or `/ws` — `/healthz` included |
 
 The general limiter's exemption is by path prefix, not by coverage: the auth
@@ -275,12 +276,118 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/clusters` | Add a new cluster |
+| POST | `/clusters` | Add a cluster, with a pasted API token or a Nexara-minted one |
 | GET | `/clusters` | List all clusters |
 | GET | `/clusters/:id` | Get cluster details |
 | PUT | `/clusters/:id` | Update cluster |
-| DELETE | `/clusters/:id` | Remove cluster |
+| DELETE | `/clusters/:id` | Remove cluster (`?revoke_pve_credentials=1` also revokes a Nexara-minted credential) |
 | POST | `/clusters/fetch-fingerprint` | Fetch TLS fingerprint from a Proxmox URL |
+
+#### Onboarding a cluster without a pre-made token
+
+`POST /clusters` takes either `token_id` + `token_secret`, or a `bootstrap`
+block — never both. With `bootstrap`, Nexara signs in once with the supplied
+password and creates the credential itself:
+
+```json
+{
+  "name": "Production",
+  "api_url": "https://pve.example.com:8006",
+  "tls_fingerprint": "AB:CD:…",
+  "bootstrap": {
+    "username": "root@pam",
+    "password": "…",
+    "otp": "123456",
+    "user_id": "nexara@pve",
+    "token_name": "nexara"
+  }
+}
+```
+
+`otp` is needed only when the account has TOTP two-factor authentication
+enabled — it rides the same `/access/ticket` request, so hardware factors
+(WebAuthn/U2F), which need a challenge exchange, cannot be used here.
+`user_id` and `token_name` default to `nexara@pve` and `nexara`; `user_id` may
+not name a `@pam` account, since that realm maps to real shell users on the
+node. `username` (the account you log in AS) is unrestricted — `root@pam` is
+the normal answer.
+
+The password is spent on a single `POST /access/ticket` and never stored. What
+Nexara keeps is the minted token's ciphertext; **the secret is never returned to
+the client** — folding the mint into the create call means it crosses the wire
+zero times. The response carries a `bootstrap` summary of what was created:
+
+```json
+{
+  "cluster": { "…": "…", "credential_source": "bootstrap" },
+  "connectivity": { "reachable": true, "message": "…" },
+  "bootstrap": {
+    "token_id": "nexara@pve!nexara",
+    "steps": [
+      { "step": "user",   "status": "created",  "detail": "nexara@pve" },
+      { "step": "acl",    "status": "created",  "detail": "Administrator on /" },
+      { "step": "token",  "status": "created",  "detail": "nexara@pve!nexara" },
+      { "step": "verify", "status": "verified", "detail": "authenticated with the new token" }
+    ]
+  }
+}
+```
+
+The flow is forward-idempotent: a rerun after a partial failure adopts whatever
+already exists (`"status": "existed"`). The user is created **without a
+password**, which is what makes every half-finished state inert.
+
+Objects created by a run that then fails are rolled back — and only those, never
+an adopted pre-existing user or grant. Whatever the rollback cannot remove is
+recorded in a `cluster_bootstrap_failed` audit row naming it, so a failed
+onboarding is never silent even though no cluster row exists to attach it to.
+
+Failures specific to the supplied Proxmox credential answer **422**, not 401 —
+a 401 would be indistinguishable from an expired Nexara session, and clients
+that refresh-and-replay on 401 would double every login attempt against the
+hypervisor:
+
+| `error` | Status | Meaning |
+|---------|--------|---------|
+| `tfa_required` | 422 | The account needs a one-time code; resubmit with `otp` |
+| `bootstrap_auth_failed` | 422 | Wrong username or password |
+| `bootstrap_forbidden` | 422 | The account cannot create users or tokens |
+| `token_exists` | 409 | That token name is taken. Nexara never auto-suffixes — each auto-named retry would leave another live `privsep=0` Administrator credential nobody holds |
+
+Deleting the cluster with `?revoke_pve_credentials=1` removes the PVE objects
+Nexara created, and only those: `credential_source` must be `bootstrap`, and
+each object is revoked only if Nexara recorded creating it. A pasted-in token is
+never touched.
+
+Four further constraints:
+
+- **It needs global `manage:cluster`**, not just the `delete:cluster` that the
+  deletion itself requires. Minting the credential took global `manage:cluster`;
+  removing it from a live hypervisor is the same class of act, and
+  `delete:cluster` can be granted scoped to one cluster.
+- **Nothing on the account is touched while another cluster in Nexara still uses
+  it.** If a second cluster row authenticates as the same PVE user on the same
+  host, only this cluster's own token is removed. Revoking the shared
+  `Administrator` grant would de-privilege that cluster's `privsep=0` token —
+  leaving it listed and healthy-looking in Nexara while unable to reach Proxmox
+  at all.
+- **The user is never cascade-deleted while it owns another API token.**
+  `DELETE /access/users` takes every token and ACL entry with it, so if the
+  account holds anything Nexara did not mint for this cluster — the same host
+  onboarded twice, or a token added by hand — only this cluster's own grant and
+  token are removed. If the token list cannot be read, it fails closed the same
+  way.
+- **Revocation runs after the cluster row is deleted**, so a failed deletion
+  cannot leave a cluster present in Nexara whose credential is already gone.
+
+Revocation is best-effort — an unreachable cluster still deletes, and what was
+left behind is recorded in the audit row.
+
+`PUT /clusters/:id` clears the provenance columns when `api_url` or `token_id`
+changes: those fields describe objects on the target the cluster used to have,
+and acting on them against a new host would delete something Nexara never
+created. Rotating only `token_secret` is a regenerate, not a re-point, and
+leaves provenance intact.
 
 ### Cluster Options & Config
 

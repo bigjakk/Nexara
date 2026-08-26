@@ -36,6 +36,7 @@ function makeCluster(
     pve_version: "",
     created_at: "",
     updated_at: "",
+    credential_source: "manual",
     ...over,
   };
 }

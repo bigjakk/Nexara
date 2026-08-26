@@ -1,0 +1,93 @@
+# Disposable Nexara stack for destructive testing.
+#
+# Runs a SECOND Nexara alongside your dev stack, seeded from a dump of it, so you
+# can delete and re-add real clusters without sacrificing your working
+# environment. Deleting a cluster cascades through ~30 foreign keys — audit
+# history, task history, every metric sample — and none of it comes back.
+#
+# See docs/contributing.md → "Testing against a disposable stack" for the full
+# procedure, including the mandatory safety cutouts.
+#
+#   TEST_HOST_IP=192.168.3.245 docker compose \
+#     --env-file .env -f docker/test/docker-compose.test.yml up -d
+name: nexara-test
+
+services:
+  nexara-test-redis:
+    image: redis:7-alpine
+    container_name: nexara-test-redis
+    volumes:
+      - ${TEST_DATA_DIR:-/var/lib/nexara-test}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [nexara_net]
+    restart: unless-stopped
+
+  nexara-test:
+    image: ${TEST_IMAGE:-nexara:dev}
+    container_name: nexara-test
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      # Shares the dev Postgres SERVER, but uses its own database.
+      DATABASE_URL: postgres://${POSTGRES_USER:-nexara}:${POSTGRES_PASSWORD:-changeme}@${TEST_DB_HOST:-nexara-db}:5432/${TEST_DB_NAME:-nexara_test}?sslmode=disable
+      REDIS_URL: redis://nexara-test-redis:6379/0
+      # MUST match the dev stack. These decrypt the Proxmox token secrets in the
+      # restored rows; a fresh key leaves every cluster unusable.
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
+    volumes:
+      - ${TEST_DATA_DIR:-/var/lib/nexara-test}/data:/data/nexara
+    healthcheck:
+      test: ["CMD", "/nexara", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+      start_period: 30s
+    depends_on:
+      nexara-test-redis:
+        condition: service_healthy
+    networks: [nexara_net]
+    restart: unless-stopped
+
+  nexara-test-caddy:
+    image: caddy:2-alpine
+    container_name: nexara-test-caddy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /data/caddy/test.crt ]; then
+          apk add --no-cache openssl >/dev/null 2>&1
+          mkdir -p /data/caddy
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout /data/caddy/test.key -out /data/caddy/test.crt \
+            -days 365 -nodes -subj "/CN=nexara-test" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1${TEST_HOST_IP:+,IP:$TEST_HOST_IP}" 2>/dev/null
+        fi
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    ports:
+      # HTTPS is required, not cosmetic: the cluster-onboarding password field is
+      # gated on window.isSecureContext. Clicking through a self-signed warning
+      # still yields a secure context; plain HTTP does not, so an HTTP-only test
+      # stack can only ever exercise the insecure-context branch.
+      - "${TEST_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ../../docker/test/Caddyfile.test:/etc/caddy/Caddyfile:ro
+      - ${TEST_DATA_DIR:-/var/lib/nexara-test}/caddy:/data
+    depends_on:
+      nexara-test:
+        condition: service_healthy
+    networks: [nexara_net]
+    restart: unless-stopped
+
+networks:
+  # Joins the dev stack's network so nexara-db is reachable by name.
+  nexara_net:
+    external: true
+    name: ${NEXARA_NETWORK:-nexara_default}

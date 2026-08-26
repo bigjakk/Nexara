@@ -9,22 +9,95 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearClusterCredentialProvenance = `-- name: ClearClusterCredentialProvenance :exec
+UPDATE clusters
+SET credential_source      = 'manual',
+    bootstrap_user_id      = '',
+    bootstrap_token_name   = '',
+    bootstrap_created_user = false,
+    bootstrap_created_acl  = false,
+    bootstrap_created_at   = NULL
+WHERE id = $1
+`
+
+// Forget that Nexara minted this cluster's credential.
+//
+// Run when the cluster is re-pointed at a different endpoint or a different
+// token: the recorded PVE user and token name describe objects on the OLD
+// target, and acting on them against the new one would delete something Nexara
+// never created.
+func (q *Queries) ClearClusterCredentialProvenance(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearClusterCredentialProvenance, id)
+	return err
+}
+
+const countClustersSharingBootstrapUser = `-- name: CountClustersSharingBootstrapUser :one
+SELECT count(*) FROM clusters
+WHERE id <> $1
+  AND split_part(token_id, '!', 1) = $2
+`
+
+type CountClustersSharingBootstrapUserParams struct {
+	ExcludeClusterID uuid.UUID `json:"exclude_cluster_id"`
+	BootstrapUserID  string    `json:"bootstrap_user_id"`
+}
+
+// How many OTHER cluster rows authenticate to Proxmox as the same PVE user.
+//
+// Asked before revoking anything at delete time. A privsep=0 token inherits its
+// owner's privileges outright, and a privsep=1 token's effective rights are the
+// intersection with its owner's — so removing the owner, or its only role
+// grant, silently kills every other token on that account. The sibling cluster
+// stays listed in Nexara and simply stops being able to reach Proxmox.
+//
+// Matched on the OWNER PARSED OUT OF token_id, not on the bootstrap_* columns:
+//
+//   - it catches a manually-added cluster that happens to use the same account,
+//     which the provenance columns never describe;
+//   - it survives Update clearing provenance on a re-pointed cluster;
+//   - it does not depend on two rows spelling api_url identically. Host is
+//     deliberately NOT compared: the same account name on a genuinely different
+//     hypervisor makes this over-report, which costs an un-revoked credential
+//     that the audit row names — the opposite mistake costs a working cluster.
+//
+// Self-exclusion is explicit rather than relying on the caller having already
+// deleted the row, so this stays correct if it is ever asked before the delete
+// (a dry-run or a preview endpoint).
+func (q *Queries) CountClustersSharingBootstrapUser(ctx context.Context, arg CountClustersSharingBootstrapUserParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countClustersSharingBootstrapUser, arg.ExcludeClusterID, arg.BootstrapUserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCluster = `-- name: CreateCluster :one
-INSERT INTO clusters (name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate
+INSERT INTO clusters (
+    name, api_url, token_id, token_secret_encrypted, tls_fingerprint,
+    sync_interval_seconds, is_active,
+    credential_source, bootstrap_user_id, bootstrap_token_name,
+    bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at
 `
 
 type CreateClusterParams struct {
-	Name                 string `json:"name"`
-	ApiUrl               string `json:"api_url"`
-	TokenID              string `json:"token_id"`
-	TokenSecretEncrypted string `json:"-"`
-	TlsFingerprint       string `json:"tls_fingerprint"`
-	SyncIntervalSeconds  int32  `json:"sync_interval_seconds"`
-	IsActive             bool   `json:"is_active"`
+	Name                 string             `json:"name"`
+	ApiUrl               string             `json:"api_url"`
+	TokenID              string             `json:"token_id"`
+	TokenSecretEncrypted string             `json:"-"`
+	TlsFingerprint       string             `json:"tls_fingerprint"`
+	SyncIntervalSeconds  int32              `json:"sync_interval_seconds"`
+	IsActive             bool               `json:"is_active"`
+	CredentialSource     string             `json:"credential_source"`
+	BootstrapUserID      string             `json:"bootstrap_user_id"`
+	BootstrapTokenName   string             `json:"bootstrap_token_name"`
+	BootstrapCreatedUser bool               `json:"bootstrap_created_user"`
+	BootstrapCreatedAcl  bool               `json:"bootstrap_created_acl"`
+	BootstrapCreatedAt   pgtype.Timestamptz `json:"bootstrap_created_at"`
 }
 
 func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error) {
@@ -36,6 +109,12 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		arg.TlsFingerprint,
 		arg.SyncIntervalSeconds,
 		arg.IsActive,
+		arg.CredentialSource,
+		arg.BootstrapUserID,
+		arg.BootstrapTokenName,
+		arg.BootstrapCreatedUser,
+		arg.BootstrapCreatedAcl,
+		arg.BootstrapCreatedAt,
 	)
 	var i Cluster
 	err := row.Scan(
@@ -51,6 +130,12 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		&i.UpdatedAt,
 		&i.PveVersion,
 		&i.Quorate,
+		&i.CredentialSource,
+		&i.BootstrapUserID,
+		&i.BootstrapTokenName,
+		&i.BootstrapCreatedUser,
+		&i.BootstrapCreatedAcl,
+		&i.BootstrapCreatedAt,
 	)
 	return i, err
 }
@@ -65,7 +150,7 @@ func (q *Queries) DeleteCluster(ctx context.Context, id uuid.UUID) error {
 }
 
 const getCluster = `-- name: GetCluster :one
-SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate FROM clusters WHERE id = $1
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at FROM clusters WHERE id = $1
 `
 
 func (q *Queries) GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error) {
@@ -84,12 +169,18 @@ func (q *Queries) GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 		&i.UpdatedAt,
 		&i.PveVersion,
 		&i.Quorate,
+		&i.CredentialSource,
+		&i.BootstrapUserID,
+		&i.BootstrapTokenName,
+		&i.BootstrapCreatedUser,
+		&i.BootstrapCreatedAcl,
+		&i.BootstrapCreatedAt,
 	)
 	return i, err
 }
 
 const listActiveClusters = `-- name: ListActiveClusters :many
-SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate FROM clusters WHERE is_active = true ORDER BY created_at
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at FROM clusters WHERE is_active = true ORDER BY created_at
 `
 
 func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
@@ -114,6 +205,12 @@ func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
 			&i.UpdatedAt,
 			&i.PveVersion,
 			&i.Quorate,
+			&i.CredentialSource,
+			&i.BootstrapUserID,
+			&i.BootstrapTokenName,
+			&i.BootstrapCreatedUser,
+			&i.BootstrapCreatedAcl,
+			&i.BootstrapCreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -126,7 +223,7 @@ func (q *Queries) ListActiveClusters(ctx context.Context) ([]Cluster, error) {
 }
 
 const listClusters = `-- name: ListClusters :many
-SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate FROM clusters ORDER BY created_at DESC
+SELECT id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at FROM clusters ORDER BY created_at DESC
 `
 
 func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
@@ -151,6 +248,12 @@ func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
 			&i.UpdatedAt,
 			&i.PveVersion,
 			&i.Quorate,
+			&i.CredentialSource,
+			&i.BootstrapUserID,
+			&i.BootstrapTokenName,
+			&i.BootstrapCreatedUser,
+			&i.BootstrapCreatedAcl,
+			&i.BootstrapCreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -172,7 +275,7 @@ SET name = $2,
     sync_interval_seconds = $7,
     is_active = $8
 WHERE id = $1
-RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate
+RETURNING id, name, api_url, token_id, token_secret_encrypted, tls_fingerprint, sync_interval_seconds, is_active, created_at, updated_at, pve_version, quorate, credential_source, bootstrap_user_id, bootstrap_token_name, bootstrap_created_user, bootstrap_created_acl, bootstrap_created_at
 `
 
 type UpdateClusterParams struct {
@@ -211,6 +314,12 @@ func (q *Queries) UpdateCluster(ctx context.Context, arg UpdateClusterParams) (C
 		&i.UpdatedAt,
 		&i.PveVersion,
 		&i.Quorate,
+		&i.CredentialSource,
+		&i.BootstrapUserID,
+		&i.BootstrapTokenName,
+		&i.BootstrapCreatedUser,
+		&i.BootstrapCreatedAcl,
+		&i.BootstrapCreatedAt,
 	)
 	return i, err
 }

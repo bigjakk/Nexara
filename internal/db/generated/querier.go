@@ -39,6 +39,13 @@ type Querier interface {
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
+	// Forget that Nexara minted this cluster's credential.
+	//
+	// Run when the cluster is re-pointed at a different endpoint or a different
+	// token: the recorded PVE user and token name describe objects on the OLD
+	// target, and acting on them against the new one would delete something Nexara
+	// never created.
+	ClearClusterCredentialProvenance(ctx context.Context, id uuid.UUID) error
 	// ClearDRSEvalRequest clears the queue slot once the scheduler has honoured
 	// it. The `<= $2` guard is load-bearing: $2 is the eval_requested_at the
 	// scheduler READ for this cluster, not now(). A request stamped after that
@@ -72,6 +79,28 @@ type Querier interface {
 	// ListAuditLogAdvanced — in particular accessible_cluster_ids, or the Total
 	// leaks how many entries the caller's inaccessible clusters hold.
 	CountAuditLogAdvanced(ctx context.Context, arg CountAuditLogAdvancedParams) (int64, error)
+	// How many OTHER cluster rows authenticate to Proxmox as the same PVE user.
+	//
+	// Asked before revoking anything at delete time. A privsep=0 token inherits its
+	// owner's privileges outright, and a privsep=1 token's effective rights are the
+	// intersection with its owner's — so removing the owner, or its only role
+	// grant, silently kills every other token on that account. The sibling cluster
+	// stays listed in Nexara and simply stops being able to reach Proxmox.
+	//
+	// Matched on the OWNER PARSED OUT OF token_id, not on the bootstrap_* columns:
+	//
+	//   * it catches a manually-added cluster that happens to use the same account,
+	//     which the provenance columns never describe;
+	//   * it survives Update clearing provenance on a re-pointed cluster;
+	//   * it does not depend on two rows spelling api_url identically. Host is
+	//     deliberately NOT compared: the same account name on a genuinely different
+	//     hypervisor makes this over-report, which costs an un-revoked credential
+	//     that the audit row names — the opposite mistake costs a working cluster.
+	//
+	// Self-exclusion is explicit rather than relying on the caller having already
+	// deleted the row, so this stays correct if it is ever asked before the delete
+	// (a dry-run or a preview endpoint).
+	CountClustersSharingBootstrapUser(ctx context.Context, arg CountClustersSharingBootstrapUserParams) (int64, error)
 	CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (CountCompletedNodesRow, error)
 	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
 	CountNotificationDLQByState(ctx context.Context) (CountNotificationDLQByStateRow, error)

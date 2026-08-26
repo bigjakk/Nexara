@@ -277,6 +277,120 @@ npm run test -- --watch
 npm test -- src/features/topology/lib/topology-transform.test.ts
 ```
 
+### Testing against a disposable stack
+
+Unit tests cannot reach the things that only break against a real hypervisor with
+real data — credential minting, cluster deletion, revocation. Both bugs found in
+the cluster-onboarding work surfaced only this way, and neither was reachable
+from a test suite.
+
+**Never test cluster deletion against your dev stack.** `clusters.id` is the
+target of ~30 `ON DELETE CASCADE` foreign keys: deleting one row takes its
+nodes, VMs, task history, audit log and every metric sample with it. Re-adding
+the cluster gives you an empty shell.
+
+Instead, run a second Nexara seeded from a dump of your dev database.
+
+#### 1. Back up, and prove the backup
+
+TimescaleDB dumps need the pre/post-restore dance. A plain `pg_restore` produces
+a database that looks fine and is not:
+
+```bash
+mkdir -p ~/nexara-backups
+docker exec nexara-db pg_dump -U nexara -d nexara -Fc --no-owner --no-acl \
+  > ~/nexara-backups/nexara-$(date +%Y%m%d-%H%M%S).dump
+```
+
+The `pg_dump` warning about circular foreign keys on `hypertable` is expected.
+
+```bash
+docker exec nexara-db psql -U nexara -d postgres -c "CREATE DATABASE nexara_test;"
+docker exec nexara-db psql -U nexara -d nexara_test \
+  -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" \
+  -c "SELECT timescaledb_pre_restore();"
+
+cat ~/nexara-backups/nexara-*.dump | docker exec -i nexara-db \
+  pg_restore -U nexara -d nexara_test --no-owner --no-acl
+
+docker exec nexara-db psql -U nexara -d nexara_test -c "SELECT timescaledb_post_restore();"
+```
+
+Verify it actually restored — an untested backup is not a backup:
+
+```bash
+docker exec nexara-db psql -U nexara -d nexara_test -c \
+  "SELECT (SELECT count(*) FROM clusters) clusters, (SELECT count(*) FROM vms) vms,
+          (SELECT count(*) FROM timescaledb_information.hypertables) hypertables;"
+```
+
+#### 2. Apply the safety cutouts — before first boot
+
+The restored rows point at your **real** Proxmox hosts, so the test stack runs a
+second collector, scheduler and DRS engine against live infrastructure. If DRS is
+on `automatic` in dev, two engines will plan migrations on the same cluster and
+fight each other.
+
+```sql
+UPDATE drs_configs SET enabled = false, mode = 'disabled';
+UPDATE notification_channels SET enabled = false;
+UPDATE alert_rules SET enabled = false;
+```
+
+Also confirm nothing is mid-flight — the cleanup sweep mutates the real cluster
+(CRS pause, HA rules):
+
+```sql
+SELECT count(*) FROM rolling_update_jobs WHERE cleanup_pending OR status IN ('running','pending');
+```
+
+#### 3. Bring it up
+
+```bash
+TEST_HOST_IP=<this-box-ip> docker compose --env-file .env \
+  -f docker/test/docker-compose.test.yml up -d
+```
+
+Reach it at **`https://<this-box-ip>:8443`** and click through the self-signed
+warning. Points worth knowing:
+
+- **Use the IP, not your dev hostname.** If a reverse proxy fronts your dev stack,
+  that hostname resolves to the proxy, which routes only 80/443 and knows nothing
+  about 8443. `ERR_CONNECTION_REFUSED` there is a routing fact, not a firewall.
+- **HTTPS is required.** The onboarding password field is gated on
+  `window.isSecureContext`. An accepted self-signed cert still counts as one;
+  plain HTTP does not.
+- **`ENCRYPTION_KEY` and `JWT_SECRET` must match dev**, or the restored token
+  secrets will not decrypt and every cluster fails to connect.
+- The stack shares the dev **Postgres server** but uses its own database, and gets
+  its **own Redis** — Redis pub/sub channels are global across DB indexes, so a
+  shared instance cross-wires cache invalidation and WS events between the apps.
+
+Confirm the cutouts held: `docker logs nexara-test | grep -c drs-engine` → `0`.
+
+#### 4. Test, then tear down
+
+```bash
+docker compose -f docker/test/docker-compose.test.yml down
+docker exec nexara-db psql -U nexara -d postgres -c "DROP DATABASE nexara_test;"
+```
+
+#### Verifying Proxmox-side effects
+
+For anything that mutates Proxmox access control, capture a baseline **before**
+and diff **after**, rather than eyeballing the UI:
+
+```bash
+# users / tokens / ACL / groups, via the Access Control tab or the API
+GET /api/v1/clusters/:id/access/users
+GET /api/v1/clusters/:id/access/acl
+```
+
+Read the "after" state using the **credential under test** where you can. If a
+change was supposed to leave a grant intact, a successful read through a
+`privsep=0` token proves it — that token inherits its owner's privileges, so a
+revoked grant turns the same call into a 403.
+
 ### Linting
 
 ```bash

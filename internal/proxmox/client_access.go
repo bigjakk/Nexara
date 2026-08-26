@@ -23,6 +23,14 @@ var (
 	accessNamePattern    = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
+// RoleAdministrator is Proxmox's built-in superuser role: every privilege the
+// cluster defines, including the seven that PVEAdmin lacks
+// (Mapping.Modify, Permissions.Modify, Realm.Allocate, Sys.AccessNetwork,
+// Sys.Incoming, Sys.Modify, Sys.PowerMgmt). Nexara needs the full set — node
+// power actions alone require Sys.PowerMgmt — so this is what onboarding
+// grants and what cluster deletion looks for when revoking.
+const RoleAdministrator = "Administrator"
+
 // validateUserID guards a caller-supplied PVE user id ("name@realm") that
 // becomes one segment of a request path.
 //
@@ -73,6 +81,22 @@ func validateTokenID(tokenid string) error {
 		return fmt.Errorf("%w: token name %q must start with a letter and contain only letters, digits, dot, dash or underscore", ErrInvalidInput, tokenid)
 	}
 	return nil
+}
+
+// validateFullTokenID guards a complete token id ("user@realm!tokenname").
+//
+// Used on the one that comes BACK from Proxmox rather than the ones going out:
+// the mint response echoes a full-tokenid that becomes an Authorization header,
+// a stored column and an audit value, and no other validator sees it.
+func validateFullTokenID(full string) error {
+	userid, name, ok := strings.Cut(full, "!")
+	if !ok {
+		return fmt.Errorf("%w: token id %q must be in user@realm!name form", ErrInvalidInput, full)
+	}
+	if err := validateUserID(userid); err != nil {
+		return err
+	}
+	return validateTokenID(name)
 }
 
 // validateGroupID guards a caller-supplied PVE group id.

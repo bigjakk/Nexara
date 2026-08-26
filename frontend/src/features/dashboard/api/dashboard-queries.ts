@@ -212,11 +212,23 @@ export function useUpdateCluster() {
   });
 }
 
+export interface DeleteClusterRequest {
+  id: string;
+  /**
+   * Also remove the PVE user and API token Nexara created for this cluster.
+   * Opt-in, and the server honours it only for clusters it onboarded itself —
+   * a pasted-in operator token is never touched.
+   */
+  revokePveCredentials?: boolean;
+}
+
 export function useDeleteCluster() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiClient.delete<{ status: string }>(`/api/v1/clusters/${id}`),
+    mutationFn: ({ id, revokePveCredentials }: DeleteClusterRequest) =>
+      apiClient.delete<{ status: string }>(
+        `/api/v1/clusters/${id}${revokePveCredentials === true ? "?revoke_pve_credentials=1" : ""}`,
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["clusters"] });
     },

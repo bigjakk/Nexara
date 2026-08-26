@@ -17,6 +17,7 @@ const mockSummary: ClusterSummary = {
     pve_version: "",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
+    credential_source: "manual",
   },
   nodeCount: 3,
   nodesOnline: 3,

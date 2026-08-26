@@ -10,7 +10,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { CopyableName } from "@/components/CopyableName";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { ClusterResponse } from "@/types/api";
 
 interface DeleteClusterDialogProps {
@@ -21,18 +24,46 @@ interface DeleteClusterDialogProps {
 
 export function DeleteClusterDialog({ cluster, open, onOpenChange }: DeleteClusterDialogProps) {
   const [confirmName, setConfirmName] = useState("");
+  const [revokeCredentials, setRevokeCredentials] = useState(false);
   const deleteMutation = useDeleteCluster();
+  const { hasPermission } = usePermissions();
+
+  // Two conditions, both required.
+  //
+  // Nexara must have minted the credential — a token the operator pasted in may
+  // be shared with other tooling, and removing it is not something to infer
+  // from "stop managing this cluster here".
+  //
+  // And the caller must hold GLOBAL manage:cluster, matching the server.
+  // Deleting a cluster needs only delete:cluster, which can be scoped to one
+  // cluster; mutating Proxmox's own access control is a different act and the
+  // server rejects it with a 403. Offering a checkbox that turns a working
+  // delete into a failed one would be worse than not offering it.
+  const canRevoke =
+    cluster.credential_source === "bootstrap" && hasPermission("manage", "cluster");
 
   function handleDelete() {
-    deleteMutation.mutate(cluster.id, {
-      onSuccess: () => {
-        onOpenChange(false);
+    deleteMutation.mutate(
+      { id: cluster.id, revokePveCredentials: canRevoke && revokeCredentials },
+      {
+        onSuccess: () => {
+          onOpenChange(false);
+        },
       },
-    });
+    );
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setConfirmName(""); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        onOpenChange(v);
+        if (!v) {
+          setConfirmName("");
+          setRevokeCredentials(false);
+        }
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Delete Cluster</DialogTitle>
@@ -47,6 +78,29 @@ export function DeleteClusterDialog({ cluster, open, onOpenChange }: DeleteClust
             value={confirmName}
             onChange={(e) => { setConfirmName(e.target.value); }}
           />
+          {canRevoke && (
+            <div className="rounded-lg border border-border p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="revoke-pve-credentials"
+                  className="mt-0.5"
+                  checked={revokeCredentials}
+                  onCheckedChange={(checked) => { setRevokeCredentials(Boolean(checked)); }}
+                />
+                <Label htmlFor="revoke-pve-credentials" className="text-sm font-normal leading-snug">
+                  Also delete the Proxmox user and API token Nexara created for this cluster
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Leave this unchecked to keep them on the cluster. Nexara removes
+                only what it created for this cluster, and skips deleting the
+                user entirely if it holds any other API token — so a credential
+                you or another install added is never taken with it. If the
+                cluster is unreachable the deletion still goes ahead, and
+                anything left behind is recorded in the audit log.
+              </p>
+            </div>
+          )}
           {deleteMutation.isError && (
             <p className="text-sm text-destructive">
               {deleteMutation.error instanceof Error ? deleteMutation.error.message : "Delete failed"}

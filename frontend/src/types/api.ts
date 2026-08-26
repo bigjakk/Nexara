@@ -517,14 +517,49 @@ export interface ApiError {
   details?: Record<string, unknown>;
 }
 
+/**
+ * Asks Nexara to create the cluster's API credential itself instead of being
+ * handed one. Mutually exclusive with token_id/token_secret.
+ *
+ * `password` and `otp` are spent on a single Proxmox login and never stored —
+ * what Nexara keeps is the token it mints.
+ */
+export interface BootstrapClusterRequest {
+  /** A privileged PVE account in name@realm form, e.g. root@pam. */
+  username: string;
+  password: string;
+  /** Required only when the account has two-factor authentication enabled. */
+  otp?: string;
+  /** Defaults to nexara@pve. */
+  user_id?: string;
+  /** Defaults to nexara. */
+  token_name?: string;
+}
+
 export interface CreateClusterRequest {
   name: string;
   api_url: string;
-  token_id: string;
-  token_secret: string;
+  /** Omitted when `bootstrap` is supplied. */
+  token_id?: string;
+  /** Omitted when `bootstrap` is supplied. */
+  token_secret?: string;
   tls_fingerprint?: string;
   sync_interval_seconds?: number;
   allow_private_address?: boolean;
+  bootstrap?: BootstrapClusterRequest;
+}
+
+/** One stage of what onboarding did on the Proxmox side. */
+export interface BootstrapStep {
+  step: "user" | "acl" | "token" | "verify";
+  status: "created" | "existed" | "verified";
+  detail?: string;
+}
+
+/** Names only — the minted secret never crosses the wire. */
+export interface BootstrapSummary {
+  token_id: string;
+  steps: BootstrapStep[];
 }
 
 export interface ConnectivityResult {
@@ -535,6 +570,8 @@ export interface ConnectivityResult {
 export interface CreateClusterResponse {
   cluster: ClusterResponse;
   connectivity: ConnectivityResult;
+  /** Present only when the cluster was onboarded with a `bootstrap` block. */
+  bootstrap?: BootstrapSummary;
 }
 
 export interface UpdateClusterResponse {
@@ -576,6 +613,11 @@ export interface ClusterResponse {
   pve_version: string;
   created_at: string;
   updated_at: string;
+  /**
+   * Where the stored API credential came from. Deleting the cluster can only
+   * offer to revoke it on the Proxmox side when Nexara minted it.
+   */
+  credential_source: "manual" | "bootstrap";
   /** Current health problems (Ceph, HA, disks, storage, failed tasks, …); absent when healthy. */
   issues?: HealthIssue[];
 }

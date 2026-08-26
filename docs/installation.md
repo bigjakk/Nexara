@@ -112,13 +112,45 @@ Open `http://localhost` (or your configured domain) in a browser. On first run, 
 ### 2. Add a Proxmox Cluster
 
 1. From the dashboard, click **Add Cluster**
-2. Enter a display name for the cluster
-3. Enter the API URL: `https://your-proxmox-host:8006`
-4. Enter a Proxmox API token (format: `user@realm!tokenid=secret-value`)
-5. If using a self-signed certificate, click **Fetch Fingerprint** and accept it
-6. Click **Save**
+2. Enter a display name and the API URL: `https://your-proxmox-host:8006`
+3. Click **Connect**. If the host uses a self-signed certificate, verify the
+   fingerprint that appears and accept it
+4. Choose how Nexara gets its credential:
+   - **Create a token for me** (default) — enter a privileged Proxmox login
+     (e.g. `root@pam`) and its password. Nexara signs in once, creates a
+     dedicated `nexara@pve` user with the `Administrator` role, and issues
+     itself an API token. The password is used for that one request and is
+     never stored; the token secret never reaches your browser.
+   - **I have a token** — paste an existing token id and secret
+     (`user@realm!tokenid` + `xxxxxxxx-…`). See
+     [Creating a Proxmox API Token](#creating-a-proxmox-api-token) below.
+5. Click **Create Token & Add** (or **Add Cluster**)
 
 The collector begins syncing inventory and metrics within seconds. You'll see nodes, VMs, and containers appear on the dashboard.
+
+A few notes on the automatic option:
+
+- If the account has TOTP two-factor authentication enabled, Nexara asks for a
+  one-time code and you resubmit the same form. Hardware keys (WebAuthn/U2F)
+  cannot be used here — paste an API token instead.
+- If the token name is already taken on the cluster, you get an error rather
+  than a silently renamed second token — otherwise each retry would leave
+  another full-privilege credential behind that nobody holds.
+- Re-running after a failure is safe. Nexara adopts a user or role grant that
+  already exists instead of duplicating it, and the user it creates has no
+  password, so a half-finished attempt leaves nothing usable behind.
+- **Serve Nexara over HTTPS before using this.** The password is typed into the
+  browser and posted to Nexara; over plain HTTP it travels in the clear. Nexara
+  warns and makes you confirm when the page is not in a secure context — pasting
+  a token is the better option there, since a token is scoped to one cluster and
+  can be revoked on its own.
+- When you later delete the cluster, Nexara offers to remove the user and token
+  it created. It only ever removes what it created, it skips deleting the user
+  entirely if that user holds any other API token, and it leaves the account
+  completely alone if another cluster in Nexara still authenticates as it — so a
+  credential you added, or one another cluster depends on, is never taken with it.
+- A failed attempt is recorded in the audit log along with anything it left
+  behind on the cluster, so there is always something to reconcile against.
 
 ### 3. Install on Your Phone (Optional)
 
@@ -126,7 +158,8 @@ The UI is fully responsive and ships a PWA manifest: open Nexara in your phone's
 
 ### Creating a Proxmox API Token
 
-On your Proxmox host:
+Only needed for the **I have a token** option above, or if you would rather
+create the credential yourself. On your Proxmox host:
 
 ```bash
 # Create an API token for an existing user
@@ -165,6 +198,9 @@ whatever the user holds.
 To check what your token can actually do, open a cluster in Nexara and go to
 **Access Control → Permissions**; sections Nexara's own token cannot use are
 disabled with the missing privilege named.
+
+Nexara's automatic option grants `Administrator` for exactly this reason, so a
+cluster onboarded that way is not affected by the `PVEAdmin` shortfall above.
 
 ## Services
 

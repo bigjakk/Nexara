@@ -231,6 +231,38 @@ func (s *Server) setupMiddleware() {
 	}))
 }
 
+// clusterCreateLimiter caps POST /api/v1/clusters at 10/min/IP.
+//
+// That endpoint is the one place Nexara can be handed a Proxmox password, and
+// in bootstrap mode every call spends a real /access/ticket attempt against the
+// operator's hypervisor. Without a dedicated cap the general limiter's much
+// larger budget would make Nexara a convenient password-spraying proxy onto a
+// cluster it is trusted to reach.
+//
+// Attached to the ROUTE rather than via app.Use, for two reasons:
+//
+//   - A path-matching Next() cannot be written safely at app level. Fiber routes
+//     on a lowercased, slash-trimmed path (CaseSensitive and StrictRouting are
+//     both false), so "POST /API/v1/clusters//" reaches this handler while a
+//     comparison against "/api/v1/clusters" does not match it — the limiter
+//     would be skipped by a request that still spends a login attempt.
+//   - App-level middleware runs before the group's authRequired, so anonymous
+//     traffic could drain the bucket and lock legitimate onboarding out.
+//     Behind a proxy with TRUSTED_PROXIES unset every client shares one bucket,
+//     which makes that a one-line denial of service.
+//
+// Per-IP rather than per-user because the limiter still runs before the handler
+// resolves the actor; manage:cluster is enforced inside Create.
+func (s *Server) clusterCreateLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() + ":cluster-create"
+		},
+	})
+}
+
 // authRequired returns middleware that rejects unauthenticated requests.
 func (s *Server) authRequired() fiber.Handler {
 	return func(c fiber.Ctx) error {

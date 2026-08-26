@@ -166,18 +166,24 @@ type CephPoolMetric struct {
 }
 
 type Cluster struct {
-	ID                   uuid.UUID `json:"id"`
-	Name                 string    `json:"name"`
-	ApiUrl               string    `json:"api_url"`
-	TokenID              string    `json:"token_id"`
-	TokenSecretEncrypted string    `json:"-"`
-	TlsFingerprint       string    `json:"tls_fingerprint"`
-	SyncIntervalSeconds  int32     `json:"sync_interval_seconds"`
-	IsActive             bool      `json:"is_active"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
-	PveVersion           string    `json:"pve_version"`
-	Quorate              bool      `json:"quorate"`
+	ID                   uuid.UUID          `json:"id"`
+	Name                 string             `json:"name"`
+	ApiUrl               string             `json:"api_url"`
+	TokenID              string             `json:"token_id"`
+	TokenSecretEncrypted string             `json:"-"`
+	TlsFingerprint       string             `json:"tls_fingerprint"`
+	SyncIntervalSeconds  int32              `json:"sync_interval_seconds"`
+	IsActive             bool               `json:"is_active"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
+	PveVersion           string             `json:"pve_version"`
+	Quorate              bool               `json:"quorate"`
+	CredentialSource     string             `json:"credential_source"`
+	BootstrapUserID      string             `json:"bootstrap_user_id"`
+	BootstrapTokenName   string             `json:"bootstrap_token_name"`
+	BootstrapCreatedUser bool               `json:"bootstrap_created_user"`
+	BootstrapCreatedAcl  bool               `json:"bootstrap_created_acl"`
+	BootstrapCreatedAt   pgtype.Timestamptz `json:"bootstrap_created_at"`
 }
 
 type ClusterSshCredential struct {
