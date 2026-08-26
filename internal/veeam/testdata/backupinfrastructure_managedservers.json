@@ -1,0 +1,80 @@
+{
+  "data": [
+    {
+      "credentialsStorageType": "Permanent",
+      "credentialsId": "00000000-0000-0000-0000-000000000000",
+      "networkSettings": {
+        "components": [
+          {
+            "componentName": "InstallerSvc",
+            "port": 6160
+          },
+          {
+            "componentName": "TransportSvc",
+            "port": 6162
+          },
+          {
+            "componentName": "GuestInteractionProxy",
+            "port": 6190
+          },
+          {
+            "componentName": "StoreOnceCatalystSdk",
+            "port": -1
+          },
+          {
+            "componentName": "DDBoostSdk",
+            "port": -1
+          },
+          {
+            "componentName": "VPowerNFS",
+            "port": 6161
+          },
+          {
+            "componentName": "RestoreProxy",
+            "port": 6170
+          },
+          {
+            "componentName": "WanAccelerator",
+            "port": 6164
+          },
+          {
+            "componentName": "TapeProxy",
+            "port": 6166
+          },
+          {
+            "componentName": "CloudGateway",
+            "port": 6168
+          },
+          {
+            "componentName": "DistributionSvc",
+            "port": 9380
+          },
+          {
+            "componentName": "VssIntegration",
+            "port": 6210
+          },
+          {
+            "componentName": "VssHvSnapshotProvider",
+            "port": -1
+          }
+        ],
+        "portRangeStart": 2500,
+        "portRangeEnd": 3300,
+        "serverSide": false
+      },
+      "isBackupServer": true,
+      "isDefaultMountServer": true,
+      "type": "WindowsHost",
+      "status": "Available",
+      "id": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
+      "name": "vbr01.example.lan",
+      "description": "EXAMPLE"
+    }
+  ],
+  "pagination": {
+    "total": 1,
+    "count": 1,
+    "skip": 0,
+    "limit": 200
+  }
+}

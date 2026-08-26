@@ -100,7 +100,7 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/clusters/:id":                {Description: "Get cluster details", Permission: "view:cluster", Group: "Clusters"},
 	"PUT /api/v1/clusters/:id":                {Description: "Update cluster settings", Permission: "manage:cluster", Group: "Clusters"},
 	"DELETE /api/v1/clusters/:id":             {Description: "Remove a cluster, optionally revoking the credential Nexara created for it", Permission: "delete:cluster", Group: "Clusters"},
-	"POST /api/v1/clusters/fetch-fingerprint": {Description: "Fetch a remote cluster's TLS fingerprint", Permission: "manage:cluster", Group: "Clusters"},
+	"POST /api/v1/clusters/fetch-fingerprint": {Description: "Fetch a remote host's TLS fingerprint. Shared by the cluster, PBS and Veeam add-flows", Permission: "manage:cluster|manage:pbs|manage:veeam", Group: "Clusters"},
 
 	// ── Nodes ─────────────────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/nodes":                    {Description: "List cluster nodes", Permission: "view:node", Group: "Nodes"},
@@ -164,6 +164,16 @@ var endpointMeta = map[string]APIEndpoint{
 	"PUT /api/v1/pbs-servers/:id":                {Description: "Update PBS server", Permission: "manage:pbs", Group: "Backup"},
 	"DELETE /api/v1/pbs-servers/:id":             {Description: "Remove a PBS server", Permission: "delete:pbs", Group: "Backup"},
 	"GET /api/v1/pbs-servers/:pbs_id/prune-jobs": {Description: "List prune jobs, optionally narrowed to one datastore with ?store=", Permission: "view:backup", Group: "Backup"},
+
+	// ── Veeam Backup & Replication ────────────────────────────────────
+	// Global scope, not per-cluster: one Veeam server can protect several
+	// Proxmox clusters, so its existence spans them.
+	"GET /api/v1/veeam-servers":           {Description: "List registered Veeam Backup & Replication servers", Permission: "view:veeam", Group: "Backup"},
+	"POST /api/v1/veeam-servers":          {Description: "Register a Veeam Backup & Replication server (VBR 13.1+). Connects and records the negotiated API revision, product version and licence edition; a failed connection is a failed create", Permission: "manage:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers/:id":       {Description: "Get Veeam server details", Permission: "view:veeam", Group: "Backup"},
+	"PUT /api/v1/veeam-servers/:id":       {Description: "Update a Veeam server. Changing the URL, credentials or TLS handling re-tests the connection; renaming or disabling does not", Permission: "manage:veeam", Group: "Backup"},
+	"DELETE /api/v1/veeam-servers/:id":    {Description: "Remove a Veeam server and its stored credential", Permission: "delete:veeam", Group: "Backup"},
+	"POST /api/v1/veeam-servers/:id/test": {Description: "Test the stored connection and report version, licence edition and covered Proxmox clusters. Persists nothing", Permission: "manage:veeam", Group: "Backup"},
 
 	// ── DRS ───────────────────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/drs/config":            {Description: "Get DRS configuration", Permission: "view:drs", Group: "DRS"},

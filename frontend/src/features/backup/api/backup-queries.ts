@@ -27,6 +27,10 @@ import type {
   PBSDatastoreConfig,
   PBSPruneJob,
   BackupCoverageEntry,
+  VeeamServer,
+  VeeamProbeResult,
+  CreateVeeamServerRequest,
+  UpdateVeeamServerRequest,
 } from "../types/backup";
 
 // --- PBS Server Queries ---
@@ -585,5 +589,65 @@ export function useBackupCoverage() {
       apiClient.list<BackupCoverageEntry>("/api/v1/backup-coverage"),
     staleTime: 60_000,
     refetchInterval: 120_000,
+  });
+}
+
+// --- Veeam Backup & Replication ---
+//
+// The Veeam server registry is global-scope (one VBR can protect several
+// Proxmox clusters), so there is no per-cluster variant of these.
+
+export function useVeeamServers() {
+  return useQuery({
+    queryKey: ["veeam-servers"],
+    queryFn: () => apiClient.list<VeeamServer>("/api/v1/veeam-servers"),
+  });
+}
+
+export function useCreateVeeamServer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (req: CreateVeeamServerRequest) =>
+      apiClient.post<VeeamServer>("/api/v1/veeam-servers", req),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
+    },
+  });
+}
+
+export function useUpdateVeeamServer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, ...body }: UpdateVeeamServerRequest & { id: string }) =>
+      apiClient.put<VeeamServer>(`/api/v1/veeam-servers/${id}`, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
+    },
+  });
+}
+
+export function useDeleteVeeamServer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient.delete<never>(`/api/v1/veeam-servers/${id}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
+    },
+  });
+}
+
+/**
+ * Tests a registered server's stored connection. Deliberately a mutation
+ * rather than a query: it makes an outbound authenticated call and must only
+ * run when the operator asks, never on mount or on a window refocus.
+ */
+export function useTestVeeamServer() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient.post<VeeamProbeResult>(`/api/v1/veeam-servers/${id}/test`),
   });
 }

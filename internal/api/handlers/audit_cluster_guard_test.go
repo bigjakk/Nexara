@@ -90,6 +90,15 @@ var auditClusterExempt = map[string]string{
 	"alerts.go.UpdateChannel":    "notification_channels has no cluster_id column",
 	"alerts.go.DeleteChannel":    "notification_channels has no cluster_id column",
 	"alerts.go.TestChannel":      "notification_channels has no cluster_id column",
+	// A Veeam server can protect several Proxmox clusters at once, so
+	// veeam_servers has no cluster_id column and naming any one cluster would
+	// be wrong rather than merely incomplete. Every route on the registry is
+	// gated on GLOBAL view/manage/delete:veeam, so the global-only readership
+	// of a NULL-cluster row is exactly the set of people who can perform the
+	// action. Per-cluster Veeam data (jobs, sessions, restore points) is a
+	// different resource and audits with its cluster.
+	"veeam_servers.go.audit": "veeam_servers spans clusters and has no cluster_id column; gated on global manage/delete:veeam",
+
 	"networks.go.CreateTemplate": "firewall_templates has no cluster_id column",
 	"networks.go.UpdateTemplate": "firewall_templates has no cluster_id column",
 	"networks.go.DeleteTemplate": "firewall_templates has no cluster_id column",

@@ -1,0 +1,15 @@
+{
+  "platform": "Windows",
+  "vbrId": "cddac31a-5c2b-46b6-ac12-37ca4a28fd75",
+  "name": "vbr01",
+  "buildVersion": "13.1.0.411",
+  "patches": [],
+  "databaseVendor": "PostgreSQL",
+  "sqlServerEdition": "",
+  "sqlServerVersion": "PostgreSQL 15.12, compiled by Visual C++ build 1942, 64-bit",
+  "databaseSchemaVersion": "10085",
+  "databaseContentVersion": "10085",
+  "veeamRegistration": {
+    "isRegistered": false
+  }
+}

@@ -24,6 +24,7 @@ func newRouteStubServer() *Server {
 		authHandler:            &handlers.AuthHandler{},
 		clusterHandler:         &handlers.ClusterHandler{},
 		pbsHandler:             &handlers.PBSHandler{},
+		veeamHandler:           &handlers.VeeamHandler{},
 		nodeHandler:            &handlers.NodeHandler{},
 		vmHandler:              &handlers.VMHandler{},
 		containerHandler:       &handlers.ContainerHandler{},

@@ -959,6 +959,45 @@ type UserRole struct {
 	CreatedAt time.Time   `json:"created_at"`
 }
 
+// Maps a Veeam platformId (one Proxmox connection) to a Nexara cluster. The join that makes every other Veeam table cluster-scopable for RBAC
+type VeeamPlatform struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	PlatformID    uuid.UUID `json:"platform_id"`
+	// Human-readable label, sourced from the license workload hostName (e.g. the Proxmox cluster name). A soft correlation signal and the default UI label
+	DisplayName string `json:"display_name"`
+	// NULL until an operator confirms the mapping. Rows with NULL are unattributable and require global view:veeam
+	ClusterID  pgtype.UUID `json:"cluster_id"`
+	LastSeenAt time.Time   `json:"last_seen_at"`
+	CreatedAt  time.Time   `json:"created_at"`
+}
+
+// Registered Veeam Backup & Replication servers (VBR 13.1+, Enterprise Plus)
+type VeeamServer struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	// https://host:9419 — the REST API root, NOT the console URL
+	BaseUrl string `json:"base_url"`
+	// Admin account, often DOMAIN\user. The backslash is significant and must survive to the OAuth2 form body verbatim
+	Username string `json:"username"`
+	// AES-256-GCM ciphertext under ENCRYPTION_KEY. Never returned by the API, never logged, never written to an audit row
+	PasswordEncrypted string `json:"-"`
+	// Negotiated x-api-version, e.g. 1.3-rev2. Persisted because the server accepts a request with the header omitted and silently falls back to a default revision — pinning it is what stops a VBR upgrade changing our response schema underneath us
+	ApiRevision string `json:"api_revision"`
+	// serverInfo.buildVersion, e.g. 13.1.0.411. Gates the 13.1 minimum: Proxmox jobs report type "Unknown" with no lastRun on 13.0.x
+	ProductVersion string `json:"product_version"`
+	// license.edition, e.g. EnterprisePlus. Proxmox workloads require Enterprise Plus; Community Edition cannot use this integration at all
+	LicenseEdition string `json:"license_edition"`
+	// SHA-256 of the leaf certificate, pinned at add-time. Empty means verify against the system CA pool — VBR ships self-signed, but a reverse-proxied deployment can present a publicly-valid chain, so both paths are real
+	TlsFingerprint string             `json:"tls_fingerprint"`
+	VerifyTls      bool               `json:"verify_tls"`
+	Enabled        bool               `json:"enabled"`
+	LastSyncAt     pgtype.Timestamptz `json:"last_sync_at"`
+	// Last collector failure for this server, surfaced in the UI. Empty when the last sync succeeded
+	LastSyncError string    `json:"last_sync_error"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 type Vm struct {
 	ID           uuid.UUID `json:"id"`
 	ClusterID    uuid.UUID `json:"cluster_id"`

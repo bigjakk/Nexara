@@ -725,7 +725,19 @@ type fetchFingerprintResponse struct {
 // FetchFingerprint handles POST /api/v1/clusters/fetch-fingerprint.
 // It connects to the Proxmox host, retrieves the TLS certificate, and returns the SHA-256 fingerprint.
 func (h *ClusterHandler) FetchFingerprint(c fiber.Ctx) error {
-	if err := requirePerm(c, "manage", "cluster"); err != nil {
+	// Any global permission that lets the caller register a remote server
+	// qualifies, because every one of those add-flows starts here: the
+	// operator has to see and accept a certificate before a credential is
+	// stored against it.
+	//
+	// Gating on manage:cluster alone made a backup-only role unusable — a
+	// role holding manage:pbs or manage:veeam but not manage:cluster was
+	// refused at step 1 and could never reach the create endpoint it *was*
+	// granted. Widening costs nothing: each of these permissions can already
+	// drive an outbound connection to an arbitrary operator-supplied URL
+	// through its own create endpoint, and this one returns a certificate,
+	// not a secret.
+	if err := requireAnyGlobalManage(c, "cluster", "pbs", "veeam"); err != nil {
 		return err
 	}
 

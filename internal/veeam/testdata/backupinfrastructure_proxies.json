@@ -1,0 +1,38 @@
+{
+  "data": [
+    {
+      "server": {
+        "hostId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
+        "hostName": "This server",
+        "maxTaskCount": 2
+      },
+      "type": "GeneralPurposeProxy",
+      "id": "50cbf622-129e-482a-9197-d67e5bb1fb1f",
+      "name": "Backup Proxy",
+      "description": "Created by Veeam Backup & Replication"
+    },
+    {
+      "server": {
+        "transportMode": "Auto",
+        "hostId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
+        "hostName": "This server",
+        "failoverToNetwork": true,
+        "hostToProxyEncryption": false,
+        "connectedDatastores": {
+          "autoSelectEnabled": true
+        },
+        "maxTaskCount": 8
+      },
+      "type": "ViProxy",
+      "id": "18b661c1-d9dc-4233-90a0-7e7b10dc2d09",
+      "name": "VMware Backup Proxy",
+      "description": "Created by Veeam Backup & Replication"
+    }
+  ],
+  "pagination": {
+    "total": 2,
+    "count": 2,
+    "skip": 0,
+    "limit": 200
+  }
+}

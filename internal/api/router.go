@@ -63,7 +63,11 @@ func (s *Server) setupRoutes() {
 	if s.clusterHandler != nil {
 		clusters := v1.Group("/clusters", s.authRequired())
 		clusters.Post("/", s.clusterCreateLimiter(), s.clusterHandler.Create)
-		clusters.Post("/fetch-fingerprint", s.clusterHandler.FetchFingerprint)
+		// Rate-limited: it opens an outbound TLS connection to a
+		// caller-supplied host, so the general 600/min budget made it a
+		// serviceable port scanner. Looser than the create limiters beside it
+		// because it is step 1 of a dialog a human retries.
+		clusters.Post("/fetch-fingerprint", s.fingerprintFetchLimiter(), s.clusterHandler.FetchFingerprint)
 		clusters.Get("/", s.clusterHandler.List)
 		clusters.Get("/:id", s.clusterHandler.Get)
 		clusters.Put("/:id", s.clusterHandler.Update)
@@ -635,6 +639,31 @@ func (s *Server) setupRoutes() {
 			pbs.Get("/:pbs_id/tasks/:upid/log", s.backupHandler.GetTaskLog)
 			pbs.Get("/:pbs_id/metrics", s.backupHandler.GetDatastoreMetrics)
 		}
+	}
+
+	// Veeam Backup & Replication server routes.
+	//
+	// Global-scope: a Veeam server can protect several Proxmox clusters, so
+	// the registry itself is gated on global view/manage/delete:veeam rather
+	// than per-cluster. Cluster scoping applies to the data these servers
+	// produce, which arrives with the inventory sync.
+	if s.veeamHandler != nil {
+		// Create, Update and Test each spend a real password grant against a
+		// domain-backed VBR server, so they carry the same dedicated limiter
+		// POST /clusters does — see veeamConnectLimiter.
+		//
+		// ONE instance shared across the three, not one call each: separate
+		// instances hold separate stores, which would silently triple the
+		// budget the limiter exists to cap.
+		veeamConnect := s.veeamConnectLimiter()
+
+		vbr := v1.Group("/veeam-servers", s.authRequired())
+		vbr.Post("/", veeamConnect, s.veeamHandler.Create)
+		vbr.Get("/", s.veeamHandler.List)
+		vbr.Get("/:id", s.veeamHandler.Get)
+		vbr.Put("/:id", veeamConnect, s.veeamHandler.Update)
+		vbr.Delete("/:id", s.veeamHandler.Delete)
+		vbr.Post("/:id/test", veeamConnect, s.veeamHandler.Test)
 	}
 
 	// PBS snapshot lookup (cross-server, by backup_id / VMID).

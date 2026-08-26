@@ -33,6 +33,8 @@ sql:
             go_struct_tag: 'json:"-"'
           - column: "pbs_servers.token_secret_encrypted"
             go_struct_tag: 'json:"-"'
+          - column: "veeam_servers.password_encrypted"
+            go_struct_tag: 'json:"-"'
           - column: "cluster_ssh_credentials.encrypted_password"
             go_struct_tag: 'json:"-"'
           - column: "cluster_ssh_credentials.encrypted_private_key"

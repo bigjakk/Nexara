@@ -1,0 +1,212 @@
+{
+  "status": "Valid",
+  "type": "NFR",
+  "edition": "EnterprisePlus",
+  "cloudConnect": "Disabled",
+  "licensedTo": "ExampleOrg",
+  "instanceLicenseSummary": {
+    "package": "Suite",
+    "licensedInstancesNumber": 20.0,
+    "usedInstancesNumber": 16.0,
+    "newInstancesNumber": 0.0,
+    "rentalInstancesNumber": 0.0,
+    "objects": [
+      {
+        "type": "Virtual Machines",
+        "count": 14,
+        "multiplier": 1.0,
+        "usedInstancesNumber": 14.0
+      },
+      {
+        "type": "Servers",
+        "count": 1,
+        "multiplier": 1.0,
+        "usedInstancesNumber": 1.0
+      },
+      {
+        "type": "File Shares (500 GB)",
+        "count": 1,
+        "multiplier": 1.0,
+        "usedInstancesNumber": 1.0
+      }
+    ],
+    "workload": [
+      {
+        "platformType": "LinuxServer",
+        "name": "docker02.example.lan",
+        "displayName": "Server",
+        "hostName": "Docker",
+        "usedInstancesNumber": 1.0,
+        "type": "Server",
+        "instanceId": "bfb24139-5d3b-6243-8d90-05e7988503f2",
+        "canBeRevoked": false
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "automation.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "b40c5f40-f1b9-47d7-aaa9-c46101cfec62",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "ad02.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "b2510f33-3342-4ba4-a148-9d789c685a2d",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "CA01.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "c2e2a699-950b-4ae7-9897-71ded40aab12",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "home-assistant",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "c87d7290-6c75-47ad-89f9-07e2ef0da788",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "test.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "0d15b3bb-7e97-439a-80cd-f0baf366510c",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "docker01.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "a1644749-5e8d-437f-8ab4-436144ada4ad",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "wazuh.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "3edc69ca-56cf-4ac2-b3a8-029ca20ca194",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "Win11.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "7fd74f30-a17e-4bd6-a072-5cbd4df353e1",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "ad01.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "8de19c4c-1b79-4072-b599-302f2152159b",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "pelican.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "22928820-b1e9-4395-95c5-9eb99862381f",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "pihole",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "10d5aa14-1719-4140-b7e6-c241d2972bdb",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "test2.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "6fd45c9b-65fa-4e3e-8bbb-0ea34f2b2aef",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "guacamole.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "c22c4092-076c-4c9d-9015-99949326cb20",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "Proxmox",
+        "name": "docker03.example.lan",
+        "displayName": "VM",
+        "hostName": "EXAMPLE",
+        "usedInstancesNumber": 1.0,
+        "type": "VM",
+        "instanceId": "ea1687dc-dd29-49ba-957e-edd34921b27e",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "UnstructuredData",
+        "name": "\\\\192.168.1.250\\personal",
+        "displayName": "File Share",
+        "hostName": "192.168.1.250",
+        "usedInstancesNumber": 0.0,
+        "type": "File Share",
+        "instanceId": "8e76b90c-2bab-4ba6-8ff7-e5c415ffa066",
+        "canBeRevoked": true
+      },
+      {
+        "platformType": "UnstructuredData",
+        "name": "192.168.3.5:/mnt/Pool1/NFS",
+        "displayName": "File Share",
+        "hostName": "192.168.3.5",
+        "usedInstancesNumber": 1.0,
+        "type": "File Share",
+        "instanceId": "672331fe-017e-476c-9d0c-9fd31333ea3a",
+        "canBeRevoked": true
+      }
+    ],
+    "expirationDate": "2027-04-27T00:00:00Z"
+  },
+  "supportId": "",
+  "autoUpdateEnabled": false,
+  "freeAgentInstanceConsumptionEnabled": true,
+  "IsMultiSection": false,
+  "proactiveSupportEnabled": true
+}

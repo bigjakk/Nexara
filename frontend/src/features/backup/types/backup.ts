@@ -274,3 +274,70 @@ export interface BackupJobParams {
   mailto?: string;
   comment?: string;
 }
+
+// --- Veeam Backup & Replication ---
+
+export interface VeeamServer {
+  id: string;
+  name: string;
+  base_url: string;
+  username: string;
+  /** Negotiated x-api-version, e.g. "1.3-rev2". */
+  api_revision: string;
+  /** VBR build, e.g. "13.1.0.411". */
+  product_version: string;
+  license_edition: string;
+  tls_fingerprint: string;
+  verify_tls: boolean;
+  enabled: boolean;
+  last_sync_at: string | null;
+  last_sync_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One Proxmox connection as Veeam's licence reports it. */
+export interface VeeamProxmoxCluster {
+  name: string;
+  vm_count: number;
+}
+
+/**
+ * Result of a connection test. Carries no credential, so it is safe to render
+ * in full. `warnings` are conditions worth showing that do not stop the server
+ * being registered — a non-Enterprise-Plus licence, or no Proxmox workloads.
+ */
+export interface VeeamProbeResult {
+  api_revision: string;
+  server_name: string;
+  build_version: string;
+  platform: string;
+  license_edition: string;
+  license_status: string;
+  license_type: string;
+  licensed_to: string;
+  license_expiration: string;
+  proxmox_clusters: VeeamProxmoxCluster[];
+  warnings: string[];
+}
+
+export interface CreateVeeamServerRequest {
+  name: string;
+  base_url: string;
+  username: string;
+  password: string;
+  tls_fingerprint?: string;
+  verify_tls?: boolean;
+  allow_private_address?: boolean;
+}
+
+export interface UpdateVeeamServerRequest {
+  name?: string;
+  base_url?: string;
+  username?: string;
+  password?: string;
+  tls_fingerprint?: string;
+  verify_tls?: boolean;
+  enabled?: boolean;
+  allow_private_address?: boolean;
+}

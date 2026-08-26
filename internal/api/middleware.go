@@ -262,6 +262,50 @@ func (s *Server) clusterCreateLimiter() fiber.Handler {
 	})
 }
 
+// veeamConnectLimiter caps the Veeam endpoints that spend a real logon at
+// 10/min/IP — create, update and test.
+//
+// Same reasoning as clusterCreateLimiter, and a worse target: every one of
+// these calls performs an OAuth2 password grant against a VBR server that is
+// usually Active-Directory-backed, with a `DOMAIN\user` credential. Under the
+// general limiter's budget an authenticated manage:veeam holder could spray
+// hundreds of domain logons a minute through Nexara's IP, and repeated /test
+// calls against a stored account are a one-liner lockout DoS.
+//
+// Attached to the route rather than app-level, for the reasons spelled out on
+// clusterCreateLimiter: a path-matching Next() cannot be written safely, and
+// app-level middleware runs before authRequired.
+func (s *Server) veeamConnectLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() + ":veeam-connect"
+		},
+	})
+}
+
+// fingerprintFetchLimiter caps POST /api/v1/clusters/fetch-fingerprint at
+// 30/min/IP.
+//
+// The endpoint dials an arbitrary caller-supplied host to read its
+// certificate. It spends no credential, so it is not the spraying risk
+// clusterCreateLimiter guards — but under the general limiter it was 600
+// outbound TLS probes a minute, and the 200-vs-502 split is a clean
+// "is something listening here" oracle. It is shared by the cluster, PBS and
+// Veeam add-flows, so the cap is looser than the 10/min on the creates it
+// precedes: a human fumbling the certificate step must not lock themselves
+// out of the create that follows it.
+func (s *Server) fingerprintFetchLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:        30,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() + ":fetch-fingerprint"
+		},
+	})
+}
+
 // limiterPath returns the request path the way Fiber ROUTED it, which is the
 // only spelling a path-matching limiter can safely compare against.
 //

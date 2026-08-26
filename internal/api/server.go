@@ -33,6 +33,7 @@ type Server struct {
 	authHandler            *handlers.AuthHandler
 	clusterHandler         *handlers.ClusterHandler
 	pbsHandler             *handlers.PBSHandler
+	veeamHandler           *handlers.VeeamHandler
 	nodeHandler            *handlers.NodeHandler
 	vmHandler              *handlers.VMHandler
 	containerHandler       *handlers.ContainerHandler
@@ -261,6 +262,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 	if d.hasCrypto() {
 		s.clusterHandler = handlers.NewClusterHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.pbsHandler = handlers.NewPBSHandler(d.queries, d.encryptionKey, d.eventPub)
+		s.veeamHandler = handlers.NewVeeamHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.vmHandler = handlers.NewVMHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.containerHandler = handlers.NewContainerHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.nodeHandler = handlers.NewNodeHandler(d.queries, d.encryptionKey, d.eventPub)

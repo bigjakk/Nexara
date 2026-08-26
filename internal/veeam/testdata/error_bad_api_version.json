@@ -1,0 +1,6 @@
+{
+  "errorCode": "NotImplemented",
+  "message": "The HTTP resource that matches the request URI 'https://vbr01.example.lan:9419/api/oauth2/token' does not support the API version '9.9-rev9'.",
+  "title": "The HTTP resource that matches the request URI 'https://vbr01.example.lan:9419/api/oauth2/token' does not support the API version '9.9-rev9'.",
+  "status": 400
+}

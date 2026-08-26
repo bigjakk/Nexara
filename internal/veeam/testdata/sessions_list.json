@@ -1,0 +1,4424 @@
+{
+  "data": [
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "211c2f5e-838d-4c47-b154-36ea7b3717f8",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "211c2f5e-838d-4c47-b154-36ea7b3717f8",
+      "creationTime": "2026-08-25T15:08:31.764927-07:00",
+      "endTime": "2026-08-25T15:09:13.768803-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15638167,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "211c2f5e-838d-4c47-b154-36ea7b3717f8"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "58781ba6-4243-423d-87ce-b83a9385ea6f",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "58781ba6-4243-423d-87ce-b83a9385ea6f",
+      "creationTime": "2026-08-25T14:53:30.775315-07:00",
+      "endTime": "2026-08-25T14:54:11.050406-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15638047,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "58781ba6-4243-423d-87ce-b83a9385ea6f"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "28e7d7c2-dbe3-4bf3-a32b-a8ae27a11d1a",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "28e7d7c2-dbe3-4bf3-a32b-a8ae27a11d1a",
+      "creationTime": "2026-08-25T14:38:29.472856-07:00",
+      "endTime": "2026-08-25T14:39:10.572284-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637956,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "28e7d7c2-dbe3-4bf3-a32b-a8ae27a11d1a"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "708de233-7fb9-4327-8f85-96125129cc61",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "708de233-7fb9-4327-8f85-96125129cc61",
+      "creationTime": "2026-08-25T14:23:26.926392-07:00",
+      "endTime": "2026-08-25T14:24:09.518989-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637865,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "708de233-7fb9-4327-8f85-96125129cc61"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "df13495d-0655-44c6-a5fd-c4691a26ee09",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "df13495d-0655-44c6-a5fd-c4691a26ee09",
+      "creationTime": "2026-08-25T14:08:25.971429-07:00",
+      "endTime": "2026-08-25T14:09:03.08564-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637770,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "df13495d-0655-44c6-a5fd-c4691a26ee09"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "351cda33-69e8-4276-b2a7-71a45b817d73",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "351cda33-69e8-4276-b2a7-71a45b817d73",
+      "creationTime": "2026-08-25T13:53:24.894056-07:00",
+      "endTime": "2026-08-25T13:54:08.682166-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637680,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "351cda33-69e8-4276-b2a7-71a45b817d73"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "7a754f69-a9cf-42eb-9f76-f8cb115ef043",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "7a754f69-a9cf-42eb-9f76-f8cb115ef043",
+      "creationTime": "2026-08-25T13:38:24.376451-07:00",
+      "endTime": "2026-08-25T13:38:58.458029-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637585,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "7a754f69-a9cf-42eb-9f76-f8cb115ef043"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "310229ea-ed4b-4ffa-8333-111cc4cdecfe",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "310229ea-ed4b-4ffa-8333-111cc4cdecfe",
+      "creationTime": "2026-08-25T13:23:23.385362-07:00",
+      "endTime": "2026-08-25T13:24:00.564488-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637492,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "310229ea-ed4b-4ffa-8333-111cc4cdecfe"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "e41e59db-6d2b-4126-a370-4a2744cf22c7",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "e41e59db-6d2b-4126-a370-4a2744cf22c7",
+      "creationTime": "2026-08-25T13:08:22.132007-07:00",
+      "endTime": "2026-08-25T13:09:01.885938-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637241,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "e41e59db-6d2b-4126-a370-4a2744cf22c7"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "5f1c603e-2d9f-46be-9f0e-ccafa408ec6b",
+      "name": "BackupCopy-Object\\ad02.example.lan Backup (Incremental)",
+      "jobId": "4f09276f-b002-484e-9b73-cd66a2469d09",
+      "creationTime": "2026-08-25T13:05:53.121058-07:00",
+      "endTime": "2026-08-25T13:07:45.35265-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637025,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:01:52",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "5f1c603e-2d9f-46be-9f0e-ccafa408ec6b"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "51ed716d-c4d8-47cc-ba58-357c762cd73d",
+      "name": "BackupCopy-Object\\CA01.example.lan Backup (Incremental)",
+      "jobId": "169e8515-31c4-4216-8b0f-5d97c5e36d7b",
+      "creationTime": "2026-08-25T13:05:53.081229-07:00",
+      "endTime": "2026-08-25T13:07:58.488501-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637067,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:02:05",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "51ed716d-c4d8-47cc-ba58-357c762cd73d"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "2096a534-87ca-4e98-af6e-2cc4057835b2",
+      "name": "BackupCopy-Object\\ad01.example.lan Backup (Incremental)",
+      "jobId": "17b00775-ca0b-459f-a44f-48bcd6cb018d",
+      "creationTime": "2026-08-25T13:05:53.043251-07:00",
+      "endTime": "2026-08-25T13:10:04.941395-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15637375,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Target",
+        "duration": "00:04:11",
+        "processingRate": "166.3 MB",
+        "processedSize": 96636764160,
+        "readSize": 6840909824,
+        "transferredSize": 2628033887,
+        "progressPercent": 100
+      },
+      "originalSessionId": "2096a534-87ca-4e98-af6e-2cc4057835b2"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "2be2ec1a-9ca8-4fbd-9ffb-628988f8af27",
+      "name": "ad01.example.lan Backup",
+      "jobId": "d06fd2e4-61c3-4f2d-bfc9-c5cff254e156",
+      "creationTime": "2026-08-25T12:57:51.097848-07:00",
+      "endTime": "2026-08-25T13:05:13.062027-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15635999,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:07:21",
+        "processingRate": "33.2 MB",
+        "processedSize": 96637033698,
+        "readSize": 13931650274,
+        "transferredSize": 2628597818,
+        "progressPercent": 100
+      },
+      "originalSessionId": "2be2ec1a-9ca8-4fbd-9ffb-628988f8af27"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "62a4504e-7de4-4dcf-8a3f-3daecc50cb19",
+      "name": "Preparing worker Veeam13-appliance03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T12:56:01.949358-07:00",
+      "endTime": "2026-08-25T12:57:39.300503-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15635349,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "62a4504e-7de4-4dcf-8a3f-3daecc50cb19"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "20ff3c43-65c0-414d-ae03-10cf59fd2faa",
+      "name": "Onsite_Daily_Offsite_Win",
+      "jobId": "d5ead060-d195-4754-8a5c-3367eea4e823",
+      "creationTime": "2026-08-25T12:56:00.391836-07:00",
+      "endTime": "2026-08-25T13:06:01.317611-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15636175,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:10:00",
+        "processingRate": "33.3 MB",
+        "processedSize": 96636764160,
+        "readSize": 13931380736,
+        "transferredSize": 2628327455,
+        "progressPercent": 100
+      },
+      "originalSessionId": "20ff3c43-65c0-414d-ae03-10cf59fd2faa"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "e79fe224-8014-4241-be85-99048bd9948c",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "e79fe224-8014-4241-be85-99048bd9948c",
+      "creationTime": "2026-08-25T12:53:21.063883-07:00",
+      "endTime": "2026-08-25T12:53:57.336429-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15635028,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "e79fe224-8014-4241-be85-99048bd9948c"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "ab1c91b8-845d-445a-8808-20efc09e6dac",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "ab1c91b8-845d-445a-8808-20efc09e6dac",
+      "creationTime": "2026-08-25T12:38:17.365986-07:00",
+      "endTime": "2026-08-25T12:38:59.363555-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634932,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "ab1c91b8-845d-445a-8808-20efc09e6dac"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "f38dc3cb-1482-44f5-84bf-d041153a7c28",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "f38dc3cb-1482-44f5-84bf-d041153a7c28",
+      "creationTime": "2026-08-25T12:23:16.294086-07:00",
+      "endTime": "2026-08-25T12:23:58.440807-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634768,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "f38dc3cb-1482-44f5-84bf-d041153a7c28"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "e491d158-76d7-4955-9b9d-8361849fc8e1",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "e491d158-76d7-4955-9b9d-8361849fc8e1",
+      "creationTime": "2026-08-25T12:08:15.317275-07:00",
+      "endTime": "2026-08-25T12:09:00.723758-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634671,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "e491d158-76d7-4955-9b9d-8361849fc8e1"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "6d71cd39-8dc7-4a9d-a62d-a5422d818f05",
+      "name": "Rescan node HV03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T12:04:52.91835-07:00",
+      "endTime": "2026-08-25T12:04:54.437833-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634525,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "6d71cd39-8dc7-4a9d-a62d-a5422d818f05"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "4921f9a6-5a37-4fc5-a740-d127af537075",
+      "name": "Rescan node HV02",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T12:04:52.917813-07:00",
+      "endTime": "2026-08-25T12:04:54.429843-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634521,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "4921f9a6-5a37-4fc5-a740-d127af537075"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "4feb98e1-8692-4d00-9cf4-73575b53cc9b",
+      "name": "Rescan node HV01",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T12:04:52.916375-07:00",
+      "endTime": "2026-08-25T12:04:53.318214-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634479,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "4feb98e1-8692-4d00-9cf4-73575b53cc9b"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "f9f181bd-5e96-4da4-8dc3-8ad40993a78c",
+      "name": "Rescan node EXAMPLE",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T12:04:52.916262-07:00",
+      "endTime": "2026-08-25T12:04:53.435411-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634499,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "f9f181bd-5e96-4da4-8dc3-8ad40993a78c"
+    },
+    {
+      "sessionType": "VolumesDiscover",
+      "state": "Stopped",
+      "id": "12496440-aaf7-48be-a654-6b8e4d4e9299",
+      "name": "Host Discovery",
+      "jobId": "aef7020f-164b-403c-9d49-bd06ea5cd73f",
+      "creationTime": "2026-08-25T12:04:47.48982-07:00",
+      "endTime": "2026-08-25T12:05:10.417036-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634608,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "12496440-aaf7-48be-a654-6b8e4d4e9299"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "8e15d5a1-14ec-4d0f-abc1-40dfaf4cdb86",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "8e15d5a1-14ec-4d0f-abc1-40dfaf4cdb86",
+      "creationTime": "2026-08-25T11:53:14.26136-07:00",
+      "endTime": "2026-08-25T11:53:58.025224-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634372,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "8e15d5a1-14ec-4d0f-abc1-40dfaf4cdb86"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "0f0374f6-0254-4913-9641-c04f2458d7a4",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "0f0374f6-0254-4913-9641-c04f2458d7a4",
+      "creationTime": "2026-08-25T11:38:12.54459-07:00",
+      "endTime": "2026-08-25T11:38:54.336821-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634280,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "0f0374f6-0254-4913-9641-c04f2458d7a4"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "d7802ee8-fe70-4f67-b9b9-c6f281a12a61",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "d7802ee8-fe70-4f67-b9b9-c6f281a12a61",
+      "creationTime": "2026-08-25T11:23:11.355594-07:00",
+      "endTime": "2026-08-25T11:23:54.334791-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634188,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "d7802ee8-fe70-4f67-b9b9-c6f281a12a61"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "7696eb62-1261-439d-9474-aa8439789cb9",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "7696eb62-1261-439d-9474-aa8439789cb9",
+      "creationTime": "2026-08-25T11:08:10.595502-07:00",
+      "endTime": "2026-08-25T11:08:53.462812-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634100,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "7696eb62-1261-439d-9474-aa8439789cb9"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "4f8a7c29-c5e8-4a89-ac6b-f9c3f7d611fa",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "4f8a7c29-c5e8-4a89-ac6b-f9c3f7d611fa",
+      "creationTime": "2026-08-25T10:53:08.84916-07:00",
+      "endTime": "2026-08-25T10:53:52.892075-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15634009,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "4f8a7c29-c5e8-4a89-ac6b-f9c3f7d611fa"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "9309a6f4-74fb-481b-b1eb-df72fa679b00",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "9309a6f4-74fb-481b-b1eb-df72fa679b00",
+      "creationTime": "2026-08-25T10:38:08.172871-07:00",
+      "endTime": "2026-08-25T10:38:45.053623-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15633918,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "9309a6f4-74fb-481b-b1eb-df72fa679b00"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "9807b91d-5cf2-4a60-86aa-27e8461968d9",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "9807b91d-5cf2-4a60-86aa-27e8461968d9",
+      "creationTime": "2026-08-25T10:23:07.024211-07:00",
+      "endTime": "2026-08-25T10:23:47.541149-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15633827,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "9807b91d-5cf2-4a60-86aa-27e8461968d9"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "5eda95e6-7f11-410f-9d52-13b2ac5f0c24",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "5eda95e6-7f11-410f-9d52-13b2ac5f0c24",
+      "creationTime": "2026-08-25T10:08:05.566572-07:00",
+      "endTime": "2026-08-25T10:08:42.749755-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15633739,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "5eda95e6-7f11-410f-9d52-13b2ac5f0c24"
+    },
+    {
+      "sessionType": "ConfigurationBackup",
+      "state": "Stopped",
+      "id": "54c3356a-2540-4e34-ba70-010ade7cd3c1",
+      "name": "Backup Configuration Job",
+      "jobId": "99d1bf3d-e2e0-4bec-b2b3-820c0b87d212",
+      "creationTime": "2026-08-25T10:00:02.199169-07:00",
+      "endTime": "2026-08-25T10:00:39.630754-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15633670,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "54c3356a-2540-4e34-ba70-010ade7cd3c1"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "657bede7-3385-48a7-a00b-74ff3f766dab",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "657bede7-3385-48a7-a00b-74ff3f766dab",
+      "creationTime": "2026-08-25T09:53:04.790172-07:00",
+      "endTime": "2026-08-25T09:53:45.078978-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632964,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "657bede7-3385-48a7-a00b-74ff3f766dab"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "c05a58b2-30da-4192-b204-8009b0583f2d",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "c05a58b2-30da-4192-b204-8009b0583f2d",
+      "creationTime": "2026-08-25T09:38:04.044165-07:00",
+      "endTime": "2026-08-25T09:38:40.99689-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632875,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "c05a58b2-30da-4192-b204-8009b0583f2d"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "da869c31-0625-443a-a786-d3932779eb02",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "da869c31-0625-443a-a786-d3932779eb02",
+      "creationTime": "2026-08-25T09:23:02.523465-07:00",
+      "endTime": "2026-08-25T09:23:44.418469-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632783,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "da869c31-0625-443a-a786-d3932779eb02"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "3783b585-25bd-4df7-9013-d7406d05b29b",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "3783b585-25bd-4df7-9013-d7406d05b29b",
+      "creationTime": "2026-08-25T09:08:01.154653-07:00",
+      "endTime": "2026-08-25T09:08:42.309414-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632687,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "3783b585-25bd-4df7-9013-d7406d05b29b"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "7f30379b-af38-49ba-bcfe-73062aa52fb8",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "7f30379b-af38-49ba-bcfe-73062aa52fb8",
+      "creationTime": "2026-08-25T08:53:00.324254-07:00",
+      "endTime": "2026-08-25T08:53:37.437829-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632603,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "7f30379b-af38-49ba-bcfe-73062aa52fb8"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "1a864803-22c0-462d-9628-07dcf15336b4",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "1a864803-22c0-462d-9628-07dcf15336b4",
+      "creationTime": "2026-08-25T08:37:58.76933-07:00",
+      "endTime": "2026-08-25T08:38:39.917849-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632508,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "1a864803-22c0-462d-9628-07dcf15336b4"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "8f80e999-0c0a-4dc3-861c-5ebbef9d9d8a",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "8f80e999-0c0a-4dc3-861c-5ebbef9d9d8a",
+      "creationTime": "2026-08-25T08:22:58.062879-07:00",
+      "endTime": "2026-08-25T08:23:39.282422-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632424,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "8f80e999-0c0a-4dc3-861c-5ebbef9d9d8a"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "cafff1ee-1144-4325-ac96-41ecfff76154",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "cafff1ee-1144-4325-ac96-41ecfff76154",
+      "creationTime": "2026-08-25T08:07:57.319202-07:00",
+      "endTime": "2026-08-25T08:08:32.893082-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632327,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "cafff1ee-1144-4325-ac96-41ecfff76154"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "6950aa0e-73e3-4583-afd6-cb0dae5a4d3a",
+      "name": "Rescan node EXAMPLE",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T08:04:33.749461-07:00",
+      "endTime": "2026-08-25T08:04:34.925196-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632173,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "6950aa0e-73e3-4583-afd6-cb0dae5a4d3a"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "fa2a766d-d903-4d2c-b2ff-ed24e6d6906a",
+      "name": "Rescan node HV02",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T08:04:33.749395-07:00",
+      "endTime": "2026-08-25T08:04:34.207135-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632145,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "fa2a766d-d903-4d2c-b2ff-ed24e6d6906a"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "47347693-4656-4629-b78a-68e4d4a30ee7",
+      "name": "Rescan node HV03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T08:04:33.74931-07:00",
+      "endTime": "2026-08-25T08:04:34.207276-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632148,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "47347693-4656-4629-b78a-68e4d4a30ee7"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "529d4e78-e427-477c-aa36-89ef33ab43ea",
+      "name": "Rescan node HV01",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T08:04:33.749175-07:00",
+      "endTime": "2026-08-25T08:04:34.931785-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632176,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "529d4e78-e427-477c-aa36-89ef33ab43ea"
+    },
+    {
+      "sessionType": "VolumesDiscover",
+      "state": "Stopped",
+      "id": "b99f81ce-7462-441c-8499-e9afb11c033a",
+      "name": "Host Discovery",
+      "jobId": "56b8e74b-53a3-4719-b8e8-0b564c6ab921",
+      "creationTime": "2026-08-25T08:04:28.288523-07:00",
+      "endTime": "2026-08-25T08:04:50.258805-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632262,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "b99f81ce-7462-441c-8499-e9afb11c033a"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "357b5c00-0613-44ec-a280-6b270743c85d",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "357b5c00-0613-44ec-a280-6b270743c85d",
+      "creationTime": "2026-08-25T07:52:55.244566-07:00",
+      "endTime": "2026-08-25T07:53:37.589344-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15632028,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "357b5c00-0613-44ec-a280-6b270743c85d"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "50cba118-b104-4d72-8b46-ffcc4190c7e7",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "50cba118-b104-4d72-8b46-ffcc4190c7e7",
+      "creationTime": "2026-08-25T07:37:54.353666-07:00",
+      "endTime": "2026-08-25T07:38:31.730144-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631932,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "50cba118-b104-4d72-8b46-ffcc4190c7e7"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "53b1ef56-f8bc-4b85-b4fa-518156c59a84",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "53b1ef56-f8bc-4b85-b4fa-518156c59a84",
+      "creationTime": "2026-08-25T07:22:53.454634-07:00",
+      "endTime": "2026-08-25T07:23:34.182043-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631845,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "53b1ef56-f8bc-4b85-b4fa-518156c59a84"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "187038cb-69ff-4ba5-8e57-8d7f5a50c1c7",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "187038cb-69ff-4ba5-8e57-8d7f5a50c1c7",
+      "creationTime": "2026-08-25T07:07:52.276228-07:00",
+      "endTime": "2026-08-25T07:08:33.829026-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631750,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "187038cb-69ff-4ba5-8e57-8d7f5a50c1c7"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "77b7429c-7327-42a7-86a1-2fe388c00c43",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "77b7429c-7327-42a7-86a1-2fe388c00c43",
+      "creationTime": "2026-08-25T06:52:51.194266-07:00",
+      "endTime": "2026-08-25T06:53:33.702166-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631666,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "77b7429c-7327-42a7-86a1-2fe388c00c43"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "2347f377-82f1-4142-9ed4-51068657dc1e",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "2347f377-82f1-4142-9ed4-51068657dc1e",
+      "creationTime": "2026-08-25T06:37:50.08553-07:00",
+      "endTime": "2026-08-25T06:38:30.501149-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631566,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "2347f377-82f1-4142-9ed4-51068657dc1e"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "aaaf9408-9542-4e1c-a93a-0033b0e43c72",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "aaaf9408-9542-4e1c-a93a-0033b0e43c72",
+      "creationTime": "2026-08-25T06:22:48.251501-07:00",
+      "endTime": "2026-08-25T06:23:29.649247-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631479,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "aaaf9408-9542-4e1c-a93a-0033b0e43c72"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "c3681fc9-6bdd-482d-bdde-f4559f8caabf",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "c3681fc9-6bdd-482d-bdde-f4559f8caabf",
+      "creationTime": "2026-08-25T06:07:47.528262-07:00",
+      "endTime": "2026-08-25T06:08:22.618536-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631388,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "c3681fc9-6bdd-482d-bdde-f4559f8caabf"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "fe534752-b79b-4c5f-be24-3a335b2ae827",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "fe534752-b79b-4c5f-be24-3a335b2ae827",
+      "creationTime": "2026-08-25T05:52:46.412071-07:00",
+      "endTime": "2026-08-25T05:53:21.438401-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631297,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "fe534752-b79b-4c5f-be24-3a335b2ae827"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "9cc706ee-3ed0-4d1c-b254-d945e461a8a4",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "9cc706ee-3ed0-4d1c-b254-d945e461a8a4",
+      "creationTime": "2026-08-25T05:37:45.480753-07:00",
+      "endTime": "2026-08-25T05:38:26.219549-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631209,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "9cc706ee-3ed0-4d1c-b254-d945e461a8a4"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "f760a406-5774-4366-aa6a-a2df42344c51",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "f760a406-5774-4366-aa6a-a2df42344c51",
+      "creationTime": "2026-08-25T05:22:44.806111-07:00",
+      "endTime": "2026-08-25T05:23:23.643522-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631116,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "f760a406-5774-4366-aa6a-a2df42344c51"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "de9e555d-5a73-45a7-b30e-64b89db369a7",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "de9e555d-5a73-45a7-b30e-64b89db369a7",
+      "creationTime": "2026-08-25T05:07:44.164047-07:00",
+      "endTime": "2026-08-25T05:08:24.59038-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15631028,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "de9e555d-5a73-45a7-b30e-64b89db369a7"
+    },
+    {
+      "sessionType": "AgentManagement",
+      "state": "Stopped",
+      "platformName": "LinuxPhysical",
+      "algorithm": "Increment",
+      "id": "4d211c85-cb7b-4858-84a2-fc669f1eef5f",
+      "name": "Docker Hosts - docker02.example.lan",
+      "jobId": "03ed791f-fae8-4d36-bf9b-21cf6f01674e",
+      "creationTime": "2026-08-25T05:00:28.10247-07:00",
+      "endTime": "2026-08-25T05:04:50.371625-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630970,
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Proxy",
+        "duration": "00:04:22",
+        "processingRate": "189.8 MB",
+        "processedSize": 560310990336,
+        "readSize": 29485957120,
+        "transferredSize": 19317093300,
+        "progressPercent": 100
+      },
+      "originalSessionId": "4d211c85-cb7b-4858-84a2-fc669f1eef5f"
+    },
+    {
+      "sessionType": "AgentBackup",
+      "state": "Stopped",
+      "platformName": "LinuxPhysical",
+      "algorithm": "None",
+      "id": "98203337-ce75-4e45-841b-da853c75b0eb",
+      "name": "Docker Hosts",
+      "jobId": "a2d10c9b-a601-4293-afe8-96b7a075a7d1",
+      "creationTime": "2026-08-25T05:00:17.205811-07:00",
+      "endTime": "2026-08-25T05:04:59.350756-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "resourceId": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
+      "resourceReference": "/api/v1/backups/ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
+      "usn": 15630968,
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Proxy",
+        "duration": "00:04:42",
+        "processingRate": "176.8 MB",
+        "processedSize": 560310990336,
+        "readSize": 29485957120,
+        "transferredSize": 19317093300,
+        "progressPercent": 100
+      },
+      "originalSessionId": "98203337-ce75-4e45-841b-da853c75b0eb"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "f61be2cd-33f5-4e4e-a7d8-e0fee4c42b0a",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "f61be2cd-33f5-4e4e-a7d8-e0fee4c42b0a",
+      "creationTime": "2026-08-25T04:52:40.83272-07:00",
+      "endTime": "2026-08-25T04:53:20.665282-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630549,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "f61be2cd-33f5-4e4e-a7d8-e0fee4c42b0a"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "29283142-76d5-4440-b336-ff0f64a4047f",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "29283142-76d5-4440-b336-ff0f64a4047f",
+      "creationTime": "2026-08-25T04:37:39.698896-07:00",
+      "endTime": "2026-08-25T04:38:16.042447-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630453,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "29283142-76d5-4440-b336-ff0f64a4047f"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "4fd0fb52-1dc8-43ab-bd67-54331a3efc0c",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "4fd0fb52-1dc8-43ab-bd67-54331a3efc0c",
+      "creationTime": "2026-08-25T04:22:39.25931-07:00",
+      "endTime": "2026-08-25T04:23:14.664288-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630369,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "4fd0fb52-1dc8-43ab-bd67-54331a3efc0c"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "280aa525-163d-428d-b972-494ea6d26dbb",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "280aa525-163d-428d-b972-494ea6d26dbb",
+      "creationTime": "2026-08-25T04:07:38.478461-07:00",
+      "endTime": "2026-08-25T04:08:16.23326-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630272,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "280aa525-163d-428d-b972-494ea6d26dbb"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "bb77f236-c63f-47af-b998-4878cdd4ef7a",
+      "name": "Rescan node HV02",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T04:04:16.265209-07:00",
+      "endTime": "2026-08-25T04:04:16.737128-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630094,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "bb77f236-c63f-47af-b998-4878cdd4ef7a"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "25757242-e3d6-471e-a21b-da4b5194796b",
+      "name": "Rescan node HV01",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T04:04:16.265118-07:00",
+      "endTime": "2026-08-25T04:04:17.303703-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630128,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "25757242-e3d6-471e-a21b-da4b5194796b"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "47248faa-dc33-421f-86bf-7a8856bbd51c",
+      "name": "Rescan node EXAMPLE",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T04:04:16.26478-07:00",
+      "endTime": "2026-08-25T04:04:17.208445-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630115,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "47248faa-dc33-421f-86bf-7a8856bbd51c"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "dc720bc3-09b1-4700-89d1-4783a65c2585",
+      "name": "Rescan node HV03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T04:04:16.264692-07:00",
+      "endTime": "2026-08-25T04:04:16.742726-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630098,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "dc720bc3-09b1-4700-89d1-4783a65c2585"
+    },
+    {
+      "sessionType": "VolumesDiscover",
+      "state": "Stopped",
+      "id": "c9141b55-2381-41b0-b6b2-47e0265ae8b4",
+      "name": "Host Discovery",
+      "jobId": "74de7d46-2d06-4028-a995-904c9700f176",
+      "creationTime": "2026-08-25T04:04:10.744303-07:00",
+      "endTime": "2026-08-25T04:04:31.607861-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15630211,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "c9141b55-2381-41b0-b6b2-47e0265ae8b4"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "94bbcbe9-56e1-4a5b-bab7-6e0d360e6689",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "94bbcbe9-56e1-4a5b-bab7-6e0d360e6689",
+      "creationTime": "2026-08-25T03:52:37.253461-07:00",
+      "endTime": "2026-08-25T03:53:37.283816-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15629976,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "94bbcbe9-56e1-4a5b-bab7-6e0d360e6689"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "d22fc3b4-be76-4386-8d21-e35ddfc0aebb",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "d22fc3b4-be76-4386-8d21-e35ddfc0aebb",
+      "creationTime": "2026-08-25T03:37:35.691982-07:00",
+      "endTime": "2026-08-25T03:38:11.278439-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15629599,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "d22fc3b4-be76-4386-8d21-e35ddfc0aebb"
+    },
+    {
+      "sessionType": "BackupJob",
+      "state": "Stopped",
+      "platformName": "UnstructuredData",
+      "algorithm": "None",
+      "id": "fa75d9c7-1f49-422c-bf73-c8873e9c7f27",
+      "name": "FileJob-Object",
+      "jobId": "c5282a66-5356-463d-bb7e-1543bb67dd25",
+      "creationTime": "2026-08-25T03:30:04.85436-07:00",
+      "endTime": "2026-08-25T03:45:30.875466-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "resourceId": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
+      "resourceReference": "/api/v1/backups/785991b9-5e3c-4885-97cb-6e381fdcb18e",
+      "usn": 15629873,
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:15:26",
+        "processingRate": "28.6 MB",
+        "processedSize": 278077659679,
+        "readSize": 11114713170,
+        "transferredSize": 2780322956,
+        "progressPercent": 100
+      },
+      "originalSessionId": "fa75d9c7-1f49-422c-bf73-c8873e9c7f27"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "73a6811b-7e96-4775-b4a2-272c0e966d67",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "73a6811b-7e96-4775-b4a2-272c0e966d67",
+      "creationTime": "2026-08-25T03:22:34.515699-07:00",
+      "endTime": "2026-08-25T03:23:16.123861-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15628851,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "73a6811b-7e96-4775-b4a2-272c0e966d67"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "d7ea8765-3cdf-4647-8548-89337df4e90f",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "d7ea8765-3cdf-4647-8548-89337df4e90f",
+      "creationTime": "2026-08-25T03:07:33.485677-07:00",
+      "endTime": "2026-08-25T03:08:14.757468-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15628763,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "d7ea8765-3cdf-4647-8548-89337df4e90f"
+    },
+    {
+      "sessionType": "CheckpointRemoval",
+      "state": "Working",
+      "platformName": "WindowsPhysical",
+      "algorithm": "None",
+      "id": "8aaa1081-c587-4771-a67f-dcff09e9f37f",
+      "name": "Checkpoint Removal",
+      "jobId": "bb70be84-d59c-419d-878c-e5d04d97405c",
+      "creationTime": "2026-08-25T03:00:16.904869-07:00",
+      "progressPercent": 0,
+      "result": {
+        "result": "None",
+        "message": "",
+        "isCanceled": false
+      },
+      "usn": 15628693,
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "initiatedBy": "SYSTEM",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "12:20:05",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 0
+      },
+      "originalSessionId": "8aaa1081-c587-4771-a67f-dcff09e9f37f"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "5e5a4626-4edc-488d-a24b-e004ed1c09c5",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "5e5a4626-4edc-488d-a24b-e004ed1c09c5",
+      "creationTime": "2026-08-25T02:52:32.715856-07:00",
+      "endTime": "2026-08-25T02:53:13.239115-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15628635,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "5e5a4626-4edc-488d-a24b-e004ed1c09c5"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "c5224bcd-8677-4d0d-a1f7-dd9fdb5add20",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "c5224bcd-8677-4d0d-a1f7-dd9fdb5add20",
+      "creationTime": "2026-08-25T02:37:32.151548-07:00",
+      "endTime": "2026-08-25T02:38:07.437667-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15628540,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "c5224bcd-8677-4d0d-a1f7-dd9fdb5add20"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "1ef88ed3-986c-4072-9215-d7ab5872e1fd",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "1ef88ed3-986c-4072-9215-d7ab5872e1fd",
+      "creationTime": "2026-08-25T02:22:31.433398-07:00",
+      "endTime": "2026-08-25T02:23:13.600984-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15628456,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "1ef88ed3-986c-4072-9215-d7ab5872e1fd"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "c679362a-f1df-47d5-aada-8e53c4c18263",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "c679362a-f1df-47d5-aada-8e53c4c18263",
+      "creationTime": "2026-08-25T02:07:30.382695-07:00",
+      "endTime": "2026-08-25T02:08:13.686847-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15628360,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "c679362a-f1df-47d5-aada-8e53c4c18263"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "f278bc8c-5309-47df-b3a6-2611c5f524fc",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "f278bc8c-5309-47df-b3a6-2611c5f524fc",
+      "creationTime": "2026-08-25T01:52:28.658091-07:00",
+      "endTime": "2026-08-25T01:53:09.237202-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15628268,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "f278bc8c-5309-47df-b3a6-2611c5f524fc"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "a7620810-5d03-4c06-97be-7af56fe6fd77",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "a7620810-5d03-4c06-97be-7af56fe6fd77",
+      "creationTime": "2026-08-25T01:37:27.72209-07:00",
+      "endTime": "2026-08-25T01:38:09.16972-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15627771,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "a7620810-5d03-4c06-97be-7af56fe6fd77"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "11b9fa25-9384-477b-9c0d-8defd8e5e9e7",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "11b9fa25-9384-477b-9c0d-8defd8e5e9e7",
+      "creationTime": "2026-08-25T01:22:27.028489-07:00",
+      "endTime": "2026-08-25T01:23:08.009906-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15626950,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "11b9fa25-9384-477b-9c0d-8defd8e5e9e7"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "df4d869b-e929-4a1b-b9f8-07572858a29a",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "df4d869b-e929-4a1b-b9f8-07572858a29a",
+      "creationTime": "2026-08-25T01:07:26.119264-07:00",
+      "endTime": "2026-08-25T01:08:07.0485-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15626130,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "df4d869b-e929-4a1b-b9f8-07572858a29a"
+    },
+    {
+      "sessionType": "BackupJob",
+      "state": "Stopped",
+      "platformName": "UnstructuredData",
+      "algorithm": "None",
+      "id": "07deaf28-46c9-4790-a15b-9a7d64605148",
+      "name": "FileJob-NAS",
+      "jobId": "28f2c35b-7c8d-4e90-bffb-29752a1e5201",
+      "creationTime": "2026-08-25T01:00:18.639933-07:00",
+      "endTime": "2026-08-25T01:44:07.853343-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "resourceId": "a0616711-8079-4579-ab7b-c762a83b3775",
+      "resourceReference": "/api/v1/backups/a0616711-8079-4579-ab7b-c762a83b3775",
+      "usn": 15628171,
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:43:49",
+        "processingRate": "4.7 MB",
+        "processedSize": 278421712672,
+        "readSize": 11445460441,
+        "transferredSize": 2818596022,
+        "progressPercent": 100
+      },
+      "originalSessionId": "07deaf28-46c9-4790-a15b-9a7d64605148"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "b62d05bf-8899-4e98-9d2c-f9c1bc5ab559",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "b62d05bf-8899-4e98-9d2c-f9c1bc5ab559",
+      "creationTime": "2026-08-25T00:52:24.927135-07:00",
+      "endTime": "2026-08-25T00:53:01.858256-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625551,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "b62d05bf-8899-4e98-9d2c-f9c1bc5ab559"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "c84f7f55-5a78-4a78-b5b3-4b14e4465584",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "c84f7f55-5a78-4a78-b5b3-4b14e4465584",
+      "creationTime": "2026-08-25T00:37:23.031278-07:00",
+      "endTime": "2026-08-25T00:38:00.360221-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625456,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "c84f7f55-5a78-4a78-b5b3-4b14e4465584"
+    },
+    {
+      "sessionType": "Retention",
+      "state": "Stopped",
+      "platformName": "WindowsPhysical",
+      "algorithm": "None",
+      "id": "62f9c8ff-f54f-4f17-a206-ca1d2016edc3",
+      "name": "Retention job",
+      "jobId": "3cc40bb8-4bb5-4c53-a017-dec3ca5b9024",
+      "creationTime": "2026-08-25T00:30:07.955561-07:00",
+      "endTime": "2026-08-25T00:31:15.584652-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625402,
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:01:07",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "62f9c8ff-f54f-4f17-a206-ca1d2016edc3"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "89db62d3-089c-48b5-aeab-f2670d8bb8e1",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "89db62d3-089c-48b5-aeab-f2670d8bb8e1",
+      "creationTime": "2026-08-25T00:22:20.769509-07:00",
+      "endTime": "2026-08-25T00:23:03.91263-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625333,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "89db62d3-089c-48b5-aeab-f2670d8bb8e1"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "d561bdd1-d7b7-48ab-80a4-20ceadbbba86",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "d561bdd1-d7b7-48ab-80a4-20ceadbbba86",
+      "creationTime": "2026-08-25T00:07:19.242596-07:00",
+      "endTime": "2026-08-25T00:08:02.271745-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625240,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "d561bdd1-d7b7-48ab-80a4-20ceadbbba86"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "947ed2bf-ec8a-4068-bf08-cd684e00d9bb",
+      "name": "Rescan node HV02",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T00:03:56.854563-07:00",
+      "endTime": "2026-08-25T00:03:58.298138-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625094,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "947ed2bf-ec8a-4068-bf08-cd684e00d9bb"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "cf29d259-e2a7-4ace-8e22-b71d6e370293",
+      "name": "Rescan node EXAMPLE",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T00:03:56.850913-07:00",
+      "endTime": "2026-08-25T00:03:57.842439-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625081,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "cf29d259-e2a7-4ace-8e22-b71d6e370293"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "73ad0e99-77fe-49df-a812-325728618c5a",
+      "name": "Rescan node HV01",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T00:03:56.849286-07:00",
+      "endTime": "2026-08-25T00:03:57.635778-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625066,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "73ad0e99-77fe-49df-a812-325728618c5a"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "4f50773f-fc76-428d-a5d6-318fb9b06553",
+      "name": "Rescan node HV03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-25T00:03:56.849201-07:00",
+      "endTime": "2026-08-25T00:03:57.293834-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625053,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "4f50773f-fc76-428d-a5d6-318fb9b06553"
+    },
+    {
+      "sessionType": "VolumesDiscover",
+      "state": "Stopped",
+      "id": "793f9a64-fcf3-4cc2-8736-e7be01989f38",
+      "name": "Host Discovery",
+      "jobId": "e5042215-6545-4b03-adff-325b647922a3",
+      "creationTime": "2026-08-25T00:03:51.510259-07:00",
+      "endTime": "2026-08-25T00:04:15.125543-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15625178,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "793f9a64-fcf3-4cc2-8736-e7be01989f38"
+    },
+    {
+      "sessionType": "VeeamUpdaterSettingsSync",
+      "state": "Stopped",
+      "id": "cb8a6248-18d3-41c0-8cf8-0ec76bbb1cf6",
+      "name": "Update Settings Synchronization",
+      "jobId": "cb8a6248-18d3-41c0-8cf8-0ec76bbb1cf6",
+      "creationTime": "2026-08-25T00:01:32.689593-07:00",
+      "endTime": "2026-08-25T00:01:37.997566-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15624954,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "cb8a6248-18d3-41c0-8cf8-0ec76bbb1cf6"
+    },
+    {
+      "sessionType": "MalwareDetection",
+      "state": "Working",
+      "id": "15d97eae-9e5b-41c1-aebb-ec7818b07f53",
+      "name": "Malware Detection",
+      "jobId": "a856b3a6-3956-46f5-ae2d-9b05fef19a5c",
+      "creationTime": "2026-08-25T00:00:25.786527-07:00",
+      "progressPercent": 0,
+      "result": {
+        "result": "None",
+        "message": "",
+        "isCanceled": false
+      },
+      "usn": 15628218,
+      "initiatedBy": "SYSTEM",
+      "originalSessionId": "15d97eae-9e5b-41c1-aebb-ec7818b07f53"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "55c47b19-c499-496e-b19a-0c38d9ea6534",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "55c47b19-c499-496e-b19a-0c38d9ea6534",
+      "creationTime": "2026-08-24T23:52:18.639725-07:00",
+      "endTime": "2026-08-24T23:52:55.263311-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15624863,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "55c47b19-c499-496e-b19a-0c38d9ea6534"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "7a45e3b1-4f4a-42e9-ad01-9340e978ebe6",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "7a45e3b1-4f4a-42e9-ad01-9340e978ebe6",
+      "creationTime": "2026-08-24T23:37:17.50965-07:00",
+      "endTime": "2026-08-24T23:38:00.29761-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15624775,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "7a45e3b1-4f4a-42e9-ad01-9340e978ebe6"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "4ff937af-b317-45d0-84be-96b7ace068f8",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "4ff937af-b317-45d0-84be-96b7ace068f8",
+      "creationTime": "2026-08-24T23:22:16.694622-07:00",
+      "endTime": "2026-08-24T23:22:57.88434-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15624678,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "4ff937af-b317-45d0-84be-96b7ace068f8"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "68d27581-7d31-4e18-afd3-58b9c7d90ba5",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "68d27581-7d31-4e18-afd3-58b9c7d90ba5",
+      "creationTime": "2026-08-24T23:07:15.577934-07:00",
+      "endTime": "2026-08-24T23:08:00.935248-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15624590,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "68d27581-7d31-4e18-afd3-58b9c7d90ba5"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "2742b3e6-174f-4ebb-99d5-febddc46669f",
+      "name": "ad01.example.lan Backup",
+      "jobId": "d06fd2e4-61c3-4f2d-bfc9-c5cff254e156",
+      "creationTime": "2026-08-24T23:01:46.50501-07:00",
+      "endTime": "2026-08-24T23:04:14.326937-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Failed",
+        "message": "Agent Backup failed, check session log for details.",
+        "isCanceled": false
+      },
+      "usn": 15624484,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:02:27",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "2742b3e6-174f-4ebb-99d5-febddc46669f"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "9d69b2bf-745c-434d-ac45-dd57d5a5fc8c",
+      "name": "Preparing worker Veeam13-appliance03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T23:00:07.631136-07:00",
+      "endTime": "2026-08-24T23:01:34.813732-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15624192,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "9d69b2bf-745c-434d-ac45-dd57d5a5fc8c"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "c1ea97d3-8896-45a3-83fd-f259f47cc908",
+      "name": "Onsite_Daily_Offsite_Win",
+      "jobId": "d5ead060-d195-4754-8a5c-3367eea4e823",
+      "creationTime": "2026-08-24T23:00:05.552921-07:00",
+      "endTime": "2026-08-24T23:04:19.227373-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Failed",
+        "message": "Backup failed, check session log for details.",
+        "isCanceled": false
+      },
+      "usn": 15624533,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:04:13",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "c1ea97d3-8896-45a3-83fd-f259f47cc908"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "b30c0a6f-69ac-40c3-9ff8-9e7cc234e7da",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "b30c0a6f-69ac-40c3-9ff8-9e7cc234e7da",
+      "creationTime": "2026-08-24T22:52:14.398751-07:00",
+      "endTime": "2026-08-24T22:52:52.221972-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15623855,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "b30c0a6f-69ac-40c3-9ff8-9e7cc234e7da"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "1a632148-c619-40d1-9611-7902d61ef03d",
+      "name": "ad01.example.lan Backup",
+      "jobId": "d06fd2e4-61c3-4f2d-bfc9-c5cff254e156",
+      "creationTime": "2026-08-24T22:47:37.055964-07:00",
+      "endTime": "2026-08-24T22:50:02.680795-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Failed",
+        "message": "Agent Backup failed, check session log for details.",
+        "isCanceled": false
+      },
+      "usn": 15623761,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:02:25",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "1a632148-c619-40d1-9611-7902d61ef03d"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "9aebe082-3a4b-4f3a-bf93-a3e2f8ba6387",
+      "name": "Preparing worker Veeam13-appliance03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T22:45:56.997747-07:00",
+      "endTime": "2026-08-24T22:47:24.390031-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15623457,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "9aebe082-3a4b-4f3a-bf93-a3e2f8ba6387"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "39adf436-8b27-42d5-b40a-077e7ec22438",
+      "name": "Onsite_Daily_Offsite_Win",
+      "jobId": "d5ead060-d195-4754-8a5c-3367eea4e823",
+      "creationTime": "2026-08-24T22:45:56.191146-07:00",
+      "endTime": "2026-08-24T22:50:04.590485-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Failed",
+        "message": "Backup failed, check session log for details.",
+        "isCanceled": false
+      },
+      "usn": 15623802,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:04:08",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "39adf436-8b27-42d5-b40a-077e7ec22438"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "a7271ef8-bb41-40f5-b724-41324dff4c14",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "a7271ef8-bb41-40f5-b724-41324dff4c14",
+      "creationTime": "2026-08-24T22:37:13.708699-07:00",
+      "endTime": "2026-08-24T22:37:52.345808-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15623120,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "a7271ef8-bb41-40f5-b724-41324dff4c14"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "3987ff18-d0e5-497a-b0c4-cadc3c7b7fe7",
+      "name": "ad01.example.lan Backup",
+      "jobId": "d06fd2e4-61c3-4f2d-bfc9-c5cff254e156",
+      "creationTime": "2026-08-24T22:33:27.432095-07:00",
+      "endTime": "2026-08-24T22:35:53.898906-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Failed",
+        "message": "Agent Backup failed, check session log for details.",
+        "isCanceled": false
+      },
+      "usn": 15623032,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:02:26",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "3987ff18-d0e5-497a-b0c4-cadc3c7b7fe7"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "08adf93d-3757-4c00-b69d-5e337fd7633d",
+      "name": "Preparing worker Veeam13-appliance03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T22:31:38.514949-07:00",
+      "endTime": "2026-08-24T22:33:15.677187-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15622739,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "08adf93d-3757-4c00-b69d-5e337fd7633d"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "be4a89f9-9865-497d-a339-88b3ff9abfa2",
+      "name": "Onsite_Daily_Offsite_Win",
+      "jobId": "d5ead060-d195-4754-8a5c-3367eea4e823",
+      "creationTime": "2026-08-24T22:31:37.078361-07:00",
+      "endTime": "2026-08-24T22:35:55.176909-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Failed",
+        "message": "Backup failed, check session log for details.",
+        "isCanceled": false
+      },
+      "usn": 15623073,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:04:18",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "be4a89f9-9865-497d-a339-88b3ff9abfa2"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "5b81229c-e672-48f1-824d-8d7f4399714d",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "5b81229c-e672-48f1-824d-8d7f4399714d",
+      "creationTime": "2026-08-24T22:22:12.642338-07:00",
+      "endTime": "2026-08-24T22:22:53.047447-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15620574,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "5b81229c-e672-48f1-824d-8d7f4399714d"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "2f28e38f-acdc-4ae3-95f7-9c23598b9ea2",
+      "name": "BackupCopy-Object\\pihole Backup (Incremental)",
+      "jobId": "6bce0929-9e63-48bb-b206-09e28aac5375",
+      "creationTime": "2026-08-24T22:20:12.334188-07:00",
+      "endTime": "2026-08-24T22:24:02.687553-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15621108,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Target",
+        "duration": "00:03:50",
+        "processingRate": "175.6 MB",
+        "processedSize": 34359738368,
+        "readSize": 1841299456,
+        "transferredSize": 793645957,
+        "progressPercent": 100
+      },
+      "originalSessionId": "2f28e38f-acdc-4ae3-95f7-9c23598b9ea2"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "04205571-d910-45e3-9473-0a70dd9528d8",
+      "name": "automation.example.lan Backup",
+      "jobId": "969d6d40-b443-47c4-9f9d-aca8a72452ec",
+      "creationTime": "2026-08-24T22:20:10.103696-07:00",
+      "endTime": "2026-08-24T22:21:07.125919-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15619441,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Proxy",
+        "duration": "00:00:57",
+        "processingRate": "376 MB",
+        "processedSize": 53687091200,
+        "readSize": 15923675136,
+        "transferredSize": 489248,
+        "progressPercent": 100
+      },
+      "originalSessionId": "04205571-d910-45e3-9473-0a70dd9528d8"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "75c621dc-c485-4404-be71-3444b23fb89b",
+      "name": "ad01.example.lan Backup",
+      "jobId": "d06fd2e4-61c3-4f2d-bfc9-c5cff254e156",
+      "creationTime": "2026-08-24T22:19:08.570808-07:00",
+      "endTime": "2026-08-24T22:21:35.095132-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Failed",
+        "message": "Agent Backup failed, check session log for details.",
+        "isCanceled": false
+      },
+      "usn": 15619843,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:02:26",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "75c621dc-c485-4404-be71-3444b23fb89b"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "4f86019c-1fe2-43f4-b36b-591909e74a69",
+      "name": "pihole Backup",
+      "jobId": "1d0a26dd-c835-457a-b3cf-b7754e6f066c",
+      "creationTime": "2026-08-24T22:19:00.657248-07:00",
+      "endTime": "2026-08-24T22:19:53.892747-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15618584,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:00:53",
+        "processingRate": "131 MB",
+        "processedSize": 34359738368,
+        "readSize": 4761583616,
+        "transferredSize": 793787525,
+        "progressPercent": 100
+      },
+      "originalSessionId": "4f86019c-1fe2-43f4-b36b-591909e74a69"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "c59cfa15-8f3f-42d6-8746-846e09f1633b",
+      "name": "CA01.example.lan Backup",
+      "jobId": "7ccbb39e-567e-40b9-a407-0a78f9dd1db8",
+      "creationTime": "2026-08-24T22:14:24.122722-07:00",
+      "endTime": "2026-08-24T22:20:45.443252-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15619191,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:06:21",
+        "processingRate": "15.4 MB",
+        "processedSize": 107374347261,
+        "readSize": 4717708285,
+        "transferredSize": 2169223969,
+        "progressPercent": 100
+      },
+      "originalSessionId": "c59cfa15-8f3f-42d6-8746-846e09f1633b"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "0904361b-b3c0-42a6-a0cc-687bb7318bf7",
+      "name": "docker03.example.lan Backup",
+      "jobId": "4f62d926-4b48-44b5-b19f-cc76d331db97",
+      "creationTime": "2026-08-24T22:11:39.020344-07:00",
+      "endTime": "2026-08-24T22:21:28.171976-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15619705,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:09:49",
+        "processingRate": "26.2 MB",
+        "processedSize": 107402159364,
+        "readSize": 13837722884,
+        "transferredSize": 3399170797,
+        "progressPercent": 100
+      },
+      "originalSessionId": "0904361b-b3c0-42a6-a0cc-687bb7318bf7"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "29b113c8-092e-4c3a-9d01-34b5504ac5e1",
+      "name": "test.example.lan Backup",
+      "jobId": "fc8f7f4a-4427-4b00-8034-ed43983047be",
+      "creationTime": "2026-08-24T22:10:42.994879-07:00",
+      "endTime": "2026-08-24T22:18:54.399582-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15617868,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Proxy",
+        "duration": "00:08:11",
+        "processingRate": "57.2 MB",
+        "processedSize": 80544732839,
+        "readSize": 28321453735,
+        "transferredSize": 5936108736,
+        "progressPercent": 100
+      },
+      "originalSessionId": "29b113c8-092e-4c3a-9d01-34b5504ac5e1"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "89929818-04a8-4e84-af68-5ec634ea2f43",
+      "name": "BackupCopy-Object\\CA01.example.lan Backup (Incremental)",
+      "jobId": "169e8515-31c4-4216-8b0f-5d97c5e36d7b",
+      "creationTime": "2026-08-24T22:10:25.016649-07:00",
+      "endTime": "2026-08-24T22:26:27.378204-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15622232,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Target",
+        "duration": "00:16:02",
+        "processingRate": "158.1 MB",
+        "processedSize": 107374182400,
+        "readSize": 3404726272,
+        "transferredSize": 2169014763,
+        "progressPercent": 100
+      },
+      "originalSessionId": "89929818-04a8-4e84-af68-5ec634ea2f43"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "3628bf56-8f5f-4428-9021-30c07a0658e6",
+      "name": "BackupCopy-Object\\ad02.example.lan Backup (Incremental)",
+      "jobId": "4f09276f-b002-484e-9b73-cd66a2469d09",
+      "creationTime": "2026-08-24T22:10:24.986299-07:00",
+      "endTime": "2026-08-24T22:17:30.300836-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15617113,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Target",
+        "duration": "00:07:05",
+        "processingRate": "159.5 MB",
+        "processedSize": 64424509440,
+        "readSize": 4169138176,
+        "transferredSize": 2633240630,
+        "progressPercent": 100
+      },
+      "originalSessionId": "3628bf56-8f5f-4428-9021-30c07a0658e6"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "ccaccf5e-c07d-44dc-b967-db69f2d60153",
+      "name": "BackupCopy-Object\\ad01.example.lan Backup (Incremental)",
+      "jobId": "17b00775-ca0b-459f-a44f-48bcd6cb018d",
+      "creationTime": "2026-08-24T22:10:24.958-07:00",
+      "endTime": "2026-08-24T22:22:08.792619-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Failed",
+        "message": "Some restore points were not processed",
+        "isCanceled": false
+      },
+      "usn": 15620216,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:11:43",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "ccaccf5e-c07d-44dc-b967-db69f2d60153"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "c8fdbc78-ae8f-458c-9692-2c322d20baf9",
+      "name": "Win11.example.lan Backup",
+      "jobId": "0d468f5c-8ac0-4229-a5b6-20aa0bf70418",
+      "creationTime": "2026-08-24T22:09:18.7746-07:00",
+      "endTime": "2026-08-24T22:14:01.509185-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15615024,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:04:42",
+        "processingRate": "320.8 MB",
+        "processedSize": 134217728000,
+        "readSize": 65144881152,
+        "transferredSize": 2005792,
+        "progressPercent": 100
+      },
+      "originalSessionId": "c8fdbc78-ae8f-458c-9692-2c322d20baf9"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "86750c43-5af1-4d09-a76d-72d87a2242e3",
+      "name": "pelican.example.lan Backup",
+      "jobId": "848da334-1f9b-45d7-9a47-32d0bc798051",
+      "creationTime": "2026-08-24T22:08:51.383505-07:00",
+      "endTime": "2026-08-24T22:10:29.740697-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15612770,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:01:38",
+        "processingRate": "493 MB",
+        "processedSize": 107374182400,
+        "readSize": 31654412288,
+        "transferredSize": 1037792,
+        "progressPercent": 100
+      },
+      "originalSessionId": "86750c43-5af1-4d09-a76d-72d87a2242e3"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "14a53de7-5466-49bd-931c-832a173aa9b3",
+      "name": "BackupCopy-Object\\docker03.example.lan Backup (Incremental)",
+      "jobId": "b75b8325-bb83-4987-a7a0-aaa91979fb57",
+      "creationTime": "2026-08-24T22:08:27.745953-07:00",
+      "endTime": "2026-08-24T22:26:55.956404-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15622362,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Target",
+        "duration": "00:18:28",
+        "processingRate": "146.5 MB",
+        "processedSize": 107374182400,
+        "readSize": 5068816384,
+        "transferredSize": 3370631540,
+        "progressPercent": 100
+      },
+      "originalSessionId": "14a53de7-5466-49bd-931c-832a173aa9b3"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "b9eb8587-538b-4570-995a-17f9a2a642b1",
+      "name": "BackupCopy-Object\\automation.example.lan Backup (Incremental)",
+      "jobId": "8068bed0-dade-4c95-bda5-8ff2f32677d5",
+      "creationTime": "2026-08-24T22:08:27.715051-07:00",
+      "endTime": "2026-08-24T22:26:17.284385-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15622138,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:17:49",
+        "processingRate": "47.9 MB",
+        "processedSize": 53687091200,
+        "readSize": 0,
+        "transferredSize": 6432,
+        "progressPercent": 100
+      },
+      "originalSessionId": "b9eb8587-538b-4570-995a-17f9a2a642b1"
+    },
+    {
+      "sessionType": "BackupCopyJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "1bce1b50-0964-4f49-b257-b7dcb8ed2fef",
+      "name": "BackupCopy-Object\\docker01.example.lan Backup (Incremental)",
+      "jobId": "3ad941b5-9913-424a-8c14-fa370d8074da",
+      "creationTime": "2026-08-24T22:08:27.681289-07:00",
+      "endTime": "2026-08-24T22:14:53.6789-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15615670,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": ".\\SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Target",
+        "duration": "00:06:25",
+        "processingRate": "200.6 MB",
+        "processedSize": 107374182400,
+        "readSize": 4563402752,
+        "transferredSize": 1025731134,
+        "progressPercent": 100
+      },
+      "originalSessionId": "1bce1b50-0964-4f49-b257-b7dcb8ed2fef"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "f4af0ec1-7a1b-44fd-ba20-4d72c797ac7f",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "f4af0ec1-7a1b-44fd-ba20-4d72c797ac7f",
+      "creationTime": "2026-08-24T22:07:09.495389-07:00",
+      "endTime": "2026-08-24T22:07:53.708308-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15611084,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "f4af0ec1-7a1b-44fd-ba20-4d72c797ac7f"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "d7f438b0-f164-4adb-904e-df224ecea203",
+      "name": "test2.example.lan Backup",
+      "jobId": "fd94d400-13c6-4d39-8773-511b020e6031",
+      "creationTime": "2026-08-24T22:02:14.39354-07:00",
+      "endTime": "2026-08-24T22:09:03.647322-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15611890,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Proxy",
+        "duration": "00:06:49",
+        "processingRate": "430.4 MB",
+        "processedSize": 322122547200,
+        "readSize": 174721073152,
+        "transferredSize": 5385120,
+        "progressPercent": 100
+      },
+      "originalSessionId": "d7f438b0-f164-4adb-904e-df224ecea203"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "bacbb43e-7e92-4204-bded-32376bc23fa6",
+      "name": "ad02.example.lan Backup",
+      "jobId": "157b4879-d9e9-4d9e-a32b-852935b92c4a",
+      "creationTime": "2026-08-24T22:02:14.221048-07:00",
+      "endTime": "2026-08-24T22:10:32.525019-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15612810,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Proxy",
+        "duration": "00:08:18",
+        "processingRate": "11.8 MB",
+        "processedSize": 64424655136,
+        "readSize": 5579618592,
+        "transferredSize": 2633448637,
+        "progressPercent": 100
+      },
+      "originalSessionId": "bacbb43e-7e92-4204-bded-32376bc23fa6"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "a7b8b147-34a8-4a70-8496-8090af3bdebd",
+      "name": "wazuh.example.lan Backup",
+      "jobId": "3b916066-e70d-4cfd-bb83-d6a6c37692a7",
+      "creationTime": "2026-08-24T22:02:12.758582-07:00",
+      "endTime": "2026-08-24T22:18:43.16331-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15617690,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:16:30",
+        "processingRate": "40.2 MB",
+        "processedSize": 536873801151,
+        "readSize": 39920080319,
+        "transferredSize": 2813916516,
+        "progressPercent": 100
+      },
+      "originalSessionId": "a7b8b147-34a8-4a70-8496-8090af3bdebd"
+    },
+    {
+      "sessionType": "EndpointBackup",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "bd6db161-4787-44c7-a7a7-b8946611a521",
+      "name": "docker01.example.lan Backup",
+      "jobId": "ba9f3e82-6729-44d6-b8f8-a3ba2a58db59",
+      "creationTime": "2026-08-24T22:02:12.699223-07:00",
+      "endTime": "2026-08-24T22:08:32.088418-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15611368,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Proxy",
+        "duration": "00:06:19",
+        "processingRate": "61.8 MB",
+        "processedSize": 107385337481,
+        "readSize": 21540517513,
+        "transferredSize": 1037833028,
+        "progressPercent": 100
+      },
+      "originalSessionId": "bd6db161-4787-44c7-a7a7-b8946611a521"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "0b71ebd6-0d6f-4656-85a5-705702028f2a",
+      "name": "Preparing worker veeam13-appliance01",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T22:00:34.194833-07:00",
+      "endTime": "2026-08-24T22:02:28.817365-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15609702,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "0b71ebd6-0d6f-4656-85a5-705702028f2a"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "6d25077b-a5cc-40a1-b92c-91fd2ffbd253",
+      "name": "Preparing worker Veeam13-appliance03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T22:00:33.357091-07:00",
+      "endTime": "2026-08-24T22:02:12.878198-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15609064,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "6d25077b-a5cc-40a1-b92c-91fd2ffbd253"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "6ca5aeba-c5a4-4dc1-af07-f3743286f8f8",
+      "name": "Preparing worker Veeam13-appliance02",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T22:00:32.655541-07:00",
+      "endTime": "2026-08-24T22:02:00.406364-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15608836,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "6ca5aeba-c5a4-4dc1-af07-f3743286f8f8"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "b5b5a970-5434-408b-a421-3f57d3fb701b",
+      "name": "Onsite_Daily_Offsite_Appliance",
+      "jobId": "3f762504-9c99-423e-92f5-95b78dab5a6c",
+      "creationTime": "2026-08-24T22:00:31.618793-07:00",
+      "endTime": "2026-08-24T22:19:56.779257-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15618648,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:19:25",
+        "processingRate": "134.4 MB",
+        "processedSize": 34359738368,
+        "readSize": 4761583616,
+        "transferredSize": 793787525,
+        "progressPercent": 100
+      },
+      "originalSessionId": "b5b5a970-5434-408b-a421-3f57d3fb701b"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "bed4048b-f4c3-4bda-bc4b-b00dff299505",
+      "name": "Onsite_Daily_Offsite_Linux",
+      "jobId": "2e2bf1aa-d900-49ea-adfc-704eb6625fad",
+      "creationTime": "2026-08-24T22:00:31.402293-07:00",
+      "endTime": "2026-08-24T22:21:29.981059-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15619774,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:20:58",
+        "processingRate": "130.7 MB",
+        "processedSize": 268435456000,
+        "readSize": 51262783488,
+        "transferredSize": 4398207922,
+        "progressPercent": 100
+      },
+      "originalSessionId": "bed4048b-f4c3-4bda-bc4b-b00dff299505"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "0a33632e-3908-48d4-b7dc-55fd66ff1059",
+      "name": "Onsite_Daily_Win",
+      "jobId": "e9990269-18f7-411b-ae7d-58d38ddab4a6",
+      "creationTime": "2026-08-24T22:00:31.052337-07:00",
+      "endTime": "2026-08-24T22:14:06.823711-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15615153,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:13:35",
+        "processingRate": "321.1 MB",
+        "processedSize": 134217728000,
+        "readSize": 65144881152,
+        "transferredSize": 2005792,
+        "progressPercent": 100
+      },
+      "originalSessionId": "0a33632e-3908-48d4-b7dc-55fd66ff1059"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "02817e43-0bde-46bc-970b-5130ec41dc96",
+      "name": "Onsite_Daily_Offsite_Win",
+      "jobId": "d5ead060-d195-4754-8a5c-3367eea4e823",
+      "creationTime": "2026-08-24T22:00:29.65369-07:00",
+      "endTime": "2026-08-24T22:21:36.333998-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Failed",
+        "message": "Backup failed, check session log for details.",
+        "isCanceled": false
+      },
+      "usn": 15619917,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:21:06",
+        "processingRate": "16.8 MB",
+        "processedSize": 171798691840,
+        "readSize": 10297016320,
+        "transferredSize": 4802360865,
+        "progressPercent": 100
+      },
+      "originalSessionId": "02817e43-0bde-46bc-970b-5130ec41dc96"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Increment",
+      "id": "6b2ab538-ec8f-4c73-a4e9-c699c4a751b5",
+      "name": "Onsite_Daily_Linux",
+      "jobId": "51d2527b-cc6c-45d5-b1b2-72b4d26d829c",
+      "creationTime": "2026-08-24T22:00:29.40618-07:00",
+      "endTime": "2026-08-24T22:18:56.529955-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15617954,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:18:27",
+        "processingRate": "268 MB",
+        "processedSize": 1046898278400,
+        "readSize": 274600034304,
+        "transferredSize": 8739400042,
+        "progressPercent": 100
+      },
+      "originalSessionId": "6b2ab538-ec8f-4c73-a4e9-c699c4a751b5"
+    },
+    {
+      "sessionType": "PlatformBackupJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "algorithm": "Full",
+      "id": "f4f9ba40-e955-40f3-951d-74447a4f0b9c",
+      "name": "Onsite_Daily_Appliance",
+      "jobId": "3953c24f-bbe6-41fc-ae2f-a34e25bfd614",
+      "creationTime": "2026-08-24T22:00:29.381149-07:00",
+      "endTime": "2026-08-24T22:00:31.281928-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Warning",
+        "message": "Warning",
+        "isCanceled": false
+      },
+      "usn": 15608162,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:00:01",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "f4f9ba40-e955-40f3-951d-74447a4f0b9c"
+    },
+    {
+      "sessionType": "SecurityComplianceAnalyzer",
+      "state": "Stopped",
+      "id": "9ac245c2-f2ef-45d9-b0ec-ffacdc8df6a5",
+      "name": "Security & Compliance Analyzer",
+      "jobId": "9ac245c2-f2ef-45d9-b0ec-ffacdc8df6a5",
+      "creationTime": "2026-08-24T22:00:13.084476-07:00",
+      "endTime": "2026-08-24T22:00:25.293011-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Warning",
+        "message": "Warning",
+        "isCanceled": false
+      },
+      "usn": 15607981,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "9ac245c2-f2ef-45d9-b0ec-ffacdc8df6a5"
+    },
+    {
+      "sessionType": "AgentDiscovery",
+      "state": "Stopped",
+      "platformName": "WindowsPhysical",
+      "algorithm": "None",
+      "id": "b3f12096-b699-4156-b46d-f065d51dab13",
+      "name": "Rescan of Manually Added",
+      "jobId": "730dc485-84c2-4a9d-86e7-2e35d1d5a0be",
+      "creationTime": "2026-08-24T22:00:13.054119-07:00",
+      "endTime": "2026-08-24T22:00:28.234548-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607987,
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:00:15",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "b3f12096-b699-4156-b46d-f065d51dab13"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "fc257684-7b27-413c-8d61-ff07c8f6278b",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "fc257684-7b27-413c-8d61-ff07c8f6278b",
+      "creationTime": "2026-08-24T21:52:08.547074-07:00",
+      "endTime": "2026-08-24T21:52:48.149385-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607900,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "fc257684-7b27-413c-8d61-ff07c8f6278b"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "df81f21f-f4c8-4015-a685-04cabfa8ea72",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "df81f21f-f4c8-4015-a685-04cabfa8ea72",
+      "creationTime": "2026-08-24T21:37:07.775399-07:00",
+      "endTime": "2026-08-24T21:37:54.130696-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607812,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "df81f21f-f4c8-4015-a685-04cabfa8ea72"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "eccff737-d515-4de7-83e2-4035cf0659d5",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "eccff737-d515-4de7-83e2-4035cf0659d5",
+      "creationTime": "2026-08-24T21:22:06.739186-07:00",
+      "endTime": "2026-08-24T21:22:51.191692-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607716,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "eccff737-d515-4de7-83e2-4035cf0659d5"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "5390d6db-0c2e-42b2-9372-8396d32a4a90",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "5390d6db-0c2e-42b2-9372-8396d32a4a90",
+      "creationTime": "2026-08-24T21:07:05.108865-07:00",
+      "endTime": "2026-08-24T21:07:52.894943-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607623,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "5390d6db-0c2e-42b2-9372-8396d32a4a90"
+    },
+    {
+      "sessionType": "AgentDiscovery",
+      "state": "Stopped",
+      "platformName": "WindowsPhysical",
+      "algorithm": "None",
+      "id": "f9ee858b-cbc9-445d-9200-5dede7021475",
+      "name": "Rescan of Docker",
+      "jobId": "bb2aa5bc-982f-4b28-aa82-bcfa4ec42503",
+      "creationTime": "2026-08-24T21:00:15.976559-07:00",
+      "endTime": "2026-08-24T21:00:40.554566-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607563,
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "NotDefined",
+        "duration": "00:00:24",
+        "processingRate": "N/A",
+        "processedSize": 0,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "f9ee858b-cbc9-445d-9200-5dede7021475"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "78956df8-a969-4ab8-8e12-f7fac911621e",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "78956df8-a969-4ab8-8e12-f7fac911621e",
+      "creationTime": "2026-08-24T20:52:03.560191-07:00",
+      "endTime": "2026-08-24T20:52:43.115289-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607488,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "78956df8-a969-4ab8-8e12-f7fac911621e"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "127e6583-6788-451b-aa91-a05fb810013e",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "127e6583-6788-451b-aa91-a05fb810013e",
+      "creationTime": "2026-08-24T20:37:02.007458-07:00",
+      "endTime": "2026-08-24T20:37:41.731991-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607397,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "127e6583-6788-451b-aa91-a05fb810013e"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "be7ec813-18f6-4db2-a8a7-9bf35d71d544",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "be7ec813-18f6-4db2-a8a7-9bf35d71d544",
+      "creationTime": "2026-08-24T20:22:01.072084-07:00",
+      "endTime": "2026-08-24T20:22:42.153016-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607311,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "be7ec813-18f6-4db2-a8a7-9bf35d71d544"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "58f44bfe-ce31-4f12-b8f2-06c6ac6ecbed",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "58f44bfe-ce31-4f12-b8f2-06c6ac6ecbed",
+      "creationTime": "2026-08-24T20:06:59.816673-07:00",
+      "endTime": "2026-08-24T20:07:40.684153-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607216,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "58f44bfe-ce31-4f12-b8f2-06c6ac6ecbed"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "0f937cd7-4e35-4a37-85b2-a63897d8591a",
+      "name": "Rescan node HV02",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T20:03:38.353405-07:00",
+      "endTime": "2026-08-24T20:03:38.839369-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607027,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "0f937cd7-4e35-4a37-85b2-a63897d8591a"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "24c47b60-cc54-4de9-a40a-a3c4b02a926a",
+      "name": "Rescan node HV03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T20:03:38.352076-07:00",
+      "endTime": "2026-08-24T20:03:38.81559-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607021,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "24c47b60-cc54-4de9-a40a-a3c4b02a926a"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "6f9801fc-ad07-4f0a-9c99-bb2923303286",
+      "name": "Rescan node HV01",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T20:03:38.342847-07:00",
+      "endTime": "2026-08-24T20:03:39.431844-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607060,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "6f9801fc-ad07-4f0a-9c99-bb2923303286"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "768adc0c-8da3-41eb-b80c-f7a7fa145131",
+      "name": "Rescan node EXAMPLE",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T20:03:38.342444-07:00",
+      "endTime": "2026-08-24T20:03:39.411831-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607054,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "768adc0c-8da3-41eb-b80c-f7a7fa145131"
+    },
+    {
+      "sessionType": "VolumesDiscover",
+      "state": "Stopped",
+      "id": "fe8efe7b-d2a9-4781-9e46-e909a47382bd",
+      "name": "Host Discovery",
+      "jobId": "a9c68a01-312a-4abc-9c13-7bffecd7517c",
+      "creationTime": "2026-08-24T20:03:31.984691-07:00",
+      "endTime": "2026-08-24T20:03:55.37731-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15607146,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "fe8efe7b-d2a9-4781-9e46-e909a47382bd"
+    },
+    {
+      "sessionType": "BackupJob",
+      "state": "Stopped",
+      "platformName": "UnstructuredData",
+      "algorithm": "None",
+      "id": "f95c8c09-fd9b-4556-b77b-cb7b61654ca5",
+      "name": "FileJob-Offsite",
+      "jobId": "e35f3b9d-62fd-4f6a-ac90-60dcf6a0c661",
+      "creationTime": "2026-08-24T20:00:16.492253-07:00",
+      "endTime": "2026-08-24T20:02:14.958194-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "resourceId": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
+      "resourceReference": "/api/v1/backups/85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
+      "usn": 15606927,
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "progress": {
+        "bottleneck": "Source",
+        "duration": "00:01:58",
+        "processingRate": "3.9 GB",
+        "processedSize": 497434363820,
+        "readSize": 0,
+        "transferredSize": 0,
+        "progressPercent": 100
+      },
+      "originalSessionId": "f95c8c09-fd9b-4556-b77b-cb7b61654ca5"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "bdcf5eee-0342-4637-a6fb-9835f977b8fc",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "bdcf5eee-0342-4637-a6fb-9835f977b8fc",
+      "creationTime": "2026-08-24T19:51:58.332901-07:00",
+      "endTime": "2026-08-24T19:52:41.799964-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15606672,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "bdcf5eee-0342-4637-a6fb-9835f977b8fc"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "3e3c6420-ac52-4d81-b0ab-eb569a04c178",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "3e3c6420-ac52-4d81-b0ab-eb569a04c178",
+      "creationTime": "2026-08-24T19:36:56.241225-07:00",
+      "endTime": "2026-08-24T19:37:42.832498-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15606579,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "3e3c6420-ac52-4d81-b0ab-eb569a04c178"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "00852106-48e1-4221-869d-2fe0722346f0",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "00852106-48e1-4221-869d-2fe0722346f0",
+      "creationTime": "2026-08-24T19:21:32.569294-07:00",
+      "endTime": "2026-08-24T19:23:23.861095-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15606492,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "00852106-48e1-4221-869d-2fe0722346f0"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "1e47e2cb-2a61-4a3a-9b98-f348f399f284",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "1e47e2cb-2a61-4a3a-9b98-f348f399f284",
+      "creationTime": "2026-08-24T19:06:10.689739-07:00",
+      "endTime": "2026-08-24T19:07:14.715785-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15606393,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "1e47e2cb-2a61-4a3a-9b98-f348f399f284"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "2cd07949-2c7b-4f87-9602-72710ee9f76e",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "2cd07949-2c7b-4f87-9602-72710ee9f76e",
+      "creationTime": "2026-08-24T18:50:45.933677-07:00",
+      "endTime": "2026-08-24T18:51:30.35975-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15606306,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "2cd07949-2c7b-4f87-9602-72710ee9f76e"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "c4f45180-8501-473c-9b4d-43137f95189c",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "c4f45180-8501-473c-9b4d-43137f95189c",
+      "creationTime": "2026-08-24T18:35:44.801548-07:00",
+      "endTime": "2026-08-24T18:36:29.393024-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15606210,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "c4f45180-8501-473c-9b4d-43137f95189c"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "ca207615-5c99-4f57-82ca-dfc14c2e5782",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "ca207615-5c99-4f57-82ca-dfc14c2e5782",
+      "creationTime": "2026-08-24T18:20:43.825655-07:00",
+      "endTime": "2026-08-24T18:21:27.887637-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15606125,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "ca207615-5c99-4f57-82ca-dfc14c2e5782"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "95cb10d8-d25e-447c-9949-75c4cab66cf3",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "95cb10d8-d25e-447c-9949-75c4cab66cf3",
+      "creationTime": "2026-08-24T18:05:42.801767-07:00",
+      "endTime": "2026-08-24T18:06:26.463895-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15606030,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "95cb10d8-d25e-447c-9949-75c4cab66cf3"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "cdf56b78-4efe-4e70-ab22-f690b3bdae80",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "cdf56b78-4efe-4e70-ab22-f690b3bdae80",
+      "creationTime": "2026-08-24T17:50:41.553413-07:00",
+      "endTime": "2026-08-24T17:51:23.782469-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605942,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "cdf56b78-4efe-4e70-ab22-f690b3bdae80"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "1e1e3bd5-8721-48e1-9097-80eb7c26f5ee",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "1e1e3bd5-8721-48e1-9097-80eb7c26f5ee",
+      "creationTime": "2026-08-24T17:35:40.058829-07:00",
+      "endTime": "2026-08-24T17:36:24.691339-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605846,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "1e1e3bd5-8721-48e1-9097-80eb7c26f5ee"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "cc459c46-3db1-42d4-811d-529341afc813",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "cc459c46-3db1-42d4-811d-529341afc813",
+      "creationTime": "2026-08-24T17:20:38.953011-07:00",
+      "endTime": "2026-08-24T17:21:25.497172-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605750,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "cc459c46-3db1-42d4-811d-529341afc813"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "aa7a8ecf-61d8-4893-9d15-01ea654f28cd",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "aa7a8ecf-61d8-4893-9d15-01ea654f28cd",
+      "creationTime": "2026-08-24T17:05:37.755195-07:00",
+      "endTime": "2026-08-24T17:06:14.998315-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605653,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "aa7a8ecf-61d8-4893-9d15-01ea654f28cd"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "34049e0a-f122-4e75-833e-9144c61d1b3b",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "34049e0a-f122-4e75-833e-9144c61d1b3b",
+      "creationTime": "2026-08-24T16:50:36.687787-07:00",
+      "endTime": "2026-08-24T16:51:15.380684-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605544,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "34049e0a-f122-4e75-833e-9144c61d1b3b"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "14678ae2-e415-484b-8d3a-79a1c325bb5c",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "14678ae2-e415-484b-8d3a-79a1c325bb5c",
+      "creationTime": "2026-08-24T16:35:35.585609-07:00",
+      "endTime": "2026-08-24T16:36:18.501382-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605448,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "14678ae2-e415-484b-8d3a-79a1c325bb5c"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "46d3905b-144b-4c1a-aae3-2084a59168ac",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "46d3905b-144b-4c1a-aae3-2084a59168ac",
+      "creationTime": "2026-08-24T16:20:34.910809-07:00",
+      "endTime": "2026-08-24T16:21:15.514061-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605361,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "46d3905b-144b-4c1a-aae3-2084a59168ac"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "0d41cf2a-3bda-4ccc-ac8f-7666181fede0",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "0d41cf2a-3bda-4ccc-ac8f-7666181fede0",
+      "creationTime": "2026-08-24T16:05:34.268727-07:00",
+      "endTime": "2026-08-24T16:06:14.454828-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605257,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "0d41cf2a-3bda-4ccc-ac8f-7666181fede0"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "528531f9-fadf-49cc-b7bf-98b2e94ed669",
+      "name": "Rescan node EXAMPLE",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T16:03:20.994261-07:00",
+      "endTime": "2026-08-24T16:03:21.546867-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605110,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "528531f9-fadf-49cc-b7bf-98b2e94ed669"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "0dbffecc-74be-4e25-b3e0-4dd82a783ced",
+      "name": "Rescan node HV02",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T16:03:20.994094-07:00",
+      "endTime": "2026-08-24T16:03:21.511391-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605095,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "0dbffecc-74be-4e25-b3e0-4dd82a783ced"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "958a42a0-550a-4612-858a-626c94f0b5af",
+      "name": "Rescan node HV01",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T16:03:20.992617-07:00",
+      "endTime": "2026-08-24T16:03:21.399708-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605067,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "958a42a0-550a-4612-858a-626c94f0b5af"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "50c3756a-e9d1-46d4-a683-599ff539666f",
+      "name": "Rescan node HV03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T16:03:20.992517-07:00",
+      "endTime": "2026-08-24T16:03:21.542016-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605105,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "50c3756a-e9d1-46d4-a683-599ff539666f"
+    },
+    {
+      "sessionType": "VolumesDiscover",
+      "state": "Stopped",
+      "id": "43bad298-c0a9-4629-9a15-65533662145d",
+      "name": "Host Discovery",
+      "jobId": "3d16fd03-dd78-4534-afb7-ac61e6d47d9a",
+      "creationTime": "2026-08-24T16:03:15.604498-07:00",
+      "endTime": "2026-08-24T16:03:37.274758-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15605198,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "43bad298-c0a9-4629-9a15-65533662145d"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "a5c1397e-86bf-47e8-88e8-00246137913c",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "a5c1397e-86bf-47e8-88e8-00246137913c",
+      "creationTime": "2026-08-24T15:50:33.485876-07:00",
+      "endTime": "2026-08-24T15:51:12.737843-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15604954,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "a5c1397e-86bf-47e8-88e8-00246137913c"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "1f590b07-cd32-4118-ab62-a24bccc03c56",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "1f590b07-cd32-4118-ab62-a24bccc03c56",
+      "creationTime": "2026-08-24T15:35:32.384445-07:00",
+      "endTime": "2026-08-24T15:36:13.088746-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15604845,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "1f590b07-cd32-4118-ab62-a24bccc03c56"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "d88b6ec5-94e2-49ed-8aec-8385854245be",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "d88b6ec5-94e2-49ed-8aec-8385854245be",
+      "creationTime": "2026-08-24T15:20:31.389504-07:00",
+      "endTime": "2026-08-24T15:21:11.386718-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15604718,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "d88b6ec5-94e2-49ed-8aec-8385854245be"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "799a12af-791a-4386-b9a6-9589d79bc740",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "799a12af-791a-4386-b9a6-9589d79bc740",
+      "creationTime": "2026-08-24T15:05:29.680291-07:00",
+      "endTime": "2026-08-24T15:06:10.333776-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15604541,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "799a12af-791a-4386-b9a6-9589d79bc740"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "e404e673-031d-4028-a9e9-c60fbe9aaffb",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "e404e673-031d-4028-a9e9-c60fbe9aaffb",
+      "creationTime": "2026-08-24T14:50:28.918406-07:00",
+      "endTime": "2026-08-24T14:51:09.883386-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15604431,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "e404e673-031d-4028-a9e9-c60fbe9aaffb"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "a9105f9f-d53d-4fdb-8fe1-74d65024e21b",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "a9105f9f-d53d-4fdb-8fe1-74d65024e21b",
+      "creationTime": "2026-08-24T14:35:28.02782-07:00",
+      "endTime": "2026-08-24T14:36:09.130357-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15604339,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "a9105f9f-d53d-4fdb-8fe1-74d65024e21b"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "ebe1098d-01c3-4742-9e1f-b97b8070982f",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "ebe1098d-01c3-4742-9e1f-b97b8070982f",
+      "creationTime": "2026-08-24T14:20:27.060526-07:00",
+      "endTime": "2026-08-24T14:21:07.233326-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15604247,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "ebe1098d-01c3-4742-9e1f-b97b8070982f"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "3a48b96b-f665-49d6-b683-32d737fc36af",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "3a48b96b-f665-49d6-b683-32d737fc36af",
+      "creationTime": "2026-08-24T14:05:25.372988-07:00",
+      "endTime": "2026-08-24T14:06:06.924745-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15604159,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "3a48b96b-f665-49d6-b683-32d737fc36af"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "a6b096cc-b467-4d70-80fe-6c8e3b684c55",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "a6b096cc-b467-4d70-80fe-6c8e3b684c55",
+      "creationTime": "2026-08-24T13:50:23.306164-07:00",
+      "endTime": "2026-08-24T13:51:02.616225-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15604064,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "a6b096cc-b467-4d70-80fe-6c8e3b684c55"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "07030362-b673-4012-ac95-1fcd471f3e73",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "07030362-b673-4012-ac95-1fcd471f3e73",
+      "creationTime": "2026-08-24T13:35:22.374337-07:00",
+      "endTime": "2026-08-24T13:36:04.481156-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603972,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "07030362-b673-4012-ac95-1fcd471f3e73"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "b02e0c23-919c-4c5d-9552-233d9f62642c",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "b02e0c23-919c-4c5d-9552-233d9f62642c",
+      "creationTime": "2026-08-24T13:20:19.815093-07:00",
+      "endTime": "2026-08-24T13:20:59.990478-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603879,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "b02e0c23-919c-4c5d-9552-233d9f62642c"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "8c0aedd8-1ad5-42e3-89d2-990e42fe2b91",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "8c0aedd8-1ad5-42e3-89d2-990e42fe2b91",
+      "creationTime": "2026-08-24T13:05:19.014422-07:00",
+      "endTime": "2026-08-24T13:05:59.305904-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603783,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "8c0aedd8-1ad5-42e3-89d2-990e42fe2b91"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "131381de-abd9-4f3e-b23b-441464d53930",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "131381de-abd9-4f3e-b23b-441464d53930",
+      "creationTime": "2026-08-24T12:50:17.710272-07:00",
+      "endTime": "2026-08-24T12:50:58.523943-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603699,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "131381de-abd9-4f3e-b23b-441464d53930"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "a82cdaf2-dfdb-409d-aaea-cb21e8564ec0",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "a82cdaf2-dfdb-409d-aaea-cb21e8564ec0",
+      "creationTime": "2026-08-24T12:35:16.352592-07:00",
+      "endTime": "2026-08-24T12:35:56.574662-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603604,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "a82cdaf2-dfdb-409d-aaea-cb21e8564ec0"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "1de0c20e-2b9e-4fab-a78a-44918e8b456e",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "1de0c20e-2b9e-4fab-a78a-44918e8b456e",
+      "creationTime": "2026-08-24T12:20:14.160744-07:00",
+      "endTime": "2026-08-24T12:20:54.294546-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603512,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "1de0c20e-2b9e-4fab-a78a-44918e8b456e"
+    },
+    {
+      "sessionType": "ConfigurationResynchronize",
+      "state": "Stopped",
+      "id": "df1d988f-d955-4179-bdcc-e2e4faadb2bf",
+      "name": "Configuration Database Resynchronize",
+      "jobId": "df1d988f-d955-4179-bdcc-e2e4faadb2bf",
+      "creationTime": "2026-08-24T12:05:12.983548-07:00",
+      "endTime": "2026-08-24T12:05:56.20056-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603414,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "df1d988f-d955-4179-bdcc-e2e4faadb2bf"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "bfa4ce22-922d-4067-b279-c128b5472ad4",
+      "name": "Rescan node HV02",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T12:02:59.790777-07:00",
+      "endTime": "2026-08-24T12:03:00.242426-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603256,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "bfa4ce22-922d-4067-b279-c128b5472ad4"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "213eee8e-9f12-4af8-92f6-9fddc27b5651",
+      "name": "Rescan node HV01",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T12:02:59.790645-07:00",
+      "endTime": "2026-08-24T12:03:00.23356-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603246,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "213eee8e-9f12-4af8-92f6-9fddc27b5651"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "7fa150e0-615f-49e7-b6e5-5934fdd11993",
+      "name": "Rescan node HV03",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T12:02:59.790208-07:00",
+      "endTime": "2026-08-24T12:03:00.320162-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603266,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "7fa150e0-615f-49e7-b6e5-5934fdd11993"
+    },
+    {
+      "sessionType": "PlatformServiceJob",
+      "state": "Stopped",
+      "platformName": "Proxmox",
+      "id": "c9192bb3-cef2-4f94-b219-d51b8051e6a6",
+      "name": "Rescan node EXAMPLE",
+      "jobId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-24T12:02:59.784826-07:00",
+      "endTime": "2026-08-24T12:03:00.262643-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603270,
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "c9192bb3-cef2-4f94-b219-d51b8051e6a6"
+    },
+    {
+      "sessionType": "VolumesDiscover",
+      "state": "Stopped",
+      "id": "7265beba-f94a-48dc-9254-a1d0d2c14034",
+      "name": "Host Discovery",
+      "jobId": "804c50f0-a0b9-4b15-a7d8-0b0bea7a664f",
+      "creationTime": "2026-08-24T12:02:54.355886-07:00",
+      "endTime": "2026-08-24T12:03:26.362922-07:00",
+      "progressPercent": 100,
+      "result": {
+        "result": "Success",
+        "message": "Success",
+        "isCanceled": false
+      },
+      "usn": 15603356,
+      "initiatedBy": "SYSTEM",
+      "relatedSessionId": "00000000-0000-0000-0000-000000000000",
+      "originalSessionId": "7265beba-f94a-48dc-9254-a1d0d2c14034"
+    }
+  ],
+  "pagination": {
+    "total": 14651,
+    "count": 200,
+    "skip": 0,
+    "limit": 200
+  }
+}

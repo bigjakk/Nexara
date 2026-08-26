@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -215,6 +216,30 @@ func accessibleClusters(c fiber.Ctx, action, resource string) (clusterAccess, er
 }
 
 // clusterIDFromParam extracts and parses the cluster_id URL parameter.
+// requireAnyGlobalManage passes if the caller holds global manage on ANY of
+// the named resources.
+//
+// For endpoints shared by several add-flows, where each flow's own create
+// endpoint is separately gated: the shared step must accept every permission
+// that can legitimately reach it, or it silently becomes a hidden dependency
+// on whichever one it happened to name.
+//
+// The action is a literal here rather than a parameter so the RBAC route
+// guard's static walk still reads "manage" out of the call graph.
+func requireAnyGlobalManage(c fiber.Ctx, resources ...string) error {
+	for _, resource := range resources {
+		ok, err := hasGlobalPerm(c, "manage", resource)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+	}
+	return fiber.NewError(fiber.StatusForbidden,
+		"Requires global manage permission on one of: "+strings.Join(resources, ", "))
+}
+
 func clusterIDFromParam(c fiber.Ctx) (uuid.UUID, error) {
 	raw := c.Params("cluster_id")
 	if raw == "" {

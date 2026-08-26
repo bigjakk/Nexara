@@ -133,6 +133,7 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateVMFolder(ctx context.Context, arg CreateVMFolderParams) (VmFolder, error)
+	CreateVeeamServer(ctx context.Context, arg CreateVeeamServerParams) (VeeamServer, error)
 	DeleteAlertRule(ctx context.Context, id uuid.UUID) error
 	DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) error
 	DeleteCVENotificationConfigChannels(ctx context.Context, configID uuid.UUID) error
@@ -231,6 +232,7 @@ type Querier interface {
 	// is valid (a genuinely empty cluster prunes everything); callers must verify
 	// the resources payload was well-formed before treating it as authoritative.
 	DeleteVMsAbsentFromCluster(ctx context.Context, arg DeleteVMsAbsentFromClusterParams) (int64, error)
+	DeleteVeeamServer(ctx context.Context, id uuid.UUID) error
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) (int64, error)
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) (int64, error)
@@ -368,6 +370,7 @@ type Querier interface {
 	// GetVMSnapshotAgeStats is the vm-scoped counterpart of
 	// GetClusterSnapshotAgeStats; same snap_time > 0 and ErrNoRows semantics.
 	GetVMSnapshotAgeStats(ctx context.Context, arg GetVMSnapshotAgeStatsParams) (GetVMSnapshotAgeStatsRow, error)
+	GetVeeamServer(ctx context.Context, id uuid.UUID) (VeeamServer, error)
 	HasClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	HasRunningJobForCluster(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	IncrementJobCleanupAttempts(ctx context.Context, id uuid.UUID) (int32, error)
@@ -669,6 +672,7 @@ type Querier interface {
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
+	ListVeeamServers(ctx context.Context) ([]VeeamServer, error)
 	ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVCInScanParams) ([]ListVulnsBySSVCInScanRow, error)
 	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
@@ -789,6 +793,7 @@ type Querier interface {
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	UpdateVMPool(ctx context.Context, arg UpdateVMPoolParams) error
 	UpdateVMStatus(ctx context.Context, arg UpdateVMStatusParams) error
+	UpdateVeeamServer(ctx context.Context, arg UpdateVeeamServerParams) (VeeamServer, error)
 	UpsertCVECache(ctx context.Context, arg UpsertCVECacheParams) error
 	// 4.8c: channel_ids array dropped; the join table
 	// cve_notification_config_channels is now the single source of truth.

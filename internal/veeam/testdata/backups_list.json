@@ -1,0 +1,166 @@
+{
+  "data": [
+    {
+      "platformName": "Proxmox",
+      "jobType": "ProxmoxBackupJob",
+      "id": "035034de-a4ea-4109-81b1-b1f7a841da20",
+      "jobId": "55553d24-d06d-4670-8e38-a938f1c41325",
+      "policyUniqueId": "1cf60063-eeef-47a7-b72f-7be6c6813248",
+      "name": "Onsite_Weekly_Appliance",
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "creationTime": "2026-02-14T22:37:33",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "Proxmox",
+      "jobType": "ProxmoxBackupJob",
+      "id": "0b50efbe-d6fa-487c-ab39-603443967af5",
+      "jobId": "51d2527b-cc6c-45d5-b1b2-72b4d26d829c",
+      "policyUniqueId": "338811ac-8ee3-4135-84ef-572d6d454e19",
+      "name": "Onsite_Daily_Linux",
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "creationTime": "2026-02-14T22:33:27",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "Proxmox",
+      "jobType": "ProxmoxBackupJob",
+      "id": "105b7425-6c7d-4a25-b64e-7585b56dc7ee",
+      "jobId": "e9990269-18f7-411b-ae7d-58d38ddab4a6",
+      "policyUniqueId": "6b24ae87-d979-4ac3-ab80-dc3d62e3de26",
+      "name": "Onsite_Daily_Win",
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "creationTime": "2026-08-08T22:33:53",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "Proxmox",
+      "jobType": "ProxmoxBackupJob",
+      "id": "25b20007-f063-440b-bd37-3cd2644cb662",
+      "jobId": "3f762504-9c99-423e-92f5-95b78dab5a6c",
+      "policyUniqueId": "57b4a798-67fc-4b3e-a2dc-71ff70e1a963",
+      "name": "Onsite_Daily_Offsite_Appliance",
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "creationTime": "2026-08-08T23:11:50",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "Proxmox",
+      "jobType": "ProxmoxBackupJob",
+      "id": "39fa8d95-8446-411b-b2b8-6a0ec2dcb053",
+      "jobId": "2e2bf1aa-d900-49ea-adfc-704eb6625fad",
+      "policyUniqueId": "34799427-73b7-4adf-99fd-464a3dbdead2",
+      "name": "Onsite_Daily_Offsite_Linux",
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "creationTime": "2026-08-08T22:42:38",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "Proxmox",
+      "jobType": "ProxmoxBackupJob",
+      "id": "5b15f4ac-41c0-4fe4-92d6-5469eb0f3a28",
+      "jobId": "1e9b508f-e3ad-4c4c-8996-dc4a253d2c3f",
+      "policyUniqueId": "70f15e59-2b66-4ea3-8b84-10fee3f479d3",
+      "name": "Onsite_Weekly_Offsite_Appliance",
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "creationTime": "2026-08-15T22:12:59",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "UnstructuredData",
+      "jobType": "FileBackup",
+      "id": "785991b9-5e3c-4885-97cb-6e381fdcb18e",
+      "jobId": "c5282a66-5356-463d-bb7e-1543bb67dd25",
+      "policyUniqueId": "",
+      "name": "FileJob-Object",
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-11T22:01:20.234099",
+      "repositoryId": "f8c592ab-416b-4854-8c5b-c4758cc1c90e",
+      "repositoryName": "example-bucket"
+    },
+    {
+      "platformName": "UnstructuredData",
+      "jobType": "FileBackup",
+      "id": "85c9b2db-b0f2-493b-8d0c-a1b38f2336c4",
+      "jobId": "e35f3b9d-62fd-4f6a-ac90-60dcf6a0c661",
+      "policyUniqueId": "",
+      "name": "FileJob-Offsite",
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-10T22:00:47.576051",
+      "repositoryId": "f8c592ab-416b-4854-8c5b-c4758cc1c90e",
+      "repositoryName": "example-bucket"
+    },
+    {
+      "platformName": "UnstructuredData",
+      "jobType": "FileBackup",
+      "id": "a0616711-8079-4579-ab7b-c762a83b3775",
+      "jobId": "28f2c35b-7c8d-4e90-bffb-29752a1e5201",
+      "policyUniqueId": "",
+      "name": "FileJob-NAS",
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-11T22:17:45.00391",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "LinuxPhysical",
+      "jobType": "LinuxAgentBackup",
+      "id": "ae1be485-d378-44a2-86f5-8d8c2c2a24b1",
+      "jobId": "a2d10c9b-a601-4293-afe8-96b7a075a7d1",
+      "policyUniqueId": "a2d10c9b-a601-4293-afe8-96b7a075a7d1",
+      "name": "Docker Hosts",
+      "platformId": "00000000-0000-0000-0000-000000000000",
+      "creationTime": "2026-08-15T00:01:06.99804",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "Proxmox",
+      "jobType": "ProxmoxBackupJob",
+      "id": "f07776e2-7e90-428e-bf3a-3a7c08151f4b",
+      "jobId": "62fa8e3f-ab21-4d94-8a3d-93106f292e81",
+      "policyUniqueId": "b33e7d1c-a593-4a8c-97af-70581d3d502f",
+      "name": "Onsite_Weekly_Linux",
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "creationTime": "2025-12-13T22:48:29",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "Proxmox",
+      "jobType": "ProxmoxBackupJob",
+      "id": "797b5d77-b906-4e8d-82a5-3f88e07ceab4",
+      "jobId": "d5ead060-d195-4754-8a5c-3367eea4e823",
+      "policyUniqueId": "177a3d7e-fcdf-4309-8f47-b534c26e8731",
+      "name": "Onsite_Daily_Offsite_Win",
+      "platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+      "creationTime": "2026-08-08T22:02:23",
+      "repositoryId": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "repositoryName": "repo-nas-01"
+    },
+    {
+      "platformName": "CustomPlatform",
+      "jobType": "BackupCopy",
+      "id": "cf9569ad-a28e-476d-89ce-7e46989622f1",
+      "jobId": "6d2da606-8ef6-4b43-a6c1-c44c40f782dd",
+      "policyUniqueId": "6d2da606-8ef6-4b43-a6c1-c44c40f782dd",
+      "name": "BackupCopy-Object",
+      "platformId": "dc38a689-07fd-49df-8e86-b8c888274983",
+      "creationTime": "2026-08-15T22:41:22.578683",
+      "repositoryId": "f8c592ab-416b-4854-8c5b-c4758cc1c90e",
+      "repositoryName": "example-bucket"
+    }
+  ],
+  "pagination": {
+    "total": 13,
+    "count": 13,
+    "skip": 0,
+    "limit": 200
+  }
+}

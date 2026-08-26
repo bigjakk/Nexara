@@ -1,0 +1,135 @@
+{
+  "data": [
+    {
+      "taskLimitEnabled": false,
+      "maxTaskCount": -1,
+      "account": {
+        "servicePoint": "https://s3.object-store.example.com",
+        "regionId": "us-east-005",
+        "credentialsId": "6e1ffbec-ddee-490f-82b9-c54e5b960028",
+        "connectionSettings": {
+          "connectionType": "Direct",
+          "gatewayServerIds": [
+            "6745a759-2205-4cd2-b172-8ec8f7e60ef8"
+          ]
+        }
+      },
+      "bucket": {
+        "bucketName": "example-bucket",
+        "folderName": "veeam12",
+        "enableAutoProvision": false,
+        "workloadsPerBucketLimit": 10,
+        "storageConsumptionLimit": {
+          "consumptionLimitKind": "TB",
+          "isEnabled": true,
+          "consumptionLimitCount": 3
+        },
+        "immutability": {
+          "immutabilityMode": "RetentionSettings",
+          "isEnabled": false,
+          "daysCount": 30
+        }
+      },
+      "mountServer": {
+        "mountServerSettingsType": "Windows",
+        "windows": {
+          "mountServerId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
+          "writeCacheFolder": "C:\\ProgramData\\Veeam\\Backup\\IRCache\\",
+          "vPowerNFSEnabled": true,
+          "vPowerNFSPortSettings": {
+            "mountPort": 1058,
+            "vPowerNFSPort": 2049
+          }
+        }
+      },
+      "proxyAppliance": {
+        "managedServerId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8"
+      },
+      "type": "S3Compatible",
+      "id": "f8c592ab-416b-4854-8c5b-c4758cc1c90e",
+      "name": "example-bucket",
+      "description": "Created by AD\\jdoe at 10/19/2025 6:25 PM.",
+      "uniqueId": "F8C592AB416B48548C5BC4758CC1C90E"
+    },
+    {
+      "hostId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
+      "repository": {
+        "path": "C:\\Backup",
+        "taskLimitEnabled": true,
+        "maxTaskCount": 4,
+        "readWriteLimitEnabled": false,
+        "readWriteRate": 0,
+        "advancedSettings": {
+          "RotatedDriveCleanupMode": "Disabled",
+          "alignDataBlocks": true,
+          "decompressBeforeStoring": false,
+          "rotatedDrives": false,
+          "perVmBackup": true
+        }
+      },
+      "mountServer": {
+        "mountServerSettingsType": "Windows",
+        "windows": {
+          "mountServerId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
+          "writeCacheFolder": "C:\\ProgramData\\Veeam\\Backup\\IRCache\\",
+          "vPowerNFSEnabled": true,
+          "vPowerNFSPortSettings": {
+            "mountPort": 1058,
+            "vPowerNFSPort": 2049
+          }
+        }
+      },
+      "type": "WinLocal",
+      "id": "88788f9e-d8f5-4eb4-bc4f-9b3f5403bcec",
+      "name": "Default Backup Repository",
+      "description": "Created by Veeam Backup",
+      "uniqueId": "88788f9ed8f54eb4bc4f9b3f5403bcec"
+    },
+    {
+      "share": {
+        "sharePath": "\\\\192.168.1.250\\veeam",
+        "credentialsId": "23400bb7-32de-48f1-8c01-8d50813c95aa",
+        "gatewayServer": {
+          "autoSelectEnabled": true,
+          "gatewayServerIds": []
+        }
+      },
+      "repository": {
+        "taskLimitEnabled": true,
+        "maxTaskCount": 4,
+        "readWriteLimitEnabled": false,
+        "readWriteRate": 0,
+        "advancedSettings": {
+          "RotatedDriveCleanupMode": "Disabled",
+          "alignDataBlocks": true,
+          "decompressBeforeStoring": false,
+          "rotatedDrives": false,
+          "perVmBackup": true
+        }
+      },
+      "mountServer": {
+        "mountServerSettingsType": "Windows",
+        "windows": {
+          "mountServerId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
+          "writeCacheFolder": "C:\\ProgramData\\Veeam\\Backup\\IRCache\\",
+          "vPowerNFSEnabled": true,
+          "vPowerNFSPortSettings": {
+            "mountPort": 1058,
+            "vPowerNFSPort": 2049
+          }
+        }
+      },
+      "type": "Smb",
+      "id": "d84ed7c4-15ff-4ba6-aa14-2fc8c8a126f2",
+      "name": "repo-nas-01",
+      "description": "Created by AD\\jdoe at 10/19/2025 6:19 PM.",
+      "uniqueId": "D84ED7C415FF4BA6AA142FC8C8A126F2"
+    }
+  ],
+  "pagination": {
+    "total": 3,
+    "count": 3,
+    "skip": 0,
+    "limit": 200
+  }
+}
