@@ -148,12 +148,11 @@ func (s *Server) setupMiddleware() {
 			return c.IP() + ":auth"
 		},
 		Next: func(c fiber.Ctx) bool {
-			switch c.Path() {
+			switch limiterPath(c) {
 			case "/api/v1/auth/login",
 				"/api/v1/auth/register",
 				"/api/v1/auth/totp/verify-login",
 				"/api/v1/auth/totp",
-				"/api/v1/auth/totp/",
 				"/api/v1/auth/totp/recovery-codes/regenerate",
 				// The OIDC flow is unauthenticated and every call does real
 				// work: /authorize performs an outbound discovery fetch to the
@@ -182,7 +181,7 @@ func (s *Server) setupMiddleware() {
 			return c.IP() + ":refresh"
 		},
 		Next: func(c fiber.Ctx) bool {
-			return c.Path() != "/api/v1/auth/refresh"
+			return limiterPath(c) != "/api/v1/auth/refresh"
 		},
 	}))
 
@@ -198,7 +197,7 @@ func (s *Server) setupMiddleware() {
 			return c.IP() + ":ws-token"
 		},
 		Next: func(c fiber.Ctx) bool {
-			return c.Path() != "/api/v1/auth/ws-token"
+			return limiterPath(c) != "/api/v1/auth/ws-token"
 		},
 	}))
 
@@ -213,7 +212,7 @@ func (s *Server) setupMiddleware() {
 			return c.IP() + ":snapshot-resync"
 		},
 		Next: func(c fiber.Ctx) bool {
-			return !strings.HasSuffix(c.Path(), "/guest-snapshots/resync")
+			return !strings.HasSuffix(limiterPath(c), "/guest-snapshots/resync")
 		},
 	}))
 
@@ -225,8 +224,8 @@ func (s *Server) setupMiddleware() {
 		Max:        s.config.RateLimitMax,
 		Expiration: s.config.RateLimitExpiration,
 		Next: func(c fiber.Ctx) bool {
-			return strings.HasPrefix(c.Path(), "/api/v1/auth/") ||
-				strings.HasPrefix(c.Path(), "/ws")
+			return strings.HasPrefix(limiterPath(c), "/api/v1/auth/") ||
+				strings.HasPrefix(limiterPath(c), "/ws")
 		},
 	}))
 }
@@ -261,6 +260,31 @@ func (s *Server) clusterCreateLimiter() fiber.Handler {
 			return c.IP() + ":cluster-create"
 		},
 	})
+}
+
+// limiterPath returns the request path the way Fiber ROUTED it, which is the
+// only spelling a path-matching limiter can safely compare against.
+//
+// Fiber builds a lowercased, slash-trimmed detectionPath and matches routes on
+// that, while c.Path() returns the raw path — CaseSensitive and StrictRouting
+// are both false here. A limiter gating on the raw path therefore steps aside
+// for spellings that still reach the handler:
+//
+//	POST /api/v1/auth/login/   the auth limiter's exact match misses it, and the
+//	                           general limiter's "/api/v1/auth/" prefix still
+//	                           matches, so it is skipped too — login ends up with
+//	                           NO rate limit at all
+//	POST /API/v1/auth/login    auth limiter skipped; the general limiter applies
+//	                           its far larger budget instead
+//
+// Route-attached limiters (see clusterCreateLimiter) do not need this, because
+// matching is Fiber's job by then.
+func limiterPath(c fiber.Ctx) string {
+	p := strings.ToLower(c.Path())
+	if len(p) > 1 {
+		p = strings.TrimRight(p, "/")
+	}
+	return p
 }
 
 // authRequired returns middleware that rejects unauthenticated requests.
