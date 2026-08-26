@@ -231,6 +231,35 @@ var endpointMeta = map[string]APIEndpoint{
 	"GET /api/v1/admin/api-keys":        {Description: "List all API keys (admin)", Permission: "manage:user", Group: "User Management"},
 	"DELETE /api/v1/admin/api-keys/:id": {Description: "Revoke any user's API key", Permission: "manage:user", Group: "User Management"},
 
+	// ── Proxmox Access Control ────────────────────────────────────────
+	// Manages a CLUSTER's own PVE users/tokens/groups/roles/ACLs, which is
+	// distinct from Nexara's local users and roles above.
+	"GET /api/v1/clusters/:cluster_id/access/users":                            {Description: "List the cluster's Proxmox users", Permission: "view:access", Group: "Proxmox Access Control"},
+	"POST /api/v1/clusters/:cluster_id/access/users":                           {Description: "Create a Proxmox user", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/users/:userid":                    {Description: "Get a Proxmox user", Permission: "view:access", Group: "Proxmox Access Control"},
+	"PUT /api/v1/clusters/:cluster_id/access/users/:userid":                    {Description: "Update a Proxmox user", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"DELETE /api/v1/clusters/:cluster_id/access/users/:userid":                 {Description: "Delete a Proxmox user and every token it owns", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/users/:userid/tokens":             {Description: "List a Proxmox user's API tokens", Permission: "view:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/users/:userid/tokens/:tokenid":    {Description: "Get one API token's metadata (never its secret)", Permission: "view:access", Group: "Proxmox Access Control"},
+	"POST /api/v1/clusters/:cluster_id/access/users/:userid/tokens/:tokenid":   {Description: "Mint a Proxmox API token — the secret is returned once and cannot be retrieved again", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"PUT /api/v1/clusters/:cluster_id/access/users/:userid/tokens/:tokenid":    {Description: "Update an API token, or regenerate its secret", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"DELETE /api/v1/clusters/:cluster_id/access/users/:userid/tokens/:tokenid": {Description: "Revoke a Proxmox API token", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/groups":                           {Description: "List Proxmox groups", Permission: "view:access", Group: "Proxmox Access Control"},
+	"POST /api/v1/clusters/:cluster_id/access/groups":                          {Description: "Create a Proxmox group", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/groups/:groupid":                  {Description: "Get a Proxmox group and its members", Permission: "view:access", Group: "Proxmox Access Control"},
+	"PUT /api/v1/clusters/:cluster_id/access/groups/:groupid":                  {Description: "Update a Proxmox group", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"DELETE /api/v1/clusters/:cluster_id/access/groups/:groupid":               {Description: "Delete a Proxmox group", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/roles":                            {Description: "List Proxmox roles and their privileges", Permission: "view:access", Group: "Proxmox Access Control"},
+	"POST /api/v1/clusters/:cluster_id/access/roles":                           {Description: "Create a custom Proxmox role", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/roles/:roleid":                    {Description: "Get one Proxmox role's privilege map", Permission: "view:access", Group: "Proxmox Access Control"},
+	"PUT /api/v1/clusters/:cluster_id/access/roles/:roleid":                    {Description: "Replace or extend a Proxmox role's privileges", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"DELETE /api/v1/clusters/:cluster_id/access/roles/:roleid":                 {Description: "Delete a custom Proxmox role", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/acl":                              {Description: "List the cluster's access control entries", Permission: "view:access", Group: "Proxmox Access Control"},
+	"PUT /api/v1/clusters/:cluster_id/access/acl":                              {Description: "Grant or revoke roles on an ACL path", Permission: "manage:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/domains":                          {Description: "List authentication realms (read-only)", Permission: "view:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/domains/:realm":                   {Description: "Get one authentication realm (read-only)", Permission: "view:access", Group: "Proxmox Access Control"},
+	"GET /api/v1/clusters/:cluster_id/access/permissions":                      {Description: "Report what Nexara's own cluster credential is permitted to do", Permission: "view:access", Group: "Proxmox Access Control"},
+
 	// ── Roles & Permissions ───────────────────────────────────────────
 	"GET /api/v1/rbac/roles":        {Description: "List roles", Permission: "view:role", Group: "Roles & Permissions"},
 	"POST /api/v1/rbac/roles":       {Description: "Create a custom role", Permission: "manage:role", Group: "Roles & Permissions"},

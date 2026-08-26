@@ -537,6 +537,56 @@ Import VMs from ESXi/vCenter sources, OVA/OVF appliances, or disk images. Reads 
 | PUT | `/clusters/:id/pools/:pool_id` | Update pool |
 | DELETE | `/clusters/:id/pools/:pool_id` | Delete pool |
 
+### Proxmox Access Control
+
+Manages a **cluster's own** Proxmox users, API tokens, groups, roles and ACLs —
+distinct from Nexara's local users and roles under `/rbac` and `/admin`.
+
+Reads need `view:access`; writes need `manage:access`, which is granted only to
+the built-in Admin role by default (it can mint a token with cluster-wide
+Administrator rights, which bypasses Nexara's own RBAC).
+
+Realms are read-only: creating or editing one requires the `Realm.Allocate`
+privilege, which no bundled Proxmox role except `Administrator` carries.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/clusters/:id/access/users` | List Proxmox users |
+| POST | `/clusters/:id/access/users` | Create a Proxmox user |
+| GET | `/clusters/:id/access/users/:userid` | Get a Proxmox user |
+| PUT | `/clusters/:id/access/users/:userid` | Update a Proxmox user |
+| DELETE | `/clusters/:id/access/users/:userid` | Delete a user and every token it owns |
+| GET | `/clusters/:id/access/users/:userid/tokens` | List a user's API tokens |
+| GET | `/clusters/:id/access/users/:userid/tokens/:tokenid` | Get token metadata (never the secret) |
+| POST | `/clusters/:id/access/users/:userid/tokens/:tokenid` | Mint an API token — returns the secret **once** |
+| PUT | `/clusters/:id/access/users/:userid/tokens/:tokenid` | Update a token, or regenerate its secret |
+| DELETE | `/clusters/:id/access/users/:userid/tokens/:tokenid` | Revoke an API token |
+| GET | `/clusters/:id/access/groups` | List groups |
+| POST | `/clusters/:id/access/groups` | Create a group |
+| GET | `/clusters/:id/access/groups/:groupid` | Get a group and its members |
+| PUT | `/clusters/:id/access/groups/:groupid` | Update a group |
+| DELETE | `/clusters/:id/access/groups/:groupid` | Delete a group |
+| GET | `/clusters/:id/access/roles` | List roles and their privileges |
+| POST | `/clusters/:id/access/roles` | Create a custom role |
+| GET | `/clusters/:id/access/roles/:roleid` | Get one role's privilege map |
+| PUT | `/clusters/:id/access/roles/:roleid` | Replace or extend a role's privileges |
+| DELETE | `/clusters/:id/access/roles/:roleid` | Delete a custom role |
+| GET | `/clusters/:id/access/acl` | List access control entries |
+| PUT | `/clusters/:id/access/acl` | Grant, or revoke with `"delete": true` |
+| GET | `/clusters/:id/access/domains` | List authentication realms (read-only) |
+| GET | `/clusters/:id/access/domains/:realm` | Get one realm (read-only) |
+| GET | `/clusters/:id/access/permissions` | Report what Nexara's own cluster token may do |
+
+**Token secrets are returned exactly once.** Proxmox has no read-back endpoint,
+so the `value` field in the create/regenerate response is the only copy that
+will ever exist outside the cluster. It is deliberately excluded from audit
+records.
+
+**Self-protection.** Deleting or regenerating the token Nexara authenticates
+with returns `409` with an explanation instead of proceeding. Append
+`?force=true` to override — the cluster will then show as unreachable until you
+update its credentials.
+
 ### Metrics
 
 | Method | Path | Description |

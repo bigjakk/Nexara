@@ -450,6 +450,38 @@ func (s *Server) setupRoutes() {
 			clusters.Delete("/:cluster_id/pools/:pool_id", s.poolHandler.DeletePool)
 		}
 
+		// Proxmox access control: PVE users, API tokens, groups, roles, ACLs.
+		// Realms are read-only — realm writes need Realm.Allocate, which no
+		// built-in PVE role except Administrator carries.
+		if s.accessHandler != nil {
+			access := clusters.Group("/:cluster_id/access")
+			access.Get("/users", s.accessHandler.ListUsers)
+			access.Post("/users", s.accessHandler.CreateUser)
+			access.Get("/users/:userid", s.accessHandler.GetUser)
+			access.Put("/users/:userid", s.accessHandler.UpdateUser)
+			access.Delete("/users/:userid", s.accessHandler.DeleteUser)
+			access.Get("/users/:userid/tokens", s.accessHandler.ListTokens)
+			access.Get("/users/:userid/tokens/:tokenid", s.accessHandler.GetToken)
+			access.Post("/users/:userid/tokens/:tokenid", s.accessHandler.CreateToken)
+			access.Put("/users/:userid/tokens/:tokenid", s.accessHandler.UpdateToken)
+			access.Delete("/users/:userid/tokens/:tokenid", s.accessHandler.DeleteToken)
+			access.Get("/groups", s.accessHandler.ListGroups)
+			access.Post("/groups", s.accessHandler.CreateGroup)
+			access.Get("/groups/:groupid", s.accessHandler.GetGroup)
+			access.Put("/groups/:groupid", s.accessHandler.UpdateGroup)
+			access.Delete("/groups/:groupid", s.accessHandler.DeleteGroup)
+			access.Get("/roles", s.accessHandler.ListRoles)
+			access.Post("/roles", s.accessHandler.CreateRole)
+			access.Get("/roles/:roleid", s.accessHandler.GetRole)
+			access.Put("/roles/:roleid", s.accessHandler.UpdateRole)
+			access.Delete("/roles/:roleid", s.accessHandler.DeleteRole)
+			access.Get("/acl", s.accessHandler.ListACL)
+			access.Put("/acl", s.accessHandler.UpdateACL)
+			access.Get("/domains", s.accessHandler.ListDomains)
+			access.Get("/domains/:realm", s.accessHandler.GetDomain)
+			access.Get("/permissions", s.accessHandler.GetPermissions)
+		}
+
 		// Replication routes.
 		if s.replicationHandler != nil {
 			clusters.Get("/:cluster_id/replication", s.replicationHandler.ListJobs)

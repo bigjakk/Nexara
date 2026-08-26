@@ -63,6 +63,7 @@ type Server struct {
 	clusterOptionsHandler  *handlers.ClusterOptionsHandler
 	haHandler              *handlers.HAHandler
 	poolHandler            *handlers.PoolHandler
+	accessHandler          *handlers.AccessHandler
 	replicationHandler     *handlers.ReplicationHandler
 	acmeHandler            *handlers.ACMEHandler
 	aptRepositoryHandler   *handlers.AptRepositoryHandler
@@ -316,6 +317,7 @@ func (s *Server) registerSecurity(d *serverDeps) {
 	s.clusterOptionsHandler = handlers.NewClusterOptionsHandler(d.queries, d.encryptionKey, d.eventPub)
 	s.haHandler = handlers.NewHAHandler(d.queries, d.encryptionKey, d.eventPub)
 	s.poolHandler = handlers.NewPoolHandler(d.queries, d.encryptionKey, d.eventPub)
+	s.accessHandler = handlers.NewAccessHandler(d.queries, d.encryptionKey, d.eventPub)
 	s.replicationHandler = handlers.NewReplicationHandler(d.queries, d.encryptionKey, d.eventPub)
 	s.acmeHandler = handlers.NewACMEHandler(d.queries, d.encryptionKey, d.eventPub)
 	s.aptRepositoryHandler = handlers.NewAptRepositoryHandler(d.queries, d.encryptionKey, d.eventPub)

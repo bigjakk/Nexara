@@ -198,6 +198,12 @@ export function useEventInvalidation(clusterIds: string[]): void {
           }
           break;
 
+        case "access_change":
+          if (cid) {
+            scheduleInvalidation(["clusters", cid, "access"]);
+          }
+          break;
+
         case "pool_change":
           if (cid) {
             scheduleInvalidation(

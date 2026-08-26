@@ -54,6 +54,7 @@ func newRouteStubServer() *Server {
 		clusterOptionsHandler:  &handlers.ClusterOptionsHandler{},
 		haHandler:              &handlers.HAHandler{},
 		poolHandler:            &handlers.PoolHandler{},
+		accessHandler:          &handlers.AccessHandler{},
 		replicationHandler:     &handlers.ReplicationHandler{},
 		acmeHandler:            &handlers.ACMEHandler{},
 		aptRepositoryHandler:   &handlers.AptRepositoryHandler{},

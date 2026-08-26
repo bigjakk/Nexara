@@ -134,7 +134,7 @@ pveum user token add root@pam nexara --privsep 0
 
 # Or create a dedicated user first
 pveum user add nexara@pve
-pveum aclmod / -user nexara@pve -role PVEAdmin
+pveum aclmod / -user nexara@pve -role Administrator
 pveum user token add nexara@pve api --privsep 0
 ```
 
@@ -142,6 +142,29 @@ Copy the token value — it is only shown once. The format for Nexara is:
 ```
 user@realm!tokenid=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
+
+#### Why `Administrator` and not `PVEAdmin`
+
+`PVEAdmin` looks like the least-privilege choice, but it is not sufficient for
+Nexara. Proxmox builds its bundled roles from the *admin*, *user* and *audit*
+privilege tiers only — the *root* tier is excluded. That tier holds
+`Sys.PowerMgmt`, `Sys.Modify`, `Sys.Incoming`, `Sys.AccessNetwork` and
+`Realm.Allocate`, so a `PVEAdmin` token cannot:
+
+- shut down or reboot a node (`Sys.PowerMgmt`)
+- change node network configuration (`Sys.Modify`)
+- manage Proxmox roles from **Access Control** (`Sys.Modify` on `/access`)
+- manage authentication realms (`Realm.Allocate`)
+
+On a stock PVE 9 cluster the difference is 40 privileges versus 47. If you
+previously followed this guide with `PVEAdmin`, those actions have been failing
+with a permission error; re-run the `aclmod` line above to fix it. No new token
+is needed — the ACL is attached to the user, and a `--privsep 0` token inherits
+whatever the user holds.
+
+To check what your token can actually do, open a cluster in Nexara and go to
+**Access Control → Permissions**; sections Nexara's own token cannot use are
+disabled with the missing privilege named.
 
 ## Services
 

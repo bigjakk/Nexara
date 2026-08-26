@@ -33,6 +33,7 @@ import { ClusterDRSTab } from "../components/ClusterDRSTab";
 import { ClusterOptionsTab } from "../components/ClusterOptionsTab";
 import { ClusterHATab } from "../components/ClusterHATab";
 import { ClusterPoolsTab } from "../components/ClusterPoolsTab";
+import { ClusterAccessTab } from "../components/ClusterAccessTab";
 import { ClusterReplicationTab } from "../components/ClusterReplicationTab";
 import { ClusterACMETab } from "../components/ClusterACMETab";
 import { ClusterMetricServersTab } from "../components/ClusterMetricServersTab";
@@ -148,6 +149,7 @@ export function ClusterDetailPage() {
               <TabsTrigger value="options">Options</TabsTrigger>
               <TabsTrigger value="ha">HA</TabsTrigger>
               <TabsTrigger value="pools">Pools</TabsTrigger>
+              <TabsTrigger value="access">Access Control</TabsTrigger>
               <TabsTrigger value="replication">Replication</TabsTrigger>
               <TabsTrigger value="ceph">Ceph</TabsTrigger>
               <TabsTrigger value="networks">Networks</TabsTrigger>
@@ -298,6 +300,10 @@ export function ClusterDetailPage() {
 
             <TabsContent value="pools">
               <ClusterPoolsTab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="access">
+              <ClusterAccessTab clusterId={clusterId ?? ""} />
             </TabsContent>
 
             <TabsContent value="replication">

@@ -5,19 +5,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/bigjakk/nexara/internal/netguard"
 )
 
 // maxResponseSize caps how much data we read from a Proxmox API response (50 MB).
@@ -31,6 +27,27 @@ type apiClient struct {
 	authHeader string
 	tokenID    string // e.g. "user@pam!tokenname" — needed for terminal handshake
 	tlsCfg     *tls.Config
+
+	// auth injects credentials into each outbound request. Set once at
+	// construction and never mutated for cached clients; BootstrapClient
+	// swaps it exactly once, in Login, before any concurrent use.
+	//
+	// May be nil on hand-built literals (some tests construct apiClient
+	// directly). applyAuth falls back to authHeader in that case, so the
+	// zero value behaves like the token auth this package has always used.
+	auth requestAuth
+}
+
+// applyAuth attaches credentials to req. See apiClient.auth for why the nil
+// case falls back to the raw authHeader.
+func (a *apiClient) applyAuth(req *http.Request) {
+	if a.auth == nil {
+		if a.authHeader != "" {
+			req.Header.Set("Authorization", a.authHeader)
+		}
+		return
+	}
+	a.auth.apply(req)
 }
 
 // newAPIClient creates an apiClient with TLS and auth configured.
@@ -52,59 +69,18 @@ func newAPIClient(cfg ClientConfig, authPrefix string) (*apiClient, error) {
 
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")
 
-	tlsCfg := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-	}
+	httpClient, tlsCfg := buildHTTPClient(cfg.TLSFingerprint, cfg.Timeout)
 
-	if cfg.TLSFingerprint != "" {
-		expected := strings.ToLower(strings.ReplaceAll(cfg.TLSFingerprint, ":", ""))
-
-		tlsCfg.InsecureSkipVerify = true //nolint:gosec // Custom VerifyPeerCertificate provides fingerprint verification
-		// Disable TLS session tickets to ensure VerifyPeerCertificate is called on every connection.
-		// Without this, resumed sessions could bypass fingerprint verification (gosec G123).
-		tlsCfg.SessionTicketsDisabled = true
-		tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			if len(rawCerts) == 0 {
-				return fmt.Errorf("proxmox: server presented no certificates")
-			}
-			actual := formatFingerprint(rawCerts[0])
-			if actual != expected {
-				return fmt.Errorf("proxmox: TLS fingerprint mismatch: got %s, want %s", actual, expected)
-			}
-			return nil
-		}
-	}
-
-	transport := &http.Transport{
-		TLSClientConfig: tlsCfg,
-		DialContext: (&net.Dialer{
-			Timeout:   cfg.Timeout,
-			KeepAlive: 30 * time.Second,
-			// Block dialing to cloud metadata, multicast, broadcast, Class E,
-			// or unspecified IPs even if DNS resolves to one (rebinding defence).
-			Control: netguard.DialControlSSRFGuard,
-		}).DialContext,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-	}
+	authHeader := buildAuthHeader(authPrefix, cfg.TokenID, cfg.TokenSecret)
 
 	return &apiClient{
-		httpClient: &http.Client{
-			Transport: transport,
-			Timeout:   cfg.Timeout,
-			// Surface any redirect as a caller-visible error rather than
-			// silently following. Proxmox API endpoints don't legitimately
-			// 3xx — a redirect almost certainly means a misconfigured
-			// reverse-proxy or a hostile upstream; either way the safe
-			// posture is to stop. Go's stdlib already strips Authorization
-			// on cross-host redirects, but turning the redirect into a
-			// caller error also defeats the case where a redirect lands on
-			// a same-host different-path endpoint that would still observe
-			// the bearer.
-			CheckRedirect: refuseRedirect,
-		},
+		httpClient: httpClient,
 		baseURL:    baseURL,
-		authHeader: buildAuthHeader(authPrefix, cfg.TokenID, cfg.TokenSecret),
+		// authHeader is retained alongside auth because console.go builds a
+		// websocket http.Header rather than an *http.Request and reads it
+		// directly.
+		authHeader: authHeader,
+		auth:       tokenAuth{header: authHeader},
 		tokenID:    cfg.TokenID,
 		tlsCfg:     tlsCfg,
 	}, nil
@@ -144,7 +120,7 @@ func (a *apiClient) do(ctx context.Context, path string, dst interface{}) error 
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", a.authHeader)
+	a.applyAuth(req)
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -174,7 +150,7 @@ func (a *apiClient) doPostRaw(ctx context.Context, path string, rawBody string, 
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", a.authHeader)
+	a.applyAuth(req)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := a.httpClient.Do(req)
@@ -208,7 +184,7 @@ func (a *apiClient) doPost(ctx context.Context, path string, params url.Values, 
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", a.authHeader)
+	a.applyAuth(req)
 	if params != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
@@ -239,7 +215,7 @@ func (a *apiClient) doDelete(ctx context.Context, path string, dst interface{}) 
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", a.authHeader)
+	a.applyAuth(req)
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -272,7 +248,7 @@ func (a *apiClient) doPut(ctx context.Context, path string, params url.Values, d
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", a.authHeader)
+	a.applyAuth(req)
 	if params != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
@@ -342,7 +318,7 @@ func (a *apiClient) doMultipart(ctx context.Context, path string, fields map[str
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", a.authHeader)
+	a.applyAuth(req)
 	req.Header.Set("Content-Type", contentType)
 	req.ContentLength = totalSize
 
@@ -466,7 +442,7 @@ func (a *apiClient) doWithTotal(ctx context.Context, path string, dst interface{
 	if err != nil {
 		return 0, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", a.authHeader)
+	a.applyAuth(req)
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -494,7 +470,7 @@ func (a *apiClient) doGetTotal(ctx context.Context, path string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("Authorization", a.authHeader)
+	a.applyAuth(req)
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {

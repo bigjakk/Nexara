@@ -38,16 +38,16 @@ type NodeListEntry struct {
 
 // NodeStatus represents the full status of a node from GET /nodes/{node}/status.
 type NodeStatus struct {
-	Node       string  `json:"node"`
-	Uptime     int64   `json:"uptime"`
-	Kversion   string  `json:"kversion"`
-	PVEVersion string  `json:"pveversion"`
-	CPUInfo    CPUInfo `json:"cpuinfo"`
-	Memory     Memory  `json:"memory"`
-	Swap       Memory  `json:"swap"`
-	RootFS     RootFS  `json:"rootfs"`
-	CPU        float64 `json:"cpu"`
-	Wait       float64 `json:"wait"`
+	Node       string   `json:"node"`
+	Uptime     int64    `json:"uptime"`
+	Kversion   string   `json:"kversion"`
+	PVEVersion string   `json:"pveversion"`
+	CPUInfo    CPUInfo  `json:"cpuinfo"`
+	Memory     Memory   `json:"memory"`
+	Swap       Memory   `json:"swap"`
+	RootFS     RootFS   `json:"rootfs"`
+	CPU        float64  `json:"cpu"`
+	Wait       float64  `json:"wait"`
 	LoadAvg    []string `json:"loadavg"`
 }
 
@@ -162,12 +162,12 @@ type CreateZFSPoolParams struct {
 
 // lvmVGRaw matches the Proxmox JSON for GET /nodes/{node}/disks/lvm children.
 type lvmVGRaw struct {
-	Name     string       `json:"name"`
-	Size     int64        `json:"size"`
-	Free     int64        `json:"free"`
-	LVCount  int          `json:"lvcount"`
-	Children []lvmPVRaw   `json:"children,omitempty"`
-	Leaf     int          `json:"leaf"`
+	Name     string     `json:"name"`
+	Size     int64      `json:"size"`
+	Free     int64      `json:"free"`
+	LVCount  int        `json:"lvcount"`
+	Children []lvmPVRaw `json:"children,omitempty"`
+	Leaf     int        `json:"leaf"`
 }
 
 type lvmPVRaw struct {
@@ -213,11 +213,11 @@ type CreateLVMThinParams struct {
 
 // DirectoryEntry represents a directory from GET /nodes/{node}/disks/directory.
 type DirectoryEntry struct {
-	Path       string `json:"path"`
-	Device     string `json:"device"`
-	Type       string `json:"type"`
-	Options    string `json:"options"`
-	UnitFile   string `json:"unitfile"`
+	Path     string `json:"path"`
+	Device   string `json:"device"`
+	Type     string `json:"type"`
+	Options  string `json:"options"`
+	UnitFile string `json:"unitfile"`
 }
 
 // CreateDirectoryParams are the parameters for creating a directory storage.
@@ -352,16 +352,16 @@ type ClusterResource struct {
 
 // StoragePool represents a storage pool from GET /nodes/{node}/storage.
 type StoragePool struct {
-	Storage    string `json:"storage"`
-	Type       string `json:"type"`
-	Content    string `json:"content"`
-	Active     int    `json:"active"`
-	Enabled    int    `json:"enabled"`
-	Shared     int    `json:"shared"`
-	Total      int64  `json:"total"`
-	Used       int64  `json:"used"`
-	Avail      int64  `json:"avail"`
-	UsedFrac   float64 `json:"used_fraction"`
+	Storage  string  `json:"storage"`
+	Type     string  `json:"type"`
+	Content  string  `json:"content"`
+	Active   int     `json:"active"`
+	Enabled  int     `json:"enabled"`
+	Shared   int     `json:"shared"`
+	Total    int64   `json:"total"`
+	Used     int64   `json:"used"`
+	Avail    int64   `json:"avail"`
+	UsedFrac float64 `json:"used_fraction"`
 }
 
 // FlexInt handles Proxmox fields that may be returned as either a JSON number
@@ -518,10 +518,10 @@ type StorageConfig struct {
 	Transport string `json:"transport,omitempty"`
 
 	// pbs
-	Datastore       string `json:"datastore,omitempty"`
-	FingerprintPBS  string `json:"fingerprint,omitempty"`
-	EncryptionKey   string `json:"encryption-key,omitempty"`
-	MasterPubkey    string `json:"master-pubkey,omitempty"`
+	Datastore      string `json:"datastore,omitempty"`
+	FingerprintPBS string `json:"fingerprint,omitempty"`
+	EncryptionKey  string `json:"encryption-key,omitempty"`
+	MasterPubkey   string `json:"master-pubkey,omitempty"`
 
 	// common optional
 	Preallocation string `json:"preallocation,omitempty"`
@@ -614,19 +614,19 @@ type URLMetadata struct {
 // ApplianceTemplate represents an entry from GET /nodes/{node}/aplinfo —
 // the catalog of official Proxmox appliance templates (Debian/Ubuntu/Turnkey/etc).
 type ApplianceTemplate struct {
-	Template    string `json:"template"`
-	OS          string `json:"os"`
-	Type        string `json:"type"`
-	Version     string `json:"version"`
-	Section     string `json:"section"`
-	Package     string `json:"package"`
-	Description string `json:"description"`
-	Headline    string `json:"headline"`
-	InfoPage    string `json:"infopage"`
-	Source      string `json:"source"`
-	Location    string `json:"location"`
-	ManageURL   string `json:"manageurl"`
-	SHA512Sum   string `json:"sha512sum"`
+	Template     string `json:"template"`
+	OS           string `json:"os"`
+	Type         string `json:"type"`
+	Version      string `json:"version"`
+	Section      string `json:"section"`
+	Package      string `json:"package"`
+	Description  string `json:"description"`
+	Headline     string `json:"headline"`
+	InfoPage     string `json:"infopage"`
+	Source       string `json:"source"`
+	Location     string `json:"location"`
+	ManageURL    string `json:"manageurl"`
+	SHA512Sum    string `json:"sha512sum"`
 	Architecture string `json:"architecture"`
 }
 
@@ -692,11 +692,11 @@ type CTVolumeMoveParams struct {
 
 // CephStatus represents the cluster-wide Ceph status from GET /nodes/{node}/ceph/status.
 type CephStatus struct {
-	Health  CephHealth  `json:"health"`
-	PGMap   CephPGMap   `json:"pgmap"`
-	OSDMap  CephOSDMap  `json:"osdmap"`
-	MonMap  CephMonMap  `json:"monmap"`
-	Quorum  []int       `json:"quorum,omitempty"`
+	Health CephHealth `json:"health"`
+	PGMap  CephPGMap  `json:"pgmap"`
+	OSDMap CephOSDMap `json:"osdmap"`
+	MonMap CephMonMap `json:"monmap"`
+	Quorum []int      `json:"quorum,omitempty"`
 }
 
 // CephHealth represents the Ceph health summary.
@@ -780,17 +780,17 @@ func cephSeverityRank(severity string) int {
 
 // CephPGMap represents Ceph placement group statistics.
 type CephPGMap struct {
-	BytesUsed    int64   `json:"bytes_used"`
-	BytesAvail   int64   `json:"bytes_avail"`
-	BytesTotal   int64   `json:"bytes_total"`
-	ReadBytesSec int64   `json:"read_bytes_sec"`
-	WritBytesSec int64   `json:"write_bytes_sec"`
-	ReadOpPerSec int64   `json:"read_op_per_sec"`
-	WritOpPerSec int64   `json:"write_op_per_sec"`
+	BytesUsed    int64          `json:"bytes_used"`
+	BytesAvail   int64          `json:"bytes_avail"`
+	BytesTotal   int64          `json:"bytes_total"`
+	ReadBytesSec int64          `json:"read_bytes_sec"`
+	WritBytesSec int64          `json:"write_bytes_sec"`
+	ReadOpPerSec int64          `json:"read_op_per_sec"`
+	WritOpPerSec int64          `json:"write_op_per_sec"`
 	PGsPerState  []PGStateCount `json:"pgs_by_state,omitempty"`
-	NumPGs       int     `json:"num_pgs"`
-	DataBytes    int64   `json:"data_bytes"`
-	UsedFraction float64 `json:"used_pct,omitempty"`
+	NumPGs       int            `json:"num_pgs"`
+	DataBytes    int64          `json:"data_bytes"`
+	UsedFraction float64        `json:"used_pct,omitempty"`
 }
 
 // PGStateCount represents PG counts by state.
@@ -811,9 +811,9 @@ type CephOSDMap struct {
 // CephMonMap represents Ceph monitor map summary.
 // Proxmox may return num_mons at the top level or nested under a "monmap" sub-object.
 type CephMonMap struct {
-	NumMons   int              `json:"num_mons"`
+	NumMons   int               `json:"num_mons"`
 	Mons      []json.RawMessage `json:"mons,omitempty"`
-	SubMonMap *cephSubMonMap   `json:"monmap,omitempty"`
+	SubMonMap *cephSubMonMap    `json:"monmap,omitempty"`
 }
 
 type cephSubMonMap struct {
@@ -846,8 +846,8 @@ type CephOSD struct {
 	In   int    `json:"in"`
 	Up   int    `json:"up"`
 	// DevicePath contains the block device path.
-	DevicePath string  `json:"device_path,omitempty"`
-	Status     string  `json:"status,omitempty"`
+	DevicePath  string  `json:"device_path,omitempty"`
+	Status      string  `json:"status,omitempty"`
 	CrushWeight float64 `json:"crush_weight,omitempty"`
 }
 
@@ -856,13 +856,13 @@ type CephOSD struct {
 // non-OSD nodes (root, host, rack) and positive integers for OSDs, but some
 // versions return them as strings.
 type CephOSDTreeNode struct {
-	ID       FlexInt           `json:"id"`
-	Name     string            `json:"name"`
-	Type     string            `json:"type"`
-	Status   string            `json:"status,omitempty"`
-	Host     string            `json:"host,omitempty"`
-	Children []CephOSDTreeNode `json:"children,omitempty"`
-	CrushWeight float64        `json:"crush_weight,omitempty"`
+	ID          FlexInt           `json:"id"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Status      string            `json:"status,omitempty"`
+	Host        string            `json:"host,omitempty"`
+	Children    []CephOSDTreeNode `json:"children,omitempty"`
+	CrushWeight float64           `json:"crush_weight,omitempty"`
 	// In reports whether the OSD is "in" the CRUSH map (eligible to hold data),
 	// as opposed to Status which reports whether its daemon is up. Proxmox omits
 	// it on non-OSD tree nodes, so it is a pointer: nil means "not reported" and
@@ -878,7 +878,6 @@ func (n *CephOSDTreeNode) IsIn() bool {
 	}
 	return bool(*n.In)
 }
-
 
 // CephOSDResponse wraps the response from GET /nodes/{node}/ceph/osd.
 type CephOSDResponse struct {
@@ -906,20 +905,20 @@ type CephPool struct {
 
 // CephPoolCreateParams holds parameters for creating a new Ceph pool.
 type CephPoolCreateParams struct {
-	Name         string `json:"name"`
-	Size         int    `json:"size"`
-	MinSize      int    `json:"min_size,omitempty"`
-	PGNum        int    `json:"pg_num"`
-	Application  string `json:"application,omitempty"`
-	CrushRule    string `json:"crush_rule_name,omitempty"`
-	PGAutoScale  string `json:"pg_autoscale_mode,omitempty"`
+	Name        string `json:"name"`
+	Size        int    `json:"size"`
+	MinSize     int    `json:"min_size,omitempty"`
+	PGNum       int    `json:"pg_num"`
+	Application string `json:"application,omitempty"`
+	CrushRule   string `json:"crush_rule_name,omitempty"`
+	PGAutoScale string `json:"pg_autoscale_mode,omitempty"`
 }
 
 // CephFS represents a CephFS filesystem from GET /nodes/{node}/ceph/fs.
 type CephFS struct {
-	Name       string `json:"name"`
-	MetaPool   string `json:"metadata_pool"`
-	DataPool   string `json:"data_pool"`
+	Name     string `json:"name"`
+	MetaPool string `json:"metadata_pool"`
+	DataPool string `json:"data_pool"`
 }
 
 // CephCrushRule represents a CRUSH rule from GET /nodes/{node}/ceph/rules.
@@ -934,19 +933,19 @@ type CephCrushRule struct {
 // CephMon represents a Ceph monitor from GET /nodes/{node}/ceph/mon.
 // Uses json.RawMessage for initial parse to handle varying response formats.
 type CephMon struct {
-	Name    string  `json:"name"`
-	Addr    string  `json:"addr,omitempty"`
-	Host    string  `json:"host,omitempty"`
-	Rank    FlexInt `json:"rank,omitempty"`
-	Quorum  bool    `json:"quorum,omitempty"`
+	Name   string  `json:"name"`
+	Addr   string  `json:"addr,omitempty"`
+	Host   string  `json:"host,omitempty"`
+	Rank   FlexInt `json:"rank,omitempty"`
+	Quorum bool    `json:"quorum,omitempty"`
 }
 
 // HAResource represents an HA-managed resource from GET /cluster/ha/resources.
 type HAResource struct {
-	SID         string `json:"sid"`          // "vm:101" or "ct:200"
-	Type        string `json:"type"`         // "vm" or "ct"
-	State       string `json:"state"`        // "started", "stopped", "enabled", etc.
-	Group       string `json:"group"`        // HA group name (may be empty)
+	SID         string `json:"sid"`   // "vm:101" or "ct:200"
+	Type        string `json:"type"`  // "vm" or "ct"
+	State       string `json:"state"` // "started", "stopped", "enabled", etc.
+	Group       string `json:"group"` // HA group name (may be empty)
 	Status      string `json:"status"`
 	MaxRelocate int    `json:"max_relocate"`
 	MaxRestart  int    `json:"max_restart"`
@@ -1078,20 +1077,20 @@ type CreateCTParams struct {
 
 // NetworkInterface represents a network interface from GET /nodes/{node}/network.
 type NetworkInterface struct {
-	Iface     string `json:"iface"`
-	Type      string `json:"type"`
-	Active    int    `json:"active"`
-	Autostart int    `json:"autostart"`
-	Method    string `json:"method,omitempty"`
-	Method6   string `json:"method6,omitempty"`
-	Address   string `json:"address,omitempty"`
-	Netmask   string `json:"netmask,omitempty"`
-	Gateway   string `json:"gateway,omitempty"`
-	CIDR      string `json:"cidr,omitempty"`
+	Iface       string `json:"iface"`
+	Type        string `json:"type"`
+	Active      int    `json:"active"`
+	Autostart   int    `json:"autostart"`
+	Method      string `json:"method,omitempty"`
+	Method6     string `json:"method6,omitempty"`
+	Address     string `json:"address,omitempty"`
+	Netmask     string `json:"netmask,omitempty"`
+	Gateway     string `json:"gateway,omitempty"`
+	CIDR        string `json:"cidr,omitempty"`
 	BridgePorts string `json:"bridge_ports,omitempty"`
 	BridgeSTP   string `json:"bridge_stp,omitempty"`
 	BridgeFD    string `json:"bridge_fd,omitempty"`
-	Comments  string `json:"comments,omitempty"`
+	Comments    string `json:"comments,omitempty"`
 }
 
 // DiskAttachParams holds parameters for attaching a new disk to a VM.
@@ -1153,24 +1152,24 @@ func (e TargetEndpoint) String() string {
 
 // RemoteMigrateVMParams holds parameters for cross-cluster VM migration via remote_migrate.
 type RemoteMigrateVMParams struct {
-	TargetBridge  string         `json:"target-bridge,omitempty"`
-	TargetStorage string         `json:"target-storage,omitempty"`
-	TargetVMID    int            `json:"target-vmid,omitempty"`
+	TargetBridge   string         `json:"target-bridge,omitempty"`
+	TargetStorage  string         `json:"target-storage,omitempty"`
+	TargetVMID     int            `json:"target-vmid,omitempty"`
 	TargetEndpoint TargetEndpoint `json:"target-endpoint"`
-	BWLimit       int            `json:"bwlimit,omitempty"`
-	Online        bool           `json:"online,omitempty"`
-	Delete        bool           `json:"delete,omitempty"`
+	BWLimit        int            `json:"bwlimit,omitempty"`
+	Online         bool           `json:"online,omitempty"`
+	Delete         bool           `json:"delete,omitempty"`
 }
 
 // RemoteMigrateCTParams holds parameters for cross-cluster container migration via remote_migrate.
 type RemoteMigrateCTParams struct {
-	TargetBridge  string         `json:"target-bridge,omitempty"`
-	TargetStorage string         `json:"target-storage,omitempty"`
-	TargetVMID    int            `json:"target-vmid,omitempty"`
+	TargetBridge   string         `json:"target-bridge,omitempty"`
+	TargetStorage  string         `json:"target-storage,omitempty"`
+	TargetVMID     int            `json:"target-vmid,omitempty"`
 	TargetEndpoint TargetEndpoint `json:"target-endpoint"`
-	BWLimit       int            `json:"bwlimit,omitempty"`
-	Restart       bool           `json:"restart,omitempty"`
-	Delete        bool           `json:"delete,omitempty"`
+	BWLimit        int            `json:"bwlimit,omitempty"`
+	Restart        bool           `json:"restart,omitempty"`
+	Delete         bool           `json:"delete,omitempty"`
 }
 
 // GuestOSInfo represents the OS information returned by the QEMU guest agent.
@@ -1234,34 +1233,34 @@ type FirewallRuleParams struct {
 
 // FirewallOptions represents firewall options for cluster/node/VM.
 type FirewallOptions struct {
-	Enable     *int   `json:"enable,omitempty"`
-	PolicyIn   string `json:"policy_in,omitempty"`
-	PolicyOut  string `json:"policy_out,omitempty"`
-	LogLevelIn string `json:"log_level_in,omitempty"`
+	Enable      *int   `json:"enable,omitempty"`
+	PolicyIn    string `json:"policy_in,omitempty"`
+	PolicyOut   string `json:"policy_out,omitempty"`
+	LogLevelIn  string `json:"log_level_in,omitempty"`
 	LogLevelOut string `json:"log_level_out,omitempty"`
 }
 
 // SDNZone represents an SDN zone from GET /cluster/sdn/zones.
 type SDNZone struct {
-	Zone         string `json:"zone"`
-	Type         string `json:"type"`
-	Nodes        string `json:"nodes,omitempty"`
-	IPAM         string `json:"ipam,omitempty"`
-	DNS          string `json:"dns,omitempty"`
-	ReverseDNS   string `json:"reversedns,omitempty"`
-	DNSZone      string `json:"dnszone,omitempty"`
-	Bridge       string `json:"bridge,omitempty"`
-	Tag          int    `json:"tag,omitempty"`
-	VLANProtocol string `json:"vlan-protocol,omitempty"`
-	Peers        string `json:"peers,omitempty"`
-	MTU          int    `json:"mtu,omitempty"`
-	Controller   string `json:"controller,omitempty"`
-	VRFVxlan     int    `json:"vrf-vxlan,omitempty"`
-	ExitNodes    string `json:"exitnodes,omitempty"`
-	Mac          string `json:"mac,omitempty"`
-	AdvSubnets   int    `json:"advertise-subnets,omitempty"`
-	DisableArp   int    `json:"disable-arp-nd-suppression,omitempty"`
-	BridgeDisableMacLearning int `json:"bridge-disable-mac-learning,omitempty"`
+	Zone                     string `json:"zone"`
+	Type                     string `json:"type"`
+	Nodes                    string `json:"nodes,omitempty"`
+	IPAM                     string `json:"ipam,omitempty"`
+	DNS                      string `json:"dns,omitempty"`
+	ReverseDNS               string `json:"reversedns,omitempty"`
+	DNSZone                  string `json:"dnszone,omitempty"`
+	Bridge                   string `json:"bridge,omitempty"`
+	Tag                      int    `json:"tag,omitempty"`
+	VLANProtocol             string `json:"vlan-protocol,omitempty"`
+	Peers                    string `json:"peers,omitempty"`
+	MTU                      int    `json:"mtu,omitempty"`
+	Controller               string `json:"controller,omitempty"`
+	VRFVxlan                 int    `json:"vrf-vxlan,omitempty"`
+	ExitNodes                string `json:"exitnodes,omitempty"`
+	Mac                      string `json:"mac,omitempty"`
+	AdvSubnets               int    `json:"advertise-subnets,omitempty"`
+	DisableArp               int    `json:"disable-arp-nd-suppression,omitempty"`
+	BridgeDisableMacLearning int    `json:"bridge-disable-mac-learning,omitempty"`
 }
 
 // SDNVNet represents an SDN VNet from GET /cluster/sdn/vnets.
@@ -1287,46 +1286,46 @@ type SDNSubnet struct {
 
 // SDNController represents an SDN controller from GET /cluster/sdn/controllers.
 type SDNController struct {
-	Controller string `json:"controller"`
-	Type       string `json:"type"`
-	Nodes      string `json:"nodes,omitempty"`
-	ASN        int    `json:"asn,omitempty"`
-	Peers      string `json:"peers,omitempty"`
-	ISISDomain string `json:"isis-domain,omitempty"`
-	ISISIfaces string `json:"isis-ifaces,omitempty"`
-	ISISNET    string `json:"isis-net,omitempty"`
-	BGPMultipath int  `json:"bgp-multipath-as-path-relax,omitempty"`
-	EBGPMultihop int  `json:"ebgp-multihop,omitempty"`
-	Loopback   string `json:"loopback,omitempty"`
-	Node       string `json:"node,omitempty"`
+	Controller   string `json:"controller"`
+	Type         string `json:"type"`
+	Nodes        string `json:"nodes,omitempty"`
+	ASN          int    `json:"asn,omitempty"`
+	Peers        string `json:"peers,omitempty"`
+	ISISDomain   string `json:"isis-domain,omitempty"`
+	ISISIfaces   string `json:"isis-ifaces,omitempty"`
+	ISISNET      string `json:"isis-net,omitempty"`
+	BGPMultipath int    `json:"bgp-multipath-as-path-relax,omitempty"`
+	EBGPMultihop int    `json:"ebgp-multihop,omitempty"`
+	Loopback     string `json:"loopback,omitempty"`
+	Node         string `json:"node,omitempty"`
 }
 
 // CreateSDNControllerParams holds parameters for creating an SDN controller.
 type CreateSDNControllerParams struct {
-	Controller string `json:"controller"`
-	Type       string `json:"type"`
-	ASN        int    `json:"asn,omitempty"`
-	Peers      string `json:"peers,omitempty"`
-	Nodes      string `json:"nodes,omitempty"`
-	ISISDomain string `json:"isis-domain,omitempty"`
-	ISISIfaces string `json:"isis-ifaces,omitempty"`
-	ISISNET    string `json:"isis-net,omitempty"`
-	EBGPMultihop int  `json:"ebgp-multihop,omitempty"`
-	Loopback   string `json:"loopback,omitempty"`
-	Node       string `json:"node,omitempty"`
+	Controller   string `json:"controller"`
+	Type         string `json:"type"`
+	ASN          int    `json:"asn,omitempty"`
+	Peers        string `json:"peers,omitempty"`
+	Nodes        string `json:"nodes,omitempty"`
+	ISISDomain   string `json:"isis-domain,omitempty"`
+	ISISIfaces   string `json:"isis-ifaces,omitempty"`
+	ISISNET      string `json:"isis-net,omitempty"`
+	EBGPMultihop int    `json:"ebgp-multihop,omitempty"`
+	Loopback     string `json:"loopback,omitempty"`
+	Node         string `json:"node,omitempty"`
 }
 
 // UpdateSDNControllerParams holds parameters for updating an SDN controller.
 type UpdateSDNControllerParams struct {
-	ASN        int    `json:"asn,omitempty"`
-	Peers      string `json:"peers,omitempty"`
-	Nodes      string `json:"nodes,omitempty"`
-	ISISDomain string `json:"isis-domain,omitempty"`
-	ISISIfaces string `json:"isis-ifaces,omitempty"`
-	ISISNET    string `json:"isis-net,omitempty"`
-	EBGPMultihop int  `json:"ebgp-multihop,omitempty"`
-	Loopback   string `json:"loopback,omitempty"`
-	Node       string `json:"node,omitempty"`
+	ASN          int    `json:"asn,omitempty"`
+	Peers        string `json:"peers,omitempty"`
+	Nodes        string `json:"nodes,omitempty"`
+	ISISDomain   string `json:"isis-domain,omitempty"`
+	ISISIfaces   string `json:"isis-ifaces,omitempty"`
+	ISISNET      string `json:"isis-net,omitempty"`
+	EBGPMultihop int    `json:"ebgp-multihop,omitempty"`
+	Loopback     string `json:"loopback,omitempty"`
+	Node         string `json:"node,omitempty"`
 }
 
 // SDNIPAM represents an SDN IPAM plugin from GET /cluster/sdn/ipams.
@@ -1356,11 +1355,11 @@ type UpdateSDNIPAMParams struct {
 
 // SDNDNS represents an SDN DNS plugin from GET /cluster/sdn/dns.
 type SDNDNS struct {
-	DNS        string `json:"dns"`
-	Type       string `json:"type"`
-	URL        string `json:"url,omitempty"`
-	Key        string `json:"key,omitempty"`
-	ReverseMaskV6 int `json:"reversemaskv6,omitempty"`
+	DNS           string `json:"dns"`
+	Type          string `json:"type"`
+	URL           string `json:"url,omitempty"`
+	Key           string `json:"key,omitempty"`
+	ReverseMaskV6 int    `json:"reversemaskv6,omitempty"`
 }
 
 // CreateSDNDNSParams holds parameters for creating a DNS plugin.
@@ -1693,25 +1692,25 @@ type ClusterOptions struct {
 
 // UpdateClusterOptionsParams holds parameters for PUT /cluster/options.
 type UpdateClusterOptionsParams struct {
-	Console       *string `json:"console,omitempty"`
-	Keyboard      *string `json:"keyboard,omitempty"`
-	Language      *string `json:"language,omitempty"`
-	EmailFrom     *string `json:"email_from,omitempty"`
-	HTTPProxy     *string `json:"http_proxy,omitempty"`
-	MacPrefix     *string `json:"mac_prefix,omitempty"`
-	Migration     *string `json:"migration,omitempty"`
-	MigrationType *string `json:"migration_type,omitempty"`
-	BWLimit       *string `json:"bwlimit,omitempty"`
-	NextID        *string `json:"next-id,omitempty"`
-	HA            *string `json:"ha,omitempty"`
-	Fencing       *string `json:"fencing,omitempty"`
-	CRS           *string `json:"crs,omitempty"`
-	MaxWorkers    *int    `json:"max_workers,omitempty"`
-	Description   *string `json:"description,omitempty"`
+	Console        *string `json:"console,omitempty"`
+	Keyboard       *string `json:"keyboard,omitempty"`
+	Language       *string `json:"language,omitempty"`
+	EmailFrom      *string `json:"email_from,omitempty"`
+	HTTPProxy      *string `json:"http_proxy,omitempty"`
+	MacPrefix      *string `json:"mac_prefix,omitempty"`
+	Migration      *string `json:"migration,omitempty"`
+	MigrationType  *string `json:"migration_type,omitempty"`
+	BWLimit        *string `json:"bwlimit,omitempty"`
+	NextID         *string `json:"next-id,omitempty"`
+	HA             *string `json:"ha,omitempty"`
+	Fencing        *string `json:"fencing,omitempty"`
+	CRS            *string `json:"crs,omitempty"`
+	MaxWorkers     *int    `json:"max_workers,omitempty"`
+	Description    *string `json:"description,omitempty"`
 	RegisteredTags *string `json:"registered-tags,omitempty"`
-	UserTagAccess *string `json:"user-tag-access,omitempty"`
-	TagStyle      *string `json:"tag-style,omitempty"`
-	Delete        string  `json:"delete,omitempty"`
+	UserTagAccess  *string `json:"user-tag-access,omitempty"`
+	TagStyle       *string `json:"tag-style,omitempty"`
+	Delete         string  `json:"delete,omitempty"`
 }
 
 // CreateHAResourceParams holds parameters for POST /cluster/ha/resources.
@@ -1756,16 +1755,16 @@ type UpdateHAGroupParams struct {
 
 // HAStatusEntry represents an entry from GET /cluster/ha/status/current.
 type HAStatusEntry struct {
-	ID        string `json:"id"`
-	Type      string `json:"type"`
-	Node      string `json:"node,omitempty"`
-	Status    string `json:"status"`
-	State     string `json:"state,omitempty"`
-	CRMState  string `json:"crm_state,omitempty"`
-	Quorum    int    `json:"quorum,omitempty"`
-	Timestamp int64  `json:"timestamp,omitempty"`
+	ID           string `json:"id"`
+	Type         string `json:"type"`
+	Node         string `json:"node,omitempty"`
+	Status       string `json:"status"`
+	State        string `json:"state,omitempty"`
+	CRMState     string `json:"crm_state,omitempty"`
+	Quorum       int    `json:"quorum,omitempty"`
+	Timestamp    int64  `json:"timestamp,omitempty"`
 	RequestState string `json:"request_state,omitempty"`
-	SID       string `json:"sid,omitempty"`
+	SID          string `json:"sid,omitempty"`
 }
 
 // FirewallAlias represents a firewall alias from GET /cluster/firewall/aliases.
@@ -1866,23 +1865,23 @@ type UpdatePoolParams struct {
 
 // ReplicationJob represents a replication job from GET /cluster/replication.
 type ReplicationJob struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Source   string `json:"source,omitempty"`
-	Target   string `json:"target"`
-	Guest    int    `json:"guest"`
-	JobNum   int    `json:"jobnum,omitempty"`
-	Schedule string `json:"schedule,omitempty"`
-	Rate     string `json:"rate,omitempty"`
-	Comment  string `json:"comment,omitempty"`
-	Disable  int    `json:"disable,omitempty"`
-	RemoveJob string `json:"remove_job,omitempty"`
-	Error    string `json:"error,omitempty"`
-	Duration float64 `json:"duration,omitempty"`
-	FailCount int   `json:"fail_count,omitempty"`
-	LastSync int64  `json:"last_sync,omitempty"`
-	LastTry  int64  `json:"last_try,omitempty"`
-	NextSync int64  `json:"next_sync,omitempty"`
+	ID        string  `json:"id"`
+	Type      string  `json:"type"`
+	Source    string  `json:"source,omitempty"`
+	Target    string  `json:"target"`
+	Guest     int     `json:"guest"`
+	JobNum    int     `json:"jobnum,omitempty"`
+	Schedule  string  `json:"schedule,omitempty"`
+	Rate      string  `json:"rate,omitempty"`
+	Comment   string  `json:"comment,omitempty"`
+	Disable   int     `json:"disable,omitempty"`
+	RemoveJob string  `json:"remove_job,omitempty"`
+	Error     string  `json:"error,omitempty"`
+	Duration  float64 `json:"duration,omitempty"`
+	FailCount int     `json:"fail_count,omitempty"`
+	LastSync  int64   `json:"last_sync,omitempty"`
+	LastTry   int64   `json:"last_try,omitempty"`
+	NextSync  int64   `json:"next_sync,omitempty"`
 }
 
 // CreateReplicationJobParams holds parameters for POST /cluster/replication.
@@ -1898,10 +1897,10 @@ type CreateReplicationJobParams struct {
 
 // UpdateReplicationJobParams holds parameters for PUT /cluster/replication/{id}.
 type UpdateReplicationJobParams struct {
-	Schedule string `json:"schedule,omitempty"`
-	Rate     string `json:"rate,omitempty"`
-	Comment  string `json:"comment,omitempty"`
-	Disable  *int   `json:"disable,omitempty"`
+	Schedule  string `json:"schedule,omitempty"`
+	Rate      string `json:"rate,omitempty"`
+	Comment   string `json:"comment,omitempty"`
+	Disable   *int   `json:"disable,omitempty"`
 	RemoveJob string `json:"remove_job,omitempty"`
 }
 
@@ -1922,11 +1921,11 @@ type ReplicationLogEntry struct {
 
 // ACMEAccount represents an ACME account from GET /cluster/acme/account.
 type ACMEAccount struct {
-	Name      string `json:"name,omitempty"`
+	Name      string      `json:"name,omitempty"`
 	Account   interface{} `json:"account,omitempty"`
-	Directory string `json:"directory,omitempty"`
-	Location  string `json:"location,omitempty"`
-	TOS       string `json:"tos,omitempty"`
+	Directory string      `json:"directory,omitempty"`
+	Location  string      `json:"location,omitempty"`
+	TOS       string      `json:"tos,omitempty"`
 }
 
 // CreateACMEAccountParams holds parameters for POST /cluster/acme/account.
@@ -2044,73 +2043,73 @@ func (n NodeCertificate) MarshalJSON() ([]byte, error) {
 
 // MetricServerConfig represents a metric server from GET /cluster/metrics/server.
 type MetricServerConfig struct {
-	ID             string `json:"id"`
-	Type           string `json:"type"`
-	Server         string `json:"server"`
-	Port           int    `json:"port"`
-	Disable        int    `json:"disable,omitempty"`
-	MTU            int    `json:"mtu,omitempty"`
-	Timeout        int    `json:"timeout,omitempty"`
-	Proto          string `json:"proto,omitempty"`
-	Path           string `json:"path,omitempty"`
-	InfluxDBProto  string `json:"influxdbproto,omitempty"`
-	Organization   string `json:"organization,omitempty"`
-	Bucket         string `json:"bucket,omitempty"`
-	Token          string `json:"token,omitempty"`
-	MaxBodySize    int    `json:"max-body-size,omitempty"`
-	VerifyCert     *int   `json:"verify-certificate,omitempty"`
+	ID            string `json:"id"`
+	Type          string `json:"type"`
+	Server        string `json:"server"`
+	Port          int    `json:"port"`
+	Disable       int    `json:"disable,omitempty"`
+	MTU           int    `json:"mtu,omitempty"`
+	Timeout       int    `json:"timeout,omitempty"`
+	Proto         string `json:"proto,omitempty"`
+	Path          string `json:"path,omitempty"`
+	InfluxDBProto string `json:"influxdbproto,omitempty"`
+	Organization  string `json:"organization,omitempty"`
+	Bucket        string `json:"bucket,omitempty"`
+	Token         string `json:"token,omitempty"`
+	MaxBodySize   int    `json:"max-body-size,omitempty"`
+	VerifyCert    *int   `json:"verify-certificate,omitempty"`
 }
 
 // CreateMetricServerParams holds parameters for POST /cluster/metrics/server/{id}.
 type CreateMetricServerParams struct {
-	ID             string `json:"id"`
-	Type           string `json:"type"`
-	Server         string `json:"server"`
-	Port           int    `json:"port"`
-	Disable        *int   `json:"disable,omitempty"`
-	MTU            int    `json:"mtu,omitempty"`
-	Timeout        int    `json:"timeout,omitempty"`
-	Proto          string `json:"proto,omitempty"`
-	Path           string `json:"path,omitempty"`
-	InfluxDBProto  string `json:"influxdbproto,omitempty"`
-	Organization   string `json:"organization,omitempty"`
-	Bucket         string `json:"bucket,omitempty"`
-	Token          string `json:"token,omitempty"`
-	MaxBodySize    int    `json:"max-body-size,omitempty"`
-	VerifyCert     *int   `json:"verify-certificate,omitempty"`
+	ID            string `json:"id"`
+	Type          string `json:"type"`
+	Server        string `json:"server"`
+	Port          int    `json:"port"`
+	Disable       *int   `json:"disable,omitempty"`
+	MTU           int    `json:"mtu,omitempty"`
+	Timeout       int    `json:"timeout,omitempty"`
+	Proto         string `json:"proto,omitempty"`
+	Path          string `json:"path,omitempty"`
+	InfluxDBProto string `json:"influxdbproto,omitempty"`
+	Organization  string `json:"organization,omitempty"`
+	Bucket        string `json:"bucket,omitempty"`
+	Token         string `json:"token,omitempty"`
+	MaxBodySize   int    `json:"max-body-size,omitempty"`
+	VerifyCert    *int   `json:"verify-certificate,omitempty"`
 }
 
 // UpdateMetricServerParams holds parameters for PUT /cluster/metrics/server/{id}.
 type UpdateMetricServerParams struct {
-	Server         string `json:"server,omitempty"`
-	Port           *int   `json:"port,omitempty"`
-	Disable        *int   `json:"disable,omitempty"`
-	MTU            int    `json:"mtu,omitempty"`
-	Timeout        int    `json:"timeout,omitempty"`
-	Proto          string `json:"proto,omitempty"`
-	Path           string `json:"path,omitempty"`
-	InfluxDBProto  string `json:"influxdbproto,omitempty"`
-	Organization   string `json:"organization,omitempty"`
-	Bucket         string `json:"bucket,omitempty"`
-	Token          string `json:"token,omitempty"`
-	MaxBodySize    int    `json:"max-body-size,omitempty"`
-	VerifyCert     *int   `json:"verify-certificate,omitempty"`
-	Delete         string `json:"delete,omitempty"`
+	Server        string `json:"server,omitempty"`
+	Port          *int   `json:"port,omitempty"`
+	Disable       *int   `json:"disable,omitempty"`
+	MTU           int    `json:"mtu,omitempty"`
+	Timeout       int    `json:"timeout,omitempty"`
+	Proto         string `json:"proto,omitempty"`
+	Path          string `json:"path,omitempty"`
+	InfluxDBProto string `json:"influxdbproto,omitempty"`
+	Organization  string `json:"organization,omitempty"`
+	Bucket        string `json:"bucket,omitempty"`
+	Token         string `json:"token,omitempty"`
+	MaxBodySize   int    `json:"max-body-size,omitempty"`
+	VerifyCert    *int   `json:"verify-certificate,omitempty"`
+	Delete        string `json:"delete,omitempty"`
 }
 
 // ClusterConfig represents cluster configuration from GET /cluster/config.
 type ClusterConfig struct {
-	Nodes    []CorosyncNode `json:"nodes,omitempty"`
-	Totem    interface{}    `json:"totem,omitempty"`
-	Version  int            `json:"version,omitempty"`
+	Nodes   []CorosyncNode `json:"nodes,omitempty"`
+	Totem   interface{}    `json:"totem,omitempty"`
+	Version int            `json:"version,omitempty"`
 }
 
 // ClusterJoinInfo represents join information from GET /cluster/config/join.
 type ClusterJoinInfo struct {
-	ConfigDigest string        `json:"config_digest,omitempty"`
-	Fingerprint  string        `json:"fingerprint,omitempty"`
+	ConfigDigest string         `json:"config_digest,omitempty"`
+	Fingerprint  string         `json:"fingerprint,omitempty"`
 	NodeList     []CorosyncNode `json:"nodelist,omitempty"`
-	Totem        interface{}   `json:"totem,omitempty"`
+	Totem        interface{}    `json:"totem,omitempty"`
 }
 
 // CorosyncNode represents a corosync node.
@@ -2127,12 +2126,215 @@ type CorosyncNode struct {
 
 // SearchResult represents a unified search result.
 type SearchResult struct {
-	Type      string `json:"type"`
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Node      string `json:"node,omitempty"`
-	Status    string `json:"status,omitempty"`
-	ClusterID string `json:"cluster_id"`
+	Type        string `json:"type"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Node        string `json:"node,omitempty"`
+	Status      string `json:"status,omitempty"`
+	ClusterID   string `json:"cluster_id"`
 	ClusterName string `json:"cluster_name"`
-	VMID      int    `json:"vmid,omitempty"`
+	VMID        int    `json:"vmid,omitempty"`
 }
+
+// ---------------------------------------------------------------------------
+// Access control (/access/*)
+// ---------------------------------------------------------------------------
+
+// AccessUser is a PVE user as returned by the /access/users INDEX.
+//
+// Proxmox is inconsistent about boolean and numeric encoding across releases —
+// enable arrives as 0/1, true/false or "1", and expire as a number or a quoted
+// number — hence FlexBool/FlexInt.
+//
+// Note Groups is a comma-separated string here. The per-user detail endpoint
+// returns the same field as a JSON array, which is why AccessUserDetail exists
+// as a separate type rather than reusing this one; decoding the detail response
+// into this struct fails outright for any user that belongs to a group.
+type AccessUser struct {
+	UserID         string   `json:"userid"`
+	Enable         FlexBool `json:"enable"`
+	Expire         FlexInt  `json:"expire"`
+	FirstName      string   `json:"firstname"`
+	LastName       string   `json:"lastname"`
+	Email          string   `json:"email"`
+	Comment        string   `json:"comment"`
+	Groups         string   `json:"groups"`
+	Keys           string   `json:"keys"`
+	RealmType      string   `json:"realm-type"`
+	TOTPLocked     FlexBool `json:"totp-locked"`
+	TFALockedUntil FlexInt  `json:"tfa-locked-until"`
+}
+
+// AccessUserDetail is a PVE user as returned by GET /access/users/{userid}.
+//
+// It differs from the index shape in more than one way, so the two are kept
+// apart deliberately: groups is an array rather than a comma-separated string,
+// and realm-type / totp-locked / tfa-locked-until are absent. userid is not
+// echoed back either — the client fills it in from the request.
+type AccessUserDetail struct {
+	UserID    string   `json:"userid"`
+	Enable    FlexBool `json:"enable"`
+	Expire    FlexInt  `json:"expire"`
+	FirstName string   `json:"firstname"`
+	LastName  string   `json:"lastname"`
+	Email     string   `json:"email"`
+	Comment   string   `json:"comment"`
+	Groups    []string `json:"groups"`
+	Keys      string   `json:"keys"`
+}
+
+// AccessUserFields are the mutable user attributes shared by create and update.
+// Pointers are tri-state: nil leaves the field untouched, a set pointer writes
+// it, and a set pointer to the zero value clears it.
+type AccessUserFields struct {
+	Comment   *string `json:"comment,omitempty"`
+	Email     *string `json:"email,omitempty"`
+	FirstName *string `json:"firstname,omitempty"`
+	LastName  *string `json:"lastname,omitempty"`
+	Groups    *string `json:"groups,omitempty"`
+	Keys      *string `json:"keys,omitempty"`
+	Enable    *bool   `json:"enable,omitempty"`
+	Expire    *int64  `json:"expire,omitempty"`
+}
+
+// CreateAccessUserParams creates a PVE user.
+type CreateAccessUserParams struct {
+	AccessUserFields
+	UserID string `json:"userid"`
+	// Password is optional. Leaving it empty creates an account that cannot
+	// log in interactively at all, which is what you want for a user that
+	// exists only to own an API token.
+	Password string `json:"password,omitempty"`
+}
+
+// UpdateAccessUserParams updates a PVE user.
+type UpdateAccessUserParams struct {
+	AccessUserFields
+	// Append adds to the group list rather than replacing it.
+	Append bool `json:"append,omitempty"`
+}
+
+// AccessToken is an API token's metadata. It never carries the secret:
+// Proxmox returns that exactly once, at creation or regeneration.
+type AccessToken struct {
+	UserID  string   `json:"userid"`
+	TokenID string   `json:"tokenid"`
+	Comment string   `json:"comment"`
+	Expire  FlexInt  `json:"expire"`
+	PrivSep FlexBool `json:"privsep"`
+}
+
+// AccessTokenInfo is the metadata block echoed back on token creation.
+type AccessTokenInfo struct {
+	Comment string   `json:"comment"`
+	Expire  FlexInt  `json:"expire"`
+	PrivSep FlexBool `json:"privsep"`
+}
+
+// AccessTokenCreated is the one-shot result of minting or regenerating a token.
+//
+// Value is the secret. Proxmox has no read-back endpoint, so this is the only
+// time it exists outside the cluster's own config. It must never be logged,
+// audited, or returned to a client that is not the operator who asked for it.
+type AccessTokenCreated struct {
+	FullTokenID string          `json:"full-tokenid"`
+	Value       string          `json:"value"`
+	Info        AccessTokenInfo `json:"info"`
+}
+
+// AccessGroup is a PVE group as returned by /access/groups.
+type AccessGroup struct {
+	GroupID string `json:"groupid"`
+	Comment string `json:"comment"`
+	Users   string `json:"users"`
+}
+
+// UpdateAccessGroupParams updates a group. Comment is a pointer so that
+// omitting it leaves the existing comment alone: sending it unconditionally
+// would mean a client that PUTs {} silently clears the comment.
+type UpdateAccessGroupParams struct {
+	Comment *string `json:"comment,omitempty"`
+}
+
+// UpdateAccessRoleParams updates a role's privileges.
+//
+// Privs is a pointer for a sharper reason than the group comment: privs is
+// required by this client, and sending an empty value strips every privilege
+// from the role. A nil pointer is rejected rather than treated as "clear",
+// so a client that forgets the field cannot silently disarm a role. Setting it
+// to an explicit "" is still allowed — that is a deliberate clear.
+type UpdateAccessRoleParams struct {
+	Privs  *string `json:"privs"`
+	Append bool    `json:"append,omitempty"`
+}
+
+// AccessGroupDetail is a single group, whose members arrive as a list rather
+// than the comma-separated string the index endpoint returns.
+type AccessGroupDetail struct {
+	GroupID string   `json:"groupid"`
+	Comment string   `json:"comment"`
+	Members []string `json:"members"`
+}
+
+// AccessRole is a PVE role and its comma-separated privilege list.
+// Special marks Proxmox's built-in roles, which cannot be edited or deleted.
+type AccessRole struct {
+	RoleID  string   `json:"roleid"`
+	Privs   string   `json:"privs"`
+	Special FlexBool `json:"special"`
+}
+
+// AccessACLEntry is one access control entry.
+// Type is "user", "group" or "token".
+type AccessACLEntry struct {
+	Path      string   `json:"path"`
+	Type      string   `json:"type"`
+	UGID      string   `json:"ugid"`
+	RoleID    string   `json:"roleid"`
+	Propagate FlexBool `json:"propagate"`
+}
+
+// UpdateAccessACLParams grants or revokes roles on a path. Proxmox uses a
+// single endpoint for both directions; Delete flips grant into revoke.
+// Users, Groups and Tokens are comma-separated lists; at least one is required.
+type UpdateAccessACLParams struct {
+	Path      string `json:"path"`
+	Roles     string `json:"roles"`
+	Users     string `json:"users,omitempty"`
+	Groups    string `json:"groups,omitempty"`
+	Tokens    string `json:"tokens,omitempty"`
+	Propagate *bool  `json:"propagate,omitempty"`
+	Delete    bool   `json:"delete,omitempty"`
+}
+
+// CreateAccessTokenParams are the options for minting an API token.
+// PrivSep nil means Proxmox's default, which is privilege separation ON.
+type CreateAccessTokenParams struct {
+	Comment string `json:"comment,omitempty"`
+	Expire  *int64 `json:"expire,omitempty"`
+	PrivSep *bool  `json:"privsep,omitempty"`
+}
+
+// UpdateAccessTokenParams updates a token. Regenerate rotates the secret,
+// which invalidates the previous one immediately.
+type UpdateAccessTokenParams struct {
+	Comment    *string `json:"comment,omitempty"`
+	Expire     *int64  `json:"expire,omitempty"`
+	PrivSep    *bool   `json:"privsep,omitempty"`
+	Regenerate bool    `json:"regenerate,omitempty"`
+}
+
+// AccessDomain is an authentication realm. The field set is deliberately
+// partial: realms are read-only here, so this carries what a listing needs
+// rather than the ~45 LDAP/AD/OIDC configuration keys PVE accepts.
+type AccessDomain struct {
+	Realm   string   `json:"realm"`
+	Type    string   `json:"type"`
+	Comment string   `json:"comment"`
+	TFA     string   `json:"tfa"`
+	Default FlexBool `json:"default"`
+}
+
+// AccessPermissions maps an ACL path to the privileges held on it, and whether
+// each propagates to child paths.
+type AccessPermissions map[string]map[string]FlexBool
