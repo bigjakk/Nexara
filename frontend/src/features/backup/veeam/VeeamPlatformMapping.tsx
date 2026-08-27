@@ -74,10 +74,9 @@ export function VeeamPlatformMapping({
         <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
           <p className="text-xs text-amber-600 dark:text-amber-400">
-            {unmapped.length === 1 ? "One connection is" : `${String(unmapped.length)} connections are`}{" "}
-            not mapped to a cluster. Their backups cannot be matched to guests,
-            they are missing from backup coverage, and only administrators with
-            global Veeam access can see them at all.
+            {unmapped.length === 1
+              ? "One connection is not mapped to a cluster. Its backups cannot be matched to guests, they are missing from backup coverage, and only administrators with global Veeam access can see them at all."
+              : `${String(unmapped.length)} connections are not mapped to a cluster. Their backups cannot be matched to guests, they are missing from backup coverage, and only administrators with global Veeam access can see them at all.`}
           </p>
         </div>
       )}
