@@ -88,6 +88,15 @@ type Engine struct {
 	encryptionKey string
 	cache         *proxmox.ClientCache // nil-safe; falls back to per-call construction
 	logger        *slog.Logger
+	// veeamOwned is the single read the Veeam pin needs, behind its own
+	// interface so that decision can be tested without a database. Everything
+	// else on this engine goes through the concrete queries handle above.
+	veeamOwned veeamOwnedQueries
+}
+
+// veeamOwnedQueries is the database surface pinVeeamInfrastructure uses.
+type veeamOwnedQueries interface {
+	ListVeeamInfrastructureGuestsForCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVeeamInfrastructureGuestsForClusterRow, error)
 }
 
 // NewEngine creates a new DRS engine.
@@ -96,6 +105,7 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger) *
 		queries:       queries,
 		encryptionKey: encryptionKey,
 		logger:        logger,
+		veeamOwned:    queries,
 	}
 }
 
@@ -245,6 +255,10 @@ func (e *Engine) Evaluate(ctx context.Context, clusterID uuid.UUID) (*EvalResult
 
 	// Detect PCI/USB passthrough VMs and mark as pinned.
 	e.detectPassthrough(ctx, client, nodeWorkloads)
+
+	// Pin the guests Veeam owns. The config gate lives inside, so it is
+	// covered by the same tests as the pinning itself.
+	e.pinVeeamInfrastructure(ctx, clusterID, cfg.ExcludeVeeamWorkers, nodeWorkloads)
 
 	// Score nodes (pinned workloads still count toward node load).
 	scores := make(map[string]NodeScore)
@@ -645,6 +659,84 @@ func (e *Engine) importHARulesLegacy(ctx context.Context, client *proxmox.Client
 	}
 
 	return rules
+}
+
+// pinVeeamInfrastructure marks the guests belonging to a Veeam deployment —
+// worker appliances, and the VBR server when it runs on the cluster it
+// protects — as ineligible for migration.
+//
+// PINNED, not filtered out. A pinned workload still counts toward node
+// scoring, which is what keeps the balance honest: three worker appliances on
+// one node is real load, and a planner blind to them would read that node as
+// idle and pile more onto it. It also keeps them visible to affinity rules, so
+// nothing gets migrated onto a node hosting a pinned anti-affinity partner —
+// the same reason containers are pinned rather than dropped when
+// include_containers is false.
+//
+// What this prevents: DRS migrating a worker mid-job, which kills the backup
+// running on it and leaves nothing behind but a failed session.
+//
+// What it does NOT prevent, deliberately: DRS migrating a PROTECTED guest away
+// from the node its worker happens to be on, which silently downgrades that
+// guest's transport from hot-add to network mode — no error, just a backup
+// several times slower, and neither product says why. Covering that would mean
+// pinning half the estate to wherever Veeam last placed a worker, and Veeam
+// re-places them per job run. Naming the gap beats a half-measure that reads
+// like a guarantee.
+//
+// A lookup failure leaves the workloads alone rather than failing the
+// evaluation. DRS balancing a cluster while briefly unaware of its worker
+// appliances is a far smaller problem than DRS not running at all.
+func (e *Engine) pinVeeamInfrastructure(ctx context.Context, clusterID uuid.UUID, enabled bool, nodeWorkloads map[string][]Workload) {
+	if !enabled {
+		return
+	}
+	// Only reachable from a struct-literal Engine in tests — NewEngine always
+	// assigns this — but those exist, and a nil interface call panics the
+	// whole evaluation.
+	if e.veeamOwned == nil {
+		return
+	}
+	owned, err := e.veeamOwned.ListVeeamInfrastructureGuestsForCluster(ctx, clusterID)
+	if err != nil {
+		e.logger.Warn("DRS could not resolve Veeam-owned guests; they will be treated as ordinary workloads",
+			"cluster_id", clusterID, "error", err)
+		return
+	}
+	if len(owned) == 0 {
+		// Said out loud, because the alternative signal is the ABSENCE of the
+		// pin lines below — and this feature exists to prevent damage that
+		// leaves no trace. A cluster showing the protection armed while
+		// nothing is recorded for it usually means the Veeam collector has not
+		// run, or resolved none of its guests by name.
+		e.logger.Debug("DRS found no Veeam-owned guests recorded for this cluster",
+			"cluster_id", clusterID)
+		return
+	}
+
+	roleByVMID := make(map[int]string, len(owned))
+	for _, row := range owned {
+		// FIRST wins. The query orders (vmid, role) so that is
+		// 'backup_server', which is the more specific fact for a guest holding
+		// both roles — the VBR server fills a proxy role itself. Last-write
+		// would silently report it as a plain worker.
+		if _, seen := roleByVMID[int(row.Vmid)]; !seen {
+			roleByVMID[int(row.Vmid)] = row.Role
+		}
+	}
+
+	for node, workloads := range nodeWorkloads {
+		for i, w := range workloads {
+			role, isVeeam := roleByVMID[w.VMID]
+			if !isVeeam || w.Pinned {
+				continue
+			}
+			e.logger.Info("DRS pinning a guest that belongs to Veeam",
+				"cluster_id", clusterID, "vmid", w.VMID, "node", node,
+				"name", w.Name, "role", role)
+			workloads[i].Pinned = true
+		}
+	}
 }
 
 // detectPassthrough checks QEMU VMs for PCI passthrough devices and marks them as pinned.

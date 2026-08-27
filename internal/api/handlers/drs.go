@@ -55,6 +55,17 @@ type drsConfigRequest struct {
 	ImbalanceThreshold  float64         `json:"imbalance_threshold"`
 	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
 	IncludeContainers   bool            `json:"include_containers"`
+	// A POINTER, unlike the flag above, because this one defaults to TRUE and
+	// absent must mean "leave the stored value alone".
+	//
+	// A plain bool would read an absent key as false, so any client predating
+	// the field would silently disarm the protection on its next save and DRS
+	// would start migrating Veeam's workers mid-backup with nothing to show
+	// why. Coercing absent to TRUE has the mirror fault: it re-arms a flag an
+	// operator deliberately turned off, from a stale browser tab saving an
+	// unrelated threshold change. Neither is a decision the caller made — see
+	// UpsertDRSConfig, which does the preserving.
+	ExcludeVeeamWorkers *bool `json:"exclude_veeam_workers"`
 }
 
 type drsConfigResponse struct {
@@ -66,6 +77,7 @@ type drsConfigResponse struct {
 	ImbalanceThreshold  float64         `json:"imbalance_threshold"`
 	EvalIntervalSeconds int32           `json:"eval_interval_seconds"`
 	IncludeContainers   bool            `json:"include_containers"`
+	ExcludeVeeamWorkers bool            `json:"exclude_veeam_workers"`
 	CreatedAt           string          `json:"created_at"`
 	UpdatedAt           string          `json:"updated_at"`
 	// NativeCRS describes the cluster's Proxmox CRS dynamic load-balancer config
@@ -85,6 +97,15 @@ type nativeCRSStatus struct {
 	RebalanceOnStart bool   `json:"rebalance_on_start"`
 }
 
+// optionalBool maps an absent request field to SQL NULL, which the upsert
+// reads as "leave the stored value alone".
+func optionalBool(v *bool) pgtype.Bool {
+	if v == nil {
+		return pgtype.Bool{}
+	}
+	return pgtype.Bool{Bool: *v, Valid: true}
+}
+
 func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 	return drsConfigResponse{
 		ID:                  c.ID,
@@ -95,6 +116,7 @@ func toDRSConfigResponse(c db.DrsConfig) drsConfigResponse {
 		ImbalanceThreshold:  c.ImbalanceThreshold,
 		EvalIntervalSeconds: c.EvalIntervalSeconds,
 		IncludeContainers:   c.IncludeContainers,
+		ExcludeVeeamWorkers: c.ExcludeVeeamWorkers,
 		CreatedAt:           c.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:           c.UpdatedAt.Format(time.RFC3339Nano),
 	}
@@ -206,6 +228,7 @@ func (h *DRSHandler) GetConfig(c fiber.Ctx) error {
 			ImbalanceThreshold:  0.25,
 			EvalIntervalSeconds: 300,
 			IncludeContainers:   false,
+			ExcludeVeeamWorkers: true,
 		}
 	} else {
 		resp = toDRSConfigResponse(cfg)
@@ -288,12 +311,22 @@ func (h *DRSHandler) UpdateConfig(c fiber.Ctx) error {
 		ImbalanceThreshold:  req.ImbalanceThreshold,
 		EvalIntervalSeconds: req.EvalIntervalSeconds,
 		IncludeContainers:   req.IncludeContainers,
+		ExcludeVeeamWorkers: optionalBool(req.ExcludeVeeamWorkers),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update DRS config")
 	}
 
-	details, _ := json.Marshal(map[string]interface{}{"mode": req.Mode, "imbalance_threshold": req.ImbalanceThreshold})
+	// The safety flags belong in the audit row. Turning exclude_veeam_workers
+	// off is exactly the change an operator has to be able to point at later
+	// when explaining a backup job DRS killed, and the STORED value is what to
+	// record — the request may have omitted the field entirely.
+	details, _ := json.Marshal(map[string]interface{}{
+		"mode":                  req.Mode,
+		"imbalance_threshold":   req.ImbalanceThreshold,
+		"include_containers":    cfg.IncludeContainers,
+		"exclude_veeam_workers": cfg.ExcludeVeeamWorkers,
+	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "drs", cfg.ID.String(), "config_update", details)
 
 	return c.JSON(toDRSConfigResponse(cfg))

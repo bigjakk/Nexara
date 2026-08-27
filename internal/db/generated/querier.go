@@ -1117,6 +1117,14 @@ type Querier interface {
 	UpsertCVENotificationConfig(ctx context.Context, arg UpsertCVENotificationConfigParams) (CveNotificationConfig, error)
 	UpsertCVEScanSchedule(ctx context.Context, arg UpsertCVEScanScheduleParams) (CveScanSchedule, error)
 	UpsertClusterSSHCredentials(ctx context.Context, arg UpsertClusterSSHCredentialsParams) (ClusterSshCredential, error)
+	//
+	// exclude_veeam_workers is the only field a caller may OMIT, and omitting it
+	// preserves whatever is stored rather than asserting a value. It defaults to
+	// TRUE, so a plain boolean would read an absent key as false and let any
+	// client that predates the field disarm the protection on its next save; and
+	// forcing true instead would re-arm a flag an operator had deliberately turned
+	// off, from a stale browser tab saving an unrelated threshold change. Neither
+	// is a decision the caller made. A new row gets the armed default.
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
 	UpsertEPSSEntry(ctx context.Context, arg UpsertEPSSEntryParams) error
 	UpsertExternalFeedCache(ctx context.Context, arg UpsertExternalFeedCacheParams) error

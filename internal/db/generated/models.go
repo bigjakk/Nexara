@@ -301,6 +301,8 @@ type DrsConfig struct {
 	UpdatedAt           time.Time          `json:"updated_at"`
 	IncludeContainers   bool               `json:"include_containers"`
 	EvalRequestedAt     pgtype.Timestamptz `json:"eval_requested_at"`
+	// Pin the guests Veeam owns — worker appliances and, when it runs on the cluster it protects, the VBR server — so DRS never selects them for migration. They are still SCORED, exactly like a container under include_containers=false: their load is real and a node carrying three of them is genuinely busier
+	ExcludeVeeamWorkers bool `json:"exclude_veeam_workers"`
 }
 
 type DrsHistory struct {

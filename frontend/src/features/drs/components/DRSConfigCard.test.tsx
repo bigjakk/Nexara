@@ -20,6 +20,7 @@ const baseConfig: DRSConfig = {
   imbalance_threshold: 0.25,
   eval_interval_seconds: 300,
   include_containers: false,
+  exclude_veeam_workers: true,
   created_at: "",
   updated_at: "",
 };

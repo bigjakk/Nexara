@@ -33,6 +33,9 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   const [threshold, setThreshold] = useState(0.25);
   const [evalInterval, setEvalInterval] = useState(300);
   const [includeContainers, setIncludeContainers] = useState(false);
+  // Armed by default, matching the column default: an unsaved form must not
+  // be the thing that disarms it.
+  const [excludeVeeamWorkers, setExcludeVeeamWorkers] = useState(true);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">(
     "idle",
   );
@@ -54,6 +57,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       setThreshold(config.imbalance_threshold);
       setEvalInterval(config.eval_interval_seconds);
       setIncludeContainers(config.include_containers);
+      setExcludeVeeamWorkers(config.exclude_veeam_workers);
     }
   }, [config]);
 
@@ -69,6 +73,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       imbalance_threshold: threshold,
       eval_interval_seconds: evalInterval,
       include_containers: includeContainers,
+      exclude_veeam_workers: excludeVeeamWorkers,
     };
     updateConfig.mutate(request, {
       onSuccess: () => {
@@ -235,6 +240,25 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             />
             <Label htmlFor="include-containers">Include containers in balancing</Label>
           </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="exclude-veeam-workers"
+              checked={excludeVeeamWorkers}
+              onCheckedChange={(v) => { setExcludeVeeamWorkers(v === true); }}
+            />
+            <Label htmlFor="exclude-veeam-workers">Never migrate Veeam&apos;s own guests</Label>
+          </div>
+          {!excludeVeeamWorkers && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                DRS may then migrate a Veeam worker appliance mid-backup, which
+                fails the job running on it and leaves nothing behind but a
+                failed session. Veeam&apos;s guests are still counted toward
+                node load either way.
+              </p>
+            </div>
+          )}
           {includeContainers && (
             <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />

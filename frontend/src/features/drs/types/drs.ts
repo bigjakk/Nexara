@@ -26,6 +26,12 @@ export interface DRSConfig {
   imbalance_threshold: number;
   eval_interval_seconds: number;
   include_containers: boolean;
+  /**
+   * Pin the guests Veeam owns — worker appliances and, where it runs on the
+   * cluster it protects, the VBR server — so DRS never migrates them. Defaults
+   * to true.
+   */
+  exclude_veeam_workers: boolean;
   created_at: string;
   updated_at: string;
   /** Proxmox native CRS state (PVE 9.2+); present when the cluster has CRS configured. */
@@ -38,6 +44,7 @@ export interface DRSConfigRequest {
   imbalance_threshold: number;
   eval_interval_seconds: number;
   include_containers: boolean;
+  exclude_veeam_workers: boolean;
 }
 
 export type RuleSource = "manual" | "ha";

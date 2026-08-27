@@ -2,8 +2,16 @@
 SELECT * FROM drs_configs WHERE cluster_id = $1;
 
 -- name: UpsertDRSConfig :one
-INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, include_containers)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+--
+-- exclude_veeam_workers is the only field a caller may OMIT, and omitting it
+-- preserves whatever is stored rather than asserting a value. It defaults to
+-- TRUE, so a plain boolean would read an absent key as false and let any
+-- client that predates the field disarm the protection on its next save; and
+-- forcing true instead would re-arm a flag an operator had deliberately turned
+-- off, from a stale browser tab saving an unrelated threshold change. Neither
+-- is a decision the caller made. A new row gets the armed default.
+INSERT INTO drs_configs (cluster_id, mode, enabled, weights, imbalance_threshold, eval_interval_seconds, include_containers, exclude_veeam_workers)
+VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE(sqlc.narg('exclude_veeam_workers')::boolean, true))
 ON CONFLICT (cluster_id) DO UPDATE SET
     mode = EXCLUDED.mode,
     enabled = EXCLUDED.enabled,
@@ -11,6 +19,7 @@ ON CONFLICT (cluster_id) DO UPDATE SET
     imbalance_threshold = EXCLUDED.imbalance_threshold,
     eval_interval_seconds = EXCLUDED.eval_interval_seconds,
     include_containers = EXCLUDED.include_containers,
+    exclude_veeam_workers = COALESCE(sqlc.narg('exclude_veeam_workers')::boolean, drs_configs.exclude_veeam_workers),
     updated_at = now()
 RETURNING *;
 
