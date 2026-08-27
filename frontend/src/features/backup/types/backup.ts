@@ -461,6 +461,91 @@ export interface VeeamBackupObject {
   last_seen_at: string;
 }
 
+/**
+ * A Veeam "platform" is one Proxmox connection — a platformId that every
+ * backup object, restore point and session from that cluster carries. The
+ * mapping to a Nexara cluster is operator-confirmed and load-bearing for
+ * authorization: until it exists, that platform's rows are visible only to a
+ * holder of global view:veeam.
+ */
+export interface VeeamPlatform {
+  platform_id: string;
+  /** From the licence workload list, e.g. "CRJLAB". Often empty. */
+  display_name: string;
+  cluster_id: string | null;
+  cluster_name: string;
+  object_count: number;
+  last_seen_at: string;
+}
+
+/** A guest belonging to the Veeam deployment rather than to the workload. */
+export interface VeeamInfrastructureGuest {
+  id: string;
+  veeam_ref: string;
+  role: "worker" | "backup_server";
+  name: string;
+  /** The Proxmox node a worker was deployed to, or "This server". */
+  host_name: string;
+  is_disabled: boolean;
+  /** Workers are powered off between runs; false is the healthy state. */
+  is_online: boolean;
+  cluster_id: string | null;
+  cluster_name: string;
+  vmid: number | null;
+  guest_name: string;
+  last_seen_at: string;
+}
+
+/**
+ * A backup object whose platform IS mapped to a cluster but which matches no
+ * guest on it — a deleted VM, a template whose name was reused under a new
+ * uuid, a host rebuilt in place. Restore points held for a machine that no
+ * longer exists in the form that was backed up.
+ */
+export interface VeeamOrphanedObject {
+  id: string;
+  veeam_object_id: string;
+  smbios_uuid: string;
+  name: string;
+  object_type: string;
+  platform_name: string;
+  cluster_id: string | null;
+  cluster_name: string;
+  restore_points_count: number;
+  restore_point_bytes: number;
+  latest_restore_point: string | null;
+  size_bytes: number;
+  last_run_failed: boolean;
+  last_seen_at: string;
+}
+
+/** One guest's Veeam protection, for the VM detail card. */
+export interface VeeamGuestProtection {
+  protected: boolean;
+  latest_restore_point: string | null;
+  malware_status: string;
+  object_count: number;
+  restore_point_count: number;
+  restore_point_bytes: number;
+  match_method: "smbios" | "name" | "manual" | "none";
+  last_run_failed: boolean;
+  restore_points: VeeamGuestRestorePoint[];
+}
+
+export interface VeeamGuestRestorePoint {
+  id: string;
+  veeam_id: string;
+  name: string;
+  point_type: string;
+  malware_status: string;
+  guest_os_family: string;
+  creation_time: string;
+  size_bytes: number;
+  supports_flr: boolean;
+  /** Which backup this point belongs to — a guest appears in several. */
+  object_name: string;
+}
+
 export interface VeeamRestorePoint {
   id: string;
   veeam_id: string;

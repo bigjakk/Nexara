@@ -695,11 +695,17 @@ WHERE i.id = r.id
 -- ListVeeamGuestProtectionForCluster is one row per correlated GUEST, not per
 -- backup object.
 --
--- The aggregation is the point. A guest appears in as many backup objects as
--- it has backups — daily, weekly and offsite on the lab, up to three — and a
--- naive join would report it three times, each with a third of its restore
--- points and a different "latest backup". RPO is MAX(creation_time) across all
--- of them, and the count is their sum.
+-- The collector folds Veeam's (guest × backup) listing to one object per
+-- guest, so on a single-server install the aggregation below is usually a
+-- no-op — but it is not optional. Two Veeam servers can protect the same
+-- cluster, and each contributes its own object for the same guest; without the
+-- GROUP BY the guest is reported twice, each row carrying a fraction of its
+-- restore points and a different "latest backup". RPO is MAX(creation_time)
+-- across all of them and the count is their sum.
+--
+-- The restore points themselves DO span every backup the guest appears in:
+-- /backupObjects/{id}/restorePoints returns the guest's points across all of
+-- them, and they all hang off the one folded object.
 -- name: ListVeeamGuestProtectionForCluster :many
 WITH obj AS (
     SELECT o.id, o.vmid, o.match_method, o.last_run_failed

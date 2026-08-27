@@ -8,6 +8,9 @@ import {
   useVeeamJobs,
   useVeeamSessions,
   useVeeamRepositories,
+  useVeeamPlatforms,
+  useVeeamOrphanedObjects,
+  useVeeamInfrastructure,
 } from "../api/backup-queries";
 import type { VeeamServer } from "../types/backup";
 import { AddVeeamServerDialog } from "./AddVeeamServerDialog";
@@ -19,22 +22,30 @@ import { VeeamJobTable } from "./VeeamJobTable";
 import { VeeamSessionTable } from "./VeeamSessionTable";
 import { VeeamRepositoryCards } from "./VeeamRepositoryCards";
 import { VeeamRepositoryChart } from "./VeeamRepositoryChart";
+import { VeeamPlatformMapping } from "./VeeamPlatformMapping";
+import { VeeamOrphanTable } from "./VeeamOrphanTable";
 
 /**
  * Renders a tab's body, distinguishing "still loading", "we could not ask" and
  * "there is genuinely nothing".
  *
  * Collapsing an error into an empty list is the failure mode this exists to
- * prevent: repositories require GLOBAL view:veeam (one repository holds every
- * cluster's backups), so a cluster-scoped viewer gets a 403 — and telling them
- * "no repositories reported by this server" would be a confident lie about
- * their backup infrastructure.
+ * prevent. Several of these tabs require GLOBAL view:veeam because what they
+ * show spans every cluster a server protects, so a cluster-scoped viewer gets
+ * a 403 — and telling them "no repositories reported by this server" would be
+ * a confident lie about their backup infrastructure.
+ *
+ * `resource` names what the tab was actually asking for. Without it every tab
+ * inherited the copy written for the first one and explained a 403 on the
+ * platform list in terms of repositories.
  */
 function VeeamTabBody({
   query,
+  resource,
   children,
 }: {
   query: { isLoading: boolean; isError: boolean; error: unknown };
+  resource: string;
   children: React.ReactNode;
 }) {
   if (query.isLoading) {
@@ -46,7 +57,7 @@ function VeeamTabBody({
     return (
       <p className="py-8 text-center text-sm text-destructive">
         {status === 403
-          ? "You do not have permission to view this. Repositories span every cluster a Veeam server protects, so they require global Veeam access."
+          ? `You do not have permission to view ${resource}. This spans every cluster the Veeam server protects, so it requires global Veeam access.`
           : `Could not load this from Nexara. ${
               query.error instanceof Error ? query.error.message : ""
             }`}
@@ -81,10 +92,20 @@ export function VeeamServersPanel() {
   const jobsQuery = useVeeamJobs(activeServerId);
   const sessionsQuery = useVeeamSessions(activeServerId);
   const reposQuery = useVeeamRepositories(activeServerId);
+  const platformsQuery = useVeeamPlatforms(activeServerId);
+  const orphansQuery = useVeeamOrphanedObjects(activeServerId);
+  const infrastructureQuery = useVeeamInfrastructure(activeServerId);
 
   const jobs = jobsQuery.data ?? [];
   const sessions = sessionsQuery.data ?? [];
   const repositories = reposQuery.data ?? [];
+  const platforms = platformsQuery.data ?? [];
+  const orphans = orphansQuery.data ?? [];
+  const infrastructure = infrastructureQuery.data ?? [];
+  // Surfaced on the tab itself: an unmapped connection is not a cosmetic gap.
+  // Its guests are absent from backup coverage entirely and invisible to
+  // anyone without global Veeam access, and nothing else on this page says so.
+  const unmappedCount = platforms.filter((p) => p.cluster_id === null).length;
 
   if (serversQuery.isLoading) {
     return (
@@ -162,16 +183,27 @@ export function VeeamServersPanel() {
             <TabsTrigger value="repositories">
               Repositories ({repositories.length})
             </TabsTrigger>
+            <TabsTrigger value="clusters">
+              Clusters
+              {unmappedCount > 0 && (
+                <span className="ml-1.5 rounded-full bg-amber-500/20 px-1.5 text-xs text-amber-600 dark:text-amber-400">
+                  {unmappedCount}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="orphans">
+              Orphaned ({orphans.length})
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="jobs" className="space-y-4">
-            <VeeamTabBody query={jobsQuery}>
+            <VeeamTabBody query={jobsQuery} resource="backup jobs">
               <VeeamJobTable jobs={jobs} scopeKey={activeServerId} />
             </VeeamTabBody>
           </TabsContent>
 
           <TabsContent value="sessions" className="space-y-4">
-            <VeeamTabBody query={sessionsQuery}>
+            <VeeamTabBody query={sessionsQuery} resource="job runs">
               <VeeamSessionTable
                 sessions={sessions}
                 scopeKey={activeServerId}
@@ -179,8 +211,31 @@ export function VeeamServersPanel() {
             </VeeamTabBody>
           </TabsContent>
 
+          <TabsContent value="clusters" className="space-y-4">
+            <VeeamTabBody query={platformsQuery} resource="cluster mappings">
+              {/*
+                Keyed on the server, so switching servers remounts and drops
+                the previous one's in-flight/error state. The platforms query
+                is cached for minutes, so a failure from server A would
+                otherwise stay rendered under server B's table.
+              */}
+              <VeeamPlatformMapping
+                key={activeServerId}
+                serverId={activeServerId}
+                platforms={platforms}
+                infrastructure={infrastructure}
+              />
+            </VeeamTabBody>
+          </TabsContent>
+
+          <TabsContent value="orphans" className="space-y-4">
+            <VeeamTabBody query={orphansQuery} resource="orphaned backups">
+              <VeeamOrphanTable serverId={activeServerId} objects={orphans} />
+            </VeeamTabBody>
+          </TabsContent>
+
           <TabsContent value="repositories" className="space-y-4">
-            <VeeamTabBody query={reposQuery}>
+            <VeeamTabBody query={reposQuery} resource="repositories">
               <VeeamRepositoryCards repositories={repositories} />
               {repositories.map((repo) => (
                 <VeeamRepositoryChart

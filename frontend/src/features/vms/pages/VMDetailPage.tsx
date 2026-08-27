@@ -32,6 +32,7 @@ import { HardwarePanel } from "../components/HardwarePanel";
 import { ContainerResourcesPanel } from "../components/ContainerResourcesPanel";
 import { SchedulePanel } from "../components/SchedulePanel";
 import { BackupPanel } from "../components/BackupPanel";
+import { VeeamProtectionCard } from "../components/VeeamProtectionCard";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
 import type { TimeRange } from "@/types/api";
@@ -364,13 +365,20 @@ export function VMDetailPage() {
           </TabsContent>
         )}
 
-        <TabsContent value="backups" className="mt-4">
+        <TabsContent value="backups" className="mt-4 space-y-4">
+          {/*
+            Both providers on one tab, on purpose. A guest can be protected by
+            PBS, by Veeam, by both, or by neither, and an operator asking "is
+            this backed up" has to see the whole answer in one place — a
+            separate Veeam tab would let them read half of it and stop.
+          */}
           <BackupPanel
             vmid={vm.vmid}
             clusterId={clusterId}
             nodeName={nodeName}
             kind={kind}
           />
+          <VeeamProtectionCard clusterId={clusterId} vmId={vmId} />
         </TabsContent>
 
         <TabsContent value="schedules" className="mt-4">

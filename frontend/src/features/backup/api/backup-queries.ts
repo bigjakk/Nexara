@@ -37,6 +37,10 @@ import type {
   VeeamSession,
   VeeamBackupObject,
   VeeamRestorePoint,
+  VeeamPlatform,
+  VeeamInfrastructureGuest,
+  VeeamOrphanedObject,
+  VeeamGuestProtection,
 } from "../types/backup";
 
 // --- PBS Server Queries ---
@@ -734,5 +738,139 @@ export function useVeeamRestorePoints(serverId: string, objectId: string) {
         `/api/v1/veeam-servers/${serverId}/backup-objects/${objectId}/restore-points`,
       ),
     enabled: serverId.length > 0 && objectId.length > 0,
+  });
+}
+
+/**
+ * The Proxmox connections a Veeam server has been seen protecting, with the
+ * Nexara cluster an operator has mapped each to.
+ */
+export function useVeeamPlatforms(serverId: string) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "platforms"],
+    queryFn: () =>
+      apiClient.list<VeeamPlatform>(
+        `/api/v1/veeam-servers/${serverId}/platforms`,
+      ),
+    enabled: serverId.length > 0,
+  });
+}
+
+/**
+ * Attaches a Veeam platform to a Nexara cluster, or detaches it with a null
+ * cluster.
+ *
+ * Invalidates every listing for the server, not just the platform one: the
+ * mapping is what makes jobs, sessions, backup objects and coverage
+ * attributable, so all of them change meaning the moment it does.
+ */
+export function useMapVeeamPlatform(serverId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      platformId,
+      clusterId,
+    }: {
+      platformId: string;
+      clusterId: string | null;
+    }) =>
+      apiClient.put<VeeamPlatform>(
+        `/api/v1/veeam-servers/${serverId}/platforms/${platformId}`,
+        { cluster_id: clusterId },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
+      void queryClient.invalidateQueries({ queryKey: ["backup-coverage"] });
+      // A platform mapping changes protection for every guest on the cluster
+      // at once, so every VM detail card is now wrong.
+      void queryClient.invalidateQueries({ queryKey: ["veeam-guest-protection"] });
+    },
+  });
+}
+
+/** The guests belonging to the Veeam deployment itself. */
+export function useVeeamInfrastructure(serverId: string) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "infrastructure"],
+    queryFn: () =>
+      apiClient.list<VeeamInfrastructureGuest>(
+        `/api/v1/veeam-servers/${serverId}/infrastructure`,
+      ),
+    enabled: serverId.length > 0,
+  });
+}
+
+/** Backup objects whose platform is mapped but which match no guest on it. */
+export function useVeeamOrphanedObjects(serverId: string) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "orphaned-objects"],
+    queryFn: () =>
+      apiClient.list<VeeamOrphanedObject>(
+        `/api/v1/veeam-servers/${serverId}/orphaned-objects`,
+      ),
+    enabled: serverId.length > 0,
+  });
+}
+
+/**
+ * Pins a backup object to a guest, or clears the pin with nulls.
+ *
+ * The escape hatch for what automatic resolution cannot know. The guest must
+ * be on the cluster the object's platform is mapped to — a Veeam platformId is
+ * one Proxmox connection, so its objects cannot belong anywhere else.
+ */
+export function useMapVeeamBackupObject(serverId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      objectId,
+      clusterId,
+      vmid,
+    }: {
+      objectId: string;
+      clusterId: string | null;
+      vmid: number | null;
+    }) =>
+      apiClient.put<{ id: string; match_method: string }>(
+        `/api/v1/veeam-servers/${serverId}/backup-objects/${objectId}/guest`,
+        { cluster_id: clusterId, vmid },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
+      void queryClient.invalidateQueries({ queryKey: ["backup-coverage"] });
+      // The whole point of a manual map is that a guest's VM detail card
+      // starts showing the backup. Without this it would go on saying there
+      // is none until the five-minute staleTime expired, and read exactly
+      // like a mapping that had silently failed.
+      void queryClient.invalidateQueries({ queryKey: ["veeam-guest-protection"] });
+    },
+  });
+}
+
+/**
+ * One guest's Veeam protection, for the VM detail page.
+ *
+ * Takes the guest's UUID like every sibling route; the server resolves it to
+ * the stable (cluster_id, vmid) identity for the lookup.
+ */
+export function useVeeamGuestProtection(clusterId: string, vmId: string) {
+  return useQuery({
+    // Its own prefix rather than nesting under ["clusters"], so the two
+    // mapping mutations can invalidate exactly this and nothing else. Nested
+    // under the cluster key they would either miss it — leaving the card
+    // claiming "no Veeam data" for the five-minute staleTime after a
+    // successful map — or force a refetch of every cluster-scoped query.
+    queryKey: ["veeam-guest-protection", clusterId, vmId],
+    queryFn: () =>
+      apiClient.get<VeeamGuestProtection>(
+        `/api/v1/clusters/${clusterId}/vms/${vmId}/veeam`,
+      ),
+    enabled: clusterId.length > 0 && vmId.length > 0,
+    // A viewer without view:veeam on this cluster gets a 403, and a guest
+    // Veeam has never seen is a perfectly ordinary answer — neither is worth
+    // retrying.
+    retry: false,
   });
 }
