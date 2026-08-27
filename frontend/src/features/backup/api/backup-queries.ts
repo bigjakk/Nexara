@@ -41,6 +41,7 @@ import type {
   VeeamInfrastructureGuest,
   VeeamOrphanedObject,
   VeeamGuestProtection,
+  VeeamSessionLogRecord,
 } from "../types/backup";
 
 // --- PBS Server Queries ---
@@ -846,6 +847,132 @@ export function useMapVeeamBackupObject(serverId: string) {
       // like a mapping that had silently failed.
       void queryClient.invalidateQueries({ queryKey: ["veeam-guest-protection"] });
     },
+  });
+}
+
+/**
+ * Veeam job control.
+ *
+ * Every one of these is ASYNC on the Veeam side: a 2xx means Veeam accepted
+ * the request, not that the job has started or stopped. The lab job took ~30s
+ * to reach Stopped after its stop returned — so the invalidation below is what
+ * begins showing the real state, and the button must not claim the action is
+ * complete.
+ */
+interface VeeamJobStartResult {
+  started: boolean;
+  session_id?: string;
+  state?: string;
+  /**
+   * Present for either outcome that is not a plain "a run started": the job
+   * had no objects to process (started false), or Veeam accepted the request
+   * but reported no run to track (started true, no session_id).
+   */
+  message?: string;
+}
+
+interface VeeamJobStopResult {
+  /** Always true on a 2xx — a stop Veeam accepted is a stop in progress. */
+  stopping: boolean;
+  /** Absent only when Veeam reported no run and the job had no last known one. */
+  session_id?: string;
+  state?: string;
+}
+
+/**
+ * Invalidates everything a control action can have changed.
+ *
+ * Broad on purpose. A start creates a session, moves the job's status, and
+ * will eventually move coverage and the per-guest protection cards — and the
+ * operator's next question after clicking is always "did it take", which a
+ * stale table answers wrongly.
+ */
+function useVeeamControlInvalidation() {
+  const queryClient = useQueryClient();
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: ["veeam-servers"] });
+    void queryClient.invalidateQueries({ queryKey: ["veeam-guest-protection"] });
+  };
+}
+
+export function useStartVeeamJob(serverId: string) {
+  const invalidate = useVeeamControlInvalidation();
+  return useMutation({
+    mutationFn: (jobVeeamId: string) =>
+      apiClient.post<VeeamJobStartResult>(
+        `/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/start`,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useStopVeeamJob(serverId: string) {
+  const invalidate = useVeeamControlInvalidation();
+  return useMutation({
+    mutationFn: (jobVeeamId: string) =>
+      apiClient.post<VeeamJobStopResult>(
+        `/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/stop`,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Enables or disables a job's schedule.
+ *
+ * The stored job row keeps its old status until the next collector poll —
+ * veeam_jobs mirrors what Veeam reports and the server deliberately does not
+ * write a status Veeam has not confirmed — so the refetch this triggers may
+ * still show the previous value for a cycle.
+ */
+export function useSetVeeamJobEnabled(serverId: string) {
+  const invalidate = useVeeamControlInvalidation();
+  return useMutation({
+    mutationFn: ({ jobVeeamId, enabled }: { jobVeeamId: string; enabled: boolean }) =>
+      apiClient.post<{ enabled: boolean }>(
+        `/api/v1/veeam-servers/${serverId}/jobs/${jobVeeamId}/${enabled ? "enable" : "disable"}`,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useStopVeeamSession(serverId: string) {
+  const invalidate = useVeeamControlInvalidation();
+  return useMutation({
+    mutationFn: (sessionVeeamId: string) =>
+      apiClient.post<{ stopping: boolean }>(
+        `/api/v1/veeam-servers/${serverId}/sessions/${sessionVeeamId}/stop`,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * One session's log, read live from Veeam rather than from Nexara's tables.
+ *
+ * AN EMPTY RESULT IS NORMAL for a stopped run: Veeam keeps no records at all
+ * for a killed session. The caller must say so, because "the log is empty" and
+ * "we could not fetch the log" look identical otherwise.
+ *
+ * Fetched only when a row is expanded — each call costs a fresh logon against
+ * the Veeam server, so this must never be eager.
+ */
+export function useVeeamSessionLogs(
+  serverId: string,
+  sessionVeeamId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "sessions", sessionVeeamId, "logs"],
+    queryFn: () =>
+      apiClient.list<VeeamSessionLogRecord>(
+        `/api/v1/veeam-servers/${serverId}/sessions/${sessionVeeamId}/logs`,
+      ),
+    enabled: enabled && serverId.length > 0 && sessionVeeamId.length > 0,
+    // A finished session's log does not change, and a caller without
+    // view:veeam on the cluster gets a 403 that retrying cannot fix.
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 }
 

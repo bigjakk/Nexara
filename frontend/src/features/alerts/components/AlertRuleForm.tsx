@@ -36,6 +36,7 @@ const METRICS = [
   { value: "veeam_rpo_hours", label: "Veeam Recovery Point Age (hours)" },
   { value: "veeam_malware_status", label: "Veeam Malware Verdict (0-3)" },
   { value: "veeam_repo_used_percent", label: "Veeam Repository Usage (%)" },
+  { value: "veeam_job_failed", label: "Veeam Failed Jobs (count)" },
 ];
 
 /**
@@ -53,6 +54,9 @@ const METRIC_SCOPES: Record<string, string[]> = {
   // One Veeam repository holds every cluster's backups, so there is no cluster
   // to attribute its fullness to.
   veeam_repo_used_percent: ["global"],
+  // A Veeam job protects many guests at once, so there is no single vm its
+  // failure belongs to.
+  veeam_job_failed: ["cluster"],
 };
 
 const ALL_SCOPES = ["cluster", "node", "vm"];
@@ -76,6 +80,9 @@ const METRIC_DEFAULT_THRESHOLD: Record<string, string> = {
   // findings will want 3.
   veeam_malware_status: "2",
   veeam_repo_used_percent: "85",
+  // A count, so "> 0" is the rule almost everyone wants. Left adjustable for
+  // an estate with a known-flaky job that is already ticketed.
+  veeam_job_failed: "0",
 };
 
 const SCOPE_LABELS: Record<string, string> = {

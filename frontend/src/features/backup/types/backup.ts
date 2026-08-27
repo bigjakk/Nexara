@@ -442,9 +442,32 @@ export interface VeeamSession {
   creation_time: string;
   end_time: string | null;
   initiated_by: string;
-  /** True when Nexara itself started or stopped the run. */
+  /**
+   * True when Nexara STARTED this run. Provenance only — never a reason to
+   * discount a failure, because a run Nexara started can fail for real.
+   */
   nexara_initiated: boolean;
+  /**
+   * True when Nexara asked this run to stop.
+   *
+   * Veeam records a cancelled run as result "Failed" with is_canceled false
+   * and an empty log, so this flag is the only thing that distinguishes an
+   * operator's stop from a genuine failure — and only for stops made from
+   * Nexara. One made from the Veeam console stays indistinguishable.
+   */
+  nexara_stopped: boolean;
   cluster_id: string | null;
+}
+
+/** One line of a Veeam session log, read live from the server. */
+export interface VeeamSessionLogRecord {
+  id: number;
+  /** None | Succeeded | Warning | Failed. */
+  status: string;
+  start_time: string | null;
+  update_time: string | null;
+  title: string;
+  description: string;
 }
 
 export interface VeeamBackupObject {

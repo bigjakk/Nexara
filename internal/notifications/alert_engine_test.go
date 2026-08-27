@@ -186,6 +186,13 @@ func TestValidMetric(t *testing.T) {
 	for _, m := range []string{
 		"cpu_usage", "mem_percent", "disk_read", "disk_write", "net_in", "net_out",
 		"snapshot_age_days", "veeam_rpo_hours", "veeam_malware_status", "veeam_repo_used_percent",
+		// veeam_job_failed became implementable with job control, and not
+		// before: a job cancelled through the API records as result "Failed"
+		// with isCanceled false and an empty log, so the rule would have fired
+		// every time an operator stopped a job from Nexara. What made it
+		// honest is veeam_sessions.nexara_stopped, which the control handlers
+		// set and GetClusterVeeamJobFailureStats excludes on.
+		"veeam_job_failed",
 	} {
 		if !ValidMetric(m) {
 			t.Errorf("ValidMetric(%q) = false, want true", m)
@@ -193,13 +200,6 @@ func TestValidMetric(t *testing.T) {
 	}
 	if ValidMetric("bogus") {
 		t.Error("ValidMetric(\"bogus\") = true, want false")
-	}
-	// veeam_job_failed is deliberately NOT a metric yet. A job cancelled
-	// through the API records as result "Failed" with isCanceled false and an
-	// empty log, so the rule would fire every time an operator stopped a job
-	// from Nexara — it ships with the job control that can suppress those.
-	if ValidMetric("veeam_job_failed") {
-		t.Error("veeam_job_failed is not implementable until stop-tracking exists")
 	}
 }
 
@@ -217,6 +217,10 @@ func TestMetricScopes(t *testing.T) {
 		// One repository holds every cluster's backups, so there is no
 		// cluster to attribute its fullness to.
 		{"veeam_repo_used_percent", []string{"global"}},
+		// A Veeam job protects many guests at once, so there is no single vm
+		// its failure belongs to — and raising it against every guest in the
+		// job would be N alarms for one event.
+		{"veeam_job_failed", []string{"cluster"}},
 		// nil means "the ordinary node/vm/cluster set", which the caller
 		// distinguishes from a restricted list.
 		{"cpu_usage", nil},

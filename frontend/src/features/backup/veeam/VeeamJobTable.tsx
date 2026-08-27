@@ -10,10 +10,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
+import { VeeamJobActions } from "./VeeamJobActions";
 import type { VeeamJob } from "../types/backup";
 
 interface VeeamJobTableProps {
   jobs: VeeamJob[];
+  /** The server these jobs belong to. Job control posts against it. */
+  serverId: string;
   /** Identifies which server these rows belong to, so expansion state resets. */
   scopeKey?: string;
 }
@@ -52,7 +55,11 @@ function formatTime(value: string | null): string {
   return parsed.toLocaleString();
 }
 
-export function VeeamJobTable({ jobs, scopeKey = "" }: VeeamJobTableProps) {
+export function VeeamJobTable({
+  jobs,
+  serverId,
+  scopeKey = "",
+}: VeeamJobTableProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Row ids are server-scoped, so switching servers must not carry a stale
   // expansion set forward — it only grows, and rows silently re-expand on
@@ -94,6 +101,7 @@ export function VeeamJobTable({ jobs, scopeKey = "" }: VeeamJobTableProps) {
               <TableHead>Next Run</TableHead>
               <TableHead>Repository</TableHead>
               <TableHead className="text-right">Guests</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -155,11 +163,14 @@ export function VeeamJobTable({ jobs, scopeKey = "" }: VeeamJobTableProps) {
                     <TableCell className="text-right">
                       {job.objects_count}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <VeeamJobActions serverId={serverId} job={job} />
+                    </TableCell>
                   </TableRow>
 
                   {isExpanded && (
                     <TableRow>
-                      <TableCell colSpan={8} className="bg-muted/30">
+                      <TableCell colSpan={9} className="bg-muted/30">
                         <div className="space-y-3 px-2 py-3">
                           {job.description !== "" && (
                             <p className="text-sm text-muted-foreground">
@@ -239,7 +250,9 @@ export function VeeamJobTable({ jobs, scopeKey = "" }: VeeamJobTableProps) {
                               Veeam records a job stopped through its API the
                               same way it records a genuine failure — same
                               result, no cancellation flag, empty log — so
-                              Nexara cannot tell the two apart.
+                              Nexara cannot tell the two apart. Stops made from
+                              Nexara are the exception: those are recorded, and
+                              the failed-job alert skips them.
                             </p>
                           )}
                         </div>

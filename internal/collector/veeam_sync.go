@@ -111,6 +111,7 @@ type VeeamSyncQueries interface {
 	PruneVeeamRestorePoints(ctx context.Context, arg db.PruneVeeamRestorePointsParams) error
 
 	GetVeeamSessionWatermark(ctx context.Context, veeamServerID uuid.UUID) (time.Time, error)
+	SetVeeamSessionsSyncedAt(ctx context.Context, id uuid.UUID) error
 	UpsertVeeamSession(ctx context.Context, arg db.UpsertVeeamSessionParams) error
 	PruneVeeamSessions(ctx context.Context, arg db.PruneVeeamSessionsParams) error
 }
@@ -1068,6 +1069,14 @@ func (v *VeeamSyncer) syncServerSessions(ctx context.Context, server db.VeeamSer
 			"veeam_server_id", server.ID, "error", err)
 	}
 
+	// Stamped only once everything above has landed, so a pass that failed
+	// part-way leaves the server on the retention floor and re-reads the
+	// window next time rather than narrowing onto a partial result.
+	if err := v.queries.SetVeeamSessionsSyncedAt(ctx, server.ID); err != nil {
+		v.logger.Warn("veeam sync: stamping the session poll failed",
+			"veeam_server_id", server.ID, "error", err)
+	}
+
 	if len(platforms) > 0 {
 		v.publishChange(ctx, "sessions_synced")
 	}
@@ -1080,6 +1089,21 @@ func (v *VeeamSyncer) syncServerSessions(ctx context.Context, server db.VeeamSer
 // the retention window, so a first sync against a server with tens of
 // thousands of historical sessions pulls only what Nexara intends to keep.
 func (v *VeeamSyncer) sessionWatermark(ctx context.Context, server db.VeeamServer) (time.Time, error) {
+	// "First sync" is a fact about the POLL, not about the table.
+	//
+	// Job control writes a session row of its own the moment an operator
+	// starts or stops a job. On a server whose session pass has not yet
+	// succeeded — it is in backoff while the inventory pass succeeded and
+	// listed the jobs, so the UI offers the button — that single row would
+	// otherwise become the watermark, anchoring `since` to minutes ago instead
+	// of the retention window. A watermark only ever moves forward, so the
+	// backfill would never happen and the server's history would be
+	// permanently short. Gating on sessions_synced_at is what tells the two
+	// apart; the emptiness test below stays as a second line of defence.
+	if !server.SessionsSyncedAt.Valid {
+		return time.Now().Add(-v.cfg.SessionRetention), nil
+	}
+
 	mark, err := v.queries.GetVeeamSessionWatermark(ctx, server.ID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && mark.IsZero()) {
 		return time.Now().Add(-v.cfg.SessionRetention), nil

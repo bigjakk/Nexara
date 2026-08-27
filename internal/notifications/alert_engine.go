@@ -42,9 +42,14 @@ var validMetrics = map[string]bool{
 	// veeam_repo_used_percent — the fullest repository. GLOBAL scope only: one
 	//                     repository holds every cluster's backups, so there is
 	//                     no cluster to attribute it to.
+	// veeam_job_failed  — jobs whose LATEST run failed, excluding the ones
+	//                     Nexara itself stopped. Cluster scope only: a job
+	//                     protects many guests, so there is no one vm to
+	//                     attribute its failure to.
 	"veeam_rpo_hours":         true,
 	"veeam_malware_status":    true,
 	"veeam_repo_used_percent": true,
+	"veeam_job_failed":        true,
 }
 
 // Veeam metric names, referenced by both the engine and the API's scope
@@ -53,6 +58,7 @@ const (
 	MetricVeeamRPOHours   = "veeam_rpo_hours"
 	MetricVeeamMalware    = "veeam_malware_status"
 	MetricVeeamRepoUsed   = "veeam_repo_used_percent"
+	MetricVeeamJobFailed  = "veeam_job_failed"
 	MetricSnapshotAgeDays = "snapshot_age_days"
 )
 
@@ -86,6 +92,8 @@ func MetricScopes(metric string) []string {
 		return []string{"cluster", "vm"}
 	case MetricVeeamRepoUsed:
 		return []string{"global"}
+	case MetricVeeamJobFailed:
+		return []string{"cluster"}
 	default:
 		return nil
 	}
@@ -174,6 +182,8 @@ func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []
 		// either. A shared repository filling up is not silenced by one
 		// cluster's maintenance.
 		return e.evaluateVeeamRepoRule(ctx, rule)
+	case MetricVeeamJobFailed:
+		return e.evaluateVeeamJobFailedRule(ctx, rule, windows)
 	}
 
 	switch rule.ScopeType {

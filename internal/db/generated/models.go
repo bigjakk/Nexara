@@ -1151,6 +1151,8 @@ type VeeamServer struct {
 	LastSyncError string    `json:"last_sync_error"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+	// When the session poll last completed for this server. Distinct from last_sync_at, which the INVENTORY pass stamps. NULL means no session poll has ever succeeded, which is what puts the watermark on the retention floor — an emptiness test cannot say that any more, because job control writes session rows of its own
+	SessionsSyncedAt pgtype.Timestamptz `json:"sessions_synced_at"`
 }
 
 type VeeamSession struct {
@@ -1179,10 +1181,12 @@ type VeeamSession struct {
 	CreationTime    time.Time          `json:"creation_time"`
 	EndTime         pgtype.Timestamptz `json:"end_time"`
 	InitiatedBy     string             `json:"initiated_by"`
-	// Set when Nexara itself started or stopped the job, taken from the 201 response that carries the session inline. The only way to tell an operator-requested stop from a genuine failure; unused until job control ships
+	// Set when Nexara STARTED this run, taken from the 201 response that carries the session inline. Provenance only — it is not the veeam_job_failed suppression signal, because a run Nexara started can still fail for a real reason. See nexara_stopped
 	NexaraInitiated bool      `json:"nexara_initiated"`
 	LastSeenAt      time.Time `json:"last_seen_at"`
 	CreatedAt       time.Time `json:"created_at"`
+	// Set when Nexara asked this session to stop, via POST /jobs/{id}/stop or /sessions/{id}/stop. Suppresses veeam_job_failed: Veeam reports a cancelled run as result "Failed" with isCanceled false and an empty log, so this flag is the only thing that can tell the two apart. A stop made from the Veeam console remains indistinguishable, which is why the alert copy reads "failed or cancelled"
+	NexaraStopped bool `json:"nexara_stopped"`
 }
 
 type Vm struct {

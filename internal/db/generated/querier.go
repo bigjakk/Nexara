@@ -369,6 +369,32 @@ type Querier interface {
 	// Zero dated snapshots → no row (ErrNoRows), which callers treat as
 	// condition-not-met so the alert auto-resolves after cleanup.
 	GetClusterSnapshotAgeStats(ctx context.Context, arg GetClusterSnapshotAgeStatsParams) (GetClusterSnapshotAgeStatsRow, error)
+	// veeam_job_failed: how many of a cluster's Veeam jobs last ran badly.
+	//
+	// Scoped through SESSIONS rather than veeam_jobs.platform_id. Both carry a
+	// platform, but a session carries it natively while a job's is derived from
+	// sessions in the first place — and a job with no session has no last run to
+	// judge, so reading from sessions loses nothing and skips a hop.
+	//
+	// "Latest run per job", not "every failed run in the window": a job that
+	// failed on Tuesday and succeeded since is not failing, and counting history
+	// would leave the alert firing until the failure aged out of retention.
+	//
+	// Sessions Nexara stopped are excluded from the FAILED count but not from the
+	// job set. Veeam records a cancelled run as result "Failed" with isCanceled
+	// false and an empty log, so without this the alert fires every time an
+	// operator stops a job from Nexara. is_canceled is deliberately not consulted
+	// — it is false on exactly the rows it would need to be true on.
+	//
+	// A stop made from the Veeam console is still indistinguishable from a
+	// failure, which is why the alert copy says "failed or cancelled" rather than
+	// claiming more than the data supports.
+	// failed_names lists at most three, and SAYS SO when it truncates. A message
+	// reading "8 of 12 failed: A, B, C" with no ellipsis reads as the complete
+	// list, so an operator works the three named jobs and never learns about the
+	// other five. A capped list that does not admit the cap is worse than a count
+	// alone.
+	GetClusterVeeamJobFailureStats(ctx context.Context, clusterID uuid.UUID) (GetClusterVeeamJobFailureStatsRow, error)
 	// GetClusterVeeamMalwareStats reports the worst malware verdict across the
 	// NEWEST restore point of each guest on a cluster.
 	//
@@ -521,6 +547,16 @@ type Querier interface {
 	// set), so the :one contract holds even for a guest Veeam has never seen.
 	GetVeeamGuestProtection(ctx context.Context, arg GetVeeamGuestProtectionParams) (GetVeeamGuestProtectionRow, error)
 	// ---------------------------------------------------------------------------
+	// Phase 4: job control.
+	// ---------------------------------------------------------------------------
+	// The job a control call names, looked up by Veeam's own id.
+	//
+	// Job control is authorized against this row's platform_id, which is DERIVED
+	// from sessions and STICKY. A job that has never run has no platform, and an
+	// unattributable job is global-only — the same fail-closed posture the read
+	// endpoints take.
+	GetVeeamJobByVeeamID(ctx context.Context, arg GetVeeamJobByVeeamIDParams) (VeeamJob, error)
+	// ---------------------------------------------------------------------------
 	// Phase 3: platform mapping and guest correlation.
 	// ---------------------------------------------------------------------------
 	GetVeeamPlatform(ctx context.Context, arg GetVeeamPlatformParams) (VeeamPlatform, error)
@@ -537,6 +573,7 @@ type Querier interface {
 	// 0%-full reading that would mask a real repository beside it.
 	GetVeeamRepositoryUsageStats(ctx context.Context, arg GetVeeamRepositoryUsageStatsParams) (GetVeeamRepositoryUsageStatsRow, error)
 	GetVeeamServer(ctx context.Context, id uuid.UUID) (VeeamServer, error)
+	GetVeeamSessionByVeeamID(ctx context.Context, arg GetVeeamSessionByVeeamIDParams) (VeeamSession, error)
 	// The newest session already stored, used as the createdAfterFilter for the
 	// next poll.
 	//
@@ -948,6 +985,18 @@ type Querier interface {
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
 	MarkNodeOnline(ctx context.Context, id uuid.UUID) error
 	MarkNotificationDLQResolved(ctx context.Context, id uuid.UUID) error
+	// Records that Nexara asked this session to stop.
+	//
+	// POST /sessions/{id}/stop answers 200 with an empty envelope — no session
+	// comes back — so unlike the job stop there is nothing to upsert, only a flag
+	// to set on the row the caller named. The caller has already read that row to
+	// authorize the request, so a zero rowcount here means it vanished underneath
+	// a concurrent prune, not that the id was wrong.
+	//
+	// Set-only, never cleared: this is the record that a "Failed" result may have
+	// been an operator's doing, and clearing it would resurrect the false alert it
+	// exists to suppress.
+	MarkVeeamSessionStopped(ctx context.Context, arg MarkVeeamSessionStoppedParams) (int64, error)
 	MoveVMFolder(ctx context.Context, arg MoveVMFolderParams) (VmFolder, error)
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	// Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still
@@ -1056,6 +1105,12 @@ type Querier interface {
 	// Deliberately does NOT touch last_sync_at. A server that has not synced in a
 	// week must not report "last synced: 30 seconds ago" beside its error.
 	SetVeeamServerSyncError(ctx context.Context, arg SetVeeamServerSyncErrorParams) error
+	// Stamps a completed SESSION poll. Separate from SetVeeamServerSyncCompleted,
+	// which the inventory pass owns — last_sync_at means "the inventory was last
+	// read successfully at" and a session poll cannot speak to that.
+	//
+	// What this exists for is the watermark: see the column comment in 000094.
+	SetVeeamSessionsSyncedAt(ctx context.Context, id uuid.UUID) error
 	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) (int64, error)
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
@@ -1163,6 +1218,23 @@ type Querier interface {
 	UpsertTaskSyncState(ctx context.Context, arg UpsertTaskSyncStateParams) error
 	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
 	UpsertVeeamBackupObject(ctx context.Context, arg UpsertVeeamBackupObjectParams) (VeeamBackupObject, error)
+	// Writes the session a start or stop returned inline, immediately.
+	//
+	// Separate from UpsertVeeamSession because of the two flag columns, which that
+	// query deliberately never writes: the poll loop must not clear a flag the
+	// control path set. Here they are ORed in rather than assigned, so a session
+	// that was started by Nexara and later stopped by Nexara carries both, and a
+	// second stop cannot un-record the first.
+	//
+	// @nexara_initiated means Nexara started this run. @nexara_stopped means
+	// Nexara asked it to stop, and is the only one veeam_job_failed suppresses
+	// on — see the column comments in 000094.
+	//
+	// last_seen_at is set from now() as usual, but nothing here should be read as
+	// the session's final state: Veeam answers these calls before it has acted, so
+	// state is "Starting"/"Stopping" and result is empty. The poll loop's
+	// UpsertVeeamSession is what settles it.
+	UpsertVeeamControlSession(ctx context.Context, arg UpsertVeeamControlSessionParams) error
 	// ---------------------------------------------------------------------------
 	// Veeam's own guests on the cluster.
 	// ---------------------------------------------------------------------------

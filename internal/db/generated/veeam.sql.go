@@ -183,7 +183,7 @@ INSERT INTO veeam_servers (
     tls_fingerprint, verify_tls, enabled
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at
+RETURNING id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at, sessions_synced_at
 `
 
 type CreateVeeamServerParams struct {
@@ -229,6 +229,7 @@ func (q *Queries) CreateVeeamServer(ctx context.Context, arg CreateVeeamServerPa
 		&i.LastSyncError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionsSyncedAt,
 	)
 	return i, err
 }
@@ -363,6 +364,76 @@ WHERE j.veeam_server_id = $1
 func (q *Queries) DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deriveVeeamJobPlatforms, veeamServerID)
 	return err
+}
+
+const getClusterVeeamJobFailureStats = `-- name: GetClusterVeeamJobFailureStats :one
+WITH latest AS (
+    SELECT DISTINCT ON (s.veeam_server_id, s.job_veeam_id)
+        s.job_veeam_id,
+        s.name,
+        s.result,
+        s.nexara_stopped
+    FROM veeam_sessions s
+    JOIN veeam_platforms p
+      ON p.veeam_server_id = s.veeam_server_id
+     AND p.platform_id = s.platform_id
+    WHERE p.cluster_id = $1::uuid
+      AND s.job_veeam_id IS NOT NULL
+    ORDER BY s.veeam_server_id, s.job_veeam_id, s.creation_time DESC
+),
+failed AS (
+    SELECT name FROM latest WHERE result = 'Failed' AND NOT nexara_stopped
+)
+SELECT
+    (SELECT count(*) FROM failed)::bigint                                  AS failed_count,
+    (SELECT count(*) FROM latest)::bigint                                  AS job_count,
+    COALESCE((SELECT string_agg(name, ', ' ORDER BY name)
+              FROM (SELECT name FROM failed ORDER BY name LIMIT 3) AS t), '')::text AS failed_names,
+    GREATEST((SELECT count(*) FROM failed) - 3, 0)::bigint                 AS unnamed_count
+`
+
+type GetClusterVeeamJobFailureStatsRow struct {
+	FailedCount  int64  `json:"failed_count"`
+	JobCount     int64  `json:"job_count"`
+	FailedNames  string `json:"failed_names"`
+	UnnamedCount int64  `json:"unnamed_count"`
+}
+
+// veeam_job_failed: how many of a cluster's Veeam jobs last ran badly.
+//
+// Scoped through SESSIONS rather than veeam_jobs.platform_id. Both carry a
+// platform, but a session carries it natively while a job's is derived from
+// sessions in the first place — and a job with no session has no last run to
+// judge, so reading from sessions loses nothing and skips a hop.
+//
+// "Latest run per job", not "every failed run in the window": a job that
+// failed on Tuesday and succeeded since is not failing, and counting history
+// would leave the alert firing until the failure aged out of retention.
+//
+// Sessions Nexara stopped are excluded from the FAILED count but not from the
+// job set. Veeam records a cancelled run as result "Failed" with isCanceled
+// false and an empty log, so without this the alert fires every time an
+// operator stops a job from Nexara. is_canceled is deliberately not consulted
+// — it is false on exactly the rows it would need to be true on.
+//
+// A stop made from the Veeam console is still indistinguishable from a
+// failure, which is why the alert copy says "failed or cancelled" rather than
+// claiming more than the data supports.
+// failed_names lists at most three, and SAYS SO when it truncates. A message
+// reading "8 of 12 failed: A, B, C" with no ellipsis reads as the complete
+// list, so an operator works the three named jobs and never learns about the
+// other five. A capped list that does not admit the cap is worse than a count
+// alone.
+func (q *Queries) GetClusterVeeamJobFailureStats(ctx context.Context, clusterID uuid.UUID) (GetClusterVeeamJobFailureStatsRow, error) {
+	row := q.db.QueryRow(ctx, getClusterVeeamJobFailureStats, clusterID)
+	var i GetClusterVeeamJobFailureStatsRow
+	err := row.Scan(
+		&i.FailedCount,
+		&i.JobCount,
+		&i.FailedNames,
+		&i.UnnamedCount,
+	)
+	return i, err
 }
 
 const getClusterVeeamMalwareStats = `-- name: GetClusterVeeamMalwareStats :one
@@ -718,6 +789,60 @@ func (q *Queries) GetVeeamGuestProtection(ctx context.Context, arg GetVeeamGuest
 	return i, err
 }
 
+const getVeeamJobByVeeamID = `-- name: GetVeeamJobByVeeamID :one
+
+SELECT id, veeam_server_id, veeam_id, name, job_type, workload, description, status, last_result, last_run, next_run, next_run_policy, repository_veeam_id, repository_name, objects_count, last_session_id, progress_percent, bottleneck, duration, processing_rate, processed_size, read_size, transferred_size, platform_id, last_seen_at, created_at, updated_at FROM veeam_jobs WHERE veeam_server_id = $1 AND veeam_id = $2
+`
+
+type GetVeeamJobByVeeamIDParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	VeeamID       uuid.UUID `json:"veeam_id"`
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: job control.
+// ---------------------------------------------------------------------------
+// The job a control call names, looked up by Veeam's own id.
+//
+// Job control is authorized against this row's platform_id, which is DERIVED
+// from sessions and STICKY. A job that has never run has no platform, and an
+// unattributable job is global-only — the same fail-closed posture the read
+// endpoints take.
+func (q *Queries) GetVeeamJobByVeeamID(ctx context.Context, arg GetVeeamJobByVeeamIDParams) (VeeamJob, error) {
+	row := q.db.QueryRow(ctx, getVeeamJobByVeeamID, arg.VeeamServerID, arg.VeeamID)
+	var i VeeamJob
+	err := row.Scan(
+		&i.ID,
+		&i.VeeamServerID,
+		&i.VeeamID,
+		&i.Name,
+		&i.JobType,
+		&i.Workload,
+		&i.Description,
+		&i.Status,
+		&i.LastResult,
+		&i.LastRun,
+		&i.NextRun,
+		&i.NextRunPolicy,
+		&i.RepositoryVeeamID,
+		&i.RepositoryName,
+		&i.ObjectsCount,
+		&i.LastSessionID,
+		&i.ProgressPercent,
+		&i.Bottleneck,
+		&i.Duration,
+		&i.ProcessingRate,
+		&i.ProcessedSize,
+		&i.ReadSize,
+		&i.TransferredSize,
+		&i.PlatformID,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getVeeamPlatform = `-- name: GetVeeamPlatform :one
 
 SELECT veeam_server_id, platform_id, display_name, cluster_id, last_seen_at, created_at FROM veeam_platforms WHERE veeam_server_id = $1 AND platform_id = $2
@@ -842,7 +967,7 @@ func (q *Queries) GetVeeamRepositoryUsageStats(ctx context.Context, arg GetVeeam
 }
 
 const getVeeamServer = `-- name: GetVeeamServer :one
-SELECT id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at FROM veeam_servers WHERE id = $1
+SELECT id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at, sessions_synced_at FROM veeam_servers WHERE id = $1
 `
 
 func (q *Queries) GetVeeamServer(ctx context.Context, id uuid.UUID) (VeeamServer, error) {
@@ -864,6 +989,51 @@ func (q *Queries) GetVeeamServer(ctx context.Context, id uuid.UUID) (VeeamServer
 		&i.LastSyncError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionsSyncedAt,
+	)
+	return i, err
+}
+
+const getVeeamSessionByVeeamID = `-- name: GetVeeamSessionByVeeamID :one
+SELECT id, veeam_server_id, veeam_id, job_veeam_id, name, session_type, platform_name, platform_id, state, result, result_message, is_canceled, algorithm, bottleneck, duration, processing_rate, processed_size, read_size, transferred_size, progress_percent, creation_time, end_time, initiated_by, nexara_initiated, last_seen_at, created_at, nexara_stopped FROM veeam_sessions WHERE veeam_server_id = $1 AND veeam_id = $2
+`
+
+type GetVeeamSessionByVeeamIDParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	VeeamID       uuid.UUID `json:"veeam_id"`
+}
+
+func (q *Queries) GetVeeamSessionByVeeamID(ctx context.Context, arg GetVeeamSessionByVeeamIDParams) (VeeamSession, error) {
+	row := q.db.QueryRow(ctx, getVeeamSessionByVeeamID, arg.VeeamServerID, arg.VeeamID)
+	var i VeeamSession
+	err := row.Scan(
+		&i.ID,
+		&i.VeeamServerID,
+		&i.VeeamID,
+		&i.JobVeeamID,
+		&i.Name,
+		&i.SessionType,
+		&i.PlatformName,
+		&i.PlatformID,
+		&i.State,
+		&i.Result,
+		&i.ResultMessage,
+		&i.IsCanceled,
+		&i.Algorithm,
+		&i.Bottleneck,
+		&i.Duration,
+		&i.ProcessingRate,
+		&i.ProcessedSize,
+		&i.ReadSize,
+		&i.TransferredSize,
+		&i.ProgressPercent,
+		&i.CreationTime,
+		&i.EndTime,
+		&i.InitiatedBy,
+		&i.NexaraInitiated,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.NexaraStopped,
 	)
 	return i, err
 }
@@ -917,7 +1087,7 @@ func (q *Queries) InsertVeeamRepositoryMetric(ctx context.Context, arg InsertVee
 }
 
 const listActiveVeeamServers = `-- name: ListActiveVeeamServers :many
-SELECT id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at FROM veeam_servers WHERE enabled = true ORDER BY created_at ASC
+SELECT id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at, sessions_synced_at FROM veeam_servers WHERE enabled = true ORDER BY created_at ASC
 `
 
 func (q *Queries) ListActiveVeeamServers(ctx context.Context) ([]VeeamServer, error) {
@@ -945,6 +1115,7 @@ func (q *Queries) ListActiveVeeamServers(ctx context.Context) ([]VeeamServer, er
 			&i.LastSyncError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SessionsSyncedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1707,7 +1878,7 @@ func (q *Queries) ListVeeamRestorePointsForGuest(ctx context.Context, arg ListVe
 }
 
 const listVeeamServers = `-- name: ListVeeamServers :many
-SELECT id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at FROM veeam_servers ORDER BY created_at DESC
+SELECT id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at, sessions_synced_at FROM veeam_servers ORDER BY created_at DESC
 `
 
 func (q *Queries) ListVeeamServers(ctx context.Context) ([]VeeamServer, error) {
@@ -1735,6 +1906,7 @@ func (q *Queries) ListVeeamServers(ctx context.Context) ([]VeeamServer, error) {
 			&i.LastSyncError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SessionsSyncedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1747,7 +1919,7 @@ func (q *Queries) ListVeeamServers(ctx context.Context) ([]VeeamServer, error) {
 }
 
 const listVeeamSessionsByServer = `-- name: ListVeeamSessionsByServer :many
-SELECT id, veeam_server_id, veeam_id, job_veeam_id, name, session_type, platform_name, platform_id, state, result, result_message, is_canceled, algorithm, bottleneck, duration, processing_rate, processed_size, read_size, transferred_size, progress_percent, creation_time, end_time, initiated_by, nexara_initiated, last_seen_at, created_at FROM veeam_sessions
+SELECT id, veeam_server_id, veeam_id, job_veeam_id, name, session_type, platform_name, platform_id, state, result, result_message, is_canceled, algorithm, bottleneck, duration, processing_rate, processed_size, read_size, transferred_size, progress_percent, creation_time, end_time, initiated_by, nexara_initiated, last_seen_at, created_at, nexara_stopped FROM veeam_sessions
 WHERE veeam_server_id = $1
   AND (
     $2::uuid[] IS NULL
@@ -1809,6 +1981,7 @@ func (q *Queries) ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSe
 			&i.NexaraInitiated,
 			&i.LastSeenAt,
 			&i.CreatedAt,
+			&i.NexaraStopped,
 		); err != nil {
 			return nil, err
 		}
@@ -1818,6 +1991,36 @@ func (q *Queries) ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSe
 		return nil, err
 	}
 	return items, nil
+}
+
+const markVeeamSessionStopped = `-- name: MarkVeeamSessionStopped :execrows
+UPDATE veeam_sessions
+SET nexara_stopped = true
+WHERE veeam_server_id = $1 AND veeam_id = $2
+`
+
+type MarkVeeamSessionStoppedParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	VeeamID       uuid.UUID `json:"veeam_id"`
+}
+
+// Records that Nexara asked this session to stop.
+//
+// POST /sessions/{id}/stop answers 200 with an empty envelope — no session
+// comes back — so unlike the job stop there is nothing to upsert, only a flag
+// to set on the row the caller named. The caller has already read that row to
+// authorize the request, so a zero rowcount here means it vanished underneath
+// a concurrent prune, not that the id was wrong.
+//
+// Set-only, never cleared: this is the record that a "Failed" result may have
+// been an operator's doing, and clearing it would resurrect the false alert it
+// exists to suppress.
+func (q *Queries) MarkVeeamSessionStopped(ctx context.Context, arg MarkVeeamSessionStoppedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markVeeamSessionStopped, arg.VeeamServerID, arg.VeeamID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const pruneVeeamRestorePoints = `-- name: PruneVeeamRestorePoints :exec
@@ -2059,6 +2262,20 @@ func (q *Queries) SetVeeamServerSyncError(ctx context.Context, arg SetVeeamServe
 	return err
 }
 
+const setVeeamSessionsSyncedAt = `-- name: SetVeeamSessionsSyncedAt :exec
+UPDATE veeam_servers SET sessions_synced_at = now() WHERE id = $1
+`
+
+// Stamps a completed SESSION poll. Separate from SetVeeamServerSyncCompleted,
+// which the inventory pass owns — last_sync_at means "the inventory was last
+// read successfully at" and a session poll cannot speak to that.
+//
+// What this exists for is the watermark: see the column comment in 000094.
+func (q *Queries) SetVeeamSessionsSyncedAt(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, setVeeamSessionsSyncedAt, id)
+	return err
+}
+
 const updateVeeamServer = `-- name: UpdateVeeamServer :one
 UPDATE veeam_servers
 SET name = $2,
@@ -2072,7 +2289,7 @@ SET name = $2,
     verify_tls = $10,
     enabled = $11
 WHERE id = $1
-RETURNING id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at
+RETURNING id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at, sessions_synced_at
 `
 
 type UpdateVeeamServerParams struct {
@@ -2120,6 +2337,7 @@ func (q *Queries) UpdateVeeamServer(ctx context.Context, arg UpdateVeeamServerPa
 		&i.LastSyncError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionsSyncedAt,
 	)
 	return i, err
 }
@@ -2192,6 +2410,118 @@ func (q *Queries) UpsertVeeamBackupObject(ctx context.Context, arg UpsertVeeamBa
 		&i.ManualGuestKey,
 	)
 	return i, err
+}
+
+const upsertVeeamControlSession = `-- name: UpsertVeeamControlSession :exec
+INSERT INTO veeam_sessions (
+    veeam_server_id, veeam_id, job_veeam_id, name, session_type,
+    platform_name, platform_id, state, result, result_message, is_canceled,
+    algorithm, bottleneck, duration, processing_rate,
+    processed_size, read_size, transferred_size, progress_percent,
+    creation_time, end_time, initiated_by,
+    nexara_initiated, nexara_stopped, last_seen_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, $21, $22,
+        $23::boolean, $24::boolean, now())
+ON CONFLICT (veeam_server_id, veeam_id)
+DO UPDATE SET
+    job_veeam_id = EXCLUDED.job_veeam_id,
+    name = EXCLUDED.name,
+    session_type = EXCLUDED.session_type,
+    platform_name = EXCLUDED.platform_name,
+    platform_id = EXCLUDED.platform_id,
+    state = EXCLUDED.state,
+    result = EXCLUDED.result,
+    result_message = EXCLUDED.result_message,
+    is_canceled = EXCLUDED.is_canceled,
+    algorithm = EXCLUDED.algorithm,
+    bottleneck = EXCLUDED.bottleneck,
+    duration = EXCLUDED.duration,
+    processing_rate = EXCLUDED.processing_rate,
+    processed_size = EXCLUDED.processed_size,
+    read_size = EXCLUDED.read_size,
+    transferred_size = EXCLUDED.transferred_size,
+    progress_percent = EXCLUDED.progress_percent,
+    creation_time = EXCLUDED.creation_time,
+    end_time = EXCLUDED.end_time,
+    initiated_by = EXCLUDED.initiated_by,
+    nexara_initiated = veeam_sessions.nexara_initiated OR EXCLUDED.nexara_initiated,
+    nexara_stopped = veeam_sessions.nexara_stopped OR EXCLUDED.nexara_stopped,
+    last_seen_at = now()
+`
+
+type UpsertVeeamControlSessionParams struct {
+	VeeamServerID   uuid.UUID          `json:"veeam_server_id"`
+	VeeamID         uuid.UUID          `json:"veeam_id"`
+	JobVeeamID      pgtype.UUID        `json:"job_veeam_id"`
+	Name            string             `json:"name"`
+	SessionType     string             `json:"session_type"`
+	PlatformName    string             `json:"platform_name"`
+	PlatformID      pgtype.UUID        `json:"platform_id"`
+	State           string             `json:"state"`
+	Result          string             `json:"result"`
+	ResultMessage   string             `json:"result_message"`
+	IsCanceled      bool               `json:"is_canceled"`
+	Algorithm       string             `json:"algorithm"`
+	Bottleneck      string             `json:"bottleneck"`
+	Duration        string             `json:"duration"`
+	ProcessingRate  string             `json:"processing_rate"`
+	ProcessedSize   int64              `json:"processed_size"`
+	ReadSize        int64              `json:"read_size"`
+	TransferredSize int64              `json:"transferred_size"`
+	ProgressPercent int32              `json:"progress_percent"`
+	CreationTime    time.Time          `json:"creation_time"`
+	EndTime         pgtype.Timestamptz `json:"end_time"`
+	InitiatedBy     string             `json:"initiated_by"`
+	NexaraInitiated bool               `json:"nexara_initiated"`
+	NexaraStopped   bool               `json:"nexara_stopped"`
+}
+
+// Writes the session a start or stop returned inline, immediately.
+//
+// Separate from UpsertVeeamSession because of the two flag columns, which that
+// query deliberately never writes: the poll loop must not clear a flag the
+// control path set. Here they are ORed in rather than assigned, so a session
+// that was started by Nexara and later stopped by Nexara carries both, and a
+// second stop cannot un-record the first.
+//
+// @nexara_initiated means Nexara started this run. @nexara_stopped means
+// Nexara asked it to stop, and is the only one veeam_job_failed suppresses
+// on — see the column comments in 000094.
+//
+// last_seen_at is set from now() as usual, but nothing here should be read as
+// the session's final state: Veeam answers these calls before it has acted, so
+// state is "Starting"/"Stopping" and result is empty. The poll loop's
+// UpsertVeeamSession is what settles it.
+func (q *Queries) UpsertVeeamControlSession(ctx context.Context, arg UpsertVeeamControlSessionParams) error {
+	_, err := q.db.Exec(ctx, upsertVeeamControlSession,
+		arg.VeeamServerID,
+		arg.VeeamID,
+		arg.JobVeeamID,
+		arg.Name,
+		arg.SessionType,
+		arg.PlatformName,
+		arg.PlatformID,
+		arg.State,
+		arg.Result,
+		arg.ResultMessage,
+		arg.IsCanceled,
+		arg.Algorithm,
+		arg.Bottleneck,
+		arg.Duration,
+		arg.ProcessingRate,
+		arg.ProcessedSize,
+		arg.ReadSize,
+		arg.TransferredSize,
+		arg.ProgressPercent,
+		arg.CreationTime,
+		arg.EndTime,
+		arg.InitiatedBy,
+		arg.NexaraInitiated,
+		arg.NexaraStopped,
+	)
+	return err
 }
 
 const upsertVeeamInfrastructure = `-- name: UpsertVeeamInfrastructure :exec

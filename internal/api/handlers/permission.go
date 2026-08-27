@@ -177,14 +177,13 @@ func clusterScopeFilter(access clusterAccess) (ids []uuid.UUID, query bool) {
 // (action, resource) against, used to filter top-level list endpoints
 // (e.g. /clusters, /search, /migrations) to entries the user is allowed to see.
 //
-// All current callers pass action="view"; the parameter is kept for symmetry
-// with requireClusterPerm and to support future filters keyed on a different
-// action verb (e.g. listing only clusters the user can manage).
+// Callers pass "view" for read filters and "execute" for Veeam job control,
+// which resolves the same per-cluster grant set through a different verb.
 //
 // On failure the returned error is always a *fiber.Error so callers can
 // `return err` directly and get the right HTTP status. Don't wrap with
 // fmt.Errorf — that would hide the status code from Fiber's ErrorHandler.
-func accessibleClusters(c fiber.Ctx, action, resource string) (clusterAccess, error) { //nolint:unparam // action always "view" today; preserved for future filters
+func accessibleClusters(c fiber.Ctx, action, resource string) (clusterAccess, error) {
 	eng, userID, ok := engineFromContext(c)
 	if !ok {
 		return clusterAccess{}, fiber.NewError(fiber.StatusInternalServerError, "RBAC engine not configured")

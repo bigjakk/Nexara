@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -54,6 +55,9 @@ type fakeVeeamQueries struct {
 	existingRepos   []db.VeeamRepository
 	// watermark drives GetVeeamSessionWatermark; zero means pgx.ErrNoRows.
 	watermark time.Time
+	// sessionsSynced records that SetVeeamSessionsSyncedAt was called, i.e.
+	// that a session pass ran to completion.
+	sessionsSynced bool
 
 	// Correlation. correlated records the server ids the call was made for,
 	// so a test can assert the enrichment ran.
@@ -233,6 +237,17 @@ func (q *fakeVeeamQueries) GetVeeamSessionWatermark(context.Context, uuid.UUID) 
 		return time.Time{}, pgx.ErrNoRows
 	}
 	return q.watermark, nil
+}
+
+// sessionsSyncedAt records that the session pass completed, which is what
+// tells sessionWatermark "a poll has run" as distinct from "the table has
+// rows". Job control writes session rows of its own, so the two are no longer
+// the same question.
+func (q *fakeVeeamQueries) SetVeeamSessionsSyncedAt(context.Context, uuid.UUID) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.sessionsSynced = true
+	return nil
 }
 
 func (q *fakeVeeamQueries) UpsertVeeamSession(_ context.Context, arg db.UpsertVeeamSessionParams) error {
@@ -685,7 +700,10 @@ func TestVeeamSync_OneObjectsRestorePointsFailingDoesNotAbortThePass(t *testing.
 }
 
 func TestVeeamSync_SessionsUseWatermarkWithOverlap(t *testing.T) {
+	// sessions_synced_at set: this is a server whose session pass has run
+	// before, which is what allows the watermark to narrow at all.
 	server := testVeeamServer(t)
+	server.SessionsSyncedAt = pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}
 	mark := time.Now().Add(-1 * time.Hour)
 	q := &fakeVeeamQueries{servers: []db.VeeamServer{server}, watermark: mark}
 	c := &fakeVeeamClient{}
@@ -724,6 +742,50 @@ func TestVeeamSync_FirstSyncBoundsSessionHistory(t *testing.T) {
 	expected := time.Now().Add(-30 * 24 * time.Hour)
 	if since.Before(expected.Add(-time.Minute)) || since.After(expected.Add(time.Minute)) {
 		t.Errorf("first-sync watermark = %v, want the start of the retention window (~%v)", since, expected)
+	}
+}
+
+// The trap job control introduced: a session row can now exist before any
+// session poll has succeeded, because starting a job writes one. Treating that
+// row as the watermark anchors `since` to minutes ago and — since a watermark
+// only ever moves forward — skips the retention window's backfill for good.
+func TestVeeamSync_FirstSyncIgnoresASessionRowNoPollWrote(t *testing.T) {
+	// sessions_synced_at is NULL: no session pass has ever completed. The
+	// watermark is non-zero anyway, standing in for the row job control wrote
+	// when an operator started a job.
+	server := testVeeamServer(t)
+	q := &fakeVeeamQueries{
+		servers:   []db.VeeamServer{server},
+		watermark: time.Now().Add(-2 * time.Minute),
+	}
+	c := &fakeVeeamClient{}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	if len(c.sessionsSince) != 1 {
+		t.Fatalf("session polls = %d, want 1", len(c.sessionsSince))
+	}
+	expected := time.Now().Add(-30 * 24 * time.Hour)
+	if since := c.sessionsSince[0]; since.After(expected.Add(time.Minute)) {
+		t.Errorf("first-sync watermark = %v, want the start of the retention window (~%v) — "+
+			"a control-written session row must not narrow the backfill", since, expected)
+	}
+}
+
+// And once the pass has completed, the stamp is what lets it narrow.
+func TestVeeamSync_StampsTheSessionPassOnSuccess(t *testing.T) {
+	server := testVeeamServer(t)
+	q := &fakeVeeamQueries{servers: []db.VeeamServer{server}}
+	c := &fakeVeeamClient{}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.sessionsSynced {
+		t.Error("a successful session poll did not stamp sessions_synced_at; every later poll would re-read the whole retention window")
 	}
 }
 

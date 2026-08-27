@@ -51,6 +51,24 @@ func (s veeamScope) permitsPlatform(platform uuid.UUID, valid bool) bool {
 	return s.access.PermitsCluster(clusterID)
 }
 
+// clusterFor resolves the cluster a platform maps to, as a nullable column
+// value — the NULL pgtype.UUID for an unattributable row.
+//
+// Used to file an audit row under the cluster whose workload an action
+// touched. A cluster-scoped operator reads audit_log filtered by cluster, so a
+// job run filed globally is invisible to exactly the person whose guests it
+// just affected.
+func (s veeamScope) clusterFor(platform uuid.UUID, valid bool) pgtype.UUID {
+	if !valid {
+		return pgtype.UUID{}
+	}
+	clusterID, mapped := s.platformCluster[platform]
+	if !mapped {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: clusterID, Valid: true}
+}
+
 // veeamServerIDFromParam parses :id without touching the database, so the
 // permission check can run before the lookup.
 func veeamServerIDFromParam(c fiber.Ctx) (uuid.UUID, error) {
@@ -92,7 +110,15 @@ func (s veeamScope) scopedPlatforms() []uuid.UUID {
 // could only ever answer "yes". PBSHandler.List and TaskHandler.List take the
 // same shape for the same reason.
 func (h *VeeamHandler) veeamScopeFor(c fiber.Ctx, serverID uuid.UUID) (veeamScope, error) {
-	access, err := accessibleClusters(c, "view", "veeam")
+	return h.veeamScopeForAction(c, "view", serverID)
+}
+
+// veeamScopeForAction is veeamScopeFor for a verb other than view. Job control
+// resolves "execute" through exactly the same platform mapping, so the two
+// share one implementation rather than growing a second copy of the
+// unattributable-is-global rule that could drift from it.
+func (h *VeeamHandler) veeamScopeForAction(c fiber.Ctx, action string, serverID uuid.UUID) (veeamScope, error) {
+	access, err := accessibleClusters(c, action, "veeam")
 	if err != nil {
 		return veeamScope{}, err
 	}

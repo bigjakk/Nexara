@@ -46,6 +46,14 @@ SET last_sync_at = now(),
     last_sync_error = $2
 WHERE id = $1;
 
+-- name: SetVeeamSessionsSyncedAt :exec
+-- Stamps a completed SESSION poll. Separate from SetVeeamServerSyncCompleted,
+-- which the inventory pass owns — last_sync_at means "the inventory was last
+-- read successfully at" and a session poll cannot speak to that.
+--
+-- What this exists for is the watermark: see the column comment in 000094.
+UPDATE veeam_servers SET sessions_synced_at = now() WHERE id = $1;
+
 -- name: SetVeeamServerSyncError :exec
 -- Deliberately does NOT touch last_sync_at. A server that has not synced in a
 -- week must not report "last synced: 30 seconds ago" beside its error.
@@ -1102,3 +1110,139 @@ SELECT
       WHERE CASE WHEN @inclusive::boolean THEN used_percent >= @threshold_percent::float8
                  ELSE used_percent > @threshold_percent::float8 END)::bigint                AS over_count,
     (SELECT count(*) FROM measured)::bigint                                                    AS measured_count;
+
+-- ---------------------------------------------------------------------------
+-- Phase 4: job control.
+-- ---------------------------------------------------------------------------
+
+-- name: GetVeeamJobByVeeamID :one
+-- The job a control call names, looked up by Veeam's own id.
+--
+-- Job control is authorized against this row's platform_id, which is DERIVED
+-- from sessions and STICKY. A job that has never run has no platform, and an
+-- unattributable job is global-only — the same fail-closed posture the read
+-- endpoints take.
+SELECT * FROM veeam_jobs WHERE veeam_server_id = $1 AND veeam_id = $2;
+
+-- name: GetVeeamSessionByVeeamID :one
+SELECT * FROM veeam_sessions WHERE veeam_server_id = $1 AND veeam_id = $2;
+
+-- name: UpsertVeeamControlSession :exec
+-- Writes the session a start or stop returned inline, immediately.
+--
+-- Separate from UpsertVeeamSession because of the two flag columns, which that
+-- query deliberately never writes: the poll loop must not clear a flag the
+-- control path set. Here they are ORed in rather than assigned, so a session
+-- that was started by Nexara and later stopped by Nexara carries both, and a
+-- second stop cannot un-record the first.
+--
+-- @nexara_initiated means Nexara started this run. @nexara_stopped means
+-- Nexara asked it to stop, and is the only one veeam_job_failed suppresses
+-- on — see the column comments in 000094.
+--
+-- last_seen_at is set from now() as usual, but nothing here should be read as
+-- the session's final state: Veeam answers these calls before it has acted, so
+-- state is "Starting"/"Stopping" and result is empty. The poll loop's
+-- UpsertVeeamSession is what settles it.
+INSERT INTO veeam_sessions (
+    veeam_server_id, veeam_id, job_veeam_id, name, session_type,
+    platform_name, platform_id, state, result, result_message, is_canceled,
+    algorithm, bottleneck, duration, processing_rate,
+    processed_size, read_size, transferred_size, progress_percent,
+    creation_time, end_time, initiated_by,
+    nexara_initiated, nexara_stopped, last_seen_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, $21, $22,
+        @nexara_initiated::boolean, @nexara_stopped::boolean, now())
+ON CONFLICT (veeam_server_id, veeam_id)
+DO UPDATE SET
+    job_veeam_id = EXCLUDED.job_veeam_id,
+    name = EXCLUDED.name,
+    session_type = EXCLUDED.session_type,
+    platform_name = EXCLUDED.platform_name,
+    platform_id = EXCLUDED.platform_id,
+    state = EXCLUDED.state,
+    result = EXCLUDED.result,
+    result_message = EXCLUDED.result_message,
+    is_canceled = EXCLUDED.is_canceled,
+    algorithm = EXCLUDED.algorithm,
+    bottleneck = EXCLUDED.bottleneck,
+    duration = EXCLUDED.duration,
+    processing_rate = EXCLUDED.processing_rate,
+    processed_size = EXCLUDED.processed_size,
+    read_size = EXCLUDED.read_size,
+    transferred_size = EXCLUDED.transferred_size,
+    progress_percent = EXCLUDED.progress_percent,
+    creation_time = EXCLUDED.creation_time,
+    end_time = EXCLUDED.end_time,
+    initiated_by = EXCLUDED.initiated_by,
+    nexara_initiated = veeam_sessions.nexara_initiated OR EXCLUDED.nexara_initiated,
+    nexara_stopped = veeam_sessions.nexara_stopped OR EXCLUDED.nexara_stopped,
+    last_seen_at = now();
+
+-- name: MarkVeeamSessionStopped :execrows
+-- Records that Nexara asked this session to stop.
+--
+-- POST /sessions/{id}/stop answers 200 with an empty envelope — no session
+-- comes back — so unlike the job stop there is nothing to upsert, only a flag
+-- to set on the row the caller named. The caller has already read that row to
+-- authorize the request, so a zero rowcount here means it vanished underneath
+-- a concurrent prune, not that the id was wrong.
+--
+-- Set-only, never cleared: this is the record that a "Failed" result may have
+-- been an operator's doing, and clearing it would resurrect the false alert it
+-- exists to suppress.
+UPDATE veeam_sessions
+SET nexara_stopped = true
+WHERE veeam_server_id = $1 AND veeam_id = $2;
+
+-- name: GetClusterVeeamJobFailureStats :one
+-- veeam_job_failed: how many of a cluster's Veeam jobs last ran badly.
+--
+-- Scoped through SESSIONS rather than veeam_jobs.platform_id. Both carry a
+-- platform, but a session carries it natively while a job's is derived from
+-- sessions in the first place — and a job with no session has no last run to
+-- judge, so reading from sessions loses nothing and skips a hop.
+--
+-- "Latest run per job", not "every failed run in the window": a job that
+-- failed on Tuesday and succeeded since is not failing, and counting history
+-- would leave the alert firing until the failure aged out of retention.
+--
+-- Sessions Nexara stopped are excluded from the FAILED count but not from the
+-- job set. Veeam records a cancelled run as result "Failed" with isCanceled
+-- false and an empty log, so without this the alert fires every time an
+-- operator stops a job from Nexara. is_canceled is deliberately not consulted
+-- — it is false on exactly the rows it would need to be true on.
+--
+-- A stop made from the Veeam console is still indistinguishable from a
+-- failure, which is why the alert copy says "failed or cancelled" rather than
+-- claiming more than the data supports.
+WITH latest AS (
+    SELECT DISTINCT ON (s.veeam_server_id, s.job_veeam_id)
+        s.job_veeam_id,
+        s.name,
+        s.result,
+        s.nexara_stopped
+    FROM veeam_sessions s
+    JOIN veeam_platforms p
+      ON p.veeam_server_id = s.veeam_server_id
+     AND p.platform_id = s.platform_id
+    WHERE p.cluster_id = @cluster_id::uuid
+      AND s.job_veeam_id IS NOT NULL
+    ORDER BY s.veeam_server_id, s.job_veeam_id, s.creation_time DESC
+),
+failed AS (
+    SELECT name FROM latest WHERE result = 'Failed' AND NOT nexara_stopped
+)
+-- failed_names lists at most three, and SAYS SO when it truncates. A message
+-- reading "8 of 12 failed: A, B, C" with no ellipsis reads as the complete
+-- list, so an operator works the three named jobs and never learns about the
+-- other five. A capped list that does not admit the cap is worse than a count
+-- alone.
+SELECT
+    (SELECT count(*) FROM failed)::bigint                                  AS failed_count,
+    (SELECT count(*) FROM latest)::bigint                                  AS job_count,
+    COALESCE((SELECT string_agg(name, ', ' ORDER BY name)
+              FROM (SELECT name FROM failed ORDER BY name LIMIT 3) AS t), '')::text AS failed_names,
+    GREATEST((SELECT count(*) FROM failed) - 3, 0)::bigint                 AS unnamed_count;

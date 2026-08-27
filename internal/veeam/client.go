@@ -261,7 +261,7 @@ func (c *Client) License(ctx context.Context) (*License, error) {
 // loop: if the second attempt is also rejected the credential is genuinely
 // bad, and retrying past that turns a wrong password into an account lockout.
 func (c *Client) get(ctx context.Context, path string, dst any) error {
-	body, err := c.doGet(ctx, path)
+	body, _, err := c.do(ctx, http.MethodGet, path)
 	if err != nil {
 		return err
 	}
@@ -274,37 +274,49 @@ func (c *Client) get(ctx context.Context, path string, dst any) error {
 	return nil
 }
 
-func (c *Client) doGet(ctx context.Context, path string) ([]byte, error) {
-	body, status, access, err := c.attemptGet(ctx, path)
+// do performs one authenticated request, returning the body and the HTTP
+// status. The status is handed back rather than swallowed because Veeam uses
+// it semantically: POST /jobs/{id}/start answers 201 with a session inline, or
+// 204 with no body at all when the job has nothing to process, and the two
+// mean different things to an operator.
+func (c *Client) do(ctx context.Context, method, path string) (body []byte, status int, err error) {
+	body, status, access, err := c.attempt(ctx, method, path)
 	if err != nil {
-		return nil, err
+		return nil, status, err
 	}
 	if status != http.StatusUnauthorized {
-		return body, checkStatus(status, body)
+		return body, status, checkStatus(status, body)
 	}
 
 	c.invalidate(access)
-	body, status, _, err = c.attemptGet(ctx, path)
+	body, status, _, err = c.attempt(ctx, method, path)
 	if err != nil {
-		return nil, err
+		return nil, status, err
 	}
-	return body, checkStatus(status, body)
+	return body, status, checkStatus(status, body)
 }
 
-// attemptGet performs one authenticated GET, returning the body, status and
+// attempt performs one authenticated request, returning the body, status and
 // the access token it used (so the caller can invalidate precisely that one).
-func (c *Client) attemptGet(ctx context.Context, path string) (body []byte, status int, access string, err error) {
+func (c *Client) attempt(ctx context.Context, method, path string) (body []byte, status int, access string, err error) {
 	access, err = c.accessToken(ctx)
 	if err != nil {
 		return nil, 0, "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
 	if err != nil {
 		return nil, 0, access, fmt.Errorf("veeam: build request for %s: %w", path, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+access)
 	req.Header.Set("Accept", "application/json")
+	// The control endpoints need `Content-Length: 0` — VBR rejects a bodiless
+	// POST without it. net/http emits it for us: a nil Body gives
+	// outgoingLength() == 0, and shouldSendContentLength() sends a zero length
+	// for POST/PUT/PATCH specifically because so many servers require it. A
+	// manually-set Content-Length header would be ignored (the transport reads
+	// req.ContentLength, not the header map), so there is deliberately nothing
+	// to set here — only something to not break by attaching an empty body.
 	c.setRevisionHeader(req)
 
 	resp, err := c.httpClient.Do(req)

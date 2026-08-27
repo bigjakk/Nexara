@@ -702,6 +702,29 @@ func (s *Server) setupRoutes() {
 		// what automatic resolution cannot know.
 		vbr.Get("/:id/orphaned-objects", s.veeamHandler.ListOrphanedObjects)
 		vbr.Put("/:id/backup-objects/:object_id/guest", s.veeamHandler.MapBackupObjectGuest)
+
+		// Job control. Gated on execute:veeam, resolved PER CLUSTER through
+		// the job's derived platform_id — a job whose platform is unmapped, or
+		// which has never run and so has no platform at all, requires the
+		// global grant.
+		//
+		// Every one of these spends a fresh OAuth2 password grant against the
+		// VBR server, so they carry their own limiter rather than the general
+		// one. ONE instance shared across the six, for the reason spelled out
+		// on veeamConnect above: separate instances hold separate stores and
+		// would multiply the budget the limiter exists to cap.
+		veeamControl := s.veeamControlLimiter()
+
+		vbr.Post("/:id/jobs/:job_id/start", veeamControl, s.veeamHandler.StartJob)
+		vbr.Post("/:id/jobs/:job_id/stop", veeamControl, s.veeamHandler.StopJob)
+		vbr.Post("/:id/jobs/:job_id/enable", veeamControl, s.veeamHandler.EnableJob)
+		vbr.Post("/:id/jobs/:job_id/disable", veeamControl, s.veeamHandler.DisableJob)
+		vbr.Post("/:id/sessions/:session_id/stop", veeamControl, s.veeamHandler.StopSession)
+
+		// Read-through to Veeam rather than stored: logs are large, per-run,
+		// and wanted only when someone opens one run. view:veeam, but it still
+		// costs a logon, so it shares the control limiter.
+		vbr.Get("/:id/sessions/:session_id/logs", veeamControl, s.veeamHandler.GetSessionLogs)
 	}
 
 	// PBS snapshot lookup (cross-server, by backup_id / VMID).

@@ -81,6 +81,22 @@ type fakeVBR struct {
 	// repeatFullPages makes every listing answer a full page forever,
 	// emulating a server whose pagination never terminates.
 	repeatFullPages bool
+
+	// responses answers an exact "METHOD path" with a canned status and body.
+	// Used by the job-control tests, whose endpoints are neither listings nor
+	// one of the fixed probe paths.
+	responses map[string]fakeResponse
+	// contentLengths records the Content-Length each request carried, keyed by
+	// "METHOD path". VBR rejects a bodiless control POST that does not send
+	// one, so a test asserts it here rather than discovering it against a real
+	// server.
+	contentLengths map[string]string
+}
+
+// fakeResponse is a canned reply for one "METHOD path".
+type fakeResponse struct {
+	status int
+	body   string
 }
 
 func (f *fakeVBR) pathCalls(path string) int {
@@ -103,9 +119,11 @@ func (f *fakeVBR) lastQuery(path string) url.Values {
 func newFakeVBR(t *testing.T) (*fakeVBR, *httptest.Server) {
 	t.Helper()
 	f := &fakeVBR{
-		t:             t,
-		lists:         map[string][]json.RawMessage{},
-		queriesByPath: map[string][]url.Values{},
+		t:              t,
+		lists:          map[string][]json.RawMessage{},
+		queriesByPath:  map[string][]url.Values{},
+		responses:      map[string]fakeResponse{},
+		contentLengths: map[string]string{},
 	}
 	srv := httptest.NewUnstartedServer(f)
 	// Silence the handshake-failure lines the fingerprint-mismatch test
@@ -129,6 +147,20 @@ func (f *fakeVBR) seenRevisions() []string {
 	return append([]string(nil), f.revisions...)
 }
 
+// contentLength returns the Content-Length recorded for one "METHOD path".
+func (f *fakeVBR) contentLength(key string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.contentLengths[key]
+}
+
+// respond registers a canned reply for one "METHOD path".
+func (f *fakeVBR) respond(key string, status int, body string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.responses[key] = fakeResponse{status: status, body: body}
+}
+
 func (f *fakeVBR) form() map[string]string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -141,6 +173,11 @@ func (f *fakeVBR) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
 	f.revisions = append(f.revisions, rev)
+	// Recorded from the parsed request rather than the header map: net/http
+	// strips Content-Length out of Header on the server side and surfaces it
+	// here, so reading the header would report "" for a request that did send
+	// one.
+	f.contentLengths[r.Method+" "+r.URL.Path] = strconv.FormatInt(r.ContentLength, 10)
 	f.mu.Unlock()
 
 	// Every API request must carry the revision header. The client sends
@@ -224,7 +261,17 @@ func (f *fakeVBR) serveAPI(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.queriesByPath[r.URL.Path] = append(f.queriesByPath[r.URL.Path], r.URL.Query())
 	rows, isList := f.lists[r.URL.Path]
+	canned, hasCanned := f.responses[r.Method+" "+r.URL.Path]
 	f.mu.Unlock()
+
+	if hasCanned {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(canned.status)
+		if canned.body != "" {
+			_, _ = w.Write([]byte(canned.body))
+		}
+		return
+	}
 
 	if isList || f.repeatFullPages {
 		q := r.URL.Query()

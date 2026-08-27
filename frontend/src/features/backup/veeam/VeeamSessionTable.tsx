@@ -10,10 +10,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
+import { VeeamSessionActions } from "./VeeamSessionActions";
+import { VeeamSessionLog } from "./VeeamSessionLog";
 import type { VeeamSession } from "../types/backup";
 
 interface VeeamSessionTableProps {
   sessions: VeeamSession[];
+  /** The server these runs belong to. Stopping one posts against it. */
+  serverId: string;
   /** Identifies which server these rows belong to, so expansion state resets. */
   scopeKey?: string;
 }
@@ -42,6 +46,7 @@ function resultVariant(
 
 export function VeeamSessionTable({
   sessions,
+  serverId,
   scopeKey = "",
 }: VeeamSessionTableProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -85,6 +90,7 @@ export function VeeamSessionTable({
               <TableHead>Started</TableHead>
               <TableHead>Duration</TableHead>
               <TableHead className="text-right">Transferred</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -118,9 +124,13 @@ export function VeeamSessionTable({
                       ) : (
                         <Badge variant={resultVariant(session.result)}>
                           {/* Never a bare "Failed": Veeam records an
-                              API-cancelled run identically to a real failure. */}
+                              API-cancelled run identically to a real failure.
+                              Keyed on nexara_STOPPED, not nexara_initiated — a
+                              run Nexara STARTED can fail for a completely real
+                              reason, and labelling that "stopped" would tell an
+                              operator to ignore a genuine backup failure. */}
                           {session.result === "Failed"
-                            ? session.nexara_initiated
+                            ? session.nexara_stopped
                               ? "Stopped from Nexara"
                               : "Failed or cancelled"
                             : session.result}
@@ -139,11 +149,17 @@ export function VeeamSessionTable({
                     <TableCell className="text-right font-mono text-sm">
                       {formatBytes(session.transferred_size)}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <VeeamSessionActions
+                        serverId={serverId}
+                        session={session}
+                      />
+                    </TableCell>
                   </TableRow>
 
                   {isExpanded && (
                     <TableRow>
-                      <TableCell colSpan={8} className="bg-muted/30">
+                      <TableCell colSpan={9} className="bg-muted/30">
                         <div className="space-y-3 px-2 py-3">
                           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                             <div>
@@ -206,7 +222,7 @@ export function VeeamSessionTable({
                             )}
 
                           {session.result === "Failed" &&
-                            !session.nexara_initiated && (
+                            !session.nexara_stopped && (
                               <p className="text-xs text-muted-foreground">
                                 Veeam records a run stopped through its API the
                                 same way it records a genuine failure, with no
@@ -215,6 +231,14 @@ export function VeeamSessionTable({
                                 Veeam console.
                               </p>
                             )}
+
+                          {/* Fetched only once the row is open: each read
+                              costs a fresh logon against the Veeam server. */}
+                          <VeeamSessionLog
+                            serverId={serverId}
+                            session={session}
+                            enabled={isExpanded}
+                          />
                         </div>
                       </TableCell>
                     </TableRow>

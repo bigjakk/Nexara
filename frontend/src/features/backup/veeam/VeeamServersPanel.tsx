@@ -198,7 +198,11 @@ export function VeeamServersPanel() {
 
           <TabsContent value="jobs" className="space-y-4">
             <VeeamTabBody query={jobsQuery} resource="backup jobs">
-              <VeeamJobTable jobs={jobs} scopeKey={activeServerId} />
+              <VeeamJobTable
+                jobs={jobs}
+                serverId={activeServerId}
+                scopeKey={activeServerId}
+              />
             </VeeamTabBody>
           </TabsContent>
 
@@ -206,6 +210,7 @@ export function VeeamServersPanel() {
             <VeeamTabBody query={sessionsQuery} resource="job runs">
               <VeeamSessionTable
                 sessions={sessions}
+                serverId={activeServerId}
                 scopeKey={activeServerId}
               />
             </VeeamTabBody>

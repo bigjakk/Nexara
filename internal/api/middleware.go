@@ -285,6 +285,29 @@ func (s *Server) veeamConnectLimiter() fiber.Handler {
 	})
 }
 
+// veeamControlLimiter caps the Veeam job-control endpoints at 30/min/IP.
+//
+// A SEPARATE instance from veeamConnectLimiter, not a shared one, and that is
+// the deliberate opposite of the note on the routes that share theirs. Job
+// control is a routine action an operator repeats — start, watch, stop, read
+// the log — while add/edit/test are one-offs. Sharing one 10/min budget would
+// let an afternoon of ordinary job control lock an operator out of registering
+// a server, and would let a fumbled add-server flow block a stop.
+//
+// Higher than 10 for the same reason, and still bounded: every one of these
+// calls mints its own OAuth2 password grant against a domain-backed VBR
+// server, so an unbounded route here is the same domain-logon spraying
+// primitive veeamConnectLimiter exists to cap.
+func (s *Server) veeamControlLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:        30,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() + ":veeam-control"
+		},
+	})
+}
+
 // fingerprintFetchLimiter caps POST /api/v1/clusters/fetch-fingerprint at
 // 30/min/IP.
 //

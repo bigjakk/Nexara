@@ -15,13 +15,12 @@ import (
 // evaluateRule dispatches to them before its scope switch, the way
 // snapshot_age_days does.
 //
-// veeam_job_failed is deliberately absent, and belongs with job control rather
-// than here. A job cancelled through the API is recorded by Veeam as result
-// "Failed" with isCanceled false and an empty session log — there is nothing
-// in the data that distinguishes it from a real failure. Shipping the rule now
-// would mean it fires every time an operator stops a job from Nexara, so it
-// waits for the phase that records nexara_initiated on the session and can
-// suppress those.
+// veeam_job_failed shipped WITH job control, not before it, and that ordering
+// was the whole reason it waited. A job cancelled through the API is recorded
+// by Veeam as result "Failed" with isCanceled false and an empty session log —
+// nothing in the data distinguishes it from a real failure. The rule is only
+// honest once Nexara records its own stops, which veeam_sessions.nexara_stopped
+// now does.
 
 // inclusiveOperator reports whether a rule's comparison includes the threshold
 // itself, so the "N over threshold" figure in an alert message is counted the
@@ -251,6 +250,64 @@ func (e *Engine) evaluateVeeamRepoRule(ctx context.Context, rule db.AlertRule) e
 		stats.FullestName, stats.FullestPercent, stats.OverCount, stats.MeasuredCount)
 	conditionMet := compareValue(stats.FullestPercent, rule.Operator, rule.Threshold)
 	return e.handleRuleResult(ctx, rule, conditionMet, stats.FullestPercent, label, pgtype.UUID{}, pgtype.UUID{})
+}
+
+// evaluateVeeamJobFailedRule handles veeam_job_failed: how many of a cluster's
+// Veeam jobs ended their most recent run badly.
+//
+// Cluster scope only. A Veeam job protects many guests at once, so there is no
+// single vm its failure belongs to — attributing it to one would be wrong, and
+// raising it against every guest in the job would be N alarms for one event.
+//
+// The value is a COUNT, not a rate or a percentage, so the rule an operator
+// almost always wants is "> 0". The threshold is left free rather than pinned
+// there: on an estate with a job that is known-flaky and already ticketed,
+// "> 1" is a legitimate thing to ask for.
+func (e *Engine) evaluateVeeamJobFailedRule(ctx context.Context, rule db.AlertRule, windows []db.MaintenanceWindow) error {
+	if rule.ScopeType != "cluster" {
+		return fmt.Errorf("veeam_job_failed does not support scope_type %q", rule.ScopeType)
+	}
+	if !rule.ClusterID.Valid {
+		return fmt.Errorf("veeam_job_failed rule %s has no cluster_id", rule.ID)
+	}
+	if e.isInMaintenanceWindow(rule.ClusterID, pgtype.UUID{}, windows) {
+		return nil
+	}
+	clusterID := uuidFromPgtype(rule.ClusterID)
+
+	stats, err := e.queries.GetClusterVeeamJobFailureStats(ctx, clusterID)
+	if err != nil {
+		return fmt.Errorf("cluster veeam job failure stats: %w", err)
+	}
+	// Veeam runs nothing on this cluster, so there is no run to judge.
+	// Condition false rather than "0 failures", which also resolves a firing
+	// alert once the last job is removed instead of pinning it at its final
+	// reading — the same shape evaluateVeeamRPORule takes for an unprotected
+	// cluster.
+	if stats.JobCount == 0 {
+		return e.handleRuleResult(ctx, rule, false, 0, e.clusterLabel(ctx, clusterID), pgtype.UUID{}, pgtype.UUID{})
+	}
+
+	failed := float64(stats.FailedCount)
+	// "failed or cancelled", never a bare "failed". A stop made from the Veeam
+	// console is recorded identically to a real failure and Nexara cannot tell
+	// them apart — only its OWN stops are excluded, upstream in the query. The
+	// honest label is the one that admits the ambiguity; a confident "failed"
+	// would be wrong every time someone used the Veeam console.
+	label := fmt.Sprintf("%s — %d of %d Veeam jobs failed or cancelled on their last run",
+		e.clusterLabel(ctx, clusterID), stats.FailedCount, stats.JobCount)
+	if stats.FailedNames != "" {
+		label += ": " + stats.FailedNames
+		// The name list is capped at three, and the cap is stated. Without
+		// this, "8 of 12 failed: A, B, C" reads as the complete list and an
+		// operator works three jobs while five more sit in the same state.
+		if stats.UnnamedCount > 0 {
+			label += fmt.Sprintf(" and %d more", stats.UnnamedCount)
+		}
+	}
+
+	conditionMet := compareValue(failed, rule.Operator, rule.Threshold)
+	return e.handleRuleResult(ctx, rule, conditionMet, failed, label, pgtype.UUID{}, pgtype.UUID{})
 }
 
 // clusterLabel resolves a cluster's name for an alert message, falling back to
