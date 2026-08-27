@@ -32,6 +32,7 @@ function job(over: Partial<VeeamJob> = {}): VeeamJob {
     last_seen_at: "2026-08-26T23:00:00Z",
     running_session_id: "",
     running_session_state: "",
+    last_session_id: "",
     ...over,
   };
 }

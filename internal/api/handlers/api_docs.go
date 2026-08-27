@@ -191,6 +191,7 @@ var endpointMeta = map[string]APIEndpoint{
 	"POST /api/v1/veeam-servers/:id/jobs/:job_id/disable":                    {Description: "Take a Veeam job off its schedule. Protection stops accruing while existing restore points remain, and Veeam raises no alarm about it", Permission: "execute:veeam", Group: "Backup"},
 	"POST /api/v1/veeam-servers/:id/sessions/:session_id/stop":               {Description: "Stop one running Veeam session. Recorded as Nexara-initiated, as for the job stop", Permission: "execute:veeam", Group: "Backup"},
 	"GET /api/v1/veeam-servers/:id/sessions/:session_id/logs":                {Description: "Read a session's log, live from Veeam. Empty is the NORMAL result for a stopped run — Veeam keeps no records for a killed session", Permission: "view:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers/:id/sessions/:session_id/tasks":               {Description: "Per-guest breakdown of one run: which guests it processed and which failed, linked to their Nexara guest where the name resolves unambiguously. Empty while a run is still in flight — Veeam reports task rows only as tasks finish", Permission: "view:veeam", Group: "Backup"},
 
 	// ── DRS ───────────────────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/drs/config":            {Description: "Get DRS configuration", Permission: "view:drs", Group: "DRS"},

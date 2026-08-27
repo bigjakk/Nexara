@@ -322,3 +322,103 @@ func TestSessionLogs_EmptyIsNotAnError(t *testing.T) {
 		t.Errorf("got %d records, want 0", len(records))
 	}
 }
+
+
+// The per-guest breakdown, and the two things about it that are easy to get
+// wrong: it is the PLAIN endpoint (unlike /jobs and /proxies, whose Proxmox
+// rows live only under /states), and its rows carry a platformId of their own.
+func TestTaskSessions_DecodesPerGuestOutcomes(t *testing.T) {
+	f, srv := newFakeVBR(t)
+	f.setList("/api/v1/sessions/"+testSessionID+"/taskSessions", []string{`{
+		"id": "7b1c2d3e-4f50-4a61-b273-8495a6b7c8d9",
+		"type": "Backup",
+		"name": "ad01.ad.crjlab.net",
+		"sessionType": "EndpointBackup",
+		"sessionId": "` + testSessionID + `",
+		"platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+		"platformType": "Proxmox",
+		"state": "Stopped",
+		"algorithm": "Increment",
+		"result": {"result": "Failed", "isCanceled": false,
+		           "message": "Session failed, check session log for details."},
+		"progress": {"duration": "00:02:28", "transferredSize": 0},
+		"creationTime": "2026-08-26T23:00:31.125853",
+		"endTime": "2026-08-26T23:02:59.50859"
+	}`, `{
+		"id": "8c2d3e4f-5061-4b72-c384-95a6b7c8d9e0",
+		"type": "Backup",
+		"name": "docker01.ad.crjlab.net",
+		"sessionType": "EndpointBackup",
+		"sessionId": "` + testSessionID + `",
+		"platformId": "01208ee8-47fe-4ea8-8727-5115874da1ad",
+		"state": "Stopped",
+		"result": {"result": "Success", "isCanceled": false, "message": ""},
+		"progress": {"duration": "00:04:11", "transferredSize": 1048576},
+		"creationTime": "2026-08-26T23:00:31.125853"
+	}`})
+	c := newTestClient(t, srv, `ad\jdoe`)
+
+	tasks, err := c.TaskSessions(context.Background(), testSessionID)
+	if err != nil {
+		t.Fatalf("TaskSessions: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("got %d tasks, want 2", len(tasks))
+	}
+
+	failed := tasks[0]
+	if failed.Name != "ad01.ad.crjlab.net" {
+		t.Errorf("name = %q", failed.Name)
+	}
+	// The guest's OWN result, which is the whole point: the run reports one
+	// outcome and its guests can each have a different one.
+	if failed.Result.Result != "Failed" {
+		t.Errorf("result = %q, want Failed", failed.Result.Result)
+	}
+	if failed.Result.Message == "" {
+		t.Error("the per-guest message was dropped; it is the reason THIS guest failed")
+	}
+	// Cluster-attributable without a join back through its session.
+	if failed.PlatformID != "01208ee8-47fe-4ea8-8727-5115874da1ad" {
+		t.Errorf("platformId = %q, want the Proxmox platform", failed.PlatformID)
+	}
+	if !failed.IsBackup() {
+		t.Error("a Backup task did not report as one")
+	}
+	if failed.Progress.Duration != "00:02:28" {
+		t.Errorf("duration = %q", failed.Progress.Duration)
+	}
+	if tasks[1].Result.Result != "Success" {
+		t.Errorf("second task result = %q, want Success", tasks[1].Result.Result)
+	}
+}
+
+// A running session returns zero rows — verified against a live run. It is not
+// an error and must not be reported as one; the caller distinguishes it from a
+// finished run with no detail using the run's own state.
+func TestTaskSessions_EmptyForARunningSession(t *testing.T) {
+	f, srv := newFakeVBR(t)
+	f.setList("/api/v1/sessions/"+testSessionID+"/taskSessions", nil)
+	c := newTestClient(t, srv, `ad\jdoe`)
+
+	tasks, err := c.TaskSessions(context.Background(), testSessionID)
+	if err != nil {
+		t.Fatalf("TaskSessions on a running run: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("got %d tasks, want 0", len(tasks))
+	}
+}
+
+// Restore, Antivirus and Replica rows share this endpoint and are not a
+// guest's outcome in a backup run.
+func TestTaskSession_IsBackup(t *testing.T) {
+	for _, tt := range []struct {
+		typ  string
+		want bool
+	}{{"Backup", true}, {"Restore", false}, {"Antivirus", false}, {"Replica", false}, {"", false}} {
+		if got := (TaskSession{Type: tt.typ}).IsBackup(); got != tt.want {
+			t.Errorf("IsBackup(%q) = %v, want %v", tt.typ, got, tt.want)
+		}
+	}
+}

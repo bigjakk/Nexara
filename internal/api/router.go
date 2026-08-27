@@ -725,6 +725,12 @@ func (s *Server) setupRoutes() {
 		// and wanted only when someone opens one run. view:veeam, but it still
 		// costs a logon, so it shares the control limiter.
 		vbr.Get("/:id/sessions/:session_id/logs", veeamControl, s.veeamHandler.GetSessionLogs)
+
+		// The per-guest breakdown of one run — which guests it processed and
+		// which failed. Veeam's console shows this and none of its plain
+		// listings do, and a Proxmox job's object list is unreadable
+		// (GET /jobs/{id} is a 400), so this is the only route to it.
+		vbr.Get("/:id/sessions/:session_id/tasks", veeamControl, s.veeamHandler.GetSessionTasks)
 	}
 
 	// PBS snapshot lookup (cross-server, by backup_id / VMID).

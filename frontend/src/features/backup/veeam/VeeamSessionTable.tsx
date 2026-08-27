@@ -12,6 +12,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
 import { VeeamSessionActions } from "./VeeamSessionActions";
 import { VeeamSessionLog } from "./VeeamSessionLog";
+import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamSession } from "../types/backup";
 
 interface VeeamSessionTableProps {
@@ -231,6 +232,26 @@ export function VeeamSessionTable({
                                 Veeam console.
                               </p>
                             )}
+
+                          {/* Which guests this run processed, and which
+                              failed. The run's own result cannot say — "Failed"
+                              on a job covering eleven guests names none of
+                              them. */}
+                          <VeeamTaskTable
+                            serverId={serverId}
+                            sessionVeeamId={session.veeam_id}
+                            enabled={isExpanded}
+                            // An empty state is FINISHED, not running —
+                            // matching VeeamSessionActions, which reads the
+                            // same field and already treats it that way.
+                            // Without the first clause a malformed row tells
+                            // the operator to wait for detail on a run that is
+                            // not going anywhere.
+                            running={
+                              session.state !== "" &&
+                              session.state !== "Stopped"
+                            }
+                          />
 
                           {/* Fetched only once the row is open: each read
                               costs a fresh logon against the Veeam server. */}

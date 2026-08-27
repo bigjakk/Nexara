@@ -9,6 +9,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/veeam"
 )
@@ -42,6 +43,7 @@ func newVeeamControlTestApp(t *testing.T) *fiber.App {
 	app.Post("/veeam-servers/:id/jobs/:job_id/disable", handler.DisableJob)
 	app.Post("/veeam-servers/:id/sessions/:session_id/stop", handler.StopSession)
 	app.Get("/veeam-servers/:id/sessions/:session_id/logs", handler.GetSessionLogs)
+	app.Get("/veeam-servers/:id/sessions/:session_id/tasks", handler.GetSessionTasks)
 
 	return app
 }
@@ -67,6 +69,7 @@ func TestVeeamControl_RefusesBeforeAnyLookup(t *testing.T) {
 		{"disable", http.MethodPost, "/veeam-servers/" + serverID + "/jobs/" + jobID + "/disable"},
 		{"session stop", http.MethodPost, "/veeam-servers/" + serverID + "/sessions/" + sessionID + "/stop"},
 		{"session logs", http.MethodGet, "/veeam-servers/" + serverID + "/sessions/" + sessionID + "/logs"},
+		{"session tasks", http.MethodGet, "/veeam-servers/" + serverID + "/sessions/" + sessionID + "/tasks"},
 	}
 
 	for _, tc := range tests {
@@ -239,5 +242,48 @@ func TestOptionalUUIDFromString(t *testing.T) {
 		if got := optionalUUIDFromString(bad); got.Valid {
 			t.Errorf("optionalUUIDFromString(%q) = %+v, want NULL", bad, got)
 		}
+	}
+}
+
+// Task rows are served only when they provably belong to the cluster the
+// request was authorized for.
+//
+// The request is permitted against the SESSION's platform, but each task row
+// carries a platformId of its own — that is what makes it independently
+// cluster-attributable, and therefore what has to agree. A row naming another
+// platform is a guest name and backup result from a cluster the caller may
+// hold no grant on.
+func TestSameVeeamPlatform(t *testing.T) {
+	authorized := uuid.New()
+	other := uuid.New()
+	valid := pgtype.UUID{Bytes: authorized, Valid: true}
+
+	tests := []struct {
+		name       string
+		upstream   string
+		authorized pgtype.UUID
+		want       bool
+	}{
+		{"same platform", authorized.String(), valid, true},
+		{"different platform", other.String(), valid, false},
+		{"no platform on the row", "", valid, false},
+		{"unparseable platform on the row", "not-a-uuid", valid, false},
+		{
+			// NOT a hole: permitsPlatform answers a NULL session platform with
+			// HasGlobal alone, so a caller who gets this far holds global
+			// view:veeam and is entitled to every cluster's rows already.
+			// Filtering here would hide data from the only person who can see
+			// all of it.
+			name:     "unattributable session serves everything, because only a global holder reaches it",
+			upstream: other.String(), authorized: pgtype.UUID{}, want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sameVeeamPlatform(tc.upstream, tc.authorized); got != tc.want {
+				t.Errorf("sameVeeamPlatform(%q, valid=%v) = %v, want %v",
+					tc.upstream, tc.authorized.Valid, got, tc.want)
+			}
+		})
 	}
 }

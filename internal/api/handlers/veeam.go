@@ -288,6 +288,12 @@ type veeamJobResponse struct {
 	// flight.
 	RunningSessionID    string `json:"running_session_id"`
 	RunningSessionState string `json:"running_session_state"`
+	// LastSessionID is the job's most recent run as VEEAM reports it, refreshed
+	// by the inventory pass. Stale for a job started since that pass, which is
+	// why RunningSessionID exists and takes precedence — but it is the only
+	// handle on the latest run of a job that is not currently running, and so
+	// the one the per-guest breakdown opens for a finished job.
+	LastSessionID string `json:"last_session_id"`
 }
 
 // ListJobs handles GET /api/v1/veeam-servers/:id/jobs.
@@ -345,6 +351,9 @@ func (h *VeeamHandler) ListJobs(c fiber.Ctx) error {
 			// the wire from a server the operator chose.
 			RunningSessionID:    j.RunningSessionID,
 			RunningSessionState: auditSafe(j.RunningSessionState),
+		}
+		if j.LastSessionID.Valid {
+			row.LastSessionID = uuid.UUID(j.LastSessionID.Bytes).String()
 		}
 		if j.PlatformID.Valid {
 			if clusterID, ok := scope.platformCluster[platform]; ok {

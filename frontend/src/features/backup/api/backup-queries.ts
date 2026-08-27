@@ -42,6 +42,7 @@ import type {
   VeeamOrphanedObject,
   VeeamGuestProtection,
   VeeamSessionLogRecord,
+  VeeamTaskSession,
 } from "../types/backup";
 
 // --- PBS Server Queries ---
@@ -970,6 +971,36 @@ export function useVeeamSessionLogs(
       ),
     enabled: enabled && serverId.length > 0 && sessionVeeamId.length > 0,
     // A finished session's log does not change, and a caller without
+    // view:veeam on the cluster gets a 403 that retrying cannot fix.
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+/**
+ * The per-guest breakdown of one run.
+ *
+ * AN EMPTY RESULT IS TWO DIFFERENT FACTS. Veeam reports no task rows for a run
+ * still in flight — they appear as tasks finish — and none for a finished run
+ * it kept no detail for. The caller knows which from the run's own state, and
+ * must say so: "not reported yet" and "no detail" read identically otherwise.
+ *
+ * Fetched only when a row is expanded — each call costs a fresh logon against
+ * the Veeam server, so this must never be eager.
+ */
+export function useVeeamSessionTasks(
+  serverId: string,
+  sessionVeeamId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "sessions", sessionVeeamId, "tasks"],
+    queryFn: () =>
+      apiClient.list<VeeamTaskSession>(
+        `/api/v1/veeam-servers/${serverId}/sessions/${sessionVeeamId}/tasks`,
+      ),
+    enabled: enabled && serverId.length > 0 && sessionVeeamId.length > 0,
+    // A finished run's breakdown does not change, and a caller without
     // view:veeam on the cluster gets a 403 that retrying cannot fix.
     staleTime: 5 * 60_000,
     retry: false,

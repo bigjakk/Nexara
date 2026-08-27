@@ -433,6 +433,13 @@ export interface VeeamJob {
    */
   running_session_id: string;
   running_session_state: string;
+  /**
+   * The job's most recent run as Veeam reports it, refreshed by the inventory
+   * pass. Stale for a job started since that pass — prefer running_session_id
+   * — but it is the only handle on the latest run of a job that is not
+   * currently running. Empty when the job has never run.
+   */
+  last_session_id: string;
 }
 
 export interface VeeamSession {
@@ -468,6 +475,34 @@ export interface VeeamSession {
    */
   nexara_stopped: boolean;
   cluster_id: string | null;
+}
+
+/**
+ * One guest's outcome inside a run.
+ *
+ * The per-guest breakdown Veeam's console shows and its plain listings do not:
+ * which guest in a job failed, and when.
+ */
+export interface VeeamTaskSession {
+  id: string;
+  name: string;
+  /** The GUEST's own state and result, not the run's. */
+  state: string;
+  result: string;
+  result_message: string;
+  algorithm: string;
+  duration: string;
+  processed_size: number;
+  transferred_size: number;
+  creation_time: string | null;
+  end_time: string | null;
+  /**
+   * The Nexara guest this task processed, when the name resolves to exactly
+   * one. Null otherwise — a task session carries no uuid, so the link is
+   * inherited from the backup object of the same name or not made at all.
+   */
+  cluster_id: string | null;
+  vmid: number | null;
 }
 
 /** One line of a Veeam session log, read live from the server. */

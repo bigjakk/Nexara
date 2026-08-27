@@ -25,6 +25,20 @@ func (f *fakeVBR) serveFixtureList(path, fixtureName string) {
 	f.lists[path] = body.Data
 }
 
+// setList makes the fake VBR answer path with inline JSON rows, for the
+// endpoints that have no captured fixture. An empty slice is a listing that
+// legitimately returns nothing, not an absent one — the key's presence is what
+// makes the fake treat the path as a listing at all.
+func (f *fakeVBR) setList(path string, rows []string) {
+	raw := make([]json.RawMessage, 0, len(rows))
+	for _, r := range rows {
+		raw = append(raw, json.RawMessage(r))
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lists[path] = raw
+}
+
 func TestRepositories_ConvertsFloatGBToBytes(t *testing.T) {
 	f, srv := newFakeVBR(t)
 	f.serveFixtureList("/api/v1/backupInfrastructure/repositories/states",

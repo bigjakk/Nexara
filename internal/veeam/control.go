@@ -184,6 +184,67 @@ func (c *Client) SessionLogs(ctx context.Context, sessionID string) ([]SessionLo
 	return body.Records, nil
 }
 
+// TaskSession is one guest's outcome inside a run.
+//
+// This is the per-object breakdown Veeam's own console shows and its plain
+// listings do not: which guest in a job failed, and when. Nothing else in the
+// API answers it — a Proxmox job's object list is unreadable (GET /jobs/{id}
+// is a 400) and backup objects are per-guest-per-server, not per-run.
+//
+// It carries PlatformID, so a task row is cluster-attributable on its own
+// without a join back through its session.
+//
+// ⚠️ There is NO smbios uuid and no objectId here, only Name. Correlating a
+// task row to a Nexara guest cannot use the deterministic tier, which is why
+// the handler inherits the link from the backup object of the same name rather
+// than inventing a second, weaker name match of its own.
+type TaskSession struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	Name string `json:"name"`
+	// SessionType at TASK level reads "EndpointBackup", not the
+	// "PlatformBackupJob" its parent session reports. Verified live. Do not
+	// filter task rows on the parent's value.
+	SessionType  string        `json:"sessionType"`
+	SessionID    string        `json:"sessionId"`
+	PlatformID   string        `json:"platformId"`
+	PlatformType string        `json:"platformType"`
+	State        string        `json:"state"`
+	Result       SessionResult `json:"result"`
+	Algorithm    string        `json:"algorithm"`
+	Progress     Progress      `json:"progress"`
+	CreationTime Timestamp     `json:"creationTime"`
+	EndTime      *Timestamp    `json:"endTime"`
+}
+
+// BackupTaskType is the ETaskSessionType value for a backup task. The others
+// are Restore, Antivirus and Replica, none of which belong in a run's
+// per-guest breakdown.
+const BackupTaskType = "Backup"
+
+// IsBackup reports whether this task is a backup of an object.
+func (t TaskSession) IsBackup() bool { return t.Type == BackupTaskType }
+
+// TaskSessions lists one run's per-guest task outcomes.
+//
+// ⚠️ A RUNNING session returns ZERO rows. Verified against a live run: task
+// rows appear only as tasks finish, so this answers "what failed" after the
+// fact and cannot drive live per-guest progress. An empty result for a run
+// still in flight means "not reported yet", which is a different fact from an
+// empty result for a finished one — callers must not render them the same way.
+//
+// Note this is the PLAIN endpoint and it does carry Proxmox rows, unlike
+// /jobs and /backupInfrastructure/proxies, which hide them outside their
+// /states variants (§2A). Verified rather than assumed, because that trap is
+// two for two elsewhere.
+func (c *Client) TaskSessions(ctx context.Context, sessionID string) ([]TaskSession, error) {
+	id, err := requireUUID("session id", sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return listPaged[TaskSession](ctx, c, "/api/v1/sessions/"+id+"/taskSessions", nil, maxInventoryRows)
+}
+
 // requireUUID validates an id before it is concatenated into a request path.
 //
 // Every one of these ids is a uuid on the Veeam side, and every caller sources

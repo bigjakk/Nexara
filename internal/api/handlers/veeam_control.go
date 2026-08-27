@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -326,6 +327,183 @@ func (h *VeeamHandler) GetSessionLogs(c fiber.Ctx) error {
 		resp = append(resp, row)
 	}
 	return RespondItems(c, resp)
+}
+
+// veeamTaskSessionResponse is one guest's outcome inside a run.
+type veeamTaskSessionResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// State and Result are the guest's own, not the run's — a run reported as
+	// Failed can have most of its guests Succeeded, and which ones did not is
+	// the whole question this endpoint answers.
+	State           string     `json:"state"`
+	Result          string     `json:"result"`
+	ResultMessage   string     `json:"result_message"`
+	Algorithm       string     `json:"algorithm"`
+	Duration        string     `json:"duration"`
+	ProcessedSize   int64      `json:"processed_size"`
+	TransferredSize int64      `json:"transferred_size"`
+	CreationTime    *time.Time `json:"creation_time"`
+	EndTime         *time.Time `json:"end_time"`
+	// ClusterID and Vmid are the Nexara guest this task processed, when the
+	// name resolves to exactly one. NULL otherwise, and the UI shows the bare
+	// name — a task session carries no uuid, so a guess here would be a guess.
+	ClusterID *uuid.UUID `json:"cluster_id"`
+	Vmid      *int32     `json:"vmid"`
+}
+
+// GetSessionTasks handles
+// GET /api/v1/veeam-servers/:id/sessions/:session_id/tasks.
+//
+// The per-guest breakdown of one run: which guests it processed and which of
+// them failed. Veeam's console shows this; none of its plain listings do, and
+// a Proxmox job's object list is unreadable (GET /jobs/{id} is a 400), so this
+// is the only route to "what failed inside that job".
+//
+// Read-through to Veeam rather than stored, like the session log: wanted only
+// when someone opens one run, and it costs a logon per call.
+//
+// ⚠️ AN EMPTY LIST IS TWO DIFFERENT FACTS. Veeam reports no task rows for a
+// run still in flight — they appear as tasks finish — and none for a finished
+// run it kept no detail for. The response says which, because an operator
+// reads the wrong one otherwise.
+func (h *VeeamHandler) GetSessionTasks(c fiber.Ctx) error {
+	target, err := h.resolveSessionForControl(c, "view")
+	if err != nil {
+		return err
+	}
+
+	client, release, err := h.controlClient(c.Context(), target.server)
+	if err != nil {
+		return renderVeeamControlError(c, err)
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(c.Context(), veeamControlTimeout)
+	defer cancel()
+
+	tasks, err := client.TaskSessions(ctx, target.session.VeeamID.String())
+	if err != nil {
+		return renderVeeamControlError(c, err)
+	}
+
+	guests := h.resolveTaskGuests(c, target)
+
+	resp := make([]veeamTaskSessionResponse, 0, len(tasks))
+	for _, t := range tasks {
+		// Backup tasks only. The same endpoint carries Restore, Antivirus and
+		// Replica rows, none of which are a guest's outcome in this run.
+		if !t.IsBackup() {
+			continue
+		}
+		// And only tasks on the platform this caller was authorized for.
+		//
+		// The request was permitted against the SESSION's platform, but a task
+		// row carries a platformId of its own — which is what makes it
+		// independently cluster-attributable, and therefore what has to agree.
+		// A row naming a different platform would be a guest name and backup
+		// result from a cluster the caller may hold no grant on. It should not
+		// happen (a run targets one platform), which is exactly why it is
+		// dropped silently rather than reasoned about: everything else in this
+		// integration answers "could this belong to another cluster?" with
+		// fail-closed, and a row that cannot be proved to belong here does not
+		// get served from here.
+		if !sameVeeamPlatform(t.PlatformID, target.session.PlatformID) {
+			continue
+		}
+		row := veeamTaskSessionResponse{
+			ID: t.ID,
+			// Bounded: every one of these is upstream text from a server the
+			// operator chose, and nothing on the far end caps them.
+			Name:            auditSafe(t.Name),
+			State:           auditSafe(t.State),
+			Result:          auditSafe(t.Result.Result),
+			ResultMessage:   auditSafe(t.Result.Message),
+			Algorithm:       auditSafe(t.Algorithm),
+			Duration:        auditSafe(t.Progress.Duration),
+			ProcessedSize:   t.Progress.ProcessedSize,
+			TransferredSize: t.Progress.TransferredSize,
+		}
+		if !t.CreationTime.IsZero() {
+			ts := t.CreationTime.Time
+			row.CreationTime = &ts
+		}
+		if end := t.EndTime.Or(); !end.IsZero() {
+			row.EndTime = &end
+		}
+		if g, ok := guests[strings.ToLower(t.Name)]; ok {
+			cluster := g.cluster
+			vmid := g.vmid
+			row.ClusterID = &cluster
+			row.Vmid = &vmid
+		}
+		resp = append(resp, row)
+	}
+
+	// Plain envelope, no bespoke "running" field beside it. Telling the two
+	// empty cases apart needs the run's state, and the caller already holds
+	// it — the same row, read from the same table, so a flag here would be
+	// exactly as stale and would fork the response shape for nothing.
+	return RespondItems(c, resp)
+}
+
+// sameVeeamPlatform reports whether an upstream platform id may be served to a
+// caller authorized against `authorized`.
+//
+// A task row naming a DIFFERENT platform, or none at all, cannot be shown to
+// belong to the cluster the request was permitted for, so it is not served.
+//
+// An unattributable SESSION is the one case that opens up rather than closes
+// down, and it is not a hole: permitsPlatform answers a NULL platform with
+// HasGlobal alone, so reaching here with `authorized` invalid means the caller
+// holds global view:veeam and is entitled to every cluster's rows already.
+// Filtering there would hide data from the only person who can see all of it,
+// and buy nothing.
+func sameVeeamPlatform(upstream string, authorized pgtype.UUID) bool {
+	if !authorized.Valid {
+		return true
+	}
+	id, err := uuid.Parse(upstream)
+	if err != nil {
+		return false
+	}
+	return id == uuid.UUID(authorized.Bytes)
+}
+
+// taskGuest is a resolved (cluster, vmid) for one guest name.
+type taskGuest struct {
+	cluster uuid.UUID
+	vmid    int32
+}
+
+// resolveTaskGuests maps lowercased guest names on this session's platform to
+// the guests they resolve to.
+//
+// Best-effort: a failure here costs the guest links, not the breakdown, and
+// the breakdown is what the caller came for. An unresolvable name renders as a
+// bare name, which is also what an ambiguous one does.
+func (h *VeeamHandler) resolveTaskGuests(c fiber.Ctx, target veeamSessionTarget) map[string]taskGuest {
+	if !target.session.PlatformID.Valid {
+		return nil
+	}
+	rows, err := h.queries.ResolveVeeamTaskGuests(c.Context(), db.ResolveVeeamTaskGuestsParams{
+		VeeamServerID: target.server.ID,
+		PlatformID:    uuid.UUID(target.session.PlatformID.Bytes),
+	})
+	if err != nil {
+		slog.Warn("veeam: resolving task guests failed; the breakdown will show bare names",
+			"veeam_server_id", target.server.ID, "session", target.session.VeeamID, "error", err)
+		return nil
+	}
+
+	guests := make(map[string]taskGuest, len(rows))
+	for _, r := range rows {
+		if !r.ClusterID.Valid || !r.Vmid.Valid {
+			continue
+		}
+		guests[r.GuestName] = taskGuest{cluster: uuid.UUID(r.ClusterID.Bytes), vmid: r.Vmid.Int32}
+	}
+	return guests
 }
 
 // ---------------------------------------------------------------------------

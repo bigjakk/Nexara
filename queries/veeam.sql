@@ -1241,6 +1241,43 @@ UPDATE veeam_sessions
 SET nexara_stopped = true
 WHERE veeam_server_id = $1 AND veeam_id = $2;
 
+-- name: ResolveVeeamTaskGuests :many
+-- Maps guest NAMES on one platform to the guests they resolve to.
+--
+-- For the per-guest breakdown of a run. A task session carries a name and
+-- nothing else — no smbios uuid, no objectId — so it cannot use the
+-- deterministic tier the correlation is built on. Rather than fork a second,
+-- weaker name match beside it, this INHERITS the answer already computed on
+-- backup objects, which resolved via smbios where they could. A task row
+-- linked this way is as good as the object's own link and no better, which is
+-- the honest ceiling.
+--
+-- Ambiguity resolves to NOTHING, and it is reachable: two backup objects can
+-- share a name without being the same guest — a rebuilt machine whose
+-- replacement reused its name is exactly the case §2A calls out, and the lab
+-- has one. Unresolved rows are rendered as a bare name, never guessed at.
+--
+-- Unlinked objects are excluded first, so an orphan sharing a live guest's
+-- name does not make that name ambiguous — the orphan is by definition not a
+-- guest on this cluster, so it cannot be what a current run processed.
+--
+-- DISTINCT on the triple rather than count(*) = 1 over rows: one guest can
+-- legitimately appear as several objects, and counting rows would drop every
+-- guest covered by more than one backup.
+WITH named AS (
+    SELECT DISTINCT lower(name) AS guest_name, cluster_id, vmid
+    FROM veeam_backup_objects
+    WHERE veeam_server_id = $1
+      AND platform_id = sqlc.arg(platform_id)::uuid
+      AND cluster_id IS NOT NULL
+      AND vmid IS NOT NULL
+)
+SELECT guest_name::text AS guest_name, cluster_id, vmid
+FROM named
+WHERE guest_name IN (
+    SELECT guest_name FROM named GROUP BY guest_name HAVING count(*) = 1
+);
+
 -- name: GetClusterVeeamJobFailureStats :one
 -- veeam_job_failed: how many of a cluster's Veeam jobs last ran badly.
 --

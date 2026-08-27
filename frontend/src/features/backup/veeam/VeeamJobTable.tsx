@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
 import { VeeamJobActions } from "./VeeamJobActions";
+import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamJob } from "../types/backup";
 
 interface VeeamJobTableProps {
@@ -267,6 +268,24 @@ export function VeeamJobTable({
                               <dd>{job.job_type}</dd>
                             </div>
                           </dl>
+                          {/* Which guests the job's latest run processed, and
+                              which failed — the question a job-level "Failed"
+                              raises and cannot answer.
+
+                              The live run when there is one, else the last one
+                              Veeam reported. running_session_id is preferred
+                              because last_session_id is refreshed by the
+                              inventory pass and is stale for a job started
+                              since it. */}
+                          <VeeamTaskTable
+                            serverId={serverId}
+                            sessionVeeamId={
+                              job.running_session_id || job.last_session_id
+                            }
+                            enabled={isExpanded}
+                            running={job.running_session_id !== ""}
+                          />
+
                           {job.last_result === "Failed" && (
                             <p className="text-xs text-muted-foreground">
                               Veeam records a job stopped through its API the
