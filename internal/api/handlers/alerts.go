@@ -3,7 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -244,7 +246,11 @@ var validOperators = map[string]bool{
 }
 
 var validScopeTypes = map[string]bool{
-	"cluster": true, "node": true, "vm": true,
+	// "global" is for metrics describing infrastructure no single cluster
+	// owns — a Veeam repository holds every cluster's backups. A global rule
+	// raises alerts with a NULL cluster_id, which the scoped history read
+	// already hides from anyone but a holder of global view:alert.
+	"cluster": true, "node": true, "vm": true, "global": true,
 }
 
 // validChannelTypes is the complete set of channel types Nexara can deliver
@@ -423,6 +429,7 @@ type alertRuleFields struct {
 	Severity        string
 	Metric          string
 	Operator        string
+	Threshold       float64
 	DurationSeconds int32
 	CooldownSeconds int32
 	MessageTemplate string
@@ -466,10 +473,30 @@ func validateAlertRuleFields(f alertRuleFields) error {
 	if !validScopeTypes[f.Scope.ScopeType] {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid scope_type")
 	}
-	if f.Metric == "snapshot_age_days" && f.Scope.ScopeType == "node" {
-		// The snapshot inventory is keyed per guest; a node scope would need
-		// a placement join against churning data for marginal value.
-		return fiber.NewError(fiber.StatusBadRequest, "snapshot_age_days supports cluster or vm scope")
+	// A bounded metric needs a threshold inside its range, or the rule can
+	// never fire. veeam_malware_status maps a verdict to 0-3, and the form's
+	// default threshold of 90 — carried over from the percentage metrics —
+	// produced exactly that: a rule accepted, stored, evaluated every tick,
+	// and incapable of ever being true.
+	if bounds, ok := notifications.MetricBounds(f.Metric); ok {
+		if f.Threshold < bounds.Min || f.Threshold > bounds.Max {
+			return fiber.NewError(fiber.StatusBadRequest,
+				fmt.Sprintf("%s threshold must be between %g and %g", f.Metric, bounds.Min, bounds.Max))
+		}
+	}
+	// Inventory-backed metrics support only some scopes. Rejecting the pairing
+	// here matters: the engine errors out on an unsupported one once per tick,
+	// forever, and the rule silently never fires.
+	if scopes := notifications.MetricScopes(f.Metric); scopes != nil {
+		if !slices.Contains(scopes, f.Scope.ScopeType) {
+			return fiber.NewError(fiber.StatusBadRequest,
+				fmt.Sprintf("%s supports %s scope", f.Metric, strings.Join(scopes, " or ")))
+		}
+	} else if f.Scope.ScopeType == "global" {
+		// The converse: a per-node or per-VM metric has nothing to read at
+		// global scope, so it would never fire either.
+		return fiber.NewError(fiber.StatusBadRequest,
+			fmt.Sprintf("%s does not support global scope", f.Metric))
 	}
 	return nil
 }
@@ -489,6 +516,14 @@ func normalizeAlertRuleScope(s alertRuleScope) alertRuleScope {
 		s.VMVmid = pgtype.Int4{}
 	case "vm":
 		s.NodeID = pgtype.UUID{}
+	case "global":
+		// No bindings at all. Leaving a cluster_id behind would file every
+		// alert this rule raises under that cluster, which is the opposite of
+		// what global means — and would hand a cluster-scoped viewer an alert
+		// about infrastructure shared with clusters they cannot see.
+		s.ClusterID = pgtype.UUID{}
+		s.NodeID = pgtype.UUID{}
+		s.VMVmid = pgtype.Int4{}
 	}
 	return s
 }
@@ -516,6 +551,10 @@ func validateAlertRuleScope(s alertRuleScope) error {
 		if !s.VMVmid.Valid {
 			return fiber.NewError(fiber.StatusBadRequest, "vm scope requires vm_vmid")
 		}
+	case "global":
+		// No binding, by definition — the metric describes infrastructure no
+		// cluster owns. normalizeAlertRuleScope has already cleared any the
+		// caller sent, so there is nothing left to require.
 	}
 	return nil
 }
@@ -701,10 +740,26 @@ func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 	if req.NodeID != "" && req.ClusterID == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "node scope requires cluster_id")
 	}
+	// A GLOBAL rule watches infrastructure no cluster owns, and only a global
+	// grant may create one. Checked HERE, before the scope is resolved,
+	// because normalizeAlertRuleScope clears cluster_id for a global rule
+	// AFTER resolveAlertRuleScope has authorized against it — so a request
+	// naming a cluster the caller does manage would otherwise pass that gate
+	// and then have the binding stripped, minting a global rule on the
+	// strength of a cluster-scoped grant. The result is invisible and
+	// unmanageable to its own creator, since every global-rule read and write
+	// requires the global grant.
+	if req.ScopeType == "global" {
+		if err := requirePerm(c, "manage", "alert"); err != nil {
+			return err
+		}
+	}
 	if req.ClusterID == "" && req.NodeID == "" {
-		// Names no cluster at all. The scope check below rejects such a rule —
-		// every scope type needs a binding and the engine could never evaluate
-		// one — but an unauthorized caller must not get that far.
+		// Names no cluster at all. That is either a GLOBAL rule, which is
+		// exactly what global manage:alert is for — it watches infrastructure
+		// shared across every cluster — or a malformed one the scope check
+		// below rejects. Either way an unauthorized caller must not get far
+		// enough to tell those apart.
 		if err := requirePerm(c, "manage", "alert"); err != nil {
 			return err
 		}
@@ -733,6 +788,7 @@ func (h *AlertHandler) CreateRule(c fiber.Ctx) error {
 		Severity:        req.Severity,
 		Metric:          req.Metric,
 		Operator:        req.Operator,
+		Threshold:       *req.Threshold,
 		DurationSeconds: durationSeconds,
 		CooldownSeconds: cooldownSeconds,
 		MessageTemplate: messageTemplate,
@@ -867,6 +923,7 @@ func mergeAlertRuleUpdate(existing db.AlertRule, req createAlertRuleRequest, sco
 		Severity:        severity,
 		Metric:          metric,
 		Operator:        operator,
+		Threshold:       threshold,
 		DurationSeconds: durationSeconds,
 		CooldownSeconds: cooldownSeconds,
 		MessageTemplate: messageTemplate,
@@ -919,6 +976,17 @@ func (h *AlertHandler) UpdateRule(c fiber.Ctx) error {
 	var req createAlertRuleRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	// Converting an existing rule TO global needs the global grant, exactly as
+	// creating one does. The gate above answers for the rule as it stands, and
+	// a cluster-scoped holder converting their own cluster-A rule would
+	// otherwise pass it and walk the rule out of their own reach — a global
+	// rule can only be read, retuned or deleted with the global grant.
+	if req.ScopeType == "global" && existing.ScopeType != "global" {
+		if err := requirePerm(c, "manage", "alert"); err != nil {
+			return err
+		}
 	}
 
 	// Resolving the scope re-runs the RBAC gate for whatever the request

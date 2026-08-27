@@ -183,13 +183,56 @@ func TestIsInMaintenanceWindow(t *testing.T) {
 }
 
 func TestValidMetric(t *testing.T) {
-	for _, m := range []string{"cpu_usage", "mem_percent", "disk_read", "disk_write", "net_in", "net_out", "snapshot_age_days"} {
+	for _, m := range []string{
+		"cpu_usage", "mem_percent", "disk_read", "disk_write", "net_in", "net_out",
+		"snapshot_age_days", "veeam_rpo_hours", "veeam_malware_status", "veeam_repo_used_percent",
+	} {
 		if !ValidMetric(m) {
 			t.Errorf("ValidMetric(%q) = false, want true", m)
 		}
 	}
 	if ValidMetric("bogus") {
 		t.Error("ValidMetric(\"bogus\") = true, want false")
+	}
+	// veeam_job_failed is deliberately NOT a metric yet. A job cancelled
+	// through the API records as result "Failed" with isCanceled false and an
+	// empty log, so the rule would fire every time an operator stopped a job
+	// from Nexara — it ships with the job control that can suppress those.
+	if ValidMetric("veeam_job_failed") {
+		t.Error("veeam_job_failed is not implementable until stop-tracking exists")
+	}
+}
+
+// The engine errors out on an unsupported metric/scope pairing once per tick,
+// forever, and the rule silently never fires — so the API rejects the pairing
+// at create time, from this table.
+func TestMetricScopes(t *testing.T) {
+	tests := []struct {
+		metric string
+		want   []string
+	}{
+		{"snapshot_age_days", []string{"cluster", "vm"}},
+		{"veeam_rpo_hours", []string{"cluster", "vm"}},
+		{"veeam_malware_status", []string{"cluster", "vm"}},
+		// One repository holds every cluster's backups, so there is no
+		// cluster to attribute its fullness to.
+		{"veeam_repo_used_percent", []string{"global"}},
+		// nil means "the ordinary node/vm/cluster set", which the caller
+		// distinguishes from a restricted list.
+		{"cpu_usage", nil},
+	}
+	for _, tt := range tests {
+		got := MetricScopes(tt.metric)
+		if len(got) != len(tt.want) {
+			t.Errorf("MetricScopes(%q) = %v, want %v", tt.metric, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("MetricScopes(%q) = %v, want %v", tt.metric, got, tt.want)
+				break
+			}
+		}
 	}
 }
 

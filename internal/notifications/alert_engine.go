@@ -31,6 +31,64 @@ var validMetrics = map[string]bool{
 	// hypertables — evaluateRule branches before the scope dispatch. The
 	// threshold unit is days; supported scopes are cluster and vm only.
 	"snapshot_age_days": true,
+	// The Veeam metrics are inventory-backed in the same way, and branch in
+	// the same place.
+	//
+	// veeam_rpo_hours   — hours since the newest restore point. Cluster and
+	//                     vm scope; cluster reports the WORST guest.
+	// veeam_malware_status — the newest restore point's verdict as a number:
+	//                     Clean 0, Informative 1, Suspicious 2, Infected 3.
+	//                     Cluster and vm scope.
+	// veeam_repo_used_percent — the fullest repository. GLOBAL scope only: one
+	//                     repository holds every cluster's backups, so there is
+	//                     no cluster to attribute it to.
+	"veeam_rpo_hours":         true,
+	"veeam_malware_status":    true,
+	"veeam_repo_used_percent": true,
+}
+
+// Veeam metric names, referenced by both the engine and the API's scope
+// validation.
+const (
+	MetricVeeamRPOHours   = "veeam_rpo_hours"
+	MetricVeeamMalware    = "veeam_malware_status"
+	MetricVeeamRepoUsed   = "veeam_repo_used_percent"
+	MetricSnapshotAgeDays = "snapshot_age_days"
+)
+
+// MetricBound is the inclusive range a metric's threshold must fall in.
+type MetricBound struct{ Min, Max float64 }
+
+// MetricBounds returns the range a metric's threshold must fall in, and
+// whether the metric is bounded at all.
+//
+// Only for metrics whose values are drawn from a small fixed set. An
+// out-of-range threshold there is not a preference, it is a rule that cannot
+// ever be true — accepted, stored, and evaluated every tick forever. The
+// percentage and rate metrics are deliberately unbounded: a CPU threshold
+// above 100 is odd but a caller may have a reason, and refusing it would be
+// this function overreaching.
+func MetricBounds(metric string) (MetricBound, bool) {
+	if metric == MetricVeeamMalware {
+		// Clean 0, Informative 1, Suspicious 2, Infected 3.
+		return MetricBound{Min: 0, Max: 3}, true
+	}
+	return MetricBound{}, false
+}
+
+// MetricScopes reports the scope types a metric supports, or nil when it
+// supports the ordinary node/vm/cluster set. Exported so the API rejects an
+// unsupported pairing at create time rather than letting the engine error out
+// once per tick, forever, on a rule that can never fire.
+func MetricScopes(metric string) []string {
+	switch metric {
+	case MetricSnapshotAgeDays, MetricVeeamRPOHours, MetricVeeamMalware:
+		return []string{"cluster", "vm"}
+	case MetricVeeamRepoUsed:
+		return []string{"global"}
+	default:
+		return nil
+	}
 }
 
 // ValidMetric returns true if the metric name is supported.
@@ -104,8 +162,18 @@ func (e *Engine) Evaluate(ctx context.Context) {
 func (e *Engine) evaluateRule(ctx context.Context, rule db.AlertRule, windows []db.MaintenanceWindow) error {
 	// Inventory-backed metrics evaluate against their own tables and scope
 	// semantics, not the per-node/per-VM metric read path below.
-	if rule.Metric == "snapshot_age_days" {
+	switch rule.Metric {
+	case MetricSnapshotAgeDays:
 		return e.evaluateSnapshotAgeRule(ctx, rule, windows)
+	case MetricVeeamRPOHours:
+		return e.evaluateVeeamRPORule(ctx, rule, windows)
+	case MetricVeeamMalware:
+		return e.evaluateVeeamMalwareRule(ctx, rule, windows)
+	case MetricVeeamRepoUsed:
+		// Global scope: no cluster, and so no cluster maintenance window
+		// either. A shared repository filling up is not silenced by one
+		// cluster's maintenance.
+		return e.evaluateVeeamRepoRule(ctx, rule)
 	}
 
 	switch rule.ScopeType {
@@ -443,12 +511,12 @@ func (e *Engine) handleRuleResult(ctx context.Context, rule db.AlertRule, condit
 		}
 
 		alert, insertErr := e.queries.InsertAlertHistory(ctx, db.InsertAlertHistoryParams{
-			RuleID:          rule.ID,
-			State:           "pending",
-			Severity:        rule.Severity,
-			ClusterID:       rule.ClusterID,
-			NodeID:          nodeID,
-			VmID:            vmID,
+			RuleID:    rule.ID,
+			State:     "pending",
+			Severity:  rule.Severity,
+			ClusterID: rule.ClusterID,
+			NodeID:    nodeID,
+			VmID:      vmID,
 			// Stable guest identity — vm_id above churns with the collector
 			// (ON DELETE SET NULL); vm_vmid is what per-VM views filter on.
 			// Invalid (NULL) for node/cluster-scoped rules.

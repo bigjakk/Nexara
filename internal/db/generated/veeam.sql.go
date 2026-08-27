@@ -365,6 +365,225 @@ func (q *Queries) DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uui
 	return err
 }
 
+const getClusterVeeamMalwareStats = `-- name: GetClusterVeeamMalwareStats :one
+WITH newest AS (
+    SELECT DISTINCT ON (o.vmid) o.vmid, rp.malware_status
+    FROM veeam_backup_objects o
+    JOIN veeam_restore_points rp ON rp.backup_object_id = o.id
+    WHERE o.cluster_id = $3::uuid
+      AND o.vmid IS NOT NULL
+    ORDER BY o.vmid, rp.creation_time DESC
+),
+rated AS (
+    SELECT vmid, malware_status,
+           CASE malware_status
+             WHEN 'Infected'    THEN 3
+             WHEN 'Suspicious'  THEN 2
+             WHEN 'Informative' THEN 1
+             ELSE 0
+           END AS severity
+    FROM newest
+)
+SELECT
+    COALESCE((SELECT vmid FROM rated ORDER BY severity DESC, vmid LIMIT 1), 0)::int              AS worst_vmid,
+    COALESCE((SELECT malware_status FROM rated ORDER BY severity DESC, vmid LIMIT 1), '')::text  AS worst_status,
+    COALESCE((SELECT severity FROM rated ORDER BY severity DESC, vmid LIMIT 1), 0)::float8       AS worst_severity,
+    (SELECT count(*) FROM rated
+      WHERE CASE WHEN $1::boolean THEN severity >= $2::float8
+                 ELSE severity > $2::float8 END)::bigint                     AS over_count,
+    (SELECT count(*) FROM rated)::bigint                                                          AS scanned_count
+`
+
+type GetClusterVeeamMalwareStatsParams struct {
+	Inclusive         bool      `json:"inclusive"`
+	ThresholdSeverity float64   `json:"threshold_severity"`
+	ClusterID         uuid.UUID `json:"cluster_id"`
+}
+
+type GetClusterVeeamMalwareStatsRow struct {
+	WorstVmid     int32   `json:"worst_vmid"`
+	WorstStatus   string  `json:"worst_status"`
+	WorstSeverity float64 `json:"worst_severity"`
+	OverCount     int64   `json:"over_count"`
+	ScannedCount  int64   `json:"scanned_count"`
+}
+
+// GetClusterVeeamMalwareStats reports the worst malware verdict across the
+// NEWEST restore point of each guest on a cluster.
+//
+// Newest only, on purpose. Veeam records a verdict per restore point, and an
+// old "Suspicious" that a later clean backup superseded is history — alerting
+// on it would keep a resolved finding firing forever with no way to clear it.
+//
+// The verdict is mapped to a number because alert rules compare numerically:
+// Clean 0, Informative 1, Suspicious 2, Infected 3, anything unrecognised 0.
+// A rule of `>= 2` catches Suspicious and worse. Note that Veeam's inline
+// encryption detection marks a LOT of points Suspicious — 76 of 172 on the
+// lab — so operators watching for confirmed findings will want `>= 3`.
+func (q *Queries) GetClusterVeeamMalwareStats(ctx context.Context, arg GetClusterVeeamMalwareStatsParams) (GetClusterVeeamMalwareStatsRow, error) {
+	row := q.db.QueryRow(ctx, getClusterVeeamMalwareStats, arg.Inclusive, arg.ThresholdSeverity, arg.ClusterID)
+	var i GetClusterVeeamMalwareStatsRow
+	err := row.Scan(
+		&i.WorstVmid,
+		&i.WorstStatus,
+		&i.WorstSeverity,
+		&i.OverCount,
+		&i.ScannedCount,
+	)
+	return i, err
+}
+
+const getClusterVeeamRPOStats = `-- name: GetClusterVeeamRPOStats :one
+
+WITH guest AS (
+    SELECT o.vmid, max(rp.creation_time) AS newest
+    FROM veeam_backup_objects o
+    LEFT JOIN veeam_restore_points rp ON rp.backup_object_id = o.id
+    WHERE o.cluster_id = $3::uuid
+      AND o.vmid IS NOT NULL
+    GROUP BY o.vmid
+),
+rated AS (
+    SELECT vmid, (extract(epoch FROM now() - newest) / 3600.0)::float8 AS rpo_hours
+    FROM guest
+    WHERE newest IS NOT NULL
+)
+SELECT
+    COALESCE((SELECT vmid FROM rated ORDER BY rpo_hours DESC LIMIT 1), 0)::int          AS worst_vmid,
+    COALESCE((SELECT rpo_hours FROM rated ORDER BY rpo_hours DESC LIMIT 1), 0)::float8  AS worst_rpo_hours,
+    -- Counted with the rule's own comparison. Hardcoding ">" made a >= rule
+    -- on a guest sitting exactly at the threshold fire with a message reading
+    -- "0 of 1 guests over threshold", which is the figure an on-call reader
+    -- acts on.
+    (SELECT count(*) FROM rated
+      WHERE CASE WHEN $1::boolean THEN rpo_hours >= $2::float8
+                 ELSE rpo_hours > $2::float8 END)::bigint          AS over_count,
+    (SELECT count(*) FROM guest WHERE newest IS NULL)::bigint                           AS unrecoverable_count,
+    (SELECT count(*) FROM guest)::bigint                                                AS protected_count
+`
+
+type GetClusterVeeamRPOStatsParams struct {
+	Inclusive      bool      `json:"inclusive"`
+	ThresholdHours float64   `json:"threshold_hours"`
+	ClusterID      uuid.UUID `json:"cluster_id"`
+}
+
+type GetClusterVeeamRPOStatsRow struct {
+	WorstVmid          int32   `json:"worst_vmid"`
+	WorstRpoHours      float64 `json:"worst_rpo_hours"`
+	OverCount          int64   `json:"over_count"`
+	UnrecoverableCount int64   `json:"unrecoverable_count"`
+	ProtectedCount     int64   `json:"protected_count"`
+}
+
+// ---------------------------------------------------------------------------
+// Alerting.
+// ---------------------------------------------------------------------------
+// GetClusterVeeamRPOStats reports the WORST recovery-point age among the
+// guests on one cluster that Veeam actually protects.
+//
+// Deliberately scoped to guests Veeam has a backup object for. A guest Veeam
+// was never meant to protect has no RPO, and evaluating one for it would fire
+// this alert for every unrelated VM on the cluster — the coverage report is
+// what answers "should this guest be backed up at all".
+//
+// unrecoverable_count is the count of guests Veeam knows about whose restore
+// points have ALL been pruned. That state is worse than any RPO, but it has no
+// age to measure, so it rides on the alert's message rather than its number:
+// inventing an hours value for it would make every notification a lie.
+// Always exactly one row, so a cluster where every protected guest has lost
+// its restore points still reports rather than vanishing into ErrNoRows.
+func (q *Queries) GetClusterVeeamRPOStats(ctx context.Context, arg GetClusterVeeamRPOStatsParams) (GetClusterVeeamRPOStatsRow, error) {
+	row := q.db.QueryRow(ctx, getClusterVeeamRPOStats, arg.Inclusive, arg.ThresholdHours, arg.ClusterID)
+	var i GetClusterVeeamRPOStatsRow
+	err := row.Scan(
+		&i.WorstVmid,
+		&i.WorstRpoHours,
+		&i.OverCount,
+		&i.UnrecoverableCount,
+		&i.ProtectedCount,
+	)
+	return i, err
+}
+
+const getGuestVeeamMalware = `-- name: GetGuestVeeamMalware :one
+WITH newest AS (
+    SELECT rp.malware_status
+    FROM veeam_backup_objects o
+    JOIN veeam_restore_points rp ON rp.backup_object_id = o.id
+    WHERE o.cluster_id = $1::uuid
+      AND o.vmid = $2::int
+    ORDER BY rp.creation_time DESC
+    LIMIT 1
+)
+SELECT
+    COALESCE((SELECT malware_status FROM newest), '')::text AS status,
+    COALESCE((SELECT CASE malware_status
+                       WHEN 'Infected'    THEN 3
+                       WHEN 'Suspicious'  THEN 2
+                       WHEN 'Informative' THEN 1
+                       ELSE 0
+                     END FROM newest), 0)::float8           AS severity,
+    EXISTS (SELECT 1 FROM newest)                           AS scanned
+`
+
+type GetGuestVeeamMalwareParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+}
+
+type GetGuestVeeamMalwareRow struct {
+	Status   string  `json:"status"`
+	Severity float64 `json:"severity"`
+	Scanned  bool    `json:"scanned"`
+}
+
+// GetGuestVeeamMalware is the vm-scoped counterpart of
+// GetClusterVeeamMalwareStats.
+func (q *Queries) GetGuestVeeamMalware(ctx context.Context, arg GetGuestVeeamMalwareParams) (GetGuestVeeamMalwareRow, error) {
+	row := q.db.QueryRow(ctx, getGuestVeeamMalware, arg.ClusterID, arg.Vmid)
+	var i GetGuestVeeamMalwareRow
+	err := row.Scan(&i.Status, &i.Severity, &i.Scanned)
+	return i, err
+}
+
+const getGuestVeeamRPO = `-- name: GetGuestVeeamRPO :one
+WITH guest AS (
+    SELECT o.id, max(rp.creation_time) AS newest
+    FROM veeam_backup_objects o
+    LEFT JOIN veeam_restore_points rp ON rp.backup_object_id = o.id
+    WHERE o.cluster_id = $1::uuid
+      AND o.vmid = $2::int
+    GROUP BY o.id
+)
+SELECT
+    COALESCE((SELECT (extract(epoch FROM now() - max(newest)) / 3600.0)::float8
+                FROM guest WHERE newest IS NOT NULL), 0)::float8 AS rpo_hours,
+    EXISTS (SELECT 1 FROM guest WHERE newest IS NOT NULL)        AS has_restore_point,
+    (SELECT count(*) FROM guest)::bigint                          AS protected_count
+`
+
+type GetGuestVeeamRPOParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+}
+
+type GetGuestVeeamRPORow struct {
+	RpoHours        float64 `json:"rpo_hours"`
+	HasRestorePoint bool    `json:"has_restore_point"`
+	ProtectedCount  int64   `json:"protected_count"`
+}
+
+// GetGuestVeeamRPO is the vm-scoped counterpart. protected_count is 0 when
+// Veeam has no backup object for the guest at all, which the engine reads as
+// "nothing to evaluate" rather than as an RPO of zero.
+func (q *Queries) GetGuestVeeamRPO(ctx context.Context, arg GetGuestVeeamRPOParams) (GetGuestVeeamRPORow, error) {
+	row := q.db.QueryRow(ctx, getGuestVeeamRPO, arg.ClusterID, arg.Vmid)
+	var i GetGuestVeeamRPORow
+	err := row.Scan(&i.RpoHours, &i.HasRestorePoint, &i.ProtectedCount)
+	return i, err
+}
+
 const getVeeamBackupObject = `-- name: GetVeeamBackupObject :one
 SELECT id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at, cluster_id, vmid, match_method, manual_guest_key FROM veeam_backup_objects WHERE veeam_server_id = $1 AND id = $2
 `
@@ -571,6 +790,55 @@ func (q *Queries) GetVeeamRepositoryMetrics(ctx context.Context, arg GetVeeamRep
 		return nil, err
 	}
 	return items, nil
+}
+
+const getVeeamRepositoryUsageStats = `-- name: GetVeeamRepositoryUsageStats :one
+WITH measured AS (
+    SELECT name, (used_bytes::float8 * 100.0 / capacity_bytes) AS used_percent
+    FROM veeam_repositories
+    WHERE capacity_bytes > 0
+)
+SELECT
+    COALESCE((SELECT name FROM measured ORDER BY used_percent DESC LIMIT 1), '')::text        AS fullest_name,
+    COALESCE((SELECT used_percent FROM measured ORDER BY used_percent DESC LIMIT 1), 0)::float8 AS fullest_percent,
+    (SELECT count(*) FROM measured
+      WHERE CASE WHEN $1::boolean THEN used_percent >= $2::float8
+                 ELSE used_percent > $2::float8 END)::bigint                AS over_count,
+    (SELECT count(*) FROM measured)::bigint                                                    AS measured_count
+`
+
+type GetVeeamRepositoryUsageStatsParams struct {
+	Inclusive        bool    `json:"inclusive"`
+	ThresholdPercent float64 `json:"threshold_percent"`
+}
+
+type GetVeeamRepositoryUsageStatsRow struct {
+	FullestName    string  `json:"fullest_name"`
+	FullestPercent float64 `json:"fullest_percent"`
+	OverCount      int64   `json:"over_count"`
+	MeasuredCount  int64   `json:"measured_count"`
+}
+
+// GetVeeamRepositoryUsageStats reports the fullest repository across every
+// Veeam server.
+//
+// Global by nature: one repository holds the backups of every cluster its
+// server protects, so there is no cluster to attribute the number to.
+//
+// Repositories reporting zero capacity are excluded throughout. Veeam reports
+// that for targets whose size it cannot measure — the lab's object-store
+// repository is one — and dividing by it is both a crash and a meaningless
+// 0%-full reading that would mask a real repository beside it.
+func (q *Queries) GetVeeamRepositoryUsageStats(ctx context.Context, arg GetVeeamRepositoryUsageStatsParams) (GetVeeamRepositoryUsageStatsRow, error) {
+	row := q.db.QueryRow(ctx, getVeeamRepositoryUsageStats, arg.Inclusive, arg.ThresholdPercent)
+	var i GetVeeamRepositoryUsageStatsRow
+	err := row.Scan(
+		&i.FullestName,
+		&i.FullestPercent,
+		&i.OverCount,
+		&i.MeasuredCount,
+	)
+	return i, err
 }
 
 const getVeeamServer = `-- name: GetVeeamServer :one

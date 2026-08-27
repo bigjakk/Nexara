@@ -33,7 +33,57 @@ const METRICS = [
   { value: "net_in", label: "Network In (bytes/s)" },
   { value: "net_out", label: "Network Out (bytes/s)" },
   { value: "snapshot_age_days", label: "Snapshot Age (days)" },
+  { value: "veeam_rpo_hours", label: "Veeam Recovery Point Age (hours)" },
+  { value: "veeam_malware_status", label: "Veeam Malware Verdict (0-3)" },
+  { value: "veeam_repo_used_percent", label: "Veeam Repository Usage (%)" },
 ];
+
+/**
+ * Which scopes each metric supports, mirroring notifications.MetricScopes on
+ * the backend. Kept in sync deliberately rather than fetched: the backend
+ * rejects an unsupported pairing anyway, and this is what stops the form from
+ * offering one in the first place.
+ *
+ * A metric absent from this map supports the ordinary cluster/node/vm set.
+ */
+const METRIC_SCOPES: Record<string, string[]> = {
+  snapshot_age_days: ["cluster", "vm"],
+  veeam_rpo_hours: ["cluster", "vm"],
+  veeam_malware_status: ["cluster", "vm"],
+  // One Veeam repository holds every cluster's backups, so there is no cluster
+  // to attribute its fullness to.
+  veeam_repo_used_percent: ["global"],
+};
+
+const ALL_SCOPES = ["cluster", "node", "vm"];
+
+function scopesFor(metric: string): string[] {
+  return METRIC_SCOPES[metric] ?? ALL_SCOPES;
+}
+
+/**
+ * A sensible threshold per metric. The form's default of 90 comes from the
+ * percentage metrics and is meaningless — indeed unreachable — for the others:
+ * a malware verdict is 0-3, so "> 90" is a rule that is accepted, stored,
+ * evaluated every tick, and can never be true. Snapping on metric change is
+ * what stops that being the easiest thing to create.
+ */
+const METRIC_DEFAULT_THRESHOLD: Record<string, string> = {
+  snapshot_age_days: "30",
+  veeam_rpo_hours: "24",
+  // >= 2 catches Suspicious and worse. Veeam's inline encryption detection
+  // flags a great many points Suspicious, so operators watching for confirmed
+  // findings will want 3.
+  veeam_malware_status: "2",
+  veeam_repo_used_percent: "85",
+};
+
+const SCOPE_LABELS: Record<string, string> = {
+  cluster: "Cluster",
+  node: "Node",
+  vm: "VM",
+  global: "Global (all Veeam servers)",
+};
 
 const OPERATORS = [
   { value: ">", label: ">" },
@@ -83,8 +133,10 @@ export function AlertRuleForm() {
   // Every scope evaluates on a binding: the engine can't run a cluster rule
   // without a cluster, a node rule without a node, or a VM rule without a
   // VMID. Submitting without one used to create a rule that never fired.
+  // Global scope binds to nothing at all — the metric describes
+  // infrastructure no cluster owns — so it is ready as soon as it is chosen.
   const scopeReady =
-    clusterId !== "" &&
+    (scopeType === "global" || clusterId !== "") &&
     (scopeType !== "node" || nodeId !== "") &&
     (scopeType !== "vm" || vmidValid);
 
@@ -116,8 +168,8 @@ export function AlertRuleForm() {
         operator,
         threshold: Number(threshold),
         duration_seconds: Number(durationSeconds),
-        scope_type: scopeType as "cluster" | "node" | "vm",
-        cluster_id: clusterId || undefined,
+        scope_type: scopeType as "cluster" | "node" | "vm" | "global",
+        cluster_id: scopeType === "global" ? undefined : clusterId || undefined,
         node_id: scopeType === "node" ? nodeId : undefined,
         vm_vmid: scopeType === "vm" ? vmid : undefined,
         cooldown_seconds: Number(cooldownSeconds),
@@ -189,10 +241,22 @@ export function AlertRuleForm() {
                 value={metric}
                 onValueChange={(v) => {
                   setMetric(v);
-                  // snapshot_age_days reads the per-guest snapshot inventory;
-                  // the backend rejects node scope for it.
-                  if (v === "snapshot_age_days" && scopeType === "node") {
-                    setScopeType("cluster");
+                  // Inventory-backed metrics support only some scopes, and the
+                  // backend rejects the rest. Snapping to a supported one
+                  // beats leaving the form in a state that only fails on
+                  // submit.
+                  const allowed = scopesFor(v);
+                  if (!allowed.includes(scopeType) && allowed.length > 0) {
+                    setScopeType(allowed[0] ?? "cluster");
+                  }
+                  const preset = METRIC_DEFAULT_THRESHOLD[v];
+                  if (preset !== undefined) {
+                    setThreshold(preset);
+                  } else if (METRIC_DEFAULT_THRESHOLD[metric] !== undefined) {
+                    // Coming BACK from a specialised metric, so the threshold
+                    // on screen belongs to that one. 90 is the percentage
+                    // default every unbounded metric started with.
+                    setThreshold("90");
                   }
                 }}
               >
@@ -216,11 +280,11 @@ export function AlertRuleForm() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cluster">Cluster</SelectItem>
-                  {metric !== "snapshot_age_days" && (
-                    <SelectItem value="node">Node</SelectItem>
-                  )}
-                  <SelectItem value="vm">VM</SelectItem>
+                  {scopesFor(metric).map((sc) => (
+                    <SelectItem key={sc} value={sc}>
+                      {SCOPE_LABELS[sc]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -256,6 +320,7 @@ export function AlertRuleForm() {
             </div>
           </div>
 
+          {scopeType !== "global" && (
           <div className="space-y-2">
             <Label htmlFor="cluster">Cluster</Label>
             <Select
@@ -279,6 +344,7 @@ export function AlertRuleForm() {
               </SelectContent>
             </Select>
           </div>
+          )}
 
           {scopeType === "node" && (
             <div className="space-y-2">

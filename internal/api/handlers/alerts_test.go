@@ -226,6 +226,61 @@ func TestMergeAlertRuleUpdate(t *testing.T) {
 			body:    `{"metric":"snapshot_age_days"}`,
 			wantErr: true,
 		},
+		{
+			// Same rule for the Veeam guest metrics, which read the same kind
+			// of per-guest inventory.
+			name: "veeam_rpo_hours with node scope rejected",
+			existing: func(r db.AlertRule) db.AlertRule {
+				r.ScopeType = "node"
+				r.NodeID = pgtype.UUID{Bytes: uuid.New(), Valid: true}
+				return r
+			},
+			body:    `{"metric":"veeam_rpo_hours"}`,
+			wantErr: true,
+		},
+		{
+			// A repository is shared across every cluster its server
+			// protects, so a cluster-scoped rule would be a claim about
+			// infrastructure that cluster does not own.
+			name:    "veeam_repo_used_percent with cluster scope rejected",
+			body:    `{"metric":"veeam_repo_used_percent"}`,
+			wantErr: true,
+		},
+		{
+			// And the converse: a per-node metric has nothing to read at
+			// global scope, so it would never fire either.
+			name: "cpu_usage with global scope rejected",
+			scope: func(r db.AlertRule) alertRuleScope {
+				s := storedScope(r)
+				s.ScopeType = "global"
+				return s
+			},
+			body:    `{"scope_type":"global"}`,
+			wantErr: true,
+		},
+		{
+			// A malware verdict is 0-3. The form's percentage default of 90
+			// produced a rule that was accepted, stored, evaluated every tick,
+			// and could never be true.
+			name:    "veeam_malware_status threshold out of range rejected",
+			body:    `{"metric":"veeam_malware_status","threshold":90}`,
+			wantErr: true,
+		},
+		{
+			name:    "veeam_malware_status threshold in range accepted",
+			body:    `{"metric":"veeam_malware_status","threshold":2}`,
+			wantErr: false,
+		},
+		{
+			name: "veeam_repo_used_percent with global scope accepted",
+			scope: func(r db.AlertRule) alertRuleScope {
+				s := storedScope(r)
+				s.ScopeType = "global"
+				return s
+			},
+			body:    `{"metric":"veeam_repo_used_percent","scope_type":"global"}`,
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

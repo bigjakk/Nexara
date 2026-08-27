@@ -325,7 +325,13 @@ export interface AlertRule {
   operator: string;
   threshold: number;
   duration_seconds: number;
-  scope_type: "cluster" | "node" | "vm";
+  /**
+   * "global" is for metrics describing infrastructure no single cluster owns
+   * — a Veeam repository holds every cluster's backups. A global rule has no
+   * cluster_id, and the scoped alert-history read hides its alerts from
+   * anyone but a holder of global view:alert.
+   */
+  scope_type: "cluster" | "node" | "vm" | "global";
   cluster_id?: string;
   node_id?: string;
   // Stable Proxmox VMID — vm-scoped rules key on (cluster_id, vm_vmid), not
@@ -458,7 +464,7 @@ export interface AlertRuleRequest {
   operator: string;
   threshold: number;
   duration_seconds?: number | undefined;
-  scope_type?: "cluster" | "node" | "vm" | undefined;
+  scope_type?: "cluster" | "node" | "vm" | "global" | undefined;
   cluster_id?: string | undefined;
   node_id?: string | undefined;
   // Stable Proxmox VMID, matching the response type — the backend binds

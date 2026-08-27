@@ -369,6 +369,37 @@ type Querier interface {
 	// Zero dated snapshots → no row (ErrNoRows), which callers treat as
 	// condition-not-met so the alert auto-resolves after cleanup.
 	GetClusterSnapshotAgeStats(ctx context.Context, arg GetClusterSnapshotAgeStatsParams) (GetClusterSnapshotAgeStatsRow, error)
+	// GetClusterVeeamMalwareStats reports the worst malware verdict across the
+	// NEWEST restore point of each guest on a cluster.
+	//
+	// Newest only, on purpose. Veeam records a verdict per restore point, and an
+	// old "Suspicious" that a later clean backup superseded is history — alerting
+	// on it would keep a resolved finding firing forever with no way to clear it.
+	//
+	// The verdict is mapped to a number because alert rules compare numerically:
+	// Clean 0, Informative 1, Suspicious 2, Infected 3, anything unrecognised 0.
+	// A rule of `>= 2` catches Suspicious and worse. Note that Veeam's inline
+	// encryption detection marks a LOT of points Suspicious — 76 of 172 on the
+	// lab — so operators watching for confirmed findings will want `>= 3`.
+	GetClusterVeeamMalwareStats(ctx context.Context, arg GetClusterVeeamMalwareStatsParams) (GetClusterVeeamMalwareStatsRow, error)
+	// ---------------------------------------------------------------------------
+	// Alerting.
+	// ---------------------------------------------------------------------------
+	// GetClusterVeeamRPOStats reports the WORST recovery-point age among the
+	// guests on one cluster that Veeam actually protects.
+	//
+	// Deliberately scoped to guests Veeam has a backup object for. A guest Veeam
+	// was never meant to protect has no RPO, and evaluating one for it would fire
+	// this alert for every unrelated VM on the cluster — the coverage report is
+	// what answers "should this guest be backed up at all".
+	//
+	// unrecoverable_count is the count of guests Veeam knows about whose restore
+	// points have ALL been pruned. That state is worse than any RPO, but it has no
+	// age to measure, so it rides on the alert's message rather than its number:
+	// inventing an hours value for it would make every notification a lie.
+	// Always exactly one row, so a cluster where every protected guest has lost
+	// its restore points still reports rather than vanishing into ErrNoRows.
+	GetClusterVeeamRPOStats(ctx context.Context, arg GetClusterVeeamRPOStatsParams) (GetClusterVeeamRPOStatsRow, error)
 	GetContainer(ctx context.Context, id uuid.UUID) (Vm, error)
 	GetDRSConfig(ctx context.Context, clusterID uuid.UUID) (DrsConfig, error)
 	GetDRSRule(ctx context.Context, id uuid.UUID) (DrsRule, error)
@@ -378,6 +409,13 @@ type Querier interface {
 	GetEnabledOIDCConfig(ctx context.Context) (OidcConfig, error)
 	GetExternalFeedCache(ctx context.Context, source string) (ExternalFeedCache, error)
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
+	// GetGuestVeeamMalware is the vm-scoped counterpart of
+	// GetClusterVeeamMalwareStats.
+	GetGuestVeeamMalware(ctx context.Context, arg GetGuestVeeamMalwareParams) (GetGuestVeeamMalwareRow, error)
+	// GetGuestVeeamRPO is the vm-scoped counterpart. protected_count is 0 when
+	// Veeam has no backup object for the guest at all, which the engine reads as
+	// "nothing to evaluate" rather than as an RPO of zero.
+	GetGuestVeeamRPO(ctx context.Context, arg GetGuestVeeamRPOParams) (GetGuestVeeamRPORow, error)
 	GetKEVCacheAge(ctx context.Context) (time.Time, error)
 	GetKEVEntry(ctx context.Context, cveID string) (KevCache, error)
 	GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, error)
@@ -487,6 +525,17 @@ type Querier interface {
 	// ---------------------------------------------------------------------------
 	GetVeeamPlatform(ctx context.Context, arg GetVeeamPlatformParams) (VeeamPlatform, error)
 	GetVeeamRepositoryMetrics(ctx context.Context, arg GetVeeamRepositoryMetricsParams) ([]GetVeeamRepositoryMetricsRow, error)
+	// GetVeeamRepositoryUsageStats reports the fullest repository across every
+	// Veeam server.
+	//
+	// Global by nature: one repository holds the backups of every cluster its
+	// server protects, so there is no cluster to attribute the number to.
+	//
+	// Repositories reporting zero capacity are excluded throughout. Veeam reports
+	// that for targets whose size it cannot measure — the lab's object-store
+	// repository is one — and dividing by it is both a crash and a meaningless
+	// 0%-full reading that would mask a real repository beside it.
+	GetVeeamRepositoryUsageStats(ctx context.Context, arg GetVeeamRepositoryUsageStatsParams) (GetVeeamRepositoryUsageStatsRow, error)
 	GetVeeamServer(ctx context.Context, id uuid.UUID) (VeeamServer, error)
 	// The newest session already stored, used as the createdAfterFilter for the
 	// next poll.
