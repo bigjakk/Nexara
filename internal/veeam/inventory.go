@@ -189,10 +189,14 @@ func (c *Client) JobStates(ctx context.Context) ([]JobState, error) {
 // BackupObject is one row from GET /api/v1/backupObjects — a guest as it
 // appears inside one backup.
 //
-// One row per (guest × backup), so a guest covered by a daily and a weekly job
-// appears twice under the same Name. Rollups must aggregate.
+// One row per (guest × backup), and the SAME ID repeats across them: verified
+// live, where 27 rows carried 18 distinct ids. ID is the guest's identity
+// within Veeam and BackupID is what differs, so callers that want per-guest
+// figures must fold the rows — and RestorePointsCount, being per-backup, must
+// be summed when they do.
 type BackupObject struct {
-	// ID is Veeam's row identity for this object, not the guest's.
+	// ID identifies the GUEST within Veeam, not this row: it repeats across
+	// every backup the guest appears in.
 	ID string `json:"id"`
 	// ObjectID is the platform's native VM id. For Proxmox it IS the smbios1
 	// uuid, which is what makes guest correlation deterministic.

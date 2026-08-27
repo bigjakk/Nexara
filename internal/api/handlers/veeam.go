@@ -423,10 +423,10 @@ type veeamBackupObjectResponse struct {
 
 // ListBackupObjects handles GET /api/v1/veeam-servers/:id/backup-objects.
 //
-// One row per (guest × backup), so the same guest name appears once per job
-// that protects it. Deliberately not deduplicated here: the per-guest rollup
-// belongs with the correlation work, and collapsing rows now would hide the
-// duplicate-name behaviour the caller needs to know about.
+// One row per guest — the collector folds Veeam's (guest × backup) listing.
+// Two rows can still share a NAME without being the same guest: that is a
+// rebuilt guest whose replacement reused its name, and telling them apart is
+// exactly what the SMBIOS uuid is for.
 func (h *VeeamHandler) ListBackupObjects(c fiber.Ctx) error {
 	// Authorize FIRST. Looking the server up before the permission check let
 	// an unauthorized caller tell 404 from 403 and so probe which server ids

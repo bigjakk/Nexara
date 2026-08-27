@@ -146,11 +146,13 @@ CREATE TRIGGER trg_veeam_jobs_updated_at
     BEFORE UPDATE ON veeam_jobs
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- veeam_backup_objects — from GET /api/v1/backupObjects.
+-- veeam_backup_objects — from GET /api/v1/backupObjects, one row per GUEST.
 --
--- One row per (guest × backup), so a guest protected by daily and weekly jobs
--- appears more than once. Any per-guest rollup must therefore aggregate;
--- a naive join reports the guest N times.
+-- The API returns one row per (guest × backup) and repeats the object id across
+-- them — verified live, where 27 rows carried 18 distinct ids. The id is the
+-- guest's identity within Veeam; the backup is what differs. The collector
+-- folds those rows before storing, so this table is at the grain guest
+-- correlation actually needs.
 CREATE TABLE IF NOT EXISTS veeam_backup_objects (
     id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     veeam_server_id      UUID NOT NULL REFERENCES veeam_servers(id) ON DELETE CASCADE,
@@ -172,7 +174,7 @@ CREATE TABLE IF NOT EXISTS veeam_backup_objects (
 COMMENT ON COLUMN veeam_backup_objects.veeam_object_id IS 'Veeam''s row id for the backup object (the payload''s "id"), NOT the guest identity';
 COMMENT ON COLUMN veeam_backup_objects.smbios_uuid IS 'The payload''s "objectId", which IS the Proxmox smbios1 uuid — verified 15/18 exact matches on the lab cluster. This is what makes guest correlation deterministic in Phase 3 rather than a name match';
 COMMENT ON COLUMN veeam_backup_objects.backup_ref IS 'The payload''s "backupId". Verified against the live server: it does NOT resolve into GET /api/v1/backups — a different id space despite the name. Stored for reference only; the object-to-restore-point link comes from GET /backupObjects/{id}/restorePoints, which is authoritative';
-COMMENT ON COLUMN veeam_backup_objects.restore_points_count IS 'Veeam''s own count, stored for display. Deliberately NOT used to decide whether to re-fetch this object''s restore points: a job that keeps N points saturates at N and the count stops moving, so a count-gated refresh would freeze permanently on the day the ceiling was hit';
+COMMENT ON COLUMN veeam_backup_objects.restore_points_count IS 'SUM of Veeam''s per-backup counts for this guest, which is what /backupObjects/{id}/restorePoints returns — any single row''s count understates it. Stored for display only: it is deliberately NOT used to decide whether to re-fetch, because a job that keeps N points saturates at N and the count stops moving, so a count-gated refresh would freeze permanently on the day the ceiling was hit';
 
 CREATE INDEX IF NOT EXISTS idx_veeam_backup_objects_server ON veeam_backup_objects (veeam_server_id);
 CREATE INDEX IF NOT EXISTS idx_veeam_backup_objects_platform ON veeam_backup_objects (platform_id);

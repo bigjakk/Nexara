@@ -191,9 +191,21 @@ func TestBackupObjects_ObjectIDIsTheSMBIOSUUID(t *testing.T) {
 			t.Errorf("%s: row id and objectId are the same value; they are different identities", o.Name)
 		}
 	}
+	// Fewer distinct guests than rows: the listing repeats a guest once per
+	// backup, which is why the collector folds it.
 	if len(ids) >= len(proxmox) {
-		t.Errorf("distinct objectIds (%d) should be fewer than rows (%d) — duplicates are the whole reason rollups aggregate",
+		t.Errorf("distinct objectIds (%d) should be fewer than rows (%d) — duplicates are the whole reason the collector folds",
 			len(ids), len(proxmox))
+	}
+	// And the ROW id repeats too, not just objectId — the fact that makes
+	// folding on it correct.
+	rowIDs := map[string]struct{}{}
+	for _, o := range proxmox {
+		rowIDs[o.ID] = struct{}{}
+	}
+	if len(rowIDs) >= len(proxmox) {
+		t.Errorf("distinct row ids (%d) should be fewer than rows (%d) — id is the guest's identity, not the row's",
+			len(rowIDs), len(proxmox))
 	}
 
 	var duplicated bool

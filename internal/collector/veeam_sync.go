@@ -519,19 +519,25 @@ func (v *VeeamSyncer) syncJobs(ctx context.Context, server db.VeeamServer, clien
 
 // syncBackupObjects converges backup objects and their restore points.
 //
-// Every Proxmox object's restore points are re-fetched every pass. An earlier
-// version skipped objects whose restorePointsCount had not moved, which looked
-// like a free optimisation and was not: a job configured to keep N restore
-// points saturates at N and stays there, adding one and deleting one on every
-// run. The count never moves again, so the skip becomes permanent — Nexara
-// would freeze on the day the ceiling was hit, never learn another restore
-// point, and keep the deleted ones alive forever. That is the steady state for
-// every count-retention job, not an edge case, and it would quietly corrupt
-// every RPO and coverage figure downstream.
+// GET /backupObjects returns one row per (guest × backup), and the SAME object
+// id repeats across them — verified on a live server, where 27 rows carried 18
+// distinct ids. The id identifies the guest within Veeam; the backup is what
+// differs. So the rows are folded to one per guest before anything is stored,
+// which is also the grain guest correlation needs.
 //
-// The cost is one listing per backup object per pass. On a large install that
-// is a few requests a second at the default five-minute cadence, and
-// VEEAM_SYNC_INTERVAL exists for operators who want it lower.
+// Folding is not just deduplication: restorePointsCount is PER BACKUP, and
+// /backupObjects/{id}/restorePoints returns the guest's points across all of
+// them. Taking any single row's count would understate it — measured on the
+// lab, a guest whose three rows read [3, 17, 9] has 29 restore points, and
+// keeping "9" made the stored count disagree with the points beside it.
+//
+// Every guest's restore points are re-fetched every pass. Skipping objects
+// whose count had not moved looked like a free optimisation and was not: a job
+// that keeps N restore points saturates at N and adds one and deletes one on
+// every run thereafter, so the count never moves again and the skip becomes
+// permanent — Nexara would freeze on the day the ceiling was hit, never learn
+// another restore point, and keep the deleted ones alive forever. That is the
+// steady state for every count-retention job, not an edge case.
 func (v *VeeamSyncer) syncBackupObjects(
 	ctx context.Context,
 	server db.VeeamServer,
@@ -549,57 +555,95 @@ func (v *VeeamSyncer) syncBackupObjects(
 		return fmt.Errorf("list existing backup objects: %w", err)
 	}
 
-	// Restore-point listings are fanned out over a bounded worker pool rather
-	// than fetched inline: serially, a large install's object count exceeds
-	// the whole pass budget and everything past the cut-off silently gets no
-	// restore points.
-	var pending []veeamPointFetch
+	guests := foldBackupObjects(objects, platforms, func(name string) {
+		v.logger.Warn("veeam sync: backup object has an unparseable id",
+			"veeam_server_id", server.ID, "name", name)
+	})
 
-	var stored int
-	for _, o := range objects {
-		if !o.IsProxmox() {
-			continue
-		}
-		objectID, ok := parseUUID(o.ID)
-		if !ok {
-			v.logger.Warn("veeam sync: backup object has an unparseable id",
-				"veeam_server_id", server.ID, "name", o.Name)
-			continue
-		}
-		if o.PlatformID != "" {
-			platforms[o.PlatformID] = struct{}{}
-		}
-
+	pending := make([]veeamPointFetch, 0, len(guests))
+	for _, g := range guests {
 		row, err := v.queries.UpsertVeeamBackupObject(ctx, db.UpsertVeeamBackupObjectParams{
 			VeeamServerID:      server.ID,
-			VeeamObjectID:      objectID,
-			SmbiosUuid:         o.ObjectID,
-			PlatformID:         optionalUUID(o.PlatformID),
-			Name:               o.Name,
-			ObjectType:         o.Type,
-			BackupRef:          optionalUUID(o.BackupID),
-			RestorePointsCount: int32(o.RestorePointsCount), //nolint:gosec // bounded by a job's retention policy
-			SizeBytes:          o.Size,
-			LastRunFailed:      o.LastRunFailed,
+			VeeamObjectID:      g.objectID,
+			SmbiosUuid:         g.object.ObjectID,
+			PlatformID:         optionalUUID(g.object.PlatformID),
+			Name:               g.object.Name,
+			ObjectType:         g.object.Type,
+			BackupRef:          optionalUUID(g.object.BackupID),
+			RestorePointsCount: g.restorePoints,
+			SizeBytes:          g.object.Size,
+			LastRunFailed:      g.lastRunFailed,
 		})
 		if err != nil {
-			return fmt.Errorf("upsert backup object %s: %w", o.Name, err)
+			return fmt.Errorf("upsert backup object %s: %w", g.object.Name, err)
 		}
-		stored++
-		pending = append(pending, veeamPointFetch{object: o, rowID: row.ID})
+		pending = append(pending, veeamPointFetch{object: g.object, rowID: row.ID})
 	}
 
 	if err := v.fetchRestorePoints(ctx, server, client, res, pending); err != nil {
 		return err
 	}
 
-	if !v.shouldSweep(server, res, "backup objects", stored, len(existing)) {
+	if !v.shouldSweep(server, res, "backup objects", len(guests), len(existing)) {
 		return nil
 	}
 	return v.queries.DeleteStaleVeeamBackupObjects(ctx, db.DeleteStaleVeeamBackupObjectsParams{
 		VeeamServerID: server.ID,
 		GraceSeconds:  v.sweepGraceSeconds(),
 	})
+}
+
+// foldedObject is one guest, folded from every backup it appears in.
+type foldedObject struct {
+	object        veeam.BackupObject
+	objectID      uuid.UUID
+	restorePoints int32
+	lastRunFailed bool
+}
+
+// foldBackupObjects folds the (guest × backup) listing to one entry per guest,
+// preserving listing order so the result is stable across passes.
+//
+// Counts are summed because each row's is per-backup; size is taken as-is
+// because it is the guest's own size and is identical across its rows
+// (verified on live data); lastRunFailed is OR'd, since a failure in any
+// backup of a guest is worth surfacing.
+func foldBackupObjects(
+	objects []veeam.BackupObject,
+	platforms map[string]struct{},
+	onBadID func(name string),
+) []foldedObject {
+	index := make(map[uuid.UUID]int, len(objects))
+	folded := make([]foldedObject, 0, len(objects))
+
+	for _, o := range objects {
+		if !o.IsProxmox() {
+			continue
+		}
+		objectID, ok := parseUUID(o.ID)
+		if !ok {
+			onBadID(o.Name)
+			continue
+		}
+		if o.PlatformID != "" {
+			platforms[o.PlatformID] = struct{}{}
+		}
+
+		count := int32(min(o.RestorePointsCount, math.MaxInt32)) //nolint:gosec // clamped on this line
+		if at, seen := index[objectID]; seen {
+			folded[at].restorePoints += count
+			folded[at].lastRunFailed = folded[at].lastRunFailed || o.LastRunFailed
+			continue
+		}
+		index[objectID] = len(folded)
+		folded = append(folded, foldedObject{
+			object:        o,
+			objectID:      objectID,
+			restorePoints: count,
+			lastRunFailed: o.LastRunFailed,
+		})
+	}
+	return folded
 }
 
 // shouldSweep decides whether a section's stale-row deletion may run.

@@ -480,6 +480,58 @@ func TestVeeamSync_AlwaysFetchesRestorePoints(t *testing.T) {
 	}
 }
 
+// GET /backupObjects returns one row per (guest × backup) and REPEATS the
+// object id across them — 27 rows carried 18 distinct ids on the live server.
+// The rows fold to one per guest, and the per-backup restore-point counts sum,
+// because /backupObjects/{id}/restorePoints returns the guest's points across
+// every backup. Measured on the lab: a guest whose rows read [3, 17, 9] has 29
+// points, so keeping any single row's count would disagree with the points
+// stored beside it.
+func TestVeeamSync_FoldsDuplicateObjectRowsPerGuest(t *testing.T) {
+	server := testVeeamServer(t)
+	q := &fakeVeeamQueries{servers: []db.VeeamServer{server}}
+
+	const size = int64(53687091200)
+	dup := func(backupID string, count int, failed bool) veeam.BackupObject {
+		return veeam.BackupObject{
+			ID: testObjectID, ObjectID: "smbios-uuid", PlatformName: "Proxmox",
+			PlatformID: testPlatformID, Name: "automation", Type: "VM",
+			BackupID: backupID, RestorePointsCount: count, Size: size,
+			LastRunFailed: failed,
+		}
+	}
+	c := &fakeVeeamClient{
+		objects: []veeam.BackupObject{
+			dup(uuid.NewString(), 3, false),
+			dup(uuid.NewString(), 17, true),
+			dup(uuid.NewString(), 9, false),
+		},
+		points: map[string][]veeam.RestorePoint{
+			testObjectID: {{ID: uuid.NewString(), CreationTime: veeam.Timestamp{Time: time.Now()}}},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncInventory(context.Background())
+
+	if len(q.objects) != 1 {
+		t.Fatalf("upserts = %d, want one row per guest", len(q.objects))
+	}
+	if got := q.objects[0].RestorePointsCount; got != 29 {
+		t.Errorf("RestorePointsCount = %d, want the sum across backups (29)", got)
+	}
+	if got := q.objects[0].SizeBytes; got != size {
+		t.Errorf("SizeBytes = %d, want the guest's own size %d — summing would multiply it by its backup count", got, size)
+	}
+	if !q.objects[0].LastRunFailed {
+		t.Error("LastRunFailed = false; a failure in any of a guest's backups is worth surfacing")
+	}
+	// And the fan-out runs once per guest, not once per listing row.
+	if len(c.pointCalls) != 1 {
+		t.Errorf("restore-point fetches = %d, want 1 — duplicates re-fetch the same guest", len(c.pointCalls))
+	}
+}
+
 // A successful-but-EMPTY listing must not delete everything. The VBR REST
 // service answers before its backup service has loaded its catalog after a
 // restart, so an empty read is a real transient state — and acting on it would
