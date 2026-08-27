@@ -993,6 +993,8 @@ type VeeamBackupObject struct {
 	Vmid pgtype.Int4 `json:"vmid"`
 	// Which tier resolved this row: smbios (deterministic, the objectId matched a guest's smbios1 uuid), name (fallback, low confidence — surfaced as such in the UI; only ever applied to a guest the collector has affirmatively recorded as having NO smbios1 uuid, never to one it has not scanned), manual (an operator said so; automatic passes never overwrite it), none (unresolved: the platform is unmapped, the guest has not been scanned yet, or the object is orphaned)
 	MatchMethod string `json:"match_method"`
+	// The pinned guest's smbios1 uuid as it stood when an operator created the manual mapping. Empty means the guest had none to record (or the row is not manually mapped), in which case the pin cannot be identity-checked and is trusted as given. Read ONLY while match_method = 'manual' — a leftover value on a row that has since been re-resolved automatically is inert
+	ManualGuestKey string `json:"manual_guest_key"`
 }
 
 // Guests that belong to the Veeam deployment rather than to the workload it protects: worker appliances (EProxyType "PVE") and the VBR server itself. Sourced from the API, never from a name prefix — "Veeam" appears in the lab worker names and would also match an unrelated guest

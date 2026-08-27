@@ -25,7 +25,40 @@ WITH candidate AS (
            ON p.veeam_server_id = o.veeam_server_id
           AND p.platform_id     = o.platform_id
     WHERE o.veeam_server_id = $1
-      AND o.match_method <> 'manual'
+      -- Manual mappings are exempt — that is what makes an operator's
+      -- decision stick — EXCEPT when the pin has become a lie. A stale pin
+      -- re-enters automatic resolution here, in the same atomic statement, so
+      -- there is never a moment where it is neither pinned nor resolved.
+      --
+      -- Three ways a pin goes stale, and each of them is a wrong answer that
+      -- nothing else would ever correct:
+      AND (
+          o.match_method <> 'manual'
+          -- The platform is no longer mapped to a cluster. Unmapping is how an
+          -- operator REVOKES cluster-scoped visibility of a server's data, and
+          -- a pin that kept its cluster_id would go on feeding the coverage
+          -- view and the VM detail card of a viewer whose grant was withdrawn.
+          OR p.cluster_id IS NULL
+          -- The pin names a different cluster than the object's platform does.
+          -- A Veeam platformId IS one Proxmox connection, so its objects
+          -- cannot belong anywhere else; this catches a platform remapped
+          -- underneath an existing pin.
+          OR o.cluster_id IS DISTINCT FROM p.cluster_id
+          -- The guest holding that VMID is not the guest that was pinned.
+          -- Proxmox reuses a VMID once its guest is destroyed, and without
+          -- this the replacement silently inherits the old machine's restore
+          -- points and reports as protected. Only fires on a genuine identity
+          -- change: a churned guest row keeps its guest_smbios entry, and a
+          -- rename does not touch the uuid.
+          OR EXISTS (
+              SELECT 1 FROM guest_smbios g
+              WHERE g.cluster_id  = o.cluster_id
+                AND g.vmid        = o.vmid
+                AND g.smbios_uuid <> ''
+                AND o.manual_guest_key <> ''
+                AND g.smbios_uuid <> o.manual_guest_key
+          )
+      )
 ),
 by_smbios AS (
     -- Grouped with the same "exactly one" rule the name tier uses. The uuid is
@@ -332,6 +365,140 @@ func (q *Queries) DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uui
 	return err
 }
 
+const getVeeamBackupObject = `-- name: GetVeeamBackupObject :one
+SELECT id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at, cluster_id, vmid, match_method, manual_guest_key FROM veeam_backup_objects WHERE veeam_server_id = $1 AND id = $2
+`
+
+type GetVeeamBackupObjectParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	ID            uuid.UUID `json:"id"`
+}
+
+// One indexed row, so an override does not read every backup object on the
+// server to find the one it is about to change.
+func (q *Queries) GetVeeamBackupObject(ctx context.Context, arg GetVeeamBackupObjectParams) (VeeamBackupObject, error) {
+	row := q.db.QueryRow(ctx, getVeeamBackupObject, arg.VeeamServerID, arg.ID)
+	var i VeeamBackupObject
+	err := row.Scan(
+		&i.ID,
+		&i.VeeamServerID,
+		&i.VeeamObjectID,
+		&i.SmbiosUuid,
+		&i.PlatformID,
+		&i.Name,
+		&i.ObjectType,
+		&i.BackupRef,
+		&i.RestorePointsCount,
+		&i.SizeBytes,
+		&i.LastRunFailed,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ClusterID,
+		&i.Vmid,
+		&i.MatchMethod,
+		&i.ManualGuestKey,
+	)
+	return i, err
+}
+
+const getVeeamGuestProtection = `-- name: GetVeeamGuestProtection :one
+WITH obj AS (
+    SELECT o.id, o.match_method, o.last_run_failed
+    FROM veeam_backup_objects o
+    WHERE o.cluster_id = $1::uuid
+      AND o.vmid = $2::int
+),
+newest AS (
+    -- The guest's most recent point across every backup it appears in. Its
+    -- malware verdict is the one worth surfacing: an old "Suspicious" that a
+    -- later clean backup superseded is history, not a live finding.
+    SELECT rp.creation_time, rp.malware_status
+    FROM obj
+    JOIN veeam_restore_points rp ON rp.backup_object_id = obj.id
+    ORDER BY rp.creation_time DESC
+    LIMIT 1
+),
+totals AS (
+    -- LEFT JOIN: a guest whose backup object exists but whose points have all
+    -- been pruned must still report, with zero.
+    SELECT count(rp.id)                            AS restore_point_count,
+           COALESCE(sum(rp.size_bytes), 0)::bigint AS restore_point_bytes
+    FROM obj
+    LEFT JOIN veeam_restore_points rp ON rp.backup_object_id = obj.id
+),
+meta AS (
+    -- Ranked so the STRONGEST tier that resolved any of the guest's objects
+    -- wins: reporting the weakest would flag a guest as a low-confidence name
+    -- match on the strength of one stale object.
+    SELECT count(*) AS object_count,
+           COALESCE(min(CASE obj.match_method
+                          WHEN 'manual' THEN 0
+                          WHEN 'smbios' THEN 1
+                          WHEN 'name'   THEN 2
+                          ELSE 3
+                        END), 3)                   AS method_rank,
+           COALESCE(bool_or(obj.last_run_failed), false)::boolean AS last_run_failed
+    FROM obj
+)
+SELECT
+    n.creation_time                       AS latest_restore_point,
+    COALESCE(n.malware_status, '')::text  AS latest_malware_status,
+    m.object_count::bigint                AS object_count,
+    t.restore_point_count::bigint         AS restore_point_count,
+    t.restore_point_bytes::bigint         AS restore_point_bytes,
+    (CASE m.method_rank
+       WHEN 0 THEN 'manual'
+       WHEN 1 THEN 'smbios'
+       WHEN 2 THEN 'name'
+       ELSE 'none'
+     END)::text                           AS match_method,
+    m.last_run_failed                     AS last_run_failed
+FROM meta m
+CROSS JOIN totals t
+LEFT JOIN newest n ON true
+`
+
+type GetVeeamGuestProtectionParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+}
+
+type GetVeeamGuestProtectionRow struct {
+	LatestRestorePoint  pgtype.Timestamptz `json:"latest_restore_point"`
+	LatestMalwareStatus string             `json:"latest_malware_status"`
+	ObjectCount         int64              `json:"object_count"`
+	RestorePointCount   int64              `json:"restore_point_count"`
+	RestorePointBytes   int64              `json:"restore_point_bytes"`
+	MatchMethod         string             `json:"match_method"`
+	LastRunFailed       bool               `json:"last_run_failed"`
+}
+
+// ListVeeamGuestProtectionForCluster narrowed to one guest, for the VM detail
+// page's backup card.
+//
+// Shaped as joined CTEs rather than scalar subqueries on purpose. sqlc typed
+// `(SELECT creation_time FROM newest)` as a NON-nullable time.Time, which is
+// wrong the moment a guest has no restore points — the commonest interesting
+// case here — and would have failed the scan at runtime rather than at build
+// time. A LEFT JOIN onto a CTE that may be empty types it correctly.
+// Both always yield exactly one row (bare aggregates over a possibly-empty
+// set), so the :one contract holds even for a guest Veeam has never seen.
+func (q *Queries) GetVeeamGuestProtection(ctx context.Context, arg GetVeeamGuestProtectionParams) (GetVeeamGuestProtectionRow, error) {
+	row := q.db.QueryRow(ctx, getVeeamGuestProtection, arg.ClusterID, arg.Vmid)
+	var i GetVeeamGuestProtectionRow
+	err := row.Scan(
+		&i.LatestRestorePoint,
+		&i.LatestMalwareStatus,
+		&i.ObjectCount,
+		&i.RestorePointCount,
+		&i.RestorePointBytes,
+		&i.MatchMethod,
+		&i.LastRunFailed,
+	)
+	return i, err
+}
+
 const getVeeamPlatform = `-- name: GetVeeamPlatform :one
 
 SELECT veeam_server_id, platform_id, display_name, cluster_id, last_seen_at, created_at FROM veeam_platforms WHERE veeam_server_id = $1 AND platform_id = $2
@@ -522,7 +689,7 @@ func (q *Queries) ListActiveVeeamServers(ctx context.Context) ([]VeeamServer, er
 }
 
 const listVeeamBackupObjectsByServer = `-- name: ListVeeamBackupObjectsByServer :many
-SELECT id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at, cluster_id, vmid, match_method FROM veeam_backup_objects WHERE veeam_server_id = $1 ORDER BY name
+SELECT id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at, cluster_id, vmid, match_method, manual_guest_key FROM veeam_backup_objects WHERE veeam_server_id = $1 ORDER BY name
 `
 
 func (q *Queries) ListVeeamBackupObjectsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamBackupObject, error) {
@@ -552,6 +719,111 @@ func (q *Queries) ListVeeamBackupObjectsByServer(ctx context.Context, veeamServe
 			&i.ClusterID,
 			&i.Vmid,
 			&i.MatchMethod,
+			&i.ManualGuestKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamGuestProtectionForCluster = `-- name: ListVeeamGuestProtectionForCluster :many
+
+WITH obj AS (
+    SELECT o.id, o.vmid, o.match_method, o.last_run_failed
+    FROM veeam_backup_objects o
+    WHERE o.cluster_id = $1::uuid
+      AND o.vmid IS NOT NULL
+),
+newest AS (
+    -- The guest's most recent point across every backup it appears in. Its
+    -- malware verdict is the one worth surfacing: an old "Suspicious" that a
+    -- later clean backup superseded is history, not a live finding.
+    SELECT DISTINCT ON (obj.vmid)
+           obj.vmid, rp.creation_time, rp.malware_status
+    FROM obj
+    JOIN veeam_restore_points rp ON rp.backup_object_id = obj.id
+    ORDER BY obj.vmid, rp.creation_time DESC
+),
+totals AS (
+    -- LEFT JOIN, so a guest whose backup object exists but whose points have
+    -- all been pruned still appears — with zero. "Veeam knows about this
+    -- guest and can restore nothing" is a worse state than never having been
+    -- backed up, and it must not be invisible.
+    SELECT obj.vmid,
+           count(rp.id)                    AS restore_point_count,
+           COALESCE(sum(rp.size_bytes), 0) AS restore_point_bytes
+    FROM obj
+    LEFT JOIN veeam_restore_points rp ON rp.backup_object_id = obj.id
+    GROUP BY obj.vmid
+)
+SELECT
+    t.vmid::int                             AS vmid,
+    n.creation_time                         AS latest_restore_point,
+    COALESCE(n.malware_status, '')::text    AS latest_malware_status,
+    t.restore_point_count::bigint           AS restore_point_count,
+    t.restore_point_bytes::bigint           AS restore_point_bytes,
+    -- The strongest tier that resolved any of this guest's objects: an
+    -- operator's own mapping outranks a deterministic match, which outranks a
+    -- name guess. Reporting the weakest would flag a guest as low-confidence
+    -- on the strength of one stale object.
+    (SELECT o2.match_method FROM obj o2
+      WHERE o2.vmid = t.vmid
+      ORDER BY CASE o2.match_method
+                 WHEN 'manual' THEN 0
+                 WHEN 'smbios' THEN 1
+                 WHEN 'name'   THEN 2
+                 ELSE 3
+               END
+      LIMIT 1)::text                        AS match_method,
+    EXISTS (SELECT 1 FROM obj o3 WHERE o3.vmid = t.vmid AND o3.last_run_failed) AS last_run_failed
+FROM totals t
+LEFT JOIN newest n ON n.vmid = t.vmid
+ORDER BY t.vmid
+`
+
+type ListVeeamGuestProtectionForClusterRow struct {
+	Vmid                int32              `json:"vmid"`
+	LatestRestorePoint  pgtype.Timestamptz `json:"latest_restore_point"`
+	LatestMalwareStatus string             `json:"latest_malware_status"`
+	RestorePointCount   int64              `json:"restore_point_count"`
+	RestorePointBytes   int64              `json:"restore_point_bytes"`
+	MatchMethod         string             `json:"match_method"`
+	LastRunFailed       bool               `json:"last_run_failed"`
+}
+
+// ---------------------------------------------------------------------------
+// Coverage: what Veeam protection a cluster's guests actually have.
+// ---------------------------------------------------------------------------
+// ListVeeamGuestProtectionForCluster is one row per correlated GUEST, not per
+// backup object.
+//
+// The aggregation is the point. A guest appears in as many backup objects as
+// it has backups — daily, weekly and offsite on the lab, up to three — and a
+// naive join would report it three times, each with a third of its restore
+// points and a different "latest backup". RPO is MAX(creation_time) across all
+// of them, and the count is their sum.
+func (q *Queries) ListVeeamGuestProtectionForCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVeeamGuestProtectionForClusterRow, error) {
+	rows, err := q.db.Query(ctx, listVeeamGuestProtectionForCluster, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVeeamGuestProtectionForClusterRow{}
+	for rows.Next() {
+		var i ListVeeamGuestProtectionForClusterRow
+		if err := rows.Scan(
+			&i.Vmid,
+			&i.LatestRestorePoint,
+			&i.LatestMalwareStatus,
+			&i.RestorePointCount,
+			&i.RestorePointBytes,
+			&i.MatchMethod,
+			&i.LastRunFailed,
 		); err != nil {
 			return nil, err
 		}
@@ -641,7 +913,7 @@ SELECT DISTINCT i.vmid::int AS vmid, i.role
 FROM veeam_infrastructure i
 WHERE i.cluster_id = $1::uuid
   AND i.vmid IS NOT NULL
-ORDER BY vmid
+ORDER BY vmid, role
 `
 
 type ListVeeamInfrastructureGuestsForClusterRow struct {
@@ -655,6 +927,11 @@ type ListVeeamInfrastructureGuestsForClusterRow struct {
 // Both casts are for sqlc's benefit, not Postgres's: the columns are nullable
 // on the table, so without them callers would handle a pgtype.UUID argument
 // and a pgtype.Int4 result that the WHERE clause already guarantees are set.
+// ORDER BY role as well as vmid, because DISTINCT is on the PAIR and one
+// guest can legitimately hold both roles — the VBR server fills a proxy role
+// itself, and both rows resolve to the same guest by name. Without the second
+// key the reported reason flips between requests. 'backup_server' sorts first
+// and is the more specific fact, which is the one worth showing.
 func (q *Queries) ListVeeamInfrastructureGuestsForCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVeeamInfrastructureGuestsForClusterRow, error) {
 	rows, err := q.db.Query(ctx, listVeeamInfrastructureGuestsForCluster, clusterID)
 	if err != nil {
@@ -716,6 +993,140 @@ func (q *Queries) ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamOrphanedObjects = `-- name: ListVeeamOrphanedObjects :many
+WITH orphan AS (
+    SELECT o.id, o.veeam_object_id, o.smbios_uuid, o.platform_id, o.name,
+           o.object_type, o.restore_points_count, o.size_bytes,
+           o.last_run_failed, o.last_seen_at, p.cluster_id,
+           p.display_name AS platform_name
+    FROM veeam_backup_objects o
+    JOIN veeam_platforms p
+      ON p.veeam_server_id = o.veeam_server_id
+     AND p.platform_id     = o.platform_id
+     -- Objects on an UNMAPPED platform are excluded: nothing is known about
+     -- where they should live, so calling them orphaned would blame the
+     -- operator's missing mapping on the data.
+     AND p.cluster_id IS NOT NULL
+    WHERE o.veeam_server_id = $1
+      AND o.match_method = 'none'
+),
+newest AS (
+    SELECT DISTINCT ON (rp.backup_object_id)
+           rp.backup_object_id, rp.creation_time
+    FROM veeam_restore_points rp
+    JOIN orphan ON orphan.id = rp.backup_object_id
+    ORDER BY rp.backup_object_id, rp.creation_time DESC
+),
+sizes AS (
+    SELECT rp.backup_object_id,
+           COALESCE(sum(rp.size_bytes), 0)::bigint AS restore_point_bytes
+    FROM veeam_restore_points rp
+    JOIN orphan ON orphan.id = rp.backup_object_id
+    GROUP BY rp.backup_object_id
+)
+SELECT
+    o.id,
+    o.veeam_object_id,
+    o.smbios_uuid,
+    o.platform_id,
+    o.name,
+    o.object_type,
+    o.restore_points_count,
+    o.size_bytes,
+    o.last_run_failed,
+    o.last_seen_at,
+    o.cluster_id,
+    o.platform_name,
+    c.name AS cluster_name,
+    n.creation_time                              AS latest_restore_point,
+    COALESCE(sz.restore_point_bytes, 0)::bigint  AS restore_point_bytes
+FROM orphan o
+LEFT JOIN clusters c ON c.id = o.cluster_id
+LEFT JOIN newest n   ON n.backup_object_id = o.id
+LEFT JOIN sizes sz   ON sz.backup_object_id = o.id
+ORDER BY o.name
+`
+
+type ListVeeamOrphanedObjectsRow struct {
+	ID                 uuid.UUID          `json:"id"`
+	VeeamObjectID      uuid.UUID          `json:"veeam_object_id"`
+	SmbiosUuid         string             `json:"smbios_uuid"`
+	PlatformID         pgtype.UUID        `json:"platform_id"`
+	Name               string             `json:"name"`
+	ObjectType         string             `json:"object_type"`
+	RestorePointsCount int32              `json:"restore_points_count"`
+	SizeBytes          int64              `json:"size_bytes"`
+	LastRunFailed      bool               `json:"last_run_failed"`
+	LastSeenAt         time.Time          `json:"last_seen_at"`
+	ClusterID          pgtype.UUID        `json:"cluster_id"`
+	PlatformName       string             `json:"platform_name"`
+	ClusterName        pgtype.Text        `json:"cluster_name"`
+	LatestRestorePoint pgtype.Timestamptz `json:"latest_restore_point"`
+	RestorePointBytes  int64              `json:"restore_point_bytes"`
+}
+
+// ListVeeamOrphanedObjects returns backup objects whose platform IS mapped to
+// a cluster but which resolve to no guest on it.
+//
+// Not an edge case, a feature. These are restore points consuming repository
+// space for machines that no longer exist in the form that was backed up — a
+// deleted guest, a template whose name was reused under a new uuid, a host
+// rebuilt in place. The Veeam console does not call them out, and a coverage
+// view built on name matching would instead report the rebuilt host as
+// protected by its predecessor's backup.
+//
+// Objects whose platform is UNMAPPED are deliberately excluded: nothing is
+// known about where they should live, so calling them orphaned would blame the
+// operator's missing mapping on the data.
+//
+// The CTEs exist for two reasons. sqlc types a bare scalar subquery as
+// interface{}, and types an AGGREGATE — including through a LATERAL — as NOT
+// NULL, which for max() over an orphan whose restore points have all been
+// pruned means a NULL scanned into a time.Time: a 500 at runtime rather than
+// an error at build time. A plain column reached through a LEFT JOIN to a CTE
+// is typed nullable, correctly.
+//
+// They are also CORRELATED to the orphan set rather than to the whole server.
+// Filtering only on veeam_server_id would compute a DISTINCT ON and a GROUP BY
+// over every restore point the server holds — tens of thousands on a real
+// install — before discarding all but the handful of rows this listing
+// typically returns, on every page load.
+func (q *Queries) ListVeeamOrphanedObjects(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamOrphanedObjectsRow, error) {
+	rows, err := q.db.Query(ctx, listVeeamOrphanedObjects, veeamServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVeeamOrphanedObjectsRow{}
+	for rows.Next() {
+		var i ListVeeamOrphanedObjectsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VeeamObjectID,
+			&i.SmbiosUuid,
+			&i.PlatformID,
+			&i.Name,
+			&i.ObjectType,
+			&i.RestorePointsCount,
+			&i.SizeBytes,
+			&i.LastRunFailed,
+			&i.LastSeenAt,
+			&i.ClusterID,
+			&i.PlatformName,
+			&i.ClusterName,
+			&i.LatestRestorePoint,
+			&i.RestorePointBytes,
 		); err != nil {
 			return nil, err
 		}
@@ -949,6 +1360,78 @@ func (q *Queries) ListVeeamRestorePointsByServer(ctx context.Context, arg ListVe
 	return items, nil
 }
 
+const listVeeamRestorePointsForGuest = `-- name: ListVeeamRestorePointsForGuest :many
+SELECT
+    rp.id,
+    rp.veeam_id,
+    rp.name,
+    rp.point_type,
+    rp.malware_status,
+    rp.guest_os_family,
+    rp.creation_time,
+    rp.size_bytes,
+    rp.supports_flr,
+    o.name AS object_name
+FROM veeam_restore_points rp
+JOIN veeam_backup_objects o ON o.id = rp.backup_object_id
+WHERE o.cluster_id = $1::uuid
+  AND o.vmid = $2::int
+ORDER BY rp.creation_time DESC
+LIMIT $3::int
+`
+
+type ListVeeamRestorePointsForGuestParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+	RowLimit  int32     `json:"row_limit"`
+}
+
+type ListVeeamRestorePointsForGuestRow struct {
+	ID            uuid.UUID `json:"id"`
+	VeeamID       uuid.UUID `json:"veeam_id"`
+	Name          string    `json:"name"`
+	PointType     string    `json:"point_type"`
+	MalwareStatus string    `json:"malware_status"`
+	GuestOsFamily string    `json:"guest_os_family"`
+	CreationTime  time.Time `json:"creation_time"`
+	SizeBytes     int64     `json:"size_bytes"`
+	SupportsFlr   bool      `json:"supports_flr"`
+	ObjectName    string    `json:"object_name"`
+}
+
+// ListVeeamRestorePointsForGuest is the guest's recovery history across every
+// backup it appears in, newest first.
+func (q *Queries) ListVeeamRestorePointsForGuest(ctx context.Context, arg ListVeeamRestorePointsForGuestParams) ([]ListVeeamRestorePointsForGuestRow, error) {
+	rows, err := q.db.Query(ctx, listVeeamRestorePointsForGuest, arg.ClusterID, arg.Vmid, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVeeamRestorePointsForGuestRow{}
+	for rows.Next() {
+		var i ListVeeamRestorePointsForGuestRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VeeamID,
+			&i.Name,
+			&i.PointType,
+			&i.MalwareStatus,
+			&i.GuestOsFamily,
+			&i.CreationTime,
+			&i.SizeBytes,
+			&i.SupportsFlr,
+			&i.ObjectName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVeeamServers = `-- name: ListVeeamServers :many
 SELECT id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at FROM veeam_servers ORDER BY created_at DESC
 `
@@ -1167,6 +1650,68 @@ func (q *Queries) ResolveVeeamInfrastructureGuests(ctx context.Context, veeamSer
 	return result.RowsAffected(), nil
 }
 
+const setVeeamBackupObjectGuest = `-- name: SetVeeamBackupObjectGuest :one
+UPDATE veeam_backup_objects
+SET cluster_id   = $3,
+    vmid         = $4,
+    match_method = CASE WHEN $3::uuid IS NULL THEN 'none' ELSE 'manual' END,
+    manual_guest_key = COALESCE(
+        (SELECT g.smbios_uuid FROM guest_smbios g
+          WHERE g.cluster_id = $3::uuid AND g.vmid = $4::int), '')
+WHERE veeam_server_id = $1
+  AND id = $2
+RETURNING id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at, cluster_id, vmid, match_method, manual_guest_key
+`
+
+type SetVeeamBackupObjectGuestParams struct {
+	VeeamServerID uuid.UUID   `json:"veeam_server_id"`
+	ID            uuid.UUID   `json:"id"`
+	ClusterID     pgtype.UUID `json:"cluster_id"`
+	Vmid          pgtype.Int4 `json:"vmid"`
+}
+
+// SetVeeamBackupObjectGuest records an operator's own mapping for one backup
+// object, or clears it back to automatic resolution.
+//
+// match_method 'manual' is what makes it stick: CorrelateVeeamBackupObjects
+// exempts those rows, so no sync overwrites a human's decision — unless the
+// pin has gone stale, which that query defines and detects.
+//
+// manual_guest_key captures the pinned guest's SMBIOS uuid at pin time, which
+// is what the staleness check compares against later. Taken from guest_smbios
+// here rather than passed in, so a caller cannot supply one that does not
+// match the guest they named.
+func (q *Queries) SetVeeamBackupObjectGuest(ctx context.Context, arg SetVeeamBackupObjectGuestParams) (VeeamBackupObject, error) {
+	row := q.db.QueryRow(ctx, setVeeamBackupObjectGuest,
+		arg.VeeamServerID,
+		arg.ID,
+		arg.ClusterID,
+		arg.Vmid,
+	)
+	var i VeeamBackupObject
+	err := row.Scan(
+		&i.ID,
+		&i.VeeamServerID,
+		&i.VeeamObjectID,
+		&i.SmbiosUuid,
+		&i.PlatformID,
+		&i.Name,
+		&i.ObjectType,
+		&i.BackupRef,
+		&i.RestorePointsCount,
+		&i.SizeBytes,
+		&i.LastRunFailed,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ClusterID,
+		&i.Vmid,
+		&i.MatchMethod,
+		&i.ManualGuestKey,
+	)
+	return i, err
+}
+
 const setVeeamPlatformCluster = `-- name: SetVeeamPlatformCluster :one
 UPDATE veeam_platforms
 SET cluster_id = $3
@@ -1322,7 +1867,7 @@ DO UPDATE SET
     size_bytes = EXCLUDED.size_bytes,
     last_run_failed = EXCLUDED.last_run_failed,
     last_seen_at = now()
-RETURNING id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at, cluster_id, vmid, match_method
+RETURNING id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at, cluster_id, vmid, match_method, manual_guest_key
 `
 
 type UpsertVeeamBackupObjectParams struct {
@@ -1370,6 +1915,7 @@ func (q *Queries) UpsertVeeamBackupObject(ctx context.Context, arg UpsertVeeamBa
 		&i.ClusterID,
 		&i.Vmid,
 		&i.MatchMethod,
+		&i.ManualGuestKey,
 	)
 	return i, err
 }

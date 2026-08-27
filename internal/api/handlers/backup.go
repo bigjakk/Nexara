@@ -1442,18 +1442,103 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx) error {
 	})
 }
 
-// backupCoverageEntry is a single VM's backup coverage info.
+// backupCoverageEntry is a single VM's backup coverage info, across every
+// provider the caller can see.
 type backupCoverageEntry struct {
-	VMID           int32  `json:"vmid"`
-	Name           string `json:"name"`
-	Type           string `json:"type"`
-	Status         string `json:"status"`
-	ClusterID      string `json:"cluster_id"`
-	ClusterName    string `json:"cluster_name"`
-	LatestBackup   *int64 `json:"latest_backup"`
-	BackupCount    int    `json:"backup_count"`
-	CoverageStatus string `json:"coverage_status"` // "recent", "stale", "none"
+	VMID        int32  `json:"vmid"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Status      string `json:"status"`
+	ClusterID   string `json:"cluster_id"`
+	ClusterName string `json:"cluster_name"`
+	// LatestBackup and BackupCount are the PBS figures, unchanged, and remain
+	// the fields the existing UI reads.
+	LatestBackup *int64 `json:"latest_backup"`
+	BackupCount  int    `json:"backup_count"`
+	// CoverageStatus is freshness across EVERY provider — "recent", "stale",
+	// "none", or "not_eligible". A guest protected only by Veeam used to
+	// report "none" here, which was simply wrong; a deployment with no Veeam
+	// server sees exactly what it saw before.
+	CoverageStatus string `json:"coverage_status"`
+	// Eligibility is why a guest is not a backup target at all: "eligible",
+	// "veeam_worker", or "veeam_backup_server". Templates never reach this
+	// report — ListAllVMs excludes them.
+	Eligibility string `json:"eligibility"`
+	// VeeamCapable is false for LXC containers, which Veeam cannot back up at
+	// all. They are still backup targets — PBS handles them — so this is a
+	// per-provider fact, not an eligibility one, and conflating the two would
+	// hide a container that genuinely has no backups.
+	VeeamCapable bool `json:"veeam_capable"`
+	// Veeam is nil when no Veeam data applies: no server configured, the
+	// cluster's platform is unmapped, or the caller holds no view:veeam.
+	Veeam *veeamCoverage `json:"veeam"`
+	// Protection names the providers actually protecting this guest:
+	// "both", "veeam", "pbs", "none", or "not_eligible".
+	Protection string `json:"protection"`
 }
+
+// coverageVerdict decides one guest's protection and freshness.
+//
+// Split out from the loop so the decision has a test of its own: it is the
+// sentence the whole feature exists to say, and every branch of it is a claim
+// about whether someone's data is recoverable.
+//
+// Ineligibility wins over everything. A Veeam worker appliance with no backup
+// is not an alarm, and rendering it as one is how a coverage view teaches
+// operators to ignore it — 8 of the lab's 19 naive alarms are of that kind.
+func coverageVerdict(eligibility string, pbsProtected, veeamProtected bool, freshest, now, staleThreshold int64) (protection, status string) {
+	if eligibility != coverageEligible {
+		return protectionNotEligible, "not_eligible"
+	}
+
+	switch {
+	case pbsProtected && veeamProtected:
+		protection = protectionBoth
+	case veeamProtected:
+		protection = protectionVeeam
+	case pbsProtected:
+		protection = protectionPBS
+	default:
+		// No provider protects it, so there is no freshness to report — and
+		// "stale" would read as "there is an old backup", which there is not.
+		return protectionNone, "none"
+	}
+
+	if now-freshest < staleThreshold {
+		return protection, "recent"
+	}
+	return protection, "stale"
+}
+
+// veeamCoverage is the Veeam side of one guest's protection.
+type veeamCoverage struct {
+	Protected          bool       `json:"protected"`
+	LatestRestorePoint *time.Time `json:"latest_restore_point"`
+	RestorePointCount  int64      `json:"restore_point_count"`
+	RestorePointBytes  int64      `json:"restore_point_bytes"`
+	// MatchMethod is how this guest was tied to its Veeam backup: "smbios"
+	// (deterministic), "manual" (an operator said so), or "name" — which the
+	// UI must flag, because a name match is a guess.
+	MatchMethod string `json:"match_method"`
+	// MalwareStatus is the verdict on the NEWEST restore point only. An old
+	// "Suspicious" that a later clean backup superseded is history.
+	MalwareStatus string `json:"malware_status"`
+	LastRunFailed bool   `json:"last_run_failed"`
+}
+
+// Protection and eligibility values, kept as constants because the frontend
+// switches on them and a typo would silently render as "unknown".
+const (
+	coverageEligible          = "eligible"
+	coverageVeeamWorker       = "veeam_worker"
+	coverageVeeamBackupServer = "veeam_backup_server"
+
+	protectionBoth        = "both"
+	protectionVeeam       = "veeam"
+	protectionPBS         = "pbs"
+	protectionNone        = "none"
+	protectionNotEligible = "not_eligible"
+)
 
 // GetBackupCoverage handles GET /api/v1/backup-coverage
 //
@@ -1467,6 +1552,16 @@ type backupCoverageEntry struct {
 // use different PBS datastores, even with overlapping VMIDs.
 func (h *BackupHandler) GetBackupCoverage(c fiber.Ctx) error {
 	access, err := accessibleClusters(c, "view", "backup")
+	if err != nil {
+		return err
+	}
+	// Veeam is a SEPARATE grant, resolved separately. A caller holding
+	// view:backup but not view:veeam gets exactly the report they got before
+	// Veeam existed: no restore-point data, and no eligibility refinement
+	// either — telling them a guest is a Veeam worker would leak the mapping
+	// they have no grant over, and the honest alternative to a partial answer
+	// is the old one.
+	veeamAccess, err := accessibleClusters(c, "view", "veeam")
 	if err != nil {
 		return err
 	}
@@ -1537,6 +1632,45 @@ func (h *BackupHandler) GetBackupCoverage(c fiber.Ctx) error {
 		}
 	}
 
+	// Step 2b: Veeam protection and Veeam-owned guests, per cluster the caller
+	// may see Veeam data for. One pair of queries per cluster rather than one
+	// per guest — the per-guest aggregation happens in SQL, because a guest
+	// appears once per backup it belongs to and a naive join would report it
+	// several times with a fraction of its restore points each.
+	veeamByCluster := make(map[uuid.UUID]map[int32]db.ListVeeamGuestProtectionForClusterRow)
+	veeamOwned := make(map[uuid.UUID]map[int32]string)
+	for _, cl := range clusters {
+		if !veeamAccess.PermitsCluster(cl.ID) {
+			continue
+		}
+		if rows, vErr := h.queries.ListVeeamGuestProtectionForCluster(c.Context(), cl.ID); vErr == nil {
+			byVmid := make(map[int32]db.ListVeeamGuestProtectionForClusterRow, len(rows))
+			for _, r := range rows {
+				byVmid[r.Vmid] = r
+			}
+			veeamByCluster[cl.ID] = byVmid
+		} else {
+			slog.Warn("backup coverage: Veeam protection unreadable",
+				"cluster_id", cl.ID, "error", vErr)
+		}
+		if rows, iErr := h.queries.ListVeeamInfrastructureGuestsForCluster(c.Context(), cl.ID); iErr == nil {
+			owned := make(map[int32]string, len(rows))
+			for _, r := range rows {
+				// First role wins, and the query orders them so that is
+				// 'backup_server'. One guest can legitimately hold both — the
+				// VBR server fills a proxy role itself — and last-write-wins
+				// would flip the reason shown to an operator between requests.
+				if _, seen := owned[r.Vmid]; !seen {
+					owned[r.Vmid] = r.Role
+				}
+			}
+			veeamOwned[cl.ID] = owned
+		} else {
+			slog.Warn("backup coverage: Veeam infrastructure unreadable",
+				"cluster_id", cl.ID, "error", iErr)
+		}
+	}
+
 	// Step 3: Match VMs against only the datastores their cluster uses.
 	now := time.Now().Unix()
 	staleThreshold := int64(24 * 3600) // 24 hours
@@ -1551,6 +1685,19 @@ func (h *BackupHandler) GetBackupCoverage(c fiber.Ctx) error {
 			Status:      vm.Status,
 			ClusterID:   vm.ClusterID.String(),
 			ClusterName: vm.ClusterName,
+			Eligibility: coverageEligible,
+			// Veeam cannot back up an LXC container at all. That is a fact
+			// about the provider, not about the guest — PBS backs containers
+			// up perfectly well, so it must not make one "not eligible" and
+			// hide that it has no backups.
+			VeeamCapable: vm.Type == "qemu",
+		}
+
+		switch veeamOwned[vm.ClusterID][vm.Vmid] {
+		case "worker":
+			entry.Eligibility = coverageVeeamWorker
+		case "backup_server":
+			entry.Eligibility = coverageVeeamBackupServer
 		}
 
 		// Check each datastore this VM's cluster uses for a matching snapshot.
@@ -1569,14 +1716,40 @@ func (h *BackupHandler) GetBackupCoverage(c fiber.Ctx) error {
 		if totalCount > 0 {
 			entry.LatestBackup = &latestTime
 			entry.BackupCount = totalCount
-			if now-latestTime < staleThreshold {
-				entry.CoverageStatus = "recent"
-			} else {
-				entry.CoverageStatus = "stale"
-			}
-		} else {
-			entry.CoverageStatus = "none"
 		}
+
+		// Freshest point from EITHER provider drives the status. Reading only
+		// PBS here reported every Veeam-protected guest as unprotected, which
+		// is the wrong answer in the one direction that matters.
+		freshest := latestTime
+		if row, ok := veeamByCluster[vm.ClusterID][vm.Vmid]; ok {
+			v := &veeamCoverage{
+				RestorePointCount: row.RestorePointCount,
+				RestorePointBytes: row.RestorePointBytes,
+				MatchMethod:       row.MatchMethod,
+				MalwareStatus:     row.LatestMalwareStatus,
+				LastRunFailed:     row.LastRunFailed,
+			}
+			// A backup object with every restore point pruned is NOT
+			// protected — Veeam knows the guest and can restore nothing —
+			// so protection keys on the points, never on the object.
+			v.Protected = row.RestorePointCount > 0
+			if row.LatestRestorePoint.Valid {
+				t := row.LatestRestorePoint.Time
+				v.LatestRestorePoint = &t
+				if unix := t.Unix(); unix > freshest {
+					freshest = unix
+				}
+			}
+			entry.Veeam = v
+		}
+
+		entry.Protection, entry.CoverageStatus = coverageVerdict(
+			entry.Eligibility,
+			totalCount > 0,
+			entry.Veeam != nil && entry.Veeam.Protected,
+			freshest, now, staleThreshold,
+		)
 
 		entries = append(entries, entry)
 	}

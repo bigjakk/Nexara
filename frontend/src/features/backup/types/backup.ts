@@ -246,6 +246,31 @@ export interface PBSDatastoreConfig {
   "notification-mode"?: string;
 }
 
+/** Which providers actually protect a guest. */
+export type BackupProtection = "both" | "veeam" | "pbs" | "none" | "not_eligible";
+
+/**
+ * Why a guest is not a backup target at all. Templates never appear in the
+ * coverage report, so they are not represented here.
+ */
+export type BackupEligibility = "eligible" | "veeam_worker" | "veeam_backup_server";
+
+/** The Veeam side of one guest's protection. Absent when no Veeam data applies. */
+export interface VeeamCoverage {
+  protected: boolean;
+  latest_restore_point: string | null;
+  restore_point_count: number;
+  restore_point_bytes: number;
+  /**
+   * How the guest was tied to its Veeam backup. "name" is a guess and must be
+   * flagged as such — a rebuilt host reuses its name.
+   */
+  match_method: "smbios" | "name" | "manual" | "none";
+  /** Verdict on the NEWEST restore point only. */
+  malware_status: string;
+  last_run_failed: boolean;
+}
+
 export interface BackupCoverageEntry {
   vmid: number;
   name: string;
@@ -253,9 +278,16 @@ export interface BackupCoverageEntry {
   status: string;
   cluster_id: string;
   cluster_name: string;
+  /** PBS figures. A Veeam-only guest has null/0 here and is still protected. */
   latest_backup: number | null;
   backup_count: number;
-  coverage_status: "recent" | "stale" | "none";
+  /** Freshness across every provider the caller can see. */
+  coverage_status: "recent" | "stale" | "none" | "not_eligible";
+  eligibility: BackupEligibility;
+  /** False for LXC containers, which Veeam cannot back up. PBS still can. */
+  veeam_capable: boolean;
+  veeam: VeeamCoverage | null;
+  protection: BackupProtection;
 }
 
 export interface BackupJobParams {

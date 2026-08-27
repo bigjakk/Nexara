@@ -145,6 +145,12 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/vms/:vm_id/config", s.vmHandler.GetVMConfig)
 			clusters.Put("/:cluster_id/vms/:vm_id/config", s.vmHandler.SetVMConfig)
 			clusters.Get("/:cluster_id/vms/:vm_id/agent", s.vmHandler.GetGuestAgentInfo)
+			if s.veeamHandler != nil {
+				// The VM detail page's Veeam card. Gated on view:veeam for the
+				// cluster, not view:vm — a caller who may see the guest is not
+				// thereby entitled to its backup posture.
+				clusters.Get("/:cluster_id/vms/:vm_id/veeam", s.veeamHandler.GetGuestVeeamProtection)
+			}
 			clusters.Get("/:cluster_id/tasks/:upid", s.vmHandler.GetTaskStatus)
 			clusters.Get("/:cluster_id/tasks/:upid/log", s.vmHandler.GetTaskLog)
 		}
@@ -688,6 +694,14 @@ func (s *Server) setupRoutes() {
 		// see what was excluded: an exclusion nobody can inspect is
 		// indistinguishable from a coverage bug.
 		vbr.Get("/:id/infrastructure", s.veeamHandler.ListInfrastructure)
+
+		// Orphaned objects — backup objects whose platform is mapped but which
+		// match no guest on it. Restore points held for machines that no
+		// longer exist in the form that was backed up, which the Veeam console
+		// does not surface. The PUT beside it is the operator's override for
+		// what automatic resolution cannot know.
+		vbr.Get("/:id/orphaned-objects", s.veeamHandler.ListOrphanedObjects)
+		vbr.Put("/:id/backup-objects/:object_id/guest", s.veeamHandler.MapBackupObjectGuest)
 	}
 
 	// PBS snapshot lookup (cross-server, by backup_id / VMID).

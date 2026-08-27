@@ -48,6 +48,8 @@ func newVeeamTestApp(t *testing.T) *fiber.App {
 	app.Post("/veeam-servers/:id/test", handler.Test)
 	app.Get("/veeam-servers/:id/platforms", handler.ListPlatforms)
 	app.Get("/veeam-servers/:id/infrastructure", handler.ListInfrastructure)
+	app.Get("/veeam-servers/:id/orphaned-objects", handler.ListOrphanedObjects)
+	app.Put("/veeam-servers/:id/backup-objects/:object_id/guest", handler.MapBackupObjectGuest)
 	app.Put("/veeam-servers/:id/platforms/:platform_id", handler.MapPlatform)
 
 	return app
@@ -189,6 +191,8 @@ func TestVeeamRoutes_RequirePermission(t *testing.T) {
 		{"list platforms", http.MethodGet, "/veeam-servers/" + id + "/platforms", ""},
 		{"map platform", http.MethodPut, "/veeam-servers/" + id + "/platforms/" + uuid.New().String(), `{"cluster_id":null}`},
 		{"list infrastructure", http.MethodGet, "/veeam-servers/" + id + "/infrastructure", ""},
+		{"list orphaned objects", http.MethodGet, "/veeam-servers/" + id + "/orphaned-objects", ""},
+		{"map object guest", http.MethodPut, "/veeam-servers/" + id + "/backup-objects/" + uuid.New().String() + "/guest", `{"cluster_id":null,"vmid":null}`},
 	}
 
 	for _, tc := range tests {

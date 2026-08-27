@@ -449,7 +449,40 @@ WITH candidate AS (
            ON p.veeam_server_id = o.veeam_server_id
           AND p.platform_id     = o.platform_id
     WHERE o.veeam_server_id = $1
-      AND o.match_method <> 'manual'
+      -- Manual mappings are exempt — that is what makes an operator's
+      -- decision stick — EXCEPT when the pin has become a lie. A stale pin
+      -- re-enters automatic resolution here, in the same atomic statement, so
+      -- there is never a moment where it is neither pinned nor resolved.
+      --
+      -- Three ways a pin goes stale, and each of them is a wrong answer that
+      -- nothing else would ever correct:
+      AND (
+          o.match_method <> 'manual'
+          -- The platform is no longer mapped to a cluster. Unmapping is how an
+          -- operator REVOKES cluster-scoped visibility of a server's data, and
+          -- a pin that kept its cluster_id would go on feeding the coverage
+          -- view and the VM detail card of a viewer whose grant was withdrawn.
+          OR p.cluster_id IS NULL
+          -- The pin names a different cluster than the object's platform does.
+          -- A Veeam platformId IS one Proxmox connection, so its objects
+          -- cannot belong anywhere else; this catches a platform remapped
+          -- underneath an existing pin.
+          OR o.cluster_id IS DISTINCT FROM p.cluster_id
+          -- The guest holding that VMID is not the guest that was pinned.
+          -- Proxmox reuses a VMID once its guest is destroyed, and without
+          -- this the replacement silently inherits the old machine's restore
+          -- points and reports as protected. Only fires on a genuine identity
+          -- change: a churned guest row keeps its guest_smbios entry, and a
+          -- rename does not touch the uuid.
+          OR EXISTS (
+              SELECT 1 FROM guest_smbios g
+              WHERE g.cluster_id  = o.cluster_id
+                AND g.vmid        = o.vmid
+                AND g.smbios_uuid <> ''
+                AND o.manual_guest_key <> ''
+                AND g.smbios_uuid <> o.manual_guest_key
+          )
+      )
 ),
 by_smbios AS (
     -- Grouped with the same "exactly one" rule the name tier uses. The uuid is
@@ -563,11 +596,16 @@ ORDER BY i.role, i.name;
 -- Both casts are for sqlc's benefit, not Postgres's: the columns are nullable
 -- on the table, so without them callers would handle a pgtype.UUID argument
 -- and a pgtype.Int4 result that the WHERE clause already guarantees are set.
+-- ORDER BY role as well as vmid, because DISTINCT is on the PAIR and one
+-- guest can legitimately hold both roles — the VBR server fills a proxy role
+-- itself, and both rows resolve to the same guest by name. Without the second
+-- key the reported reason flips between requests. 'backup_server' sorts first
+-- and is the more specific fact, which is the one worth showing.
 SELECT DISTINCT i.vmid::int AS vmid, i.role
 FROM veeam_infrastructure i
 WHERE i.cluster_id = @cluster_id::uuid
   AND i.vmid IS NOT NULL
-ORDER BY vmid;
+ORDER BY vmid, role;
 
 -- DeleteStaleVeeamInfrastructure prunes rows Veeam has stopped reporting.
 --
@@ -649,3 +687,263 @@ FROM resolved r
 WHERE i.id = r.id
   AND (i.cluster_id IS DISTINCT FROM r.cluster_id
     OR i.vmid       IS DISTINCT FROM r.vmid);
+
+-- ---------------------------------------------------------------------------
+-- Coverage: what Veeam protection a cluster's guests actually have.
+-- ---------------------------------------------------------------------------
+
+-- ListVeeamGuestProtectionForCluster is one row per correlated GUEST, not per
+-- backup object.
+--
+-- The aggregation is the point. A guest appears in as many backup objects as
+-- it has backups — daily, weekly and offsite on the lab, up to three — and a
+-- naive join would report it three times, each with a third of its restore
+-- points and a different "latest backup". RPO is MAX(creation_time) across all
+-- of them, and the count is their sum.
+-- name: ListVeeamGuestProtectionForCluster :many
+WITH obj AS (
+    SELECT o.id, o.vmid, o.match_method, o.last_run_failed
+    FROM veeam_backup_objects o
+    WHERE o.cluster_id = @cluster_id::uuid
+      AND o.vmid IS NOT NULL
+),
+newest AS (
+    -- The guest's most recent point across every backup it appears in. Its
+    -- malware verdict is the one worth surfacing: an old "Suspicious" that a
+    -- later clean backup superseded is history, not a live finding.
+    SELECT DISTINCT ON (obj.vmid)
+           obj.vmid, rp.creation_time, rp.malware_status
+    FROM obj
+    JOIN veeam_restore_points rp ON rp.backup_object_id = obj.id
+    ORDER BY obj.vmid, rp.creation_time DESC
+),
+totals AS (
+    -- LEFT JOIN, so a guest whose backup object exists but whose points have
+    -- all been pruned still appears — with zero. "Veeam knows about this
+    -- guest and can restore nothing" is a worse state than never having been
+    -- backed up, and it must not be invisible.
+    SELECT obj.vmid,
+           count(rp.id)                    AS restore_point_count,
+           COALESCE(sum(rp.size_bytes), 0) AS restore_point_bytes
+    FROM obj
+    LEFT JOIN veeam_restore_points rp ON rp.backup_object_id = obj.id
+    GROUP BY obj.vmid
+)
+SELECT
+    t.vmid::int                             AS vmid,
+    n.creation_time                         AS latest_restore_point,
+    COALESCE(n.malware_status, '')::text    AS latest_malware_status,
+    t.restore_point_count::bigint           AS restore_point_count,
+    t.restore_point_bytes::bigint           AS restore_point_bytes,
+    -- The strongest tier that resolved any of this guest's objects: an
+    -- operator's own mapping outranks a deterministic match, which outranks a
+    -- name guess. Reporting the weakest would flag a guest as low-confidence
+    -- on the strength of one stale object.
+    (SELECT o2.match_method FROM obj o2
+      WHERE o2.vmid = t.vmid
+      ORDER BY CASE o2.match_method
+                 WHEN 'manual' THEN 0
+                 WHEN 'smbios' THEN 1
+                 WHEN 'name'   THEN 2
+                 ELSE 3
+               END
+      LIMIT 1)::text                        AS match_method,
+    EXISTS (SELECT 1 FROM obj o3 WHERE o3.vmid = t.vmid AND o3.last_run_failed) AS last_run_failed
+FROM totals t
+LEFT JOIN newest n ON n.vmid = t.vmid
+ORDER BY t.vmid;
+
+-- ListVeeamOrphanedObjects returns backup objects whose platform IS mapped to
+-- a cluster but which resolve to no guest on it.
+--
+-- Not an edge case, a feature. These are restore points consuming repository
+-- space for machines that no longer exist in the form that was backed up — a
+-- deleted guest, a template whose name was reused under a new uuid, a host
+-- rebuilt in place. The Veeam console does not call them out, and a coverage
+-- view built on name matching would instead report the rebuilt host as
+-- protected by its predecessor's backup.
+--
+-- Objects whose platform is UNMAPPED are deliberately excluded: nothing is
+-- known about where they should live, so calling them orphaned would blame the
+-- operator's missing mapping on the data.
+-- name: ListVeeamOrphanedObjects :many
+--
+-- The CTEs exist for two reasons. sqlc types a bare scalar subquery as
+-- interface{}, and types an AGGREGATE — including through a LATERAL — as NOT
+-- NULL, which for max() over an orphan whose restore points have all been
+-- pruned means a NULL scanned into a time.Time: a 500 at runtime rather than
+-- an error at build time. A plain column reached through a LEFT JOIN to a CTE
+-- is typed nullable, correctly.
+--
+-- They are also CORRELATED to the orphan set rather than to the whole server.
+-- Filtering only on veeam_server_id would compute a DISTINCT ON and a GROUP BY
+-- over every restore point the server holds — tens of thousands on a real
+-- install — before discarding all but the handful of rows this listing
+-- typically returns, on every page load.
+WITH orphan AS (
+    SELECT o.id, o.veeam_object_id, o.smbios_uuid, o.platform_id, o.name,
+           o.object_type, o.restore_points_count, o.size_bytes,
+           o.last_run_failed, o.last_seen_at, p.cluster_id,
+           p.display_name AS platform_name
+    FROM veeam_backup_objects o
+    JOIN veeam_platforms p
+      ON p.veeam_server_id = o.veeam_server_id
+     AND p.platform_id     = o.platform_id
+     -- Objects on an UNMAPPED platform are excluded: nothing is known about
+     -- where they should live, so calling them orphaned would blame the
+     -- operator's missing mapping on the data.
+     AND p.cluster_id IS NOT NULL
+    WHERE o.veeam_server_id = $1
+      AND o.match_method = 'none'
+),
+newest AS (
+    SELECT DISTINCT ON (rp.backup_object_id)
+           rp.backup_object_id, rp.creation_time
+    FROM veeam_restore_points rp
+    JOIN orphan ON orphan.id = rp.backup_object_id
+    ORDER BY rp.backup_object_id, rp.creation_time DESC
+),
+sizes AS (
+    SELECT rp.backup_object_id,
+           COALESCE(sum(rp.size_bytes), 0)::bigint AS restore_point_bytes
+    FROM veeam_restore_points rp
+    JOIN orphan ON orphan.id = rp.backup_object_id
+    GROUP BY rp.backup_object_id
+)
+SELECT
+    o.id,
+    o.veeam_object_id,
+    o.smbios_uuid,
+    o.platform_id,
+    o.name,
+    o.object_type,
+    o.restore_points_count,
+    o.size_bytes,
+    o.last_run_failed,
+    o.last_seen_at,
+    o.cluster_id,
+    o.platform_name,
+    c.name AS cluster_name,
+    n.creation_time                              AS latest_restore_point,
+    COALESCE(sz.restore_point_bytes, 0)::bigint  AS restore_point_bytes
+FROM orphan o
+LEFT JOIN clusters c ON c.id = o.cluster_id
+LEFT JOIN newest n   ON n.backup_object_id = o.id
+LEFT JOIN sizes sz   ON sz.backup_object_id = o.id
+ORDER BY o.name;
+
+-- SetVeeamBackupObjectGuest records an operator's own mapping for one backup
+-- object, or clears it back to automatic resolution.
+--
+-- match_method 'manual' is what makes it stick: CorrelateVeeamBackupObjects
+-- exempts those rows, so no sync overwrites a human's decision — unless the
+-- pin has gone stale, which that query defines and detects.
+--
+-- manual_guest_key captures the pinned guest's SMBIOS uuid at pin time, which
+-- is what the staleness check compares against later. Taken from guest_smbios
+-- here rather than passed in, so a caller cannot supply one that does not
+-- match the guest they named.
+-- name: SetVeeamBackupObjectGuest :one
+UPDATE veeam_backup_objects
+SET cluster_id   = $3,
+    vmid         = $4,
+    match_method = CASE WHEN $3::uuid IS NULL THEN 'none' ELSE 'manual' END,
+    manual_guest_key = COALESCE(
+        (SELECT g.smbios_uuid FROM guest_smbios g
+          WHERE g.cluster_id = $3::uuid AND g.vmid = $4::int), '')
+WHERE veeam_server_id = $1
+  AND id = $2
+RETURNING *;
+
+-- name: GetVeeamBackupObject :one
+-- One indexed row, so an override does not read every backup object on the
+-- server to find the one it is about to change.
+SELECT * FROM veeam_backup_objects WHERE veeam_server_id = $1 AND id = $2;
+
+-- name: GetVeeamGuestProtection :one
+--
+-- ListVeeamGuestProtectionForCluster narrowed to one guest, for the VM detail
+-- page's backup card.
+--
+-- Shaped as joined CTEs rather than scalar subqueries on purpose. sqlc typed
+-- `(SELECT creation_time FROM newest)` as a NON-nullable time.Time, which is
+-- wrong the moment a guest has no restore points — the commonest interesting
+-- case here — and would have failed the scan at runtime rather than at build
+-- time. A LEFT JOIN onto a CTE that may be empty types it correctly.
+WITH obj AS (
+    SELECT o.id, o.match_method, o.last_run_failed
+    FROM veeam_backup_objects o
+    WHERE o.cluster_id = @cluster_id::uuid
+      AND o.vmid = @vmid::int
+),
+newest AS (
+    -- The guest's most recent point across every backup it appears in. Its
+    -- malware verdict is the one worth surfacing: an old "Suspicious" that a
+    -- later clean backup superseded is history, not a live finding.
+    SELECT rp.creation_time, rp.malware_status
+    FROM obj
+    JOIN veeam_restore_points rp ON rp.backup_object_id = obj.id
+    ORDER BY rp.creation_time DESC
+    LIMIT 1
+),
+totals AS (
+    -- LEFT JOIN: a guest whose backup object exists but whose points have all
+    -- been pruned must still report, with zero.
+    SELECT count(rp.id)                            AS restore_point_count,
+           COALESCE(sum(rp.size_bytes), 0)::bigint AS restore_point_bytes
+    FROM obj
+    LEFT JOIN veeam_restore_points rp ON rp.backup_object_id = obj.id
+),
+meta AS (
+    -- Ranked so the STRONGEST tier that resolved any of the guest's objects
+    -- wins: reporting the weakest would flag a guest as a low-confidence name
+    -- match on the strength of one stale object.
+    SELECT count(*) AS object_count,
+           COALESCE(min(CASE obj.match_method
+                          WHEN 'manual' THEN 0
+                          WHEN 'smbios' THEN 1
+                          WHEN 'name'   THEN 2
+                          ELSE 3
+                        END), 3)                   AS method_rank,
+           COALESCE(bool_or(obj.last_run_failed), false)::boolean AS last_run_failed
+    FROM obj
+)
+SELECT
+    n.creation_time                       AS latest_restore_point,
+    COALESCE(n.malware_status, '')::text  AS latest_malware_status,
+    m.object_count::bigint                AS object_count,
+    t.restore_point_count::bigint         AS restore_point_count,
+    t.restore_point_bytes::bigint         AS restore_point_bytes,
+    (CASE m.method_rank
+       WHEN 0 THEN 'manual'
+       WHEN 1 THEN 'smbios'
+       WHEN 2 THEN 'name'
+       ELSE 'none'
+     END)::text                           AS match_method,
+    m.last_run_failed                     AS last_run_failed
+FROM meta m
+-- Both always yield exactly one row (bare aggregates over a possibly-empty
+-- set), so the :one contract holds even for a guest Veeam has never seen.
+CROSS JOIN totals t
+LEFT JOIN newest n ON true;
+
+-- ListVeeamRestorePointsForGuest is the guest's recovery history across every
+-- backup it appears in, newest first.
+-- name: ListVeeamRestorePointsForGuest :many
+SELECT
+    rp.id,
+    rp.veeam_id,
+    rp.name,
+    rp.point_type,
+    rp.malware_status,
+    rp.guest_os_family,
+    rp.creation_time,
+    rp.size_bytes,
+    rp.supports_flr,
+    o.name AS object_name
+FROM veeam_restore_points rp
+JOIN veeam_backup_objects o ON o.id = rp.backup_object_id
+WHERE o.cluster_id = @cluster_id::uuid
+  AND o.vmid = @vmid::int
+ORDER BY rp.creation_time DESC
+LIMIT @row_limit::int;

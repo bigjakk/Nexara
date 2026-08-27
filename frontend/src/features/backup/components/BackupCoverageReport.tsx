@@ -10,10 +10,10 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ShieldCheck, ShieldAlert, ShieldOff, Search } from "lucide-react";
+import { ShieldCheck, ShieldAlert, ShieldOff, ShieldQuestion, Search } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBackupCoverage } from "../api/backup-queries";
-import type { BackupCoverageEntry } from "../types/backup";
+import type { BackupCoverageEntry, BackupEligibility } from "../types/backup";
 
 function formatBackupAge(unixTs: number | null): string {
   if (unixTs == null) return "Never";
@@ -21,6 +21,65 @@ function formatBackupAge(unixTs: number | null): string {
   if (ageSec < 3600) return `${String(Math.floor(ageSec / 60))}m ago`;
   if (ageSec < 86400) return `${String(Math.floor(ageSec / 3600))}h ago`;
   return `${String(Math.floor(ageSec / 86400))}d ago`;
+}
+
+/**
+ * The freshest backup from ANY provider. Reading only latest_backup showed
+ * "Never" beside a "Protected" badge for every guest Veeam protects, since
+ * that field is deliberately still the PBS figure.
+ */
+function freshestBackup(entry: BackupCoverageEntry): number | null {
+  const veeamTs = entry.veeam?.latest_restore_point
+    ? Math.floor(new Date(entry.veeam.latest_restore_point).getTime() / 1000)
+    : null;
+  if (entry.latest_backup == null) return veeamTs;
+  if (veeamTs == null) return entry.latest_backup;
+  return Math.max(entry.latest_backup, veeamTs);
+}
+
+const ELIGIBILITY_LABELS: Record<BackupEligibility, string> = {
+  eligible: "",
+  veeam_worker: "Veeam worker appliance",
+  veeam_backup_server: "Veeam backup server",
+};
+
+/**
+ * Which providers protect a guest. Kept separate from the coverage badge,
+ * which answers "how fresh": an operator deciding whether a guest is safe
+ * needs both, and collapsing them loses the case where one provider is
+ * current and the other has silently stopped.
+ */
+function ProtectionCell({ entry }: { entry: BackupCoverageEntry }) {
+  if (entry.protection === "not_eligible") {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {ELIGIBILITY_LABELS[entry.eligibility] || "Not a backup target"}
+      </span>
+    );
+  }
+  if (entry.protection === "none") {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {(entry.protection === "pbs" || entry.protection === "both") && (
+        <Badge variant="outline" className="text-xs">PBS</Badge>
+      )}
+      {(entry.protection === "veeam" || entry.protection === "both") && (
+        <Badge variant="outline" className="text-xs">Veeam</Badge>
+      )}
+      {/*
+        A name match is a guess: a rebuilt host reuses its name, so the
+        backup behind it may be of the machine it replaced. Saying so is the
+        entire reason match_method is carried through to the UI.
+      */}
+      {entry.veeam?.match_method === "name" && (
+        <Badge variant="secondary" className="text-xs" title="Matched by name, not by SMBIOS UUID — verify before relying on it">
+          name match
+        </Badge>
+      )}
+    </div>
+  );
 }
 
 function CoverageBadge({ status }: { status: BackupCoverageEntry["coverage_status"] }) {
@@ -44,6 +103,13 @@ function CoverageBadge({ status }: { status: BackupCoverageEntry["coverage_statu
         <Badge variant="destructive" className="gap-1">
           <ShieldOff className="h-3 w-3" />
           No Backup
+        </Badge>
+      );
+    case "not_eligible":
+      return (
+        <Badge variant="secondary" className="gap-1">
+          <ShieldQuestion className="h-3 w-3" />
+          Not a target
         </Badge>
       );
   }
@@ -73,12 +139,16 @@ export function BackupCoverageReport() {
   }, [entries, search, filterStatus]);
 
   const stats = useMemo(() => {
-    if (!entries) return { total: 0, recent: 0, stale: 0, none: 0 };
+    if (!entries) return { total: 0, recent: 0, stale: 0, none: 0, notEligible: 0 };
+    const notEligible = entries.filter((e) => e.coverage_status === "not_eligible").length;
     return {
-      total: entries.length,
+      // Backup TARGETS, not rows. Counting Veeam's own appliances here would
+      // make the tiles disagree with each other and overstate the estate.
+      total: entries.length - notEligible,
       recent: entries.filter((e) => e.coverage_status === "recent").length,
       stale: entries.filter((e) => e.coverage_status === "stale").length,
       none: entries.filter((e) => e.coverage_status === "none").length,
+      notEligible,
     };
   }, [entries]);
 
@@ -100,10 +170,15 @@ export function BackupCoverageReport() {
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-muted-foreground">Total VMs</CardTitle>
+            <CardTitle className="text-xs text-muted-foreground">Backup targets</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold tracking-tight">{stats.total}</p>
+            {stats.notEligible > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {stats.notEligible} excluded (Veeam infrastructure)
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -151,6 +226,7 @@ export function BackupCoverageReport() {
           <option value="recent">Protected</option>
           <option value="stale">Stale</option>
           <option value="none">No Backup</option>
+          <option value="not_eligible">Not a target</option>
         </select>
       </div>
 
@@ -164,6 +240,7 @@ export function BackupCoverageReport() {
               <TableHead>Cluster</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Coverage</TableHead>
+              <TableHead>Protected by</TableHead>
               <TableHead>Last Backup</TableHead>
               <TableHead className="text-right">Backups</TableHead>
             </TableRow>
@@ -171,7 +248,7 @@ export function BackupCoverageReport() {
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
                   {entries?.length === 0 ? "No VMs found." : "No matching VMs."}
                 </TableCell>
               </TableRow>
@@ -184,7 +261,9 @@ export function BackupCoverageReport() {
                     ? "bg-destructive/5"
                     : entry.coverage_status === "stale"
                       ? "bg-amber-500/5"
-                      : ""
+                      : entry.coverage_status === "not_eligible"
+                        ? "text-muted-foreground"
+                        : ""
                 }
               >
                 <TableCell className="font-mono text-xs">{entry.vmid}</TableCell>
@@ -206,11 +285,14 @@ export function BackupCoverageReport() {
                 <TableCell>
                   <CoverageBadge status={entry.coverage_status} />
                 </TableCell>
+                <TableCell>
+                  <ProtectionCell entry={entry} />
+                </TableCell>
                 <TableCell className="text-sm">
-                  {formatBackupAge(entry.latest_backup)}
+                  {formatBackupAge(freshestBackup(entry))}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">
-                  {entry.backup_count}
+                  {entry.backup_count + (entry.veeam?.restore_point_count ?? 0)}
                 </TableCell>
               </TableRow>
             ))}

@@ -151,6 +151,7 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 		platform    *uuid.UUID
 		matchMethod string
 		vmid        *int32
+		manualKey   string
 	}
 	i32 := func(n int32) *int32 { return &n }
 
@@ -196,6 +197,12 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 		// tier, so a pass that overwrote it would be unmistakable.
 		{key: "manual", smbios: uuidWeb01, name: "web01", platform: &m089Platform,
 			matchMethod: "manual", vmid: i32(999)},
+		// A pin onto guest 100, recorded when that guest's SMBIOS uuid was
+		// something else — i.e. Proxmox destroyed the pinned guest and handed
+		// VMID 100 to a new one. The pin must fall back to automatic
+		// resolution, which here finds the real owner of uuidWeb01.
+		{key: "manual-stale-guest", smbios: uuidWeb01, name: "web01", platform: &m089Platform,
+			matchMethod: "manual", vmid: i32(100), manualKey: uuidGone},
 	}
 
 	ids := make(map[string]uuid.UUID, len(objects))
@@ -213,9 +220,9 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 		if _, err := pool.Exec(ctx,
 			`INSERT INTO veeam_backup_objects
 			   (id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name,
-			    object_type, cluster_id, vmid, match_method)
-			 VALUES ($1, $2, $3, $4, $5, $6, 'VM', $7, $8, $9)`,
-			id, m089Server, uuid.New(), o.smbios, o.platform, o.name, cluster, o.vmid, method); err != nil {
+			    object_type, cluster_id, vmid, match_method, manual_guest_key)
+			 VALUES ($1, $2, $3, $4, $5, $6, 'VM', $7, $8, $9, $10)`,
+			id, m089Server, uuid.New(), o.smbios, o.platform, o.name, cluster, o.vmid, method, o.manualKey); err != nil {
 			t.Fatalf("seed backup object %s: %v", o.key, err)
 		}
 	}
@@ -284,6 +291,12 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 	assert("smbios-duplicate", "none", nil, nil)
 	// The operator's mapping survives untouched, wrong or not.
 	assert("manual", "manual", &m089ClusterA, i32(999))
+	// …but only while it is still TRUE. A pin whose guest has been replaced
+	// is not an operator decision to respect, it is a claim that the new
+	// occupant of that VMID owns the old machine's restore points — the exact
+	// "protected by a backup of the machine it replaced" failure the SMBIOS
+	// tier exists to prevent, made permanent by the manual exemption.
+	assert("manual-stale-guest", "smbios", &m089ClusterA, i32(100))
 
 	// --- unmapping must un-attribute ---------------------------------------
 	//
@@ -300,7 +313,13 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 	}
 	assert("smbios-hit", "none", nil, nil)
 	assert("name-hit", "none", nil, nil)
-	assert("manual", "manual", &m089ClusterA, i32(999))
+	// The manual pin goes too. Unmapping IS the documented way to revoke
+	// cluster-scoped visibility of a server's data, and a pin that kept its
+	// cluster_id would go on feeding the coverage view and the VM detail card
+	// of a viewer whose grant was just withdrawn — the coverage read keys on
+	// veeam_backup_objects.cluster_id directly, bypassing the platform scope
+	// that protects every other listing.
+	assert("manual", "none", nil, nil)
 
 	// --- idempotence --------------------------------------------------------
 	//

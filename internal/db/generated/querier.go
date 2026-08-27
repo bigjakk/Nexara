@@ -467,6 +467,21 @@ type Querier interface {
 	// GetVMSnapshotAgeStats is the vm-scoped counterpart of
 	// GetClusterSnapshotAgeStats; same snap_time > 0 and ErrNoRows semantics.
 	GetVMSnapshotAgeStats(ctx context.Context, arg GetVMSnapshotAgeStatsParams) (GetVMSnapshotAgeStatsRow, error)
+	// One indexed row, so an override does not read every backup object on the
+	// server to find the one it is about to change.
+	GetVeeamBackupObject(ctx context.Context, arg GetVeeamBackupObjectParams) (VeeamBackupObject, error)
+	//
+	// ListVeeamGuestProtectionForCluster narrowed to one guest, for the VM detail
+	// page's backup card.
+	//
+	// Shaped as joined CTEs rather than scalar subqueries on purpose. sqlc typed
+	// `(SELECT creation_time FROM newest)` as a NON-nullable time.Time, which is
+	// wrong the moment a guest has no restore points — the commonest interesting
+	// case here — and would have failed the scan at runtime rather than at build
+	// time. A LEFT JOIN onto a CTE that may be empty types it correctly.
+	// Both always yield exactly one row (bare aggregates over a possibly-empty
+	// set), so the :one contract holds even for a guest Veeam has never seen.
+	GetVeeamGuestProtection(ctx context.Context, arg GetVeeamGuestProtectionParams) (GetVeeamGuestProtectionRow, error)
 	// ---------------------------------------------------------------------------
 	// Phase 3: platform mapping and guest correlation.
 	// ---------------------------------------------------------------------------
@@ -792,6 +807,18 @@ type Querier interface {
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
 	ListVeeamBackupObjectsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamBackupObject, error)
+	// ---------------------------------------------------------------------------
+	// Coverage: what Veeam protection a cluster's guests actually have.
+	// ---------------------------------------------------------------------------
+	// ListVeeamGuestProtectionForCluster is one row per correlated GUEST, not per
+	// backup object.
+	//
+	// The aggregation is the point. A guest appears in as many backup objects as
+	// it has backups — daily, weekly and offsite on the lab, up to three — and a
+	// naive join would report it three times, each with a third of its restore
+	// points and a different "latest backup". RPO is MAX(creation_time) across all
+	// of them, and the count is their sum.
+	ListVeeamGuestProtectionForCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVeeamGuestProtectionForClusterRow, error)
 	// The guest is joined at read time on the stable (cluster_id, vmid) identity,
 	// never held as a foreign key: the collector re-mints a guest row's UUID on
 	// churn. A NULL guest_name means the row resolved to a guest that is mid-churn
@@ -803,8 +830,40 @@ type Querier interface {
 	// Both casts are for sqlc's benefit, not Postgres's: the columns are nullable
 	// on the table, so without them callers would handle a pgtype.UUID argument
 	// and a pgtype.Int4 result that the WHERE clause already guarantees are set.
+	// ORDER BY role as well as vmid, because DISTINCT is on the PAIR and one
+	// guest can legitimately hold both roles — the VBR server fills a proxy role
+	// itself, and both rows resolve to the same guest by name. Without the second
+	// key the reported reason flips between requests. 'backup_server' sorts first
+	// and is the more specific fact, which is the one worth showing.
 	ListVeeamInfrastructureGuestsForCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVeeamInfrastructureGuestsForClusterRow, error)
 	ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamJob, error)
+	// ListVeeamOrphanedObjects returns backup objects whose platform IS mapped to
+	// a cluster but which resolve to no guest on it.
+	//
+	// Not an edge case, a feature. These are restore points consuming repository
+	// space for machines that no longer exist in the form that was backed up — a
+	// deleted guest, a template whose name was reused under a new uuid, a host
+	// rebuilt in place. The Veeam console does not call them out, and a coverage
+	// view built on name matching would instead report the rebuilt host as
+	// protected by its predecessor's backup.
+	//
+	// Objects whose platform is UNMAPPED are deliberately excluded: nothing is
+	// known about where they should live, so calling them orphaned would blame the
+	// operator's missing mapping on the data.
+	//
+	// The CTEs exist for two reasons. sqlc types a bare scalar subquery as
+	// interface{}, and types an AGGREGATE — including through a LATERAL — as NOT
+	// NULL, which for max() over an orphan whose restore points have all been
+	// pruned means a NULL scanned into a time.Time: a 500 at runtime rather than
+	// an error at build time. A plain column reached through a LEFT JOIN to a CTE
+	// is typed nullable, correctly.
+	//
+	// They are also CORRELATED to the orphan set rather than to the whole server.
+	// Filtering only on veeam_server_id would compute a DISTINCT ON and a GROUP BY
+	// over every restore point the server holds — tens of thousands on a real
+	// install — before discarding all but the handful of rows this listing
+	// typically returns, on every page load.
+	ListVeeamOrphanedObjects(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamOrphanedObjectsRow, error)
 	ListVeeamPlatformsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamPlatform, error)
 	// ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
 	// the server has been seen protecting, with the Nexara cluster (if any) an
@@ -814,6 +873,9 @@ type Querier interface {
 	ListVeeamRepositoriesByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamRepository, error)
 	ListVeeamRestorePointsByObject(ctx context.Context, backupObjectID uuid.UUID) ([]VeeamRestorePoint, error)
 	ListVeeamRestorePointsByServer(ctx context.Context, arg ListVeeamRestorePointsByServerParams) ([]VeeamRestorePoint, error)
+	// ListVeeamRestorePointsForGuest is the guest's recovery history across every
+	// backup it appears in, newest first.
+	ListVeeamRestorePointsForGuest(ctx context.Context, arg ListVeeamRestorePointsForGuestParams) ([]ListVeeamRestorePointsForGuestRow, error)
 	ListVeeamServers(ctx context.Context) ([]VeeamServer, error)
 	// Scoped in SQL, not in Go, because of the LIMIT: filtering after the limit
 	// would take the newest N rows server-wide and then discard the ones the
@@ -911,6 +973,18 @@ type Querier interface {
 	SetVMConfigOSType(ctx context.Context, arg SetVMConfigOSTypeParams) error
 	SetVMImportJobUPID(ctx context.Context, arg SetVMImportJobUPIDParams) error
 	SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error
+	// SetVeeamBackupObjectGuest records an operator's own mapping for one backup
+	// object, or clears it back to automatic resolution.
+	//
+	// match_method 'manual' is what makes it stick: CorrelateVeeamBackupObjects
+	// exempts those rows, so no sync overwrites a human's decision — unless the
+	// pin has gone stale, which that query defines and detects.
+	//
+	// manual_guest_key captures the pinned guest's SMBIOS uuid at pin time, which
+	// is what the staleness check compares against later. Taken from guest_smbios
+	// here rather than passed in, so a caller cannot supply one that does not
+	// match the guest they named.
+	SetVeeamBackupObjectGuest(ctx context.Context, arg SetVeeamBackupObjectGuestParams) (VeeamBackupObject, error)
 	// SetVeeamPlatformCluster attaches (or, with NULL, detaches) a Proxmox
 	// connection from a Nexara cluster. This is the operator-confirmed mapping
 	// every cluster-scoped Veeam permission resolves through, which is why it is
