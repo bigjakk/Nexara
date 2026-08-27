@@ -176,6 +176,24 @@ func (q *Queries) CorrelateVeeamBackupObjects(ctx context.Context, veeamServerID
 	return result.RowsAffected(), nil
 }
 
+const countVeeamJobsByServer = `-- name: CountVeeamJobsByServer :one
+SELECT count(*) FROM veeam_jobs WHERE veeam_server_id = $1
+`
+
+// How many jobs are stored for this server, for the empty-listing sweep guard.
+//
+// Its own query rather than len(ListVeeamJobsByServer): that listing carries a
+// LATERAL join per row to resolve the live run for the API, which is pure
+// waste when the caller only wants a count — and it coupled the collector's
+// refusal-to-prune guard to a presentation concern that has no business
+// influencing it.
+func (q *Queries) CountVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countVeeamJobsByServer, veeamServerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createVeeamServer = `-- name: CreateVeeamServer :one
 INSERT INTO veeam_servers (
     name, base_url, username, password_encrypted,
@@ -1398,18 +1416,84 @@ func (q *Queries) ListVeeamInfrastructureGuestsForCluster(ctx context.Context, c
 }
 
 const listVeeamJobsByServer = `-- name: ListVeeamJobsByServer :many
-SELECT id, veeam_server_id, veeam_id, name, job_type, workload, description, status, last_result, last_run, next_run, next_run_policy, repository_veeam_id, repository_name, objects_count, last_session_id, progress_percent, bottleneck, duration, processing_rate, processed_size, read_size, transferred_size, platform_id, last_seen_at, created_at, updated_at FROM veeam_jobs WHERE veeam_server_id = $1 ORDER BY name
+SELECT j.id, j.veeam_server_id, j.veeam_id, j.name, j.job_type, j.workload, j.description, j.status, j.last_result, j.last_run, j.next_run, j.next_run_policy, j.repository_veeam_id, j.repository_name, j.objects_count, j.last_session_id, j.progress_percent, j.bottleneck, j.duration, j.processing_rate, j.processed_size, j.read_size, j.transferred_size, j.platform_id, j.last_seen_at, j.created_at, j.updated_at,
+       COALESCE(s.veeam_id::text, '')::text AS running_session_id,
+       COALESCE(s.state, '')::text          AS running_session_state
+FROM veeam_jobs j
+LEFT JOIN LATERAL (
+    SELECT veeam_id, state
+    FROM veeam_sessions
+    WHERE veeam_server_id = j.veeam_server_id
+      AND job_veeam_id = j.veeam_id
+      AND state <> 'Stopped'
+      AND state <> ''
+    ORDER BY creation_time DESC
+    LIMIT 1
+) s ON true
+WHERE j.veeam_server_id = $1
+ORDER BY j.name
 `
 
-func (q *Queries) ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamJob, error) {
+type ListVeeamJobsByServerRow struct {
+	ID                  uuid.UUID          `json:"id"`
+	VeeamServerID       uuid.UUID          `json:"veeam_server_id"`
+	VeeamID             uuid.UUID          `json:"veeam_id"`
+	Name                string             `json:"name"`
+	JobType             string             `json:"job_type"`
+	Workload            string             `json:"workload"`
+	Description         string             `json:"description"`
+	Status              string             `json:"status"`
+	LastResult          string             `json:"last_result"`
+	LastRun             pgtype.Timestamptz `json:"last_run"`
+	NextRun             pgtype.Timestamptz `json:"next_run"`
+	NextRunPolicy       string             `json:"next_run_policy"`
+	RepositoryVeeamID   pgtype.UUID        `json:"repository_veeam_id"`
+	RepositoryName      string             `json:"repository_name"`
+	ObjectsCount        int32              `json:"objects_count"`
+	LastSessionID       pgtype.UUID        `json:"last_session_id"`
+	ProgressPercent     int32              `json:"progress_percent"`
+	Bottleneck          string             `json:"bottleneck"`
+	Duration            string             `json:"duration"`
+	ProcessingRate      string             `json:"processing_rate"`
+	ProcessedSize       int64              `json:"processed_size"`
+	ReadSize            int64              `json:"read_size"`
+	TransferredSize     int64              `json:"transferred_size"`
+	PlatformID          pgtype.UUID        `json:"platform_id"`
+	LastSeenAt          time.Time          `json:"last_seen_at"`
+	CreatedAt           time.Time          `json:"created_at"`
+	UpdatedAt           time.Time          `json:"updated_at"`
+	RunningSessionID    string             `json:"running_session_id"`
+	RunningSessionState string             `json:"running_session_state"`
+}
+
+// Carries the job's LIVE run alongside its stored state.
+//
+// veeam_jobs.status is refreshed by the inventory pass, which runs every few
+// minutes; sessions are polled every 60s and job control writes one the
+// instant an operator starts a job. Reading "is a run in flight" from status
+// alone therefore left a job unstoppable from the jobs table for a whole
+// inventory interval after the operator started it — the button that would
+// undo the thing they just did was the one missing.
+//
+// Derived rather than written: veeam_jobs still mirrors exactly what Veeam
+// reports, and this reads Veeam's own session data instead of patching a
+// status the server has not confirmed.
+//
+// Non-terminal is anything but Stopped. ESessionState has twelve values and
+// only that one is final — the rest include WaitingRepository, WaitingSlot and
+// Idle, which are precisely the states a stuck run sits in and the ones an
+// operator most wants to kill. A session wedged in one of them after the poll
+// stopped shows a Stop that answers 409 "not currently running", which is a
+// better answer than no button.
+func (q *Queries) ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamJobsByServerRow, error) {
 	rows, err := q.db.Query(ctx, listVeeamJobsByServer, veeamServerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []VeeamJob{}
+	items := []ListVeeamJobsByServerRow{}
 	for rows.Next() {
-		var i VeeamJob
+		var i ListVeeamJobsByServerRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.VeeamServerID,
@@ -1438,6 +1522,8 @@ func (q *Queries) ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RunningSessionID,
+			&i.RunningSessionState,
 		); err != nil {
 			return nil, err
 		}

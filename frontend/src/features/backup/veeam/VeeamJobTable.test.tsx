@@ -30,6 +30,8 @@ function job(over: Partial<VeeamJob> = {}): VeeamJob {
     transferred_size: 8739400042,
     cluster_id: null,
     last_seen_at: "2026-08-26T23:00:00Z",
+    running_session_id: "",
+    running_session_state: "",
     ...over,
   };
 }
@@ -143,6 +145,36 @@ describe("VeeamJobTable", () => {
       <VeeamJobTable serverId="srv-1" jobs={[job({ status: "Stopped" })]} />,
     );
     expect(screen.queryByText("Running")).not.toBeInTheDocument();
+  });
+
+  // progress_percent is written by the inventory pass, the same one that
+  // writes status. A run derived from a live session has the PREVIOUS run's
+  // number — normally 100 — so drawing a bar for it would show a backup that
+  // started seconds ago as finished.
+  it("draws no progress bar for a run Veeam has not confirmed yet", () => {
+    const { rerender } = renderWithProviders(
+      <VeeamJobTable
+        serverId="srv-1"
+        jobs={[
+          job({
+            status: "Stopped",
+            progress_percent: 100,
+            running_session_id: "20ff3c43-65c0-414d-ae03-10cf59fd2faa",
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.queryByTestId("job-progress")).not.toBeInTheDocument();
+
+    // Once Veeam confirms the run, the number describes it and the bar returns.
+    rerender(
+      <VeeamJobTable
+        serverId="srv-1"
+        jobs={[job({ status: "Running", progress_percent: 40 })]}
+      />,
+    );
+    expect(screen.getByTestId("job-progress")).toBeInTheDocument();
   });
 
   it("says so when a server has no Proxmox jobs", () => {

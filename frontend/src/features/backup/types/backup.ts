@@ -422,6 +422,17 @@ export interface VeeamJob {
   /** Null until an operator maps this job's Veeam platform to a cluster. */
   cluster_id: string | null;
   last_seen_at: string;
+  /**
+   * The job's live run, derived from its sessions — empty when none is in
+   * flight.
+   *
+   * `status` is only as fresh as the last inventory pass (minutes), while a
+   * run started from Nexara exists immediately, so this is what decides
+   * whether to offer Stop. Without it the button that undoes the thing the
+   * operator just did was missing for a whole interval.
+   */
+  running_session_id: string;
+  running_session_state: string;
 }
 
 export interface VeeamSession {

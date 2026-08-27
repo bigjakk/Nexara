@@ -107,7 +107,15 @@ export function VeeamJobTable({
           <TableBody>
             {jobs.map((job) => {
               const isExpanded = expanded.has(job.id);
-              const running = job.status === "Running";
+              // Same staleness as the action buttons: a run started from
+              // Nexara exists as a session immediately, while job.status
+              // trails the inventory pass by minutes.
+              const running =
+                job.status === "Running" || job.running_session_id !== "";
+              // Whether progress_percent describes THIS run. It is written by
+              // the same pass that writes status, so it is only trustworthy
+              // when status agrees a run is in flight.
+              const measured = job.status === "Running";
 
               return (
                 <Fragment key={job.id}>
@@ -129,14 +137,28 @@ export function VeeamJobTable({
                       {running ? (
                         <div className="flex items-center gap-2">
                           <Badge variant="default">Running</Badge>
-                          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                          {/* The bar renders ONLY when Veeam itself reports
+                              the job as running, because progress_percent is
+                              refreshed by the same inventory pass that sets
+                              status. For a run derived from a live session
+                              that number is the PREVIOUS run's — normally 100
+                              — so drawing it would show a backup that started
+                              seconds ago as finished. A badge with no bar says
+                              "running, progress not measured yet", which is
+                              the truth. */}
+                          {measured && (
                             <div
-                              className="h-full rounded-full bg-primary transition-all"
-                              style={{
-                                width: `${String(Math.min(Math.max(job.progress_percent, 0), 100))}%`,
-                              }}
-                            />
-                          </div>
+                              data-testid="job-progress"
+                              className="h-1.5 w-16 overflow-hidden rounded-full bg-muted"
+                            >
+                              <div
+                                className="h-full rounded-full bg-primary transition-all"
+                                style={{
+                                  width: `${String(Math.min(Math.max(job.progress_percent, 0), 100))}%`,
+                                }}
+                              />
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <Badge variant="secondary">{job.status || "-"}</Badge>

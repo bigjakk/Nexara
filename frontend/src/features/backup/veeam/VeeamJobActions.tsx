@@ -67,8 +67,15 @@ export function VeeamJobActions({ serverId, job }: VeeamJobActionsProps) {
   // shape every other cluster-scoped action in Nexara has.
   if (!canExecute("veeam")) return null;
 
-  const stoppable = STOPPABLE_STATUSES.has(job.status);
-  const stopping = job.status === STOPPING_STATUS;
+  // A live run beats the stored status, which is only as fresh as the last
+  // inventory pass. A job started from Nexara has a session immediately and a
+  // status that still reads "Stopped" for minutes, so keying on status alone
+  // hid Stop for exactly as long as the operator was most likely to want it.
+  const running = job.running_session_id !== "";
+  const stoppable = running || STOPPABLE_STATUSES.has(job.status);
+  const stopping =
+    job.status === STOPPING_STATUS ||
+    job.running_session_state === STOPPING_STATUS;
   const disabled = job.status === DISABLED_STATUS;
   const busy = startJob.isPending || stopJob.isPending || setEnabled.isPending;
 

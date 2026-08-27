@@ -107,10 +107,10 @@ func (q *fakeVeeamQueries) ListVeeamRepositoriesByServer(context.Context, uuid.U
 	return q.existingRepos, nil
 }
 
-func (q *fakeVeeamQueries) ListVeeamJobsByServer(context.Context, uuid.UUID) ([]db.VeeamJob, error) {
+func (q *fakeVeeamQueries) CountVeeamJobsByServer(context.Context, uuid.UUID) (int64, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.existingJobs, nil
+	return int64(len(q.existingJobs)), nil
 }
 
 func (q *fakeVeeamQueries) UpsertVeeamInfrastructure(_ context.Context, arg db.UpsertVeeamInfrastructureParams) error {

@@ -81,11 +81,20 @@ export function BackupDashboardPage() {
       {/* Provider tabs. PBS and Veeam are independent backup providers with
           nothing in common at the connection level, and either can be
           configured without the other — so Veeam must be reachable even when
-          no PBS server exists. */}
+          no PBS server exists.
+
+          Coverage sits BESIDE them rather than inside either. It is the one
+          view that spans both providers — "which guests are protected, by
+          what, and which genuinely aren't" — so filing it under one provider
+          made it a claim about that provider alone. It was previously a PBS
+          sub-tab nested inside the `activeServerId && !isError` guard, which
+          meant a Veeam-only install, or one whose PBS server was unreachable,
+          could not reach the unified report at all. */}
       <Tabs defaultValue="pbs">
         <TabsList>
           <TabsTrigger value="pbs">Proxmox Backup Server</TabsTrigger>
           <TabsTrigger value="veeam">Veeam</TabsTrigger>
+          <TabsTrigger value="coverage">Coverage</TabsTrigger>
         </TabsList>
 
         <TabsContent value="pbs" className="space-y-6">
@@ -226,7 +235,6 @@ export function BackupDashboardPage() {
                     <TabsTrigger value="tasks">
                       Tasks ({tasks.length})
                     </TabsTrigger>
-                    <TabsTrigger value="coverage">Coverage</TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="overview" className="space-y-6">
@@ -315,9 +323,6 @@ export function BackupDashboardPage() {
                     <PBSTaskTable tasks={tasks} pbsId={activeServerId} />
                   </TabsContent>
 
-                  <TabsContent value="coverage" className="space-y-4">
-                    <BackupCoverageReport />
-                  </TabsContent>
                 </Tabs>
               </>
             )}
@@ -325,6 +330,13 @@ export function BackupDashboardPage() {
 
         <TabsContent value="veeam" className="space-y-4">
           <VeeamServersPanel />
+        </TabsContent>
+
+        {/* Multi-provider by design: the report asks each cluster's
+            /backup-coverage, which answers across PBS and Veeam together and
+            models eligibility, so it needs neither provider to be selected. */}
+        <TabsContent value="coverage" className="space-y-4">
+          <BackupCoverageReport />
         </TabsContent>
       </Tabs>
     </div>

@@ -168,6 +168,14 @@ type Querier interface {
 	// deactivate every user and inadvertently re-open the anonymous-admin path
 	// on the next /auth/register call, so we filter by ID exclusion instead.
 	CountUsers(ctx context.Context) (int64, error)
+	// How many jobs are stored for this server, for the empty-listing sweep guard.
+	//
+	// Its own query rather than len(ListVeeamJobsByServer): that listing carries a
+	// LATERAL join per row to resolve the live run for the API, which is pure
+	// waste when the caller only wants a count — and it coupled the collector's
+	// refusal-to-prune guard to a presentation concern that has no business
+	// influencing it.
+	CountVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
 	CreateFirewallTemplate(ctx context.Context, arg CreateFirewallTemplateParams) (FirewallTemplate, error)
@@ -928,7 +936,26 @@ type Querier interface {
 	// key the reported reason flips between requests. 'backup_server' sorts first
 	// and is the more specific fact, which is the one worth showing.
 	ListVeeamInfrastructureGuestsForCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVeeamInfrastructureGuestsForClusterRow, error)
-	ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamJob, error)
+	// Carries the job's LIVE run alongside its stored state.
+	//
+	// veeam_jobs.status is refreshed by the inventory pass, which runs every few
+	// minutes; sessions are polled every 60s and job control writes one the
+	// instant an operator starts a job. Reading "is a run in flight" from status
+	// alone therefore left a job unstoppable from the jobs table for a whole
+	// inventory interval after the operator started it — the button that would
+	// undo the thing they just did was the one missing.
+	//
+	// Derived rather than written: veeam_jobs still mirrors exactly what Veeam
+	// reports, and this reads Veeam's own session data instead of patching a
+	// status the server has not confirmed.
+	//
+	// Non-terminal is anything but Stopped. ESessionState has twelve values and
+	// only that one is final — the rest include WaitingRepository, WaitingSlot and
+	// Idle, which are precisely the states a stuck run sits in and the ones an
+	// operator most wants to kill. A session wedged in one of them after the poll
+	// stopped shows a Stop that answers 409 "not currently running", which is a
+	// better answer than no button.
+	ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamJobsByServerRow, error)
 	// ListVeeamOrphanedObjects returns backup objects whose platform IS mapped to
 	// a cluster but which resolve to no guest on it.
 	//

@@ -195,8 +195,52 @@ WHERE j.veeam_server_id = $1
   AND j.veeam_id = s.job_veeam_id
   AND j.platform_id IS NULL;
 
+-- name: CountVeeamJobsByServer :one
+-- How many jobs are stored for this server, for the empty-listing sweep guard.
+--
+-- Its own query rather than len(ListVeeamJobsByServer): that listing carries a
+-- LATERAL join per row to resolve the live run for the API, which is pure
+-- waste when the caller only wants a count — and it coupled the collector's
+-- refusal-to-prune guard to a presentation concern that has no business
+-- influencing it.
+SELECT count(*) FROM veeam_jobs WHERE veeam_server_id = $1;
+
 -- name: ListVeeamJobsByServer :many
-SELECT * FROM veeam_jobs WHERE veeam_server_id = $1 ORDER BY name;
+-- Carries the job's LIVE run alongside its stored state.
+--
+-- veeam_jobs.status is refreshed by the inventory pass, which runs every few
+-- minutes; sessions are polled every 60s and job control writes one the
+-- instant an operator starts a job. Reading "is a run in flight" from status
+-- alone therefore left a job unstoppable from the jobs table for a whole
+-- inventory interval after the operator started it — the button that would
+-- undo the thing they just did was the one missing.
+--
+-- Derived rather than written: veeam_jobs still mirrors exactly what Veeam
+-- reports, and this reads Veeam's own session data instead of patching a
+-- status the server has not confirmed.
+--
+-- Non-terminal is anything but Stopped. ESessionState has twelve values and
+-- only that one is final — the rest include WaitingRepository, WaitingSlot and
+-- Idle, which are precisely the states a stuck run sits in and the ones an
+-- operator most wants to kill. A session wedged in one of them after the poll
+-- stopped shows a Stop that answers 409 "not currently running", which is a
+-- better answer than no button.
+SELECT j.*,
+       COALESCE(s.veeam_id::text, '')::text AS running_session_id,
+       COALESCE(s.state, '')::text          AS running_session_state
+FROM veeam_jobs j
+LEFT JOIN LATERAL (
+    SELECT veeam_id, state
+    FROM veeam_sessions
+    WHERE veeam_server_id = j.veeam_server_id
+      AND job_veeam_id = j.veeam_id
+      AND state <> 'Stopped'
+      AND state <> ''
+    ORDER BY creation_time DESC
+    LIMIT 1
+) s ON true
+WHERE j.veeam_server_id = $1
+ORDER BY j.name;
 
 -- name: DeleteStaleVeeamJobs :exec
 -- Grace-windowed, DB-clock prune (mirrors DeleteStalePBSSnapshots).

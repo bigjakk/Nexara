@@ -280,6 +280,14 @@ type veeamJobResponse struct {
 	TransferredSize int64      `json:"transferred_size"`
 	ClusterID       *uuid.UUID `json:"cluster_id"`
 	LastSeenAt      time.Time  `json:"last_seen_at"`
+	// RunningSessionID is the job's live run, derived from its sessions rather
+	// than from Status. Status is only as fresh as the last inventory pass —
+	// minutes — while a run started from Nexara exists immediately, so
+	// deciding "is a run in flight" from Status alone hid the Stop button for
+	// a whole interval after the operator pressed Run. Empty when no run is in
+	// flight.
+	RunningSessionID    string `json:"running_session_id"`
+	RunningSessionState string `json:"running_session_state"`
 }
 
 // ListJobs handles GET /api/v1/veeam-servers/:id/jobs.
@@ -333,6 +341,10 @@ func (h *VeeamHandler) ListJobs(c fiber.Ctx) error {
 			ReadSize:        j.ReadSize,
 			TransferredSize: j.TransferredSize,
 			LastSeenAt:      j.LastSeenAt,
+			// Bounded like every other upstream string: the state comes off
+			// the wire from a server the operator chose.
+			RunningSessionID:    j.RunningSessionID,
+			RunningSessionState: auditSafe(j.RunningSessionState),
 		}
 		if j.PlatformID.Valid {
 			if clusterID, ok := scope.platformCluster[platform]; ok {

@@ -31,6 +31,8 @@ function job(over: Partial<VeeamJob> = {}): VeeamJob {
     transferred_size: 0,
     cluster_id: null,
     last_seen_at: "2026-08-26T23:00:00Z",
+    running_session_id: "",
+    running_session_state: "",
     ...over,
   };
 }
@@ -201,6 +203,37 @@ describe("VeeamJobActions", () => {
     await waitFor(() => {
       expect(calls).toContain(
         "POST /api/v1/veeam-servers/srv-1/jobs/3953c24f-bbe6-41fc-ae2f-a34e25bfd614/enable",
+      );
+    });
+  });
+
+  // The defect the live lab test exposed. veeam_jobs.status is refreshed by
+  // the inventory pass every few minutes, so a job started from Nexara still
+  // reads "Stopped" long after its run exists — and Stop, the button that
+  // undoes what the operator just did, was the one missing.
+  it("offers Stop on a live run even while the stored status is stale", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <VeeamJobActions
+        serverId="srv-1"
+        job={job({
+          status: "Stopped",
+          running_session_id: "20ff3c43-65c0-414d-ae03-10cf59fd2faa",
+          running_session_state: "Working",
+        })}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /run job now/i }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /stop job/i }));
+    expect(calls).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "Stop job" }));
+    await waitFor(() => {
+      expect(calls).toContain(
+        "POST /api/v1/veeam-servers/srv-1/jobs/3953c24f-bbe6-41fc-ae2f-a34e25bfd614/stop",
       );
     });
   });

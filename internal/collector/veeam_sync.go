@@ -94,7 +94,7 @@ type VeeamSyncQueries interface {
 	DeleteStaleVeeamRepositories(ctx context.Context, arg db.DeleteStaleVeeamRepositoriesParams) error
 	InsertVeeamRepositoryMetric(ctx context.Context, arg db.InsertVeeamRepositoryMetricParams) error
 
-	ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]db.VeeamJob, error)
+	CountVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) (int64, error)
 	UpsertVeeamJob(ctx context.Context, arg db.UpsertVeeamJobParams) error
 	DeleteStaleVeeamJobs(ctx context.Context, arg db.DeleteStaleVeeamJobsParams) error
 	DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error
@@ -651,9 +651,9 @@ func (v *VeeamSyncer) syncJobs(ctx context.Context, server db.VeeamServer, clien
 		return fmt.Errorf("job states: %w", err)
 	}
 
-	existing, err := v.queries.ListVeeamJobsByServer(ctx, server.ID)
+	existing, err := v.queries.CountVeeamJobsByServer(ctx, server.ID)
 	if err != nil {
-		return fmt.Errorf("list existing jobs: %w", err)
+		return fmt.Errorf("count existing jobs: %w", err)
 	}
 	var stored int
 
@@ -699,7 +699,7 @@ func (v *VeeamSyncer) syncJobs(ctx context.Context, server db.VeeamServer, clien
 		stored++
 	}
 
-	if !v.shouldSweep(server, res, "backup jobs", stored, len(existing)) {
+	if !v.shouldSweep(server, res, "backup jobs", stored, int(existing)) {
 		return nil
 	}
 	return v.queries.DeleteStaleVeeamJobs(ctx, db.DeleteStaleVeeamJobsParams{
