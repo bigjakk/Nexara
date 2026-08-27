@@ -333,3 +333,73 @@ func (c *Client) Sessions(ctx context.Context, since time.Time, maxRows int) ([]
 	}
 	return listPaged[Session](ctx, c, "/api/v1/sessions", params, maxRows)
 }
+
+// ProxmoxProxyType is the EProxyType value for a Veeam worker appliance
+// deployed onto a Proxmox cluster.
+const ProxmoxProxyType = "PVE"
+
+// ProxyState is one row from GET /api/v1/backupInfrastructure/proxies/states.
+//
+// ⚠️ /states, NOT the plain /backupInfrastructure/proxies listing. Verified
+// against a live 13.1 server: the plain listing returned 2 rows and NONE of
+// them were Proxmox, while /states returned 5 including all three PVE
+// appliances. This is the same shape jobs take — Proxmox rows exist only in
+// the /states variant — and it is not documented anywhere.
+//
+// There is deliberately no VM identity here to correlate on. The model carries
+// a name and the Proxmox NODE it was deployed to (HostName), and nothing else:
+// no smbios uuid, no vmid. Name is therefore the only key, which is why the
+// resolution insists on an exact, unique, case-insensitive match rather than
+// the substring test a human would reach for — "Veeam" appears in the lab's
+// worker names AND in the name of an unrelated guest.
+type ProxyState struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	HostID      string `json:"hostId"`
+	// HostName is the Proxmox node the appliance runs on for a PVE proxy
+	// ("hv01.example.lan"), and the literal string "This server" for a proxy
+	// role the VBR server fills itself.
+	HostName    string `json:"hostName"`
+	IsDisabled  bool   `json:"isDisabled"`
+	IsOnline    bool   `json:"isOnline"`
+	IsOutOfDate bool   `json:"isOutOfDate"`
+}
+
+// IsProxmox reports whether this proxy is a Proxmox worker appliance.
+func (p ProxyState) IsProxmox() bool { return p.Type == ProxmoxProxyType }
+
+// ProxyStates lists every backup proxy's current state.
+//
+// Worker appliances are normally OFFLINE between runs — all three on the lab
+// report isOnline false — because Veeam powers them on for a job and off
+// again afterwards. Do not read that as a fault.
+func (c *Client) ProxyStates(ctx context.Context) ([]ProxyState, error) {
+	return listPaged[ProxyState](ctx, c, "/api/v1/backupInfrastructure/proxies/states", nil, maxInventoryRows)
+}
+
+// ManagedServer is one row from GET /api/v1/backupInfrastructure/managedServers.
+//
+// Only used to find the VBR server itself. When it runs as a guest on the very
+// cluster it protects — which the lab does — it is not an unprotected VM, it
+// is infrastructure, and a coverage report that flags it teaches operators to
+// ignore the report.
+//
+// Name is the FQDN Veeam knows the server by ("Veeam01.example.lan") and is
+// what matches a Proxmox guest name. serverInfo.name is NOT interchangeable
+// with it: on the lab that field is the short "Veeam01", which matches no
+// guest at all.
+type ManagedServer struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Status         string `json:"status"`
+	Description    string `json:"description"`
+	IsBackupServer bool   `json:"isBackupServer"`
+}
+
+// ManagedServers lists the servers registered with this VBR installation.
+func (c *Client) ManagedServers(ctx context.Context) ([]ManagedServer, error) {
+	return listPaged[ManagedServer](ctx, c, "/api/v1/backupInfrastructure/managedServers", nil, maxInventoryRows)
+}

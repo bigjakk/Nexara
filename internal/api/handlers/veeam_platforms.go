@@ -195,3 +195,68 @@ func clusterIDForAudit(id *uuid.UUID) any {
 	}
 	return id.String()
 }
+
+type veeamInfrastructureResponse struct {
+	ID          uuid.UUID  `json:"id"`
+	VeeamRef    uuid.UUID  `json:"veeam_ref"`
+	Role        string     `json:"role"`
+	Name        string     `json:"name"`
+	HostName    string     `json:"host_name"`
+	IsDisabled  bool       `json:"is_disabled"`
+	IsOnline    bool       `json:"is_online"`
+	ClusterID   *uuid.UUID `json:"cluster_id"`
+	ClusterName string     `json:"cluster_name"`
+	VMID        *int32     `json:"vmid"`
+	GuestName   string     `json:"guest_name"`
+	LastSeenAt  time.Time  `json:"last_seen_at"`
+}
+
+// ListInfrastructure handles GET /api/v1/veeam-servers/:id/infrastructure.
+//
+// The guests that belong to the Veeam deployment rather than to the workload
+// it protects: worker appliances, and the VBR server when it runs on the
+// cluster it protects. Coverage excludes them, and this is where an operator
+// checks what Nexara decided to exclude and why — an exclusion nobody can
+// inspect is indistinguishable from a coverage bug.
+//
+// Global view:veeam, like the repository and platform listings: the answer
+// spans every cluster the server protects.
+func (h *VeeamHandler) ListInfrastructure(c fiber.Ctx) error {
+	if err := requirePerm(c, "view", "veeam"); err != nil {
+		return err
+	}
+	server, err := h.fetch(c)
+	if err != nil {
+		return err
+	}
+
+	rows, err := h.queries.ListVeeamInfrastructureByServer(c.Context(), server.ID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list Veeam infrastructure")
+	}
+
+	resp := make([]veeamInfrastructureResponse, len(rows))
+	for i, r := range rows {
+		resp[i] = veeamInfrastructureResponse{
+			ID:          r.ID,
+			VeeamRef:    r.VeeamRef,
+			Role:        r.Role,
+			Name:        r.Name,
+			HostName:    r.HostName,
+			IsDisabled:  r.IsDisabled,
+			IsOnline:    r.IsOnline,
+			ClusterName: r.ClusterName.String,
+			GuestName:   r.GuestName.String,
+			LastSeenAt:  r.LastSeenAt,
+		}
+		if r.ClusterID.Valid {
+			id := uuid.UUID(r.ClusterID.Bytes)
+			resp[i].ClusterID = &id
+		}
+		if r.Vmid.Valid {
+			vmid := r.Vmid.Int32
+			resp[i].VMID = &vmid
+		}
+	}
+	return RespondItems(c, resp)
+}

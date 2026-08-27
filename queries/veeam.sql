@@ -510,3 +510,142 @@ WHERE o.id = r.id
   AND (o.cluster_id   IS DISTINCT FROM r.cluster_id
     OR o.vmid         IS DISTINCT FROM r.vmid
     OR o.match_method IS DISTINCT FROM r.match_method);
+
+-- ---------------------------------------------------------------------------
+-- Veeam's own guests on the cluster.
+-- ---------------------------------------------------------------------------
+
+-- name: UpsertVeeamInfrastructure :exec
+-- cluster_id and vmid are absent from the UPDATE on purpose: they are resolved
+-- by ResolveVeeamInfrastructureGuests and must survive a refresh of the state
+-- fields, exactly as veeam_jobs.platform_id does.
+INSERT INTO veeam_infrastructure (
+    veeam_server_id, veeam_ref, role, name, host_name, is_disabled, is_online, last_seen_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+ON CONFLICT (veeam_server_id, veeam_ref)
+DO UPDATE SET
+    role         = EXCLUDED.role,
+    name         = EXCLUDED.name,
+    host_name    = EXCLUDED.host_name,
+    is_disabled  = EXCLUDED.is_disabled,
+    is_online    = EXCLUDED.is_online,
+    last_seen_at = now();
+
+-- name: ListVeeamInfrastructureByServer :many
+SELECT
+    i.id,
+    i.veeam_ref,
+    i.role,
+    i.name,
+    i.host_name,
+    i.is_disabled,
+    i.is_online,
+    i.cluster_id,
+    i.vmid,
+    i.last_seen_at,
+    c.name AS cluster_name,
+    v.name AS guest_name
+FROM veeam_infrastructure i
+LEFT JOIN clusters c ON c.id = i.cluster_id
+-- The guest is joined at read time on the stable (cluster_id, vmid) identity,
+-- never held as a foreign key: the collector re-mints a guest row's UUID on
+-- churn. A NULL guest_name means the row resolved to a guest that is mid-churn
+-- or gone, which the UI renders as an unlinked name.
+LEFT JOIN vms v ON v.cluster_id = i.cluster_id AND v.vmid = i.vmid
+WHERE i.veeam_server_id = $1
+ORDER BY i.role, i.name;
+
+-- ListVeeamInfrastructureGuestsForCluster is the eligibility feed: which
+-- guests on one cluster belong to the Veeam deployment rather than to the
+-- workload it protects.
+-- name: ListVeeamInfrastructureGuestsForCluster :many
+-- Both casts are for sqlc's benefit, not Postgres's: the columns are nullable
+-- on the table, so without them callers would handle a pgtype.UUID argument
+-- and a pgtype.Int4 result that the WHERE clause already guarantees are set.
+SELECT DISTINCT i.vmid::int AS vmid, i.role
+FROM veeam_infrastructure i
+WHERE i.cluster_id = @cluster_id::uuid
+  AND i.vmid IS NOT NULL
+ORDER BY vmid;
+
+-- DeleteStaleVeeamInfrastructure prunes rows Veeam has stopped reporting.
+--
+-- An ordinary grace-windowed sweep, deliberately WITHOUT the empty-listing
+-- refusal the catalog sections use. Those guard against VBR's REST service
+-- answering before its backup service has loaded the backup catalog; proxies
+-- and managed servers are configuration, not catalog, and are not subject to
+-- that window. The trade the refusal would make is also the wrong way round
+-- here: a spurious empty read costs one interval of a few worker VMs showing
+-- as unprotected, while refusing forever means a decommissioned worker stays
+-- excluded from coverage permanently and invisibly.
+-- Scoped to the roles whose listing was actually READ this pass. The two
+-- roles come from two different endpoints, and a caller whose rights stop at
+-- the backup catalog can read one and not the other — without the filter,
+-- three consecutive failures of the managed-server listing would age the
+-- backup server out of the table and put its guest back into the coverage
+-- report as a false alarm, with a clean last_sync_at and nothing to explain
+-- it. The list must be non-nil: pgx encodes nil as SQL NULL, and
+-- role = ANY(NULL) is NULL, which would delete nothing at all.
+-- name: DeleteStaleVeeamInfrastructure :exec
+DELETE FROM veeam_infrastructure
+WHERE veeam_server_id = $1
+  AND role = ANY(@roles::text[])
+  AND last_seen_at < now() - make_interval(secs => @grace_seconds::int);
+
+-- ResolveVeeamInfrastructureGuests matches each row to a Proxmox guest.
+--
+-- Name is the only key there is: neither the proxy state model nor the
+-- managed-server model carries an smbios uuid or a vmid. So the match is
+-- exact and case-insensitive (the lab has "veeam13-appliance01" beside
+-- "Veeam13-appliance02"), never a prefix or substring test — "Veeam" also
+-- appears in the name of the VBR server's own guest, and would in any
+-- unrelated guest an operator happened to name that way.
+--
+-- The search is confined to clusters this Veeam server has a mapped platform
+-- on, and the match must be UNIQUE across all of them: two guests sharing the
+-- name means the key does not identify one, and excluding a guest from
+-- coverage on a coin flip would hide a real machine's lack of backups.
+-- name: ResolveVeeamInfrastructureGuests :execrows
+WITH candidate AS (
+    SELECT i.id, lower(i.name) AS name
+    FROM veeam_infrastructure i
+    WHERE i.veeam_server_id = $1
+      -- vms.name is NOT NULL DEFAULT '', so a blank name here would match
+      -- every unnamed guest — and where exactly one exists, silently exclude
+      -- a real machine from coverage. The deterministic tier of
+      -- CorrelateVeeamBackupObjects guards its key the same way.
+      AND i.name <> ''
+),
+resolved AS (
+    -- The aggregate always yields exactly one row, so a bare CROSS JOIN
+    -- LATERAL keeps every candidate — including the ones that matched
+    -- nothing, whose stale resolution must be cleared rather than left.
+    SELECT
+        c.id,
+        CASE WHEN m.matches = 1 THEN m.cluster_id END AS cluster_id,
+        CASE WHEN m.matches = 1 THEN m.vmid       END AS vmid
+    FROM candidate c
+    CROSS JOIN LATERAL (
+        SELECT (array_agg(v.cluster_id))[1] AS cluster_id,
+               (array_agg(v.vmid))[1]       AS vmid,
+               count(*)                     AS matches
+        FROM vms v
+        WHERE lower(v.name) = c.name
+          AND v.type = 'qemu'
+          -- EXISTS rather than a join: a Veeam server can map several
+          -- platforms onto ONE cluster, and joining would then count the same
+          -- guest twice and fail the uniqueness test above for no reason.
+          AND EXISTS (
+              SELECT 1 FROM veeam_platforms p
+              WHERE p.veeam_server_id = $1 AND p.cluster_id = v.cluster_id
+          )
+    ) m
+)
+UPDATE veeam_infrastructure i
+SET cluster_id = r.cluster_id,
+    vmid       = r.vmid
+FROM resolved r
+WHERE i.id = r.id
+  AND (i.cluster_id IS DISTINCT FROM r.cluster_id
+    OR i.vmid       IS DISTINCT FROM r.vmid);

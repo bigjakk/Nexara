@@ -47,6 +47,7 @@ func newVeeamTestApp(t *testing.T) *fiber.App {
 	app.Delete("/veeam-servers/:id", handler.Delete)
 	app.Post("/veeam-servers/:id/test", handler.Test)
 	app.Get("/veeam-servers/:id/platforms", handler.ListPlatforms)
+	app.Get("/veeam-servers/:id/infrastructure", handler.ListInfrastructure)
 	app.Put("/veeam-servers/:id/platforms/:platform_id", handler.MapPlatform)
 
 	return app
@@ -187,6 +188,7 @@ func TestVeeamRoutes_RequirePermission(t *testing.T) {
 		// one for the cluster being attached.
 		{"list platforms", http.MethodGet, "/veeam-servers/" + id + "/platforms", ""},
 		{"map platform", http.MethodPut, "/veeam-servers/" + id + "/platforms/" + uuid.New().String(), `{"cluster_id":null}`},
+		{"list infrastructure", http.MethodGet, "/veeam-servers/" + id + "/infrastructure", ""},
 	}
 
 	for _, tc := range tests {

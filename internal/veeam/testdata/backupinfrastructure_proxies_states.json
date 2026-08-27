@@ -1,0 +1,65 @@
+{
+  "data": [
+    {
+      "type": "GeneralPurposeProxy",
+      "id": "50cbf622-129e-482a-9197-d67e5bb1fb1f",
+      "name": "Backup Proxy",
+      "description": "Created by Veeam Backup & Replication",
+      "hostId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
+      "hostName": "This server",
+      "isDisabled": false,
+      "isOnline": true,
+      "isOutOfDate": false
+    },
+    {
+      "type": "PVE",
+      "id": "33de6836-c00c-4d7c-bd37-2bdf37743b47",
+      "name": "veeam13-appliance01",
+      "description": "Created by ad.example.lan\\jdoe at 4/28/2026 8:45 AM.",
+      "hostId": "27c23f2c-16b9-46fb-b45c-c33a77d6d4cc",
+      "hostName": "hv01.example.lan",
+      "isDisabled": false,
+      "isOnline": false,
+      "isOutOfDate": false
+    },
+    {
+      "type": "PVE",
+      "id": "fd7611c4-7cee-49d1-840d-60efe76f8ae1",
+      "name": "Veeam13-appliance02",
+      "description": "Created by ad\\jdoe (Veeam Backup & Replication) at 10/19/2025 6:13 PM.",
+      "hostId": "c99bb88f-6b35-48e5-a8c6-d18f7c4f1785",
+      "hostName": "hv02.example.lan",
+      "isDisabled": false,
+      "isOnline": false,
+      "isOutOfDate": false
+    },
+    {
+      "type": "PVE",
+      "id": "5c3255b2-81b3-45a5-a80e-7792cd57cc6d",
+      "name": "Veeam13-appliance03",
+      "description": "Created by ad\\jdoe (Veeam Backup & Replication) at 10/21/2025 2:56 PM.",
+      "hostId": "2f638be2-6130-4e0c-98d8-bd68db4e73c0",
+      "hostName": "hv03.example.lan",
+      "isDisabled": false,
+      "isOnline": false,
+      "isOutOfDate": false
+    },
+    {
+      "type": "ViProxy",
+      "id": "18b661c1-d9dc-4233-90a0-7e7b10dc2d09",
+      "name": "VMware Backup Proxy",
+      "description": "Created by Veeam Backup & Replication",
+      "hostId": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
+      "hostName": "This server",
+      "isDisabled": false,
+      "isOnline": true,
+      "isOutOfDate": false
+    }
+  ],
+  "pagination": {
+    "total": 5,
+    "count": 5,
+    "skip": 0,
+    "limit": 200
+  }
+}

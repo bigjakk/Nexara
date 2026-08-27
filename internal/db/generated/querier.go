@@ -281,6 +281,25 @@ type Querier interface {
 	// second behind the Nexara container cannot make rows this very pass wrote
 	// look stale. The grace window absorbs a momentary non-observation on top.
 	DeleteStaleVeeamBackupObjects(ctx context.Context, arg DeleteStaleVeeamBackupObjectsParams) error
+	// DeleteStaleVeeamInfrastructure prunes rows Veeam has stopped reporting.
+	//
+	// An ordinary grace-windowed sweep, deliberately WITHOUT the empty-listing
+	// refusal the catalog sections use. Those guard against VBR's REST service
+	// answering before its backup service has loaded the backup catalog; proxies
+	// and managed servers are configuration, not catalog, and are not subject to
+	// that window. The trade the refusal would make is also the wrong way round
+	// here: a spurious empty read costs one interval of a few worker VMs showing
+	// as unprotected, while refusing forever means a decommissioned worker stays
+	// excluded from coverage permanently and invisibly.
+	// Scoped to the roles whose listing was actually READ this pass. The two
+	// roles come from two different endpoints, and a caller whose rights stop at
+	// the backup catalog can read one and not the other — without the filter,
+	// three consecutive failures of the managed-server listing would age the
+	// backup server out of the table and put its guest back into the coverage
+	// report as a false alarm, with a clean last_sync_at and nothing to explain
+	// it. The list must be non-nil: pgx encodes nil as SQL NULL, and
+	// role = ANY(NULL) is NULL, which would delete nothing at all.
+	DeleteStaleVeeamInfrastructure(ctx context.Context, arg DeleteStaleVeeamInfrastructureParams) error
 	// Grace-windowed, DB-clock prune (mirrors DeleteStalePBSSnapshots).
 	//
 	// Both sides of the comparison come from now(), so a Postgres running even a
@@ -773,6 +792,18 @@ type Querier interface {
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
 	ListVeeamBackupObjectsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamBackupObject, error)
+	// The guest is joined at read time on the stable (cluster_id, vmid) identity,
+	// never held as a foreign key: the collector re-mints a guest row's UUID on
+	// churn. A NULL guest_name means the row resolved to a guest that is mid-churn
+	// or gone, which the UI renders as an unlinked name.
+	ListVeeamInfrastructureByServer(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamInfrastructureByServerRow, error)
+	// ListVeeamInfrastructureGuestsForCluster is the eligibility feed: which
+	// guests on one cluster belong to the Veeam deployment rather than to the
+	// workload it protects.
+	// Both casts are for sqlc's benefit, not Postgres's: the columns are nullable
+	// on the table, so without them callers would handle a pgtype.UUID argument
+	// and a pgtype.Int4 result that the WHERE clause already guarantees are set.
+	ListVeeamInfrastructureGuestsForCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVeeamInfrastructureGuestsForClusterRow, error)
 	ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamJob, error)
 	ListVeeamPlatformsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamPlatform, error)
 	// ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
@@ -825,6 +856,20 @@ type Querier interface {
 	// the single leader-held executor (see migration 000079).
 	RequestDRSEvaluation(ctx context.Context, clusterID uuid.UUID) error
 	ResolveAlert(ctx context.Context, arg ResolveAlertParams) error
+	// ResolveVeeamInfrastructureGuests matches each row to a Proxmox guest.
+	//
+	// Name is the only key there is: neither the proxy state model nor the
+	// managed-server model carries an smbios uuid or a vmid. So the match is
+	// exact and case-insensitive (the lab has "veeam13-appliance01" beside
+	// "Veeam13-appliance02"), never a prefix or substring test — "Veeam" also
+	// appears in the name of the VBR server's own guest, and would in any
+	// unrelated guest an operator happened to name that way.
+	//
+	// The search is confined to clusters this Veeam server has a mapped platform
+	// on, and the match must be UNIQUE across all of them: two guests sharing the
+	// name means the key does not identify one, and excluding a guest from
+	// coverage on a coin flip would hide a real machine's lack of backups.
+	ResolveVeeamInfrastructureGuests(ctx context.Context, veeamServerID uuid.UUID) (int64, error)
 	ResumeRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	RevokeAPIKey(ctx context.Context, id uuid.UUID) error
 	RevokeAllUserAPIKeys(ctx context.Context, userID uuid.UUID) error
@@ -981,6 +1026,13 @@ type Querier interface {
 	UpsertTaskSyncState(ctx context.Context, arg UpsertTaskSyncStateParams) error
 	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
 	UpsertVeeamBackupObject(ctx context.Context, arg UpsertVeeamBackupObjectParams) (VeeamBackupObject, error)
+	// ---------------------------------------------------------------------------
+	// Veeam's own guests on the cluster.
+	// ---------------------------------------------------------------------------
+	// cluster_id and vmid are absent from the UPDATE on purpose: they are resolved
+	// by ResolveVeeamInfrastructureGuests and must survive a refresh of the state
+	// fields, exactly as veeam_jobs.platform_id does.
+	UpsertVeeamInfrastructure(ctx context.Context, arg UpsertVeeamInfrastructureParams) error
 	// platform_id is deliberately absent from the UPDATE below: it is derived from
 	// sessions by DeriveVeeamJobPlatforms and must survive a job-state refresh.
 	UpsertVeeamJob(ctx context.Context, arg UpsertVeeamJobParams) error

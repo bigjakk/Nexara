@@ -682,6 +682,12 @@ func (s *Server) setupRoutes() {
 		// manage:veeam, not on a grant for the cluster being attached.
 		vbr.Get("/:id/platforms", s.veeamHandler.ListPlatforms)
 		vbr.Put("/:id/platforms/:platform_id", s.veeamHandler.MapPlatform)
+
+		// Veeam's own guests on the cluster — worker appliances and the VBR
+		// server. Coverage excludes these, so an operator needs to be able to
+		// see what was excluded: an exclusion nobody can inspect is
+		// indistinguishable from a coverage bug.
+		vbr.Get("/:id/infrastructure", s.veeamHandler.ListInfrastructure)
 	}
 
 	// PBS snapshot lookup (cross-server, by backup_id / VMID).

@@ -46,8 +46,9 @@ hostname or identifier, so nothing needed redacting.
 | `sessions_list.json` | `GET /api/v1/sessions` |
 | `backupinfrastructure_repositories.json` | `GET /api/v1/backupInfrastructure/repositories` |
 | `backupinfrastructure_repositories_states.json` | `…/repositories/states` — capacity in float **GB** |
-| `backupinfrastructure_managedservers.json` | `…/managedServers` — ⚠️ Proxmox server is **not** listed |
-| `backupinfrastructure_proxies.json` | `…/proxies` |
+| `backupinfrastructure_managedservers.json` | `…/managedServers` — ⚠️ Proxmox server is **not** listed; the VBR server itself is (`isBackupServer`) |
+| `backupinfrastructure_proxies.json` | `…/proxies` — ⚠️ contains **no** Proxmox workers |
+| `backupinfrastructure_proxies_states.json` | `…/proxies/states` — the real Proxmox worker source |
 
 Phase 1 exercises the first six. The rest are captured ahead of Phase 2 so the
 inventory sync can be written against real shapes on day one — deliberately
@@ -61,6 +62,22 @@ committed unused rather than left in a scratch directory to rot.
 - `jobs_list.json` vs `jobs_states.json` — Proxmox jobs appear only in the
   latter. `GET /jobs/{id}` rejects them outright with
   `400 "Specify job of supported platform type."`
+- `backupinfrastructure_proxies.json` vs `…_proxies_states.json` — **the same
+  trap again**, and documented nowhere. The plain listing returned 2 rows on
+  the live server and none of them were Proxmox; `/states` returned 5,
+  including all three `"type": "PVE"` worker appliances. Assume any
+  Proxmox-bearing collection has this shape until proven otherwise.
+- A `PVE` proxy carries **no smbios uuid and no vmid** — only `name` and the
+  Proxmox node in `hostName`. Name is therefore the only key for matching a
+  worker to a guest, which is why the match is exact and case-insensitive
+  rather than a prefix test: the capture holds `veeam13-appliance01` beside
+  `Veeam13-appliance02`, and "Veeam" also appears in the name of the VBR
+  server's own guest.
+- Workers report `isOnline: false` in the capture, and that is the **healthy**
+  steady state — Veeam powers an appliance on for a job and off afterwards.
+- The backup server's identity for guest matching is `managedServers.name`,
+  the FQDN. `serverInfo.name` is the short form ("Veeam01" against a guest
+  named `Veeam01.ad.example.lan`) and matches nothing.
 - `backupobjects_list.json` has duplicate `name` values AND **duplicate `id`
   values**: 27 Proxmox rows carry only 18 distinct ids. `id` is the **guest's**
   identity within Veeam and `backupId` is what differs, so the collector folds

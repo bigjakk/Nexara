@@ -99,6 +99,10 @@ type VeeamSyncQueries interface {
 	DeleteStaleVeeamJobs(ctx context.Context, arg db.DeleteStaleVeeamJobsParams) error
 	DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error
 
+	UpsertVeeamInfrastructure(ctx context.Context, arg db.UpsertVeeamInfrastructureParams) error
+	DeleteStaleVeeamInfrastructure(ctx context.Context, arg db.DeleteStaleVeeamInfrastructureParams) error
+	ResolveVeeamInfrastructureGuests(ctx context.Context, veeamServerID uuid.UUID) (int64, error)
+
 	ListVeeamBackupObjectsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]db.VeeamBackupObject, error)
 	UpsertVeeamBackupObject(ctx context.Context, arg db.UpsertVeeamBackupObjectParams) (db.VeeamBackupObject, error)
 	DeleteStaleVeeamBackupObjects(ctx context.Context, arg db.DeleteStaleVeeamBackupObjectsParams) error
@@ -118,6 +122,8 @@ type VeeamClientFactory func(cfg veeam.Config) (VeeamClient, error)
 type VeeamClient interface {
 	Repositories(ctx context.Context) ([]veeam.Repository, error)
 	JobStates(ctx context.Context) ([]veeam.JobState, error)
+	ProxyStates(ctx context.Context) ([]veeam.ProxyState, error)
+	ManagedServers(ctx context.Context) ([]veeam.ManagedServer, error)
 	BackupObjects(ctx context.Context) ([]veeam.BackupObject, error)
 	RestorePointsForObject(ctx context.Context, objectID string) ([]veeam.RestorePoint, error)
 	Sessions(ctx context.Context, since time.Time, limit int) ([]veeam.Session, error)
@@ -335,6 +341,14 @@ func (v *VeeamSyncer) syncServerInventory(ctx context.Context, server db.VeeamSe
 	if err := v.syncBackupObjects(ctx, server, client, &res, platforms); err != nil {
 		return res, err
 	}
+	// Deliberately not error-returning. A failure here must not discard the
+	// repositories, jobs and backup objects this pass has ALREADY written, nor
+	// skip the platform recording and correlation that follow — the least
+	// valuable listing on the server would otherwise throw away the most
+	// valuable enrichment of an otherwise good pass, and put the server into
+	// backoff besides. It raises a warning instead, which reaches
+	// last_sync_error alongside a fresh last_sync_at: "synced, with a caveat".
+	v.syncInfrastructure(ctx, server, client, &res)
 
 	v.recordPlatforms(ctx, server, client, platforms)
 
@@ -377,7 +391,137 @@ func (v *VeeamSyncer) syncServerInventory(ctx context.Context, server db.VeeamSe
 	return res, nil
 }
 
-// correlate resolves this server's backup objects to Nexara guests.
+// syncInfrastructure records the guests that belong to the Veeam deployment
+// itself — worker appliances and, when it runs on the cluster it protects, the
+// VBR server.
+//
+// They are not backup targets, and a coverage report that lists them as
+// unprotected VMs is one operators stop reading. Four of the lab's nineteen
+// naive alarms are these.
+//
+// Both listings are CONFIGURATION, unlike the backup catalog, so the stale
+// sweep here is an ordinary grace-windowed one with no empty-listing refusal —
+// see DeleteStaleVeeamInfrastructure for why that trade goes the other way for
+// this table.
+func (v *VeeamSyncer) syncInfrastructure(ctx context.Context, server db.VeeamServer, client VeeamClient, res *passResult) {
+	// swept names the roles whose listing was read successfully this pass, and
+	// is the ONLY thing the stale sweep is allowed to delete. A section that
+	// could not be read must leave its rows alone: three consecutive failures
+	// of a listing a caller is not authorized for would otherwise age its rows
+	// out of existence and put those guests back into the coverage report as
+	// false alarms, with a clean last_sync_at and nothing to explain it.
+	var swept []string
+
+	// ⚠️ /proxies/states, not /proxies. Verified against a live 13.1 server:
+	// the plain listing has no Proxmox rows at all, while /states has every
+	// worker — the same trap job states carry, and documented nowhere.
+	proxies, err := client.ProxyStates(ctx)
+	if err != nil {
+		v.logger.Warn("veeam sync: backup proxies unreadable",
+			"veeam_server_id", server.ID, "error", err)
+		res.warn("Veeam's own worker appliances could not be listed, so guests belonging to them may be reported as unprotected.")
+	} else {
+		swept = append(swept, veeamRoleWorker)
+		for _, p := range proxies {
+			if !p.IsProxmox() {
+				continue
+			}
+			ref, ok := parseUUID(p.ID)
+			if !ok {
+				v.logger.Warn("veeam sync: proxy has an unparseable id",
+					"veeam_server_id", server.ID, "name", p.Name)
+				continue
+			}
+			if uErr := v.queries.UpsertVeeamInfrastructure(ctx, db.UpsertVeeamInfrastructureParams{
+				VeeamServerID: server.ID,
+				VeeamRef:      ref,
+				Role:          veeamRoleWorker,
+				Name:          p.Name,
+				HostName:      p.HostName,
+				IsDisabled:    p.IsDisabled,
+				IsOnline:      p.IsOnline,
+			}); uErr != nil {
+				v.logger.Warn("veeam sync: upserting a worker appliance failed",
+					"veeam_server_id", server.ID, "name", p.Name, "error", uErr)
+				// The listing was read; one row failing to store is not a
+				// reason to let the sweep delete the rest.
+			}
+		}
+	}
+
+	// The VBR server itself, which matters only when it runs as a guest on the
+	// cluster it protects — the lab's does. Commonly unreadable by a caller
+	// whose rights stop at the backup catalog, hence Debug rather than a
+	// warning an operator cannot act on.
+	if servers, mErr := client.ManagedServers(ctx); mErr != nil {
+		v.logger.Debug("veeam sync: managed servers unreadable",
+			"veeam_server_id", server.ID, "error", mErr)
+	} else {
+		swept = append(swept, veeamRoleBackupServer)
+		for _, m := range servers {
+			if !m.IsBackupServer {
+				continue
+			}
+			ref, ok := parseUUID(m.ID)
+			if !ok {
+				// Logged, not silent: without this the backup-server half of
+				// the feature would do nothing and look exactly like a
+				// deployment whose VBR simply is not a guest on the cluster.
+				v.logger.Warn("veeam sync: backup server has an unparseable id",
+					"veeam_server_id", server.ID, "name", m.Name)
+				continue
+			}
+			if uErr := v.queries.UpsertVeeamInfrastructure(ctx, db.UpsertVeeamInfrastructureParams{
+				VeeamServerID: server.ID,
+				VeeamRef:      ref,
+				Role:          veeamRoleBackupServer,
+				// The managedServers FQDN, which is what matches a guest
+				// name. serverInfo.name is the short form and matches none.
+				Name: m.Name,
+				// A managed server is reachable or it is not; "disabled" is a
+				// proxy concept and does not apply.
+				IsOnline: m.Status == veeamManagedServerAvailable,
+			}); uErr != nil {
+				v.logger.Warn("veeam sync: upserting the backup server failed",
+					"veeam_server_id", server.ID, "name", m.Name, "error", uErr)
+			}
+		}
+	}
+
+	if len(swept) == 0 {
+		return
+	}
+	if err := v.queries.DeleteStaleVeeamInfrastructure(ctx, db.DeleteStaleVeeamInfrastructureParams{
+		VeeamServerID: server.ID,
+		// Non-nil by construction — the guard above returns first. pgx encodes
+		// a nil slice as SQL NULL and role = ANY(NULL) is NULL, so a nil here
+		// would silently delete nothing rather than everything, but relying on
+		// that would make the guard look optional.
+		Roles:        swept,
+		GraceSeconds: v.sweepGraceSeconds(),
+	}); err != nil {
+		v.logger.Warn("veeam sync: pruning stale Veeam infrastructure failed",
+			"veeam_server_id", server.ID, "error", err)
+	}
+
+	// Resolving these rows to guests happens in correlate(), not here: it
+	// searches the clusters this server has MAPPED platforms on, and
+	// recordPlatforms has not run yet at this point in the pass. Doing it
+	// here would resolve nothing on the very first sync of a new server.
+}
+
+// Roles a Veeam-owned guest can have, matching the CHECK on
+// veeam_infrastructure.role.
+const (
+	veeamRoleWorker       = "worker"
+	veeamRoleBackupServer = "backup_server"
+)
+
+// veeamManagedServerAvailable is EManagedServerStatus's healthy value.
+const veeamManagedServerAvailable = "Available"
+
+// correlate resolves this server's backup objects, and Veeam's own guests, to
+// Nexara guests.
 //
 // Runs after recordPlatforms, so a platform discovered by this very pass — and
 // auto-mapped by its own INSERT when the install has a single cluster — is
@@ -401,6 +545,17 @@ func (v *VeeamSyncer) correlate(ctx context.Context, server db.VeeamServer) {
 	} else if changed > 0 {
 		v.logger.Info("veeam sync: guest correlation updated",
 			"veeam_server_id", server.ID, "objects", changed)
+	}
+
+	// Run unconditionally rather than only when a row was just written: a
+	// guest RENAMED out from under a resolved row has to lose its resolution,
+	// and nothing about the Veeam-side listing changes when that happens.
+	if changed, err := v.queries.ResolveVeeamInfrastructureGuests(ctx, server.ID); err != nil {
+		v.logger.Warn("veeam sync: resolving Veeam infrastructure guests failed",
+			"veeam_server_id", server.ID, "error", err)
+	} else if changed > 0 {
+		v.logger.Info("veeam sync: Veeam infrastructure guests resolved",
+			"veeam_server_id", server.ID, "rows", changed)
 	}
 }
 

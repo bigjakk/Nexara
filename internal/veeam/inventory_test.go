@@ -514,3 +514,84 @@ func writeListPage(w http.ResponseWriter, rows []json.RawMessage, total, skip, l
 		},
 	})
 }
+
+func TestProxyStates_FindsProxmoxWorkerAppliances(t *testing.T) {
+	f, srv := newFakeVBR(t)
+	f.serveFixtureList("/api/v1/backupInfrastructure/proxies/states",
+		"backupinfrastructure_proxies_states.json")
+	c := newTestClient(t, srv, "administrator")
+
+	proxies, err := c.ProxyStates(context.Background())
+	if err != nil {
+		t.Fatalf("ProxyStates: %v", err)
+	}
+	if len(proxies) != 5 {
+		t.Fatalf("got %d proxies, want 5", len(proxies))
+	}
+
+	var workers []ProxyState
+	for _, p := range proxies {
+		if p.IsProxmox() {
+			workers = append(workers, p)
+		}
+	}
+	// The captured server runs a GeneralPurposeProxy and a ViProxy alongside
+	// three Proxmox appliances. Nexara has nothing to say about the first two.
+	if len(workers) != 3 {
+		t.Fatalf("Proxmox workers = %d, want 3", len(workers))
+	}
+
+	names := map[string]string{}
+	for _, w := range workers {
+		names[w.Name] = w.HostName
+	}
+	// Captured verbatim, mixed case and all — which is exactly why the guest
+	// resolution matches case-insensitively.
+	for name, wantHost := range map[string]string{
+		"veeam13-appliance01": "hv01.example.lan",
+		"Veeam13-appliance02": "hv02.example.lan",
+		"Veeam13-appliance03": "hv03.example.lan",
+	} {
+		if got, ok := names[name]; !ok {
+			t.Errorf("worker %q missing from the listing", name)
+		} else if got != wantHost {
+			t.Errorf("worker %q host = %q, want %q", name, got, wantHost)
+		}
+	}
+
+	// Workers are powered off between runs, so offline is the normal state
+	// and must never be surfaced as a fault.
+	for _, w := range workers {
+		if w.IsOnline {
+			t.Errorf("worker %q reports online; the capture has all three off", w.Name)
+		}
+	}
+}
+
+func TestManagedServers_IdentifiesTheBackupServer(t *testing.T) {
+	f, srv := newFakeVBR(t)
+	f.serveFixtureList("/api/v1/backupInfrastructure/managedServers",
+		"backupinfrastructure_managedservers.json")
+	c := newTestClient(t, srv, "administrator")
+
+	servers, err := c.ManagedServers(context.Background())
+	if err != nil {
+		t.Fatalf("ManagedServers: %v", err)
+	}
+
+	var backupServers []ManagedServer
+	for _, s := range servers {
+		if s.IsBackupServer {
+			backupServers = append(backupServers, s)
+		}
+	}
+	if len(backupServers) != 1 {
+		t.Fatalf("backup servers = %d, want 1", len(backupServers))
+	}
+	// The FQDN, which is what matches a Proxmox guest name when the VBR
+	// server runs on the cluster it protects. serverInfo.name is the SHORT
+	// name and matches nothing.
+	if got := backupServers[0].Name; got != "vbr01.example.lan" {
+		t.Errorf("backup server name = %q, want the FQDN", got)
+	}
+}

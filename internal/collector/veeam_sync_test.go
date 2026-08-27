@@ -27,18 +27,18 @@ type fakeVeeamQueries struct {
 
 	servers []db.VeeamServer
 
-	repositories   []db.UpsertVeeamRepositoryParams
-	repoMetrics    []db.InsertVeeamRepositoryMetricParams
-	jobs           []db.UpsertVeeamJobParams
-	objects        []db.UpsertVeeamBackupObjectParams
-	restorePoints  []db.UpsertVeeamRestorePointParams
-	sessions       []db.UpsertVeeamSessionParams
-	platforms      []db.UpsertVeeamPlatformParams
-	syncErrors     []db.SetVeeamServerSyncErrorParams
-	syncSuccesses  []uuid.UUID
+	repositories  []db.UpsertVeeamRepositoryParams
+	repoMetrics   []db.InsertVeeamRepositoryMetricParams
+	jobs          []db.UpsertVeeamJobParams
+	objects       []db.UpsertVeeamBackupObjectParams
+	restorePoints []db.UpsertVeeamRestorePointParams
+	sessions      []db.UpsertVeeamSessionParams
+	platforms     []db.UpsertVeeamPlatformParams
+	syncErrors    []db.SetVeeamServerSyncErrorParams
+	syncSuccesses []uuid.UUID
 	// serverNote is the FINAL value written to last_sync_error, as opposed to
 	// the append-only history above.
-	serverNote string
+	serverNote     string
 	prunedPoints   []db.PruneVeeamRestorePointsParams
 	prunedSessions []db.PruneVeeamSessionsParams
 	derived        []uuid.UUID
@@ -58,6 +58,10 @@ type fakeVeeamQueries struct {
 	// Correlation. correlated records the server ids the call was made for,
 	// so a test can assert the enrichment ran.
 	correlated []uuid.UUID
+	// Veeam's own guests on the cluster.
+	infrastructure      []db.UpsertVeeamInfrastructureParams
+	staleInfrastructure []db.DeleteStaleVeeamInfrastructureParams
+	resolvedInfra       []uuid.UUID
 	// correlateErr makes CorrelateVeeamBackupObjects fail, to prove a failed
 	// enrichment does not fail the pass that produced a good inventory.
 	correlateErr error
@@ -103,6 +107,27 @@ func (q *fakeVeeamQueries) ListVeeamJobsByServer(context.Context, uuid.UUID) ([]
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.existingJobs, nil
+}
+
+func (q *fakeVeeamQueries) UpsertVeeamInfrastructure(_ context.Context, arg db.UpsertVeeamInfrastructureParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.infrastructure = append(q.infrastructure, arg)
+	return nil
+}
+
+func (q *fakeVeeamQueries) DeleteStaleVeeamInfrastructure(_ context.Context, arg db.DeleteStaleVeeamInfrastructureParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.staleInfrastructure = append(q.staleInfrastructure, arg)
+	return nil
+}
+
+func (q *fakeVeeamQueries) ResolveVeeamInfrastructureGuests(_ context.Context, serverID uuid.UUID) (int64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.resolvedInfra = append(q.resolvedInfra, serverID)
+	return 0, nil
 }
 
 func (q *fakeVeeamQueries) CorrelateVeeamBackupObjects(_ context.Context, serverID uuid.UUID) (int64, error) {
@@ -250,6 +275,12 @@ type fakeVeeamClient struct {
 	// sessionsSince records the watermark each poll asked for.
 	sessionsSince []time.Time
 	logouts       int
+
+	// Veeam's own guests on the cluster.
+	proxies    []veeam.ProxyState
+	managed    []veeam.ManagedServer
+	proxiesErr error
+	managedErr error
 }
 
 func (c *fakeVeeamClient) Repositories(context.Context) ([]veeam.Repository, error) {
@@ -289,6 +320,14 @@ func (c *fakeVeeamClient) maxConcurrent() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.peak
+}
+
+func (c *fakeVeeamClient) ProxyStates(context.Context) ([]veeam.ProxyState, error) {
+	return c.proxies, c.proxiesErr
+}
+
+func (c *fakeVeeamClient) ManagedServers(context.Context) ([]veeam.ManagedServer, error) {
+	return c.managed, c.managedErr
 }
 
 func (c *fakeVeeamClient) Sessions(_ context.Context, since time.Time, _ int) ([]veeam.Session, error) {
@@ -366,7 +405,7 @@ func TestVeeamSync_Inventory(t *testing.T) {
 		points: map[string][]veeam.RestorePoint{
 			testObjectID: {
 				{ID: uuid.NewString(), Name: "web01", Type: "Increment", MalwareStatus: "Clean",
-					CreationTime: veeam.Timestamp{Time: time.Now().Add(-2 * time.Hour)},
+					CreationTime:      veeam.Timestamp{Time: time.Now().Add(-2 * time.Hour)},
 					AllowedOperations: []string{"StartFlrRestore"}},
 			},
 		},
@@ -1118,5 +1157,143 @@ func TestVeeamSync_CorrelationFailureDoesNotFailThePass(t *testing.T) {
 	}
 	if q.serverNote != "" {
 		t.Errorf("last_sync_error = %q, want empty", q.serverNote)
+	}
+}
+
+func TestVeeamSync_RecordsVeeamOwnGuests(t *testing.T) {
+	server := testVeeamServer(t)
+	q := &fakeVeeamQueries{servers: []db.VeeamServer{server}}
+	c := &fakeVeeamClient{
+		proxies: []veeam.ProxyState{
+			// The lab's real shape: two proxies the VBR server fills itself,
+			// which are not guests anywhere, and three Proxmox appliances.
+			{ID: uuid.NewString(), Name: "Backup Proxy", Type: "GeneralPurposeProxy", HostName: "This server", IsOnline: true},
+			{ID: uuid.NewString(), Name: "VMware Backup Proxy", Type: "ViProxy", HostName: "This server", IsOnline: true},
+			{ID: uuid.NewString(), Name: "veeam13-appliance01", Type: veeam.ProxmoxProxyType, HostName: "hv01.example.lan"},
+			{ID: uuid.NewString(), Name: "Veeam13-appliance02", Type: veeam.ProxmoxProxyType, HostName: "hv02.example.lan"},
+		},
+		managed: []veeam.ManagedServer{
+			{ID: uuid.NewString(), Name: "vbr01.example.lan", Type: "WindowsHost", Status: "Available", IsBackupServer: true},
+			// A repository host is a managed server too, and is not Veeam's
+			// own guest on the protected cluster.
+			{ID: uuid.NewString(), Name: "nas01.example.lan", Type: "LinuxHost", Status: "Available"},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncInventory(context.Background())
+
+	byName := map[string]db.UpsertVeeamInfrastructureParams{}
+	for _, row := range q.infrastructure {
+		byName[row.Name] = row
+	}
+	// Only the PVE proxies and the backup server. A GeneralPurposeProxy or a
+	// ViProxy runs on the VBR host, not on the Proxmox cluster, and excluding
+	// a guest that happens to share one of those names from coverage would
+	// hide a real machine's lack of backups.
+	if len(byName) != 3 {
+		t.Fatalf("infrastructure rows = %d (%v), want 3", len(byName), byName)
+	}
+	for _, name := range []string{"veeam13-appliance01", "Veeam13-appliance02"} {
+		row, ok := byName[name]
+		if !ok {
+			t.Errorf("worker %q was not recorded", name)
+			continue
+		}
+		if row.Role != veeamRoleWorker {
+			t.Errorf("%q role = %q, want %q", name, row.Role, veeamRoleWorker)
+		}
+	}
+	if row, ok := byName["vbr01.example.lan"]; !ok {
+		t.Error("the VBR server was not recorded")
+	} else if row.Role != veeamRoleBackupServer {
+		t.Errorf("backup server role = %q, want %q", row.Role, veeamRoleBackupServer)
+	}
+
+	if len(q.staleInfrastructure) != 1 {
+		t.Errorf("stale infrastructure sweeps = %d, want 1", len(q.staleInfrastructure))
+	}
+	if len(q.resolvedInfra) != 1 {
+		t.Errorf("resolvedInfra = %v, want one call", q.resolvedInfra)
+	}
+}
+
+func TestVeeamSync_UnreadableManagedServersStillRecordsWorkers(t *testing.T) {
+	server := testVeeamServer(t)
+	q := &fakeVeeamQueries{servers: []db.VeeamServer{server}}
+	c := &fakeVeeamClient{
+		proxies: []veeam.ProxyState{
+			{ID: uuid.NewString(), Name: "veeam13-appliance01", Type: veeam.ProxmoxProxyType},
+		},
+		managedErr: errors.New("insufficient rights"),
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncInventory(context.Background())
+
+	// The workers are the bulk of the value, and a VBR server that is not a
+	// guest on any mapped cluster — the common case — contributes nothing
+	// here anyway. Losing the whole pass over it would be a poor trade.
+	if len(q.infrastructure) != 1 {
+		t.Fatalf("infrastructure rows = %d, want the worker", len(q.infrastructure))
+	}
+	if len(q.syncSuccesses) != 1 {
+		t.Errorf("syncSuccesses = %v, want the pass to succeed", q.syncSuccesses)
+	}
+
+	// And the sweep must NOT be allowed to touch the role whose listing it
+	// could not read. A Veeam account with rights to the proxy listing but
+	// not the managed-server one fails this way on every pass, and an
+	// unscoped sweep would age the backup server out of the table inside the
+	// grace window — putting its guest back in the coverage report as a false
+	// alarm, with a clean last_sync_at and nothing to explain it.
+	if len(q.staleInfrastructure) != 1 {
+		t.Fatalf("stale sweeps = %d, want 1", len(q.staleInfrastructure))
+	}
+	if roles := q.staleInfrastructure[0].Roles; len(roles) != 1 || roles[0] != veeamRoleWorker {
+		t.Errorf("sweep roles = %v, want only %q", roles, veeamRoleWorker)
+	}
+}
+
+func TestVeeamSync_ProxyListingFailureWarnsButKeepsThePass(t *testing.T) {
+	server := testVeeamServer(t)
+	q := &fakeVeeamQueries{servers: []db.VeeamServer{server}}
+	c := &fakeVeeamClient{
+		proxiesErr: errors.New("connection reset"),
+		objects: []veeam.BackupObject{
+			{ID: testObjectID, ObjectID: "316e531d-55c0-4fef-adc2-f1bb9c4e1873", PlatformName: "Proxmox",
+				PlatformID: testPlatformID, Name: "web01", Type: "VM"},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncInventory(context.Background())
+
+	// The rows it could not refresh are kept, so every worker appliance stays
+	// excluded from coverage across the outage.
+	for _, sweep := range q.staleInfrastructure {
+		for _, role := range sweep.Roles {
+			if role == veeamRoleWorker {
+				t.Error("a failed proxy listing still swept the worker rows")
+			}
+		}
+	}
+
+	// The pass itself survives. Discarding it would throw away the
+	// repositories, jobs and backup objects already written this pass, skip
+	// the correlation that follows, and put the server into backoff — a steep
+	// price for the least valuable listing on the server.
+	if len(q.syncSuccesses) != 1 {
+		t.Errorf("syncSuccesses = %v, want the pass to still succeed", q.syncSuccesses)
+	}
+	if len(q.correlated) != 1 {
+		t.Errorf("correlated = %v, want the correlation to still run", q.correlated)
+	}
+
+	// But it is not silent: the caveat reaches last_sync_error beside a fresh
+	// last_sync_at, because a persistent failure here means guests that are
+	// Veeam's own are being reported as unprotected.
+	if q.note() == "" {
+		t.Error("a failed proxy listing left no warning on the server row")
 	}
 }
