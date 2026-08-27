@@ -337,3 +337,40 @@ func TestGuard_AuditReadPathsRedact(t *testing.T) {
 		}
 	}
 }
+
+// The guard above passes by finding nothing if its detector stops matching, and
+// the naming of confirmRequiredError.Fields was chosen specifically to keep that
+// detector precise (a second meaning for the identifier Details would have made
+// renderConfirmRequired a false positive). Pin the true positives so that
+// decision stays load-bearing rather than incidental.
+func TestGuard_AuditReadDetectorStillSeesTheReadPaths(t *testing.T) {
+	_, files := parseGoFiles(t, ".")
+
+	var readers int
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			var reads bool
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Details" {
+					reads = true
+				}
+				return true
+			})
+			if reads {
+				readers++
+			}
+		}
+	}
+
+	// Two response converters and two exporters, per the guard's own comment.
+	const wantAtLeast = 4
+	if readers < wantAtLeast {
+		t.Errorf("detector matched %d functions reading an audit row's Details, want at least %d — "+
+			"the field name or the AST walk likely changed, which would let "+
+			"TestGuard_AuditReadPathsRedact pass by matching nothing", readers, wantAtLeast)
+	}
+}

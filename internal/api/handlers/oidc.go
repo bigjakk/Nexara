@@ -61,6 +61,9 @@ type oidcConfigRequest struct {
 	DefaultRoleID    *string           `json:"default_role_id"`
 	AutoProvision    bool              `json:"auto_provision"`
 	AllowedDomains   []string          `json:"allowed_domains"`
+	// AcknowledgeInsecureRedirect is required to store a plain-http callback
+	// on anything but loopback.
+	AcknowledgeInsecureRedirect bool `json:"acknowledge_insecure_redirect,omitempty"`
 }
 
 type oidcConfigResponse struct {
@@ -186,6 +189,12 @@ func (h *OIDCHandler) Create(c fiber.Ctx) error {
 	if err := validateOIDCIssuerURL(req.IssuerURL); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
+	if err := validateOIDCRedirectURI(req.RedirectURI); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	if err := requireOIDCRedirectSchemeAck(req.RedirectURI, req.AcknowledgeInsecureRedirect); err != nil {
+		return renderConfirmRequired(c, err)
+	}
 
 	encSecret := ""
 	if req.ClientSecret != "" {
@@ -237,7 +246,14 @@ func (h *OIDCHandler) Create(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create OIDC config")
 	}
 
-	details, _ := json.Marshal(map[string]string{"name": cfg.Name})
+	// The redirect URI is recorded on create for the same reason Update records
+	// a change to it: nothing downstream can tell a legitimate callback from
+	// one pointed at a host the caller controls, so the row is the only trace.
+	details, _ := json.Marshal(map[string]any{
+		"name":         cfg.Name,
+		"issuer_url":   auditSafe(cfg.IssuerUrl),
+		"redirect_uri": auditSafe(cfg.RedirectUri),
+	})
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", cfg.ID.String(), "oidc_config_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(toOIDCConfigResponse(cfg))
@@ -273,6 +289,18 @@ func (h *OIDCHandler) Update(c fiber.Ctx) error {
 
 	if err := validateOIDCIssuerURL(req.IssuerURL); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	// Validated only when it changes: this rule is newer than the column, so an
+	// install carrying a value that predates it can still edit everything else
+	// on the config. Any NEW value has to satisfy it.
+	if req.RedirectURI != existing.RedirectUri {
+		if err := validateOIDCRedirectURI(req.RedirectURI); err != nil {
+			return fiber.NewError(fiber.StatusBadRequest, err.Error())
+		}
+		if err := requireOIDCRedirectSchemeAck(req.RedirectURI, req.AcknowledgeInsecureRedirect); err != nil {
+			return renderConfirmRequired(c, err)
+		}
 	}
 
 	// Refuse to re-point the stored client secret at an issuer the operator
@@ -346,7 +374,25 @@ func (h *OIDCHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update OIDC config")
 	}
 
-	details, _ := json.Marshal(map[string]string{"name": cfg.Name})
+	// Name a moved redirect_uri explicitly. Format validation cannot tell a
+	// legitimate re-home from a caller pointing every login's authorization
+	// code at a host they control (see validateOIDCRedirectURI), so the audit
+	// row is what makes the change legible instead of silent.
+	//
+	// These ARE a widening: GET on this config needs manage:user, while
+	// view:audit is held by every Viewer. Accepted because the values are an
+	// issuer hostname and this install's own public origin, neither of which is
+	// a secret — not because the audiences match. They do not.
+	fields := map[string]any{"name": cfg.Name}
+	if cfg.RedirectUri != existing.RedirectUri {
+		fields["previous_redirect_uri"] = auditSafe(existing.RedirectUri)
+		fields["new_redirect_uri"] = auditSafe(cfg.RedirectUri)
+	}
+	if cfg.IssuerUrl != existing.IssuerUrl {
+		fields["previous_issuer_url"] = auditSafe(existing.IssuerUrl)
+		fields["new_issuer_url"] = auditSafe(cfg.IssuerUrl)
+	}
+	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", cfg.ID.String(), "oidc_config_updated", details)
 
 	return c.JSON(toOIDCConfigResponse(cfg))
@@ -652,6 +698,118 @@ func (h *OIDCHandler) buildOIDCConfig(cfg db.OidcConfig) (auth.OIDCConfig, error
 		GroupsClaim:      cfg.GroupsClaim,
 		AllowedDomains:   cfg.AllowedDomains,
 	}, nil
+}
+
+// confirmInsecureOIDCRedirect is the code the admin page keys on to turn the
+// cleartext-callback refusal into a prompt.
+const confirmInsecureOIDCRedirect = "insecure_oidc_redirect_confirm_required"
+
+// requireOIDCRedirectSchemeAck refuses a cleartext callback unless the operator
+// says so. The authorization code rides back on this URL, so over anything but
+// loopback it is readable by whoever is on the wire.
+//
+// Confirm-and-proceed rather than a refusal: an install genuinely served over
+// plain http on a lab network has no https origin to name, and the admin page
+// derives this value from window.location.origin — a hard block would leave it
+// unable to save the URI its own UI generated. Fails closed, which the earlier
+// c.Scheme() version did not.
+//
+// Takes no fiber.Ctx: gates decide, renderers respond. See confirm_gate.go.
+func requireOIDCRedirectSchemeAck(rawURL string, acknowledged bool) error {
+	if acknowledged {
+		return nil
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		// Self-sufficient rather than relying on validateOIDCRedirectURI having
+		// run first: an unparseable URI cannot be shown to be safe, and the
+		// ordering between the two is not asserted anywhere.
+		return &confirmRequiredError{
+			Code:    confirmInsecureOIDCRedirect,
+			Message: "This callback could not be parsed, so it cannot be shown to be encrypted. Confirm to proceed.",
+			Fields:  map[string]any{"redirect_scheme": "unknown"},
+		}
+	}
+	if u.Scheme != "http" {
+		return nil
+	}
+	// Over the loopback interface the code never leaves the machine.
+	if host := u.Hostname(); host == "localhost" || net.ParseIP(host).IsLoopback() {
+		return nil
+	}
+	return &confirmRequiredError{
+		Code: confirmInsecureOIDCRedirect,
+		Message: "This callback is plain http, so every login's authorization code crosses " +
+			"the network in the clear. Use https unless this install has no TLS at all. " +
+			"Confirm to proceed.",
+		Fields: map[string]any{"redirect_scheme": "http"},
+	}
+}
+
+// oidcCallbackPath is the route Nexara actually serves for the OIDC callback
+// (see router.go). A redirect_uri that does not end here cannot complete a
+// login against this install, so it is either a misconfiguration or an attempt
+// to send the authorization code somewhere else.
+const oidcCallbackPath = "/api/v1/auth/oidc/callback"
+
+// validateOIDCRedirectURI checks the address the IdP sends the browser back
+// to, carrying the authorization code. It was previously written to the
+// database with no validation at all.
+//
+// What this DOES catch: cleartext delivery of the code, credentials or a
+// fragment smuggled into the URI (RFC 6749 §3.1.2 forbids the fragment
+// outright), and any path that is not the callback this install serves.
+//
+// What it CANNOT catch, and no format check could: a well-formed URI on a host
+// the caller controls — https://attacker.example/api/v1/auth/oidc/callback
+// satisfies every rule here. Closing that needs an authoritative public origin
+// for the install, which Nexara does not have server-side (the value is
+// correct only relative to whatever the reverse proxy publishes; the admin UI
+// derives it from window.location.origin in the browser). The residual risk is
+// bounded — redeeming a stolen code still needs the client secret, which
+// credential_redirect.go now protects — and the change is audited, so
+// re-pointing it is at least legible after the fact rather than silent.
+//
+// http on loopback is always fine; http anywhere else is a separate,
+// overridable refusal — see requireOIDCRedirectSchemeAck. Deriving that from
+// the request was tried and removed: c.Scheme() only reports https when
+// TRUSTED_PROXIES is set AND the proxy sends X-Forwarded-Proto, so on the
+// documented default it reads "http" for every request and silently turned the
+// rule off on exactly the deployments it was written for.
+func validateOIDCRedirectURI(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid redirect URI: %w", err)
+	}
+	if u.Scheme == "" || u.Host == "" || u.Hostname() == "" {
+		// Host alone is not enough: "https://:8080/..." parses with a non-empty
+		// Host and an empty Hostname.
+		return fmt.Errorf("redirect_uri must be an absolute URL including scheme and host")
+	}
+	if u.User != nil {
+		return fmt.Errorf("redirect_uri must not contain credentials")
+	}
+	if u.Fragment != "" || strings.Contains(rawURL, "#") {
+		return fmt.Errorf("redirect_uri must not contain a fragment")
+	}
+
+	// Only http and https are ever a callback. The cleartext question is
+	// handled separately, because it has a legitimate answer on a lab install
+	// and this function's other rules do not.
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("redirect_uri must use https")
+	}
+
+	// Tolerate a reverse proxy serving Nexara under a path prefix, which makes
+	// the published callback ".../nexara/api/v1/auth/oidc/callback".
+	//
+	// EscapedPath, not Path: Path is decoded, so ".../oidc%2Fcallback" — one
+	// segment naming a different resource — would satisfy a check written
+	// against the decoded form.
+	if !strings.HasSuffix(strings.TrimSuffix(u.EscapedPath(), "/"), oidcCallbackPath) {
+		return fmt.Errorf("redirect_uri must end in %s — that is the callback this install serves", oidcCallbackPath)
+	}
+	return nil
 }
 
 func validateOIDCIssuerURL(rawURL string) error {

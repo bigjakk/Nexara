@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,6 +69,9 @@ type updateClusterRequest struct {
 	SyncIntervalSeconds *int32  `json:"sync_interval_seconds"`
 	IsActive            *bool   `json:"is_active"`
 	AllowPrivateAddress bool    `json:"allow_private_address,omitempty"`
+	// AcknowledgeSSHTrustReset confirms that moving api_url may clear this
+	// cluster's SSH credential and every pinned host key.
+	AcknowledgeSSHTrustReset bool `json:"acknowledge_ssh_trust_reset,omitempty"`
 }
 
 type clusterResponse struct {
@@ -511,6 +515,81 @@ func (h *ClusterHandler) Update(c fiber.Ctx) error {
 		return errCredentialRedirect("cluster API URL", "API token secret")
 	}
 
+	// Moving the address also re-homes the SSH credential, which the guard
+	// above cannot see: cluster_ssh_credentials stores a password or private
+	// key against the CLUSTER, while the host it is delivered to lives in
+	// nodes.address — filled by the collector from whatever the API at
+	// params.ApiUrl reports. So a caller who supplies their own token secret
+	// (satisfying the redirect check, since the PVE token they are re-pointing
+	// is one they chose) can stand up a host that advertises a node IP they
+	// control, pin its key, and have every later rolling update or node command
+	// hand it the cluster's real SSH credential.
+	//
+	// Confirmation cannot be the control here: the same caller holds
+	// manage:ssh_credentials, so anything they can approve, they can approve
+	// for themselves. Only re-supplying the secret proves possession, which is
+	// the bargain credential_redirect.go strikes everywhere else — so drop the
+	// trust anchor and make the operator re-enter it.
+	//
+	// The pins go too. They are keyed on (cluster_id, host, port) and describe
+	// machines from the deployment being left behind; kept, a recycled address
+	// in the new deployment would be silently authorized by an old pin.
+	//
+	// Deliberately BEFORE the write: if this fails, the address must not move,
+	// because "new address + old SSH credential" is exactly the state being
+	// prevented. The cost of the reverse ordering is a lost credential on a
+	// write that then failed — recoverable by re-entering it, unlike the leak.
+	//
+	// token_id is not part of the predicate. It changes which identity Nexara
+	// presents, not which host answers, so it cannot re-home a node address.
+	if params.ApiUrl != existing.ApiUrl {
+		// An in-flight rolling update reads these credentials on every tick
+		// (internal/rolling/orchestrator.go advanceUpgrading). Pulling them
+		// mid-run fails the node it is on while the cluster still holds a
+		// drained node, disabled HA rules and a paused rebalance. Delete
+		// already refuses for the same reason; fail closed if the check
+		// itself errors, since we cannot rule an active job out.
+		busy, busyErr := h.queries.HasRunningJobForCluster(c.Context(), id)
+		if busyErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to check for active rolling update jobs")
+		}
+		if busy {
+			return fiber.NewError(fiber.StatusConflict,
+				"Cluster has an active rolling update job, and moving the API address re-homes the "+
+					"node addresses it is working through. Cancel or finish the job first.")
+		}
+
+		// A terminal-but-uncleaned job also holds cluster-side state — a paused
+		// CRS, disabled HA rules — and releaseJobState reaches it through a
+		// client built from THIS row. Once the address moves, that sweep would
+		// aim the old cluster's restore values at the new one. Refuse rather
+		// than let the two clusters cross: unlike Delete, where the cluster is
+		// usually gone for good and the state could never be released, here the
+		// old address still works and the sweep can finish against it.
+		if pending, pendErr := h.queries.ListCleanupPendingJobsForCluster(c.Context(), id); pendErr != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to check for pending rolling-update cleanup")
+		} else if len(pending) > 0 {
+			return fiber.NewError(fiber.StatusConflict,
+				"Cluster has rolling-update state that has not been released yet (CRS pause / HA-rule "+
+					"disables). Moving the API address would aim that cleanup at the new address. "+
+					"Wait for the cleanup sweep to finish, then retry.")
+		}
+
+		// The token secret costs a re-type; this costs a password or private
+		// key that is gone for good, plus every host-key pin. That asymmetry
+		// is worth a confirmation on its own — a cosmetic edit (adding a
+		// trailing slash, switching a hostname to its CNAME) reaches the same
+		// destination and should not silently destroy the credential. The UI
+		// warns before saving; this is the gate for every other caller.
+		if err := h.requireSSHTrustResetAck(c.Context(), id, req.AcknowledgeSSHTrustReset); err != nil {
+			return renderConfirmRequired(c, err)
+		}
+
+		if resetErr := h.resetClusterSSHTrust(c, id, existing.ApiUrl, params.ApiUrl); resetErr != nil {
+			return resetErr
+		}
+	}
+
 	cluster, err := h.queries.UpdateCluster(c.Context(), params)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update cluster")
@@ -705,6 +784,164 @@ func (h *ClusterHandler) Delete(c fiber.Ctx) error {
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// confirmSSHTrustReset is the code the cluster edit dialog keys on to turn the
+// refusal into a prompt. Changing this string without changing
+// EditClusterDialog's SSH_TRUST_RESET makes the cluster API URL unchangeable
+// from the UI — the 422 stops matching, no panel renders, and the
+// acknowledgement is never sent. TestSSHTrustResetGateWireCode pins the value.
+const confirmSSHTrustReset = "ssh_trust_reset_confirm_required"
+
+// requireSSHTrustResetAck asks before destroying an SSH credential that moving
+// the address will invalidate. Confirm-and-proceed, in the same structured-422
+// shape as the private-address and LDAP-transport gates, so the admin UI can
+// turn it into a prompt rather than an unexplained failure.
+//
+// Silent only when there is genuinely nothing to lose — no stored credential
+// AND no pinned host keys. Those two can exist independently: deleting the
+// credential leaves the pins behind.
+func (h *ClusterHandler) requireSSHTrustResetAck(ctx context.Context, id uuid.UUID, acknowledged bool) error {
+	if acknowledged {
+		return nil
+	}
+
+	hasCreds, err := h.queries.HasClusterSSHCredentials(ctx, id)
+	if err != nil {
+		slog.Error("failed to check for cluster SSH credentials before re-home",
+			"cluster_id", id, "error", err)
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check for SSH credentials")
+	}
+
+	// #8: the pins are destroyed too, and they outlive the credential — a
+	// DELETE of the SSH credential leaves them behind. Prompting only on the
+	// credential would silently discard trust the operator established.
+	pins, pinErr := h.queries.ListSSHKnownHosts(ctx, id)
+	if pinErr != nil {
+		slog.Error("failed to list pinned SSH host keys before re-home",
+			"cluster_id", id, "error", pinErr)
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read pinned SSH host keys")
+	}
+
+	if !hasCreds && len(pins) == 0 {
+		return nil
+	}
+
+	return &confirmRequiredError{
+		Code: confirmSSHTrustReset,
+		Message: "Node addresses are learned from this API, so the stored SSH credential and " +
+			"every pinned host key were entrusted to machines this cluster is leaving. Saving " +
+			"clears both, and the credential cannot be recovered. Confirm to proceed.",
+		Fields: map[string]any{
+			"clears_ssh_credential": hasCreds,
+			"clears_pinned_hosts":   len(pins),
+		},
+	}
+}
+
+// resetClusterSSHTrust drops the cluster's SSH credential and every pinned
+// host key, because the address they were entrusted to has moved. Called only
+// when clusters.api_url actually changes.
+//
+// A no-op when nothing is stored, so re-homing a cluster that never had SSH
+// configured stays a plain address change.
+func (h *ClusterHandler) resetClusterSSHTrust(c fiber.Ctx, id uuid.UUID, previousURL, newURL string) error {
+	creds, credErr := h.queries.GetClusterSSHCredentials(c.Context(), id)
+	hadCreds := credErr == nil
+	if credErr != nil && !errors.Is(credErr, pgx.ErrNoRows) {
+		slog.Error("failed to read cluster SSH credentials before re-home",
+			"cluster_id", id, "error", credErr)
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read cluster SSH credentials")
+	}
+
+	pins, pinErr := h.queries.ListSSHKnownHosts(c.Context(), id)
+	if pinErr != nil {
+		slog.Error("failed to list pinned SSH host keys before re-home",
+			"cluster_id", id, "error", pinErr)
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to read pinned SSH host keys")
+	}
+
+	if !hadCreds && len(pins) == 0 {
+		return nil
+	}
+
+	// Both deletes are attempted and the outcome is recorded either way. An
+	// early return between them would destroy the credential and leave no trace
+	// of it — and this row is the only explanation the operator gets for their
+	// rolling updates suddenly reporting SSH as unconfigured.
+	var failure error
+	credsCleared := false
+	if hadCreds {
+		if err := h.queries.DeleteClusterSSHCredentials(c.Context(), id); err != nil {
+			slog.Error("failed to clear cluster SSH credentials on re-home",
+				"cluster_id", id, "error", err)
+			failure = fiber.NewError(fiber.StatusInternalServerError, "Failed to clear cluster SSH credentials")
+		} else {
+			credsCleared = true
+		}
+	}
+	pinsCleared := false
+	if len(pins) > 0 && failure == nil {
+		if err := h.queries.DeleteSSHKnownHostsForCluster(c.Context(), id); err != nil {
+			slog.Error("failed to clear pinned SSH host keys on re-home",
+				"cluster_id", id, "error", err)
+			failure = fiber.NewError(fiber.StatusInternalServerError, "Failed to clear pinned SSH host keys")
+		} else {
+			pinsCleared = true
+		}
+	}
+
+	// Name what was dropped: after this the operator has to re-enter the
+	// credential and re-pin, and this row is the only record of why their
+	// rolling updates suddenly report SSH as unconfigured.
+	//
+	// Usernames and host addresses only — never the credential itself, and
+	// note audit_log.details is readable by every Viewer.
+	// Truncated and bounded like every other value in this row: ssh_known_hosts
+	// .host is fed from nodes.address, which the collector fills from whatever
+	// the cluster API reported — the same remote-controlled source the rest of
+	// this blob is defended against — and audit_log.details is readable by
+	// every Viewer.
+	const maxAuditedPins = 64
+	pinnedHosts := make([]string, 0, len(pins))
+	for i, p := range pins {
+		if i >= maxAuditedPins {
+			pinnedHosts = append(pinnedHosts, "… and "+strconv.Itoa(len(pins)-maxAuditedPins)+" more")
+			break
+		}
+		pinnedHosts = append(pinnedHosts, auditSafe(p.Host))
+	}
+	fields := map[string]any{
+		"reason":                 "cluster re-pointed at a different API address; SSH trust anchor reset",
+		"previous_api_url":       auditSafe(previousURL),
+		"new_api_url":            auditSafe(newURL),
+		"ssh_credential_cleared": credsCleared,
+		"warning":                "re-enter the SSH credential and re-pin each node host key before the next rolling update",
+	}
+	if pinsCleared {
+		fields["pinned_hosts_cleared"] = pinnedHosts
+	}
+	if failure != nil {
+		// The address does NOT move when this is set, so the row describes a
+		// half-done reset the operator has to reconcile by hand.
+		fields["partial"] = true
+		fields["warning"] = "SSH trust reset did not complete; the API address was NOT changed. " +
+			"Re-check the cluster's SSH credential and pinned host keys."
+	}
+	if hadCreds {
+		// The username names WHICH login has to be re-entered, which is the one
+		// thing the operator cannot recover from the rest of this row. It is
+		// otherwise reachable only with manage:ssh_credentials, and view:audit
+		// is held by every Viewer, so this does widen who knows the privileged
+		// login name — accepted because the row is useless without it, and
+		// truncated like every other value here.
+		fields["ssh_username"] = auditSafe(creds.Username)
+	}
+	details, _ := json.Marshal(fields)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(),
+		"cluster_ssh_trust_reset", details)
+
+	return failure
 }
 
 type connectivityTestResult struct {

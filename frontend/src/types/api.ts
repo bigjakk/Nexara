@@ -100,6 +100,12 @@ export interface LDAPConfigRequest {
   group_role_mapping: Record<string, string>;
   default_role_id: string | null;
   sync_interval_minutes: number;
+  /**
+   * Confirms storing a config that carries passwords over a connection that is
+   * unencrypted, or encrypted but unverified. Only sent after the operator
+   * accepts the warning the backend returns on the first attempt.
+   */
+  acknowledge_insecure_tls?: boolean;
 }
 
 export interface LDAPTestResponse {
@@ -149,6 +155,12 @@ export interface OIDCConfigRequest {
   default_role_id: string | null;
   auto_provision: boolean;
   allowed_domains: string[];
+  /**
+   * Confirms a plain-http callback on anything but loopback. The authorization
+   * code rides back on that URL, so off loopback it crosses the network in the
+   * clear. Only sent after the operator accepts the backend's refusal.
+   */
+  acknowledge_insecure_redirect?: boolean;
 }
 
 export interface OIDCTestResponse {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useUpdateCluster } from "@/features/dashboard/api/dashboard-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,15 @@ import {
   type PrivateAddressWarning as PrivateAddressDetails,
 } from "@/lib/private-address";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
+import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
+import {
+  confirmRequiredFromError,
+  type ConfirmRequired,
+} from "@/lib/confirm-gate";
+import { useSSHCredentials } from "@/features/rolling-updates/api/rolling-update-queries";
+
+/** The backend's code for the SSH trust reset (clusters.go). */
+const SSH_TRUST_RESET = "ssh_trust_reset_confirm_required";
 import type { ClusterResponse } from "@/types/api";
 
 interface FingerprintResponse {
@@ -60,6 +69,39 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
   // before the request is worth sending, and says why.
   const addressChanged = apiUrl !== cluster.api_url;
 
+  // Moving the address resets the cluster's SSH trust anchor server-side: node
+  // addresses are learned from this API, so a stored SSH credential and its
+  // pinned host keys no longer describe the machines Nexara would reach.
+  //
+  // The server refuses with a 422 until the reset is acknowledged, and THAT is
+  // what drives the confirmation below — not this query. The query needs
+  // manage:ssh_credentials, which a caller holding only manage:cluster does not
+  // have; driving the prompt from it would leave that caller staring at a
+  // refusal with no control to satisfy it, unable to change the address at all.
+  // It is used only for the advance notice, which is a nicety for callers who
+  // can read it.
+  const { data: sshCreds } = useSSHCredentials(cluster.id);
+  const sshResetForeseen = addressChanged && sshCreds != null;
+
+  // The server's refusal, once it arrives. Re-submitting with the
+  // acknowledgement is the only way past it, for every caller.
+  const [sshResetConfirm, setSshResetConfirm] = useState<ConfirmRequired | null>(
+    null,
+  );
+
+  // Radix only calls the Dialog's onOpenChange for its OWN close affordances
+  // (Escape, overlay, the built-in X). The footer Cancel calls onOpenChange
+  // directly, so the reset has to key on `open` instead — otherwise a typed
+  // token secret, an open confirm and an accepted fingerprint all survive a
+  // cancel into the next time the dialog is opened.
+  useEffect(() => {
+    if (!open) {
+      resetFingerprintState();
+      updateMutation.reset();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   function resetFingerprintState() {
     setFingerprint(null);
     setFingerprintAccepted(false);
@@ -68,6 +110,7 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
     setPrivateWarning(null);
     setPrivateWarningSource(null);
     setAllowPrivate(false);
+    setSshResetConfirm(null);
   }
 
   async function fetchFingerprint(allow: boolean) {
@@ -106,7 +149,7 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
   function handleConfirmPrivate() {
     setAllowPrivate(true);
     if (privateWarningSource === "update") {
-      submitUpdate(true);
+      submitUpdate(true, sshResetConfirm != null);
     } else {
       void fetchFingerprint(true);
     }
@@ -114,10 +157,10 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
 
   function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
-    submitUpdate(allowPrivate);
+    submitUpdate(allowPrivate, false);
   }
 
-  function submitUpdate(allow: boolean) {
+  function submitUpdate(allow: boolean, acknowledgeSSHTrustReset: boolean) {
     const body: {
       name?: string;
       api_url?: string;
@@ -125,6 +168,7 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
       token_secret?: string;
       tls_fingerprint?: string;
       allow_private_address?: boolean;
+      acknowledge_ssh_trust_reset?: boolean;
     } = {};
     if (name !== cluster.name) body.name = name;
     if (apiUrl !== cluster.api_url) body.api_url = apiUrl;
@@ -136,6 +180,11 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
     if (allow) {
       body.allow_private_address = true;
     }
+    // Only ever sent after the operator has confirmed the server's refusal.
+    // Attaching it pre-emptively would make the gate decorative.
+    if (acknowledgeSSHTrustReset) {
+      body.acknowledge_ssh_trust_reset = true;
+    }
 
     if (Object.keys(body).length === 0) {
       onOpenChange(false);
@@ -144,6 +193,9 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
 
     setPrivateWarning(null);
     setPrivateWarningSource(null);
+    if (!acknowledgeSSHTrustReset) {
+      setSshResetConfirm(null);
+    }
 
     updateMutation.mutate(
       { id: cluster.id, body },
@@ -157,7 +209,21 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
           if (warn != null) {
             setPrivateWarning(warn);
             setPrivateWarningSource("update");
+            return;
           }
+          // The dialog only ever edits this one cluster, so the target is
+          // fixed and a late-settling mutation cannot land on another.
+          const confirm = confirmRequiredFromError(err, [SSH_TRUST_RESET], cluster.id);
+          if (confirm != null) {
+            setSshResetConfirm(confirm);
+            return;
+          }
+          // Anything else must reach the banner below, which is gated on this
+          // being null. Leaving a stale confirm mounted hides the failure —
+          // and on the acknowledged re-submit that failure can be a 500 AFTER
+          // the SSH credential was already deleted, which is the one outcome
+          // the operator most needs told about.
+          setSshResetConfirm(null);
         },
       },
     );
@@ -197,6 +263,26 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
               </p>
             )}
           </div>
+
+          {sshResetForeseen && sshResetConfirm == null && (
+            <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-500 shrink-0" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-500">
+                    SSH credential will be cleared
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Node addresses are learned from this API, so the stored SSH
+                    credential (<strong>{sshCreds.username}</strong>) and every
+                    pinned host key were entrusted to machines this cluster is
+                    leaving. Saving clears both. Re-enter the credential and
+                    re-pin each node before the next rolling update.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="edit-token">Token ID</Label>
             <Input id="edit-token" value={tokenId} onChange={(e) => { setTokenId(e.target.value); }} required />
@@ -302,6 +388,21 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
             )}
           </div>
 
+          {sshResetConfirm != null && sshResetConfirm.target === cluster.id && (
+            <ConfirmRequiredWarning
+              title="SSH credential will be cleared"
+              message={sshResetConfirm.message}
+              confirmLabel="Clear SSH trust and save"
+              onConfirm={() => {
+                submitUpdate(allowPrivate, true);
+              }}
+              onCancel={() => {
+                setSshResetConfirm(null);
+              }}
+              pending={updateMutation.isPending}
+            />
+          )}
+
           {privateWarning != null && (
             <PrivateAddressWarning
               ip={privateWarning.ip}
@@ -315,7 +416,7 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
             />
           )}
 
-          {privateWarning == null && updateMutation.isError && (
+          {privateWarning == null && sshResetConfirm == null && updateMutation.isError && (
             <p className="text-sm text-destructive">
               {updateMutation.error instanceof Error ? updateMutation.error.message : "Update failed"}
             </p>

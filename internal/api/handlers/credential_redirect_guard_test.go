@@ -232,3 +232,95 @@ func qualifiedFuncName(fn *ast.FuncDecl) string {
 func isEncryptedField(name string) bool {
 	return strings.Contains(name, "Encrypted")
 }
+
+// The SSH trust reset is the cross-table half of the credential-redirect rule,
+// and the guard above is blind to it by construction — the credential lives in
+// cluster_ssh_credentials while the address that reaches it lives in
+// nodes.address, filled by the collector from whatever clusters.api_url
+// reports. Nothing else pins the call, so a refactor could drop it from
+// ClusterHandler.Update and every other test would still pass.
+//
+// Ordering matters as much as presence: the reset must run BEFORE the row is
+// written, or there is a window holding the new address and the old SSH
+// credential together, which is the state being prevented.
+func TestGuard_ClusterUpdateResetsSSHTrustBeforeWriting(t *testing.T) {
+	fset, files := parseGoFiles(t, ".")
+
+	var checked bool
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || qualifiedFuncName(fn) != "ClusterHandler.Update" {
+				continue
+			}
+			checked = true
+
+			var resetPos, writePos int
+			var resetChecked bool
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				// The reset must be CHECKED, not merely called. `_ = reset(...)`
+				// or a bare call leaves a failure to clear the credential
+				// invisible, and the handler goes on to move the address —
+				// which is the state this whole guard exists to prevent. Same
+				// standard guardedByRedirectCheck applies to the redirect gate.
+				if ifStmt, ok := n.(*ast.IfStmt); ok {
+					// Init and Cond ONLY. Descending into Body would match the
+					// call merely for sitting inside `if params.ApiUrl != ...`,
+					// which is where it already lives — so a bare call or
+					// `_ = reset(...)` would still look checked.
+					for _, part := range []ast.Node{ifStmt.Init, ifStmt.Cond} {
+						if part == nil {
+							continue
+						}
+						ast.Inspect(part, func(inner ast.Node) bool {
+							if call, ok := inner.(*ast.CallExpr); ok && callName(call) == "resetClusterSSHTrust" {
+								resetChecked = true
+							}
+							return true
+						})
+					}
+				}
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				switch callName(call) {
+				case "resetClusterSSHTrust":
+					if resetPos == 0 {
+						resetPos = int(call.Pos())
+					}
+				case "UpdateCluster":
+					if writePos == 0 {
+						writePos = int(call.Pos())
+					}
+				}
+				return true
+			})
+
+			pos := fset.Position(fn.Pos())
+			if resetPos == 0 {
+				t.Errorf("%s: ClusterHandler.Update no longer calls resetClusterSSHTrust. "+
+					"Moving api_url re-homes every node address, so the stored SSH credential "+
+					"and its pinned host keys were entrusted to machines the cluster is leaving. "+
+					"Without the reset, a caller who supplies their own token secret can have "+
+					"Nexara hand that credential to a host they control.", pos)
+				continue
+			}
+			if !resetChecked {
+				t.Errorf("%s: ClusterHandler.Update calls resetClusterSSHTrust but never checks its "+
+					"error. A failed reset must stop the handler — otherwise the address moves with "+
+					"the SSH credential still in place, which is the state the reset exists to "+
+					"prevent.", pos)
+			}
+			if writePos != 0 && resetPos > writePos {
+				t.Errorf("%s: resetClusterSSHTrust runs AFTER UpdateCluster. It must run before, "+
+					"or a failed reset leaves the row holding the new address alongside the old "+
+					"SSH credential — exactly the state it exists to prevent.", pos)
+			}
+		}
+	}
+
+	if !checked {
+		t.Fatal("ClusterHandler.Update not found — this guard is no longer checking anything")
+	}
+}

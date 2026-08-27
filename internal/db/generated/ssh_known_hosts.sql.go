@@ -43,6 +43,16 @@ func (q *Queries) DeleteSSHKnownHostByID(ctx context.Context, arg DeleteSSHKnown
 	return err
 }
 
+const deleteSSHKnownHostsForCluster = `-- name: DeleteSSHKnownHostsForCluster :exec
+DELETE FROM ssh_known_hosts
+WHERE cluster_id = $1
+`
+
+func (q *Queries) DeleteSSHKnownHostsForCluster(ctx context.Context, clusterID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSSHKnownHostsForCluster, clusterID)
+	return err
+}
+
 const getSSHKnownHost = `-- name: GetSSHKnownHost :one
 SELECT id, cluster_id, host, port, public_key, fingerprint, pinned_by, pinned_at FROM ssh_known_hosts
 WHERE cluster_id = $1 AND host = $2 AND port = $3

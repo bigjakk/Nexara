@@ -244,6 +244,7 @@ type Querier interface {
 	DeleteRole(ctx context.Context, id uuid.UUID) error
 	DeleteSSHKnownHost(ctx context.Context, arg DeleteSSHKnownHostParams) error
 	DeleteSSHKnownHostByID(ctx context.Context, arg DeleteSSHKnownHostByIDParams) error
+	DeleteSSHKnownHostsForCluster(ctx context.Context, clusterID uuid.UUID) error
 	DeleteScheduledTask(ctx context.Context, id uuid.UUID) error
 	DeleteSetting(ctx context.Context, arg DeleteSettingParams) error
 	DeleteSettingByID(ctx context.Context, id uuid.UUID) error

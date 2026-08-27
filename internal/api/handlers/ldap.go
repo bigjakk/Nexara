@@ -58,6 +58,10 @@ type ldapConfigRequest struct {
 	GroupRoleMapping     map[string]string `json:"group_role_mapping"`
 	DefaultRoleID        *string           `json:"default_role_id"`
 	SyncIntervalMinutes  int32             `json:"sync_interval_minutes"`
+	// AcknowledgeInsecureTLS is required to store a config that carries
+	// passwords over a connection that is unencrypted, or encrypted but
+	// unverified.
+	AcknowledgeInsecureTLS bool `json:"acknowledge_insecure_tls,omitempty"`
 }
 
 type ldapConfigResponse struct {
@@ -193,6 +197,16 @@ func (h *LDAPHandler) Create(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
+	// No previous state on create, so the gate reads the END state: pass a
+	// protected, verifying "before" and let the requested config be compared
+	// against it.
+	if err := requireLDAPTransportAck(
+		true, ldapTransportProtected(req.ServerURL, req.StartTLS),
+		false, req.SkipTLSVerify,
+		req.AcknowledgeInsecureTLS); err != nil {
+		return renderConfirmRequired(c, err)
+	}
+
 	encPassword := ""
 	if req.BindPassword != "" {
 		var err error
@@ -242,7 +256,17 @@ func (h *LDAPHandler) Create(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create LDAP config")
 	}
 
-	details, _ := json.Marshal(map[string]string{"name": cfg.Name})
+	// Same reasoning as Update: a directory created straight into cleartext is
+	// as worth a trail as one moved there, and creating a new enabled config is
+	// the easier of the two for a caller who wants passwords sent somewhere.
+	createFields := map[string]any{"name": cfg.Name}
+	if lostEnc, lostVer := ldapTransportWeakened(
+		true, ldapTransportProtected(cfg.ServerUrl, cfg.StartTls),
+		false, cfg.SkipTlsVerify); lostEnc || lostVer {
+		createFields["insecure_transport_acknowledged"] = true
+		createFields["new_transport"] = ldapTransportLabel(cfg.ServerUrl, cfg.StartTls, cfg.SkipTlsVerify)
+	}
+	details, _ := json.Marshal(createFields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "ldap", cfg.ID.String(), "ldap_config_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(toLDAPConfigResponse(cfg))
@@ -282,6 +306,20 @@ func (h *LDAPHandler) Update(c fiber.Ctx) error {
 
 	if err := validateLDAPFilters(req.UserFilter, req.GroupFilter); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	// A downgrade of the transport is gated the same way an address move is,
+	// and for the same reason: the caller need never have seen the bind
+	// password, and this is the other way to get it out of Nexara.
+	wasProtected := ldapTransportProtected(existing.ServerUrl, existing.StartTls)
+	nowProtected := ldapTransportProtected(req.ServerURL, req.StartTLS)
+	lostEncryption, lostVerification := ldapTransportWeakened(
+		wasProtected, nowProtected, existing.SkipTlsVerify, req.SkipTLSVerify)
+	if err := requireLDAPTransportAck(
+		wasProtected, nowProtected,
+		existing.SkipTlsVerify, req.SkipTLSVerify,
+		req.AcknowledgeInsecureTLS); err != nil {
+		return renderConfirmRequired(c, err)
 	}
 
 	// Refuse to re-point the stored bind password at a directory the operator
@@ -354,7 +392,19 @@ func (h *LDAPHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update LDAP config")
 	}
 
-	details, _ := json.Marshal(map[string]string{"name": cfg.Name})
+	// An acknowledged downgrade is the one action in this file the project
+	// gates behind a confirmation, so it has to leave a trail — otherwise the
+	// only record that a directory was moved to cleartext is the absence of
+	// one. The transport is recorded as a label rather than the raw server_url:
+	// GET on this config needs manage:user while view:audit is held by every
+	// Viewer, and the label carries the whole point without the address.
+	fields := map[string]any{"name": cfg.Name}
+	if lostEncryption || lostVerification {
+		fields["insecure_transport_acknowledged"] = true
+		fields["previous_transport"] = ldapTransportLabel(existing.ServerUrl, existing.StartTls, existing.SkipTlsVerify)
+		fields["new_transport"] = ldapTransportLabel(cfg.ServerUrl, cfg.StartTls, cfg.SkipTlsVerify)
+	}
+	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "ldap", cfg.ID.String(), "ldap_config_updated", details)
 
 	return c.JSON(toLDAPConfigResponse(cfg))
@@ -652,6 +702,95 @@ func validateLDAPFilters(userFilter, groupFilter string) error {
 	}
 	return nil
 }
+
+// ldapTransportProtected reports whether a config encrypts its connection at
+// all. ldaps:// is implicit TLS; on ldap:// only StartTLS upgrades it.
+func ldapTransportProtected(serverURL string, startTLS bool) bool {
+	// Lowercased because wasProtected is computed from a STORED server_url.
+	// validateLDAPServerURL is case-sensitive and runs on every write path, so
+	// "LDAPS://" cannot be stored today — but a row that predates it would
+	// otherwise read as cleartext, making a real downgrade look like no change
+	// and skipping the prompt.
+	return startTLS || strings.HasPrefix(strings.ToLower(serverURL), "ldaps://")
+}
+
+// ldapTransportWeakened reports the two ways a config can move to a weaker
+// connection: losing encryption entirely, and keeping it but dropping the
+// certificate check. They are reported separately because the operator needs
+// different words for each — cleartext is readable by anyone on the wire,
+// unverified only by someone who can intercept.
+//
+// Split out from the gate so the rule is testable without a request context.
+func ldapTransportWeakened(wasProtected, nowProtected, wasSkippingVerify, nowSkippingVerify bool) (lostEncryption, lostVerification bool) {
+	return wasProtected && !nowProtected, !wasSkippingVerify && nowSkippingVerify
+}
+
+// ldapTransportLabel names a config's connection security in one token, for
+// audit rows that must not carry the server address itself.
+func ldapTransportLabel(serverURL string, startTLS, skipVerify bool) string {
+	if !ldapTransportProtected(serverURL, startTLS) {
+		return "cleartext"
+	}
+	base := "starttls"
+	if strings.HasPrefix(strings.ToLower(serverURL), "ldaps://") {
+		base = "ldaps"
+	}
+	if skipVerify {
+		return base + " (unverified)"
+	}
+	return base
+}
+
+// requireLDAPTransportAck refuses a config that weakens LDAP transport unless
+// the caller says so explicitly.
+//
+// Why this is NOT conditional on a stored bind password: LDAP authentication
+// binds AS THE USER, so every interactive login puts that person's password on
+// this connection. A config doing an anonymous service bind still carries end
+// user passwords, and a directory on a segment someone can sniff needs no MITM
+// at all for cleartext to be readable.
+//
+// Confirm-and-proceed rather than a refusal, matching requireInsecureTLSAck and
+// the private-address gate: a lab directory with no CA is a real case. What it
+// removes is doing it by accident — and note start_tls and skip_tls_verify are
+// non-pointer bools on a full-body PUT, so a client that merely OMITS them
+// turns StartTLS off. That is the accident this catches.
+//
+// The predicate is the CHANGE, not the end state, so an install already running
+// cleartext is not made to re-acknowledge on every unrelated edit. Pass
+// wasProtected=true / wasSkippingVerify=false on create, where there is no
+// previous state and the end state is what matters.
+func requireLDAPTransportAck(wasProtected, nowProtected, wasSkippingVerify, nowSkippingVerify, acknowledged bool) error {
+	lostEncryption, lostVerification := ldapTransportWeakened(
+		wasProtected, nowProtected, wasSkippingVerify, nowSkippingVerify)
+	if (!lostEncryption && !lostVerification) || acknowledged {
+		return nil
+	}
+
+	// Losing encryption outranks losing verification: a cleartext connection
+	// has no certificate to talk about, and the operator needs the stronger of
+	// the two warnings.
+	if lostEncryption {
+		return &confirmRequiredError{
+			Code: confirmInsecureLDAPTransport,
+			Message: "This would carry the bind password and every user's login password to " +
+				"the directory in cleartext — ldap:// without StartTLS is not encrypted at all. " +
+				"Confirm to proceed.",
+			Fields: map[string]any{"transport_kind": "cleartext"},
+		}
+	}
+	return &confirmRequiredError{
+		Code: confirmInsecureLDAPTransport,
+		Message: "This directory connection's certificate would never be verified, so the " +
+			"passwords on it are exposed to anyone who can intercept the connection. " +
+			"Confirm to proceed.",
+		Fields: map[string]any{"transport_kind": "unverified"},
+	}
+}
+
+// confirmInsecureLDAPTransport is the code the admin page keys on to turn the
+// refusal into a prompt.
+const confirmInsecureLDAPTransport = "insecure_ldap_transport_confirm_required"
 
 func validateLDAPServerURL(rawURL string) error {
 	if !strings.HasPrefix(rawURL, "ldap://") && !strings.HasPrefix(rawURL, "ldaps://") {

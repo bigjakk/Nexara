@@ -20,6 +20,14 @@ import {
   XCircle,
 } from "lucide-react";
 import { AdminNav } from "../components/AdminNav";
+import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
+import {
+  confirmRequiredFromError,
+  type ConfirmRequired,
+} from "@/lib/confirm-gate";
+
+/** The backend's code for a cleartext OIDC callback (oidc.go). */
+const INSECURE_OIDC_REDIRECT = "insecure_oidc_redirect_confirm_required";
 import {
   useOIDCConfigs,
   useCreateOIDCConfig,
@@ -132,6 +140,16 @@ export function OIDCPage() {
   const { data: roles } = useRoles();
   const createConfig = useCreateOIDCConfig();
   const updateConfig = useUpdateOIDCConfig();
+
+  // Confirm gate for a plain-http callback: the authorization code rides back
+  // on that URL, so off loopback it crosses the network in the clear. The
+  // backend refuses the first attempt rather than saving.
+  const [redirectWarning, setRedirectWarning] = useState<ConfirmRequired | null>(
+    null,
+  );
+  // This page had no error display for create/update at all, so a refusal was
+  // simply a Save button that did nothing.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const deleteConfig = useDeleteOIDCConfig();
   const testConnection = useTestOIDCConnection();
 
@@ -169,6 +187,11 @@ export function OIDCPage() {
     form.issuer_url !== activeConfig.issuer_url;
 
   useEffect(() => {
+    // Skip while a confirm is pending: re-seeding would replace the values the
+    // operator is being asked about, so the confirm button would then submit
+    // the config unchanged — silently discarding their edit while reporting
+    // success.
+    if (redirectWarning != null) return;
     if (activeConfig) {
       const f = configToForm(activeConfig);
       setForm(f);
@@ -180,7 +203,21 @@ export function OIDCPage() {
       setDomainsText(activeConfig.allowed_domains.join(", "));
       setScopesText(activeConfig.scopes.join(", "));
     }
+    // redirectWarning is read, not depended on, and deliberately absent from the
+    // deps: including it would re-run this the moment the confirm clears,
+    // re-seeding the form from the server and discarding the edit the operator
+    // had just been asked to confirm.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConfig]);
+
+  // Clears the per-attempt feedback. The confirm in particular MUST be cleared
+  // when the form switches configs: left mounted, its button would submit
+  // whichever config is open now with an acknowledgement given for another.
+  const clearFeedback = () => {
+    setTestResult(null);
+    setRedirectWarning(null);
+    setSaveError(null);
+  };
 
   const startNew = () => {
     const redirectUri = window.location.origin + "/api/v1/auth/oidc/callback";
@@ -190,20 +227,20 @@ export function OIDCPage() {
     setScopesText("openid, email, profile");
     setIsNew(true);
     setEditingId(null);
-    setTestResult(null);
+    clearFeedback();
     setProviderPreset("custom");
   };
 
   const startEdit = (cfg: OIDCConfig) => {
     setEditingId(cfg.id);
     setIsNew(false);
-    setTestResult(null);
+    clearFeedback();
   };
 
   const cancel = () => {
     setEditingId(null);
     setIsNew(false);
-    setTestResult(null);
+    clearFeedback();
   };
 
   const buildMappingFromRows = () => {
@@ -232,19 +269,46 @@ export function OIDCPage() {
       .filter(Boolean);
   };
 
-  const handleSave = () => {
+  // Which config a save belongs to, so a mutation that settles after the
+  // operator has switched configs cannot leave its prompt on a different one.
+  const saveTarget = isNew ? null : editingId;
+
+  const save = (acknowledgeInsecureRedirect: boolean) => {
     const data: OIDCConfigRequest = {
       ...form,
       group_role_mapping: buildMappingFromRows(),
       allowed_domains: parseDomains(),
       scopes: parseScopes(),
+      ...(acknowledgeInsecureRedirect
+        ? { acknowledge_insecure_redirect: true }
+        : {}),
+    };
+    const target = saveTarget;
+
+    setSaveError(null);
+    if (!acknowledgeInsecureRedirect) {
+      setRedirectWarning(null);
+    }
+
+    const onError = (err: unknown) => {
+      const confirm = confirmRequiredFromError(err, [INSECURE_OIDC_REDIRECT], target);
+      if (confirm != null) {
+        setRedirectWarning(confirm);
+        return;
+      }
+      setRedirectWarning(null);
+      setSaveError(
+        err instanceof Error ? err.message : "Failed to save OIDC configuration",
+      );
     };
 
     if (isNew) {
       createConfig.mutate(data, {
         onSuccess: () => {
           setIsNew(false);
+          setRedirectWarning(null);
         },
+        onError,
       });
     } else if (editingId) {
       updateConfig.mutate(
@@ -252,10 +316,16 @@ export function OIDCPage() {
         {
           onSuccess: () => {
             setEditingId(null);
+            setRedirectWarning(null);
           },
+          onError,
         },
       );
     }
+  };
+
+  const handleSave = () => {
+    save(false);
   };
 
   const handleTest = () => {
@@ -665,6 +735,25 @@ export function OIDCPage() {
                   </div>
                 )}
               </div>
+            )}
+
+            {redirectWarning != null && redirectWarning.target === saveTarget && (
+              <ConfirmRequiredWarning
+                title="Callback is not encrypted"
+                message={`${redirectWarning.message} This is fine for a self-hosted lab with no TLS — confirm to continue, or go back and use an https callback.`}
+                confirmLabel="Save with a cleartext callback"
+                onConfirm={() => {
+                  save(true);
+                }}
+                onCancel={() => {
+                  setRedirectWarning(null);
+                }}
+                pending={createConfig.isPending || updateConfig.isPending}
+              />
+            )}
+
+            {saveError != null && (
+              <p className="text-sm text-destructive">{saveError}</p>
             )}
 
             {/* Actions */}

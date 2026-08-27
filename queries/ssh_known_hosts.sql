@@ -24,3 +24,7 @@ WHERE cluster_id = $1 AND host = $2 AND port = $3;
 -- name: DeleteSSHKnownHostByID :exec
 DELETE FROM ssh_known_hosts
 WHERE id = $1 AND cluster_id = $2;
+
+-- name: DeleteSSHKnownHostsForCluster :exec
+DELETE FROM ssh_known_hosts
+WHERE cluster_id = $1;

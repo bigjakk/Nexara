@@ -31,6 +31,15 @@ import {
 } from "../api/ldap-queries";
 import { useRoles } from "../api/rbac-queries";
 import type { LDAPConfig, LDAPConfigRequest } from "@/types/api";
+import {
+  confirmRequiredFromError,
+  confirmDetailString,
+  type ConfirmRequired,
+} from "@/lib/confirm-gate";
+import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
+
+/** The backend's code for an LDAP transport downgrade (ldap.go). */
+const INSECURE_LDAP_TRANSPORT = "insecure_ldap_transport_confirm_required";
 
 type DirectoryType = "openldap" | "ad";
 
@@ -141,6 +150,13 @@ export function LDAPPage() {
   // for, so moving the server URL means re-entering it. The backend refuses
   // the combination outright (LDAPHandler.Update). A config that binds
   // anonymously has no stored password and is not affected.
+  // Confirm gate for a transport downgrade (cleartext, or TLS with no
+  // certificate check). The backend answers the first attempt with a 422
+  // rather than saving; accepting re-submits with acknowledge_insecure_tls.
+  const [transportWarning, setTransportWarning] =
+    useState<ConfirmRequired | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const addressChanged =
     !isNew &&
     activeConfig != null &&
@@ -148,6 +164,11 @@ export function LDAPPage() {
     form.server_url !== activeConfig.server_url;
 
   useEffect(() => {
+    // Skip while a confirm is pending: re-seeding would replace the values the
+    // operator is being asked about, so the confirm button would then submit
+    // the config unchanged — silently discarding their edit while reporting
+    // success.
+    if (transportWarning != null) return;
     if (activeConfig) {
       const f = configToForm(activeConfig);
       setForm(f);
@@ -158,29 +179,42 @@ export function LDAPPage() {
         ),
       );
     }
+    // transportWarning is read, not depended on, and deliberately absent from the
+    // deps: including it would re-run this the moment the confirm clears,
+    // re-seeding the form from the server and discarding the edit the operator
+    // had just been asked to confirm.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConfig]);
+
+  // Clears the per-attempt feedback. The transport confirm in particular MUST
+  // be cleared when the form switches configs: left mounted, its confirm button
+  // would submit whichever config is open now, carrying an acknowledgement the
+  // operator gave for a different directory.
+  const clearFeedback = () => {
+    setTestResult(null);
+    setSyncResult(null);
+    setTransportWarning(null);
+    setSaveError(null);
+  };
 
   const startNew = () => {
     setForm(emptyForm);
     setMappingRows([]);
     setIsNew(true);
     setEditingId(null);
-    setTestResult(null);
-    setSyncResult(null);
+    clearFeedback();
   };
 
   const startEdit = (cfg: LDAPConfig) => {
     setEditingId(cfg.id);
     setIsNew(false);
-    setTestResult(null);
-    setSyncResult(null);
+    clearFeedback();
   };
 
   const cancel = () => {
     setEditingId(null);
     setIsNew(false);
-    setTestResult(null);
-    setSyncResult(null);
+    clearFeedback();
   };
 
   const buildMappingFromRows = () => {
@@ -193,17 +227,46 @@ export function LDAPPage() {
     return mapping;
   };
 
-  const handleSave = () => {
+  // Which config a save belongs to, so a mutation that settles after the
+  // operator has switched configs cannot leave its prompt on a different one.
+  const saveTarget = isNew ? null : editingId;
+
+  const save = (acknowledgeInsecureTLS: boolean) => {
     const data: LDAPConfigRequest = {
       ...form,
       group_role_mapping: buildMappingFromRows(),
+      ...(acknowledgeInsecureTLS ? { acknowledge_insecure_tls: true } : {}),
+    };
+    const target = saveTarget;
+
+    // The warning stays mounted across a confirmed re-submit so its button can
+    // show progress; it is cleared on success, or replaced on a fresh refusal.
+    setSaveError(null);
+    if (!acknowledgeInsecureTLS) {
+      setTransportWarning(null);
+    }
+
+    const onSettledSuccess = () => {
+      setTransportWarning(null);
+    };
+
+    const onError = (err: unknown) => {
+      const confirm = confirmRequiredFromError(err, [INSECURE_LDAP_TRANSPORT], target);
+      if (confirm != null) {
+        setTransportWarning(confirm);
+        return;
+      }
+      setTransportWarning(null);
+      setSaveError(err instanceof Error ? err.message : "Failed to save LDAP configuration");
     };
 
     if (isNew) {
       createConfig.mutate(data, {
         onSuccess: () => {
           setIsNew(false);
+          onSettledSuccess();
         },
+        onError,
       });
     } else if (editingId) {
       updateConfig.mutate(
@@ -211,10 +274,16 @@ export function LDAPPage() {
         {
           onSuccess: () => {
             setEditingId(null);
+            onSettledSuccess();
           },
+          onError,
         },
       );
     }
+  };
+
+  const handleSave = () => {
+    save(false);
   };
 
   const handleTest = () => {
@@ -721,6 +790,33 @@ export function LDAPPage() {
                   </p>
                 )}
               </div>
+            )}
+
+            {transportWarning != null && transportWarning.target === saveTarget && (
+              <ConfirmRequiredWarning
+                title={
+                  confirmDetailString(transportWarning, "transport_kind") === "cleartext"
+                    ? "Passwords would travel in cleartext"
+                    : "Certificate would never be verified"
+                }
+                message={`${transportWarning.message} This is fine for a self-hosted lab directory — confirm to continue, or go back and use ldaps:// or StartTLS.`}
+                confirmLabel={
+                  confirmDetailString(transportWarning, "transport_kind") === "cleartext"
+                    ? "Save without encryption"
+                    : "Save without verification"
+                }
+                onConfirm={() => {
+                  save(true);
+                }}
+                onCancel={() => {
+                  setTransportWarning(null);
+                }}
+                pending={createConfig.isPending || updateConfig.isPending}
+              />
+            )}
+
+            {saveError != null && (
+              <p className="text-sm text-destructive">{saveError}</p>
             )}
 
             {/* Actions */}
