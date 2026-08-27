@@ -774,17 +774,17 @@ func requireLDAPTransportAck(wasProtected, nowProtected, wasSkippingVerify, nowS
 		return &confirmRequiredError{
 			Code: confirmInsecureLDAPTransport,
 			Message: "This would carry the bind password and every user's login password to " +
-				"the directory in cleartext — ldap:// without StartTLS is not encrypted at all. " +
-				"Confirm to proceed.",
-			Fields: map[string]any{"transport_kind": "cleartext"},
+				"the directory in cleartext — ldap:// without StartTLS is not encrypted at all.",
+			AcknowledgeField: "acknowledge_insecure_tls",
+			Fields:           map[string]any{"transport_kind": "cleartext"},
 		}
 	}
 	return &confirmRequiredError{
 		Code: confirmInsecureLDAPTransport,
 		Message: "This directory connection's certificate would never be verified, so the " +
-			"passwords on it are exposed to anyone who can intercept the connection. " +
-			"Confirm to proceed.",
-		Fields: map[string]any{"transport_kind": "unverified"},
+			"passwords on it are exposed to anyone who can intercept the connection.",
+		AcknowledgeField: "acknowledge_insecure_tls",
+		Fields:           map[string]any{"transport_kind": "unverified"},
 	}
 }
 

@@ -725,9 +725,10 @@ func requireOIDCRedirectSchemeAck(rawURL string, acknowledged bool) error {
 		// run first: an unparseable URI cannot be shown to be safe, and the
 		// ordering between the two is not asserted anywhere.
 		return &confirmRequiredError{
-			Code:    confirmInsecureOIDCRedirect,
-			Message: "This callback could not be parsed, so it cannot be shown to be encrypted. Confirm to proceed.",
-			Fields:  map[string]any{"redirect_scheme": "unknown"},
+			Code:             confirmInsecureOIDCRedirect,
+			Message:          "This callback could not be parsed, so it cannot be shown to be encrypted.",
+			AcknowledgeField: "acknowledge_insecure_redirect",
+			Fields:           map[string]any{"redirect_scheme": "unknown"},
 		}
 	}
 	if u.Scheme != "http" {
@@ -740,9 +741,9 @@ func requireOIDCRedirectSchemeAck(rawURL string, acknowledged bool) error {
 	return &confirmRequiredError{
 		Code: confirmInsecureOIDCRedirect,
 		Message: "This callback is plain http, so every login's authorization code crosses " +
-			"the network in the clear. Use https unless this install has no TLS at all. " +
-			"Confirm to proceed.",
-		Fields: map[string]any{"redirect_scheme": "http"},
+			"the network in the clear. Use https unless this install has no TLS at all.",
+		AcknowledgeField: "acknowledge_insecure_redirect",
+		Fields:           map[string]any{"redirect_scheme": "http"},
 	}
 }
 

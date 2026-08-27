@@ -38,6 +38,13 @@ type confirmRequiredError struct {
 	// banner for a confirm prompt.
 	Code    string
 	Message string
+	// AcknowledgeField names the request field that overrides this refusal. A
+	// UI already knows which flag to resend, but a direct API caller has only
+	// the response to go on — and Message deliberately does not spell it out,
+	// because every consumer appends its own call to action and two of them
+	// read as a stutter ("Confirm to proceed. … confirm to continue").
+	AcknowledgeField string
+
 	// Fields carries whatever the prompt needs to word itself, and is rendered
 	// under the "details" JSON key. Never put a secret here: it goes into a
 	// response body, and gates like these are reached by callers who have not
@@ -64,6 +71,10 @@ func renderConfirmRequired(c fiber.Ctx, err error) error {
 	details := fiber.Map{}
 	for k, v := range confirmErr.Fields {
 		details[k] = v
+	}
+
+	if confirmErr.AcknowledgeField != "" {
+		details["acknowledge_field"] = confirmErr.AcknowledgeField
 	}
 
 	return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{

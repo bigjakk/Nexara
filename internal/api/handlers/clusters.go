@@ -831,7 +831,8 @@ func (h *ClusterHandler) requireSSHTrustResetAck(ctx context.Context, id uuid.UU
 		Code: confirmSSHTrustReset,
 		Message: "Node addresses are learned from this API, so the stored SSH credential and " +
 			"every pinned host key were entrusted to machines this cluster is leaving. Saving " +
-			"clears both, and the credential cannot be recovered. Confirm to proceed.",
+			"clears both, and the credential cannot be recovered.",
+		AcknowledgeField: "acknowledge_ssh_trust_reset",
 		Fields: map[string]any{
 			"clears_ssh_credential": hasCreds,
 			"clears_pinned_hosts":   len(pins),
