@@ -64,6 +64,27 @@ type Config struct {
 	// 60s in the collector; 0 disables collection entirely (the central
 	// page then only refreshes via per-guest resyncs).
 	SnapshotSyncInterval time.Duration `envconfig:"SNAPSHOT_SYNC_INTERVAL" default:"5m"`
+	// VeeamSyncInterval drives the Veeam inventory pass — repositories and
+	// their capacity sample, job states, backup objects and the restore
+	// points of any object whose point count moved. Floored at 60s in the
+	// collector; 0 disables Veeam collection entirely.
+	VeeamSyncInterval time.Duration `envconfig:"VEEAM_SYNC_INTERVAL" default:"5m"`
+	// VeeamSessionInterval drives the much cheaper session poll: one
+	// watermarked, server-side-filtered listing per server, so a running job's
+	// progress is visible without paying for a full inventory pass. Floored at
+	// 30s; 0 falls back to the inventory cadence.
+	VeeamSessionInterval time.Duration `envconfig:"VEEAM_SESSION_INTERVAL" default:"60s"`
+	// VeeamRestorePointRetention bounds how long a restore point Veeam has
+	// STOPPED reporting is kept. It is measured against last_seen_at, never
+	// against the point's own age — a restore point Veeam still holds must
+	// never be pruned, or every RPO and coverage figure derived from it
+	// silently becomes wrong.
+	VeeamRestorePointRetention time.Duration `envconfig:"VEEAM_RESTORE_POINT_RETENTION" default:"720h"`
+	// VeeamSessionRetention bounds the window of job runs Nexara mirrors.
+	// Unlike restore points this IS measured against the session's own age:
+	// a real server holds tens of thousands of them and Nexara deliberately
+	// keeps a recent window rather than the full history.
+	VeeamSessionRetention time.Duration `envconfig:"VEEAM_SESSION_RETENTION" default:"720h"`
 	// TaskHistoryRetention bounds how far back /api/v1/tasks can answer. The
 	// hourly sweep deletes terminal rows older than this.
 	//

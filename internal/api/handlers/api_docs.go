@@ -168,12 +168,18 @@ var endpointMeta = map[string]APIEndpoint{
 	// ── Veeam Backup & Replication ────────────────────────────────────
 	// Global scope, not per-cluster: one Veeam server can protect several
 	// Proxmox clusters, so its existence spans them.
-	"GET /api/v1/veeam-servers":           {Description: "List registered Veeam Backup & Replication servers", Permission: "view:veeam", Group: "Backup"},
-	"POST /api/v1/veeam-servers":          {Description: "Register a Veeam Backup & Replication server (VBR 13.1+). Connects and records the negotiated API revision, product version and licence edition; a failed connection is a failed create", Permission: "manage:veeam", Group: "Backup"},
-	"GET /api/v1/veeam-servers/:id":       {Description: "Get Veeam server details", Permission: "view:veeam", Group: "Backup"},
-	"PUT /api/v1/veeam-servers/:id":       {Description: "Update a Veeam server. Changing the URL, credentials or TLS handling re-tests the connection; renaming or disabling does not", Permission: "manage:veeam", Group: "Backup"},
-	"DELETE /api/v1/veeam-servers/:id":    {Description: "Remove a Veeam server and its stored credential", Permission: "delete:veeam", Group: "Backup"},
-	"POST /api/v1/veeam-servers/:id/test": {Description: "Test the stored connection and report version, licence edition and covered Proxmox clusters. Persists nothing", Permission: "manage:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers":                                              {Description: "List registered Veeam Backup & Replication servers", Permission: "view:veeam", Group: "Backup"},
+	"POST /api/v1/veeam-servers":                                             {Description: "Register a Veeam Backup & Replication server (VBR 13.1+). Connects and records the negotiated API revision, product version and licence edition; a failed connection is a failed create", Permission: "manage:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers/:id":                                          {Description: "Get Veeam server details", Permission: "view:veeam", Group: "Backup"},
+	"PUT /api/v1/veeam-servers/:id":                                          {Description: "Update a Veeam server. Changing the URL, credentials or TLS handling re-tests the connection; renaming or disabling does not", Permission: "manage:veeam", Group: "Backup"},
+	"DELETE /api/v1/veeam-servers/:id":                                       {Description: "Remove a Veeam server and its stored credential", Permission: "delete:veeam", Group: "Backup"},
+	"POST /api/v1/veeam-servers/:id/test":                                    {Description: "Test the stored connection and report version, licence edition and covered Proxmox clusters. Persists nothing", Permission: "manage:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers/:id/repositories":                             {Description: "List Veeam backup repositories with capacity. Global scope — one repository holds every cluster's backups", Permission: "view:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers/:id/repositories/:repository_id/metrics":      {Description: "Repository capacity over time. ?range=24h|7d|30d|90d, default 7d", Permission: "view:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers/:id/jobs":                                     {Description: "List Veeam Proxmox backup jobs with their last result and progress", Permission: "view:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers/:id/sessions":                                 {Description: "List recent Veeam Proxmox backup runs", Permission: "view:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers/:id/backup-objects":                           {Description: "List backed-up guests. One row per (guest x backup), so a guest covered by several jobs appears more than once", Permission: "view:veeam", Group: "Backup"},
+	"GET /api/v1/veeam-servers/:id/backup-objects/:object_id/restore-points": {Description: "List a backup object's restore points, with malware status and file-level-restore availability", Permission: "view:veeam", Group: "Backup"},
 
 	// ── DRS ───────────────────────────────────────────────────────────
 	"GET /api/v1/clusters/:cluster_id/drs/config":            {Description: "Get DRS configuration", Permission: "view:drs", Group: "DRS"},

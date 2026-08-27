@@ -2,10 +2,13 @@ package veeam
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -68,11 +71,42 @@ type fakeVBR struct {
 	// that many authenticated requests, forcing a 401-refresh-retry.
 	expireAfter int32
 	authedCalls atomic.Int32
+
+	// lists holds paginated listing rows per path, served with limit/skip
+	// honoured so the client's pagination walk is genuinely exercised.
+	lists map[string][]json.RawMessage
+	// queriesByPath records every query string seen per path, so a test can
+	// assert what the client asked for and not merely what it got back.
+	queriesByPath map[string][]url.Values
+	// repeatFullPages makes every listing answer a full page forever,
+	// emulating a server whose pagination never terminates.
+	repeatFullPages bool
+}
+
+func (f *fakeVBR) pathCalls(path string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.queriesByPath[path])
+}
+
+// lastQuery returns the query string of the most recent request to path.
+func (f *fakeVBR) lastQuery(path string) url.Values {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	seen := f.queriesByPath[path]
+	if len(seen) == 0 {
+		return url.Values{}
+	}
+	return seen[len(seen)-1]
 }
 
 func newFakeVBR(t *testing.T) (*fakeVBR, *httptest.Server) {
 	t.Helper()
-	f := &fakeVBR{t: t}
+	f := &fakeVBR{
+		t:             t,
+		lists:         map[string][]json.RawMessage{},
+		queriesByPath: map[string][]url.Values{},
+	}
 	srv := httptest.NewUnstartedServer(f)
 	// Silence the handshake-failure lines the fingerprint-mismatch test
 	// deliberately provokes; they are the expected outcome there and pure
@@ -184,6 +218,28 @@ func (f *fakeVBR) serveAPI(w http.ResponseWriter, r *http.Request) {
 	if f.rejectAllAPI || (f.expireAfter > 0 && f.authedCalls.Add(1) > f.expireAfter) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write(fixture(f.t, "error_bad_credentials.json"))
+		return
+	}
+
+	f.mu.Lock()
+	f.queriesByPath[r.URL.Path] = append(f.queriesByPath[r.URL.Path], r.URL.Query())
+	rows, isList := f.lists[r.URL.Path]
+	f.mu.Unlock()
+
+	if isList || f.repeatFullPages {
+		q := r.URL.Query()
+		if f.repeatFullPages {
+			full := make([]json.RawMessage, pageSize)
+			for i := range full {
+				full[i] = json.RawMessage(`{}`)
+			}
+			writeListPage(w, full, pageSize*maxPages*2, 0, pageSize)
+			return
+		}
+		page, total := paginate(rows, q)
+		skip, _ := strconv.Atoi(q.Get("skip"))
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		writeListPage(w, page, total, skip, limit)
 		return
 	}
 

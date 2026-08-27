@@ -341,3 +341,102 @@ export interface UpdateVeeamServerRequest {
   enabled?: boolean;
   allow_private_address?: boolean;
 }
+
+export interface VeeamRepository {
+  id: string;
+  veeam_id: string;
+  name: string;
+  type: string;
+  host_name: string;
+  path: string;
+  capacity_bytes: number;
+  free_bytes: number;
+  used_bytes: number;
+  is_online: boolean;
+  is_out_of_date: boolean;
+  last_seen_at: string;
+}
+
+export interface VeeamRepositoryMetric {
+  time: string;
+  capacity_bytes: number;
+  free_bytes: number;
+  used_bytes: number;
+}
+
+export interface VeeamJob {
+  id: string;
+  veeam_id: string;
+  name: string;
+  job_type: string;
+  workload: string;
+  description: string;
+  status: string;
+  last_result: string;
+  last_run: string | null;
+  next_run: string | null;
+  next_run_policy: string;
+  repository_name: string;
+  objects_count: number;
+  progress_percent: number;
+  /** Veeam's own bottleneck analysis: Source/Target/Network/Proxy/NotDefined. */
+  bottleneck: string;
+  /** Pre-formatted by Veeam ("00:18:27"); there is no machine-readable form. */
+  duration: string;
+  processing_rate: string;
+  processed_size: number;
+  read_size: number;
+  transferred_size: number;
+  /** Null until an operator maps this job's Veeam platform to a cluster. */
+  cluster_id: string | null;
+  last_seen_at: string;
+}
+
+export interface VeeamSession {
+  id: string;
+  veeam_id: string;
+  name: string;
+  state: string;
+  result: string;
+  result_message: string;
+  algorithm: string;
+  bottleneck: string;
+  duration: string;
+  processing_rate: string;
+  processed_size: number;
+  read_size: number;
+  transferred_size: number;
+  progress_percent: number;
+  creation_time: string;
+  end_time: string | null;
+  initiated_by: string;
+  /** True when Nexara itself started or stopped the run. */
+  nexara_initiated: boolean;
+  cluster_id: string | null;
+}
+
+export interface VeeamBackupObject {
+  id: string;
+  veeam_object_id: string;
+  /** Veeam's objectId, which for Proxmox is the guest's smbios1 uuid. */
+  smbios_uuid: string;
+  name: string;
+  object_type: string;
+  restore_points_count: number;
+  size_bytes: number;
+  last_run_failed: boolean;
+  cluster_id: string | null;
+  last_seen_at: string;
+}
+
+export interface VeeamRestorePoint {
+  id: string;
+  veeam_id: string;
+  name: string;
+  point_type: string;
+  malware_status: string;
+  guest_os_family: string;
+  creation_time: string;
+  size_bytes: number;
+  supports_flr: boolean;
+}

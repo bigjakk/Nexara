@@ -523,6 +523,75 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 			}()
 		}
 
+		// Veeam inventory + session loops. Leader-gated on the same ctx as the
+		// loops above, so a follower never polls a VBR server and a lost
+		// leadership tears both down with everything else.
+		//
+		// Two cadences because the two passes cost very different things: the
+		// inventory pass fans out a restore-point listing per changed backup
+		// object, while a session poll is one filtered, watermarked request.
+		if cfg.VeeamSyncInterval > 0 {
+			veeamSyncer := collector.NewVeeamSyncer(queries, cfg.EncryptionKey, collector.VeeamSyncConfig{
+				RestorePointRetention: cfg.VeeamRestorePointRetention,
+				SessionRetention:      cfg.VeeamSessionRetention,
+			}, logger)
+			if application.EventPub != nil {
+				veeamSyncer.SetEventPublisher(application.EventPub)
+			}
+
+			veeamInterval := cfg.VeeamSyncInterval
+			if veeamInterval < time.Minute {
+				veeamInterval = time.Minute
+			}
+			sessionInterval := cfg.VeeamSessionInterval
+			if sessionInterval <= 0 {
+				sessionInterval = veeamInterval
+			}
+			if sessionInterval < 30*time.Second {
+				sessionInterval = 30 * time.Second
+			}
+
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("veeam inventory loop panicked", "panic", r)
+					}
+				}()
+				// One pass immediately, so a freshly added server shows data
+				// without waiting out a full interval.
+				veeamSyncer.SyncInventory(ctx)
+				ticker := time.NewTicker(veeamInterval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						veeamSyncer.SyncInventory(ctx)
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("veeam session loop panicked", "panic", r)
+					}
+				}()
+				veeamSyncer.SyncSessions(ctx)
+				ticker := time.NewTicker(sessionInterval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						veeamSyncer.SyncSessions(ctx)
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+		}
+
 		// Run initial sync immediately.
 		results := syncer.SyncAll(ctx)
 		mc.ProcessResults(ctx, results)

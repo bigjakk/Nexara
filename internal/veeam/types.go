@@ -1,6 +1,10 @@
 package veeam
 
-import "sort"
+import (
+	"sort"
+	"strings"
+	"time"
+)
 
 // ProxmoxPlatformName is the value VBR 13.1 uses for Proxmox VE across every
 // platformName / platformType field.
@@ -119,4 +123,67 @@ func (l *License) ProxmoxClusters() []ProxmoxCluster {
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+// Timestamp is a time the Veeam API emitted.
+//
+// It exists because the API is not consistent about offsets: session and job
+// timestamps carry one ("2026-08-24T22:00:29.381149-07:00") while others do
+// not ("2026-02-14T22:37:33" on a backup's creationTime). A plain time.Time
+// field fails the whole decode on the second form, which would take down a
+// sync for one bad field on one row.
+//
+// An unparseable or empty value decodes to the zero time rather than an error,
+// for the same reason: losing one timestamp is recoverable, losing the listing
+// that contained it is not.
+type Timestamp struct {
+	time.Time
+}
+
+// timestampLayouts are tried in order. The offset-bearing forms come first
+// because they are what the endpoints Nexara actually polls emit.
+var timestampLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02T15:04:05",
+	"2006-01-02",
+}
+
+// UnmarshalJSON decodes any of the layouts above, plus JSON null.
+func (t *Timestamp) UnmarshalJSON(data []byte) error {
+	s := strings.Trim(string(data), `"`)
+	if s == "" || s == "null" {
+		t.Time = time.Time{}
+		return nil
+	}
+	for _, layout := range timestampLayouts {
+		// An offset-less value is read as UTC. It is the only defensible
+		// choice: the alternative is the collector's local zone, which would
+		// make the same payload decode differently depending on where Nexara
+		// runs.
+		if parsed, err := time.Parse(layout, s); err == nil {
+			t.Time = parsed
+			return nil
+		}
+	}
+	t.Time = time.Time{}
+	return nil
+}
+
+// MarshalJSON emits RFC3339, or null for the zero time.
+func (t Timestamp) MarshalJSON() ([]byte, error) {
+	if t.IsZero() {
+		return []byte("null"), nil
+	}
+	return []byte(`"` + t.Format(time.RFC3339) + `"`), nil
+}
+
+// Or returns the timestamp's value, or the zero time when the pointer is nil.
+// Saves every caller a nil check on the optional fields.
+func (t *Timestamp) Or() time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return t.Time
 }

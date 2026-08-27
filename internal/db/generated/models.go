@@ -959,6 +959,60 @@ type UserRole struct {
 	CreatedAt time.Time   `json:"created_at"`
 }
 
+type VeeamBackupObject struct {
+	ID            uuid.UUID `json:"id"`
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	// Veeam's row id for the backup object (the payload's "id"), NOT the guest identity
+	VeeamObjectID uuid.UUID `json:"veeam_object_id"`
+	// The payload's "objectId", which IS the Proxmox smbios1 uuid — verified 15/18 exact matches on the lab cluster. This is what makes guest correlation deterministic in Phase 3 rather than a name match
+	SmbiosUuid string      `json:"smbios_uuid"`
+	PlatformID pgtype.UUID `json:"platform_id"`
+	Name       string      `json:"name"`
+	ObjectType string      `json:"object_type"`
+	// The payload's "backupId". Verified against the live server: it does NOT resolve into GET /api/v1/backups — a different id space despite the name. Stored for reference only; the object-to-restore-point link comes from GET /backupObjects/{id}/restorePoints, which is authoritative
+	BackupRef pgtype.UUID `json:"backup_ref"`
+	// Veeam's own count. Compared against the stored value to decide whether this object's restore points need re-fetching, which is what keeps the per-object fan-out cheap
+	RestorePointsCount int32     `json:"restore_points_count"`
+	SizeBytes          int64     `json:"size_bytes"`
+	LastRunFailed      bool      `json:"last_run_failed"`
+	LastSeenAt         time.Time `json:"last_seen_at"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+type VeeamJob struct {
+	ID                uuid.UUID          `json:"id"`
+	VeeamServerID     uuid.UUID          `json:"veeam_server_id"`
+	VeeamID           uuid.UUID          `json:"veeam_id"`
+	Name              string             `json:"name"`
+	JobType           string             `json:"job_type"`
+	Workload          string             `json:"workload"`
+	Description       string             `json:"description"`
+	Status            string             `json:"status"`
+	LastResult        string             `json:"last_result"`
+	LastRun           pgtype.Timestamptz `json:"last_run"`
+	NextRun           pgtype.Timestamptz `json:"next_run"`
+	NextRunPolicy     string             `json:"next_run_policy"`
+	RepositoryVeeamID pgtype.UUID        `json:"repository_veeam_id"`
+	RepositoryName    string             `json:"repository_name"`
+	ObjectsCount      int32              `json:"objects_count"`
+	LastSessionID     pgtype.UUID        `json:"last_session_id"`
+	ProgressPercent   int32              `json:"progress_percent"`
+	// Veeam's bottleneck analysis (Source/Target/Network/Proxy/NotDefined)
+	Bottleneck string `json:"bottleneck"`
+	// Veeam's own formatted duration ("00:18:27"), stored as given — it is a display value, not something to compute with
+	Duration        string `json:"duration"`
+	ProcessingRate  string `json:"processing_rate"`
+	ProcessedSize   int64  `json:"processed_size"`
+	ReadSize        int64  `json:"read_size"`
+	TransferredSize int64  `json:"transferred_size"`
+	// DERIVED from sessions and STICKY — job states carry no platformId, sessions are the only bridge. Once set it is never cleared: session retention pruning would otherwise silently un-attribute a job and drop it out of a cluster-scoped user's view with nothing to explain why
+	PlatformID pgtype.UUID `json:"platform_id"`
+	LastSeenAt time.Time   `json:"last_seen_at"`
+	CreatedAt  time.Time   `json:"created_at"`
+	UpdatedAt  time.Time   `json:"updated_at"`
+}
+
 // Maps a Veeam platformId (one Proxmox connection) to a Nexara cluster. The join that makes every other Veeam table cluster-scopable for RBAC
 type VeeamPlatform struct {
 	VeeamServerID uuid.UUID `json:"veeam_server_id"`
@@ -969,6 +1023,66 @@ type VeeamPlatform struct {
 	ClusterID  pgtype.UUID `json:"cluster_id"`
 	LastSeenAt time.Time   `json:"last_seen_at"`
 	CreatedAt  time.Time   `json:"created_at"`
+}
+
+type VeeamRepository struct {
+	ID            uuid.UUID `json:"id"`
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	VeeamID       uuid.UUID `json:"veeam_id"`
+	Name          string    `json:"name"`
+	RepoType      string    `json:"repo_type"`
+	// Veeam's hostName for the repository, e.g. "Direct" for an object-store target
+	HostName string `json:"host_name"`
+	Path     string `json:"path"`
+	// Converted from the API's float capacityGB. The conversion belongs in the client so every consumer sees bytes, matching pbs_datastore_metrics
+	CapacityBytes int64     `json:"capacity_bytes"`
+	FreeBytes     int64     `json:"free_bytes"`
+	UsedBytes     int64     `json:"used_bytes"`
+	IsOnline      bool      `json:"is_online"`
+	IsOutOfDate   bool      `json:"is_out_of_date"`
+	LastSeenAt    time.Time `json:"last_seen_at"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type VeeamRepositoryMetric struct {
+	Time              time.Time `json:"time"`
+	VeeamServerID     uuid.UUID `json:"veeam_server_id"`
+	RepositoryVeeamID uuid.UUID `json:"repository_veeam_id"`
+	CapacityBytes     int64     `json:"capacity_bytes"`
+	FreeBytes         int64     `json:"free_bytes"`
+	UsedBytes         int64     `json:"used_bytes"`
+}
+
+type VeeamRepositoryMetrics5m struct {
+	Bucket            interface{} `json:"bucket"`
+	VeeamServerID     uuid.UUID   `json:"veeam_server_id"`
+	RepositoryVeeamID uuid.UUID   `json:"repository_veeam_id"`
+	CapacityBytes     int64       `json:"capacity_bytes"`
+	FreeBytes         int64       `json:"free_bytes"`
+	UsedBytes         int64       `json:"used_bytes"`
+}
+
+type VeeamRestorePoint struct {
+	ID             uuid.UUID `json:"id"`
+	VeeamServerID  uuid.UUID `json:"veeam_server_id"`
+	BackupObjectID uuid.UUID `json:"backup_object_id"`
+	VeeamID        uuid.UUID `json:"veeam_id"`
+	Name           string    `json:"name"`
+	PointType      string    `json:"point_type"`
+	// Rides on every restore point, so per-guest malware state needs no separate /malwareDetection sync
+	MalwareStatus string      `json:"malware_status"`
+	GuestOsFamily string      `json:"guest_os_family"`
+	CreationTime  time.Time   `json:"creation_time"`
+	SizeBytes     int64       `json:"size_bytes"`
+	BackupID      pgtype.UUID `json:"backup_id"`
+	SessionID     pgtype.UUID `json:"session_id"`
+	BackupFileID  pgtype.UUID `json:"backup_file_id"`
+	// Derived from allowedOperations containing StartFlrRestore. File-level restore is the only restore Proxmox supports on 13.1 — entire-VM and instant recovery do not exist for this platform
+	SupportsFlr bool `json:"supports_flr"`
+	// Retention prunes on THIS, never on creation_time: a restore point Veeam still holds must not vanish from Nexara just because it is old, or every RPO and coverage number derived from it becomes wrong
+	LastSeenAt time.Time `json:"last_seen_at"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // Registered Veeam Backup & Replication servers (VBR 13.1+, Enterprise Plus)
@@ -996,6 +1110,38 @@ type VeeamServer struct {
 	LastSyncError string    `json:"last_sync_error"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type VeeamSession struct {
+	ID            uuid.UUID   `json:"id"`
+	VeeamServerID uuid.UUID   `json:"veeam_server_id"`
+	VeeamID       uuid.UUID   `json:"veeam_id"`
+	JobVeeamID    pgtype.UUID `json:"job_veeam_id"`
+	Name          string      `json:"name"`
+	SessionType   string      `json:"session_type"`
+	PlatformName  string      `json:"platform_name"`
+	// Carried directly by sessions, unlike job states. This is what makes a session cluster-scopable, and what veeam_jobs.platform_id is derived from
+	PlatformID    pgtype.UUID `json:"platform_id"`
+	State         string      `json:"state"`
+	Result        string      `json:"result"`
+	ResultMessage string      `json:"result_message"`
+	// Veeam's own flag, which is FALSE even for a session cancelled through its API — a cancelled job is recorded as result "Failed" with an empty log and nothing distinguishing it from a real failure. Do not trust this to mean "not cancelled"
+	IsCanceled      bool               `json:"is_canceled"`
+	Algorithm       string             `json:"algorithm"`
+	Bottleneck      string             `json:"bottleneck"`
+	Duration        string             `json:"duration"`
+	ProcessingRate  string             `json:"processing_rate"`
+	ProcessedSize   int64              `json:"processed_size"`
+	ReadSize        int64              `json:"read_size"`
+	TransferredSize int64              `json:"transferred_size"`
+	ProgressPercent int32              `json:"progress_percent"`
+	CreationTime    time.Time          `json:"creation_time"`
+	EndTime         pgtype.Timestamptz `json:"end_time"`
+	InitiatedBy     string             `json:"initiated_by"`
+	// Set when Nexara itself started or stopped the job, taken from the 201 response that carries the session inline. The only way to tell an operator-requested stop from a genuine failure; unused until job control ships
+	NexaraInitiated bool      `json:"nexara_initiated"`
+	LastSeenAt      time.Time `json:"last_seen_at"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type Vm struct {

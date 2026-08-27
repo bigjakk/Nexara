@@ -31,6 +31,12 @@ import type {
   VeeamProbeResult,
   CreateVeeamServerRequest,
   UpdateVeeamServerRequest,
+  VeeamRepository,
+  VeeamRepositoryMetric,
+  VeeamJob,
+  VeeamSession,
+  VeeamBackupObject,
+  VeeamRestorePoint,
 } from "../types/backup";
 
 // --- PBS Server Queries ---
@@ -649,5 +655,84 @@ export function useTestVeeamServer() {
   return useMutation({
     mutationFn: (id: string) =>
       apiClient.post<VeeamProbeResult>(`/api/v1/veeam-servers/${id}/test`),
+  });
+}
+
+export function useVeeamRepositories(serverId: string) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "repositories"],
+    queryFn: () =>
+      apiClient.list<VeeamRepository>(
+        `/api/v1/veeam-servers/${serverId}/repositories`,
+      ),
+    enabled: serverId.length > 0,
+  });
+}
+
+export function useVeeamRepositoryMetrics(
+  serverId: string,
+  repositoryVeeamId: string,
+  range = "7d",
+) {
+  return useQuery({
+    queryKey: [
+      "veeam-servers",
+      serverId,
+      "repositories",
+      repositoryVeeamId,
+      "metrics",
+      range,
+    ],
+    queryFn: () =>
+      apiClient.list<VeeamRepositoryMetric>(
+        `/api/v1/veeam-servers/${serverId}/repositories/${repositoryVeeamId}/metrics?range=${range}`,
+      ),
+    enabled: serverId.length > 0 && repositoryVeeamId.length > 0,
+  });
+}
+
+export function useVeeamJobs(serverId: string) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "jobs"],
+    queryFn: () =>
+      apiClient.list<VeeamJob>(`/api/v1/veeam-servers/${serverId}/jobs`),
+    enabled: serverId.length > 0,
+    // A running job's progress moves; the collector refreshes job state on
+    // its own cadence, so this only has to keep the page roughly current.
+    refetchInterval: 60_000,
+  });
+}
+
+export function useVeeamSessions(serverId: string) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "sessions"],
+    queryFn: () =>
+      apiClient.list<VeeamSession>(
+        `/api/v1/veeam-servers/${serverId}/sessions`,
+      ),
+    enabled: serverId.length > 0,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useVeeamBackupObjects(serverId: string) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "backup-objects"],
+    queryFn: () =>
+      apiClient.list<VeeamBackupObject>(
+        `/api/v1/veeam-servers/${serverId}/backup-objects`,
+      ),
+    enabled: serverId.length > 0,
+  });
+}
+
+export function useVeeamRestorePoints(serverId: string, objectId: string) {
+  return useQuery({
+    queryKey: ["veeam-servers", serverId, "backup-objects", objectId, "points"],
+    queryFn: () =>
+      apiClient.list<VeeamRestorePoint>(
+        `/api/v1/veeam-servers/${serverId}/backup-objects/${objectId}/restore-points`,
+      ),
+    enabled: serverId.length > 0 && objectId.length > 0,
   });
 }

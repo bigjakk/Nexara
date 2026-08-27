@@ -664,6 +664,17 @@ func (s *Server) setupRoutes() {
 		vbr.Put("/:id", veeamConnect, s.veeamHandler.Update)
 		vbr.Delete("/:id", s.veeamHandler.Delete)
 		vbr.Post("/:id/test", veeamConnect, s.veeamHandler.Test)
+
+		// Collected inventory. Repositories are global scope; jobs, sessions
+		// and backup objects are scoped per cluster through the server's
+		// veeam_platforms mapping, and fail closed to global-only while that
+		// mapping is unconfirmed.
+		vbr.Get("/:id/repositories", s.veeamHandler.ListRepositories)
+		vbr.Get("/:id/repositories/:repository_id/metrics", s.veeamHandler.GetRepositoryMetrics)
+		vbr.Get("/:id/jobs", s.veeamHandler.ListJobs)
+		vbr.Get("/:id/sessions", s.veeamHandler.ListSessions)
+		vbr.Get("/:id/backup-objects", s.veeamHandler.ListBackupObjects)
+		vbr.Get("/:id/backup-objects/:object_id/restore-points", s.veeamHandler.ListRestorePoints)
 	}
 
 	// PBS snapshot lookup (cross-server, by backup_id / VMID).

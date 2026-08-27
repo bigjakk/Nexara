@@ -7,8 +7,10 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createVeeamServer = `-- name: CreateVeeamServer :one
@@ -68,6 +70,69 @@ func (q *Queries) CreateVeeamServer(ctx context.Context, arg CreateVeeamServerPa
 	return i, err
 }
 
+const deleteStaleVeeamBackupObjects = `-- name: DeleteStaleVeeamBackupObjects :exec
+DELETE FROM veeam_backup_objects
+WHERE veeam_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
+`
+
+type DeleteStaleVeeamBackupObjectsParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	GraceSeconds  int32     `json:"grace_seconds"`
+}
+
+// Grace-windowed, DB-clock prune (mirrors DeleteStalePBSSnapshots).
+//
+// Both sides of the comparison come from now(), so a Postgres running even a
+// second behind the Nexara container cannot make rows this very pass wrote
+// look stale. The grace window absorbs a momentary non-observation on top.
+func (q *Queries) DeleteStaleVeeamBackupObjects(ctx context.Context, arg DeleteStaleVeeamBackupObjectsParams) error {
+	_, err := q.db.Exec(ctx, deleteStaleVeeamBackupObjects, arg.VeeamServerID, arg.GraceSeconds)
+	return err
+}
+
+const deleteStaleVeeamJobs = `-- name: DeleteStaleVeeamJobs :exec
+DELETE FROM veeam_jobs
+WHERE veeam_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
+`
+
+type DeleteStaleVeeamJobsParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	GraceSeconds  int32     `json:"grace_seconds"`
+}
+
+// Grace-windowed, DB-clock prune (mirrors DeleteStalePBSSnapshots).
+//
+// Both sides of the comparison come from now(), so a Postgres running even a
+// second behind the Nexara container cannot make rows this very pass wrote
+// look stale. The grace window absorbs a momentary non-observation on top.
+func (q *Queries) DeleteStaleVeeamJobs(ctx context.Context, arg DeleteStaleVeeamJobsParams) error {
+	_, err := q.db.Exec(ctx, deleteStaleVeeamJobs, arg.VeeamServerID, arg.GraceSeconds)
+	return err
+}
+
+const deleteStaleVeeamRepositories = `-- name: DeleteStaleVeeamRepositories :exec
+DELETE FROM veeam_repositories
+WHERE veeam_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
+`
+
+type DeleteStaleVeeamRepositoriesParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	GraceSeconds  int32     `json:"grace_seconds"`
+}
+
+// Grace-windowed, DB-clock prune (mirrors DeleteStalePBSSnapshots).
+//
+// Both sides of the comparison come from now(), so a Postgres running even a
+// second behind the Nexara container cannot make rows this very pass wrote
+// look stale. The grace window absorbs a momentary non-observation on top.
+func (q *Queries) DeleteStaleVeeamRepositories(ctx context.Context, arg DeleteStaleVeeamRepositoriesParams) error {
+	_, err := q.db.Exec(ctx, deleteStaleVeeamRepositories, arg.VeeamServerID, arg.GraceSeconds)
+	return err
+}
+
 const deleteVeeamServer = `-- name: DeleteVeeamServer :exec
 DELETE FROM veeam_servers WHERE id = $1
 `
@@ -75,6 +140,77 @@ DELETE FROM veeam_servers WHERE id = $1
 func (q *Queries) DeleteVeeamServer(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteVeeamServer, id)
 	return err
+}
+
+const deriveVeeamJobPlatforms = `-- name: DeriveVeeamJobPlatforms :exec
+UPDATE veeam_jobs j
+SET platform_id = s.platform_id
+FROM (
+    SELECT DISTINCT ON (job_veeam_id) job_veeam_id, platform_id
+    FROM veeam_sessions
+    WHERE veeam_server_id = $1
+      AND job_veeam_id IS NOT NULL
+      AND platform_id IS NOT NULL
+    ORDER BY job_veeam_id, creation_time DESC
+) s
+WHERE j.veeam_server_id = $1
+  AND j.veeam_id = s.job_veeam_id
+  AND j.platform_id IS NULL
+`
+
+// Job states carry no platformId; sessions are the only bridge. STICKY by
+// construction — the WHERE clause only touches rows that have none yet, so a
+// pruned session cannot un-attribute a job that was already resolved.
+func (q *Queries) DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deriveVeeamJobPlatforms, veeamServerID)
+	return err
+}
+
+const getVeeamRepositoryMetrics = `-- name: GetVeeamRepositoryMetrics :many
+SELECT bucket::timestamptz AS time, capacity_bytes, free_bytes, used_bytes
+FROM veeam_repository_metrics_5m
+WHERE veeam_server_id = $1
+  AND repository_veeam_id = $2
+  AND bucket >= $3
+ORDER BY bucket
+`
+
+type GetVeeamRepositoryMetricsParams struct {
+	VeeamServerID     uuid.UUID   `json:"veeam_server_id"`
+	RepositoryVeeamID uuid.UUID   `json:"repository_veeam_id"`
+	Bucket            interface{} `json:"bucket"`
+}
+
+type GetVeeamRepositoryMetricsRow struct {
+	Time          time.Time `json:"time"`
+	CapacityBytes int64     `json:"capacity_bytes"`
+	FreeBytes     int64     `json:"free_bytes"`
+	UsedBytes     int64     `json:"used_bytes"`
+}
+
+func (q *Queries) GetVeeamRepositoryMetrics(ctx context.Context, arg GetVeeamRepositoryMetricsParams) ([]GetVeeamRepositoryMetricsRow, error) {
+	rows, err := q.db.Query(ctx, getVeeamRepositoryMetrics, arg.VeeamServerID, arg.RepositoryVeeamID, arg.Bucket)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetVeeamRepositoryMetricsRow{}
+	for rows.Next() {
+		var i GetVeeamRepositoryMetricsRow
+		if err := rows.Scan(
+			&i.Time,
+			&i.CapacityBytes,
+			&i.FreeBytes,
+			&i.UsedBytes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getVeeamServer = `-- name: GetVeeamServer :one
@@ -102,6 +238,348 @@ func (q *Queries) GetVeeamServer(ctx context.Context, id uuid.UUID) (VeeamServer
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getVeeamSessionWatermark = `-- name: GetVeeamSessionWatermark :one
+SELECT creation_time FROM veeam_sessions
+WHERE veeam_server_id = $1
+ORDER BY creation_time DESC
+LIMIT 1
+`
+
+// The newest session already stored, used as the createdAfterFilter for the
+// next poll.
+//
+// The newest ROW rather than MAX(creation_time): an aggregate over an empty
+// table is SQL NULL, which sqlc types as interface{} and pgx cannot scan into
+// a time. Reading the row instead returns pgx.ErrNoRows on an empty table,
+// which is an explicit "first sync" the caller handles — and it is served
+// straight off idx_veeam_sessions_server_time.
+func (q *Queries) GetVeeamSessionWatermark(ctx context.Context, veeamServerID uuid.UUID) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getVeeamSessionWatermark, veeamServerID)
+	var creation_time time.Time
+	err := row.Scan(&creation_time)
+	return creation_time, err
+}
+
+const insertVeeamRepositoryMetric = `-- name: InsertVeeamRepositoryMetric :exec
+INSERT INTO veeam_repository_metrics (
+    time, veeam_server_id, repository_veeam_id, capacity_bytes, free_bytes, used_bytes
+)
+VALUES (now(), $1, $2, $3, $4, $5)
+`
+
+type InsertVeeamRepositoryMetricParams struct {
+	VeeamServerID     uuid.UUID `json:"veeam_server_id"`
+	RepositoryVeeamID uuid.UUID `json:"repository_veeam_id"`
+	CapacityBytes     int64     `json:"capacity_bytes"`
+	FreeBytes         int64     `json:"free_bytes"`
+	UsedBytes         int64     `json:"used_bytes"`
+}
+
+func (q *Queries) InsertVeeamRepositoryMetric(ctx context.Context, arg InsertVeeamRepositoryMetricParams) error {
+	_, err := q.db.Exec(ctx, insertVeeamRepositoryMetric,
+		arg.VeeamServerID,
+		arg.RepositoryVeeamID,
+		arg.CapacityBytes,
+		arg.FreeBytes,
+		arg.UsedBytes,
+	)
+	return err
+}
+
+const listActiveVeeamServers = `-- name: ListActiveVeeamServers :many
+SELECT id, name, base_url, username, password_encrypted, api_revision, product_version, license_edition, tls_fingerprint, verify_tls, enabled, last_sync_at, last_sync_error, created_at, updated_at FROM veeam_servers WHERE enabled = true ORDER BY created_at ASC
+`
+
+func (q *Queries) ListActiveVeeamServers(ctx context.Context) ([]VeeamServer, error) {
+	rows, err := q.db.Query(ctx, listActiveVeeamServers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VeeamServer{}
+	for rows.Next() {
+		var i VeeamServer
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.BaseUrl,
+			&i.Username,
+			&i.PasswordEncrypted,
+			&i.ApiRevision,
+			&i.ProductVersion,
+			&i.LicenseEdition,
+			&i.TlsFingerprint,
+			&i.VerifyTls,
+			&i.Enabled,
+			&i.LastSyncAt,
+			&i.LastSyncError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamBackupObjectsByServer = `-- name: ListVeeamBackupObjectsByServer :many
+SELECT id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at FROM veeam_backup_objects WHERE veeam_server_id = $1 ORDER BY name
+`
+
+func (q *Queries) ListVeeamBackupObjectsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamBackupObject, error) {
+	rows, err := q.db.Query(ctx, listVeeamBackupObjectsByServer, veeamServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VeeamBackupObject{}
+	for rows.Next() {
+		var i VeeamBackupObject
+		if err := rows.Scan(
+			&i.ID,
+			&i.VeeamServerID,
+			&i.VeeamObjectID,
+			&i.SmbiosUuid,
+			&i.PlatformID,
+			&i.Name,
+			&i.ObjectType,
+			&i.BackupRef,
+			&i.RestorePointsCount,
+			&i.SizeBytes,
+			&i.LastRunFailed,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamJobsByServer = `-- name: ListVeeamJobsByServer :many
+SELECT id, veeam_server_id, veeam_id, name, job_type, workload, description, status, last_result, last_run, next_run, next_run_policy, repository_veeam_id, repository_name, objects_count, last_session_id, progress_percent, bottleneck, duration, processing_rate, processed_size, read_size, transferred_size, platform_id, last_seen_at, created_at, updated_at FROM veeam_jobs WHERE veeam_server_id = $1 ORDER BY name
+`
+
+func (q *Queries) ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamJob, error) {
+	rows, err := q.db.Query(ctx, listVeeamJobsByServer, veeamServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VeeamJob{}
+	for rows.Next() {
+		var i VeeamJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.VeeamServerID,
+			&i.VeeamID,
+			&i.Name,
+			&i.JobType,
+			&i.Workload,
+			&i.Description,
+			&i.Status,
+			&i.LastResult,
+			&i.LastRun,
+			&i.NextRun,
+			&i.NextRunPolicy,
+			&i.RepositoryVeeamID,
+			&i.RepositoryName,
+			&i.ObjectsCount,
+			&i.LastSessionID,
+			&i.ProgressPercent,
+			&i.Bottleneck,
+			&i.Duration,
+			&i.ProcessingRate,
+			&i.ProcessedSize,
+			&i.ReadSize,
+			&i.TransferredSize,
+			&i.PlatformID,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamPlatformsByServer = `-- name: ListVeeamPlatformsByServer :many
+SELECT veeam_server_id, platform_id, display_name, cluster_id, last_seen_at, created_at FROM veeam_platforms WHERE veeam_server_id = $1 ORDER BY display_name, platform_id
+`
+
+func (q *Queries) ListVeeamPlatformsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamPlatform, error) {
+	rows, err := q.db.Query(ctx, listVeeamPlatformsByServer, veeamServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VeeamPlatform{}
+	for rows.Next() {
+		var i VeeamPlatform
+		if err := rows.Scan(
+			&i.VeeamServerID,
+			&i.PlatformID,
+			&i.DisplayName,
+			&i.ClusterID,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamRepositoriesByServer = `-- name: ListVeeamRepositoriesByServer :many
+SELECT id, veeam_server_id, veeam_id, name, repo_type, host_name, path, capacity_bytes, free_bytes, used_bytes, is_online, is_out_of_date, last_seen_at, created_at, updated_at FROM veeam_repositories WHERE veeam_server_id = $1 ORDER BY name
+`
+
+func (q *Queries) ListVeeamRepositoriesByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamRepository, error) {
+	rows, err := q.db.Query(ctx, listVeeamRepositoriesByServer, veeamServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VeeamRepository{}
+	for rows.Next() {
+		var i VeeamRepository
+		if err := rows.Scan(
+			&i.ID,
+			&i.VeeamServerID,
+			&i.VeeamID,
+			&i.Name,
+			&i.RepoType,
+			&i.HostName,
+			&i.Path,
+			&i.CapacityBytes,
+			&i.FreeBytes,
+			&i.UsedBytes,
+			&i.IsOnline,
+			&i.IsOutOfDate,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamRestorePointsByObject = `-- name: ListVeeamRestorePointsByObject :many
+SELECT id, veeam_server_id, backup_object_id, veeam_id, name, point_type, malware_status, guest_os_family, creation_time, size_bytes, backup_id, session_id, backup_file_id, supports_flr, last_seen_at, created_at FROM veeam_restore_points
+WHERE backup_object_id = $1
+ORDER BY creation_time DESC
+`
+
+func (q *Queries) ListVeeamRestorePointsByObject(ctx context.Context, backupObjectID uuid.UUID) ([]VeeamRestorePoint, error) {
+	rows, err := q.db.Query(ctx, listVeeamRestorePointsByObject, backupObjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VeeamRestorePoint{}
+	for rows.Next() {
+		var i VeeamRestorePoint
+		if err := rows.Scan(
+			&i.ID,
+			&i.VeeamServerID,
+			&i.BackupObjectID,
+			&i.VeeamID,
+			&i.Name,
+			&i.PointType,
+			&i.MalwareStatus,
+			&i.GuestOsFamily,
+			&i.CreationTime,
+			&i.SizeBytes,
+			&i.BackupID,
+			&i.SessionID,
+			&i.BackupFileID,
+			&i.SupportsFlr,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamRestorePointsByServer = `-- name: ListVeeamRestorePointsByServer :many
+SELECT id, veeam_server_id, backup_object_id, veeam_id, name, point_type, malware_status, guest_os_family, creation_time, size_bytes, backup_id, session_id, backup_file_id, supports_flr, last_seen_at, created_at FROM veeam_restore_points
+WHERE veeam_server_id = $1
+ORDER BY creation_time DESC
+LIMIT $2
+`
+
+type ListVeeamRestorePointsByServerParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	Limit         int32     `json:"limit"`
+}
+
+func (q *Queries) ListVeeamRestorePointsByServer(ctx context.Context, arg ListVeeamRestorePointsByServerParams) ([]VeeamRestorePoint, error) {
+	rows, err := q.db.Query(ctx, listVeeamRestorePointsByServer, arg.VeeamServerID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VeeamRestorePoint{}
+	for rows.Next() {
+		var i VeeamRestorePoint
+		if err := rows.Scan(
+			&i.ID,
+			&i.VeeamServerID,
+			&i.BackupObjectID,
+			&i.VeeamID,
+			&i.Name,
+			&i.PointType,
+			&i.MalwareStatus,
+			&i.GuestOsFamily,
+			&i.CreationTime,
+			&i.SizeBytes,
+			&i.BackupID,
+			&i.SessionID,
+			&i.BackupFileID,
+			&i.SupportsFlr,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listVeeamServers = `-- name: ListVeeamServers :many
@@ -142,6 +620,159 @@ func (q *Queries) ListVeeamServers(ctx context.Context) ([]VeeamServer, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const listVeeamSessionsByServer = `-- name: ListVeeamSessionsByServer :many
+SELECT id, veeam_server_id, veeam_id, job_veeam_id, name, session_type, platform_name, platform_id, state, result, result_message, is_canceled, algorithm, bottleneck, duration, processing_rate, processed_size, read_size, transferred_size, progress_percent, creation_time, end_time, initiated_by, nexara_initiated, last_seen_at, created_at FROM veeam_sessions
+WHERE veeam_server_id = $1
+  AND (
+    $2::uuid[] IS NULL
+    OR (platform_id IS NOT NULL AND platform_id = ANY($2::uuid[]))
+  )
+ORDER BY creation_time DESC
+LIMIT $3
+`
+
+type ListVeeamSessionsByServerParams struct {
+	VeeamServerID uuid.UUID   `json:"veeam_server_id"`
+	PlatformIds   []uuid.UUID `json:"platform_ids"`
+	RowLimit      int32       `json:"row_limit"`
+}
+
+// Scoped in SQL, not in Go, because of the LIMIT: filtering after the limit
+// would take the newest N rows server-wide and then discard the ones the
+// caller cannot see, so a busy cluster's runs would crowd out a quiet
+// cluster's entirely and the caller would see an empty list.
+//
+// A NULL platform_ids means "no restriction" (a global holder). A non-NULL
+// array restricts to those platforms AND excludes rows with no platform at
+// all — an unattributable row could belong to any cluster, so it is
+// global-only. pgx sends a nil slice as NULL and a non-nil empty slice as
+// '{}', and that distinction is what makes both cases work.
+func (q *Queries) ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSessionsByServerParams) ([]VeeamSession, error) {
+	rows, err := q.db.Query(ctx, listVeeamSessionsByServer, arg.VeeamServerID, arg.PlatformIds, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VeeamSession{}
+	for rows.Next() {
+		var i VeeamSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.VeeamServerID,
+			&i.VeeamID,
+			&i.JobVeeamID,
+			&i.Name,
+			&i.SessionType,
+			&i.PlatformName,
+			&i.PlatformID,
+			&i.State,
+			&i.Result,
+			&i.ResultMessage,
+			&i.IsCanceled,
+			&i.Algorithm,
+			&i.Bottleneck,
+			&i.Duration,
+			&i.ProcessingRate,
+			&i.ProcessedSize,
+			&i.ReadSize,
+			&i.TransferredSize,
+			&i.ProgressPercent,
+			&i.CreationTime,
+			&i.EndTime,
+			&i.InitiatedBy,
+			&i.NexaraInitiated,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pruneVeeamRestorePoints = `-- name: PruneVeeamRestorePoints :exec
+DELETE FROM veeam_restore_points
+WHERE veeam_server_id = $1
+  AND last_seen_at < now() - make_interval(secs => $2::int)
+`
+
+type PruneVeeamRestorePointsParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	GraceSeconds  int32     `json:"grace_seconds"`
+}
+
+// Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still
+// holds must not disappear from Nexara because it is old, or every RPO and
+// coverage figure derived from it silently becomes wrong. This deletes only
+// rows Veeam has stopped reporting.
+func (q *Queries) PruneVeeamRestorePoints(ctx context.Context, arg PruneVeeamRestorePointsParams) error {
+	_, err := q.db.Exec(ctx, pruneVeeamRestorePoints, arg.VeeamServerID, arg.GraceSeconds)
+	return err
+}
+
+const pruneVeeamSessions = `-- name: PruneVeeamSessions :exec
+DELETE FROM veeam_sessions
+WHERE veeam_server_id = $1 AND creation_time < $2
+`
+
+type PruneVeeamSessionsParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	CreationTime  time.Time `json:"creation_time"`
+}
+
+// Sessions are historical events and Veeam keeps tens of thousands of them, so
+// this DOES prune on creation_time: Nexara mirrors a bounded recent window by
+// design rather than the server's full history.
+func (q *Queries) PruneVeeamSessions(ctx context.Context, arg PruneVeeamSessionsParams) error {
+	_, err := q.db.Exec(ctx, pruneVeeamSessions, arg.VeeamServerID, arg.CreationTime)
+	return err
+}
+
+const setVeeamServerSyncCompleted = `-- name: SetVeeamServerSyncCompleted :exec
+UPDATE veeam_servers
+SET last_sync_at = now(),
+    last_sync_error = $2
+WHERE id = $1
+`
+
+type SetVeeamServerSyncCompletedParams struct {
+	ID            uuid.UUID `json:"id"`
+	LastSyncError string    `json:"last_sync_error"`
+}
+
+// Stamps a completed sync and sets the note in one statement.
+//
+// The note is usually empty, but a pass can succeed WITH a caveat — it read
+// everything and then refused to prune on an empty listing, say. Clearing the
+// error unconditionally here is what erased that caveat in the same pass that
+// raised it.
+func (q *Queries) SetVeeamServerSyncCompleted(ctx context.Context, arg SetVeeamServerSyncCompletedParams) error {
+	_, err := q.db.Exec(ctx, setVeeamServerSyncCompleted, arg.ID, arg.LastSyncError)
+	return err
+}
+
+const setVeeamServerSyncError = `-- name: SetVeeamServerSyncError :exec
+UPDATE veeam_servers
+SET last_sync_error = $2
+WHERE id = $1
+`
+
+type SetVeeamServerSyncErrorParams struct {
+	ID            uuid.UUID `json:"id"`
+	LastSyncError string    `json:"last_sync_error"`
+}
+
+// Deliberately does NOT touch last_sync_at. A server that has not synced in a
+// week must not report "last synced: 30 seconds ago" beside its error.
+func (q *Queries) SetVeeamServerSyncError(ctx context.Context, arg SetVeeamServerSyncErrorParams) error {
+	_, err := q.db.Exec(ctx, setVeeamServerSyncError, arg.ID, arg.LastSyncError)
+	return err
 }
 
 const updateVeeamServer = `-- name: UpdateVeeamServer :one
@@ -207,4 +838,384 @@ func (q *Queries) UpdateVeeamServer(ctx context.Context, arg UpdateVeeamServerPa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertVeeamBackupObject = `-- name: UpsertVeeamBackupObject :one
+INSERT INTO veeam_backup_objects (
+    veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name,
+    object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+ON CONFLICT (veeam_server_id, veeam_object_id)
+DO UPDATE SET
+    smbios_uuid = EXCLUDED.smbios_uuid,
+    platform_id = EXCLUDED.platform_id,
+    name = EXCLUDED.name,
+    object_type = EXCLUDED.object_type,
+    backup_ref = EXCLUDED.backup_ref,
+    restore_points_count = EXCLUDED.restore_points_count,
+    size_bytes = EXCLUDED.size_bytes,
+    last_run_failed = EXCLUDED.last_run_failed,
+    last_seen_at = now()
+RETURNING id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at
+`
+
+type UpsertVeeamBackupObjectParams struct {
+	VeeamServerID      uuid.UUID   `json:"veeam_server_id"`
+	VeeamObjectID      uuid.UUID   `json:"veeam_object_id"`
+	SmbiosUuid         string      `json:"smbios_uuid"`
+	PlatformID         pgtype.UUID `json:"platform_id"`
+	Name               string      `json:"name"`
+	ObjectType         string      `json:"object_type"`
+	BackupRef          pgtype.UUID `json:"backup_ref"`
+	RestorePointsCount int32       `json:"restore_points_count"`
+	SizeBytes          int64       `json:"size_bytes"`
+	LastRunFailed      bool        `json:"last_run_failed"`
+}
+
+func (q *Queries) UpsertVeeamBackupObject(ctx context.Context, arg UpsertVeeamBackupObjectParams) (VeeamBackupObject, error) {
+	row := q.db.QueryRow(ctx, upsertVeeamBackupObject,
+		arg.VeeamServerID,
+		arg.VeeamObjectID,
+		arg.SmbiosUuid,
+		arg.PlatformID,
+		arg.Name,
+		arg.ObjectType,
+		arg.BackupRef,
+		arg.RestorePointsCount,
+		arg.SizeBytes,
+		arg.LastRunFailed,
+	)
+	var i VeeamBackupObject
+	err := row.Scan(
+		&i.ID,
+		&i.VeeamServerID,
+		&i.VeeamObjectID,
+		&i.SmbiosUuid,
+		&i.PlatformID,
+		&i.Name,
+		&i.ObjectType,
+		&i.BackupRef,
+		&i.RestorePointsCount,
+		&i.SizeBytes,
+		&i.LastRunFailed,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertVeeamJob = `-- name: UpsertVeeamJob :exec
+INSERT INTO veeam_jobs (
+    veeam_server_id, veeam_id, name, job_type, workload, description,
+    status, last_result, last_run, next_run, next_run_policy,
+    repository_veeam_id, repository_name, objects_count, last_session_id,
+    progress_percent, bottleneck, duration, processing_rate,
+    processed_size, read_size, transferred_size, last_seen_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, $21, $22, now())
+ON CONFLICT (veeam_server_id, veeam_id)
+DO UPDATE SET
+    name = EXCLUDED.name,
+    job_type = EXCLUDED.job_type,
+    workload = EXCLUDED.workload,
+    description = EXCLUDED.description,
+    status = EXCLUDED.status,
+    last_result = EXCLUDED.last_result,
+    last_run = EXCLUDED.last_run,
+    next_run = EXCLUDED.next_run,
+    next_run_policy = EXCLUDED.next_run_policy,
+    repository_veeam_id = EXCLUDED.repository_veeam_id,
+    repository_name = EXCLUDED.repository_name,
+    objects_count = EXCLUDED.objects_count,
+    last_session_id = EXCLUDED.last_session_id,
+    progress_percent = EXCLUDED.progress_percent,
+    bottleneck = EXCLUDED.bottleneck,
+    duration = EXCLUDED.duration,
+    processing_rate = EXCLUDED.processing_rate,
+    processed_size = EXCLUDED.processed_size,
+    read_size = EXCLUDED.read_size,
+    transferred_size = EXCLUDED.transferred_size,
+    last_seen_at = now()
+`
+
+type UpsertVeeamJobParams struct {
+	VeeamServerID     uuid.UUID          `json:"veeam_server_id"`
+	VeeamID           uuid.UUID          `json:"veeam_id"`
+	Name              string             `json:"name"`
+	JobType           string             `json:"job_type"`
+	Workload          string             `json:"workload"`
+	Description       string             `json:"description"`
+	Status            string             `json:"status"`
+	LastResult        string             `json:"last_result"`
+	LastRun           pgtype.Timestamptz `json:"last_run"`
+	NextRun           pgtype.Timestamptz `json:"next_run"`
+	NextRunPolicy     string             `json:"next_run_policy"`
+	RepositoryVeeamID pgtype.UUID        `json:"repository_veeam_id"`
+	RepositoryName    string             `json:"repository_name"`
+	ObjectsCount      int32              `json:"objects_count"`
+	LastSessionID     pgtype.UUID        `json:"last_session_id"`
+	ProgressPercent   int32              `json:"progress_percent"`
+	Bottleneck        string             `json:"bottleneck"`
+	Duration          string             `json:"duration"`
+	ProcessingRate    string             `json:"processing_rate"`
+	ProcessedSize     int64              `json:"processed_size"`
+	ReadSize          int64              `json:"read_size"`
+	TransferredSize   int64              `json:"transferred_size"`
+}
+
+// platform_id is deliberately absent from the UPDATE below: it is derived from
+// sessions by DeriveVeeamJobPlatforms and must survive a job-state refresh.
+func (q *Queries) UpsertVeeamJob(ctx context.Context, arg UpsertVeeamJobParams) error {
+	_, err := q.db.Exec(ctx, upsertVeeamJob,
+		arg.VeeamServerID,
+		arg.VeeamID,
+		arg.Name,
+		arg.JobType,
+		arg.Workload,
+		arg.Description,
+		arg.Status,
+		arg.LastResult,
+		arg.LastRun,
+		arg.NextRun,
+		arg.NextRunPolicy,
+		arg.RepositoryVeeamID,
+		arg.RepositoryName,
+		arg.ObjectsCount,
+		arg.LastSessionID,
+		arg.ProgressPercent,
+		arg.Bottleneck,
+		arg.Duration,
+		arg.ProcessingRate,
+		arg.ProcessedSize,
+		arg.ReadSize,
+		arg.TransferredSize,
+	)
+	return err
+}
+
+const upsertVeeamPlatform = `-- name: UpsertVeeamPlatform :exec
+INSERT INTO veeam_platforms (veeam_server_id, platform_id, display_name, last_seen_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (veeam_server_id, platform_id)
+DO UPDATE SET
+    -- display_name only ever moves forward: the license workload list is the
+    -- only source of a human label, and a sync that could not read it must not
+    -- blank out one an earlier sync found.
+    display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name
+                        ELSE veeam_platforms.display_name END,
+    last_seen_at = now()
+`
+
+type UpsertVeeamPlatformParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	PlatformID    uuid.UUID `json:"platform_id"`
+	DisplayName   string    `json:"display_name"`
+}
+
+func (q *Queries) UpsertVeeamPlatform(ctx context.Context, arg UpsertVeeamPlatformParams) error {
+	_, err := q.db.Exec(ctx, upsertVeeamPlatform, arg.VeeamServerID, arg.PlatformID, arg.DisplayName)
+	return err
+}
+
+const upsertVeeamRepository = `-- name: UpsertVeeamRepository :exec
+INSERT INTO veeam_repositories (
+    veeam_server_id, veeam_id, name, repo_type, host_name, path,
+    capacity_bytes, free_bytes, used_bytes, is_online, is_out_of_date, last_seen_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+ON CONFLICT (veeam_server_id, veeam_id)
+DO UPDATE SET
+    name = EXCLUDED.name,
+    repo_type = EXCLUDED.repo_type,
+    host_name = EXCLUDED.host_name,
+    path = EXCLUDED.path,
+    capacity_bytes = EXCLUDED.capacity_bytes,
+    free_bytes = EXCLUDED.free_bytes,
+    used_bytes = EXCLUDED.used_bytes,
+    is_online = EXCLUDED.is_online,
+    is_out_of_date = EXCLUDED.is_out_of_date,
+    last_seen_at = now()
+`
+
+type UpsertVeeamRepositoryParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	VeeamID       uuid.UUID `json:"veeam_id"`
+	Name          string    `json:"name"`
+	RepoType      string    `json:"repo_type"`
+	HostName      string    `json:"host_name"`
+	Path          string    `json:"path"`
+	CapacityBytes int64     `json:"capacity_bytes"`
+	FreeBytes     int64     `json:"free_bytes"`
+	UsedBytes     int64     `json:"used_bytes"`
+	IsOnline      bool      `json:"is_online"`
+	IsOutOfDate   bool      `json:"is_out_of_date"`
+}
+
+func (q *Queries) UpsertVeeamRepository(ctx context.Context, arg UpsertVeeamRepositoryParams) error {
+	_, err := q.db.Exec(ctx, upsertVeeamRepository,
+		arg.VeeamServerID,
+		arg.VeeamID,
+		arg.Name,
+		arg.RepoType,
+		arg.HostName,
+		arg.Path,
+		arg.CapacityBytes,
+		arg.FreeBytes,
+		arg.UsedBytes,
+		arg.IsOnline,
+		arg.IsOutOfDate,
+	)
+	return err
+}
+
+const upsertVeeamRestorePoint = `-- name: UpsertVeeamRestorePoint :exec
+INSERT INTO veeam_restore_points (
+    veeam_server_id, backup_object_id, veeam_id, name, point_type,
+    malware_status, guest_os_family, creation_time, size_bytes,
+    backup_id, session_id, backup_file_id, supports_flr, last_seen_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
+ON CONFLICT (veeam_server_id, veeam_id)
+DO UPDATE SET
+    backup_object_id = EXCLUDED.backup_object_id,
+    name = EXCLUDED.name,
+    point_type = EXCLUDED.point_type,
+    malware_status = EXCLUDED.malware_status,
+    guest_os_family = EXCLUDED.guest_os_family,
+    creation_time = EXCLUDED.creation_time,
+    size_bytes = EXCLUDED.size_bytes,
+    backup_id = EXCLUDED.backup_id,
+    session_id = EXCLUDED.session_id,
+    backup_file_id = EXCLUDED.backup_file_id,
+    supports_flr = EXCLUDED.supports_flr,
+    last_seen_at = now()
+`
+
+type UpsertVeeamRestorePointParams struct {
+	VeeamServerID  uuid.UUID   `json:"veeam_server_id"`
+	BackupObjectID uuid.UUID   `json:"backup_object_id"`
+	VeeamID        uuid.UUID   `json:"veeam_id"`
+	Name           string      `json:"name"`
+	PointType      string      `json:"point_type"`
+	MalwareStatus  string      `json:"malware_status"`
+	GuestOsFamily  string      `json:"guest_os_family"`
+	CreationTime   time.Time   `json:"creation_time"`
+	SizeBytes      int64       `json:"size_bytes"`
+	BackupID       pgtype.UUID `json:"backup_id"`
+	SessionID      pgtype.UUID `json:"session_id"`
+	BackupFileID   pgtype.UUID `json:"backup_file_id"`
+	SupportsFlr    bool        `json:"supports_flr"`
+}
+
+func (q *Queries) UpsertVeeamRestorePoint(ctx context.Context, arg UpsertVeeamRestorePointParams) error {
+	_, err := q.db.Exec(ctx, upsertVeeamRestorePoint,
+		arg.VeeamServerID,
+		arg.BackupObjectID,
+		arg.VeeamID,
+		arg.Name,
+		arg.PointType,
+		arg.MalwareStatus,
+		arg.GuestOsFamily,
+		arg.CreationTime,
+		arg.SizeBytes,
+		arg.BackupID,
+		arg.SessionID,
+		arg.BackupFileID,
+		arg.SupportsFlr,
+	)
+	return err
+}
+
+const upsertVeeamSession = `-- name: UpsertVeeamSession :exec
+INSERT INTO veeam_sessions (
+    veeam_server_id, veeam_id, job_veeam_id, name, session_type,
+    platform_name, platform_id, state, result, result_message, is_canceled,
+    algorithm, bottleneck, duration, processing_rate,
+    processed_size, read_size, transferred_size, progress_percent,
+    creation_time, end_time, initiated_by, last_seen_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, $21, $22, now())
+ON CONFLICT (veeam_server_id, veeam_id)
+DO UPDATE SET
+    job_veeam_id = EXCLUDED.job_veeam_id,
+    name = EXCLUDED.name,
+    session_type = EXCLUDED.session_type,
+    platform_name = EXCLUDED.platform_name,
+    platform_id = EXCLUDED.platform_id,
+    state = EXCLUDED.state,
+    result = EXCLUDED.result,
+    result_message = EXCLUDED.result_message,
+    is_canceled = EXCLUDED.is_canceled,
+    algorithm = EXCLUDED.algorithm,
+    bottleneck = EXCLUDED.bottleneck,
+    duration = EXCLUDED.duration,
+    processing_rate = EXCLUDED.processing_rate,
+    processed_size = EXCLUDED.processed_size,
+    read_size = EXCLUDED.read_size,
+    transferred_size = EXCLUDED.transferred_size,
+    progress_percent = EXCLUDED.progress_percent,
+    creation_time = EXCLUDED.creation_time,
+    end_time = EXCLUDED.end_time,
+    initiated_by = EXCLUDED.initiated_by,
+    last_seen_at = now()
+`
+
+type UpsertVeeamSessionParams struct {
+	VeeamServerID   uuid.UUID          `json:"veeam_server_id"`
+	VeeamID         uuid.UUID          `json:"veeam_id"`
+	JobVeeamID      pgtype.UUID        `json:"job_veeam_id"`
+	Name            string             `json:"name"`
+	SessionType     string             `json:"session_type"`
+	PlatformName    string             `json:"platform_name"`
+	PlatformID      pgtype.UUID        `json:"platform_id"`
+	State           string             `json:"state"`
+	Result          string             `json:"result"`
+	ResultMessage   string             `json:"result_message"`
+	IsCanceled      bool               `json:"is_canceled"`
+	Algorithm       string             `json:"algorithm"`
+	Bottleneck      string             `json:"bottleneck"`
+	Duration        string             `json:"duration"`
+	ProcessingRate  string             `json:"processing_rate"`
+	ProcessedSize   int64              `json:"processed_size"`
+	ReadSize        int64              `json:"read_size"`
+	TransferredSize int64              `json:"transferred_size"`
+	ProgressPercent int32              `json:"progress_percent"`
+	CreationTime    time.Time          `json:"creation_time"`
+	EndTime         pgtype.Timestamptz `json:"end_time"`
+	InitiatedBy     string             `json:"initiated_by"`
+}
+
+// nexara_initiated is absent from the UPDATE below: it is set once by the
+// handler that started or stopped the job and must survive every later poll
+// of that session.
+func (q *Queries) UpsertVeeamSession(ctx context.Context, arg UpsertVeeamSessionParams) error {
+	_, err := q.db.Exec(ctx, upsertVeeamSession,
+		arg.VeeamServerID,
+		arg.VeeamID,
+		arg.JobVeeamID,
+		arg.Name,
+		arg.SessionType,
+		arg.PlatformName,
+		arg.PlatformID,
+		arg.State,
+		arg.Result,
+		arg.ResultMessage,
+		arg.IsCanceled,
+		arg.Algorithm,
+		arg.Bottleneck,
+		arg.Duration,
+		arg.ProcessingRate,
+		arg.ProcessedSize,
+		arg.ReadSize,
+		arg.TransferredSize,
+		arg.ProgressPercent,
+		arg.CreationTime,
+		arg.EndTime,
+		arg.InitiatedBy,
+	)
+	return err
 }

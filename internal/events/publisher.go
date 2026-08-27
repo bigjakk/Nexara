@@ -37,6 +37,7 @@ const (
 	KindVMImport          = "vm_import"
 	KindSnapshotChange    = "snapshot_change"
 	KindAccessChange      = "access_change"
+	KindVeeamChange       = "veeam_change"
 )
 
 // Redis pub/sub channels for non-cluster events. Cluster events use

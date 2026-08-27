@@ -219,6 +219,24 @@ type Querier interface {
 	//     vms.id and, before migration 000068, silently dropped folder memberships.
 	//     Driving both sides from now() also avoids mixing the app and DB clocks.
 	DeleteStaleVMsForNodes(ctx context.Context, arg DeleteStaleVMsForNodesParams) (int64, error)
+	// Grace-windowed, DB-clock prune (mirrors DeleteStalePBSSnapshots).
+	//
+	// Both sides of the comparison come from now(), so a Postgres running even a
+	// second behind the Nexara container cannot make rows this very pass wrote
+	// look stale. The grace window absorbs a momentary non-observation on top.
+	DeleteStaleVeeamBackupObjects(ctx context.Context, arg DeleteStaleVeeamBackupObjectsParams) error
+	// Grace-windowed, DB-clock prune (mirrors DeleteStalePBSSnapshots).
+	//
+	// Both sides of the comparison come from now(), so a Postgres running even a
+	// second behind the Nexara container cannot make rows this very pass wrote
+	// look stale. The grace window absorbs a momentary non-observation on top.
+	DeleteStaleVeeamJobs(ctx context.Context, arg DeleteStaleVeeamJobsParams) error
+	// Grace-windowed, DB-clock prune (mirrors DeleteStalePBSSnapshots).
+	//
+	// Both sides of the comparison come from now(), so a Postgres running even a
+	// second behind the Nexara container cannot make rows this very pass wrote
+	// look stale. The grace window absorbs a momentary non-observation on top.
+	DeleteStaleVeeamRepositories(ctx context.Context, arg DeleteStaleVeeamRepositoriesParams) error
 	DeleteStoragePool(ctx context.Context, id uuid.UUID) error
 	DeleteStoragePoolsByName(ctx context.Context, arg DeleteStoragePoolsByNameParams) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
@@ -233,6 +251,10 @@ type Querier interface {
 	// the resources payload was well-formed before treating it as authoritative.
 	DeleteVMsAbsentFromCluster(ctx context.Context, arg DeleteVMsAbsentFromClusterParams) (int64, error)
 	DeleteVeeamServer(ctx context.Context, id uuid.UUID) error
+	// Job states carry no platformId; sessions are the only bridge. STICKY by
+	// construction — the WHERE clause only touches rows that have none yet, so a
+	// pruned session cannot un-attribute a job that was already resolved.
+	DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) (int64, error)
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) (int64, error)
@@ -370,7 +392,17 @@ type Querier interface {
 	// GetVMSnapshotAgeStats is the vm-scoped counterpart of
 	// GetClusterSnapshotAgeStats; same snap_time > 0 and ErrNoRows semantics.
 	GetVMSnapshotAgeStats(ctx context.Context, arg GetVMSnapshotAgeStatsParams) (GetVMSnapshotAgeStatsRow, error)
+	GetVeeamRepositoryMetrics(ctx context.Context, arg GetVeeamRepositoryMetricsParams) ([]GetVeeamRepositoryMetricsRow, error)
 	GetVeeamServer(ctx context.Context, id uuid.UUID) (VeeamServer, error)
+	// The newest session already stored, used as the createdAfterFilter for the
+	// next poll.
+	//
+	// The newest ROW rather than MAX(creation_time): an aggregate over an empty
+	// table is SQL NULL, which sqlc types as interface{} and pgx cannot scan into
+	// a time. Reading the row instead returns pgx.ErrNoRows on an empty table,
+	// which is an explicit "first sync" the caller handles — and it is served
+	// straight off idx_veeam_sessions_server_time.
+	GetVeeamSessionWatermark(ctx context.Context, veeamServerID uuid.UUID) (time.Time, error)
 	HasClusterSSHCredentials(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	HasRunningJobForCluster(ctx context.Context, clusterID uuid.UUID) (bool, error)
 	IncrementJobCleanupAttempts(ctx context.Context, id uuid.UUID) (int32, error)
@@ -437,6 +469,7 @@ type Querier interface {
 	// overflowing the ::int cast.
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	InsertVMImportJob(ctx context.Context, arg InsertVMImportJobParams) (VmImportJob, error)
+	InsertVeeamRepositoryMetric(ctx context.Context, arg InsertVeeamRepositoryMetricParams) error
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ListAPIKeysByUserRow, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
 	ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error)
@@ -444,6 +477,7 @@ type Querier interface {
 	ListActiveMaintenanceWindows(ctx context.Context) ([]MaintenanceWindow, error)
 	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
 	ListActiveVMImportJobs(ctx context.Context) ([]VmImportJob, error)
+	ListActiveVeeamServers(ctx context.Context) ([]VeeamServer, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	ListAlertHistoryByCluster(ctx context.Context, arg ListAlertHistoryByClusterParams) ([]AlertHistory, error)
 	// ListAlertHistoryFiltered backs the Alerts history page. cluster_id is the
@@ -672,7 +706,24 @@ type Querier interface {
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]ListVMStatusesByClusterRow, error)
 	ListVMsByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListVMsByNode(ctx context.Context, nodeID uuid.UUID) ([]Vm, error)
+	ListVeeamBackupObjectsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamBackupObject, error)
+	ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamJob, error)
+	ListVeeamPlatformsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamPlatform, error)
+	ListVeeamRepositoriesByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamRepository, error)
+	ListVeeamRestorePointsByObject(ctx context.Context, backupObjectID uuid.UUID) ([]VeeamRestorePoint, error)
+	ListVeeamRestorePointsByServer(ctx context.Context, arg ListVeeamRestorePointsByServerParams) ([]VeeamRestorePoint, error)
 	ListVeeamServers(ctx context.Context) ([]VeeamServer, error)
+	// Scoped in SQL, not in Go, because of the LIMIT: filtering after the limit
+	// would take the newest N rows server-wide and then discard the ones the
+	// caller cannot see, so a busy cluster's runs would crowd out a quiet
+	// cluster's entirely and the caller would see an empty list.
+	//
+	// A NULL platform_ids means "no restriction" (a global holder). A non-NULL
+	// array restricts to those platforms AND excludes rows with no platform at
+	// all — an unattributable row could belong to any cluster, so it is
+	// global-only. pgx sends a nil slice as NULL and a non-nil empty slice as
+	// '{}', and that distinction is what makes both cases work.
+	ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSessionsByServerParams) ([]VeeamSession, error)
 	ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVCInScanParams) ([]ListVulnsBySSVCInScanRow, error)
 	MarkAlertNotificationSent(ctx context.Context, id uuid.UUID) error
 	MarkNodeOffline(ctx context.Context, id uuid.UUID) error
@@ -680,6 +731,15 @@ type Querier interface {
 	MarkNotificationDLQResolved(ctx context.Context, id uuid.UUID) error
 	MoveVMFolder(ctx context.Context, arg MoveVMFolderParams) (VmFolder, error)
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	// Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still
+	// holds must not disappear from Nexara because it is old, or every RPO and
+	// coverage figure derived from it silently becomes wrong. This deletes only
+	// rows Veeam has stopped reporting.
+	PruneVeeamRestorePoints(ctx context.Context, arg PruneVeeamRestorePointsParams) error
+	// Sessions are historical events and Veeam keeps tens of thousands of them, so
+	// this DOES prune on creation_time: Nexara mirrors a bounded recent window by
+	// design rather than the server's full history.
+	PruneVeeamSessions(ctx context.Context, arg PruneVeeamSessionsParams) error
 	PurgeOldNotificationDLQ(ctx context.Context) error
 	// ReconcileTaskHistory marks a still-running task terminal. Scoped to
 	// status='running' so it never clobbers rows already finalized by the
@@ -735,6 +795,16 @@ type Querier interface {
 	SetVMConfigOSType(ctx context.Context, arg SetVMConfigOSTypeParams) error
 	SetVMImportJobUPID(ctx context.Context, arg SetVMImportJobUPIDParams) error
 	SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error
+	// Stamps a completed sync and sets the note in one statement.
+	//
+	// The note is usually empty, but a pass can succeed WITH a caveat — it read
+	// everything and then refused to prune on an empty listing, say. Clearing the
+	// error unconditionally here is what erased that caveat in the same pass that
+	// raised it.
+	SetVeeamServerSyncCompleted(ctx context.Context, arg SetVeeamServerSyncCompletedParams) error
+	// Deliberately does NOT touch last_sync_at. A server that has not synced in a
+	// week must not report "last synced: 30 seconds ago" beside its error.
+	SetVeeamServerSyncError(ctx context.Context, arg SetVeeamServerSyncErrorParams) error
 	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) (int64, error)
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
@@ -822,6 +892,17 @@ type Querier interface {
 	UpsertStoragePool(ctx context.Context, arg UpsertStoragePoolParams) (UpsertStoragePoolRow, error)
 	UpsertTaskSyncState(ctx context.Context, arg UpsertTaskSyncStateParams) error
 	UpsertVM(ctx context.Context, arg UpsertVMParams) (Vm, error)
+	UpsertVeeamBackupObject(ctx context.Context, arg UpsertVeeamBackupObjectParams) (VeeamBackupObject, error)
+	// platform_id is deliberately absent from the UPDATE below: it is derived from
+	// sessions by DeriveVeeamJobPlatforms and must survive a job-state refresh.
+	UpsertVeeamJob(ctx context.Context, arg UpsertVeeamJobParams) error
+	UpsertVeeamPlatform(ctx context.Context, arg UpsertVeeamPlatformParams) error
+	UpsertVeeamRepository(ctx context.Context, arg UpsertVeeamRepositoryParams) error
+	UpsertVeeamRestorePoint(ctx context.Context, arg UpsertVeeamRestorePointParams) error
+	// nexara_initiated is absent from the UPDATE below: it is set once by the
+	// handler that started or stopped the job and must survive every later poll
+	// of that session.
+	UpsertVeeamSession(ctx context.Context, arg UpsertVeeamSessionParams) error
 }
 
 var _ Querier = (*Queries)(nil)
