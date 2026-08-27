@@ -46,6 +46,8 @@ func newVeeamTestApp(t *testing.T) *fiber.App {
 	app.Put("/veeam-servers/:id", handler.Update)
 	app.Delete("/veeam-servers/:id", handler.Delete)
 	app.Post("/veeam-servers/:id/test", handler.Test)
+	app.Get("/veeam-servers/:id/platforms", handler.ListPlatforms)
+	app.Put("/veeam-servers/:id/platforms/:platform_id", handler.MapPlatform)
 
 	return app
 }
@@ -179,6 +181,12 @@ func TestVeeamRoutes_RequirePermission(t *testing.T) {
 		{"update", http.MethodPut, "/veeam-servers/" + id, `{"name":"renamed"}`},
 		{"delete", http.MethodDelete, "/veeam-servers/" + id, ""},
 		{"test", http.MethodPost, "/veeam-servers/" + id + "/test", ""},
+		// The platform mapping decides which cluster a body of backup data is
+		// attributed to, and every cluster-scoped Veeam permission resolves
+		// through it — so both sides are gated on the GLOBAL grant, not on
+		// one for the cluster being attached.
+		{"list platforms", http.MethodGet, "/veeam-servers/" + id + "/platforms", ""},
+		{"map platform", http.MethodPut, "/veeam-servers/" + id + "/platforms/" + uuid.New().String(), `{"cluster_id":null}`},
 	}
 
 	for _, tc := range tests {

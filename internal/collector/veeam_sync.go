@@ -87,6 +87,7 @@ type VeeamSyncQueries interface {
 	SetVeeamServerSyncError(ctx context.Context, arg db.SetVeeamServerSyncErrorParams) error
 
 	UpsertVeeamPlatform(ctx context.Context, arg db.UpsertVeeamPlatformParams) error
+	CorrelateVeeamBackupObjects(ctx context.Context, veeamServerID uuid.UUID) (int64, error)
 
 	ListVeeamRepositoriesByServer(ctx context.Context, veeamServerID uuid.UUID) ([]db.VeeamRepository, error)
 	UpsertVeeamRepository(ctx context.Context, arg db.UpsertVeeamRepositoryParams) error
@@ -345,6 +346,13 @@ func (v *VeeamSyncer) syncServerInventory(ctx context.Context, server db.VeeamSe
 			"veeam_server_id", server.ID, "error", err)
 	}
 
+	// Above the prune's early return, deliberately. Correlation reads the
+	// object set as it stands — including one a refused sweep chose to keep —
+	// and has nothing to do with restore-point retention, so inheriting that
+	// guard would strand a freshly mapped platform uncorrelated for as long
+	// as a VBR server took to finish loading its catalog.
+	v.correlate(ctx, server)
+
 	// The prune is gated on the SAME verdict as the sweeps, not merely on the
 	// pass not erroring. A pass that refused to sweep because the catalog came
 	// back empty touched no restore points either — so pruning on last_seen_at
@@ -367,6 +375,33 @@ func (v *VeeamSyncer) syncServerInventory(ctx context.Context, server db.VeeamSe
 
 	v.publishChange(ctx, "inventory_synced")
 	return res, nil
+}
+
+// correlate resolves this server's backup objects to Nexara guests.
+//
+// Runs after recordPlatforms, so a platform discovered by this very pass — and
+// auto-mapped by its own INSERT when the install has a single cluster — is
+// correlated in the same tick rather than the next one.
+//
+// It cannot fail the pass. The inventory is correct without it: correlation is
+// an enrichment, and refusing to record a successful sync because a follow-up
+// UPDATE failed would put the server into backoff and stop collecting the
+// very data the correlation decorates.
+//
+// The guest side of the join is filled by the collector's own SMBIOS pass,
+// which only visits clusters a platform is already mapped to. A freshly mapped
+// platform therefore converges over two ticks: everything reads as unresolved
+// until that pass has recorded what each guest's SMBIOS uuid is (or that it
+// has none), which is the honest answer — the alternative, name-matching
+// guests nothing is known about, reports orphaned backups as live protection.
+func (v *VeeamSyncer) correlate(ctx context.Context, server db.VeeamServer) {
+	if changed, err := v.queries.CorrelateVeeamBackupObjects(ctx, server.ID); err != nil {
+		v.logger.Warn("veeam sync: correlating backup objects failed",
+			"veeam_server_id", server.ID, "error", err)
+	} else if changed > 0 {
+		v.logger.Info("veeam sync: guest correlation updated",
+			"veeam_server_id", server.ID, "objects", changed)
+	}
 }
 
 // passResult is what one pass wants to say about itself beyond succeeding or

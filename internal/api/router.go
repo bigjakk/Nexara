@@ -675,6 +675,13 @@ func (s *Server) setupRoutes() {
 		vbr.Get("/:id/sessions", s.veeamHandler.ListSessions)
 		vbr.Get("/:id/backup-objects", s.veeamHandler.ListBackupObjects)
 		vbr.Get("/:id/backup-objects/:object_id/restore-points", s.veeamHandler.ListRestorePoints)
+
+		// Platform mapping. This is the operator-confirmed link a Veeam
+		// platformId has to a Nexara cluster, and every cluster-scoped Veeam
+		// permission resolves through it — so the write is gated on GLOBAL
+		// manage:veeam, not on a grant for the cluster being attached.
+		vbr.Get("/:id/platforms", s.veeamHandler.ListPlatforms)
+		vbr.Put("/:id/platforms/:platform_id", s.veeamHandler.MapPlatform)
 	}
 
 	// PBS snapshot lookup (cross-server, by backup_id / VMID).

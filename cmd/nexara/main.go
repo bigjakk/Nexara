@@ -523,6 +523,37 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 			}()
 		}
 
+		// Guest SMBIOS loop: caches the smbios1 uuid that makes Veeam guest
+		// correlation deterministic. Rides the snapshot cadence because it has
+		// the same shape — a per-guest config read with no bulk endpoint — but
+		// it is far cheaper in the steady state, since a cached uuid is only
+		// re-read once a day. Does nothing at all until an operator maps a
+		// Veeam platform to a cluster.
+		if cfg.SnapshotSyncInterval > 0 {
+			smbiosInterval := cfg.SnapshotSyncInterval
+			if smbiosInterval < time.Minute {
+				smbiosInterval = time.Minute
+			}
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("guest smbios sync loop panicked", "panic", r)
+					}
+				}()
+				syncer.SyncAllGuestSmbios(ctx)
+				smbiosTicker := time.NewTicker(smbiosInterval)
+				defer smbiosTicker.Stop()
+				for {
+					select {
+					case <-smbiosTicker.C:
+						syncer.SyncAllGuestSmbios(ctx)
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+		}
+
 		// Veeam inventory + session loops. Leader-gated on the same ctx as the
 		// loops above, so a follower never polls a VBR server and a lost
 		// leadership tears both down with everything else.

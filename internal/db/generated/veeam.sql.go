@@ -13,6 +13,136 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const correlateVeeamBackupObjects = `-- name: CorrelateVeeamBackupObjects :execrows
+WITH candidate AS (
+    SELECT
+        o.id,
+        o.name,
+        lower(o.smbios_uuid) AS smbios_uuid,
+        p.cluster_id
+    FROM veeam_backup_objects o
+    LEFT JOIN veeam_platforms p
+           ON p.veeam_server_id = o.veeam_server_id
+          AND p.platform_id     = o.platform_id
+    WHERE o.veeam_server_id = $1
+      AND o.match_method <> 'manual'
+),
+by_smbios AS (
+    -- Grouped with the same "exactly one" rule the name tier uses. The uuid is
+    -- supposed to be unique within a cluster, but nothing in Proxmox enforces
+    -- it — smbios1 is operator-settable, and a guest built by copying another
+    -- one's config carries its uuid. Two guests holding the same uuid makes
+    -- the deterministic key non-deterministic, and without the HAVING the
+    -- UPDATE below would silently pick whichever row the planner handed it.
+    -- Resolving to nothing surfaces the object as needing a manual mapping,
+    -- which is the honest answer.
+    SELECT c.id, c.cluster_id, min(g.vmid) AS vmid
+    FROM candidate c
+    JOIN guest_smbios g
+      ON g.cluster_id  = c.cluster_id
+     AND g.smbios_uuid = c.smbios_uuid
+    WHERE c.smbios_uuid <> ''
+    GROUP BY c.id, c.cluster_id
+    HAVING count(*) = 1
+),
+by_name AS (
+    SELECT c.id, c.cluster_id, min(v.vmid) AS vmid
+    FROM candidate c
+    JOIN vms v
+      ON v.cluster_id = c.cluster_id
+     AND lower(v.name) = lower(c.name)
+     AND v.type = 'qemu'
+    -- The affirmative "this guest has no SMBIOS uuid" record. An inner join,
+    -- so a guest the collector has never scanned is excluded rather than
+    -- treated as uuid-less.
+    JOIN guest_smbios gn
+      ON gn.cluster_id = v.cluster_id
+     AND gn.vmid = v.vmid
+     AND gn.smbios_uuid = ''
+    WHERE NOT EXISTS (SELECT 1 FROM by_smbios s WHERE s.id = c.id)
+    GROUP BY c.id, c.cluster_id
+    HAVING count(*) = 1
+),
+resolved AS (
+    SELECT
+        c.id,
+        COALESCE(s.cluster_id, n.cluster_id) AS cluster_id,
+        COALESCE(s.vmid, n.vmid)             AS vmid,
+        CASE
+            WHEN s.id IS NOT NULL THEN 'smbios'
+            WHEN n.id IS NOT NULL THEN 'name'
+            ELSE 'none'
+        END                                  AS match_method
+    FROM candidate c
+    LEFT JOIN by_smbios s ON s.id = c.id
+    LEFT JOIN by_name   n ON n.id = c.id
+)
+UPDATE veeam_backup_objects o
+SET cluster_id   = r.cluster_id,
+    vmid         = r.vmid,
+    match_method = r.match_method
+FROM resolved r
+WHERE o.id = r.id
+  AND (o.cluster_id   IS DISTINCT FROM r.cluster_id
+    OR o.vmid         IS DISTINCT FROM r.vmid
+    OR o.match_method IS DISTINCT FROM r.match_method)
+`
+
+// CorrelateVeeamBackupObjects resolves every backup object on one server to a
+// (cluster_id, vmid) guest, in one statement.
+//
+// One statement, not a reset-then-match sequence, on purpose: clearing every
+// correlation and rebuilding it would leave a window — however brief — in
+// which the coverage view reports every guest unprotected. In a backup product
+// that is the single worst thing a transient state can say, so the new value
+// is computed and written atomically instead.
+//
+// Tiers, in order:
+//
+//	smbios — the guest's smbios1 uuid equals Veeam's objectId. Deterministic.
+//	name   — a single QEMU guest in the mapped cluster carries that name AND
+//	         the collector has affirmatively recorded that the guest has no
+//	         SMBIOS uuid (a guest_smbios row with an empty smbios_uuid). Low
+//	         confidence, and flagged as such.
+//
+//	         That second condition is load-bearing, and it is a positive
+//	         requirement rather than the absence of a row on purpose. Three
+//	         states have to be told apart:
+//
+//	           guest has a uuid          → the smbios tier is the only tier.
+//	             A cached uuid the tier did not match is not an unknown, it
+//	             is a positive MISMATCH — commonly a host rebuilt in place,
+//	             which keeps its name, gets a new uuid, and leaves Veeam
+//	             holding the replaced machine's backup under the old one.
+//	             Name-matching there reports the replacement as protected by
+//	             a backup of the machine it replaced, the single failure this
+//	             whole design exists to prevent.
+//	           guest has no uuid         → nothing deterministic exists, so a
+//	             flagged name match is the best honest answer.
+//	           guest not yet scanned     → we do not know which of the two it
+//	             is, and must say so. Requiring the affirmative record is
+//	             what stops a platform mapped seconds ago — before the SMBIOS
+//	             pass has visited its cluster — from name-matching every
+//	             object it has, orphans included.
+//
+//	         An AMBIGUOUS name (two guests, which the lab already has)
+//	         resolves to nothing rather than to whichever row sorted first.
+//	none   — unresolved. Either the platform is not mapped to a cluster yet,
+//	         or the object is orphaned: its guest no longer exists in the form
+//	         that was backed up. That is a feature, not a gap — see the
+//	         orphaned-objects listing.
+//
+// Rows an operator has mapped by hand (match_method 'manual') are excluded
+// entirely, and the final predicate skips rows whose resolution has not
+// changed so a quiet pass does not churn updated_at on every object.
+func (q *Queries) CorrelateVeeamBackupObjects(ctx context.Context, veeamServerID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, correlateVeeamBackupObjects, veeamServerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createVeeamServer = `-- name: CreateVeeamServer :one
 INSERT INTO veeam_servers (
     name, base_url, username, password_encrypted,
@@ -164,6 +294,33 @@ WHERE j.veeam_server_id = $1
 func (q *Queries) DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deriveVeeamJobPlatforms, veeamServerID)
 	return err
+}
+
+const getVeeamPlatform = `-- name: GetVeeamPlatform :one
+
+SELECT veeam_server_id, platform_id, display_name, cluster_id, last_seen_at, created_at FROM veeam_platforms WHERE veeam_server_id = $1 AND platform_id = $2
+`
+
+type GetVeeamPlatformParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	PlatformID    uuid.UUID `json:"platform_id"`
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: platform mapping and guest correlation.
+// ---------------------------------------------------------------------------
+func (q *Queries) GetVeeamPlatform(ctx context.Context, arg GetVeeamPlatformParams) (VeeamPlatform, error) {
+	row := q.db.QueryRow(ctx, getVeeamPlatform, arg.VeeamServerID, arg.PlatformID)
+	var i VeeamPlatform
+	err := row.Scan(
+		&i.VeeamServerID,
+		&i.PlatformID,
+		&i.DisplayName,
+		&i.ClusterID,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getVeeamRepositoryMetrics = `-- name: GetVeeamRepositoryMetrics :many
@@ -329,7 +486,7 @@ func (q *Queries) ListActiveVeeamServers(ctx context.Context) ([]VeeamServer, er
 }
 
 const listVeeamBackupObjectsByServer = `-- name: ListVeeamBackupObjectsByServer :many
-SELECT id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at FROM veeam_backup_objects WHERE veeam_server_id = $1 ORDER BY name
+SELECT id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at, cluster_id, vmid, match_method FROM veeam_backup_objects WHERE veeam_server_id = $1 ORDER BY name
 `
 
 func (q *Queries) ListVeeamBackupObjectsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamBackupObject, error) {
@@ -356,6 +513,9 @@ func (q *Queries) ListVeeamBackupObjectsByServer(ctx context.Context, veeamServe
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ClusterID,
+			&i.Vmid,
+			&i.MatchMethod,
 		); err != nil {
 			return nil, err
 		}
@@ -439,6 +599,65 @@ func (q *Queries) ListVeeamPlatformsByServer(ctx context.Context, veeamServerID 
 			&i.ClusterID,
 			&i.LastSeenAt,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamPlatformsWithCluster = `-- name: ListVeeamPlatformsWithCluster :many
+SELECT
+    p.veeam_server_id,
+    p.platform_id,
+    p.display_name,
+    p.cluster_id,
+    p.last_seen_at,
+    c.name AS cluster_name,
+    (SELECT count(*) FROM veeam_backup_objects o
+      WHERE o.veeam_server_id = p.veeam_server_id
+        AND o.platform_id = p.platform_id) AS object_count
+FROM veeam_platforms p
+LEFT JOIN clusters c ON c.id = p.cluster_id
+WHERE p.veeam_server_id = $1
+ORDER BY p.display_name, p.platform_id
+`
+
+type ListVeeamPlatformsWithClusterRow struct {
+	VeeamServerID uuid.UUID   `json:"veeam_server_id"`
+	PlatformID    uuid.UUID   `json:"platform_id"`
+	DisplayName   string      `json:"display_name"`
+	ClusterID     pgtype.UUID `json:"cluster_id"`
+	LastSeenAt    time.Time   `json:"last_seen_at"`
+	ClusterName   pgtype.Text `json:"cluster_name"`
+	ObjectCount   int64       `json:"object_count"`
+}
+
+// ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
+// the server has been seen protecting, with the Nexara cluster (if any) an
+// operator has attached it to. object_count is what makes an unmapped platform
+// legible — "18 guests you cannot see yet" rather than a bare UUID.
+func (q *Queries) ListVeeamPlatformsWithCluster(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamPlatformsWithClusterRow, error) {
+	rows, err := q.db.Query(ctx, listVeeamPlatformsWithCluster, veeamServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVeeamPlatformsWithClusterRow{}
+	for rows.Next() {
+		var i ListVeeamPlatformsWithClusterRow
+		if err := rows.Scan(
+			&i.VeeamServerID,
+			&i.PlatformID,
+			&i.DisplayName,
+			&i.ClusterID,
+			&i.LastSeenAt,
+			&i.ClusterName,
+			&i.ObjectCount,
 		); err != nil {
 			return nil, err
 		}
@@ -734,6 +953,38 @@ func (q *Queries) PruneVeeamSessions(ctx context.Context, arg PruneVeeamSessions
 	return err
 }
 
+const setVeeamPlatformCluster = `-- name: SetVeeamPlatformCluster :one
+UPDATE veeam_platforms
+SET cluster_id = $3
+WHERE veeam_server_id = $1 AND platform_id = $2
+RETURNING veeam_server_id, platform_id, display_name, cluster_id, last_seen_at, created_at
+`
+
+type SetVeeamPlatformClusterParams struct {
+	VeeamServerID uuid.UUID   `json:"veeam_server_id"`
+	PlatformID    uuid.UUID   `json:"platform_id"`
+	ClusterID     pgtype.UUID `json:"cluster_id"`
+}
+
+// SetVeeamPlatformCluster attaches (or, with NULL, detaches) a Proxmox
+// connection from a Nexara cluster. This is the operator-confirmed mapping
+// every cluster-scoped Veeam permission resolves through, which is why it is
+// deliberately not derived: Veeam exposes no field that names the Nexara
+// cluster, and guessing wrong would show one tenant's backups to another.
+func (q *Queries) SetVeeamPlatformCluster(ctx context.Context, arg SetVeeamPlatformClusterParams) (VeeamPlatform, error) {
+	row := q.db.QueryRow(ctx, setVeeamPlatformCluster, arg.VeeamServerID, arg.PlatformID, arg.ClusterID)
+	var i VeeamPlatform
+	err := row.Scan(
+		&i.VeeamServerID,
+		&i.PlatformID,
+		&i.DisplayName,
+		&i.ClusterID,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const setVeeamServerSyncCompleted = `-- name: SetVeeamServerSyncCompleted :exec
 UPDATE veeam_servers
 SET last_sync_at = now(),
@@ -857,7 +1108,7 @@ DO UPDATE SET
     size_bytes = EXCLUDED.size_bytes,
     last_run_failed = EXCLUDED.last_run_failed,
     last_seen_at = now()
-RETURNING id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at
+RETURNING id, veeam_server_id, veeam_object_id, smbios_uuid, platform_id, name, object_type, backup_ref, restore_points_count, size_bytes, last_run_failed, last_seen_at, created_at, updated_at, cluster_id, vmid, match_method
 `
 
 type UpsertVeeamBackupObjectParams struct {
@@ -902,6 +1153,9 @@ func (q *Queries) UpsertVeeamBackupObject(ctx context.Context, arg UpsertVeeamBa
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ClusterID,
+		&i.Vmid,
+		&i.MatchMethod,
 	)
 	return i, err
 }
@@ -997,8 +1251,13 @@ func (q *Queries) UpsertVeeamJob(ctx context.Context, arg UpsertVeeamJobParams) 
 }
 
 const upsertVeeamPlatform = `-- name: UpsertVeeamPlatform :exec
-INSERT INTO veeam_platforms (veeam_server_id, platform_id, display_name, last_seen_at)
-VALUES ($1, $2, $3, now())
+INSERT INTO veeam_platforms (veeam_server_id, platform_id, display_name, cluster_id, last_seen_at)
+VALUES (
+    $1, $2, $3,
+    (SELECT c.id FROM clusters c
+      WHERE c.is_active
+        AND (SELECT count(*) FROM clusters WHERE is_active) = 1),
+    now())
 ON CONFLICT (veeam_server_id, platform_id)
 DO UPDATE SET
     -- display_name only ever moves forward: the license workload list is the
@@ -1015,6 +1274,20 @@ type UpsertVeeamPlatformParams struct {
 	DisplayName   string    `json:"display_name"`
 }
 
+// cluster_id is set ONLY on first discovery, and only when the install has
+// exactly one active cluster — there is then no second cluster whose data a
+// wrong guess could expose.
+//
+// Doing it here rather than as a recurring "map anything still NULL" sweep is
+// the point: unmapping a platform sets cluster_id back to NULL, so a sweep
+// would silently re-map it on the next tick and undo an operator's deliberate
+// revocation of cluster-scoped access within minutes. The ON CONFLICT branch
+// below never touches cluster_id, so once the row exists the mapping is the
+// operator's alone.
+//
+// The subquery cannot error on a multi-cluster install: the count guard is
+// inside it, so it yields no rows — and therefore NULL — rather than "more
+// than one row returned by a subquery".
 func (q *Queries) UpsertVeeamPlatform(ctx context.Context, arg UpsertVeeamPlatformParams) error {
 	_, err := q.db.Exec(ctx, upsertVeeamPlatform, arg.VeeamServerID, arg.PlatformID, arg.DisplayName)
 	return err

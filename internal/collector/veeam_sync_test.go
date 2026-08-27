@@ -54,6 +54,13 @@ type fakeVeeamQueries struct {
 	existingRepos   []db.VeeamRepository
 	// watermark drives GetVeeamSessionWatermark; zero means pgx.ErrNoRows.
 	watermark time.Time
+
+	// Correlation. correlated records the server ids the call was made for,
+	// so a test can assert the enrichment ran.
+	correlated []uuid.UUID
+	// correlateErr makes CorrelateVeeamBackupObjects fail, to prove a failed
+	// enrichment does not fail the pass that produced a good inventory.
+	correlateErr error
 }
 
 func (q *fakeVeeamQueries) ListActiveVeeamServers(context.Context) ([]db.VeeamServer, error) {
@@ -96,6 +103,13 @@ func (q *fakeVeeamQueries) ListVeeamJobsByServer(context.Context, uuid.UUID) ([]
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.existingJobs, nil
+}
+
+func (q *fakeVeeamQueries) CorrelateVeeamBackupObjects(_ context.Context, serverID uuid.UUID) (int64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.correlated = append(q.correlated, serverID)
+	return 0, q.correlateErr
 }
 
 func (q *fakeVeeamQueries) UpsertVeeamPlatform(_ context.Context, arg db.UpsertVeeamPlatformParams) error {
@@ -574,6 +588,15 @@ func TestVeeamSync_EmptyListingDoesNotWipeInventory(t *testing.T) {
 	if len(q.prunedPoints) != 0 {
 		t.Error("restore points were pruned on a pass that refused to sweep")
 	}
+
+	// Correlation is NOT gated on it. It reads the object set as it stands —
+	// including the one this pass deliberately kept — and has nothing to do
+	// with restore-point retention. Inheriting the guard would strand a
+	// freshly mapped platform uncorrelated for as long as a VBR server took
+	// to finish loading its catalog after a restart.
+	if len(q.correlated) != 1 {
+		t.Errorf("correlated = %v, want the pass to still correlate", q.correlated)
+	}
 }
 
 // A server that genuinely has nothing yet must still converge — the guard is
@@ -1048,4 +1071,52 @@ func indexOf(haystack, needle string) int {
 		}
 	}
 	return -1
+}
+
+func TestVeeamSync_InventoryCorrelates(t *testing.T) {
+	server := testVeeamServer(t)
+	q := &fakeVeeamQueries{servers: []db.VeeamServer{server}}
+	c := &fakeVeeamClient{
+		objects: []veeam.BackupObject{
+			{ID: testObjectID, ObjectID: "316e531d-55c0-4fef-adc2-f1bb9c4e1873", PlatformName: "Proxmox",
+				PlatformID: testPlatformID, Name: "web01", Type: "VM"},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncInventory(context.Background())
+
+	if len(q.correlated) != 1 || q.correlated[0] != server.ID {
+		t.Errorf("correlated = %v, want one call for %s", q.correlated, server.ID)
+	}
+}
+
+func TestVeeamSync_CorrelationFailureDoesNotFailThePass(t *testing.T) {
+	server := testVeeamServer(t)
+	q := &fakeVeeamQueries{
+		servers:      []db.VeeamServer{server},
+		correlateErr: errors.New("deadlock detected"),
+	}
+	c := &fakeVeeamClient{
+		objects: []veeam.BackupObject{
+			{ID: testObjectID, ObjectID: "316e531d-55c0-4fef-adc2-f1bb9c4e1873", PlatformName: "Proxmox",
+				PlatformID: testPlatformID, Name: "web01", Type: "VM"},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncInventory(context.Background())
+
+	// Correlation is an enrichment of an inventory that is already correct
+	// without it. Failing the pass would put the server into backoff and stop
+	// collecting the very data the correlation decorates.
+	if len(q.syncSuccesses) != 1 {
+		t.Errorf("syncSuccesses = %v, want the pass to still succeed", q.syncSuccesses)
+	}
+	if len(q.syncErrors) != 0 {
+		t.Errorf("syncErrors = %+v, want none — a failed enrichment is not a failed sync", q.syncErrors)
+	}
+	if q.serverNote != "" {
+		t.Errorf("last_sync_error = %q, want empty", q.serverNote)
+	}
 }

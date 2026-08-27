@@ -71,6 +71,54 @@ type Querier interface {
 	CompleteRollingUpdateJob(ctx context.Context, id uuid.UUID) (int64, error)
 	CompleteVMImportJob(ctx context.Context, id uuid.UUID) error
 	ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) error
+	// CorrelateVeeamBackupObjects resolves every backup object on one server to a
+	// (cluster_id, vmid) guest, in one statement.
+	//
+	// One statement, not a reset-then-match sequence, on purpose: clearing every
+	// correlation and rebuilding it would leave a window — however brief — in
+	// which the coverage view reports every guest unprotected. In a backup product
+	// that is the single worst thing a transient state can say, so the new value
+	// is computed and written atomically instead.
+	//
+	// Tiers, in order:
+	//
+	//   smbios — the guest's smbios1 uuid equals Veeam's objectId. Deterministic.
+	//   name   — a single QEMU guest in the mapped cluster carries that name AND
+	//            the collector has affirmatively recorded that the guest has no
+	//            SMBIOS uuid (a guest_smbios row with an empty smbios_uuid). Low
+	//            confidence, and flagged as such.
+	//
+	//            That second condition is load-bearing, and it is a positive
+	//            requirement rather than the absence of a row on purpose. Three
+	//            states have to be told apart:
+	//
+	//              guest has a uuid          → the smbios tier is the only tier.
+	//                A cached uuid the tier did not match is not an unknown, it
+	//                is a positive MISMATCH — commonly a host rebuilt in place,
+	//                which keeps its name, gets a new uuid, and leaves Veeam
+	//                holding the replaced machine's backup under the old one.
+	//                Name-matching there reports the replacement as protected by
+	//                a backup of the machine it replaced, the single failure this
+	//                whole design exists to prevent.
+	//              guest has no uuid         → nothing deterministic exists, so a
+	//                flagged name match is the best honest answer.
+	//              guest not yet scanned     → we do not know which of the two it
+	//                is, and must say so. Requiring the affirmative record is
+	//                what stops a platform mapped seconds ago — before the SMBIOS
+	//                pass has visited its cluster — from name-matching every
+	//                object it has, orphans included.
+	//
+	//            An AMBIGUOUS name (two guests, which the lab already has)
+	//            resolves to nothing rather than to whichever row sorted first.
+	//   none   — unresolved. Either the platform is not mapped to a cluster yet,
+	//            or the object is orphaned: its guest no longer exists in the form
+	//            that was backed up. That is a feature, not a gap — see the
+	//            orphaned-objects listing.
+	//
+	// Rows an operator has mapped by hand (match_method 'manual') are excluded
+	// entirely, and the final predicate skips rows whose resolution has not
+	// changed so a quiet pass does not churn updated_at on every object.
+	CorrelateVeeamBackupObjects(ctx context.Context, veeamServerID uuid.UUID) (int64, error)
 	CountActiveAPIKeysByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) (CountActiveAlertsByClusterRow, error)
 	CountActiveNodes(ctx context.Context, jobID uuid.UUID) (int64, error)
@@ -150,6 +198,14 @@ type Querier interface {
 	DeleteDRSRule(ctx context.Context, id uuid.UUID) error
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteFirewallTemplate(ctx context.Context, id uuid.UUID) error
+	// DeleteGuestSmbiosForVanishedGuests drops cache rows for guests that are no
+	// longer in the cluster's vms inventory. vmids come from the vms table rather
+	// than a live listing, so this inherits the grace protection
+	// DeleteStaleVMsForNodes gives those rows and a transient Proxmox blip cannot
+	// flush the cache. The list must be a non-nil (possibly empty) slice: pgx
+	// encodes nil as SQL NULL and NOT (x = ANY(NULL)) is NULL, so a nil list
+	// silently deletes nothing.
+	DeleteGuestSmbiosForVanishedGuests(ctx context.Context, arg DeleteGuestSmbiosForVanishedGuestsParams) (int64, error)
 	// DeleteGuestSnapshotsForVanishedGuests removes snapshot rows for guests that
 	// no longer exist in the cluster's vms inventory. Callers feed vmids from the
 	// vms table (not from a live listing), so this inherits the grace protection
@@ -392,6 +448,10 @@ type Querier interface {
 	// GetVMSnapshotAgeStats is the vm-scoped counterpart of
 	// GetClusterSnapshotAgeStats; same snap_time > 0 and ErrNoRows semantics.
 	GetVMSnapshotAgeStats(ctx context.Context, arg GetVMSnapshotAgeStatsParams) (GetVMSnapshotAgeStatsRow, error)
+	// ---------------------------------------------------------------------------
+	// Phase 3: platform mapping and guest correlation.
+	// ---------------------------------------------------------------------------
+	GetVeeamPlatform(ctx context.Context, arg GetVeeamPlatformParams) (VeeamPlatform, error)
 	GetVeeamRepositoryMetrics(ctx context.Context, arg GetVeeamRepositoryMetricsParams) ([]GetVeeamRepositoryMetricsRow, error)
 	GetVeeamServer(ctx context.Context, id uuid.UUID) (VeeamServer, error)
 	// The newest session already stored, used as the createdAfterFilter for the
@@ -540,6 +600,11 @@ type Querier interface {
 	ListCVEScans(ctx context.Context, arg ListCVEScansParams) ([]CveScan, error)
 	ListCleanupPendingJobsForCluster(ctx context.Context, clusterID uuid.UUID) ([]RollingUpdateJob, error)
 	ListClusters(ctx context.Context) ([]Cluster, error)
+	// ListClustersWithVeeamPlatform returns the clusters an operator has mapped a
+	// Veeam platform to. The per-guest config fetch that fills guest_smbios runs
+	// only for these: a deployment with no Veeam server, or one whose platform is
+	// not mapped yet, pays nothing for a correlation it cannot use.
+	ListClustersWithVeeamPlatform(ctx context.Context) ([]Cluster, error)
 	ListContainersByCluster(ctx context.Context, clusterID uuid.UUID) ([]Vm, error)
 	ListDRSHistory(ctx context.Context, arg ListDRSHistoryParams) ([]DrsHistory, error)
 	ListDRSRules(ctx context.Context, clusterID uuid.UUID) ([]DrsRule, error)
@@ -571,6 +636,7 @@ type Querier interface {
 	ListFiringUnacknowledged(ctx context.Context) ([]AlertHistory, error)
 	// No row-level tiebreak, for the reasons noted on ListSettingsByScope above.
 	ListGlobalSettings(ctx context.Context) ([]Setting, error)
+	ListGuestSmbiosByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSmbios, error)
 	ListGuestSnapshotsByCluster(ctx context.Context, clusterID uuid.UUID) ([]GuestSnapshot, error)
 	// ListGuestSnapshotsForReport feeds the snapshot_inventory report type: one
 	// cluster's rows, oldest dated first (unknown ages last), with the guest
@@ -709,6 +775,11 @@ type Querier interface {
 	ListVeeamBackupObjectsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamBackupObject, error)
 	ListVeeamJobsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamJob, error)
 	ListVeeamPlatformsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamPlatform, error)
+	// ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
+	// the server has been seen protecting, with the Nexara cluster (if any) an
+	// operator has attached it to. object_count is what makes an unmapped platform
+	// legible — "18 guests you cannot see yet" rather than a bare UUID.
+	ListVeeamPlatformsWithCluster(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamPlatformsWithClusterRow, error)
 	ListVeeamRepositoriesByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamRepository, error)
 	ListVeeamRestorePointsByObject(ctx context.Context, backupObjectID uuid.UUID) ([]VeeamRestorePoint, error)
 	ListVeeamRestorePointsByServer(ctx context.Context, arg ListVeeamRestorePointsByServerParams) ([]VeeamRestorePoint, error)
@@ -795,6 +866,12 @@ type Querier interface {
 	SetVMConfigOSType(ctx context.Context, arg SetVMConfigOSTypeParams) error
 	SetVMImportJobUPID(ctx context.Context, arg SetVMImportJobUPIDParams) error
 	SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error
+	// SetVeeamPlatformCluster attaches (or, with NULL, detaches) a Proxmox
+	// connection from a Nexara cluster. This is the operator-confirmed mapping
+	// every cluster-scoped Veeam permission resolves through, which is why it is
+	// deliberately not derived: Veeam exposes no field that names the Nexara
+	// cluster, and guessing wrong would show one tenant's backups to another.
+	SetVeeamPlatformCluster(ctx context.Context, arg SetVeeamPlatformClusterParams) (VeeamPlatform, error)
 	// Stamps a completed sync and sets the note in one statement.
 	//
 	// The note is usually empty, but a pass can succeed WITH a caveat — it read
@@ -875,6 +952,17 @@ type Querier interface {
 	UpsertDRSConfig(ctx context.Context, arg UpsertDRSConfigParams) (DrsConfig, error)
 	UpsertEPSSEntry(ctx context.Context, arg UpsertEPSSEntryParams) error
 	UpsertExternalFeedCache(ctx context.Context, arg UpsertExternalFeedCacheParams) error
+	// Cache of each QEMU guest's smbios1 uuid — the deterministic join key between
+	// Nexara's guest inventory and a Veeam backup object.
+	//
+	// Keyed on (cluster_id, vmid), never vms.id: the collector deletes and
+	// re-inserts guest rows with fresh UUIDs on churn, which would empty a cache
+	// keyed on that id and force a full per-guest config re-fetch every time.
+	// smbios_uuid is lowered here as well as in the caller so the stored value is
+	// canonical no matter which path writes it. The correlation join lowers both
+	// sides too — a case mismatch would degrade a deterministic match to the
+	// low-confidence name tier with nothing to indicate why.
+	UpsertGuestSmbios(ctx context.Context, arg UpsertGuestSmbiosParams) error
 	UpsertGuestSnapshot(ctx context.Context, arg UpsertGuestSnapshotParams) (GuestSnapshot, error)
 	UpsertKEVEntry(ctx context.Context, arg UpsertKEVEntryParams) error
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
@@ -896,6 +984,20 @@ type Querier interface {
 	// platform_id is deliberately absent from the UPDATE below: it is derived from
 	// sessions by DeriveVeeamJobPlatforms and must survive a job-state refresh.
 	UpsertVeeamJob(ctx context.Context, arg UpsertVeeamJobParams) error
+	// cluster_id is set ONLY on first discovery, and only when the install has
+	// exactly one active cluster — there is then no second cluster whose data a
+	// wrong guess could expose.
+	//
+	// Doing it here rather than as a recurring "map anything still NULL" sweep is
+	// the point: unmapping a platform sets cluster_id back to NULL, so a sweep
+	// would silently re-map it on the next tick and undo an operator's deliberate
+	// revocation of cluster-scoped access within minutes. The ON CONFLICT branch
+	// below never touches cluster_id, so once the row exists the mapping is the
+	// operator's alone.
+	//
+	// The subquery cannot error on a multi-cluster install: the count guard is
+	// inside it, so it yields no rows — and therefore NULL — rather than "more
+	// than one row returned by a subquery".
 	UpsertVeeamPlatform(ctx context.Context, arg UpsertVeeamPlatformParams) error
 	UpsertVeeamRepository(ctx context.Context, arg UpsertVeeamRepositoryParams) error
 	UpsertVeeamRestorePoint(ctx context.Context, arg UpsertVeeamRestorePointParams) error

@@ -13,6 +13,10 @@ sql:
         emit_interface: true
         emit_exact_table_names: false
         emit_empty_slices: true
+        # sqlc singularizes table names for struct names, and "guest_smbios"
+        # becomes "GuestSmbio" — SMBIOS is an acronym, not a plural.
+        rename:
+          guest_smbio: "GuestSmbios"
         overrides:
           - db_type: "uuid"
             go_type:

@@ -60,6 +60,12 @@ type mockQueries struct {
 	guestSnapNotInSetRemoved int64
 	guestSnapVanishedCalls   []db.DeleteGuestSnapshotsForVanishedGuestsParams
 	guestSnapVanishedRemoved int64
+
+	// Guest SMBIOS cache (the Veeam correlation key)
+	veeamLinkedClusters  []db.Cluster
+	guestSmbiosByCluster []db.GuestSmbios
+	smbiosUpserts        []db.UpsertGuestSmbiosParams
+	smbiosVanishedCalls  []db.DeleteGuestSmbiosForVanishedGuestsParams
 }
 
 func newMockQueries() *mockQueries {
@@ -95,6 +101,24 @@ func (m *mockQueries) DeleteGuestSnapshotsNotInSet(_ context.Context, arg db.Del
 func (m *mockQueries) DeleteGuestSnapshotsForVanishedGuests(_ context.Context, arg db.DeleteGuestSnapshotsForVanishedGuestsParams) (int64, error) {
 	m.guestSnapVanishedCalls = append(m.guestSnapVanishedCalls, arg)
 	return m.guestSnapVanishedRemoved, nil
+}
+
+func (m *mockQueries) ListClustersWithVeeamPlatform(_ context.Context) ([]db.Cluster, error) {
+	return m.veeamLinkedClusters, nil
+}
+
+func (m *mockQueries) ListGuestSmbiosByCluster(_ context.Context, _ uuid.UUID) ([]db.GuestSmbios, error) {
+	return m.guestSmbiosByCluster, nil
+}
+
+func (m *mockQueries) UpsertGuestSmbios(_ context.Context, arg db.UpsertGuestSmbiosParams) error {
+	m.smbiosUpserts = append(m.smbiosUpserts, arg)
+	return nil
+}
+
+func (m *mockQueries) DeleteGuestSmbiosForVanishedGuests(_ context.Context, arg db.DeleteGuestSmbiosForVanishedGuestsParams) (int64, error) {
+	m.smbiosVanishedCalls = append(m.smbiosVanishedCalls, arg)
+	return 0, nil
 }
 
 func (m *mockQueries) UpsertNode(_ context.Context, arg db.UpsertNodeParams) (db.Node, error) {

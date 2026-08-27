@@ -352,6 +352,15 @@ type FirewallTemplate struct {
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
+// Cache of each QEMU guest's smbios1 uuid, which is the deterministic join key between Nexara's inventory and a Veeam backup object. Populated only for clusters with a linked Veeam platform — no Veeam, no per-guest config fetch
+type GuestSmbios struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+	// Stored lowercase. Proxmox and Veeam both emit lowercase today, but the correlation join lowers both sides anyway: a case difference here would silently degrade every match to the name-based fallback tier, which is the exact failure this column exists to avoid. An EMPTY string is meaningful, not missing data — it records that the collector read the guest's config and found no smbios1 uuid. That is what lets correlation distinguish "this guest has no uuid" (where a flagged name match is the best honest answer) from "this guest has not been scanned yet" (where any match would be a guess), and it is also what stops a uuid-less guest being re-read on every single pass forever
+	SmbiosUuid string    `json:"smbios_uuid"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
 type GuestSnapshot struct {
 	ClusterID   uuid.UUID `json:"cluster_id"`
 	Vmid        int32     `json:"vmid"`
@@ -971,13 +980,19 @@ type VeeamBackupObject struct {
 	ObjectType string      `json:"object_type"`
 	// The payload's "backupId". Verified against the live server: it does NOT resolve into GET /api/v1/backups — a different id space despite the name. Stored for reference only; the object-to-restore-point link comes from GET /backupObjects/{id}/restorePoints, which is authoritative
 	BackupRef pgtype.UUID `json:"backup_ref"`
-	// Veeam's own count. Compared against the stored value to decide whether this object's restore points need re-fetching, which is what keeps the per-object fan-out cheap
+	// SUM of Veeam's per-backup counts for this guest, which is what /backupObjects/{id}/restorePoints returns — any single row's count understates it. Stored for display only: it is deliberately NOT used to decide whether to re-fetch, because a job that keeps N points saturates at N and the count stops moving, so a count-gated refresh would freeze permanently on the day the ceiling was hit
 	RestorePointsCount int32     `json:"restore_points_count"`
 	SizeBytes          int64     `json:"size_bytes"`
 	LastRunFailed      bool      `json:"last_run_failed"`
 	LastSeenAt         time.Time `json:"last_seen_at"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
+	// The Nexara cluster this backup object's guest lives on, resolved by the correlation pass. NULL means unattributable — either the Veeam platform is not yet mapped to a cluster, or the object is orphaned (its guest no longer exists in the form that was backed up). ON DELETE SET NULL, not CASCADE: removing a cluster must not delete the record that its guests were backed up
+	ClusterID pgtype.UUID `json:"cluster_id"`
+	// Paired with cluster_id as the Proxmox-stable guest identity. Never vms.id — the collector mints a fresh UUID for a guest row on churn, so a foreign key to it would drop correlation on every re-inventory
+	Vmid pgtype.Int4 `json:"vmid"`
+	// Which tier resolved this row: smbios (deterministic, the objectId matched a guest's smbios1 uuid), name (fallback, low confidence — surfaced as such in the UI; only ever applied to a guest the collector has affirmatively recorded as having NO smbios1 uuid, never to one it has not scanned), manual (an operator said so; automatic passes never overwrite it), none (unresolved: the platform is unmapped, the guest has not been scanned yet, or the object is orphaned)
+	MatchMethod string `json:"match_method"`
 }
 
 type VeeamJob struct {

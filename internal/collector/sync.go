@@ -91,6 +91,11 @@ type SyncQueries interface {
 	ListGuestSnapshotsByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.GuestSnapshot, error)
 	DeleteGuestSnapshotsNotInSet(ctx context.Context, arg db.DeleteGuestSnapshotsNotInSetParams) (int64, error)
 	DeleteGuestSnapshotsForVanishedGuests(ctx context.Context, arg db.DeleteGuestSnapshotsForVanishedGuestsParams) (int64, error)
+	// Guest SMBIOS cache (the Veeam correlation key)
+	ListClustersWithVeeamPlatform(ctx context.Context) ([]db.Cluster, error)
+	ListGuestSmbiosByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.GuestSmbios, error)
+	UpsertGuestSmbios(ctx context.Context, arg db.UpsertGuestSmbiosParams) error
+	DeleteGuestSmbiosForVanishedGuests(ctx context.Context, arg db.DeleteGuestSmbiosForVanishedGuestsParams) (int64, error)
 	// Node hardware detail queries
 	UpsertNodeDisk(ctx context.Context, arg db.UpsertNodeDiskParams) (db.NodeDisk, error)
 	DeleteStaleNodeDisks(ctx context.Context, arg db.DeleteStaleNodeDisksParams) error
@@ -187,6 +192,7 @@ type Syncer struct {
 	lastSyncError        map[uuid.UUID]time.Time // rate-limit sync error reporting per cluster
 	fastSyncInFlight     atomic.Bool             // re-entrancy guard for SyncAllResources
 	snapshotSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllGuestSnapshots
+	smbiosSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestSmbios
 }
 
 // NewSyncer creates a Syncer with the default Proxmox client factory.
