@@ -61,8 +61,16 @@ committed unused rather than left in a scratch directory to rot.
 - `jobs_list.json` vs `jobs_states.json` — Proxmox jobs appear only in the
   latter. `GET /jobs/{id}` rejects them outright with
   `400 "Specify job of supported platform type."`
-- `backupobjects_list.json` has **duplicate `name` values**: one backup object
-  per (VM × backup), so per-guest rollup must aggregate, not join naively.
+- `backupobjects_list.json` has duplicate `name` values AND **duplicate `id`
+  values**: 27 Proxmox rows carry only 18 distinct ids. `id` is the **guest's**
+  identity within Veeam and `backupId` is what differs, so the collector folds
+  the listing to one row per guest — summing `restorePointsCount`, which is
+  per-backup, and taking `size` as-is because it is identical across a guest's
+  rows.
+- Restore points come from `/backupObjects/{id}/restorePoints`, **not** the
+  bulk `restorepoints_list.json` path: the bulk listing carries no object id,
+  so its rows could only be linked back by name — and a rebuilt guest reuses
+  its name.
 - `sessions_list.json` is dominated by `ConfigurationResynchronize` — filter
   server-side with `typeFilter`, or the poll budget is spent on noise.
 - Proxmox sessions are `sessionType: "PlatformBackupJob"` +
