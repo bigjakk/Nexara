@@ -284,6 +284,26 @@ func (h *LDAPHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
+	// Refuse to re-point the stored bind password at a directory the operator
+	// never entrusted it to. See credential_redirect.go. Delivery is deferred
+	// here: the password is bound against server_url on the next TestConnection,
+	// scheduled sync, or user login. A config that binds anonymously has no
+	// stored password and is not blocked from moving.
+	if credentialRedirected(req.ServerURL, existing.ServerUrl, existing.BindPasswordEncrypted, req.BindPassword) {
+		// Audited, because this is the one request that is unambiguously an
+		// attempt to point a stored credential somewhere new. Refusing it
+		// silently would make an enumeration of this path invisible.
+		redirectDetails, _ := json.Marshal(map[string]any{
+			// Truncated: nothing bounds the length of a URL a caller can
+			// submit, and audit_log.details is readable by every Viewer.
+			"attempted_server_url": auditSafe(req.ServerURL),
+			"previous_server_url":  auditSafe(existing.ServerUrl),
+		})
+		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "ldap", id.String(),
+			"ldap_credential_redirect_refused", redirectDetails)
+		return errCredentialRedirect("server URL", "bind password")
+	}
+
 	// If password is provided, encrypt it; otherwise keep existing
 	encPassword := existing.BindPasswordEncrypted
 	if req.BindPassword != "" {

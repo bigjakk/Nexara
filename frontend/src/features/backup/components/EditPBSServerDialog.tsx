@@ -47,6 +47,12 @@ export function EditPBSServerDialog({
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
 
+  // The stored token secret is only ever sent to the address it was saved for,
+  // so moving the address means re-entering it. The backend refuses the
+  // combination outright (PBSHandler.Update); this makes the field required
+  // before the request is worth sending, and says why.
+  const addressChanged = apiUrl !== server.api_url;
+
   useEffect(() => {
     if (open) {
       setName(server.name);
@@ -141,6 +147,13 @@ export function EditPBSServerDialog({
               }}
               required
             />
+            {addressChanged && (
+              <p className="text-xs text-muted-foreground">
+                This server is moving to a new address, so it needs the API
+                token secret again — the stored one is only ever sent to the
+                address it was saved for.
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-pbs-token-id">API Token ID</Label>
@@ -157,17 +170,24 @@ export function EditPBSServerDialog({
             <Label htmlFor="edit-pbs-token-secret">
               API Token Secret{" "}
               <span className="text-muted-foreground font-normal">
-                (leave blank to keep current)
+                {addressChanged
+                  ? "(required — the address changed)"
+                  : "(leave blank to keep current)"}
               </span>
             </Label>
             <Input
               id="edit-pbs-token-secret"
               type="password"
-              placeholder="Leave blank to keep current secret"
+              placeholder={
+                addressChanged
+                  ? "Re-enter the token secret for the new address"
+                  : "Leave blank to keep current secret"
+              }
               value={tokenSecret}
               onChange={(e) => {
                 setTokenSecret(e.target.value);
               }}
+              required={addressChanged}
             />
           </div>
           <div className="space-y-2">

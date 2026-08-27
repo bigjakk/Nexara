@@ -230,3 +230,30 @@ func TestPBSListByCluster_InvalidUUID(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
+
+// See TestClusterUpdate_EmptyTokenSecretRejected — same rule, same reason.
+func TestPBSUpdate_EmptyTokenSecretRejected(t *testing.T) {
+	app := newPBSTestApp(t)
+
+	body, _ := json.Marshal(map[string]any{
+		"api_url":      "https://attacker.example.net:8007",
+		"token_secret": "",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/pbs-servers/"+uuid.New().String(), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-Role", "admin")
+
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(raw, []byte("token_secret must not be empty")) {
+		t.Errorf("body %s does not explain the empty token_secret", raw)
+	}
+}

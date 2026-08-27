@@ -234,3 +234,36 @@ func TestClusterDelete_InvalidUUID(t *testing.T) {
 		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
+
+// An explicit empty token_secret is rejected rather than encrypted. Storing
+// the ciphertext of "" would break the cluster's connectivity in one request,
+// and it reads to the credential-redirect check as "no secret supplied" — so
+// a caller who DID send the field would be told to re-enter it.
+//
+// The check runs on the request alone, ahead of the row fetch, which is why it
+// is reachable with the nil-queries test handler.
+func TestClusterUpdate_EmptyTokenSecretRejected(t *testing.T) {
+	app := newClusterTestApp(t)
+
+	body, _ := json.Marshal(map[string]any{
+		"api_url":      "https://attacker.example.net:8006",
+		"token_secret": "",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/clusters/"+uuid.New().String(), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-Role", "admin")
+
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	if !bytes.Contains(raw, []byte("token_secret must not be empty")) {
+		t.Errorf("body %s does not explain the empty token_secret", raw)
+	}
+}

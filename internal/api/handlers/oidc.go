@@ -275,6 +275,26 @@ func (h *OIDCHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
+	// Refuse to re-point the stored client secret at an issuer the operator
+	// never entrusted it to. See credential_redirect.go. Delivery is deferred
+	// here: the issuer determines the token endpoint, so the secret is posted
+	// to whatever that host names on the next callback. A public client holds
+	// no stored secret and is not blocked from moving.
+	if credentialRedirected(req.IssuerURL, existing.IssuerUrl, existing.ClientSecretEncrypted, req.ClientSecret) {
+		// Audited, because this is the one request that is unambiguously an
+		// attempt to point a stored credential somewhere new. Refusing it
+		// silently would make an enumeration of this path invisible.
+		redirectDetails, _ := json.Marshal(map[string]any{
+			// Truncated: nothing bounds the length of a URL a caller can
+			// submit, and audit_log.details is readable by every Viewer.
+			"attempted_issuer_url": auditSafe(req.IssuerURL),
+			"previous_issuer_url":  auditSafe(existing.IssuerUrl),
+		})
+		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", id.String(),
+			"oidc_credential_redirect_refused", redirectDetails)
+		return errCredentialRedirect("issuer URL", "client secret")
+	}
+
 	// If secret is provided, encrypt it; otherwise keep existing
 	encSecret := existing.ClientSecretEncrypted
 	if req.ClientSecret != "" {

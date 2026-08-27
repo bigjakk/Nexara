@@ -157,6 +157,17 @@ export function OIDCPage() {
 
   const activeConfig = configs?.find((c) => c.id === editingId);
 
+  // The stored client secret is only ever sent to the issuer it was saved for
+  // — the issuer names the token endpoint the secret is posted to — so moving
+  // the issuer URL means re-entering it. The backend refuses the combination
+  // outright (OIDCHandler.Update). A public client has no stored secret and is
+  // not affected.
+  const addressChanged =
+    !isNew &&
+    activeConfig != null &&
+    activeConfig.client_secret_set &&
+    form.issuer_url !== activeConfig.issuer_url;
+
   useEffect(() => {
     if (activeConfig) {
       const f = configToForm(activeConfig);
@@ -412,6 +423,13 @@ export function OIDCPage() {
                     onChange={(e) => { setForm({ ...form, issuer_url: e.target.value }); }}
                     placeholder="https://auth.example.com/realms/main"
                   />
+                  {addressChanged && (
+                    <p className="text-xs text-muted-foreground">
+                      This provider is moving to a new issuer, so it needs the
+                      client secret again — the stored one is only ever sent to
+                      the address it was saved for.
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label>Client ID</Label>
@@ -426,7 +444,9 @@ export function OIDCPage() {
                     Client Secret
                     {!isNew && activeConfig?.client_secret_set && (
                       <span className="ml-2 text-xs text-muted-foreground">
-                        (leave blank to keep current)
+                        {addressChanged
+                          ? "(required — the issuer changed)"
+                          : "(leave blank to keep current)"}
                       </span>
                     )}
                   </Label>
@@ -435,10 +455,13 @@ export function OIDCPage() {
                     value={form.client_secret}
                     onChange={(e) => { setForm({ ...form, client_secret: e.target.value }); }}
                     placeholder={
-                      !isNew && activeConfig?.client_secret_set
-                        ? "********"
-                        : "Client secret"
+                      addressChanged
+                        ? "Re-enter the client secret for the new issuer"
+                        : !isNew && activeConfig?.client_secret_set
+                          ? "********"
+                          : "Client secret"
                     }
+                    required={addressChanged}
                   />
                 </div>
                 <div className="space-y-2">

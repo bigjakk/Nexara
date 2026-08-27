@@ -361,14 +361,17 @@ func (h *VeeamHandler) Update(c fiber.Ctx) error {
 		connectionChanged = true
 	}
 
-	// ANY change to the address, not merely a change of origin. The client
-	// appends /api/oauth2/token to base_url verbatim, so a path or a query
-	// string re-points the credential at a different listener behind the same
-	// host — "https://vbr.example.com/anything-i-control" and
-	// "https://vbr.example.com:9419?x=" both keep scheme and host while
-	// sending the password somewhere else entirely. Origin equality would
-	// have made the message below a lie.
-	addressChanged := params.BaseUrl != existing.BaseUrl
+	// ANY change to the address, not merely a change of origin — see
+	// credentialRedirected in credential_redirect.go for why, and for the four
+	// other stored-credential/mutable-address pairs held to the same rule.
+	//
+	// Its storedSecret clause is a no-op here and must stay that way: Create
+	// requires a non-empty password (and Update only ever assigns a fresh
+	// encryption), so PasswordEncrypted is never empty on a reachable row. If
+	// that ever stopped holding, an empty ciphertext would fall through to the
+	// decrypt below and surface as a 500 rather than this refusal.
+	credentialRedirect := credentialRedirected(
+		params.BaseUrl, existing.BaseUrl, existing.PasswordEncrypted, password)
 
 	if connectionChanged {
 		if password == "" {
@@ -379,7 +382,7 @@ func (h *VeeamHandler) Update(c fiber.Ctx) error {
 			// the caller never has to know the password to steal it. Requiring
 			// it to be re-typed means the caller can only send a credential
 			// they already hold.
-			if addressChanged {
+			if credentialRedirect {
 				// Audited, because this is the one request that is
 				// unambiguously an attempt to point a stored domain-admin
 				// credential somewhere new. Refusing it silently would make
@@ -387,9 +390,7 @@ func (h *VeeamHandler) Update(c fiber.Ctx) error {
 				h.audit(c, existing, "veeam_server_credential_redirect_refused", map[string]any{
 					"attempted_base_url": auditSafe(params.BaseUrl),
 				})
-				return fiber.NewError(fiber.StatusBadRequest,
-					"Changing the server address requires re-entering the password. "+
-						"The stored credential is only ever sent to the address it was saved for.")
+				return errCredentialRedirect("server address", "password")
 			}
 
 			decrypted, derr := crypto.Decrypt(existing.PasswordEncrypted, h.encryptionKey)

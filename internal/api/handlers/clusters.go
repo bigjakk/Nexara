@@ -416,6 +416,18 @@ func (h *ClusterHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
+	// An explicit "" is not a way to say "keep the current secret" — omitting
+	// the field is. Encrypting it would swap a working credential for the
+	// ciphertext of an empty string (crypto.Encrypt always emits nonce+tag, so
+	// the column stays non-empty and nothing downstream notices), which is a
+	// one-request way to break a cluster's connectivity. It also reads to the
+	// redirect check below as "no secret supplied", so the caller would be
+	// told to re-enter a secret they did in fact send.
+	if req.TokenSecret != nil && *req.TokenSecret == "" {
+		return fiber.NewError(fiber.StatusBadRequest,
+			"token_secret must not be empty — omit the field to keep the stored secret")
+	}
+
 	existing, err := h.queries.GetCluster(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -472,6 +484,31 @@ func (h *ClusterHandler) Update(c fiber.Ctx) error {
 	}
 	if req.IsActive != nil {
 		params.IsActive = *req.IsActive
+	}
+
+	// Refuse to re-point a stored token at an address the operator never
+	// entrusted it to. See credential_redirect.go for the shape; for a cluster
+	// the delivery is immediate rather than deferred — testClusterConnectivity
+	// at the end of this handler dials params.ApiUrl with the decrypted stored
+	// secret before the response is written. Checked here, ahead of the write,
+	// so a refused attempt leaves the row untouched.
+	suppliedSecret := ""
+	if req.TokenSecret != nil {
+		suppliedSecret = *req.TokenSecret
+	}
+	if credentialRedirected(params.ApiUrl, existing.ApiUrl, existing.TokenSecretEncrypted, suppliedSecret) {
+		// Audited, because this is the one request that is unambiguously an
+		// attempt to point a stored credential somewhere new. Refusing it
+		// silently would make an enumeration of this path invisible.
+		redirectDetails, _ := json.Marshal(map[string]any{
+			// Truncated: nothing bounds the length of a URL a caller can
+			// submit, and audit_log.details is readable by every Viewer.
+			"attempted_api_url": auditSafe(params.ApiUrl),
+			"previous_api_url":  auditSafe(existing.ApiUrl),
+		})
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(id), "cluster", id.String(),
+			"cluster_credential_redirect_refused", redirectDetails)
+		return errCredentialRedirect("cluster API URL", "API token secret")
 	}
 
 	cluster, err := h.queries.UpdateCluster(c.Context(), params)

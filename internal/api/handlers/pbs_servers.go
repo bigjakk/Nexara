@@ -146,7 +146,7 @@ func (h *PBSHandler) Create(c fiber.Ctx) error {
 
 	AuditLog(c, h.queries, h.eventPub,
 		pbs.ClusterID, "pbs_server", pbs.ID.String(), "pbs_created",
-		json.RawMessage(`{"name":"`+pbs.Name+`"}`))
+		pbsAuditName(pbs.Name))
 
 	return c.Status(fiber.StatusCreated).JSON(toPBSResponse(pbs))
 }
@@ -241,6 +241,18 @@ func (h *PBSHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
+	// An explicit "" is not a way to say "keep the current secret" — omitting
+	// the field is. Encrypting it would swap a working credential for the
+	// ciphertext of an empty string (crypto.Encrypt always emits nonce+tag, so
+	// the column stays non-empty and nothing downstream notices), which is a
+	// one-request way to break this server's collection. It also reads to the
+	// redirect check below as "no secret supplied", so the caller would be
+	// told to re-enter a secret they did in fact send.
+	if req.TokenSecret != nil && *req.TokenSecret == "" {
+		return fiber.NewError(fiber.StatusBadRequest,
+			"token_secret must not be empty — omit the field to keep the stored secret")
+	}
+
 	existing, err := h.queries.GetPBSServer(c.Context(), id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -313,6 +325,30 @@ func (h *PBSHandler) Update(c fiber.Ctx) error {
 		params.TlsFingerprint = *req.TLSFingerprint
 	}
 
+	// Refuse to re-point a stored token at an address the operator never
+	// entrusted it to. See credential_redirect.go. Nothing connects in this
+	// handler, so the delivery is deferred: the collector rebuilds a client
+	// from this row on its next sync (internal/proxmox/cache.go), which is
+	// what makes the row worth refusing rather than merely warning about.
+	suppliedSecret := ""
+	if req.TokenSecret != nil {
+		suppliedSecret = *req.TokenSecret
+	}
+	if credentialRedirected(params.ApiUrl, existing.ApiUrl, existing.TokenSecretEncrypted, suppliedSecret) {
+		// Audited, because this is the one request that is unambiguously an
+		// attempt to point a stored credential somewhere new. Refusing it
+		// silently would make an enumeration of this path invisible.
+		redirectDetails, _ := json.Marshal(map[string]any{
+			// Truncated: nothing bounds the length of a URL a caller can
+			// submit, and audit_log.details is readable by every Viewer.
+			"attempted_api_url": auditSafe(params.ApiUrl),
+			"previous_api_url":  auditSafe(existing.ApiUrl),
+		})
+		AuditLog(c, h.queries, h.eventPub, existing.ClusterID, "pbs_server", id.String(),
+			"pbs_credential_redirect_refused", redirectDetails)
+		return errCredentialRedirect("server API URL", "API token secret")
+	}
+
 	pbs, err := h.queries.UpdatePBSServer(c.Context(), params)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update PBS server")
@@ -324,7 +360,7 @@ func (h *PBSHandler) Update(c fiber.Ctx) error {
 
 	AuditLog(c, h.queries, h.eventPub,
 		pbs.ClusterID, "pbs_server", pbs.ID.String(), "pbs_updated",
-		json.RawMessage(`{"name":"`+pbs.Name+`"}`))
+		pbsAuditName(pbs.Name))
 
 	return c.JSON(toPBSResponse(pbs))
 }
@@ -354,7 +390,7 @@ func (h *PBSHandler) Delete(c fiber.Ctx) error {
 
 	AuditLog(c, h.queries, h.eventPub,
 		existing.ClusterID, "pbs_server", id.String(), "pbs_deleted",
-		json.RawMessage(`{"name":"`+existing.Name+`"}`))
+		pbsAuditName(existing.Name))
 
 	if err := h.queries.DeletePBSServer(c.Context(), id); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to delete PBS server")
@@ -365,4 +401,18 @@ func (h *PBSHandler) Delete(c fiber.Ctx) error {
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// pbsAuditName builds the details blob for the plain name-only PBS audit rows.
+// Marshalled rather than concatenated: audit_log.details is JSONB NOT NULL, so
+// a server name containing a quote would produce a malformed blob, fail the
+// insert, and leave the action with no audit row at all — AuditLog only logs
+// that failure. A crafted name could otherwise inject its own keys into a row
+// every Viewer can read.
+func pbsAuditName(name string) json.RawMessage {
+	details, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return details
 }

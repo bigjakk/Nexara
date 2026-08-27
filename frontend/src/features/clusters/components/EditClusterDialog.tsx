@@ -53,6 +53,13 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
 
   const updateMutation = useUpdateCluster();
 
+  // The stored token secret is only ever sent to the address it was saved for,
+  // so moving the address means re-entering it. The backend refuses the
+  // combination outright (ClusterHandler.Update, which dials the new address
+  // with the stored secret if it gets that far); this makes the field required
+  // before the request is worth sending, and says why.
+  const addressChanged = apiUrl !== cluster.api_url;
+
   function resetFingerprintState() {
     setFingerprint(null);
     setFingerprintAccepted(false);
@@ -182,14 +189,32 @@ export function EditClusterDialog({ cluster, open, onOpenChange }: EditClusterDi
           <div className="space-y-2">
             <Label htmlFor="edit-url">API URL</Label>
             <Input id="edit-url" value={apiUrl} onChange={(e) => { setApiUrl(e.target.value); }} required />
+            {addressChanged && (
+              <p className="text-xs text-muted-foreground">
+                This cluster is moving to a new address, so it needs the token
+                secret again — the stored one is only ever sent to the address
+                it was saved for.
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-token">Token ID</Label>
             <Input id="edit-token" value={tokenId} onChange={(e) => { setTokenId(e.target.value); }} required />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="edit-secret">Token Secret (leave blank to keep current)</Label>
-            <Input id="edit-secret" type="password" value={tokenSecret} onChange={(e) => { setTokenSecret(e.target.value); }} placeholder="Unchanged" />
+            <Label htmlFor="edit-secret">
+              {addressChanged
+                ? "Token Secret (required — the address changed)"
+                : "Token Secret (leave blank to keep current)"}
+            </Label>
+            <Input
+              id="edit-secret"
+              type="password"
+              value={tokenSecret}
+              onChange={(e) => { setTokenSecret(e.target.value); }}
+              placeholder={addressChanged ? "Re-enter the token secret for the new address" : "Unchanged"}
+              required={addressChanged}
+            />
           </div>
 
           {/* TLS Certificate Section */}

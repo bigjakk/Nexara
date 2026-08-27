@@ -137,6 +137,16 @@ export function LDAPPage() {
 
   const activeConfig = configs?.find((c) => c.id === editingId);
 
+  // The stored bind password is only ever sent to the directory it was saved
+  // for, so moving the server URL means re-entering it. The backend refuses
+  // the combination outright (LDAPHandler.Update). A config that binds
+  // anonymously has no stored password and is not affected.
+  const addressChanged =
+    !isNew &&
+    activeConfig != null &&
+    activeConfig.bind_password_set &&
+    form.server_url !== activeConfig.server_url;
+
   useEffect(() => {
     if (activeConfig) {
       const f = configToForm(activeConfig);
@@ -402,6 +412,13 @@ export function LDAPPage() {
                     onChange={(e) => { setForm({ ...form, server_url: e.target.value }); }}
                     placeholder="ldap://ldap.example.com:389"
                   />
+                  {addressChanged && (
+                    <p className="text-xs text-muted-foreground">
+                      This directory is moving to a new address, so it needs the
+                      bind password again — the stored one is only ever sent to
+                      the address it was saved for.
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-6 pt-6">
                   <div className="flex items-center gap-2">
@@ -439,7 +456,9 @@ export function LDAPPage() {
                     Bind Password
                     {!isNew && activeConfig?.bind_password_set && (
                       <span className="ml-2 text-xs text-muted-foreground">
-                        (leave blank to keep current)
+                        {addressChanged
+                          ? "(required — the address changed)"
+                          : "(leave blank to keep current)"}
                       </span>
                     )}
                   </Label>
@@ -448,10 +467,13 @@ export function LDAPPage() {
                     value={form.bind_password}
                     onChange={(e) => { setForm({ ...form, bind_password: e.target.value }); }}
                     placeholder={
-                      !isNew && activeConfig?.bind_password_set
-                        ? "********"
-                        : "Password"
+                      addressChanged
+                        ? "Re-enter the bind password for the new address"
+                        : !isNew && activeConfig?.bind_password_set
+                          ? "********"
+                          : "Password"
                     }
+                    required={addressChanged}
                   />
                 </div>
               </div>
