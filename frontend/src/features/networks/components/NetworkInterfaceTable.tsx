@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Trash2, RotateCcw, Check } from "lucide-react";
+import { Trash2, RotateCcw, Check, Pencil } from "lucide-react";
 import {
   useNetworkInterfaces,
   useDeleteNetworkInterface,
@@ -18,6 +18,13 @@ import {
 } from "../api/network-queries";
 import type { NetworkInterface } from "../types/network";
 import { CreateInterfaceDialog } from "./CreateInterfaceDialog";
+import { InterfaceFormDialog } from "./InterfaceFormDialog";
+import {
+  interfaceAddresses,
+  interfaceGateways,
+  interfacePorts,
+  interfaceTypeLabel,
+} from "./interface-fields";
 
 interface NetworkInterfaceTableProps {
   clusterId: string;
@@ -90,8 +97,11 @@ export function NetworkInterfaceTable({
               <TableHead>CIDR / Address</TableHead>
               <TableHead>Gateway</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Bridge Ports</TableHead>
-              <TableHead className="w-16" />
+              <TableHead>VLAN aware</TableHead>
+              <TableHead>Ports / Slaves</TableHead>
+              <TableHead>Bond Mode</TableHead>
+              <TableHead>Comment</TableHead>
+              <TableHead className="w-24" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -122,19 +132,20 @@ function InterfaceRow({
   clusterId: string;
 }) {
   const deleteIface = useDeleteNetworkInterface(clusterId, nodeName);
+  const [editing, setEditing] = useState(false);
 
   return (
     <TableRow>
       <TableCell className="font-medium">{nodeName}</TableCell>
       <TableCell className="font-mono text-sm">{iface.iface}</TableCell>
       <TableCell>
-        <Badge variant="outline">{iface.type}</Badge>
+        <Badge variant="outline">{interfaceTypeLabel(iface.type)}</Badge>
       </TableCell>
       <TableCell className="font-mono text-sm">
-        {iface.cidr || iface.address || "-"}
+        {interfaceAddresses(iface)}
       </TableCell>
       <TableCell className="font-mono text-sm">
-        {iface.gateway || "-"}
+        {interfaceGateways(iface)}
       </TableCell>
       <TableCell>
         <Badge variant={iface.active ? "default" : "secondary"}>
@@ -142,17 +153,38 @@ function InterfaceRow({
         </Badge>
       </TableCell>
       <TableCell className="text-sm">
-        {iface.bridge_ports || "-"}
+        {iface.type === "bridge" ? (iface.bridge_vlan_aware ? "Yes" : "No") : "--"}
       </TableCell>
+      <TableCell className="font-mono text-sm">{interfacePorts(iface)}</TableCell>
+      <TableCell className="text-sm">{iface.bond_mode ?? "--"}</TableCell>
+      <TableCell className="text-sm">{iface.comments ?? "--"}</TableCell>
       <TableCell>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => { deleteIface.mutate(iface.iface); }}
-          disabled={deleteIface.isPending}
-        >
-          <Trash2 className="h-4 w-4 text-destructive" />
-        </Button>
+        <div className="flex gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => { setEditing(true); }}
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => { deleteIface.mutate(iface.iface); }}
+            disabled={deleteIface.isPending}
+          >
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </div>
+        {editing && (
+          <InterfaceFormDialog
+            clusterId={clusterId}
+            nodeName={nodeName}
+            existing={iface}
+            open
+            onOpenChange={(open) => { if (!open) setEditing(false); }}
+          />
+        )}
       </TableCell>
     </TableRow>
   );

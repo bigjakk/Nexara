@@ -105,6 +105,48 @@ func (h *NetworkHandler) ListNodeNetworkInterfaces(c fiber.Ctx) error {
 	return RespondItems(c, ifaces)
 }
 
+// networkAuditSettings names the interface settings a request carries a value
+// for, in a stable order. Only the names: view:audit is granted to every Viewer
+// by default, while reading the interfaces themselves needs view:network, so an
+// audit row must not become a way around that. Which knobs an operator touched
+// is the useful part anyway.
+func networkAuditSettings(o proxmox.NetworkInterfaceOptions) []string {
+	set := make([]string, 0, 8)
+	add := func(name string, present bool) {
+		if present {
+			set = append(set, name)
+		}
+	}
+	add("address", o.Address != "")
+	add("address6", o.Address6 != "")
+	add("bond-primary", o.BondPrimary != "")
+	add("bond_mode", o.BondMode != "")
+	add("bond_xmit_hash_policy", o.BondXmitHashPolicy != "")
+	add("bridge_fd", o.BridgeFD != "")
+	add("bridge_ports", o.BridgePorts != "")
+	add("bridge_stp", o.BridgeSTP != "")
+	add("bridge_vids", o.BridgeVIDs != "")
+	add("bridge_vlan_aware", o.BridgeVLANAware != 0)
+	add("cidr", o.CIDR != "")
+	add("cidr6", o.CIDR6 != "")
+	add("comments", o.Comments != "")
+	add("comments6", o.Comments6 != "")
+	add("gateway", o.Gateway != "")
+	add("gateway6", o.Gateway6 != "")
+	add("mtu", o.MTU != 0)
+	add("netmask", o.Netmask != "")
+	add("netmask6", o.Netmask6 != "")
+	add("ovs_bonds", o.OVSBonds != "")
+	add("ovs_bridge", o.OVSBridge != "")
+	add("ovs_options", o.OVSOptions != "")
+	add("ovs_ports", o.OVSPorts != "")
+	add("ovs_tag", o.OVSTag != 0)
+	add("slaves", o.Slaves != "")
+	add("vlan-id", o.VLANID != 0)
+	add("vlan-raw-device", o.VLANRawDevice != "")
+	return set
+}
+
 // CreateNetworkInterface handles POST /clusters/:cluster_id/networks/:node_name.
 func (h *NetworkHandler) CreateNetworkInterface(c fiber.Ctx) error {
 	clusterID, err := clusterIDFromParam(c)
@@ -128,6 +170,12 @@ func (h *NetworkHandler) CreateNetworkInterface(c fiber.Ctx) error {
 	if req.Iface == "" || req.Type == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "iface and type are required")
 	}
+	if err := proxmox.ValidateCreatableNetworkInterfaceType(req.Type); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	if err := proxmox.ValidateNetworkInterfaceOptions(req.NetworkInterfaceOptions); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -138,7 +186,12 @@ func (h *NetworkHandler) CreateNetworkInterface(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to create network interface: %v", err))
 	}
 
-	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": req.Iface, "type": req.Type})
+	details, _ := json.Marshal(map[string]any{
+		"node":     nodeName,
+		"iface":    req.Iface,
+		"type":     req.Type,
+		"settings": networkAuditSettings(req.NetworkInterfaceOptions),
+	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("%s/%s", nodeName, req.Iface), "interface_created", details)
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "ok"})
@@ -168,6 +221,15 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx) error {
 	if req.Type == "" {
 		return fiber.NewError(fiber.StatusBadRequest, "type is required")
 	}
+	if err := proxmox.ValidateEditableNetworkInterfaceType(req.Type); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	if err := proxmox.ValidateNetworkInterfaceDeleteKeys(req.Delete); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+	if err := proxmox.ValidateNetworkInterfaceOptions(req.NetworkInterfaceOptions); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
@@ -178,7 +240,13 @@ func (h *NetworkHandler) UpdateNetworkInterface(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, fmt.Sprintf("Failed to update network interface: %v", err))
 	}
 
-	details, _ := json.Marshal(map[string]string{"node": nodeName, "iface": ifaceName, "type": req.Type})
+	details, _ := json.Marshal(map[string]any{
+		"node":     nodeName,
+		"iface":    ifaceName,
+		"type":     req.Type,
+		"settings": networkAuditSettings(req.NetworkInterfaceOptions),
+		"cleared":  req.Delete,
+	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "network", fmt.Sprintf("%s/%s", nodeName, ifaceName), "interface_updated", details)
 
 	return c.JSON(fiber.Map{"status": "ok"})

@@ -1077,20 +1077,46 @@ type CreateCTParams struct {
 
 // NetworkInterface represents a network interface from GET /nodes/{node}/network.
 type NetworkInterface struct {
-	Iface       string `json:"iface"`
-	Type        string `json:"type"`
-	Active      int    `json:"active"`
-	Autostart   int    `json:"autostart"`
-	Method      string `json:"method,omitempty"`
-	Method6     string `json:"method6,omitempty"`
-	Address     string `json:"address,omitempty"`
-	Netmask     string `json:"netmask,omitempty"`
-	Gateway     string `json:"gateway,omitempty"`
-	CIDR        string `json:"cidr,omitempty"`
-	BridgePorts string `json:"bridge_ports,omitempty"`
-	BridgeSTP   string `json:"bridge_stp,omitempty"`
-	BridgeFD    string `json:"bridge_fd,omitempty"`
-	Comments    string `json:"comments,omitempty"`
+	Iface     string `json:"iface"`
+	Type      string `json:"type"`
+	Active    int    `json:"active"`
+	Autostart int    `json:"autostart"`
+	Method    string `json:"method,omitempty"`
+	Method6   string `json:"method6,omitempty"`
+
+	Address  string `json:"address,omitempty"`
+	Netmask  string `json:"netmask,omitempty"`
+	Gateway  string `json:"gateway,omitempty"`
+	CIDR     string `json:"cidr,omitempty"`
+	Address6 string `json:"address6,omitempty"`
+	// Netmask6 is an IPv6 prefix length. Proxmox declares it an integer but
+	// has returned it quoted on some releases, so decode it leniently.
+	Netmask6  FlexString `json:"netmask6,omitempty"`
+	Gateway6  string     `json:"gateway6,omitempty"`
+	CIDR6     string     `json:"cidr6,omitempty"`
+	Comments  string     `json:"comments,omitempty"`
+	Comments6 string     `json:"comments6,omitempty"`
+	MTU       FlexInt    `json:"mtu,omitempty"`
+
+	BridgePorts     string     `json:"bridge_ports,omitempty"`
+	BridgeSTP       string     `json:"bridge_stp,omitempty"`
+	BridgeFD        string     `json:"bridge_fd,omitempty"`
+	BridgeVLANAware FlexInt    `json:"bridge_vlan_aware,omitempty"`
+	BridgeVIDs      FlexString `json:"bridge_vids,omitempty"`
+
+	Slaves             string `json:"slaves,omitempty"`
+	BondMode           string `json:"bond_mode,omitempty"`
+	BondXmitHashPolicy string `json:"bond_xmit_hash_policy,omitempty"`
+	BondPrimary        string `json:"bond-primary,omitempty"`
+
+	OVSBridge  string  `json:"ovs_bridge,omitempty"`
+	OVSPorts   string  `json:"ovs_ports,omitempty"`
+	OVSBonds   string  `json:"ovs_bonds,omitempty"`
+	OVSOptions string  `json:"ovs_options,omitempty"`
+	OVSTag     FlexInt `json:"ovs_tag,omitempty"`
+
+	VLANID        FlexInt `json:"vlan-id,omitempty"`
+	VLANRawDevice string  `json:"vlan-raw-device,omitempty"`
 }
 
 // DiskAttachParams holds parameters for attaching a new disk to a VM.
@@ -1490,37 +1516,62 @@ type UpdateHARuleParams struct {
 	Digest    string  `json:"digest,omitempty"`
 }
 
+// NetworkInterfaceOptions holds the settings shared by the create and update
+// forms of POST/PUT /nodes/{node}/network. Every field maps 1:1 to a Proxmox
+// parameter; which ones apply depends on the interface type.
+type NetworkInterfaceOptions struct {
+	Address  string `json:"address,omitempty"`
+	Netmask  string `json:"netmask,omitempty"`
+	Gateway  string `json:"gateway,omitempty"`
+	CIDR     string `json:"cidr,omitempty"`
+	Address6 string `json:"address6,omitempty"`
+	Netmask6 string `json:"netmask6,omitempty"`
+	Gateway6 string `json:"gateway6,omitempty"`
+	CIDR6    string `json:"cidr6,omitempty"`
+
+	Autostart int    `json:"autostart,omitempty"`
+	Comments  string `json:"comments,omitempty"`
+	Comments6 string `json:"comments6,omitempty"`
+	MTU       int    `json:"mtu,omitempty"`
+	Method    string `json:"method,omitempty"`
+	Method6   string `json:"method6,omitempty"`
+
+	BridgePorts     string `json:"bridge_ports,omitempty"`
+	BridgeSTP       string `json:"bridge_stp,omitempty"`
+	BridgeFD        string `json:"bridge_fd,omitempty"`
+	BridgeVLANAware int    `json:"bridge_vlan_aware,omitempty"`
+	BridgeVIDs      string `json:"bridge_vids,omitempty"`
+
+	Slaves             string `json:"slaves,omitempty"`
+	BondMode           string `json:"bond_mode,omitempty"`
+	BondXmitHashPolicy string `json:"bond_xmit_hash_policy,omitempty"`
+	BondPrimary        string `json:"bond-primary,omitempty"`
+
+	OVSBridge  string `json:"ovs_bridge,omitempty"`
+	OVSPorts   string `json:"ovs_ports,omitempty"`
+	OVSBonds   string `json:"ovs_bonds,omitempty"`
+	OVSOptions string `json:"ovs_options,omitempty"`
+	OVSTag     int    `json:"ovs_tag,omitempty"`
+
+	VLANID        int    `json:"vlan-id,omitempty"`
+	VLANRawDevice string `json:"vlan-raw-device,omitempty"`
+}
+
 // CreateNetworkInterfaceParams holds parameters for creating a network interface.
 type CreateNetworkInterfaceParams struct {
-	Iface       string `json:"iface"`
-	Type        string `json:"type"`
-	Address     string `json:"address,omitempty"`
-	Netmask     string `json:"netmask,omitempty"`
-	Gateway     string `json:"gateway,omitempty"`
-	CIDR        string `json:"cidr,omitempty"`
-	Autostart   int    `json:"autostart,omitempty"`
-	BridgePorts string `json:"bridge_ports,omitempty"`
-	BridgeSTP   string `json:"bridge_stp,omitempty"`
-	BridgeFD    string `json:"bridge_fd,omitempty"`
-	Comments    string `json:"comments,omitempty"`
-	Method      string `json:"method,omitempty"`
-	Method6     string `json:"method6,omitempty"`
+	Iface string `json:"iface"`
+	Type  string `json:"type"`
+	NetworkInterfaceOptions
 }
 
 // UpdateNetworkInterfaceParams holds parameters for updating a network interface.
 type UpdateNetworkInterfaceParams struct {
-	Type        string `json:"type"`
-	Address     string `json:"address,omitempty"`
-	Netmask     string `json:"netmask,omitempty"`
-	Gateway     string `json:"gateway,omitempty"`
-	CIDR        string `json:"cidr,omitempty"`
-	Autostart   int    `json:"autostart,omitempty"`
-	BridgePorts string `json:"bridge_ports,omitempty"`
-	BridgeSTP   string `json:"bridge_stp,omitempty"`
-	BridgeFD    string `json:"bridge_fd,omitempty"`
-	Comments    string `json:"comments,omitempty"`
-	Method      string `json:"method,omitempty"`
-	Method6     string `json:"method6,omitempty"`
+	Type string `json:"type"`
+	NetworkInterfaceOptions
+	// Delete names the Proxmox settings to unset on this interface. An empty
+	// string in a form field is not enough to clear an existing value — the
+	// key has to be listed here, exactly as Proxmox's own UI does it.
+	Delete []string `json:"delete,omitempty"`
 }
 
 // NodeTask represents a completed or running task from GET /nodes/{node}/tasks.

@@ -1,18 +1,43 @@
-export interface NetworkInterface {
-  iface: string;
-  type: string;
-  active: number;
-  autostart: number;
-  method?: string;
-  method6?: string;
+/** Settings shared by an interface as read, created and updated. Field names
+ *  mirror the Proxmox API parameters exactly. */
+export interface NetworkInterfaceOptions {
   address?: string;
   netmask?: string;
   gateway?: string;
   cidr?: string;
+  address6?: string;
+  netmask6?: string;
+  gateway6?: string;
+  cidr6?: string;
+  autostart?: number;
+  comments?: string;
+  comments6?: string;
+  mtu?: number;
+  method?: string;
+  method6?: string;
   bridge_ports?: string;
   bridge_stp?: string;
   bridge_fd?: string;
-  comments?: string;
+  bridge_vlan_aware?: number;
+  bridge_vids?: string;
+  slaves?: string;
+  bond_mode?: string;
+  bond_xmit_hash_policy?: string;
+  "bond-primary"?: string;
+  ovs_bridge?: string;
+  ovs_ports?: string;
+  ovs_bonds?: string;
+  ovs_options?: string;
+  ovs_tag?: number;
+  "vlan-id"?: number;
+  "vlan-raw-device"?: string;
+}
+
+export interface NetworkInterface extends NetworkInterfaceOptions {
+  iface: string;
+  type: string;
+  active: number;
+  autostart: number;
 }
 
 export interface NodeInterfaces {
@@ -20,35 +45,16 @@ export interface NodeInterfaces {
   interfaces: NetworkInterface[];
 }
 
-export interface CreateNetworkInterfaceRequest {
+export interface CreateNetworkInterfaceRequest extends NetworkInterfaceOptions {
   iface: string;
   type: string;
-  address?: string;
-  netmask?: string;
-  gateway?: string;
-  cidr?: string;
-  autostart?: number;
-  bridge_ports?: string;
-  bridge_stp?: string;
-  bridge_fd?: string;
-  comments?: string;
-  method?: string;
-  method6?: string;
 }
 
-export interface UpdateNetworkInterfaceRequest {
+export interface UpdateNetworkInterfaceRequest extends NetworkInterfaceOptions {
   type: string;
-  address?: string;
-  netmask?: string;
-  gateway?: string;
-  cidr?: string;
-  autostart?: number;
-  bridge_ports?: string;
-  bridge_stp?: string;
-  bridge_fd?: string;
-  comments?: string;
-  method?: string;
-  method6?: string;
+  /** Settings to unset. Proxmox ignores an empty value, so clearing a field
+   *  means naming it here. */
+  delete?: string[];
 }
 
 export interface FirewallRule {

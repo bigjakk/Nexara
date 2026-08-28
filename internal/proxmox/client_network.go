@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 func (c *Client) GetNetworkBridges(ctx context.Context, node string) ([]NetworkInterface, error) {
@@ -303,6 +304,65 @@ func (c *Client) DeleteSDNDNS(ctx context.Context, dns string) error {
 	}
 	return nil
 }
+
+// networkIfaceOptionsToForm encodes the settings shared by the create and
+// update calls. Only non-empty values are sent: Proxmox treats a present-but-
+// empty parameter as a validation error for most keys, and clearing a value on
+// an existing interface goes through UpdateNetworkInterfaceParams.Delete.
+func networkIfaceOptionsToForm(form url.Values, o NetworkInterfaceOptions) {
+	strs := map[string]string{
+		"address":               o.Address,
+		"netmask":               o.Netmask,
+		"gateway":               o.Gateway,
+		"cidr":                  o.CIDR,
+		"address6":              o.Address6,
+		"netmask6":              o.Netmask6,
+		"gateway6":              o.Gateway6,
+		"cidr6":                 o.CIDR6,
+		"comments":              o.Comments,
+		"comments6":             o.Comments6,
+		"method":                o.Method,
+		"method6":               o.Method6,
+		"bridge_ports":          o.BridgePorts,
+		"bridge_stp":            o.BridgeSTP,
+		"bridge_fd":             o.BridgeFD,
+		"bridge_vids":           o.BridgeVIDs,
+		"slaves":                o.Slaves,
+		"bond_mode":             o.BondMode,
+		"bond_xmit_hash_policy": o.BondXmitHashPolicy,
+		"bond-primary":          o.BondPrimary,
+		"ovs_bridge":            o.OVSBridge,
+		"ovs_ports":             o.OVSPorts,
+		"ovs_bonds":             o.OVSBonds,
+		"ovs_options":           o.OVSOptions,
+		"vlan-raw-device":       o.VLANRawDevice,
+	}
+	for k, v := range strs {
+		if v != "" {
+			form.Set(k, v)
+		}
+	}
+
+	ints := map[string]int{
+		"mtu":     o.MTU,
+		"ovs_tag": o.OVSTag,
+		"vlan-id": o.VLANID,
+		// Off is expressed by omitting the key, and turning it off on an
+		// existing bridge goes through Delete — the same split Proxmox's own
+		// dialog makes (uncheckedValue for autostart, deleteEmpty for this).
+		"bridge_vlan_aware": o.BridgeVLANAware,
+	}
+	for k, v := range ints {
+		if v != 0 {
+			form.Set(k, strconv.Itoa(v))
+		}
+	}
+
+	// autostart is the one flag always sent: Proxmox's checkbox uses an
+	// unchecked value of 0, so 0 is how "do not start on boot" is expressed.
+	form.Set("autostart", strconv.Itoa(o.Autostart))
+}
+
 func (c *Client) CreateNetworkInterface(ctx context.Context, node string, params CreateNetworkInterfaceParams) error {
 	if err := validateNodeName(node); err != nil {
 		return err
@@ -310,82 +370,26 @@ func (c *Client) CreateNetworkInterface(ctx context.Context, node string, params
 	form := url.Values{}
 	form.Set("iface", params.Iface)
 	form.Set("type", params.Type)
-	if params.Address != "" {
-		form.Set("address", params.Address)
-	}
-	if params.Netmask != "" {
-		form.Set("netmask", params.Netmask)
-	}
-	if params.Gateway != "" {
-		form.Set("gateway", params.Gateway)
-	}
-	if params.CIDR != "" {
-		form.Set("cidr", params.CIDR)
-	}
-	if params.BridgePorts != "" {
-		form.Set("bridge_ports", params.BridgePorts)
-	}
-	if params.BridgeSTP != "" {
-		form.Set("bridge_stp", params.BridgeSTP)
-	}
-	if params.BridgeFD != "" {
-		form.Set("bridge_fd", params.BridgeFD)
-	}
-	if params.Comments != "" {
-		form.Set("comments", params.Comments)
-	}
-	if params.Method != "" {
-		form.Set("method", params.Method)
-	}
-	if params.Method6 != "" {
-		form.Set("method6", params.Method6)
-	}
-	form.Set("autostart", strconv.Itoa(params.Autostart))
+	networkIfaceOptionsToForm(form, params.NetworkInterfaceOptions)
 	path := "/nodes/" + url.PathEscape(node) + "/network"
 	if err := c.doPost(ctx, path, form, nil); err != nil {
 		return fmt.Errorf("create network interface %s on %s: %w", params.Iface, node, err)
 	}
 	return nil
 }
+
 func (c *Client) UpdateNetworkInterface(ctx context.Context, node string, iface string, params UpdateNetworkInterfaceParams) error {
 	if err := validateNodeName(node); err != nil {
 		return err
 	}
-	form := url.Values{}
-	form.Set("type", params.Type)
-	if params.Address != "" {
-		form.Set("address", params.Address)
-	}
-	if params.Netmask != "" {
-		form.Set("netmask", params.Netmask)
-	}
-	if params.Gateway != "" {
-		form.Set("gateway", params.Gateway)
-	}
-	if params.CIDR != "" {
-		form.Set("cidr", params.CIDR)
-	}
-	if params.BridgePorts != "" {
-		form.Set("bridge_ports", params.BridgePorts)
-	}
-	if params.BridgeSTP != "" {
-		form.Set("bridge_stp", params.BridgeSTP)
-	}
-	if params.BridgeFD != "" {
-		form.Set("bridge_fd", params.BridgeFD)
-	}
-	if params.Comments != "" {
-		form.Set("comments", params.Comments)
-	}
-	if params.Method != "" {
-		form.Set("method", params.Method)
-	}
-	if params.Method6 != "" {
-		form.Set("method6", params.Method6)
-	}
-	form.Set("autostart", strconv.Itoa(params.Autostart))
 	if err := validatePathSegment("interface name", iface); err != nil {
 		return err
+	}
+	form := url.Values{}
+	form.Set("type", params.Type)
+	networkIfaceOptionsToForm(form, params.NetworkInterfaceOptions)
+	if len(params.Delete) > 0 {
+		form.Set("delete", strings.Join(params.Delete, ","))
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/network/" + url.PathEscape(iface)
 	if err := c.doPut(ctx, path, form, nil); err != nil {
@@ -393,6 +397,7 @@ func (c *Client) UpdateNetworkInterface(ctx context.Context, node string, iface 
 	}
 	return nil
 }
+
 func (c *Client) DeleteNetworkInterface(ctx context.Context, node string, iface string) error {
 	if err := validateNodeName(node); err != nil {
 		return err
@@ -426,6 +431,108 @@ func (c *Client) RevertNetworkConfig(ctx context.Context, node string) error {
 	path := "/nodes/" + url.PathEscape(node) + "/network"
 	if err := c.doDelete(ctx, path, nil); err != nil {
 		return fmt.Errorf("revert network config on %s: %w", node, err)
+	}
+	return nil
+}
+
+// creatableNetworkInterfaceTypes are the interface types Proxmox's own UI
+// offers under Create. The API's `type` enum is wider — it also accepts eth,
+// alias, vlan, OVSPort, vnet, fabric and unknown — but those describe
+// interfaces that already exist (a physical NIC, an OVS port implied by its
+// bridge) rather than ones an operator creates by hand.
+var creatableNetworkInterfaceTypes = map[string]bool{
+	"bridge":     true,
+	"bond":       true,
+	"vlan":       true,
+	"OVSBridge":  true,
+	"OVSBond":    true,
+	"OVSIntPort": true,
+}
+
+// editableNetworkInterfaceTypes is every type an existing interface may report:
+// the creatable ones plus the ones that only ever come into being on their own.
+// Editing is allowed for all of them — a physical NIC gets an address, an OVS
+// port gets a VLAN tag. Derived from the creatable set rather than restated, so
+// adding a creatable type cannot leave it uneditable.
+var editableNetworkInterfaceTypes = func() map[string]bool {
+	types := map[string]bool{
+		"eth":     true,
+		"alias":   true,
+		"OVSPort": true,
+		"vnet":    true,
+		"fabric":  true,
+		"unknown": true,
+	}
+	for t := range creatableNetworkInterfaceTypes {
+		types[t] = true
+	}
+	return types
+}()
+
+// ValidateCreatableNetworkInterfaceType rejects a type POST cannot sensibly
+// create, so the caller gets a 400 naming the problem instead of a Proxmox
+// error surfacing as a 500.
+func ValidateCreatableNetworkInterfaceType(t string) error {
+	if !creatableNetworkInterfaceTypes[t] {
+		return fmt.Errorf("%w: %q is not a network interface type that can be created", ErrInvalidInput, t)
+	}
+	return nil
+}
+
+// ValidateEditableNetworkInterfaceType rejects a type PUT does not accept.
+func ValidateEditableNetworkInterfaceType(t string) error {
+	if !editableNetworkInterfaceTypes[t] {
+		return fmt.Errorf("%w: %q is not a known network interface type", ErrInvalidInput, t)
+	}
+	return nil
+}
+
+// deletableNetworkInterfaceKeys are the settings PUT may unset. Proxmox's
+// `delete` parameter takes raw option names, so it is allow-listed rather than
+// passed through: `delete=type` or `delete=iface` would corrupt the interface.
+var deletableNetworkInterfaceKeys = map[string]bool{
+	"address": true, "netmask": true, "gateway": true, "cidr": true,
+	"address6": true, "netmask6": true, "gateway6": true, "cidr6": true,
+	"comments": true, "comments6": true, "mtu": true,
+	"bridge_ports": true, "bridge_stp": true, "bridge_fd": true,
+	"bridge_vlan_aware": true, "bridge_vids": true,
+	"slaves": true, "bond_mode": true, "bond_xmit_hash_policy": true, "bond-primary": true,
+	"ovs_bridge": true, "ovs_ports": true, "ovs_bonds": true, "ovs_options": true, "ovs_tag": true,
+	"vlan-id": true, "vlan-raw-device": true,
+}
+
+// ValidateNetworkInterfaceDeleteKeys checks every entry of an update's Delete
+// list against the allow-list above.
+func ValidateNetworkInterfaceDeleteKeys(keys []string) error {
+	for _, k := range keys {
+		if !deletableNetworkInterfaceKeys[k] {
+			return fmt.Errorf("%w: %q is not a network setting that can be cleared", ErrInvalidInput, k)
+		}
+	}
+	return nil
+}
+
+// Proxmox's own bounds, echoed here so an out-of-range value fails as a 400
+// rather than reaching the node and coming back as a 500.
+const (
+	minInterfaceMTU = 1280
+	maxInterfaceMTU = 65520
+	maxVLANTag      = 4094
+)
+
+// ValidateNetworkInterfaceOptions range-checks the numeric settings. Zero means
+// "not set" for all three and is always allowed.
+func ValidateNetworkInterfaceOptions(o NetworkInterfaceOptions) error {
+	if o.MTU != 0 && (o.MTU < minInterfaceMTU || o.MTU > maxInterfaceMTU) {
+		return fmt.Errorf("%w: MTU %d is outside %d-%d", ErrInvalidInput, o.MTU, minInterfaceMTU, maxInterfaceMTU)
+	}
+	for _, tag := range []struct {
+		name  string
+		value int
+	}{{"ovs_tag", o.OVSTag}, {"vlan-id", o.VLANID}} {
+		if tag.value != 0 && (tag.value < 1 || tag.value > maxVLANTag) {
+			return fmt.Errorf("%w: %s %d is outside 1-%d", ErrInvalidInput, tag.name, tag.value, maxVLANTag)
+		}
 	}
 	return nil
 }

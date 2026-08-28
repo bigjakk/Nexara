@@ -66,12 +66,18 @@ import {
 import {
   useNodeNetworkInterfaces as useNodeNetworkInterfacesLive,
   useDeleteNetworkInterface,
-  useUpdateNetworkInterface,
   useApplyNetworkConfig,
   useRevertNetworkConfig,
 } from "@/features/networks/api/network-queries";
-import type { UpdateNetworkInterfaceRequest } from "@/features/networks/types/network";
+import type { NetworkInterface } from "@/features/networks/types/network";
 import { CreateInterfaceDialog } from "@/features/networks/components/CreateInterfaceDialog";
+import { InterfaceFormDialog } from "@/features/networks/components/InterfaceFormDialog";
+import {
+  interfaceAddresses,
+  interfaceGateways,
+  interfacePorts,
+  interfaceTypeLabel,
+} from "@/features/networks/components/interface-fields";
 import { useConsoleStore } from "@/stores/console-store";
 import { usePermissions } from "@/hooks/usePermissions";
 import { NodeAptRepositories } from "../components/NodeAptRepositories";
@@ -369,33 +375,11 @@ export function NodeDetailPage() {
 function NetworkTab({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
   const { data: networkInterfaces, isLoading } = useNodeNetworkInterfacesLive(clusterId, nodeName);
   const deleteIface = useDeleteNetworkInterface(clusterId, nodeName);
-  const updateIface = useUpdateNetworkInterface(clusterId, nodeName);
   const apply = useApplyNetworkConfig(clusterId, nodeName);
   const revert = useRevertNetworkConfig(clusterId, nodeName);
-  const [editIface, setEditIface] = useState<string | null>(null);
-  const [editCidr, setEditCidr] = useState("");
-  const [editGateway, setEditGateway] = useState("");
-  const [editBridgePorts, setEditBridgePorts] = useState("");
+  const [editIface, setEditIface] = useState<NetworkInterface | null>(null);
 
   if (isLoading) return <Skeleton className="h-48 w-full" />;
-
-  const openEdit = (iface: { iface: string; type: string; cidr?: string; address?: string; gateway?: string; bridge_ports?: string }) => {
-    setEditIface(iface.iface);
-    setEditCidr(iface.cidr ?? iface.address ?? "");
-    setEditGateway(iface.gateway ?? "");
-    setEditBridgePorts(iface.bridge_ports ?? "");
-  };
-
-  const saveEdit = (ifaceName: string, ifaceType: string) => {
-    const params: UpdateNetworkInterfaceRequest = { type: ifaceType };
-    if (editCidr) params.cidr = editCidr;
-    if (editGateway) params.gateway = editGateway;
-    if (editBridgePorts) params.bridge_ports = editBridgePorts;
-    updateIface.mutate(
-      { iface: ifaceName, params },
-      { onSuccess: () => { setEditIface(null); } },
-    );
-  };
 
   return (
     <div className="space-y-3">
@@ -437,75 +421,64 @@ function NetworkTab({ clusterId, nodeName }: { clusterId: string; nodeName: stri
                 <th className="px-3 py-2 text-left font-medium">Interface</th>
                 <th className="px-3 py-2 text-left font-medium">Type</th>
                 <th className="px-3 py-2 text-left font-medium">Active</th>
+                <th className="px-3 py-2 text-left font-medium">Autostart</th>
+                <th className="px-3 py-2 text-left font-medium">VLAN aware</th>
+                <th className="px-3 py-2 text-left font-medium">Ports / Slaves</th>
+                <th className="px-3 py-2 text-left font-medium">Bond Mode</th>
                 <th className="px-3 py-2 text-left font-medium">Address / CIDR</th>
                 <th className="px-3 py-2 text-left font-medium">Gateway</th>
-                <th className="px-3 py-2 text-left font-medium">Bridge Ports</th>
+                <th className="px-3 py-2 text-left font-medium">MTU</th>
+                <th className="px-3 py-2 text-left font-medium">Comment</th>
                 <th className="w-20 px-3 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y">
               {networkInterfaces.map((iface) => (
-                editIface === iface.iface ? (
-                  <tr key={iface.iface} className="bg-muted/20">
-                    <td className="px-3 py-2 font-mono text-xs">{iface.iface}</td>
-                    <td className="px-3 py-2">
-                      <Badge variant="outline" className="text-xs">{iface.type}</Badge>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge variant={iface.active ? "default" : "secondary"} className="text-xs">
-                        {iface.active ? "up" : "down"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Input className="h-7 text-xs font-mono" value={editCidr} onChange={(e) => { setEditCidr(e.target.value); }} placeholder="CIDR" />
-                    </td>
-                    <td className="px-3 py-2">
-                      <Input className="h-7 text-xs font-mono" value={editGateway} onChange={(e) => { setEditGateway(e.target.value); }} placeholder="Gateway" />
-                    </td>
-                    <td className="px-3 py-2">
-                      <Input className="h-7 text-xs" value={editBridgePorts} onChange={(e) => { setEditBridgePorts(e.target.value); }} placeholder="Bridge ports" />
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { saveEdit(iface.iface, iface.type); }} disabled={updateIface.isPending}>
-                          <Check className="h-3.5 w-3.5 text-emerald-600" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditIface(null); }}>
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={iface.iface} className="hover:bg-muted/30">
-                    <td className="px-3 py-2 font-mono text-xs">{iface.iface}</td>
-                    <td className="px-3 py-2">
-                      <Badge variant="outline" className="text-xs">{iface.type}</Badge>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge variant={iface.active ? "default" : "secondary"} className="text-xs">
-                        {iface.active ? "up" : "down"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs">{iface.cidr || iface.address || "--"}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{iface.gateway || "--"}</td>
-                    <td className="px-3 py-2 text-xs">{iface.bridge_ports || "--"}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { openEdit(iface); }}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { deleteIface.mutate(iface.iface); }} disabled={deleteIface.isPending}>
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                )
+                <tr key={iface.iface} className="hover:bg-muted/30">
+                  <td className="px-3 py-2 font-mono text-xs">{iface.iface}</td>
+                  <td className="px-3 py-2">
+                    <Badge variant="outline" className="text-xs">{interfaceTypeLabel(iface.type)}</Badge>
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge variant={iface.active ? "default" : "secondary"} className="text-xs">
+                      {iface.active ? "up" : "down"}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2 text-xs">{iface.autostart ? "Yes" : "No"}</td>
+                  <td className="px-3 py-2 text-xs">
+                    {iface.type === "bridge" ? (iface.bridge_vlan_aware ? "Yes" : "No") : "--"}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs">{interfacePorts(iface)}</td>
+                  <td className="px-3 py-2 text-xs">{iface.bond_mode ?? "--"}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{interfaceAddresses(iface)}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{interfaceGateways(iface)}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{iface.mtu ?? "--"}</td>
+                  <td className="px-3 py-2 text-xs">{iface.comments ?? "--"}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditIface(iface); }}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { deleteIface.mutate(iface.iface); }} disabled={deleteIface.isPending}>
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {editIface && (
+        <InterfaceFormDialog
+          clusterId={clusterId}
+          nodeName={nodeName}
+          existing={editIface}
+          open
+          onOpenChange={(open) => { if (!open) setEditIface(null); }}
+        />
       )}
     </div>
   );
