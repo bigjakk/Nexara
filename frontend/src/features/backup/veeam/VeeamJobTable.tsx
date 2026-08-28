@@ -10,6 +10,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
+import { SortableTableHead } from "@/components/SortableTableHead";
+import { byId, useTableSort, type SortAccessors } from "@/hooks/useTableSort";
 import { VeeamJobActions } from "./VeeamJobActions";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamJob } from "../types/backup";
@@ -49,6 +51,25 @@ function resultVariant(
   }
 }
 
+/**
+ * Whether the job is running, by the same rule the Status cell paints.
+ *
+ * job.status trails the inventory pass by minutes, while a run started from
+ * Nexara exists as a session immediately — so a job can be running with
+ * status still "Stopped". Shared with the sort accessor below: a column that
+ * ordered on the raw field would put a visibly-Running job under "Stopped".
+ */
+function isRunning(job: VeeamJob): boolean {
+  return job.status === "Running" || job.running_session_id !== "";
+}
+
+/** Epoch ms, so date columns order chronologically rather than by their text. */
+function toEpoch(value: string | null): number | null {
+  if (value == null || value === "") return null;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function formatTime(value: string | null): string {
   if (value == null || value === "") return "Never";
   const parsed = new Date(value);
@@ -56,11 +77,66 @@ function formatTime(value: string | null): string {
   return parsed.toLocaleString();
 }
 
+type JobSortKey =
+  | "name"
+  | "status"
+  | "result"
+  | "lastRun"
+  | "nextRun"
+  | "repository"
+  | "guests";
+
+/**
+ * Domain order for the two badge columns, not alphabetical.
+ *
+ * By label, Status ascending gives Disabled, Inactive, Running, Stopped —
+ * burying the jobs actually in flight in third place — and Result ascending
+ * only happens to put Failed first, which would quietly stop being true the
+ * next time a label is reworded. Both cells still show their label; only the
+ * ordering is ranked.
+ */
+const JOB_STATUS_RANK: Record<string, number> = {
+  Running: 0,
+  Stopped: 1,
+  Inactive: 2,
+  Disabled: 3,
+};
+
+const JOB_RESULT_RANK: Record<string, number> = {
+  "Failed or cancelled": 0,
+  Warning: 1,
+  Success: 2,
+};
+
+/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
+const JOB_SORT: SortAccessors<VeeamJob, JobSortKey> = {
+  name: (job) => job.name,
+  status: (job) => {
+    if (isRunning(job)) return JOB_STATUS_RANK["Running"] ?? 0;
+    if (job.status === "") return null;
+    return JOB_STATUS_RANK[job.status] ?? 99;
+  },
+  result: (job) =>
+    job.last_result === ""
+      ? null
+      : (JOB_RESULT_RANK[resultLabel(job.last_result)] ?? 99),
+  lastRun: (job) => toEpoch(job.last_run),
+  nextRun: (job) => toEpoch(job.next_run),
+  repository: (job) => job.repository_name || null,
+  guests: (job) => job.objects_count,
+};
+
 export function VeeamJobTable({
   jobs,
   serverId,
   scopeKey = "",
 }: VeeamJobTableProps) {
+  const {
+    rows: sortedJobs,
+    toggle: toggleSort,
+    directionFor,
+  } = useTableSort(jobs, JOB_SORT, byId);
+
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Row ids are server-scoped, so switching servers must not carry a stale
   // expansion set forward — it only grows, and rows silently re-expand on
@@ -95,24 +171,70 @@ export function VeeamJobTable({
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>Job</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Last Result</TableHead>
-              <TableHead>Last Run</TableHead>
-              <TableHead>Next Run</TableHead>
-              <TableHead>Repository</TableHead>
-              <TableHead className="text-right">Guests</TableHead>
+              <SortableTableHead
+                direction={directionFor("name")}
+                onSort={() => {
+                  toggleSort("name");
+                }}
+              >
+                Job
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("status")}
+                onSort={() => {
+                  toggleSort("status");
+                }}
+              >
+                Status
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("result")}
+                onSort={() => {
+                  toggleSort("result");
+                }}
+              >
+                Last Result
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("lastRun")}
+                onSort={() => {
+                  toggleSort("lastRun");
+                }}
+              >
+                Last Run
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("nextRun")}
+                onSort={() => {
+                  toggleSort("nextRun");
+                }}
+              >
+                Next Run
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("repository")}
+                onSort={() => {
+                  toggleSort("repository");
+                }}
+              >
+                Repository
+              </SortableTableHead>
+              <SortableTableHead
+                align="right"
+                direction={directionFor("guests")}
+                onSort={() => {
+                  toggleSort("guests");
+                }}
+              >
+                Guests
+              </SortableTableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {jobs.map((job) => {
+            {sortedJobs.map((job) => {
               const isExpanded = expanded.has(job.id);
-              // Same staleness as the action buttons: a run started from
-              // Nexara exists as a session immediately, while job.status
-              // trails the inventory pass by minutes.
-              const running =
-                job.status === "Running" || job.running_session_id !== "";
+              const running = isRunning(job);
               // Whether progress_percent describes THIS run. It is written by
               // the same pass that writes status, so it is only trustworthy
               // when status agrees a run is in flight.

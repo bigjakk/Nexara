@@ -10,6 +10,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
+import { SortableTableHead } from "@/components/SortableTableHead";
+import { byId, useTableSort, type SortAccessors } from "@/hooks/useTableSort";
+import { veeamDurationSeconds } from "./veeam-duration";
 import { VeeamSessionActions } from "./VeeamSessionActions";
 import { VeeamSessionLog } from "./VeeamSessionLog";
 import { VeeamTaskTable } from "./VeeamTaskTable";
@@ -30,6 +33,42 @@ function formatTime(value: string | null): string {
   return parsed.toLocaleString();
 }
 
+/** Epoch ms, so date columns order chronologically rather than by their text. */
+function toEpoch(value: string | null): number | null {
+  if (value == null || value === "") return null;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * Severity order for the Result column, not alphabetical.
+ *
+ * Sorting the label ascending gives Failed, Stopped, Success, Warning — which
+ * is close to right by accident, and would silently stop being right if a
+ * label were reworded. Ranking says it on purpose. The cell still shows the
+ * label; only the ordering is domain-ranked.
+ */
+const SESSION_RESULT_RANK: Record<string, number> = {
+  "Failed or cancelled": 0,
+  "Stopped from Nexara": 1,
+  Warning: 2,
+  Success: 3,
+};
+
+/**
+ * The Result cell's own label.
+ *
+ * Named for sessions specifically: VeeamJobTable has its own `resultLabel`
+ * taking a bare result string, and a job's last_result carries no
+ * nexara_stopped flag to consult. Merging them would silently drop the
+ * distinction between an operator's stop and a genuine backup failure.
+ */
+function sessionResultLabel(session: VeeamSession): string | null {
+  if (session.result === "") return null;
+  if (session.result !== "Failed") return session.result;
+  return session.nexara_stopped ? "Stopped from Nexara" : "Failed or cancelled";
+}
+
 function resultVariant(
   result: string,
 ): "default" | "secondary" | "destructive" | "outline" {
@@ -45,11 +84,41 @@ function resultVariant(
   }
 }
 
+type SessionSortKey =
+  | "name"
+  | "state"
+  | "result"
+  | "mode"
+  | "started"
+  | "duration"
+  | "transferred";
+
+/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
+const SESSION_SORT: SortAccessors<VeeamSession, SessionSortKey> = {
+  name: (session) => session.name,
+  state: (session) => session.state || null,
+  result: (session) => {
+    const label = sessionResultLabel(session);
+    return label === null ? null : (SESSION_RESULT_RANK[label] ?? 99);
+  },
+  mode: (session) => session.algorithm || null,
+  started: (session) => toEpoch(session.creation_time),
+  duration: (session) =>
+    session.duration === "" ? null : veeamDurationSeconds(session.duration),
+  transferred: (session) => session.transferred_size,
+};
+
 export function VeeamSessionTable({
   sessions,
   serverId,
   scopeKey = "",
 }: VeeamSessionTableProps) {
+  const {
+    rows: sortedSessions,
+    toggle: toggleSort,
+    directionFor,
+  } = useTableSort(sessions, SESSION_SORT, byId);
+
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Row ids are server-scoped, so switching servers must not carry a stale
   // expansion set forward — it only grows, and rows silently re-expand on
@@ -84,18 +153,68 @@ export function VeeamSessionTable({
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>Job</TableHead>
-              <TableHead>State</TableHead>
-              <TableHead>Result</TableHead>
-              <TableHead>Mode</TableHead>
-              <TableHead>Started</TableHead>
-              <TableHead>Duration</TableHead>
-              <TableHead className="text-right">Transferred</TableHead>
+              <SortableTableHead
+                direction={directionFor("name")}
+                onSort={() => {
+                  toggleSort("name");
+                }}
+              >
+                Job
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("state")}
+                onSort={() => {
+                  toggleSort("state");
+                }}
+              >
+                State
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("result")}
+                onSort={() => {
+                  toggleSort("result");
+                }}
+              >
+                Result
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("mode")}
+                onSort={() => {
+                  toggleSort("mode");
+                }}
+              >
+                Mode
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("started")}
+                onSort={() => {
+                  toggleSort("started");
+                }}
+              >
+                Started
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("duration")}
+                onSort={() => {
+                  toggleSort("duration");
+                }}
+              >
+                Duration
+              </SortableTableHead>
+              <SortableTableHead
+                align="right"
+                direction={directionFor("transferred")}
+                onSort={() => {
+                  toggleSort("transferred");
+                }}
+              >
+                Transferred
+              </SortableTableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sessions.map((session) => {
+            {sortedSessions.map((session) => {
               const isExpanded = expanded.has(session.id);
 
               return (
@@ -130,11 +249,7 @@ export function VeeamSessionTable({
                               run Nexara STARTED can fail for a completely real
                               reason, and labelling that "stopped" would tell an
                               operator to ignore a genuine backup failure. */}
-                          {session.result === "Failed"
-                            ? session.nexara_stopped
-                              ? "Stopped from Nexara"
-                              : "Failed or cancelled"
-                            : session.result}
+                          {sessionResultLabel(session)}
                         </Badge>
                       )}
                     </TableCell>

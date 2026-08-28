@@ -12,8 +12,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChevronDown, ChevronRight, Ghost } from "lucide-react";
 import { formatBytes } from "@/lib/format";
+import { SortableTableHead } from "@/components/SortableTableHead";
+import { byId, useTableSort, type SortAccessors } from "@/hooks/useTableSort";
 import { useMapVeeamBackupObject } from "../api/backup-queries";
 import type { VeeamOrphanedObject } from "../types/backup";
+
+/** Epoch ms, so date columns order chronologically rather than by their text. */
+function toEpoch(value: string | null): number | null {
+  if (value == null || value === "") return null;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+type OrphanSortKey = "name" | "cluster" | "points" | "size" | "newest";
+
+/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
+const ORPHAN_SORT: SortAccessors<VeeamOrphanedObject, OrphanSortKey> = {
+  name: (object) => object.name,
+  // The cell falls back to the platform name, so the column must too.
+  cluster: (object) => object.cluster_name || object.platform_name || null,
+  points: (object) => object.restore_points_count,
+  size: (object) => object.restore_point_bytes,
+  newest: (object) => toEpoch(object.latest_restore_point),
+};
 
 function formatTime(value: string | null): string {
   if (value == null || value === "") return "Never";
@@ -42,6 +63,12 @@ export function VeeamOrphanTable({
   serverId: string;
   objects: VeeamOrphanedObject[];
 }) {
+  const {
+    rows: sortedObjects,
+    toggle: toggleSort,
+    directionFor,
+  } = useTableSort(objects, ORPHAN_SORT, byId);
+
   const [expanded, setExpanded] = useState<string | null>(null);
 
   // Switching servers must not leave a row from the previous one expanded.
@@ -76,15 +103,52 @@ export function VeeamOrphanTable({
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>Name</TableHead>
-              <TableHead>Cluster</TableHead>
-              <TableHead className="text-right">Restore points</TableHead>
-              <TableHead className="text-right">Size</TableHead>
-              <TableHead>Newest point</TableHead>
+              <SortableTableHead
+                direction={directionFor("name")}
+                onSort={() => {
+                  toggleSort("name");
+                }}
+              >
+                Name
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("cluster")}
+                onSort={() => {
+                  toggleSort("cluster");
+                }}
+              >
+                Cluster
+              </SortableTableHead>
+              <SortableTableHead
+                align="right"
+                direction={directionFor("points")}
+                onSort={() => {
+                  toggleSort("points");
+                }}
+              >
+                Restore points
+              </SortableTableHead>
+              <SortableTableHead
+                align="right"
+                direction={directionFor("size")}
+                onSort={() => {
+                  toggleSort("size");
+                }}
+              >
+                Size
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("newest")}
+                onSort={() => {
+                  toggleSort("newest");
+                }}
+              >
+                Newest point
+              </SortableTableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {objects.map((object) => {
+            {sortedObjects.map((object) => {
               const isOpen = expanded === object.id;
               return (
                 <Fragment key={object.id}>
@@ -144,7 +208,10 @@ function OrphanDetail({
 
   const parsed = Number(vmid);
   const vmidValid =
-    vmid !== "" && Number.isInteger(parsed) && parsed > 0 && parsed <= 2147483647;
+    vmid !== "" &&
+    Number.isInteger(parsed) &&
+    parsed > 0 &&
+    parsed <= 2147483647;
 
   return (
     <div className="space-y-3 py-2">
@@ -211,7 +278,9 @@ function OrphanDetail({
         */}
         <Button
           size="sm"
-          disabled={!vmidValid || mapObject.isPending || object.cluster_id === null}
+          disabled={
+            !vmidValid || mapObject.isPending || object.cluster_id === null
+          }
           onClick={() => {
             mapObject.mutate({
               objectId: object.id,

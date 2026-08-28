@@ -16,10 +16,16 @@ import {
   PlugZap,
   Trash2,
 } from "lucide-react";
+import { SortableTableHead } from "@/components/SortableTableHead";
+import { byId, useTableSort, type SortAccessors } from "@/hooks/useTableSort";
 import { useTestVeeamServer } from "../api/backup-queries";
 import type { VeeamProbeResult, VeeamServer } from "../types/backup";
 import { VeeamProbeSummary } from "./VeeamProbeSummary";
 import { VeeamServerStatusBadge } from "./VeeamServerStatusBadge";
+import {
+  veeamServerStatus,
+  type VeeamServerStatus,
+} from "./veeam-server-status";
 
 interface VeeamServerTableProps {
   servers: VeeamServer[];
@@ -28,6 +34,31 @@ interface VeeamServerTableProps {
 }
 
 const REQUIRED_EDITION = "EnterprisePlus";
+
+type ServerSortKey = "name" | "address" | "version" | "edition" | "status";
+
+/**
+ * Severity order for the Status column, not alphabetical.
+ *
+ * Sorted by label, ascending gives Connected, Disabled, Error — so the first
+ * click on Status buries the broken servers at the bottom, which is the
+ * opposite of why anyone clicks it. The cell still shows the badge's label;
+ * only the ordering is ranked.
+ */
+const STATUS_RANK: Record<VeeamServerStatus, number> = {
+  Error: 0,
+  Disabled: 1,
+  Connected: 2,
+};
+
+/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
+const SERVER_SORT: SortAccessors<VeeamServer, ServerSortKey> = {
+  name: (server) => server.name,
+  address: (server) => server.base_url,
+  version: (server) => server.product_version || null,
+  edition: (server) => server.license_edition || null,
+  status: (server) => STATUS_RANK[veeamServerStatus(server)],
+};
 
 function formatTimestamp(value: string | null): string {
   if (value == null || value === "") return "Never";
@@ -41,6 +72,12 @@ export function VeeamServerTable({
   onEdit,
   onDelete,
 }: VeeamServerTableProps) {
+  const {
+    rows: sortedServers,
+    toggle: toggleSort,
+    directionFor,
+  } = useTableSort(servers, SERVER_SORT, byId);
+
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Per-server test results, keyed by id: one server's probe must not clear
   // another's, and a shared mutation result would do exactly that.
@@ -99,16 +136,51 @@ export function VeeamServerTable({
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>Name</TableHead>
-              <TableHead>Address</TableHead>
-              <TableHead>Version</TableHead>
-              <TableHead>Edition</TableHead>
-              <TableHead>Status</TableHead>
+              <SortableTableHead
+                direction={directionFor("name")}
+                onSort={() => {
+                  toggleSort("name");
+                }}
+              >
+                Name
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("address")}
+                onSort={() => {
+                  toggleSort("address");
+                }}
+              >
+                Address
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("version")}
+                onSort={() => {
+                  toggleSort("version");
+                }}
+              >
+                Version
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("edition")}
+                onSort={() => {
+                  toggleSort("edition");
+                }}
+              >
+                Edition
+              </SortableTableHead>
+              <SortableTableHead
+                direction={directionFor("status")}
+                onSort={() => {
+                  toggleSort("status");
+                }}
+              >
+                Status
+              </SortableTableHead>
               <TableHead className="w-32 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {servers.map((server) => {
+            {sortedServers.map((server) => {
               const isExpanded = expanded.has(server.id);
               const probe = probes[server.id];
               const probeError = probeErrors[server.id];

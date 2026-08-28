@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import type { VeeamServer } from "../types/backup";
+import { veeamServerStatus } from "./veeam-server-status";
 
 /**
  * The one place that decides what a registered Veeam server's connection state
@@ -10,15 +11,16 @@ import type { VeeamServer } from "../types/backup";
  * have the header calling a server connected while its own row said otherwise.
  */
 export function VeeamServerStatusBadge({ server }: { server: VeeamServer }) {
-  if (!server.enabled) {
-    return <Badge variant="secondary">Disabled</Badge>;
+  switch (veeamServerStatus(server)) {
+    case "Disabled":
+      return <Badge variant="secondary">Disabled</Badge>;
+    case "Error":
+      return <Badge variant="destructive">Error</Badge>;
+    default:
+      return (
+        <Badge variant="default" className="bg-emerald-600">
+          Connected
+        </Badge>
+      );
   }
-  if (server.last_sync_error !== "") {
-    return <Badge variant="destructive">Error</Badge>;
-  }
-  return (
-    <Badge variant="default" className="bg-emerald-600">
-      Connected
-    </Badge>
-  );
 }
