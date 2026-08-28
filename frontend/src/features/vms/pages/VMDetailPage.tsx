@@ -119,6 +119,8 @@ export function VMDetailPage() {
 
   const normalizedStatus = vm.status.toLowerCase() as ResourceStatus;
   const consoleAllowed = canConsole(kind === "ct" ? "container" : "vm");
+  const showConsolePreview =
+    !isMobile && kind === "vm" && consoleAllowed && normalizedStatus === "running" && nodeName !== "";
 
   function openConsole(type: "terminal" | "vnc") {
     if (!vm) return;
@@ -147,21 +149,11 @@ export function VMDetailPage() {
   }
 
   return (
-    <div className="relative space-y-6 p-6">
-      {/* Floating live console preview — absolute so it doesn't stretch the
-          header row. Desktop-only: at phone widths it would sit on top of
-          the header; the VNC Console button stays as the mobile entry. */}
-      {!isMobile && kind === "vm" && consoleAllowed && normalizedStatus === "running" && nodeName !== "" && (
-        <div className="absolute right-6 top-6 z-10">
-          <VMConsolePreview
-            clusterId={clusterId}
-            node={nodeName}
-            vmid={vm.vmid}
-            onOpen={() => { openConsole("vnc"); }}
-          />
-        </div>
-      )}
-      {/* Header */}
+    <div className="space-y-6 p-6">
+      {/* Header. The live console preview is a normal flex child in the right
+          slot rather than an overlay, so the header reserves its height on its
+          own and the action row below always clears it — no magic offset to
+          drift. Desktop-only; the VNC Console button is the mobile entry. */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
           <Button variant="ghost" size="sm" asChild className="-ml-2 mt-1.5">
@@ -239,73 +231,89 @@ export function VMDetailPage() {
           </div>
           </div>
         </div>
-      </div>
 
-      {/* Console + Actions */}
-      <div className="flex flex-wrap items-center gap-2">
-        {/* Consoles open regardless of power state (iLO-style): a stopped
-            guest parks as "powered off" with a Start button and connects
-            automatically on power-on. Only templates can't be consoled.
-            Hidden without the console:* permission — the mint would 403. */}
-        {kind === "vm" && consoleAllowed && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => { openConsole("vnc"); }}
-            disabled={vm.template}
-          >
-            <Monitor className="h-4 w-4" />
-            VNC Console
-          </Button>
-        )}
-        {kind === "ct" && consoleAllowed && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => { openConsole("terminal"); }}
-            disabled={vm.template}
-          >
-            <Terminal className="h-4 w-4" />
-            Attach
-          </Button>
+        {showConsolePreview && (
+          <VMConsolePreview
+            clusterId={clusterId}
+            node={nodeName}
+            vmid={vm.vmid}
+            onOpen={() => { openConsole("vnc"); }}
+          />
         )}
       </div>
 
-      <VMActions
-        clusterId={clusterId}
-        resourceId={vmId}
-        kind={kind}
-        status={vm.status}
-        name={vm.name}
-        template={vm.template}
-        onSnapshot={() => { setSnapshotOpen(true); }}
-        onClone={() => { setCloneOpen(true); }}
-        onCloneToTemplate={() => { setCloneToTemplateOpen(true); }}
-        onDeploy={() => { setDeployOpen(true); }}
-        onMigrate={() => { setMigrateOpen(true); }}
-        onDestroy={() => { setDestroyOpen(true); }}
-        onConvertToTemplate={() => { setConvertTemplateOpen(true); }}
-      />
-
-      {/* Tabs */}
+      {/* Tabs — the actions share the tab strip's row (tabs left, actions
+          right) rather than sitting in a band of their own above it. */}
       <Tabs defaultValue={initialTab}>
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          {kind === "vm" && (
-            <TabsTrigger value="hardware">Hardware</TabsTrigger>
-          )}
-          {kind === "ct" && (
-            <TabsTrigger value="resources">Resources</TabsTrigger>
-          )}
-          <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
-          {kind === "vm" && (
-            <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
-          )}
-          <TabsTrigger value="backups">Backups</TabsTrigger>
-          <TabsTrigger value="schedules">Schedules</TabsTrigger>
-        </TabsList>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            {kind === "vm" && (
+              <TabsTrigger value="hardware">Hardware</TabsTrigger>
+            )}
+            {kind === "ct" && (
+              <TabsTrigger value="resources">Resources</TabsTrigger>
+            )}
+            <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
+            {kind === "vm" && (
+              <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
+            )}
+            <TabsTrigger value="backups">Backups</TabsTrigger>
+            <TabsTrigger value="schedules">Schedules</TabsTrigger>
+          </TabsList>
+
+          <VMActions
+            // flex-auto, not flex-1: basis-auto lets the actions drop to their
+            // own full-width line once they no longer fit beside the tabs,
+            // instead of being squeezed into a tall column next to them.
+            className="flex-auto min-w-0"
+            leading={
+              <>
+                {/* Consoles open regardless of power state (iLO-style): a stopped
+                    guest parks as "powered off" with a Start button and connects
+                    automatically on power-on. Only templates can't be consoled.
+                    Hidden without the console:* permission — the mint would 403. */}
+                {kind === "vm" && consoleAllowed && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => { openConsole("vnc"); }}
+                    disabled={vm.template}
+                  >
+                    <Monitor className="h-4 w-4" />
+                    VNC Console
+                  </Button>
+                )}
+                {kind === "ct" && consoleAllowed && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => { openConsole("terminal"); }}
+                    disabled={vm.template}
+                  >
+                    <Terminal className="h-4 w-4" />
+                    Attach
+                  </Button>
+                )}
+              </>
+            }
+            clusterId={clusterId}
+            resourceId={vmId}
+            kind={kind}
+            status={vm.status}
+            name={vm.name}
+            template={vm.template}
+            onSnapshot={() => { setSnapshotOpen(true); }}
+            onClone={() => { setCloneOpen(true); }}
+            onCloneToTemplate={() => { setCloneToTemplateOpen(true); }}
+            onDeploy={() => { setDeployOpen(true); }}
+            onMigrate={() => { setMigrateOpen(true); }}
+            onDestroy={() => { setDestroyOpen(true); }}
+            onConvertToTemplate={() => { setConvertTemplateOpen(true); }}
+          />
+        </div>
 
         <TabsContent value="overview" className="mt-4 space-y-6">
           {/* Summary */}

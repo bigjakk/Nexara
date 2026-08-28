@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Camera, Copy, ArrowRightLeft, Trash2, FileBox, Rocket } from "lucide-react";
+import { Camera, Copy, ArrowRightLeft, Trash2, FileBox, Package, Rocket } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +34,10 @@ function expectedStatus(action: VMAction): string | null {
 }
 
 interface VMActionsProps {
+  /** Rendered at the start of the action row (e.g. the console button). */
+  leading?: React.ReactNode;
+  /** Extra classes for the outer wrapper, for slotting into a parent row. */
+  className?: string | undefined;
   clusterId: string;
   resourceId: string;
   kind: ResourceKind;
@@ -50,6 +55,8 @@ interface VMActionsProps {
 
 
 export function VMActions({
+  leading,
+  className,
   clusterId,
   resourceId,
   kind,
@@ -122,8 +129,14 @@ export function VMActions({
   );
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className={cn("space-y-2", className)}>
+      {/* One right-aligned row, console button first. justify-end rather than
+          ml-auto so the buttons stay right even when they wrap to a second
+          line — keeping them off the page's natural left-hand reading path,
+          where a stray click would land on Shutdown. */}
+      <div className="flex min-h-9 flex-wrap items-center gap-2 sm:justify-end">
+        {leading}
+
         {visibleActions.map((config) => (
           <Button
             key={config.action}
@@ -198,7 +211,7 @@ export function VMActions({
             disabled={isPending}
             onClick={onConvertToTemplate}
           >
-            <FileBox className="h-4 w-4" />
+            <Package className="h-4 w-4" />
             Convert to Template
           </Button>
         )}

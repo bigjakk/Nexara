@@ -11,6 +11,7 @@ import {
   ArrowRightLeft,
   Trash2,
   FileBox,
+  Package,
   Rocket,
 } from "lucide-react";
 import type { VMAction, ResourceKind } from "../types/vm";
@@ -132,7 +133,7 @@ export const managementActions: ManagementActionConfig[] = [
   {
     action: "convert-to-template",
     label: "Convert to Template",
-    icon: <FileBox className="h-4 w-4" />,
+    icon: <Package className="h-4 w-4" />,
     variant: "outline",
     showWhen: (s, _k, template) => s === "stopped" && !template,
   },

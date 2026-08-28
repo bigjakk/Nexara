@@ -22,6 +22,7 @@ import {
 import { useThemeStore } from "@/stores/theme-store";
 import {
   usePreferencesStore,
+  type ButtonDisplay,
   type ByteUnit,
   type DateFormat,
 } from "@/stores/preferences-store";
@@ -59,6 +60,12 @@ const dateFormatOptions: { value: DateFormat; labelKey: string; exampleKey: stri
   { value: "relative", labelKey: "relative", exampleKey: "relativeExample" },
   { value: "iso", labelKey: "iso8601", exampleKey: "isoExample" },
   { value: "locale", labelKey: "local", exampleKey: "localeExample" },
+];
+
+const buttonDisplayOptions: { value: ButtonDisplay; labelKey: string; exampleKey: string }[] = [
+  { value: "icon-text", labelKey: "iconAndText", exampleKey: "iconAndTextExample" },
+  { value: "icon", labelKey: "iconOnly", exampleKey: "iconOnlyExample" },
+  { value: "text", labelKey: "textOnly", exampleKey: "textOnlyExample" },
 ];
 
 const refreshIntervalOptions = [
@@ -284,6 +291,32 @@ export function AppearancePage() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Button Display */}
+          <div className="space-y-2">
+            <Label>{t("buttonDisplay")}</Label>
+            <Select
+              value={preferences.buttonDisplay}
+              onValueChange={(v) => { savePreferences({ buttonDisplay: v as ButtonDisplay }); }}
+            >
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {buttonDisplayOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    <span>{t(opt.labelKey)}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      ({t(opt.exampleKey)})
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {t("buttonDisplayHint")}
+            </p>
           </div>
         </CardContent>
       </Card>

@@ -3,6 +3,8 @@ import i18n from "@/lib/i18n";
 
 export type ByteUnit = "binary" | "decimal";
 export type DateFormat = "relative" | "iso" | "locale";
+/** How buttons that pair an icon with a label render across the app. */
+export type ButtonDisplay = "icon-text" | "icon" | "text";
 
 export interface UserPreferences {
   byteUnit: ByteUnit;
@@ -10,6 +12,7 @@ export interface UserPreferences {
   refreshInterval: number; // seconds, 0 = manual
   accentColor: string; // HSL string e.g. "240 5.9% 10%" or preset name
   language: string; // BCP 47 language code e.g. "en", "de", "fr"
+  buttonDisplay: ButtonDisplay;
 }
 
 interface PreferencesState {
@@ -28,6 +31,7 @@ const defaultPreferences: UserPreferences = {
   refreshInterval: 30,
   accentColor: "default",
   language: "en",
+  buttonDisplay: "icon-text",
 };
 
 function loadStored(): UserPreferences {
