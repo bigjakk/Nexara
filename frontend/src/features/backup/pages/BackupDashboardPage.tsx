@@ -32,6 +32,14 @@ import { DatastoreConfigCard } from "../components/DatastoreConfigCard";
 import { CapacityForecastChart } from "../components/CapacityForecastChart";
 import { BackupCoverageReport } from "../components/BackupCoverageReport";
 import { VeeamServersPanel } from "../veeam/VeeamServersPanel";
+import { Badge } from "@/components/ui/badge";
+import { PROVIDER_FILL_CLASSES } from "../components/provider-accents";
+import {
+  ProviderBadge,
+  ProviderHeader,
+  ProviderTabLabel,
+  ProviderTrademarkNote,
+} from "../components/ProviderIdentity";
 
 export function BackupDashboardPage() {
   const serversQuery = usePBSServers();
@@ -40,10 +48,18 @@ export function BackupDashboardPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const activeServerId =
-    selectedServerId || (servers.length > 0 ? (servers[0]?.id ?? "") : "");
+  // Reconciled against the list, not merely defaulted — the same fix
+  // VeeamServersPanel carries. A bare `selectedServerId || servers[0]` keeps
+  // pointing at a server that has just been deleted, because the stale id is
+  // still non-empty: every query then targets a 404, no switcher button is
+  // highlighted, and the whole provider header (including the Delete button
+  // that caused it) disappears, with no way back but a reload.
+  const selectionIsLive = servers.some((srv) => srv.id === selectedServerId);
+  const activeServerId = selectionIsLive
+    ? selectedServerId
+    : (servers[0]?.id ?? "");
 
-  const activeServer = servers.find((s) => s.id === activeServerId);
+  const activeServer = servers.find((srv) => srv.id === activeServerId);
 
   const dsStatusQuery = usePBSDatastoreStatus(activeServerId);
   const snapshotsQuery = usePBSSnapshots(activeServerId);
@@ -55,8 +71,13 @@ export function BackupDashboardPage() {
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
   const [selectedClusterId, setSelectedClusterId] = useState<string>("");
-  const activeClusterId =
-    selectedClusterId || (clusters.length > 0 ? (clusters[0]?.id ?? "") : "");
+  // Reconciled for the same reason the server selection above is.
+  const clusterSelectionIsLive = clusters.some(
+    (c) => c.id === selectedClusterId,
+  );
+  const activeClusterId = clusterSelectionIsLive
+    ? selectedClusterId
+    : (clusters[0]?.id ?? "");
   const backupJobsQuery = useBackupJobs(activeClusterId);
 
   const datastores = dsStatusQuery.data ?? [];
@@ -70,6 +91,34 @@ export function BackupDashboardPage() {
     dsStatusQuery.isError &&
     dsStatusQuery.error instanceof ApiClientError &&
     dsStatusQuery.error.status === 404;
+
+  /**
+   * The header badge for the selected PBS server.
+   *
+   * Deliberately narrower than "the status query failed". `isNotFound` is a
+   * 404 — the server really is unreachable. Any other error is most often a
+   * token missing Datastore.Audit, where the server is reachable and
+   * authenticated and only the permission is wrong; telling that operator to
+   * check connectivity sends them the wrong way. The unreachable card further
+   * down the tab draws the same distinction.
+   */
+  function pbsStatusBadge() {
+    if (dsStatusQuery.isLoading) {
+      // Reserve the space rather than popping a badge in on second paint.
+      return <Skeleton className="h-5 w-20" />;
+    }
+    if (isNotFound) {
+      return <Badge variant="destructive">Unreachable</Badge>;
+    }
+    if (dsStatusQuery.isError) {
+      return <Badge variant="secondary">Status unavailable</Badge>;
+    }
+    return (
+      <Badge variant="default" className="bg-emerald-600">
+        Connected
+      </Badge>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -92,39 +141,60 @@ export function BackupDashboardPage() {
           could not reach the unified report at all. */}
       <Tabs defaultValue="pbs">
         <TabsList>
-          <TabsTrigger value="pbs">Proxmox Backup Server</TabsTrigger>
-          <TabsTrigger value="veeam">Veeam</TabsTrigger>
+          <TabsTrigger value="pbs">
+            <ProviderTabLabel provider="pbs">
+              Proxmox Backup Server
+            </ProviderTabLabel>
+          </TabsTrigger>
+          <TabsTrigger value="veeam">
+            <ProviderTabLabel provider="veeam">Veeam</ProviderTabLabel>
+          </TabsTrigger>
+          {/* Left unmarked on purpose. Coverage answers across both providers,
+              so wearing either one's accent would make it a claim about that
+              provider alone. */}
           <TabsTrigger value="coverage">Coverage</TabsTrigger>
         </TabsList>
 
         <TabsContent value="pbs" className="space-y-6">
-          <div className="flex items-center justify-end gap-2">
-            {activeServer && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setEditOpen(true);
-                  }}
-                >
-                  <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                  Edit
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setDeleteOpen(true);
-                  }}
-                >
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                  Delete
-                </Button>
-              </>
-            )}
-            <AddPBSServerDialog />
-          </div>
+          {activeServer ? (
+            <ProviderHeader
+              provider="pbs"
+              title="Proxmox Backup Server"
+              subtitle={[activeServer.name, activeServer.api_url]
+                .filter((part) => part !== "")
+                .join(" · ")}
+              status={pbsStatusBadge()}
+              actions={
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditOpen(true);
+                    }}
+                  >
+                    <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setDeleteOpen(true);
+                    }}
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    Delete
+                  </Button>
+                  <AddPBSServerDialog />
+                </div>
+              }
+            />
+          ) : (
+            <div className="flex items-center justify-end gap-2">
+              <AddPBSServerDialog />
+            </div>
+          )}
 
           {activeServer && (
             <>
@@ -151,7 +221,9 @@ export function BackupDashboardPage() {
 
           {!serversQuery.isLoading && servers.length === 0 && (
             <div className="rounded-md border bg-muted/50 px-6 py-12 text-center">
-              <Shield className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+              <div className="mb-3 flex justify-center">
+                <ProviderBadge provider="pbs" size="lg" />
+              </div>
               <h2 className="text-lg font-medium">No PBS Servers</h2>
               <p className="mt-1 mb-4 text-sm text-muted-foreground">
                 Register a Proxmox Backup Server to manage backups.
@@ -165,12 +237,13 @@ export function BackupDashboardPage() {
               {servers.map((server) => (
                 <button
                   key={server.id}
+                  aria-pressed={activeServerId === server.id}
                   onClick={() => {
                     setSelectedServerId(server.id);
                   }}
                   className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                     activeServerId === server.id
-                      ? "bg-primary text-primary-foreground"
+                      ? PROVIDER_FILL_CLASSES.pbs
                       : "bg-muted text-muted-foreground hover:bg-accent"
                   }`}
                 >
@@ -178,12 +251,6 @@ export function BackupDashboardPage() {
                 </button>
               ))}
             </div>
-          )}
-
-          {activeServer && servers.length === 1 && (
-            <p className="text-sm text-muted-foreground">
-              Server: <span className="font-medium">{activeServer.name}</span>
-            </p>
           )}
 
           {dsStatusQuery.isLoading && (
@@ -196,6 +263,8 @@ export function BackupDashboardPage() {
 
           {isNotFound && (
             <div className="rounded-md border bg-muted/50 px-6 py-12 text-center">
+              {/* Muted shield, not the provider tile its sibling empty state
+                  wears: the accent marks identity, and this is a failure. */}
               <Shield className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
               <h2 className="text-lg font-medium">PBS Server Unreachable</h2>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -207,7 +276,9 @@ export function BackupDashboardPage() {
 
           {dsStatusQuery.isError && !isNotFound && (
             <p className="text-sm text-destructive">
-              Failed to load PBS data. Check server connectivity.
+              Could not load PBS data. The server answered, so this is more
+              often a permission than a connectivity problem — check that the
+              API token holds Datastore.Audit.
             </p>
           )}
 
@@ -288,6 +359,7 @@ export function BackupDashboardPage() {
                         {clusters.map((cluster) => (
                           <button
                             key={cluster.id}
+                            aria-pressed={activeClusterId === cluster.id}
                             onClick={() => {
                               setSelectedClusterId(cluster.id);
                             }}
@@ -322,7 +394,6 @@ export function BackupDashboardPage() {
                   <TabsContent value="tasks" className="space-y-4">
                     <PBSTaskTable tasks={tasks} pbsId={activeServerId} />
                   </TabsContent>
-
                 </Tabs>
               </>
             )}
@@ -339,6 +410,11 @@ export function BackupDashboardPage() {
           <BackupCoverageReport />
         </TabsContent>
       </Tabs>
+
+      {/* Below the tab set, not inside a tab: the Coverage report names Veeam
+          in its own right, and a note nested in a provider panel would miss
+          that panel's own loading and error returns. */}
+      <ProviderTrademarkNote providers={["pbs", "veeam"]} />
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { DatabaseBackup } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiClientError } from "@/lib/api-client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,6 +23,9 @@ import { VeeamRepositoryCards } from "./VeeamRepositoryCards";
 import { VeeamRepositoryChart } from "./VeeamRepositoryChart";
 import { VeeamPlatformMapping } from "./VeeamPlatformMapping";
 import { VeeamOrphanTable } from "./VeeamOrphanTable";
+import { VeeamServerStatusBadge } from "./VeeamServerStatusBadge";
+import { PROVIDER_FILL_CLASSES } from "../components/provider-accents";
+import { ProviderBadge, ProviderHeader } from "../components/ProviderIdentity";
 
 /**
  * Renders a tab's body, distinguishing "still loading", "we could not ask" and
@@ -89,6 +91,8 @@ export function VeeamServersPanel() {
     ? selectedServerId
     : (servers[0]?.id ?? "");
 
+  const activeServer = servers.find((s) => s.id === activeServerId);
+
   const jobsQuery = useVeeamJobs(activeServerId);
   const sessionsQuery = useVeeamSessions(activeServerId);
   const reposQuery = useVeeamRepositories(activeServerId);
@@ -129,7 +133,9 @@ export function VeeamServersPanel() {
     return (
       <div className="space-y-4">
         <div className="rounded-md border bg-muted/50 px-6 py-12 text-center">
-          <DatabaseBackup className="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+          <div className="mb-3 flex justify-center">
+            <ProviderBadge provider="veeam" size="lg" />
+          </div>
           <h2 className="text-lg font-medium">No Veeam Servers</h2>
           <p className="mx-auto mt-1 mb-4 max-w-lg text-sm text-muted-foreground">
             Connect a Veeam Backup &amp; Replication server to see the state of
@@ -144,30 +150,55 @@ export function VeeamServersPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        {servers.length > 1 ? (
-          <div className="flex flex-wrap gap-2">
-            {servers.map((server) => (
-              <button
-                key={server.id}
-                onClick={() => {
-                  setSelectedServerId(server.id);
-                }}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  activeServerId === server.id
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-accent"
-                }`}
-              >
-                {server.name}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span />
-        )}
-        <AddVeeamServerDialog />
-      </div>
+      {/* Says which product's state the tables below belong to. The tab label
+          used to be the only thing that did, and it scrolls out of view on a
+          narrow viewport. */}
+      <ProviderHeader
+        provider="veeam"
+        title="Veeam Backup & Replication"
+        subtitle={
+          activeServer != null
+            ? [
+                activeServer.base_url,
+                activeServer.product_version !== ""
+                  ? `v${activeServer.product_version}`
+                  : null,
+                activeServer.license_edition !== ""
+                  ? activeServer.license_edition
+                  : null,
+              ]
+                .filter((part): part is string => part != null && part !== "")
+                .join(" · ")
+            : ""
+        }
+        status={
+          activeServer != null && (
+            <VeeamServerStatusBadge server={activeServer} />
+          )
+        }
+        actions={<AddVeeamServerDialog />}
+      />
+
+      {servers.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {servers.map((server) => (
+            <button
+              key={server.id}
+              aria-pressed={activeServerId === server.id}
+              onClick={() => {
+                setSelectedServerId(server.id);
+              }}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                activeServerId === server.id
+                  ? PROVIDER_FILL_CLASSES.veeam
+                  : "bg-muted text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              {server.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <VeeamServerTable
         servers={servers}

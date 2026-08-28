@@ -19,6 +19,7 @@ import {
 import { useTestVeeamServer } from "../api/backup-queries";
 import type { VeeamProbeResult, VeeamServer } from "../types/backup";
 import { VeeamProbeSummary } from "./VeeamProbeSummary";
+import { VeeamServerStatusBadge } from "./VeeamServerStatusBadge";
 
 interface VeeamServerTableProps {
   servers: VeeamServer[];
@@ -145,15 +146,7 @@ export function VeeamServerTable({
                       )}
                     </TableCell>
                     <TableCell>
-                      {!server.enabled ? (
-                        <Badge variant="secondary">Disabled</Badge>
-                      ) : server.last_sync_error !== "" ? (
-                        <Badge variant="destructive">Error</Badge>
-                      ) : (
-                        <Badge variant="default" className="bg-emerald-600">
-                          Connected
-                        </Badge>
-                      )}
+                      <VeeamServerStatusBadge server={server} />
                     </TableCell>
                     <TableCell
                       className="text-right"

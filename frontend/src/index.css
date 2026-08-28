@@ -43,6 +43,15 @@
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
 
+  /* Per-provider accents. Third-party backup providers get their own hue so a
+     page can say "this is Veeam" without shipping a vendor logo — see the
+     block in :root below for why these are deliberately NOT the vendors'
+     exact brand colours. */
+  --color-provider-veeam: hsl(var(--provider-veeam));
+  --color-provider-veeam-foreground: hsl(var(--provider-veeam-foreground));
+  --color-provider-pbs: hsl(var(--provider-pbs));
+  --color-provider-pbs-foreground: hsl(var(--provider-pbs-foreground));
+
   /* Custom radius scale tied to --radius (NOT the Tailwind defaults — this
      project overrode borderRadius.sm/md/lg in v3). Keep mapped so rounded-*
      utilities are unchanged and stay reactive to runtime --radius changes. */
@@ -92,6 +101,27 @@
     --border: 220 13% 90%;
     --input: 220 13% 90%;
     --ring: 162 88% 26%;
+
+    /* Provider accents — evocative of each vendor's hue family, deliberately
+       not their brand values. Two reasons they are ours and not theirs:
+
+       1. --primary is already a deep teal-green, so Veeam's own bright green
+          would read as a second Nexara brand colour rather than as a distinct
+          provider. This grass green is far enough round the wheel to separate.
+       2. Nexara is AGPL-3.0. Vendor logos and brand assets cannot be
+          sublicensed under it, so the tree carries none — the identity is
+          built from our own glyphs and our own hues instead.
+
+       These carry white text on the selected server-switcher button, not just
+       the decorative tile, so the light-mode lightness is pinned to whatever
+       clears WCAG AA (4.5:1) against white — 4.58:1 and 4.62:1 as an
+       8-bit browser actually paints them. Raising
+       it for a punchier tile drops real button text below AA. */
+    --provider-veeam: 87 64% 31%;
+    --provider-veeam-foreground: 0 0% 100%;
+    --provider-pbs: 35 78% 36%;
+    --provider-pbs-foreground: 0 0% 100%;
+
     --radius: 0.5rem;
   }
 
@@ -115,6 +145,11 @@
     --border: 225 14% 14.5%;
     --input: 225 14% 17%;
     --ring: 158 64% 52%;
+
+    --provider-veeam: 87 58% 52%;
+    --provider-veeam-foreground: 87 60% 10%;
+    --provider-pbs: 35 80% 55%;
+    --provider-pbs-foreground: 35 80% 10%;
   }
 }
 

@@ -328,3 +328,17 @@ nexara.example.com {
 ## License
 
 [GNU Affero General Public License v3.0](LICENSE)
+
+---
+
+## Trademarks
+
+Proxmox and Proxmox Backup Server are registered trademarks of Proxmox Server
+Solutions GmbH. Veeam and Veeam Backup & Replication are registered trademarks
+of Veeam Software Group GmbH. VMware and ESXi are registered trademarks of
+Broadcom Inc.
+
+Nexara is an independent project and is not affiliated with, sponsored by, or
+endorsed by any of them. Those names are used solely to identify the software
+Nexara interoperates with. No vendor logo or brand asset is distributed with
+this project — the in-app provider marks and colours are Nexara's own.
