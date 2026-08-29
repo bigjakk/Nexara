@@ -24,7 +24,7 @@ function server(over: Partial<VeeamServer> = {}): VeeamServer {
     tls_fingerprint: "",
     verify_tls: true,
     enabled: true,
-    last_sync_at: null,
+    last_sync_at: "2026-08-26T12:05:00Z",
     last_sync_error: "",
     created_at: "2026-08-26T12:00:00Z",
     updated_at: "2026-08-26T12:00:00Z",
@@ -67,6 +67,35 @@ describe("VeeamServerTable", () => {
     expect(screen.getByText("13.1.0.411")).toBeInTheDocument();
     expect(screen.getByText("EnterprisePlus")).toBeInTheDocument();
     expect(screen.getByText("Connected")).toBeInTheDocument();
+  });
+
+  it("reads Syncing, not Connected, before the first inventory pass lands", () => {
+    renderWithProviders(
+      <VeeamServerTable
+        servers={[server({ last_sync_at: null })]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    // A just-registered server is enabled with no error, which used to fall
+    // through to a green "Connected" over empty tables — the UI claiming
+    // health while the operator saw nothing and assumed it was broken.
+    expect(screen.getByText("Syncing")).toBeInTheDocument();
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+  });
+
+  it("reads Error when the first pass failed, rather than sitting on Syncing", () => {
+    renderWithProviders(
+      <VeeamServerTable
+        servers={[server({ last_sync_at: null, last_sync_error: "401" })]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.queryByText("Syncing")).not.toBeInTheDocument();
   });
 
   it("reveals connection detail when the row is expanded", async () => {

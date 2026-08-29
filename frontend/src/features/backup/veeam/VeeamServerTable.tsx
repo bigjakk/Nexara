@@ -40,15 +40,16 @@ type ServerSortKey = "name" | "address" | "version" | "edition" | "status";
 /**
  * Severity order for the Status column, not alphabetical.
  *
- * Sorted by label, ascending gives Connected, Disabled, Error — so the first
- * click on Status buries the broken servers at the bottom, which is the
- * opposite of why anyone clicks it. The cell still shows the badge's label;
- * only the ordering is ranked.
+ * Sorted by label, ascending gives Connected, Disabled, Error, Syncing — so
+ * the first click on Status buries the broken servers at the bottom, which is
+ * the opposite of why anyone clicks it. The cell still shows the badge's
+ * label; only the ordering is ranked.
  */
 const STATUS_RANK: Record<VeeamServerStatus, number> = {
   Error: 0,
   Disabled: 1,
-  Connected: 2,
+  Syncing: 2,
+  Connected: 3,
 };
 
 /** Each accessor sorts on what its cell SHOWS, not on the underlying field. */

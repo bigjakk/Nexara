@@ -31,6 +31,14 @@ type VeeamHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	syncTrigger   VeeamSyncTrigger
+}
+
+// VeeamSyncTrigger asks the collector for an inventory pass now rather than at
+// the next tick. Satisfied by *collector.InventoryTrigger; an interface here so
+// the handler package does not depend on the collector.
+type VeeamSyncTrigger interface {
+	TriggerInventory()
 }
 
 // NewVeeamHandler creates a Veeam server handler.
@@ -41,6 +49,15 @@ func NewVeeamHandler(queries *db.Queries, encryptionKey string, eventPub *events
 		eventPub:      eventPub,
 	}
 }
+
+// SetSyncTrigger wires the collector's inventory trigger in.
+//
+// Set after construction because the API server is built before the collector
+// exists, mirroring how the syncer receives its event publisher. Optional: it
+// stays nil when the collector is disabled (VEEAM_SYNC_INTERVAL=0) or in tests,
+// and Create must degrade to the old wait-for-the-tick behaviour rather than
+// panic — registering a server has to keep working with no collector running.
+func (h *VeeamHandler) SetSyncTrigger(t VeeamSyncTrigger) { h.syncTrigger = t }
 
 // probeTimeout bounds a connection test. Generous relative to the three calls
 // it makes, because a first contact often pays a DNS and TLS-handshake cost
@@ -199,6 +216,14 @@ func (h *VeeamHandler) Create(c fiber.Ctx) error {
 	}
 
 	h.audit(c, server, "veeam_server_created", nil)
+
+	// Ask for an inventory pass now. Without this the server sits with empty
+	// jobs, runs and repositories until the next collector tick — up to
+	// VeeamSyncInterval — which reads as a broken integration rather than a
+	// pending one. The UI shows "Syncing" for exactly this window.
+	if h.syncTrigger != nil {
+		h.syncTrigger.TriggerInventory()
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(toVeeamResponse(server, true))
 }

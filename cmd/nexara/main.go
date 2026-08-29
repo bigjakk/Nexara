@@ -194,7 +194,20 @@ func main() {
 	srv.RegisterFrontend(distFS)
 
 	// ---- Collector goroutine ----
-	go runCollector(ctx, cfg, application, logger.With("component", "collector"))
+	// Built here rather than inside runCollector so the API handler and the
+	// collector loop can share it without a cross-goroutine write to the
+	// handler: this runs before srv starts serving.
+	//
+	// LIMITATION: process-local. The inventory loop that reads this trigger is
+	// leader-gated (see runWithLeaderRetry below), so it only shortens the wait
+	// when the replica that served POST /veeam-servers is also the collector
+	// leader. On a multi-replica deployment a registration handled by any other
+	// replica falls back to the next tick, exactly as before — no worse, but no
+	// better. Making it cross-instance needs a real transport (Redis pub/sub, or
+	// the leader polling for servers with last_sync_at IS NULL).
+	veeamTrigger := collector.NewInventoryTrigger()
+	srv.SetVeeamSyncTrigger(veeamTrigger)
+	go runCollector(ctx, cfg, application, veeamTrigger, logger.With("component", "collector"))
 
 	// ---- Scheduler goroutine ----
 	go runScheduler(ctx, cfg, application, logger.With("component", "scheduler"))
@@ -431,7 +444,7 @@ func runWithLeaderRetry(ctx context.Context, pool *pgxpool.Pool, role string, lo
 
 // runCollector runs the metric collection loop. Uses leader election so only
 // one instance across the Swarm cluster runs the collector at any time.
-func runCollector(ctx context.Context, cfg *config.Config, application *app.App, logger *slog.Logger) {
+func runCollector(ctx context.Context, cfg *config.Config, application *app.App, veeamTrigger *collector.InventoryTrigger, logger *slog.Logger) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("collector panic", "error", r)
@@ -588,14 +601,19 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 						logger.Error("veeam inventory loop panicked", "panic", r)
 					}
 				}()
-				// One pass immediately, so a freshly added server shows data
-				// without waiting out a full interval.
+				// One pass immediately, so servers registered before this
+				// process started show data without waiting out a full
+				// interval. A server added while we are already running is
+				// covered by the trigger below, not by this.
 				veeamSyncer.SyncInventory(ctx)
 				ticker := time.NewTicker(veeamInterval)
 				defer ticker.Stop()
 				for {
 					select {
 					case <-ticker.C:
+						veeamSyncer.SyncInventory(ctx)
+					case <-veeamTrigger.C():
+						// POST /veeam-servers asking not to wait out the tick.
 						veeamSyncer.SyncInventory(ctx)
 					case <-ctx.Done():
 						return

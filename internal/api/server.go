@@ -398,6 +398,20 @@ func (s *Server) App() *fiber.App {
 	return s.app
 }
 
+// SetVeeamSyncTrigger gives the Veeam handler a way to ask the collector for
+// an inventory pass as soon as a server is registered, instead of leaving the
+// operator on empty tables until the next tick.
+//
+// Wired from main after the collector is built, because the API server is
+// constructed first. No-op when the Veeam handler is absent (no encryption
+// key) — registering a server is impossible in that state anyway.
+func (s *Server) SetVeeamSyncTrigger(t handlers.VeeamSyncTrigger) {
+	if s.veeamHandler == nil {
+		return
+	}
+	s.veeamHandler.SetSyncTrigger(t)
+}
+
 // RBACEngine returns the API server's RBAC engine so other components
 // in the unified binary (e.g. the WebSocket server) can perform their
 // own permission checks against the same engine instance. May be nil

@@ -1359,3 +1359,60 @@ func TestVeeamSync_ProxyListingFailureWarnsButKeepsThePass(t *testing.T) {
 		t.Error("a failed proxy listing left no warning on the server row")
 	}
 }
+
+func TestInventoryTriggerCoalesces(t *testing.T) {
+	trig := NewInventoryTrigger()
+
+	// Three registrations in a row must not queue three passes: the next pass
+	// picks up every server regardless, so the extras are pure duplicate load
+	// on a VBR that is already being asked for a full inventory.
+	trig.TriggerInventory()
+	trig.TriggerInventory()
+	trig.TriggerInventory()
+
+	select {
+	case <-trig.C():
+	default:
+		t.Fatal("trigger did not fire")
+	}
+
+	select {
+	case <-trig.C():
+		t.Fatal("trigger fired twice; three sends should coalesce to one")
+	default:
+	}
+}
+
+func TestInventoryTriggerDoesNotBlock(t *testing.T) {
+	trig := NewInventoryTrigger()
+
+	// Nobody is selecting on it. A send that blocked here would stall the
+	// request goroutine that registered the server.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 5 {
+			trig.TriggerInventory()
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("TriggerInventory blocked with no reader")
+	}
+}
+
+func TestInventoryTriggerNilIsInert(t *testing.T) {
+	var trig *InventoryTrigger
+
+	// The collector can be disabled (VEEAM_SYNC_INTERVAL=0), and registering a
+	// server must still work rather than panic.
+	trig.TriggerInventory()
+
+	// A nil channel blocks forever in a select, which is what makes the loop's
+	// case need no nil branch of its own.
+	if ch := trig.C(); ch != nil {
+		t.Fatalf("nil trigger yielded a non-nil channel: %v", ch)
+	}
+}

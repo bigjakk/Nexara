@@ -198,6 +198,56 @@ func NewVeeamSyncer(queries VeeamSyncQueries, encryptionKey string, cfg VeeamSyn
 	}
 }
 
+// InventoryTrigger is a coalescing request for an out-of-band inventory pass.
+//
+// It deliberately does NOT hang off VeeamSyncer. The syncer is built inside the
+// collector goroutine, while the API handler that fires the trigger is built
+// before that goroutine starts — handing the handler a syncer-owned channel
+// would mean writing the handler's field from the collector goroutine while
+// request goroutines read it. Creating the trigger up front and passing it to
+// both sides keeps the wiring race-free.
+type InventoryTrigger struct{ ch chan struct{} }
+
+// NewInventoryTrigger returns a trigger with a one-slot buffer.
+func NewInventoryTrigger() *InventoryTrigger {
+	return &InventoryTrigger{ch: make(chan struct{}, 1)}
+}
+
+// TriggerInventory asks for an inventory pass as soon as the loop is free.
+//
+// Registering a server is the case this exists for: without it a new server
+// shows nothing until the next tick, which is VeeamSyncInterval (5 minutes by
+// default) of empty tables. The immediate pass the inventory loop runs at
+// startup only covers servers that already existed, not one added while Nexara
+// is already running.
+//
+// Non-blocking, so N rapid registrations coalesce into at most one extra pass:
+// a dropped trigger means one is already queued, and that pass will pick up
+// every server anyway. A trigger raised while a pass is in flight is still
+// honoured — the loop is the serializer, and it reads the buffered nudge the
+// moment it returns to its select.
+//
+// Nil-safe: a nil trigger is the "no collector wired" case, not an error.
+func (t *InventoryTrigger) TriggerInventory() {
+	if t == nil {
+		return
+	}
+	select {
+	case t.ch <- struct{}{}:
+	default:
+	}
+}
+
+// C is the channel an inventory loop selects on alongside its ticker. A nil
+// trigger yields a nil channel, which blocks forever in a select — exactly the
+// "nobody can trigger this" behaviour, with no branch at the call site.
+func (t *InventoryTrigger) C() <-chan struct{} {
+	if t == nil {
+		return nil
+	}
+	return t.ch
+}
+
 // sweepGraceSeconds is the grace window in seconds: the floor, or three sync
 // intervals, whichever is larger. Three so a row survives two consecutive
 // missed passes before anything deletes it.
