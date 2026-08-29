@@ -578,6 +578,7 @@ type NodeNetworkInterface struct {
 	LastSeenAt  time.Time `json:"last_seen_at"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	Mtu         int32     `json:"mtu"`
 }
 
 type NodePciDevice struct {

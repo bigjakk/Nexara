@@ -29,7 +29,7 @@ func (q *Queries) DeleteStaleNodeNetworkInterfaces(ctx context.Context, arg Dele
 }
 
 const listNodeNetworkInterfacesByNode = `-- name: ListNodeNetworkInterfacesByNode :many
-SELECT id, node_id, cluster_id, iface, iface_type, active, autostart, method, method6, address, netmask, gateway, cidr, bridge_ports, comments, last_seen_at, created_at, updated_at FROM node_network_interfaces WHERE node_id = $1 ORDER BY iface
+SELECT id, node_id, cluster_id, iface, iface_type, active, autostart, method, method6, address, netmask, gateway, cidr, bridge_ports, comments, last_seen_at, created_at, updated_at, mtu FROM node_network_interfaces WHERE node_id = $1 ORDER BY iface
 `
 
 func (q *Queries) ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uuid.UUID) ([]NodeNetworkInterface, error) {
@@ -60,6 +60,7 @@ func (q *Queries) ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uu
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Mtu,
 		); err != nil {
 			return nil, err
 		}
@@ -73,8 +74,8 @@ func (q *Queries) ListNodeNetworkInterfacesByNode(ctx context.Context, nodeID uu
 
 const upsertNodeNetworkInterface = `-- name: UpsertNodeNetworkInterface :one
 INSERT INTO node_network_interfaces (node_id, cluster_id, iface, iface_type, active, autostart, method, method6,
-                                      address, netmask, gateway, cidr, bridge_ports, comments, last_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
+                                      address, netmask, gateway, cidr, bridge_ports, comments, mtu, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
 ON CONFLICT (node_id, iface) DO UPDATE SET
     iface_type = EXCLUDED.iface_type,
     active = EXCLUDED.active,
@@ -87,8 +88,9 @@ ON CONFLICT (node_id, iface) DO UPDATE SET
     cidr = EXCLUDED.cidr,
     bridge_ports = EXCLUDED.bridge_ports,
     comments = EXCLUDED.comments,
+    mtu = EXCLUDED.mtu,
     last_seen_at = now()
-RETURNING id, node_id, cluster_id, iface, iface_type, active, autostart, method, method6, address, netmask, gateway, cidr, bridge_ports, comments, last_seen_at, created_at, updated_at
+RETURNING id, node_id, cluster_id, iface, iface_type, active, autostart, method, method6, address, netmask, gateway, cidr, bridge_ports, comments, last_seen_at, created_at, updated_at, mtu
 `
 
 type UpsertNodeNetworkInterfaceParams struct {
@@ -106,6 +108,7 @@ type UpsertNodeNetworkInterfaceParams struct {
 	Cidr        string    `json:"cidr"`
 	BridgePorts string    `json:"bridge_ports"`
 	Comments    string    `json:"comments"`
+	Mtu         int32     `json:"mtu"`
 }
 
 func (q *Queries) UpsertNodeNetworkInterface(ctx context.Context, arg UpsertNodeNetworkInterfaceParams) (NodeNetworkInterface, error) {
@@ -124,6 +127,7 @@ func (q *Queries) UpsertNodeNetworkInterface(ctx context.Context, arg UpsertNode
 		arg.Cidr,
 		arg.BridgePorts,
 		arg.Comments,
+		arg.Mtu,
 	)
 	var i NodeNetworkInterface
 	err := row.Scan(
@@ -145,6 +149,7 @@ func (q *Queries) UpsertNodeNetworkInterface(ctx context.Context, arg UpsertNode
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Mtu,
 	)
 	return i, err
 }

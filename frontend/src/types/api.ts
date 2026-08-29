@@ -701,6 +701,8 @@ export interface NodeNetworkInterfaceResponse {
   cidr: string;
   bridge_ports: string;
   comments: string;
+  /** 0 when the interface does not configure an MTU explicitly. */
+  mtu: number;
 }
 
 export interface NodePCIDeviceResponse {

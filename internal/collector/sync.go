@@ -878,6 +878,8 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 				Cidr:        iface.CIDR,
 				BridgePorts: iface.BridgePorts,
 				Comments:    iface.Comments,
+				// Proxmox omits mtu for interfaces that inherit the default, so 0 means "not configured".
+				Mtu: safeconv.Int32(int(iface.MTU)),
 			}); err != nil {
 				s.logger.Warn("failed to upsert network interface", "node", node.Node, "iface", iface.Iface, "error", err)
 			}

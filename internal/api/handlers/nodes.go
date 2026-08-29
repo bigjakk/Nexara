@@ -223,6 +223,9 @@ type nodeNetworkInterfaceResponse struct {
 	CIDR        string    `json:"cidr"`
 	BridgePorts string    `json:"bridge_ports"`
 	Comments    string    `json:"comments"`
+	// MTU is 0 when the interface does not configure one explicitly (Proxmox
+	// omits the field, and the interface inherits the default).
+	MTU int32 `json:"mtu"`
 }
 
 type nodePCIDeviceResponse struct {
@@ -291,6 +294,7 @@ func (h *NodeHandler) ListNodeNetworkInterfaces(c fiber.Ctx) error {
 			Method: f.Method, Method6: f.Method6,
 			Address: f.Address, Netmask: f.Netmask, Gateway: f.Gateway, CIDR: f.Cidr,
 			BridgePorts: f.BridgePorts, Comments: f.Comments,
+			MTU: f.Mtu,
 		}
 	}
 	return RespondItems(c, resp)
