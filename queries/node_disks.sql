@@ -11,6 +11,29 @@ ON CONFLICT (node_id, dev_path) DO UPDATE SET
     rpm = EXCLUDED.rpm,
     vendor = EXCLUDED.vendor,
     wwn = EXCLUDED.wwn,
+    -- last_seen_at marks every sync; updated_at moves only when the row's content actually
+    -- changed, so it answers "when did this row last change?" rather than "when was it last polled?".
+    updated_at = CASE WHEN (
+        node_disks.model,
+        node_disks.serial,
+        node_disks.size,
+        node_disks.disk_type,
+        node_disks.health,
+        node_disks.wearout,
+        node_disks.rpm,
+        node_disks.vendor,
+        node_disks.wwn
+    ) IS DISTINCT FROM (
+        EXCLUDED.model,
+        EXCLUDED.serial,
+        EXCLUDED.size,
+        EXCLUDED.disk_type,
+        EXCLUDED.health,
+        EXCLUDED.wearout,
+        EXCLUDED.rpm,
+        EXCLUDED.vendor,
+        EXCLUDED.wwn
+    ) THEN now() ELSE node_disks.updated_at END,
     last_seen_at = now()
 RETURNING *;
 
