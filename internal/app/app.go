@@ -46,6 +46,7 @@ import (
 	"github.com/bigjakk/nexara/internal/reports"
 	"github.com/bigjakk/nexara/internal/rolling"
 	"github.com/bigjakk/nexara/internal/scanner"
+	"github.com/bigjakk/nexara/internal/virtiowin"
 )
 
 // App holds the process-wide singletons.
@@ -82,6 +83,7 @@ type App struct {
 	DRSExecutor    *drs.Executor
 	RollingOrch    *rolling.Orchestrator
 	ReportGen      *reports.Generator
+	VirtioWin      *virtiowin.Engine
 }
 
 // New builds every singleton in dependency order. shutdownCtx is the
@@ -163,11 +165,14 @@ func New(shutdownCtx context.Context, cfg *config.Config, pool *pgxpool.Pool, rd
 
 		a.ReportGen = reports.NewGenerator(a.Queries, logger.With("component", "report-gen"))
 
+		a.VirtioWin = virtiowin.NewEngine(a.Queries, cfg.EncryptionKey, logger.With("component", "virtio-win"))
+
 		// Nil-safe on every setter; a keyless or DB-less install simply leaves
 		// the engines building clients per call.
 		a.CVEScanner.SetProxmoxCache(a.ProxmoxCache)
 		a.DRSEngine.SetProxmoxCache(a.ProxmoxCache)
 		a.RollingOrch.SetProxmoxCache(a.ProxmoxCache)
+		a.VirtioWin.SetProxmoxCache(a.ProxmoxCache)
 	}
 
 	return a

@@ -38,6 +38,7 @@ type Server struct {
 	vmHandler              *handlers.VMHandler
 	containerHandler       *handlers.ContainerHandler
 	storageHandler         *handlers.StorageHandler
+	virtioWinHandler       *handlers.VirtioWinHandler
 	vmImportHandler        *handlers.VMImportHandler
 	vmFoldersHandler       *handlers.VMFoldersHandler
 	metricsHandler         *handlers.MetricsHandler
@@ -267,6 +268,7 @@ func (s *Server) registerInventory(d *serverDeps) {
 		s.containerHandler = handlers.NewContainerHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.nodeHandler = handlers.NewNodeHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.storageHandler = handlers.NewStorageHandler(d.queries, d.encryptionKey, d.eventPub)
+		s.virtioWinHandler = handlers.NewVirtioWinHandler(d.queries, d.eventPub, d.app.VirtioWin)
 		s.vmImportHandler = handlers.NewVMImportHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.cephHandler = handlers.NewCephHandler(d.queries, d.encryptionKey, d.eventPub)
 		s.backupHandler = handlers.NewBackupHandler(d.queries, d.encryptionKey, d.eventPub)

@@ -688,6 +688,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		AlertEngine:   application.AlertEngine,
 		ReportGen:     application.ReportGen,
 		RollingOrch:   application.RollingOrch,
+		VirtioWin:     application.VirtioWin,
 	})
 
 	runWithLeaderRetry(ctx, application.Pool, "scheduler", logger, func(ctx context.Context) {
@@ -701,6 +702,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			"report_retention_interval", "24h",
 			"task_retention_interval", "1h",
 			"rolling_update_interval", "15s",
+			"virtio_win_interval", "6h",
 		)
 
 		// Clean up stale DRS history entries from previous interrupted runs.
@@ -738,6 +740,8 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		runTaskRetention := engine("task_retention", sched.RunTaskRetention)
 		runRolling := engine("rolling_updates", sched.RunRollingUpdates)
 		runImports := engine("vm_import_reconcile", sched.RunVMImportReconcile)
+		runVirtioWin := engine("virtio_win_check", sched.RunVirtioWinCheck)
+		runVirtioWinReconcile := engine("virtio_win_reconcile", sched.RunVirtioWinReconcile)
 
 		// Run initial checks immediately.
 		runTasks()
@@ -750,6 +754,8 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		runTaskRetention()
 		runRolling()
 		runImports()
+		runVirtioWin()
+		runVirtioWinReconcile()
 
 		taskTicker := time.NewTicker(60 * time.Second)
 		defer taskTicker.Stop()
@@ -781,6 +787,16 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		importTicker := time.NewTicker(15 * time.Second)
 		defer importTicker.Stop()
 
+		// Upstream cuts a virtio-win release every few months; 6h is already far
+		// more often than it can change, and each tick is one small HTTP request.
+		virtioWinTicker := time.NewTicker(6 * time.Hour)
+		defer virtioWinTicker.Stop()
+
+		// The reconcile half runs on its own faster tick: an 837 MiB fetch needs
+		// following minute by minute, not once every six hours.
+		virtioWinReconcileTicker := time.NewTicker(30 * time.Second)
+		defer virtioWinReconcileTicker.Stop()
+
 		for {
 			select {
 			case <-taskTicker.C:
@@ -803,6 +819,10 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 				runRolling()
 			case <-importTicker.C:
 				runImports()
+			case <-virtioWinTicker.C:
+				runVirtioWin()
+			case <-virtioWinReconcileTicker.C:
+				runVirtioWinReconcile()
 			case <-ctx.Done():
 				logger.Info("scheduler stopped")
 				return

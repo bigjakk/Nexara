@@ -29,6 +29,7 @@ func newRouteStubServer() *Server {
 		vmHandler:              &handlers.VMHandler{},
 		containerHandler:       &handlers.ContainerHandler{},
 		storageHandler:         &handlers.StorageHandler{},
+		virtioWinHandler:       &handlers.VirtioWinHandler{},
 		vmImportHandler:        &handlers.VMImportHandler{},
 		vmFoldersHandler:       &handlers.VMFoldersHandler{},
 		metricsHandler:         &handlers.MetricsHandler{},

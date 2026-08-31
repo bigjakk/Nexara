@@ -20,6 +20,7 @@ import (
 	"github.com/bigjakk/nexara/internal/reports"
 	"github.com/bigjakk/nexara/internal/rolling"
 	"github.com/bigjakk/nexara/internal/scanner"
+	"github.com/bigjakk/nexara/internal/virtiowin"
 )
 
 // Scheduler runs due scheduled tasks.
@@ -34,6 +35,7 @@ type Scheduler struct {
 	alertEngine   *notifications.Engine
 	reportGen     *reports.Generator
 	rollingOrch   *rolling.Orchestrator
+	virtioWin     *virtiowin.Engine
 	eventPub      *events.Publisher
 	cache         *proxmox.ClientCache // nil-safe; passed through to sub-engines
 	drsLastEval   map[uuid.UUID]time.Time
@@ -56,6 +58,7 @@ type Deps struct {
 	AlertEngine *notifications.Engine
 	ReportGen   *reports.Generator
 	RollingOrch *rolling.Orchestrator
+	VirtioWin   *virtiowin.Engine
 }
 
 // New creates a Scheduler over the shared engines in d.
@@ -75,6 +78,7 @@ func New(d Deps) *Scheduler {
 		alertEngine:   d.AlertEngine,
 		reportGen:     d.ReportGen,
 		rollingOrch:   d.RollingOrch,
+		virtioWin:     d.VirtioWin,
 		eventPub:      d.EventPub,
 		cache:         d.Cache,
 		drsLastEval:   make(map[uuid.UUID]time.Time),
@@ -179,6 +183,9 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 	}
 
 	if len(configs) == 0 {
+		// Still trim: rows from a cluster that has since been switched off would
+		// otherwise be retained forever, because this is the only caller.
+		s.virtioWin.TrimHistory(ctx, virtioWinHistoryRetention)
 		return
 	}
 
@@ -319,6 +326,140 @@ func (s *Scheduler) RunKEVRefresh(ctx context.Context) {
 		return
 	}
 	s.logger.Info("KEV refresh complete", "entries", written)
+}
+
+// virtioWinHistoryRetention bounds how long finished virtio-win download rows
+// are kept. Downloads are infrequent (one per release per cluster), so this is
+// generous enough to stay a useful audit trail.
+const virtioWinHistoryRetention = 90 * 24 * time.Hour
+
+// RunVirtioWinCheck refreshes the upstream virtio-win catalog and brings every
+// opted-in cluster's ISO storage in line with its target version.
+//
+// One upstream fetch serves every cluster: the catalog is global, and only the
+// per-cluster reconciliation against storage is fanned out. Downloads are
+// dispatched, not awaited — download-url returns a UPID and RunVirtioWinReconcile
+// follows it, so an 837 MiB transfer never holds this tick open.
+func (s *Scheduler) RunVirtioWinCheck(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("virtio-win check panicked", "panic", r)
+		}
+	}()
+	if s.virtioWin == nil {
+		return
+	}
+
+	// Check who wants this BEFORE touching the network. Refreshing
+	// unconditionally would make every install — air-gapped ones included —
+	// reach out to fedorapeople.org on boot and every 6h for a feature nobody
+	// enabled. No opted-in cluster, no outbound request.
+	configs, err := s.queries.ListEnabledVirtioWinConfigs(ctx)
+	if err != nil {
+		s.logger.Warn("virtio-win: list enabled configs failed", "error", err)
+		return
+	}
+	if len(configs) == 0 {
+		return
+	}
+
+	latest, err := s.virtioWin.RefreshCatalog(ctx)
+	if err != nil {
+		// Keep going: a cluster may still be behind on a version already in the
+		// catalog, and that is worth acting on even when upstream is unreachable.
+		s.logger.Warn("virtio-win: upstream catalog refresh failed", "error", err)
+	} else {
+		s.logger.Debug("virtio-win: catalog refreshed", "latest", latest.Version, "stable", latest.IsStable)
+	}
+	for _, cfg := range configs {
+		download, syncErr := s.virtioWin.SyncCluster(ctx, cfg)
+		s.virtioWin.MarkChecked(ctx, cfg.ClusterID, syncErr)
+		switch {
+		case syncErr != nil:
+			s.logger.Warn("virtio-win: cluster sync failed",
+				"cluster_id", cfg.ClusterID, "storage", cfg.Storage, "error", syncErr)
+		case download != nil:
+			s.logger.Info("virtio-win: download dispatched",
+				"cluster_id", cfg.ClusterID, "storage", cfg.Storage,
+				"version", download.Version, "node", download.Node, "upid", download.Upid)
+			s.trackVirtioWinDownload(ctx, *download)
+		}
+	}
+
+	s.virtioWin.TrimHistory(ctx, virtioWinHistoryRetention)
+}
+
+// RunVirtioWinReconcile advances in-flight virtio-win downloads by polling the
+// Proxmox tasks they became. Separate from the check tick because the check is
+// a 6-hourly upstream poll while a download needs following minute by minute —
+// and because the transfer outlives any in-process watcher.
+func (s *Scheduler) RunVirtioWinReconcile(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("virtio-win reconcile panicked", "panic", r)
+		}
+	}()
+	if s.virtioWin == nil {
+		return
+	}
+	if err := s.virtioWin.Reconcile(ctx); err != nil {
+		s.logger.Warn("virtio-win: reconcile failed", "error", err)
+	}
+}
+
+// trackVirtioWinDownload records a dispatched download the way every other
+// UPID-producing action in the codebase is recorded: a task_history row, an
+// audit entry, and the events that make both visible live.
+//
+// The scheduler's other trackTask is bound to a db.ScheduledTask, which this is
+// not — the shape is shared deliberately rather than hand-rolling the three
+// writes at the call site. As there, a failed task_history insert skips the
+// audit row on purpose: an audit row carrying the UPID makes the collector's
+// external-task ingest dedup skip it, and the task would then appear nowhere.
+func (s *Scheduler) trackVirtioWinDownload(ctx context.Context, row db.VirtioWinDownload) {
+	if row.Upid == "" {
+		return
+	}
+	description := "Download virtio-win " + row.Version + " to " + row.Storage
+	if _, err := s.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
+		ClusterID:   row.ClusterID,
+		UserID:      auth.SystemUserID,
+		Upid:        row.Upid,
+		Description: description,
+		Status:      "running",
+		Node:        row.Node,
+		TaskType:    "download",
+	}); err != nil {
+		s.logger.Warn("virtio-win: insert task history failed",
+			"download_id", row.ID, "upid", row.Upid, "error", err)
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{
+		"upid":     row.Upid,
+		"node":     row.Node,
+		"storage":  row.Storage,
+		"version":  row.Version,
+		"filename": row.Filename,
+	})
+	if err := s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: row.ClusterID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+		ResourceType: "storage",
+		ResourceID:   row.Storage,
+		Action:       "virtio_win_download",
+		Details:      details,
+	}); err != nil {
+		s.logger.Warn("virtio-win: insert audit log failed",
+			"download_id", row.ID, "upid", row.Upid, "error", err)
+	}
+
+	if s.eventPub != nil {
+		s.eventPub.ClusterEvent(ctx, row.ClusterID.String(),
+			events.KindTaskCreated, "task", row.Upid, "virtio_win_download")
+		s.eventPub.ClusterEvent(ctx, row.ClusterID.String(),
+			events.KindVirtioWinChange, "storage", row.Storage, "virtio_win_download")
+	}
 }
 
 // RunReportRetention deletes scheduled-report runs older than 90 days. The

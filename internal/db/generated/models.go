@@ -1190,6 +1190,55 @@ type VeeamSession struct {
 	NexaraStopped bool `json:"nexara_stopped"`
 }
 
+type VirtioWinConfig struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Enabled   bool      `json:"enabled"`
+	Storage   string    `json:"storage"`
+	// Node that performs the download; empty means pick any online node in the cluster. The ISO lands on the storage, not the node, but download-url is a node-scoped call
+	Node string `json:"node"`
+	// Pinned upstream version; empty means follow whatever upstream marks stable
+	TargetVersion string `json:"target_version"`
+	// Opt-in. When set, versions that are neither pinned nor newest are deleted from the target storage after a successful download. Off by default: an ISO this did not download may still be in use
+	PruneEnabled bool               `json:"prune_enabled"`
+	LastCheckAt  pgtype.Timestamptz `json:"last_check_at"`
+	LastError    string             `json:"last_error"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+}
+
+type VirtioWinDownload struct {
+	ID        uuid.UUID `json:"id"`
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Node      string    `json:"node"`
+	Storage   string    `json:"storage"`
+	Version   string    `json:"version"`
+	Filename  string    `json:"filename"`
+	Status    string    `json:"status"`
+	// Proxmox task UPID returned by download-url; empty only while the dispatch itself failed before Proxmox accepted the task
+	Upid        string             `json:"upid"`
+	Error       string             `json:"error"`
+	TriggeredBy string             `json:"triggered_by"`
+	StartedAt   time.Time          `json:"started_at"`
+	FinishedAt  pgtype.Timestamptz `json:"finished_at"`
+}
+
+type VirtioWinRelease struct {
+	// Upstream directory version including the release suffix, e.g. "0.1.302-1"
+	Version string `json:"version"`
+	// Version as it appears in the ISO filename, i.e. version without the release suffix ("0.1.302")
+	IsoVersion  string `json:"iso_version"`
+	IsoFilename string `json:"iso_filename"`
+	IsoUrl      string `json:"iso_url"`
+	IsoSize     int64  `json:"iso_size"`
+	// True for the single version the upstream stable-virtio/ redirect currently points at
+	IsStable bool `json:"is_stable"`
+	// Empty by default: upstream publishes no ISO checksum (its CHECKSUM file covers only the RPMs). Operator-supplied when set, and passed through to the Proxmox download-url call
+	Checksum          string             `json:"checksum"`
+	ChecksumAlgorithm string             `json:"checksum_algorithm"`
+	PublishedAt       pgtype.Timestamptz `json:"published_at"`
+	DiscoveredAt      time.Time          `json:"discovered_at"`
+}
+
 type Vm struct {
 	ID           uuid.UUID `json:"id"`
 	ClusterID    uuid.UUID `json:"cluster_id"`

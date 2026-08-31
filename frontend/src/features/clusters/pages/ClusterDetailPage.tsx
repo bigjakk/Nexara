@@ -30,6 +30,7 @@ import { ClusterCephTab } from "../components/ClusterCephTab";
 import { ClusterNetworksTab } from "../components/ClusterNetworksTab";
 import { ClusterFirewallTab } from "../components/ClusterFirewallTab";
 import { ClusterDRSTab } from "../components/ClusterDRSTab";
+import { ClusterGuestToolsTab } from "@/features/guest-tools/components/ClusterGuestToolsTab";
 import { ClusterOptionsTab } from "../components/ClusterOptionsTab";
 import { ClusterHATab } from "../components/ClusterHATab";
 import { ClusterPoolsTab } from "../components/ClusterPoolsTab";
@@ -157,6 +158,7 @@ export function ClusterDetailPage() {
               <TabsTrigger value="certificates">Certificates</TabsTrigger>
               <TabsTrigger value="metric-servers">Metrics</TabsTrigger>
               <TabsTrigger value="drs">DRS</TabsTrigger>
+              <TabsTrigger value="guest-tools">Guest Tools</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-4">
@@ -320,6 +322,10 @@ export function ClusterDetailPage() {
 
             <TabsContent value="drs">
               <ClusterDRSTab clusterId={clusterId ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="guest-tools">
+              <ClusterGuestToolsTab clusterId={clusterId ?? ""} />
             </TabsContent>
           </Tabs>
         </>

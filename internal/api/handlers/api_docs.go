@@ -157,6 +157,16 @@ var endpointMeta = map[string]APIEndpoint{
 	// manage, not view: discovery makes a node dial a caller-supplied address.
 	"GET /api/v1/clusters/:cluster_id/scan/iscsi": {Description: "Discover iSCSI targets on a portal", Permission: "manage:storage", Group: "Storage"},
 
+	// ── virtio-win ────────────────────────────────────────────────────
+	// Gated on storage permissions rather than a resource of their own: the
+	// effect is a node fetching a URL into a storage, which is what
+	// manage:storage already authorises on POST .../storage/:id/download-url.
+	"GET /api/v1/virtio-win/releases":                       {Description: "List known upstream virtio-win releases", Permission: "view:storage", Group: "virtio-win"},
+	"GET /api/v1/clusters/:cluster_id/virtio-win/config":    {Description: "Get the cluster's virtio-win auto-download policy", Permission: "view:storage", Group: "virtio-win"},
+	"PUT /api/v1/clusters/:cluster_id/virtio-win/config":    {Description: "Update the cluster's virtio-win auto-download policy", Permission: "manage:storage", Group: "virtio-win"},
+	"POST /api/v1/clusters/:cluster_id/virtio-win/download": {Description: "Download a virtio-win ISO to the configured storage now", Permission: "manage:storage", Group: "virtio-win"},
+	"GET /api/v1/clusters/:cluster_id/virtio-win/downloads": {Description: "List virtio-win download history for the cluster", Permission: "view:storage", Group: "virtio-win"},
+
 	// ── Backup (PBS) ──────────────────────────────────────────────────
 	"GET /api/v1/pbs-servers":                    {Description: "List PBS servers", Permission: "view:pbs", Group: "Backup"},
 	"POST /api/v1/pbs-servers":                   {Description: "Add a PBS server", Permission: "manage:pbs", Group: "Backup"},
