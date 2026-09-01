@@ -47,7 +47,6 @@ export function Terminal({ tab, visible }: TerminalProps) {
   const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
   const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
   const retryCountRef = useRef(0);
-  const intentionalCloseRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Reuses a still-valid scoped token across this tab's reconnect cycle
@@ -71,15 +70,18 @@ export function Terminal({ tab, visible }: TerminalProps) {
   // Park dead tabs while the guest is off; auto-resume when it powers on.
   useGuestPowerSync(tab);
 
+  // Minimizing must not resize the guest's pty — see the ResizeObserver below.
+  const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
+
   const handleResize = useCallback(() => {
-    if (fitAddonRef.current && termRef.current && visible) {
+    if (fitAddonRef.current && termRef.current && visible && !isMinimized) {
       try {
         fitAddonRef.current.fit();
       } catch {
         // Ignore fit errors when container is hidden
       }
     }
-  }, [visible]);
+  }, [visible, isMinimized]);
 
   useEffect(() => {
     if (!activated) return;
@@ -131,7 +133,15 @@ export function Terminal({ tab, visible }: TerminalProps) {
     // Resources captured by the cleanup function. Populated asynchronously
     // by connect() once the scoped token has been minted; cleanup tolerates
     // them still being null if unmount races the mint.
-    intentionalCloseRef.current = false;
+    //
+    // `closed` is scoped to THIS run of the effect, deliberately not a ref.
+    // When the effect re-runs (manual reconnect, node change) the previous
+    // run's socket is still closing and its onclose lands a beat later. A
+    // component-lifetime ref was set true by the cleanup and then immediately
+    // false again here, so that stale handler read its own teardown as a
+    // dropped connection and scheduled a retry — which bumped reconnectKey,
+    // re-ran the effect, and looped forever.
+    let closed = false;
     let ws: WebSocket | null = null;
     let dataDisposable: { dispose: () => void } | null = null;
     let resizeDisposable: { dispose: () => void } | null = null;
@@ -164,7 +174,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
           ...(vmid !== undefined ? { vmid } : {}),
         });
       } catch (err) {
-        if (intentionalCloseRef.current) return;
+        if (closed) return;
         const msg = err instanceof Error ? err.message : "unknown error";
         term.writeln(`\r\nFailed to authorize console session: ${msg}`);
         updateTabStatus(tabId, "error");
@@ -172,7 +182,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
       }
 
       // Component may have unmounted while we awaited the mint.
-      if (intentionalCloseRef.current) return;
+      if (closed) return;
 
       const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid);
       ws = new WebSocket(wsUrl, wsAuthProtocols(token));
@@ -184,6 +194,11 @@ export function Terminal({ tab, visible }: TerminalProps) {
       };
 
       ws.onmessage = (event: MessageEvent) => {
+        // close() is asynchronous, so frames already queued on a superseded
+        // socket still dispatch. Without this the stale generation would
+        // stamp its status onto the tab the live one is dialling, and write
+        // into an XTerminal the cleanup has already disposed.
+        if (closed) return;
         if (typeof event.data === "string") {
           // JSON control message.
           try {
@@ -230,7 +245,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
       };
 
       ws.onclose = () => {
-        if (intentionalCloseRef.current) return;
+        if (closed) return;
         if (tabIsParked()) return; // guest is off \u2014 wait for power-on instead
 
         if (retryCountRef.current < MAX_CONSOLE_AUTO_RETRIES) {
@@ -250,7 +265,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
       };
 
       ws.onerror = () => {
-        if (!intentionalCloseRef.current && !tabIsParked()) {
+        if (!closed && !tabIsParked()) {
           updateTabStatus(tabId, "error");
         }
       };
@@ -273,6 +288,16 @@ export function Terminal({ tab, visible }: TerminalProps) {
       // ResizeObserver for auto-fit.
       observer = new ResizeObserver(() => {
         requestAnimationFrame(() => {
+          // fit() reflows the REMOTE pty, not just the local view: it fires
+          // term.onResize, which sends a resize frame and SIGWINCHes whatever
+          // is running. The minimized PiP is 320x200 — about 38x11 — so
+          // fitting to it would redraw a live vim/htop/tmux into a fraction
+          // of its columns and leave it mangled on restore. The PiP is a
+          // thumbnail, not a viewport: hold the session at its real size and
+          // re-fit when the window comes back (the effect below). This never
+          // mattered before, because minimizing used to destroy the terminal
+          // and dial a brand-new shell.
+          if (useConsoleStore.getState().windowMode === "minimized") return;
           try {
             fitAddon.fit();
           } catch {
@@ -288,7 +313,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
     void connect();
 
     return () => {
-      intentionalCloseRef.current = true;
+      closed = true;
       clearTimeout(retryTimerRef.current);
       observer?.disconnect();
       dataDisposable?.dispose();
@@ -301,7 +326,28 @@ export function Terminal({ tab, visible }: TerminalProps) {
     };
   }, [tabId, clusterID, node, type, vmid, reconnectKey, activated, mintToken, updateTabStatus, resolveAndReconnect]);
 
-  // Re-fit when visibility changes.
+  // A terminal that goes away (console closed, tab removed) leaves no socket
+  // behind, so the tab must not stay marked live. Reset it to the same
+  // pre-dial state a page reload leaves it in and let whoever mounts next
+  // dial from a clean slate. Settled states — "disconnected", "error" and
+  // the parked "guest-stopped" — remain true with no socket, so they stand.
+  useEffect(() => {
+    return () => {
+      const status = useConsoleStore
+        .getState()
+        .tabs.find((t) => t.id === tabId)?.status;
+      if (
+        status === "connected" ||
+        status === "connecting" ||
+        status === "reconnecting"
+      ) {
+        updateTabStatus(tabId, "idle");
+      }
+    };
+  }, [tabId, updateTabStatus]);
+
+  // Re-fit when the tab becomes visible, and again when the window is
+  // restored from the PiP (handleResize's identity tracks isMinimized).
   useEffect(() => {
     if (visible) {
       handleResize();

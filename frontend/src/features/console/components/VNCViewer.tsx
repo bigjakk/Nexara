@@ -40,7 +40,6 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
   const [rfb, setRfb] = useState<RFB | null>(null);
   const retryCountRef = useRef(0);
   const retryScheduledRef = useRef(false);
-  const intentionalCloseRef = useRef(false);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Reuses a still-valid scoped token across this tab's reconnect cycle
@@ -91,7 +90,16 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       applyStatusRef.current("connecting");
     }
 
-    intentionalCloseRef.current = false;
+    // Scoped to THIS run of the effect, deliberately not a ref. When the
+    // effect re-runs (manual reconnect, node change) the handlers wired up by
+    // the previous run are still attached to the socket the cleanup is tearing
+    // down, and their close events land a beat later. A component-lifetime ref
+    // was set true by the cleanup and then immediately false again here, so
+    // those stale handlers read their own teardown as a dropped connection and
+    // scheduled a retry — which bumped reconnectKey, re-ran the effect, and
+    // looped forever. A per-run flag stays true for the generation it belongs
+    // to, so a superseded connection can never speak for the tab again.
+    let closed = false;
     retryScheduledRef.current = false;
     let ws: WebSocket | null = null;
     let stateLog1Timer: ReturnType<typeof setTimeout> | null = null;
@@ -106,7 +114,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     // scheduled a timer (and the second overwrote retryTimerRef, leaking the
     // first), producing overlapping reconnect cycles.
     const scheduleRetry = () => {
-      if (intentionalCloseRef.current || retryScheduledRef.current) return;
+      if (closed || retryScheduledRef.current) return;
       if (tabIsParked()) return; // guest is off — wait for power-on instead
       if (retryCountRef.current < MAX_CONSOLE_AUTO_RETRIES) {
         const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
@@ -148,13 +156,13 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
           ...(vmid !== undefined ? { vmid } : {}),
         });
       } catch (err) {
-        if (intentionalCloseRef.current) return;
+        if (closed) return;
         console.error("[VNCViewer] failed to mint console token", err);
         applyStatusRef.current("error");
         return;
       }
 
-      if (intentionalCloseRef.current) return;
+      if (closed) return;
 
       const wsUrl = buildVncWsUrl(clusterID, node, vmid, guestType);
       // The wsUrl is now token-free (token rides in subprotocol). Log it.
@@ -187,6 +195,13 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       }, 5000);
 
       localWs.onmessage = (event: MessageEvent) => {
+        // close() is asynchronous, so frames already queued on a superseded
+        // socket still dispatch. Without this a stale generation could reach
+        // the `connected` branch below and build a SECOND RFB into the same
+        // container — overwriting rfbRef, handing VNCToolbar a doomed
+        // instance, and leaking the live Proxmox console session when the
+        // next cleanup disconnects the wrong one.
+        if (closed) return;
         if (typeof event.data === "string") {
           try {
             const msg = JSON.parse(event.data) as {
@@ -222,12 +237,10 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
 
               rfbInstance.addEventListener("disconnect", () => {
                 console.log("[VNCViewer] RFB disconnect event fired");
-                if (intentionalCloseRef.current) {
-                  applyStatusRef.current("disconnected");
-                  rfbRef.current = null;
-                  setRfb(null);
-                  return;
-                }
+                // We closed this one ourselves. Whatever owns the tab now —
+                // a newer connection, or nothing — must not have its rfbRef
+                // cleared or a retry scheduled on its behalf.
+                if (closed) return;
 
                 rfbRef.current = null;
                 setRfb(null);
@@ -267,7 +280,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
           "wasClean:", event.wasClean,
           "readyState:", localWs.readyState,
         );
-        if (intentionalCloseRef.current) return;
+        if (closed) return;
         if (!rfbRef.current) {
           // WS closed before RFB was established — auto-reconnect
           scheduleRetry();
@@ -280,7 +293,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
           "type:", event.type,
           "readyState:", localWs.readyState,
         );
-        if (!intentionalCloseRef.current && !tabIsParked()) {
+        if (!closed && !tabIsParked()) {
           applyStatusRef.current("error");
         }
       };
@@ -289,7 +302,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     void connect();
 
     return () => {
-      intentionalCloseRef.current = true;
+      closed = true;
       clearTimeout(retryTimerRef.current);
       retryScheduledRef.current = false;
       if (stateLog1Timer) clearTimeout(stateLog1Timer);
@@ -305,6 +318,29 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     };
     // Only re-run when the actual connection parameters change.
   }, [tabId, tab.type, clusterID, node, vmid, guestType, reconnectKey, activated, mintToken]);
+
+  // A viewer that goes away (console closed, tab removed) leaves no socket
+  // behind, so the tab must not stay marked live. Reset it to the same
+  // pre-dial state a page reload leaves it in and let whoever mounts next
+  // dial from a clean slate. Settled states — "disconnected", "error" and
+  // the parked "guest-stopped" — remain true with no socket, so they stand.
+  // Runs after the connect effect's cleanup (definition order), and
+  // synchronously before any replacement mounts, so it cannot land on top
+  // of a newer connection's status the way the old teardown write did.
+  useEffect(() => {
+    return () => {
+      const status = useConsoleStore
+        .getState()
+        .tabs.find((t) => t.id === tabIdRef.current)?.status;
+      if (
+        status === "connected" ||
+        status === "connecting" ||
+        status === "reconnecting"
+      ) {
+        applyStatusRef.current("idle");
+      }
+    };
+  }, []);
 
   const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
 

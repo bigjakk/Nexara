@@ -254,129 +254,92 @@ export function FloatingConsole() {
 
   if (windowMode === "hidden") return null;
 
-  // --- Minimized: PiP preview ---
-  if (isMinimized) {
-    const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
-    const pipWidth = isMobile ? Math.min(320, window.innerWidth - 32) : 320;
-    const pipHeight = 200;
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
 
-    return createPortal(
-      <div
-        style={{
-          position: "fixed",
-          right: 16,
-          bottom: 16,
-          width: pipWidth,
-          height: pipHeight,
-          zIndex: 40,
-        }}
-        className="group overflow-hidden rounded-lg border border-border/30 shadow-xl transition-opacity hover:opacity-100 opacity-70"
-      >
-        {/* Live console content */}
-        <div className="relative h-full w-full bg-[#1a1b26]/80 backdrop-blur-xs">
-          {tabs.map((tab) =>
-            tab.type === "vm_vnc" || tab.type === "ct_vnc" ? (
-              <VNCViewer
-                key={tab.id}
-                tab={tab}
-                visible={tab.id === activeTabId}
-              />
-            ) : (
-              <Terminal
-                key={tab.id}
-                tab={tab}
-                visible={tab.id === activeTabId}
-              />
-            ),
-          )}
-
-          {/* Top-right controls — hover-revealed on desktop, always visible
-              on touch (there is no hover to reveal them with) */}
-          <div
-            className={cn(
-              "absolute right-2 top-2 flex gap-2",
-              isMobile
-                ? "opacity-100"
-                : "opacity-0 transition-opacity group-hover:opacity-100",
-            )}
-          >
-            <button
-              className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-white/25 hover:text-white"
-              onClick={showConsole}
-              title="Restore"
-            >
-              <Maximize className="h-4 w-4" />
-            </button>
-            <button
-              className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-red-500/70 hover:text-white"
-              onClick={() => { useConsoleStore.getState().setWindowMode("hidden"); }}
-              title="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          {/* Subtle overlay label */}
-          <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center gap-1.5 bg-linear-to-t from-black/60 to-transparent px-2 py-1.5">
-            <TerminalSquare className="h-3 w-3 text-white/70" />
-            <span className="truncate text-[11px] text-white/70">
-              {activeTab?.label ?? "Console"}
-            </span>
-            {tabs.length > 1 && (
-              <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[9px] font-medium text-white/80">
-                {String(tabs.length)}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>,
-      document.body,
-    );
-  }
-
-  // --- Floating or Maximized ---
-  // Mobile is always a full-screen takeover: a draggable/resizable window
-  // is a precision-pointer UX, and at phone widths it would cover the app
-  // anyway. The stored floating position/size only applies on desktop.
-  const style: React.CSSProperties = isMobile
-    ? { position: "fixed", inset: 0, zIndex: 50 }
-    : isMaximized
-      ? { position: "fixed", inset: 16, zIndex: 40 }
-      : {
-          position: "fixed",
-          left: windowPosition.x,
-          top: windowPosition.y,
-          width: windowSize.width,
-          height: windowSize.height,
-          zIndex: 40,
-        };
+  // Every window mode renders ONE tree, with the console content always in
+  // the same slot. Minimize used to return a separate picture-in-picture
+  // tree; because React reconciles children by position, that swapped a
+  // <TitleBar> in where a <div> had been and unmounted the whole subtree —
+  // tearing down the live RFB/WebSocket and re-dialling Proxmox (re-minting
+  // and re-auditing a console token) on every minimize *and* every restore,
+  // while the outgoing connection's late disconnect event stamped
+  // "disconnected" over its replacement. Floating and maximized already
+  // shared a tree, which is exactly why maximizing never dropped a session.
+  // Keep the slots stable: per-mode branches belong in a className or inside
+  // a slot, never wrapped around one.
+  const style: React.CSSProperties = isMinimized
+    ? {
+        position: "fixed",
+        right: 16,
+        bottom: 16,
+        width: isMobile ? Math.min(320, window.innerWidth - 32) : 320,
+        height: 200,
+        zIndex: 40,
+      }
+    : isMobile
+      ? // Mobile is always a full-screen takeover: a draggable/resizable
+        // window is a precision-pointer UX, and at phone widths it would
+        // cover the app anyway. The stored floating position/size is desktop
+        // only.
+        { position: "fixed", inset: 0, zIndex: 50 }
+      : isMaximized
+        ? { position: "fixed", inset: 16, zIndex: 40 }
+        : {
+            position: "fixed",
+            left: windowPosition.x,
+            top: windowPosition.y,
+            width: windowSize.width,
+            height: windowSize.height,
+            zIndex: 40,
+          };
 
   return createPortal(
     <div
       style={style}
       className={cn(
-        "flex flex-col overflow-hidden bg-background shadow-2xl",
-        !isMobile && "rounded-lg border",
+        "flex flex-col overflow-hidden",
+        isMinimized
+          ? // `group` only here: it reveals the PiP's own controls below.
+            // ConsoleTabBar marks each tab `group` and reveals that tab's
+            // close/reconnect buttons with group-hover, and group-hover
+            // matches ANY .group ancestor — so putting it on the window root
+            // unconditionally would pop every tab's buttons open at once
+            // whenever the pointer was anywhere inside the console.
+            "group rounded-lg border border-border/30 opacity-70 shadow-xl transition-opacity hover:opacity-100"
+          : "bg-background shadow-2xl",
+        !isMinimized && !isMobile && "rounded-lg border",
       )}
     >
-      <TitleBar
-        onPointerDown={handleDragDown}
-        onPointerMove={handleDragMove}
-        onPointerUp={handleDragUp}
-      />
+      {!isMinimized && (
+        <TitleBar
+          onPointerDown={handleDragDown}
+          onPointerMove={handleDragMove}
+          onPointerUp={handleDragUp}
+        />
+      )}
 
       {/* Tab bar + Quick Connect */}
-      <div className="flex items-center border-b bg-card">
-        <div className="min-w-0 flex-1 overflow-x-auto">
-          <ConsoleTabBar />
+      {!isMinimized && (
+        <div className="flex items-center border-b bg-card">
+          <div className="min-w-0 flex-1 overflow-x-auto">
+            <ConsoleTabBar />
+          </div>
+          <div className="shrink-0 px-2 py-1">
+            <QuickConnect />
+          </div>
         </div>
-        <div className="shrink-0 px-2 py-1">
-          <QuickConnect />
-        </div>
-      </div>
+      )}
 
-      {/* Content area */}
-      <div className="relative flex-1 bg-[#1a1b26]">
+      {/* Content area — the one slot every window mode shares. min-h-0 so
+          flex-1 can actually shrink: a flex item's min-height defaults to
+          auto, so without it a tall console (an xterm's intrinsic rows)
+          pushes this past the window and overflows the 200px PiP. */}
+      <div
+        className={cn(
+          "relative min-h-0 flex-1",
+          isMinimized ? "bg-[#1a1b26]/80 backdrop-blur-xs" : "bg-[#1a1b26]",
+        )}
+      >
         {tabs.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
             <TerminalSquare className="h-12 w-12 opacity-30" />
@@ -399,10 +362,55 @@ export function FloatingConsole() {
             ),
           )
         )}
+
+        {/* Minimized chrome: the PiP overlay rides on top of the same live
+            content rather than replacing it. */}
+        {isMinimized && (
+          <>
+            {/* Top-right controls — hover-revealed on desktop, always visible
+                on touch (there is no hover to reveal them with) */}
+            <div
+              className={cn(
+                "absolute right-2 top-2 flex gap-2",
+                isMobile
+                  ? "opacity-100"
+                  : "opacity-0 transition-opacity group-hover:opacity-100",
+              )}
+            >
+              <button
+                className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-white/25 hover:text-white"
+                onClick={showConsole}
+                title="Restore"
+              >
+                <Maximize className="h-4 w-4" />
+              </button>
+              <button
+                className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-red-500/70 hover:text-white"
+                onClick={() => { useConsoleStore.getState().setWindowMode("hidden"); }}
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Subtle overlay label */}
+            <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center gap-1.5 bg-linear-to-t from-black/60 to-transparent px-2 py-1.5">
+              <TerminalSquare className="h-3 w-3 text-white/70" />
+              <span className="truncate text-[11px] text-white/70">
+                {activeTab?.label ?? "Console"}
+              </span>
+              {tabs.length > 1 && (
+                <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[9px] font-medium text-white/80">
+                  {String(tabs.length)}
+                </span>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Resize handles on all 4 corners (desktop floating mode only) */}
-      {!isMobile && !isMaximized && resizeCorners.map((corner) => (
+      {!isMinimized && !isMobile && !isMaximized && resizeCorners.map((corner) => (
         <div
           key={corner.dir}
           className={corner.className}
