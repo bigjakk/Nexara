@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Disc3, AlertTriangle, Download } from "lucide-react";
+import { Disc3, AlertTriangle, Download, RefreshCw } from "lucide-react";
 import { formatBytes } from "@/lib/format";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import {
@@ -19,9 +19,17 @@ import {
   useUpdateVirtioWinConfig,
   useVirtioWinReleases,
   useDownloadVirtioWin,
+  useCheckVirtioWinNow,
 } from "../api/virtio-win-queries";
 import { isAlreadyPresent, isAlreadyRunning } from "../types/virtio-win";
 import type { VirtioWinConfigRequest } from "../types/virtio-win";
+import {
+  buildSchedule,
+  localTimezone,
+  parseSchedule,
+  type ParsedSchedule,
+} from "../lib/virtio-win-schedule";
+import { VirtioWinScheduleFields } from "./VirtioWinScheduleFields";
 import { usePermissions } from "@/hooks/usePermissions";
 
 /** Sentinel for the "follow upstream stable" choice — Select cannot hold "". */
@@ -37,6 +45,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
   const { data: storages } = useClusterStorage(clusterId);
   const updateConfig = useUpdateVirtioWinConfig(clusterId);
   const download = useDownloadVirtioWin(clusterId);
+  const checkNow = useCheckVirtioWinNow(clusterId);
   const { canManage } = usePermissions();
   const readOnly = !canManage("storage");
 
@@ -49,20 +58,58 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
   const [node, setNode] = useState("");
   const [targetVersion, setTargetVersion] = useState("");
   const [pruneEnabled, setPruneEnabled] = useState(false);
+  const [schedule, setSchedule] = useState<ParsedSchedule>(() =>
+    parseSchedule(""),
+  );
+  const [timezone, setTimezone] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">(
     "idle",
   );
   const [downloadNote, setDownloadNote] = useState("");
 
+  // Seeded from the fields the form OWNS, not from the config object.
+  //
+  // Depending on `config` would re-seed on any refetch, and this card now has
+  // two buttons that change the config without touching a single form field:
+  // Check now writes last_check_at/next_check_at, and saving the download
+  // source below changes source_url. Either would reset a half-made schedule
+  // edit out from under the operator — and re-saving afterwards would quietly
+  // write back the OLD schedule. A genuine external change to a field the form
+  // shows still re-seeds, because that field is in the dependency list.
+  const {
+    enabled: cfgEnabled,
+    storage: cfgStorage,
+    node: cfgNode,
+    target_version: cfgTargetVersion,
+    prune_enabled: cfgPruneEnabled,
+    check_schedule: cfgCheckSchedule,
+    check_timezone: cfgCheckTimezone,
+  } = config ?? {};
   useEffect(() => {
-    if (config) {
-      setEnabled(config.enabled);
-      setStorage(config.storage);
-      setNode(config.node);
-      setTargetVersion(config.target_version);
-      setPruneEnabled(config.prune_enabled);
-    }
-  }, [config]);
+    if (cfgEnabled === undefined) return; // no config loaded yet
+    setEnabled(cfgEnabled);
+    setStorage(cfgStorage ?? "");
+    setNode(cfgNode ?? "");
+    setTargetVersion(cfgTargetVersion ?? "");
+    setPruneEnabled(cfgPruneEnabled ?? false);
+    setSchedule(parseSchedule(cfgCheckSchedule ?? ""));
+    // Prefill the viewer's own zone only when nothing is configured at all.
+    // Once a schedule exists, an empty zone is a deliberate "server time"
+    // that must survive being opened in another browser.
+    setTimezone(
+      cfgCheckTimezone === "" && cfgCheckSchedule === ""
+        ? localTimezone()
+        : (cfgCheckTimezone ?? ""),
+    );
+  }, [
+    cfgEnabled,
+    cfgStorage,
+    cfgNode,
+    cfgTargetVersion,
+    cfgPruneEnabled,
+    cfgCheckSchedule,
+    cfgCheckTimezone,
+  ]);
 
   if (isLoading) {
     return <Skeleton className="h-96 w-full" />;
@@ -89,12 +136,17 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
 
   const handleSave = () => {
     setSaveStatus("idle");
+    const cron = buildSchedule(schedule);
     const request: VirtioWinConfigRequest = {
       enabled,
       storage,
       node,
       target_version: targetVersion,
       prune_enabled: pruneEnabled,
+      check_schedule: cron,
+      // Meaningless without a schedule, and sending it anyway would record a
+      // zone against a cluster that is on the six-hourly interval.
+      check_timezone: cron === "" ? "" : timezone,
     };
     updateConfig.mutate(request, {
       onSuccess: () => {
@@ -138,6 +190,26 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
     );
   };
 
+  const handleCheckNow = () => {
+    setDownloadNote("");
+    checkNow.mutate(undefined, {
+      onSuccess: (result) => {
+        if (result.download) {
+          setDownloadNote(
+            `Checked. virtio-win ${result.download.version} was missing — download started on ${result.download.node}.`,
+          );
+        } else if (result.config.last_error !== "") {
+          setDownloadNote(`Check failed: ${result.config.last_error}`);
+        } else {
+          setDownloadNote("Checked. Storage is already up to date.");
+        }
+      },
+      onError: (err: unknown) => {
+        setDownloadNote(err instanceof Error ? err.message : "Check failed.");
+      },
+    });
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -175,14 +247,22 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
           <div className="space-y-1">
             <Label htmlFor="virtio-win-enabled">Download automatically</Label>
             <p className="text-xs text-muted-foreground">
-              Checks upstream every 6 hours and fetches the target version when
+              Checks on the schedule below and fetches the target version when
               it is missing.
             </p>
           </div>
         </div>
 
+        <VirtioWinScheduleFields
+          schedule={schedule}
+          timezone={timezone}
+          disabled={readOnly}
+          onScheduleChange={setSchedule}
+          onTimezoneChange={setTimezone}
+        />
+
         <div className="space-y-2">
-          <Label>Target storage</Label>
+          <Label htmlFor="virtio-win-storage">Target storage</Label>
           <Select
             value={storage}
             disabled={readOnly}
@@ -190,7 +270,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
               setStorage(v);
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger id="virtio-win-storage">
               <SelectValue placeholder="Select an ISO-capable storage" />
             </SelectTrigger>
             <SelectContent>
@@ -210,7 +290,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
         </div>
 
         <div className="space-y-2">
-          <Label>Version</Label>
+          <Label htmlFor="virtio-win-version">Version</Label>
           <Select
             value={targetVersion === "" ? FOLLOW_STABLE : targetVersion}
             disabled={readOnly}
@@ -218,7 +298,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
               setTargetVersion(v === FOLLOW_STABLE ? "" : v);
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger id="virtio-win-version">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -267,11 +347,28 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
           </div>
         </div>
 
-        {config?.last_check_at ? (
-          <p className="text-xs text-muted-foreground">
-            Last checked {new Date(config.last_check_at).toLocaleString()}.
+        <div className="space-y-1 border-t pt-4 text-xs text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Last checked</span>{" "}
+            {config?.last_check_at
+              ? new Date(config.last_check_at).toLocaleString()
+              : "never"}
           </p>
-        ) : null}
+          <p>
+            <span className="font-medium text-foreground">Next check</span>{" "}
+            {!enabled
+              ? "not scheduled — automatic downloads are off"
+              : config?.next_check_at
+                ? new Date(config.next_check_at).toLocaleString()
+                : "within a minute"}
+          </p>
+          {config?.source_url ? (
+            <p className="break-all">
+              <span className="font-medium text-foreground">Source</span>{" "}
+              {config.source_url}
+            </p>
+          ) : null}
+        </div>
 
         {downloadNote ? (
           <p className="text-xs text-muted-foreground">{downloadNote}</p>
@@ -283,6 +380,20 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
             disabled={readOnly || updateConfig.isPending}
           >
             {updateConfig.isPending ? "Saving..." : "Save"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleCheckNow}
+            // Off means there is no cycle to trigger; the API refuses it too,
+            // and Download now is the button for fetching without opting in.
+            disabled={
+              readOnly || checkNow.isPending || storage === "" || !enabled
+            }
+          >
+            <RefreshCw
+              className={`mr-2 h-4 w-4 ${checkNow.isPending ? "animate-spin" : ""}`}
+            />
+            {checkNow.isPending ? "Checking..." : "Check now"}
           </Button>
           <Button
             variant="outline"

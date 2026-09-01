@@ -57,12 +57,17 @@ func (e *Engine) SetProxmoxCache(cache *proxmox.ClientCache) { e.cache = cache }
 // pin against and to give prune a keep-set, and a failure there must not stop
 // the stable release from being recorded.
 func (e *Engine) RefreshCatalog(ctx context.Context) (Release, error) {
-	latest, err := e.upstream.CheckLatest(ctx)
+	// One resolve per refresh, shared by every request below: the mirror
+	// override must not change halfway through a catalog sweep, or the
+	// versions and the URLs recorded for them come from different roots.
+	upstream := e.client(ctx)
+
+	latest, err := upstream.CheckLatest(ctx)
 	if err != nil {
 		return Release{}, fmt.Errorf("virtio-win: resolve latest: %w", err)
 	}
 
-	if archive, err := e.upstream.ListArchive(ctx); err != nil {
+	if archive, err := upstream.ListArchive(ctx); err != nil {
 		e.logger.Warn("virtio-win: archive sweep failed; catalog limited to the current release", "error", err)
 	} else {
 		for _, rel := range archive {
@@ -77,7 +82,7 @@ func (e *Engine) RefreshCatalog(ctx context.Context) (Release, error) {
 
 	// Probe the size for display. Not fatal — a failed HEAD says nothing about
 	// whether the node can fetch it, since the node dials out independently.
-	if size, err := e.upstream.ProbeSize(ctx, latest.ISOURL); err == nil {
+	if size, err := upstream.ProbeSize(ctx, latest.ISOURL); err == nil {
 		latest.ISOSize = size
 	} else {
 		e.logger.Debug("virtio-win: ISO size probe failed", "version", latest.Version, "error", err)
@@ -86,11 +91,23 @@ func (e *Engine) RefreshCatalog(ctx context.Context) (Release, error) {
 	if _, err := e.storeRelease(ctx, latest); err != nil {
 		return Release{}, fmt.Errorf("virtio-win: store release %s: %w", latest.Version, err)
 	}
+	// Reassert the flag against THIS refresh, whichever way it went. When the
+	// source named a stable version, only that row keeps the flag; when it
+	// could not — a mirror has no stable-virtio/ redirect to copy, so the
+	// archive-index fallback answers IsStable false — nothing is stable any
+	// more, and passing "" clears every row because no version equals "".
+	//
+	// Leaving a previously-set flag alone here is what made a mirror unusable:
+	// a catalog carrying 0.1.271 from upstream, and a mirror that only goes up
+	// to 0.1.266, would keep resolving unpinned clusters to 0.1.271 — the one
+	// version the mirror does not have — 404ing on every check, forever, and
+	// never reaching the newest-release fallback because a stable row existed.
+	keepStable := ""
 	if latest.IsStable {
-		// Clear first so the partial index on is_stable only ever matches one row.
-		if err := e.queries.ClearVirtioWinStableFlag(ctx, latest.Version); err != nil {
-			e.logger.Warn("virtio-win: clear previous stable flag failed", "error", err)
-		}
+		keepStable = latest.Version
+	}
+	if err := e.queries.ClearVirtioWinStableFlag(ctx, keepStable); err != nil {
+		e.logger.Warn("virtio-win: reassert stable flag failed", "error", err)
 	}
 	return latest, nil
 }
@@ -138,13 +155,47 @@ func (e *Engine) ResolveTarget(ctx context.Context, cfg db.VirtioWinConfig) (db.
 		return rel, nil
 	}
 	rel, err := e.queries.GetStableVirtioWinRelease(ctx)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.VirtioWinRelease{}, ErrNoTarget
-		}
+	if err == nil {
+		return rel, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return db.VirtioWinRelease{}, fmt.Errorf("get stable release: %w", err)
 	}
-	return rel, nil
+	return e.newestRelease(ctx)
+}
+
+// newestRelease is the fallback for an unpinned cluster when nothing in the
+// catalog is flagged stable.
+//
+// That flag is set only from upstream's own stable-virtio/ redirect, and
+// CheckLatest deliberately does not set it when it had to fall back to the
+// archive index — the newest directory name is a guess at what is current, not
+// upstream's statement of it. Without this fallback that caution becomes a
+// dead end for exactly the installs the mirror support was added for: a mirror
+// made with `wget -m -np` has no such redirect to copy, so an unpinned cluster
+// would never resolve a target at all.
+//
+// Ordering is done in Go rather than SQL because the comparison is numeric per
+// component: "0.1.96" is older than "0.1.302" but sorts after it as text.
+func (e *Engine) newestRelease(ctx context.Context) (db.VirtioWinRelease, error) {
+	releases, err := e.queries.ListVirtioWinReleases(ctx)
+	if err != nil {
+		return db.VirtioWinRelease{}, fmt.Errorf("list releases: %w", err)
+	}
+	if len(releases) == 0 {
+		return db.VirtioWinRelease{}, ErrNoTarget
+	}
+	versions := make([]string, 0, len(releases))
+	for _, r := range releases {
+		versions = append(versions, r.Version)
+	}
+	newest := Newest(versions)
+	for _, r := range releases {
+		if r.Version == newest {
+			return r, nil
+		}
+	}
+	return db.VirtioWinRelease{}, ErrNoTarget
 }
 
 // EnsureCatalog populates the release catalog when it is empty.
@@ -156,10 +207,14 @@ func (e *Engine) ResolveTarget(ctx context.Context, cfg db.VirtioWinConfig) (db.
 // away. Calling this on the enabling write closes that gap without reintroducing
 // an unconditional fetch. A no-op once anything is known.
 func (e *Engine) EnsureCatalog(ctx context.Context) error {
-	if _, err := e.queries.GetStableVirtioWinRelease(ctx); err == nil {
-		return nil
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	// "Anything known", not "a stable release known": a mirror that does not
+	// reproduce upstream's stable-virtio/ redirect yields a catalog with no
+	// stable row at all, and testing for one would re-fetch the whole archive
+	// index on every call for those installs.
+	if releases, err := e.queries.ListVirtioWinReleases(ctx); err != nil {
 		return fmt.Errorf("check catalog: %w", err)
+	} else if len(releases) > 0 {
+		return nil
 	}
 	if _, err := e.RefreshCatalog(ctx); err != nil {
 		return err
@@ -245,9 +300,18 @@ func (e *Engine) dispatch(
 		return nil, fmt.Errorf("record download of %s: %w", target.Version, err)
 	}
 
+	// Build the URL from the base in effect NOW rather than trusting the one
+	// recorded when the version was discovered. A release the catalog learned
+	// before a mirror was configured still carries the fedorapeople URL, which
+	// is exactly the URL an air-gapped node cannot reach.
+	isoURL := target.IsoUrl
+	if built, buildErr := BuildISOURLFrom(e.ResolveBase(ctx), target.Version); buildErr == nil {
+		isoURL = built
+	}
+
 	verify := true
 	params := proxmox.URLDownloadParams{
-		URL:                target.IsoUrl,
+		URL:                isoURL,
 		Content:            "iso",
 		Filename:           target.IsoFilename,
 		Checksum:           target.Checksum,
@@ -658,17 +722,26 @@ func (e *Engine) DownloadNow(ctx context.Context, cfg db.VirtioWinConfig, versio
 	return e.dispatch(ctx, client, cfg, node, release, "manual")
 }
 
-// MarkChecked records the outcome of a cluster sync attempt so the UI can show
-// when the check last ran and why it last failed.
-func (e *Engine) MarkChecked(ctx context.Context, clusterID uuid.UUID, syncErr error) {
+// MarkChecked records the outcome of a cluster sync attempt and arms the next
+// check, so the UI can show both when the check last ran and when the next one
+// lands.
+//
+// The next time is computed from the config's own schedule, not from a global
+// tick. A failed sync is scheduled exactly like a successful one: retrying a
+// cluster that cannot reach its storage every minute until 03:00 comes round
+// again would turn one broken cluster into a busy loop against Proxmox.
+func (e *Engine) MarkChecked(ctx context.Context, cfg db.VirtioWinConfig, syncErr error) {
 	msg := ""
 	if syncErr != nil {
 		msg = syncErr.Error()
 	}
+	next := NextCheck(cfg.CheckSchedule, cfg.CheckTimezone, time.Now())
 	if err := e.queries.MarkVirtioWinConfigChecked(ctx, db.MarkVirtioWinConfigCheckedParams{
-		ClusterID: clusterID, LastError: msg,
+		ClusterID:   cfg.ClusterID,
+		LastError:   msg,
+		NextCheckAt: pgtype.Timestamptz{Time: next, Valid: true},
 	}); err != nil {
-		e.logger.Warn("virtio-win: record check outcome failed", "cluster_id", clusterID, "error", err)
+		e.logger.Warn("virtio-win: record check outcome failed", "cluster_id", cfg.ClusterID, "error", err)
 	}
 }
 

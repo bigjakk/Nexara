@@ -107,13 +107,46 @@ func (e *Engine) ResolveTarget(ctx context.Context, clusterID uuid.UUID, cfg db.
 	}
 
 	stable, err := e.queries.GetStableVirtioWinRelease(ctx)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Target{}, ErrNoTargetVersion
-		}
+	if err == nil {
+		return Target{Version: stable.Version, ISOVersion: stable.IsoVersion, ISOFilename: stable.IsoFilename}, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return Target{}, fmt.Errorf("get stable release: %w", err)
 	}
-	return Target{Version: stable.Version, ISOVersion: stable.IsoVersion, ISOFilename: stable.IsoFilename}, nil
+	return e.newestTarget(ctx)
+}
+
+// newestTarget is the fallback for an unpinned guest when nothing in the
+// catalog is flagged stable, mirroring virtiowin.Engine.newestRelease.
+//
+// The flag comes only from upstream's own stable-virtio/ redirect. An install
+// downloading from a mirror has no such redirect to copy, so its catalog never
+// carries one at all — and without this, every guest on such an install is
+// unresolvable: staging 412s, the scheduled pass can stage nothing, and the
+// fleet table's target column renders blank. An explicit pin at any layer is
+// handled above and still wins; this only covers "follow whatever is current".
+//
+// Ordering is done in Go because the comparison is numeric per component:
+// "0.1.96" is older than "0.1.302" but sorts after it as text.
+func (e *Engine) newestTarget(ctx context.Context) (Target, error) {
+	releases, err := e.queries.ListVirtioWinReleases(ctx)
+	if err != nil {
+		return Target{}, fmt.Errorf("list releases: %w", err)
+	}
+	if len(releases) == 0 {
+		return Target{}, ErrNoTargetVersion
+	}
+	versions := make([]string, 0, len(releases))
+	for _, r := range releases {
+		versions = append(versions, r.Version)
+	}
+	newest := virtiowin.Newest(versions)
+	for _, r := range releases {
+		if r.Version == newest {
+			return Target{Version: r.Version, ISOVersion: r.IsoVersion, ISOFilename: r.IsoFilename}, nil
+		}
+	}
+	return Target{}, ErrNoTargetVersion
 }
 
 // Detect probes one guest for its installed guest tools and records the result.

@@ -69,12 +69,25 @@ func ISOFilename(version string) string {
 // It returns an error rather than a malformed URL for an unparseable version,
 // because the result is handed to a Proxmox node to fetch.
 func BuildISOURL(version string) (string, error) {
+	return BuildISOURLFrom(BaseURL, version)
+}
+
+// BuildISOURLFrom is BuildISOURL against an arbitrary download root, for the
+// operator-configured mirror. The layout below the root is the upstream one —
+// a mirror is expected to be a copy of the tree (`wget -m -np` produces
+// exactly this), not an arbitrary file server.
+//
+// An empty base means upstream, so a caller need not special-case "no mirror".
+func BuildISOURLFrom(base, version string) (string, error) {
 	if !ValidVersion(version) {
 		return "", fmt.Errorf("virtiowin: invalid version %q", version)
 	}
+	if base == "" {
+		base = BaseURL
+	}
 	dirVersion, isoVersion := SplitVersion(version)
-	return fmt.Sprintf("%s/virtio-win-%s/virtio-win-%s.iso",
-		ArchivePath[:len(ArchivePath)-1], dirVersion, isoVersion), nil
+	return fmt.Sprintf("%s/archive-virtio/virtio-win-%s/virtio-win-%s.iso",
+		strings.TrimSuffix(base, "/"), dirVersion, isoVersion), nil
 }
 
 // ParseVersionFromPath pulls a version out of an upstream directory name or a

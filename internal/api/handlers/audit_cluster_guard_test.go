@@ -82,6 +82,7 @@ var auditClusterExempt = map[string]string{
 	"ldap.go.Sync":                  "LDAP sync is install-global",
 	"oidc.go.Callback":              "OIDC login callback is an auth event; no cluster in scope",
 	"settings.go.auditSettingWrite": "settings are install-global",
+	"virtio_win.go.SetMirror":       "the virtio-win download source is one instance-wide setting row, gated on global manage:settings",
 	"audit.go.UpdateSyslogConfig":   "syslog forwarding is an install-global setting",
 	"audit.go.TestSyslog":           "syslog forwarding is an install-global setting",
 

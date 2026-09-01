@@ -181,3 +181,65 @@ func TestRequestsSendNonBrowserUserAgent(t *testing.T) {
 		t.Errorf("User-Agent %q is browser-shaped; Anubis would challenge it", got)
 	}
 }
+
+// TestWithBaseTargetsAMirror covers the shape an air-gapped install actually
+// gets: a copy of the upstream tree made with `wget -m -np`, which has the
+// archive directory but NOT the stable-virtio/ redirect (wget follows it and
+// saves the result under the archive path instead of reproducing the 301).
+//
+// CheckLatest has to degrade to the archive index there, and every URL it
+// builds has to point at the mirror rather than at fedorapeople.
+func TestWithBaseTargetsAMirror(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/archive-virtio/" {
+			// Notably including /stable-virtio/ — the mirror has no redirect.
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(archiveIndex))
+	}))
+	t.Cleanup(srv.Close)
+
+	base := NewClient(slog.New(slog.NewTextHandler(io.Discard, nil))).WithBase(srv.URL)
+
+	rel, err := base.CheckLatest(context.Background())
+	if err != nil {
+		t.Fatalf("CheckLatest against a mirror: %v", err)
+	}
+	if rel.Version != "0.1.302-1" {
+		t.Errorf("Version = %q, want the newest in the index (0.1.302-1)", rel.Version)
+	}
+	// Not upstream's own statement of stable, so not flagged as such. Engine
+	// resolution falls back to the newest release for exactly this reason.
+	if rel.IsStable {
+		t.Error("IsStable = true; a version guessed from the archive index must not claim it")
+	}
+	if !strings.HasPrefix(rel.ISOURL, srv.URL) {
+		t.Errorf("ISOURL = %q, want it under the mirror %q", rel.ISOURL, srv.URL)
+	}
+	if !strings.HasSuffix(rel.ISOURL, "/archive-virtio/virtio-win-0.1.302-1/virtio-win-0.1.302.iso") {
+		t.Errorf("ISOURL = %q, want the upstream layout below the mirror root", rel.ISOURL)
+	}
+}
+
+// TestWithBaseDoesNotMutateTheOriginal: the engine derives a per-refresh client
+// from one long-lived instance, so a mirror configured for one refresh must not
+// leak into the shared client.
+func TestWithBaseDoesNotMutateTheOriginal(t *testing.T) {
+	original := NewClient(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	derived := original.WithBase("https://mirror.internal/virtio")
+
+	if original.base != BaseURL {
+		t.Errorf("original base = %q, want it untouched at %q", original.base, BaseURL)
+	}
+	if derived.base != "https://mirror.internal/virtio" {
+		t.Errorf("derived base = %q", derived.base)
+	}
+	if derived.http != original.http {
+		t.Error("derived client built a new http.Client; the connection pool should be shared")
+	}
+	// An empty base is "no override", not "no base at all".
+	if back := original.WithBase(""); back.base != BaseURL {
+		t.Errorf("WithBase(\"\") base = %q, want upstream", back.base)
+	}
+}

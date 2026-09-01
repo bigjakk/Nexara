@@ -672,9 +672,12 @@ downloading writes into a Proxmox storage.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/virtio-win/releases` | List known upstream virtio-win releases |
+| GET | `/virtio-win/mirror` | Get the instance-wide download source |
+| PUT | `/virtio-win/mirror` | Point downloads at a mirror, for air-gapped installs (`manage:settings`) |
 | GET | `/clusters/:id/virtio-win/config` | Get the cluster's virtio-win auto-download policy |
 | PUT | `/clusters/:id/virtio-win/config` | Update the cluster's virtio-win auto-download policy |
 | GET | `/clusters/:id/virtio-win/downloads` | List virtio-win download history for the cluster |
+| POST | `/clusters/:id/virtio-win/check` | Run the cluster's check now, off-schedule |
 | POST | `/clusters/:id/virtio-win/download` | Download a virtio-win ISO to the configured storage now |
 
 The release catalogue is global — every cluster sees the same upstream list.
@@ -683,6 +686,39 @@ RPMs), so the field is empty unless an operator supplies one, in which case it i
 passed through to Proxmox's `download-url` call. Downloads are dispatched
 asynchronously and reconciled from their UPID, so a pass survives a Nexara
 restart.
+
+**Check schedule.** The config carries `check_schedule` (a five-field cron
+expression; empty means every six hours, counted from the last check) and
+`check_timezone` (an IANA zone; empty means the server's own). `next_check_at`
+is when the next one is due — `null` reads as *due now*, which is what a
+just-enabled cluster and a config upgraded in place both carry.
+
+Rejected on write rather than stored: an unparseable expression, an unknown
+zone, and an expression that parses but never comes round (`0 3 31 4 *` —
+April 31, and the Feb 30 / Sep 31 variants). The last is not pedantry: the cron
+library range-checks each field on its own, accepts the date, and then answers
+"next occurrence" with the zero time — which as a `next_check_at` is
+permanently in the past, i.e. due on every tick forever.
+
+`POST .../check` refreshes the catalogue from the source and reconciles the
+cluster's storage, downloading only if the target ISO is missing; it records the
+outcome exactly as the scheduler does, so the next check moves to its next slot.
+It answers `{"config": …}`, plus `"download"` when one was dispatched.
+
+**Download source.** `PUT /virtio-win/mirror` takes `{"base_url": …}` and
+replaces `fedorapeople.org` for both discovery and the URL handed to the node.
+It is instance-wide — the catalogue it fills is global — which is why writing it
+needs `manage:settings` rather than `manage:storage`; reading it needs only
+`view:storage`. The mirror is expected to mirror the upstream layout, so that
+`<base>/archive-virtio/virtio-win-<version>/` holds each ISO.
+
+Two shapes need an explicit confirmation, each returned as a `422` the caller
+re-submits with a flag: `insecure_source_confirm_required` for a plain-HTTP base
+(`allow_insecure: true`), and `private_address_confirm_required` for one
+resolving to a private or loopback address (`allow_private_address: true`) — the
+normal case for an internal mirror. Cloud-metadata and other never-routable
+addresses are a `400` and cannot be confirmed through. The key is reserved
+against the generic settings endpoints, so it cannot be written unvalidated.
 
 ### Resource Pools
 

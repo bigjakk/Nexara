@@ -808,6 +808,44 @@ These actions are gated on the **storage** permissions (`view:storage` / `manage
 
 > Upstream publishes **no ISO checksum** — its `CHECKSUM` file covers only the RPMs — so the field is empty unless you supply one, in which case Proxmox verifies it. Downloads are dispatched asynchronously and reconciled from their Proxmox task ID, so a download finishes correctly even if Nexara restarts.
 
+#### When it checks
+
+The card shows **Last checked** and **Next check**, and lets you say when the next one lands:
+
+| Schedule | Behaviour |
+|----------|-----------|
+| `Every 6 hours` | **Default.** Counted from the last check, so restarting Nexara no longer resets the cycle |
+| `Daily at HH:MM` | One check a day, at that time |
+| `Weekly on <day> at HH:MM` | One check a week |
+
+What is really being scheduled is not the upstream lookup — that is one small request — but the **~840 MB fetch** a lookup can dispatch, which is why the timed options exist: point them at a maintenance window.
+
+For the timed options, set the **time zone** as well. Left on `Server time` the hour is read in the container's own zone, which is almost always UTC.
+
+**Check now** is available while automatic downloads are on — it is the manual
+trigger for that cycle, and with the cycle off there is nothing to trigger. It
+runs the check immediately without waiting for the next slot: it refreshes the release list from the source and downloads only if the target ISO is actually missing. That is the difference from **Download now**, which fetches the version you have selected. Both run against the *saved* config, so save first.
+
+Enabling the feature, changing the target storage, or changing the pinned version each schedule a check within the minute — the schedule only governs the unattended cycle.
+
+#### Downloading from a mirror (air-gapped installs)
+
+**Download source**, at the bottom of the tab, is where releases are discovered and ISOs fetched from. It applies to **every cluster on the install**, not just the one you are looking at, and changing it needs `manage:settings`.
+
+Leave it empty to follow upstream. Point it at an internal mirror when neither Nexara nor the Proxmox nodes can reach `fedorapeople.org` — both have to reach it, since Nexara reads the release list and the *node* fetches the ISO.
+
+The mirror must be a copy of the upstream tree, so that `<base>/archive-virtio/virtio-win-<version>/` holds each ISO:
+
+```bash
+wget -m -np https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/
+```
+
+Serve the resulting directory over HTTP and set the base URL to its root. The `stable-virtio/` redirect is not needed — without one, Nexara uses the newest version in the archive index instead.
+
+> Two confirmations you may be asked for, both once, both deliberate: a base that resolves to a **private address** (which an internal mirror always does), and a **plain-HTTP** base. HTTP means the driver media a Windows guest installs arrives with no integrity or authenticity protection, and upstream publishes no checksum to fall back on — so prefer HTTPS on the mirror, or set a per-release checksum. Cloud metadata and other never-routable addresses are refused outright and cannot be confirmed through.
+
+After changing the source, run **Check now** to rebuild the release list from it; the versions listed until then were discovered against the previous source.
+
 ---
 
 ## Alert Configuration

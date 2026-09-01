@@ -1,11 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiClient } from "@/lib/api-client";
+import { toast } from "sonner";
+import { apiClient, ApiClientError } from "@/lib/api-client";
+import { MIRROR_CONFIRM_CODES } from "../types/virtio-win";
 import type {
+  VirtioWinCheckResult,
   VirtioWinConfig,
   VirtioWinConfigRequest,
   VirtioWinDownload,
   VirtioWinDownloadRequest,
   VirtioWinDownloadResult,
+  VirtioWinMirror,
+  VirtioWinMirrorRequest,
   VirtioWinRelease,
 } from "../types/virtio-win";
 
@@ -16,6 +21,7 @@ export const virtioWinKeys = {
     [...virtioWinKeys.all, "config", clusterId] as const,
   downloads: (clusterId: string) =>
     [...virtioWinKeys.all, "downloads", clusterId] as const,
+  mirror: () => [...virtioWinKeys.all, "mirror"] as const,
 };
 
 /**
@@ -98,6 +104,79 @@ export function useDownloadVirtioWin(clusterId: string) {
       void queryClient.invalidateQueries({
         queryKey: virtioWinKeys.config(clusterId),
       });
+    },
+  });
+}
+
+/**
+ * The instance-wide download source. Read is open to view:storage so an
+ * operator looking at a failed check can see where it was pointed; writing it
+ * needs manage:settings, because one write repoints every cluster.
+ */
+export function useVirtioWinMirror() {
+  return useQuery({
+    queryKey: virtioWinKeys.mirror(),
+    queryFn: () => apiClient.get<VirtioWinMirror>("/api/v1/virtio-win/mirror"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useUpdateVirtioWinMirror() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: VirtioWinMirrorRequest) =>
+      apiClient.put<VirtioWinMirror>("/api/v1/virtio-win/mirror", body),
+    // The global mutation cache toasts any mutation that defines no onError of
+    // its own. Both confirm-required answers are prompts rather than failures
+    // — the card renders each inline with a "use it anyway" — so they would
+    // arrive as a red error toast on top of the prompt. Defining a handler is
+    // what stands that safety net down, which means real failures have to be
+    // raised here explicitly rather than being swallowed with it.
+    onError: (err: unknown) => {
+      if (
+        err instanceof ApiClientError &&
+        (MIRROR_CONFIRM_CODES as readonly string[]).includes(err.body.error)
+      ) {
+        return;
+      }
+      toast.error(
+        err instanceof Error && err.message.length > 0
+          ? err.message
+          : "Failed to save the virtio-win source",
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: virtioWinKeys.mirror() });
+      // The catalog was discovered against the previous source, and every
+      // cluster config carries the resolved source_url — both are stale the
+      // moment this lands.
+      void queryClient.invalidateQueries({ queryKey: virtioWinKeys.all });
+    },
+  });
+}
+
+/**
+ * Runs a cluster's scheduled check immediately. Distinct from a download: this
+ * refreshes the catalog and fetches only if the target is actually missing,
+ * which is what makes a just-saved schedule or source verifiable without
+ * waiting for its next slot.
+ */
+export function useCheckVirtioWinNow(clusterId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiClient.post<VirtioWinCheckResult>(
+        `/api/v1/clusters/${clusterId}/virtio-win/check`,
+        {},
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: virtioWinKeys.config(clusterId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: virtioWinKeys.downloads(clusterId),
+      });
+      void queryClient.invalidateQueries({ queryKey: virtioWinKeys.releases() });
     },
   });
 }

@@ -1254,6 +1254,12 @@ type VirtioWinConfig struct {
 	LastError    string             `json:"last_error"`
 	CreatedAt    time.Time          `json:"created_at"`
 	UpdatedAt    time.Time          `json:"updated_at"`
+	// Cron expression (min hour dom month dow); empty means every 6 hours from the last check
+	CheckSchedule string `json:"check_schedule"`
+	// IANA zone the cron expression is evaluated in; empty means server time
+	CheckTimezone string `json:"check_timezone"`
+	// When the next check is due; NULL means due now
+	NextCheckAt pgtype.Timestamptz `json:"next_check_at"`
 }
 
 type VirtioWinDownload struct {

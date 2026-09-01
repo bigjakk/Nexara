@@ -338,12 +338,17 @@ func (s *Scheduler) RunKEVRefresh(ctx context.Context) {
 const virtioWinHistoryRetention = 90 * 24 * time.Hour
 
 // RunVirtioWinCheck refreshes the upstream virtio-win catalog and brings every
-// opted-in cluster's ISO storage in line with its target version.
+// cluster whose check has come due in line with its target version.
 //
 // One upstream fetch serves every cluster: the catalog is global, and only the
 // per-cluster reconciliation against storage is fanned out. Downloads are
 // dispatched, not awaited — download-url returns a UPID and RunVirtioWinReconcile
 // follows it, so an 837 MiB transfer never holds this tick open.
+//
+// The tick itself is now a cheap minutely poll rather than a six-hourly sweep:
+// each cluster carries its own next_check_at, so an operator can aim the check
+// — and the ~840 MiB fetch it dispatches — at a maintenance window. When
+// nothing is due this costs one indexed query and returns.
 func (s *Scheduler) RunVirtioWinCheck(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -356,11 +361,11 @@ func (s *Scheduler) RunVirtioWinCheck(ctx context.Context) {
 
 	// Check who wants this BEFORE touching the network. Refreshing
 	// unconditionally would make every install — air-gapped ones included —
-	// reach out to fedorapeople.org on boot and every 6h for a feature nobody
-	// enabled. No opted-in cluster, no outbound request.
-	configs, err := s.queries.ListEnabledVirtioWinConfigs(ctx)
+	// reach out to fedorapeople.org for a feature nobody enabled. No cluster
+	// due, no outbound request.
+	configs, err := s.queries.ListDueVirtioWinConfigs(ctx)
 	if err != nil {
-		s.logger.Warn("virtio-win: list enabled configs failed", "error", err)
+		s.logger.Warn("virtio-win: list due configs failed", "error", err)
 		return
 	}
 	if len(configs) == 0 {
@@ -377,7 +382,10 @@ func (s *Scheduler) RunVirtioWinCheck(ctx context.Context) {
 	}
 	for _, cfg := range configs {
 		download, syncErr := s.virtioWin.SyncCluster(ctx, cfg)
-		s.virtioWin.MarkChecked(ctx, cfg.ClusterID, syncErr)
+		// Unconditional, and before the logging: this is what arms the next
+		// check. Skipping it on any path leaves next_check_at in the past, and
+		// the cluster is then re-synced every single minute.
+		s.virtioWin.MarkChecked(ctx, cfg, syncErr)
 		switch {
 		case syncErr != nil:
 			s.logger.Warn("virtio-win: cluster sync failed",

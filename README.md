@@ -149,7 +149,7 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 - **Alert engine** — threshold alerts, escalation chains, 7 notification channels (SMTP, Slack, Discord, Teams, Telegram, Webhook, PagerDuty)
 - **CVE scanning** — automated vulnerability scanning
 - **Scheduled tasks** — cron-based guest snapshots and reboots
-- **Windows guest tools** — track virtio-win driver and QEMU guest agent versions per guest, stage updates that apply on reboot, and pull virtio-win ISOs into Proxmox storage automatically
+- **Windows guest tools** — track virtio-win driver and QEMU guest agent versions per guest, stage updates that apply on reboot, and pull virtio-win ISOs into Proxmox storage on a schedule you set (or from your own mirror, for air-gapped networks)
 
 </td>
 <td>

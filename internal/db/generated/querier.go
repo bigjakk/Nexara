@@ -64,8 +64,12 @@ type Querier interface {
 	ClearJobCleanupPending(ctx context.Context, id uuid.UUID) error
 	ClearJobNativeCRSPaused(ctx context.Context, id uuid.UUID) error
 	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
-	// ClearVirtioWinStableFlag runs immediately before marking the newly-discovered
-	// stable release, so the partial index on is_stable only ever matches one row.
+	// ClearVirtioWinStableFlag reasserts the flag after a catalog refresh, so the
+	// partial index on is_stable only ever matches the row the source just named.
+	//
+	// Passing '' clears EVERY row, which is the answer when the source could not
+	// name a stable version at all — a mirror has no stable-virtio/ redirect to
+	// copy. No version string is empty, so the <> holds nothing back.
 	ClearVirtioWinStableFlag(ctx context.Context, version string) error
 	CompleteMigrationJob(ctx context.Context, arg CompleteMigrationJobParams) error
 	// Terminal transitions set cleanup_pending: the job may still hold cluster
@@ -772,10 +776,14 @@ type Querier interface {
 	ListDistinctAuditActions(ctx context.Context) ([]string, error)
 	ListDistinctAuditUsers(ctx context.Context) ([]ListDistinctAuditUsersRow, error)
 	ListDueReportSchedules(ctx context.Context) ([]ReportSchedule, error)
+	// ListDueVirtioWinConfigs returns the opted-in clusters whose next check has
+	// come round. NULL is "due now": that is what a fresh row, a just-enabled
+	// cluster, and a pre-000100 row upgraded in place all carry, so each gets one
+	// check promptly and a schedule from then on.
+	ListDueVirtioWinConfigs(ctx context.Context) ([]VirtioWinConfig, error)
 	ListEnabledAlertRules(ctx context.Context) ([]AlertRule, error)
 	ListEnabledCVEScanSchedules(ctx context.Context) ([]CveScanSchedule, error)
 	ListEnabledDRSConfigs(ctx context.Context) ([]DrsConfig, error)
-	ListEnabledVirtioWinConfigs(ctx context.Context) ([]VirtioWinConfig, error)
 	ListExistingAuditLogUPIDs(ctx context.Context, upids []string) ([]string, error)
 	// ListExistingTaskHistoryUPIDs and ListExistingAuditLogUPIDs are the batch
 	// dedup the collector ingest uses: given a node's candidate UPIDs, return the
@@ -1087,6 +1095,9 @@ type Querier interface {
 	// been an operator's doing, and clearing it would resurrect the false alert it
 	// exists to suppress.
 	MarkVeeamSessionStopped(ctx context.Context, arg MarkVeeamSessionStoppedParams) (int64, error)
+	// MarkVirtioWinConfigChecked records the outcome and arms the next check in one
+	// statement. Splitting them would let a crash between the two leave a row whose
+	// next_check_at is still in the past, i.e. one that re-checks on every tick.
 	MarkVirtioWinConfigChecked(ctx context.Context, arg MarkVirtioWinConfigCheckedParams) error
 	MoveVMFolder(ctx context.Context, arg MoveVMFolderParams) (VmFolder, error)
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
@@ -1409,6 +1420,28 @@ type Querier interface {
 	// destructive opt-in, so an absent key preserves the stored value rather than
 	// reading as false. A client that predates the field cannot arm it, and a stale
 	// browser tab saving an unrelated storage change cannot disarm it.
+	//
+	// next_check_at is decided here rather than by the caller so that a save and a
+	// scheduler tick cannot interleave into a lost update. Three outcomes, in the
+	// order the CASE tests them:
+	//
+	//   NULL ("due now") when the cluster has just been switched on, or when the
+	//   storage or pinned version changed while it was on. The operator has just
+	//   stated what they want held; waiting until 03:00 to act on it reads as the
+	//   save not having worked.
+	//
+	//   The caller's freshly computed time when only the schedule or its zone
+	//   changed. Recomputing is the whole point of that edit, and it must not
+	//   trigger a check as a side effect.
+	//
+	//   Otherwise unchanged, so that saving an unrelated field (prune, node) does
+	//   not reset the cycle. A row that keeps being saved every few minutes would
+	//   otherwise never reach its own next check.
+	//
+	// The NULL passthrough ahead of the schedule branch keeps a check that is
+	// already due, due. Enabling and then setting the schedule is two saves, and
+	// without it the second would push the first one's pending check out to 03:00
+	// — so the sync the operator just asked for would silently not happen.
 	UpsertVirtioWinConfig(ctx context.Context, arg UpsertVirtioWinConfigParams) (VirtioWinConfig, error)
 	//
 	// checksum/checksum_algorithm are operator-supplied and are deliberately NOT

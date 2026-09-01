@@ -65,6 +65,18 @@ func NewClient(logger *slog.Logger) *Client {
 	}
 }
 
+// WithBase returns a shallow copy of the client pointed at a different
+// download root, sharing the underlying HTTP client so the mirror override
+// does not cost a fresh TLS handshake per check. An empty base means upstream.
+func (c *Client) WithBase(base string) *Client {
+	if base == "" {
+		base = BaseURL
+	}
+	clone := *c
+	clone.base = strings.TrimSuffix(base, "/")
+	return &clone
+}
+
 func (c *Client) get(ctx context.Context, rawURL string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -233,10 +245,12 @@ func (c *Client) releaseFor(version string) (Release, error) {
 	if err != nil || parsed.Host == "" {
 		return Release{}, fmt.Errorf("virtiowin: built an unparseable ISO URL for %q", version)
 	}
-	// Enforce https only against the real upstream. Tests point base at an
-	// httptest server, which is plain http; the guard exists to stop the
-	// upstream's http:// redirect Location leaking into a production URL, and a
-	// loopback test server cannot be that.
+	// Enforce https only against the real upstream. The guard exists to stop
+	// the upstream's http:// redirect Location leaking into a production URL,
+	// which a base that is not the upstream root cannot be the source of: a
+	// mirror's scheme comes from the operator's own configured base (validated
+	// on write, with plain http requiring an explicit confirmation), and a test
+	// points base at an httptest server, which is plain http by construction.
 	if c.base == BaseURL && parsed.Scheme != "https" {
 		return Release{}, fmt.Errorf("virtiowin: built a non-https ISO URL for %q", version)
 	}
@@ -249,15 +263,8 @@ func (c *Client) releaseFor(version string) (Release, error) {
 	}, nil
 }
 
-// buildISOURL mirrors BuildISOURL but honours a test-overridden base.
+// buildISOURL builds the ISO URL under this client's base, which is upstream
+// unless an operator configured a mirror (or a test pointed it at httptest).
 func (c *Client) buildISOURL(version string) (string, error) {
-	if c.base == BaseURL {
-		return BuildISOURL(version)
-	}
-	if !ValidVersion(version) {
-		return "", fmt.Errorf("virtiowin: invalid version %q", version)
-	}
-	dirVersion, isoVersion := SplitVersion(version)
-	return fmt.Sprintf("%s/archive-virtio/virtio-win-%s/virtio-win-%s.iso",
-		strings.TrimSuffix(c.base, "/"), dirVersion, isoVersion), nil
+	return BuildISOURLFrom(c.base, version)
 }

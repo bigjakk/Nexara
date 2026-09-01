@@ -32,11 +32,19 @@ export interface VirtioWinConfig {
   prune_enabled: boolean;
   last_check_at: string | null;
   last_error: string;
+  /** Five-field cron expression; empty means every six hours. */
+  check_schedule: string;
+  /** IANA zone the cron is read in; empty means the server's own zone. */
+  check_timezone: string;
+  /** Null means a check is due now — just enabled, or never run. */
+  next_check_at: string | null;
   /**
    * What the cluster will actually hold: the pin when set, otherwise upstream
    * stable. Resolved server-side so the UI never re-derives the precedence rule.
    */
   effective_version: string;
+  /** The download root in force. Instance-wide; see VirtioWinMirror. */
+  source_url: string;
 }
 
 export interface VirtioWinConfigRequest {
@@ -50,6 +58,8 @@ export interface VirtioWinConfigRequest {
    * operator actually saw.
    */
   prune_enabled?: boolean;
+  check_schedule: string;
+  check_timezone: string;
 }
 
 export type VirtioWinDownloadStatus =
@@ -113,4 +123,46 @@ export function isAlreadyRunning(
   result: VirtioWinDownloadResult,
 ): result is VirtioWinAlreadyRunning {
   return result.status === "already_running";
+}
+
+/**
+ * The instance-wide download source. One value for the whole install, not per
+ * cluster: the release catalog it fills is global, and being cut off from
+ * fedorapeople.org is a property of the install.
+ */
+export interface VirtioWinMirror {
+  /** The configured override; empty means follow upstream. */
+  base_url: string;
+  /** The root actually in use — the override, or upstream. */
+  effective_url: string;
+  /** What "no override" resolves to, so the UI need not hardcode a copy. */
+  upstream_url: string;
+}
+
+/**
+ * The two 422 codes the source endpoint answers with. Neither is a failure:
+ * each is a prompt the card renders inline with its own confirmation, which is
+ * why they are kept out of the global mutation error toast.
+ */
+export const MIRROR_CONFIRM_CODES = [
+  "insecure_source_confirm_required",
+  "private_address_confirm_required",
+] as const;
+
+export interface VirtioWinMirrorRequest {
+  base_url: string;
+  /** Confirms a base resolving to a private address, which a mirror always is. */
+  allow_private_address?: boolean;
+  /** Confirms a plain-http base, which fetches the ISO unauthenticated. */
+  allow_insecure?: boolean;
+}
+
+/**
+ * Result of running a cluster's check off-schedule. The config always comes
+ * back with the timestamps the check just wrote; a download is present only
+ * when the check found the target ISO missing and dispatched a fetch for it.
+ */
+export interface VirtioWinCheckResult {
+  config: VirtioWinConfig;
+  download?: VirtioWinDownload;
 }

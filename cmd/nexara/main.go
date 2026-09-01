@@ -703,7 +703,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			"report_retention_interval", "24h",
 			"task_retention_interval", "1h",
 			"rolling_update_interval", "15s",
-			"virtio_win_interval", "6h",
+			"virtio_win_interval", "60s (per-cluster schedule, default 6h)",
 			"guest_tools_interval", "1h",
 		)
 
@@ -793,9 +793,12 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		importTicker := time.NewTicker(15 * time.Second)
 		defer importTicker.Stop()
 
-		// Upstream cuts a virtio-win release every few months; 6h is already far
-		// more often than it can change, and each tick is one small HTTP request.
-		virtioWinTicker := time.NewTicker(6 * time.Hour)
+		// Minutely, but not a minutely upstream fetch: each cluster carries its
+		// own next_check_at (default six-hourly, or a cron an operator aimed at
+		// a maintenance window), so a tick with nothing due is one indexed
+		// query. The poll has to be this fine-grained for "daily at 03:00" to
+		// mean 03:00.
+		virtioWinTicker := time.NewTicker(1 * time.Minute)
 		defer virtioWinTicker.Stop()
 
 		// The reconcile half runs on its own faster tick: an 837 MiB fetch needs

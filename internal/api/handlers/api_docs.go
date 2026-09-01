@@ -172,9 +172,14 @@ var endpointMeta = map[string]APIEndpoint{
 	// Gated on storage permissions rather than a resource of their own: the
 	// effect is a node fetching a URL into a storage, which is what
 	// manage:storage already authorises on POST .../storage/:id/download-url.
+	// The source override is the exception: one write repoints every cluster's
+	// downloads, so it wants manage:settings, not a per-cluster permission.
 	"GET /api/v1/virtio-win/releases":                       {Description: "List known upstream virtio-win releases", Permission: "view:storage", Group: "virtio-win"},
+	"GET /api/v1/virtio-win/mirror":                         {Description: "Get the instance-wide virtio-win download source", Permission: "view:storage", Group: "virtio-win"},
+	"PUT /api/v1/virtio-win/mirror":                         {Description: "Point virtio-win downloads at a mirror, for air-gapped installs", Permission: "manage:settings", Group: "virtio-win"},
 	"GET /api/v1/clusters/:cluster_id/virtio-win/config":    {Description: "Get the cluster's virtio-win auto-download policy", Permission: "view:storage", Group: "virtio-win"},
 	"PUT /api/v1/clusters/:cluster_id/virtio-win/config":    {Description: "Update the cluster's virtio-win auto-download policy", Permission: "manage:storage", Group: "virtio-win"},
+	"POST /api/v1/clusters/:cluster_id/virtio-win/check":    {Description: "Run the cluster's virtio-win check now, off-schedule", Permission: "manage:storage", Group: "virtio-win"},
 	"POST /api/v1/clusters/:cluster_id/virtio-win/download": {Description: "Download a virtio-win ISO to the configured storage now", Permission: "manage:storage", Group: "virtio-win"},
 	"GET /api/v1/clusters/:cluster_id/virtio-win/downloads": {Description: "List virtio-win download history for the cluster", Permission: "view:storage", Group: "virtio-win"},
 

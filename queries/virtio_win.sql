@@ -32,8 +32,12 @@ SELECT * FROM virtio_win_releases ORDER BY discovered_at DESC, version DESC;
 -- name: GetStableVirtioWinRelease :one
 SELECT * FROM virtio_win_releases WHERE is_stable ORDER BY version DESC LIMIT 1;
 
--- ClearVirtioWinStableFlag runs immediately before marking the newly-discovered
--- stable release, so the partial index on is_stable only ever matches one row.
+-- ClearVirtioWinStableFlag reasserts the flag after a catalog refresh, so the
+-- partial index on is_stable only ever matches the row the source just named.
+--
+-- Passing '' clears EVERY row, which is the answer when the source could not
+-- name a stable version at all — a mirror has no stable-virtio/ redirect to
+-- copy. No version string is empty, so the <> holds nothing back.
 -- name: ClearVirtioWinStableFlag :exec
 UPDATE virtio_win_releases SET is_stable = false WHERE is_stable AND version <> $1;
 
@@ -51,22 +55,76 @@ SELECT * FROM virtio_win_configs WHERE cluster_id = $1;
 -- destructive opt-in, so an absent key preserves the stored value rather than
 -- reading as false. A client that predates the field cannot arm it, and a stale
 -- browser tab saving an unrelated storage change cannot disarm it.
-INSERT INTO virtio_win_configs (cluster_id, enabled, storage, node, target_version, prune_enabled)
-VALUES ($1, $2, $3, $4, $5, COALESCE(sqlc.narg('prune_enabled')::boolean, false))
+--
+-- next_check_at is decided here rather than by the caller so that a save and a
+-- scheduler tick cannot interleave into a lost update. Three outcomes, in the
+-- order the CASE tests them:
+--
+--   NULL ("due now") when the cluster has just been switched on, or when the
+--   storage or pinned version changed while it was on. The operator has just
+--   stated what they want held; waiting until 03:00 to act on it reads as the
+--   save not having worked.
+--
+--   The caller's freshly computed time when only the schedule or its zone
+--   changed. Recomputing is the whole point of that edit, and it must not
+--   trigger a check as a side effect.
+--
+--   Otherwise unchanged, so that saving an unrelated field (prune, node) does
+--   not reset the cycle. A row that keeps being saved every few minutes would
+--   otherwise never reach its own next check.
+--
+-- The NULL passthrough ahead of the schedule branch keeps a check that is
+-- already due, due. Enabling and then setting the schedule is two saves, and
+-- without it the second would push the first one's pending check out to 03:00
+-- — so the sync the operator just asked for would silently not happen.
+INSERT INTO virtio_win_configs (
+    cluster_id, enabled, storage, node, target_version, prune_enabled,
+    check_schedule, check_timezone
+)
+VALUES (
+    $1, $2, $3, $4, $5, COALESCE(sqlc.narg('prune_enabled')::boolean, false),
+    sqlc.arg('check_schedule'), sqlc.arg('check_timezone')
+)
 ON CONFLICT (cluster_id) DO UPDATE SET
     enabled        = EXCLUDED.enabled,
     storage        = EXCLUDED.storage,
     node           = EXCLUDED.node,
     target_version = EXCLUDED.target_version,
-    prune_enabled  = COALESCE(sqlc.narg('prune_enabled')::boolean, virtio_win_configs.prune_enabled)
+    prune_enabled  = COALESCE(sqlc.narg('prune_enabled')::boolean, virtio_win_configs.prune_enabled),
+    check_schedule = EXCLUDED.check_schedule,
+    check_timezone = EXCLUDED.check_timezone,
+    next_check_at  = CASE
+        WHEN NOT EXCLUDED.enabled THEN NULL
+        WHEN NOT virtio_win_configs.enabled
+             OR virtio_win_configs.storage        IS DISTINCT FROM EXCLUDED.storage
+             OR virtio_win_configs.target_version IS DISTINCT FROM EXCLUDED.target_version
+            THEN NULL
+        WHEN virtio_win_configs.next_check_at IS NULL THEN NULL
+        WHEN virtio_win_configs.check_schedule IS DISTINCT FROM EXCLUDED.check_schedule
+             OR virtio_win_configs.check_timezone IS DISTINCT FROM EXCLUDED.check_timezone
+            THEN sqlc.narg('next_check_at')::timestamptz
+        ELSE virtio_win_configs.next_check_at
+    END
 RETURNING *;
 
--- name: ListEnabledVirtioWinConfigs :many
-SELECT * FROM virtio_win_configs WHERE enabled AND storage <> '';
+-- ListDueVirtioWinConfigs returns the opted-in clusters whose next check has
+-- come round. NULL is "due now": that is what a fresh row, a just-enabled
+-- cluster, and a pre-000100 row upgraded in place all carry, so each gets one
+-- check promptly and a schedule from then on.
+-- name: ListDueVirtioWinConfigs :many
+SELECT * FROM virtio_win_configs
+WHERE enabled
+  AND storage <> ''
+  AND (next_check_at IS NULL OR next_check_at <= now());
 
+-- MarkVirtioWinConfigChecked records the outcome and arms the next check in one
+-- statement. Splitting them would let a crash between the two leave a row whose
+-- next_check_at is still in the past, i.e. one that re-checks on every tick.
 -- name: MarkVirtioWinConfigChecked :exec
 UPDATE virtio_win_configs
-SET last_check_at = now(), last_error = $2
+SET last_check_at = now(),
+    last_error    = $2,
+    next_check_at = sqlc.narg('next_check_at')::timestamptz
 WHERE cluster_id = $1;
 
 -- name: DeleteVirtioWinConfig :exec

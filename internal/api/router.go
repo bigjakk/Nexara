@@ -226,6 +226,7 @@ func (s *Server) setupRoutes() {
 		if s.virtioWinHandler != nil {
 			clusters.Get("/:cluster_id/virtio-win/config", s.virtioWinHandler.GetConfig)
 			clusters.Put("/:cluster_id/virtio-win/config", s.virtioWinHandler.UpdateConfig)
+			clusters.Post("/:cluster_id/virtio-win/check", s.virtioWinHandler.CheckNow)
 			clusters.Post("/:cluster_id/virtio-win/download", s.virtioWinHandler.Download)
 			clusters.Get("/:cluster_id/virtio-win/downloads", s.virtioWinHandler.ListDownloads)
 		}
@@ -782,11 +783,15 @@ func (s *Server) setupRoutes() {
 		snaps.Get("/", s.guestSnapshotHandler.List)
 	}
 
-	// Upstream virtio-win release catalog. Global rather than per-cluster: every
-	// cluster pins against the same published set of versions.
+	// Upstream virtio-win release catalog and the download source that fills
+	// it. Both global rather than per-cluster: every cluster pins against the
+	// same published set of versions, and being cut off from fedorapeople.org
+	// is a property of the install, not of one cluster.
 	if s.virtioWinHandler != nil {
 		virtioWin := v1.Group("/virtio-win", s.authRequired())
 		virtioWin.Get("/releases", s.virtioWinHandler.ListReleases)
+		virtioWin.Get("/mirror", s.virtioWinHandler.GetMirror)
+		virtioWin.Put("/mirror", s.virtioWinHandler.SetMirror)
 	}
 
 	// RBAC routes.

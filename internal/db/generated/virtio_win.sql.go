@@ -16,8 +16,12 @@ const clearVirtioWinStableFlag = `-- name: ClearVirtioWinStableFlag :exec
 UPDATE virtio_win_releases SET is_stable = false WHERE is_stable AND version <> $1
 `
 
-// ClearVirtioWinStableFlag runs immediately before marking the newly-discovered
-// stable release, so the partial index on is_stable only ever matches one row.
+// ClearVirtioWinStableFlag reasserts the flag after a catalog refresh, so the
+// partial index on is_stable only ever matches the row the source just named.
+//
+// Passing ” clears EVERY row, which is the answer when the source could not
+// name a stable version at all — a mirror has no stable-virtio/ redirect to
+// copy. No version string is empty, so the <> holds nothing back.
 func (q *Queries) ClearVirtioWinStableFlag(ctx context.Context, version string) error {
 	_, err := q.db.Exec(ctx, clearVirtioWinStableFlag, version)
 	return err
@@ -95,7 +99,7 @@ func (q *Queries) GetStableVirtioWinRelease(ctx context.Context) (VirtioWinRelea
 }
 
 const getVirtioWinConfig = `-- name: GetVirtioWinConfig :one
-SELECT cluster_id, enabled, storage, node, target_version, prune_enabled, last_check_at, last_error, created_at, updated_at FROM virtio_win_configs WHERE cluster_id = $1
+SELECT cluster_id, enabled, storage, node, target_version, prune_enabled, last_check_at, last_error, created_at, updated_at, check_schedule, check_timezone, next_check_at FROM virtio_win_configs WHERE cluster_id = $1
 `
 
 func (q *Queries) GetVirtioWinConfig(ctx context.Context, clusterID uuid.UUID) (VirtioWinConfig, error) {
@@ -112,6 +116,9 @@ func (q *Queries) GetVirtioWinConfig(ctx context.Context, clusterID uuid.UUID) (
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CheckSchedule,
+		&i.CheckTimezone,
+		&i.NextCheckAt,
 	)
 	return i, err
 }
@@ -224,12 +231,19 @@ func (q *Queries) ListActiveVirtioWinDownloads(ctx context.Context) ([]VirtioWin
 	return items, nil
 }
 
-const listEnabledVirtioWinConfigs = `-- name: ListEnabledVirtioWinConfigs :many
-SELECT cluster_id, enabled, storage, node, target_version, prune_enabled, last_check_at, last_error, created_at, updated_at FROM virtio_win_configs WHERE enabled AND storage <> ''
+const listDueVirtioWinConfigs = `-- name: ListDueVirtioWinConfigs :many
+SELECT cluster_id, enabled, storage, node, target_version, prune_enabled, last_check_at, last_error, created_at, updated_at, check_schedule, check_timezone, next_check_at FROM virtio_win_configs
+WHERE enabled
+  AND storage <> ''
+  AND (next_check_at IS NULL OR next_check_at <= now())
 `
 
-func (q *Queries) ListEnabledVirtioWinConfigs(ctx context.Context) ([]VirtioWinConfig, error) {
-	rows, err := q.db.Query(ctx, listEnabledVirtioWinConfigs)
+// ListDueVirtioWinConfigs returns the opted-in clusters whose next check has
+// come round. NULL is "due now": that is what a fresh row, a just-enabled
+// cluster, and a pre-000100 row upgraded in place all carry, so each gets one
+// check promptly and a schedule from then on.
+func (q *Queries) ListDueVirtioWinConfigs(ctx context.Context) ([]VirtioWinConfig, error) {
+	rows, err := q.db.Query(ctx, listDueVirtioWinConfigs)
 	if err != nil {
 		return nil, err
 	}
@@ -248,6 +262,9 @@ func (q *Queries) ListEnabledVirtioWinConfigs(ctx context.Context) ([]VirtioWinC
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CheckSchedule,
+			&i.CheckTimezone,
+			&i.NextCheckAt,
 		); err != nil {
 			return nil, err
 		}
@@ -411,17 +428,23 @@ func (q *Queries) ListVirtioWinReleases(ctx context.Context) ([]VirtioWinRelease
 
 const markVirtioWinConfigChecked = `-- name: MarkVirtioWinConfigChecked :exec
 UPDATE virtio_win_configs
-SET last_check_at = now(), last_error = $2
+SET last_check_at = now(),
+    last_error    = $2,
+    next_check_at = $3::timestamptz
 WHERE cluster_id = $1
 `
 
 type MarkVirtioWinConfigCheckedParams struct {
-	ClusterID uuid.UUID `json:"cluster_id"`
-	LastError string    `json:"last_error"`
+	ClusterID   uuid.UUID          `json:"cluster_id"`
+	LastError   string             `json:"last_error"`
+	NextCheckAt pgtype.Timestamptz `json:"next_check_at"`
 }
 
+// MarkVirtioWinConfigChecked records the outcome and arms the next check in one
+// statement. Splitting them would let a crash between the two leave a row whose
+// next_check_at is still in the past, i.e. one that re-checks on every tick.
 func (q *Queries) MarkVirtioWinConfigChecked(ctx context.Context, arg MarkVirtioWinConfigCheckedParams) error {
-	_, err := q.db.Exec(ctx, markVirtioWinConfigChecked, arg.ClusterID, arg.LastError)
+	_, err := q.db.Exec(ctx, markVirtioWinConfigChecked, arg.ClusterID, arg.LastError, arg.NextCheckAt)
 	return err
 }
 
@@ -463,30 +486,75 @@ func (q *Queries) SetVirtioWinReleaseChecksum(ctx context.Context, arg SetVirtio
 }
 
 const upsertVirtioWinConfig = `-- name: UpsertVirtioWinConfig :one
-INSERT INTO virtio_win_configs (cluster_id, enabled, storage, node, target_version, prune_enabled)
-VALUES ($1, $2, $3, $4, $5, COALESCE($6::boolean, false))
+INSERT INTO virtio_win_configs (
+    cluster_id, enabled, storage, node, target_version, prune_enabled,
+    check_schedule, check_timezone
+)
+VALUES (
+    $1, $2, $3, $4, $5, COALESCE($6::boolean, false),
+    $7, $8
+)
 ON CONFLICT (cluster_id) DO UPDATE SET
     enabled        = EXCLUDED.enabled,
     storage        = EXCLUDED.storage,
     node           = EXCLUDED.node,
     target_version = EXCLUDED.target_version,
-    prune_enabled  = COALESCE($6::boolean, virtio_win_configs.prune_enabled)
-RETURNING cluster_id, enabled, storage, node, target_version, prune_enabled, last_check_at, last_error, created_at, updated_at
+    prune_enabled  = COALESCE($6::boolean, virtio_win_configs.prune_enabled),
+    check_schedule = EXCLUDED.check_schedule,
+    check_timezone = EXCLUDED.check_timezone,
+    next_check_at  = CASE
+        WHEN NOT EXCLUDED.enabled THEN NULL
+        WHEN NOT virtio_win_configs.enabled
+             OR virtio_win_configs.storage        IS DISTINCT FROM EXCLUDED.storage
+             OR virtio_win_configs.target_version IS DISTINCT FROM EXCLUDED.target_version
+            THEN NULL
+        WHEN virtio_win_configs.next_check_at IS NULL THEN NULL
+        WHEN virtio_win_configs.check_schedule IS DISTINCT FROM EXCLUDED.check_schedule
+             OR virtio_win_configs.check_timezone IS DISTINCT FROM EXCLUDED.check_timezone
+            THEN $9::timestamptz
+        ELSE virtio_win_configs.next_check_at
+    END
+RETURNING cluster_id, enabled, storage, node, target_version, prune_enabled, last_check_at, last_error, created_at, updated_at, check_schedule, check_timezone, next_check_at
 `
 
 type UpsertVirtioWinConfigParams struct {
-	ClusterID     uuid.UUID   `json:"cluster_id"`
-	Enabled       bool        `json:"enabled"`
-	Storage       string      `json:"storage"`
-	Node          string      `json:"node"`
-	TargetVersion string      `json:"target_version"`
-	PruneEnabled  pgtype.Bool `json:"prune_enabled"`
+	ClusterID     uuid.UUID          `json:"cluster_id"`
+	Enabled       bool               `json:"enabled"`
+	Storage       string             `json:"storage"`
+	Node          string             `json:"node"`
+	TargetVersion string             `json:"target_version"`
+	PruneEnabled  pgtype.Bool        `json:"prune_enabled"`
+	CheckSchedule string             `json:"check_schedule"`
+	CheckTimezone string             `json:"check_timezone"`
+	NextCheckAt   pgtype.Timestamptz `json:"next_check_at"`
 }
 
 // prune_enabled follows the omit-vs-assert idiom from UpsertDRSConfig: it is a
 // destructive opt-in, so an absent key preserves the stored value rather than
 // reading as false. A client that predates the field cannot arm it, and a stale
 // browser tab saving an unrelated storage change cannot disarm it.
+//
+// next_check_at is decided here rather than by the caller so that a save and a
+// scheduler tick cannot interleave into a lost update. Three outcomes, in the
+// order the CASE tests them:
+//
+//	NULL ("due now") when the cluster has just been switched on, or when the
+//	storage or pinned version changed while it was on. The operator has just
+//	stated what they want held; waiting until 03:00 to act on it reads as the
+//	save not having worked.
+//
+//	The caller's freshly computed time when only the schedule or its zone
+//	changed. Recomputing is the whole point of that edit, and it must not
+//	trigger a check as a side effect.
+//
+//	Otherwise unchanged, so that saving an unrelated field (prune, node) does
+//	not reset the cycle. A row that keeps being saved every few minutes would
+//	otherwise never reach its own next check.
+//
+// The NULL passthrough ahead of the schedule branch keeps a check that is
+// already due, due. Enabling and then setting the schedule is two saves, and
+// without it the second would push the first one's pending check out to 03:00
+// — so the sync the operator just asked for would silently not happen.
 func (q *Queries) UpsertVirtioWinConfig(ctx context.Context, arg UpsertVirtioWinConfigParams) (VirtioWinConfig, error) {
 	row := q.db.QueryRow(ctx, upsertVirtioWinConfig,
 		arg.ClusterID,
@@ -495,6 +563,9 @@ func (q *Queries) UpsertVirtioWinConfig(ctx context.Context, arg UpsertVirtioWin
 		arg.Node,
 		arg.TargetVersion,
 		arg.PruneEnabled,
+		arg.CheckSchedule,
+		arg.CheckTimezone,
+		arg.NextCheckAt,
 	)
 	var i VirtioWinConfig
 	err := row.Scan(
@@ -508,6 +579,9 @@ func (q *Queries) UpsertVirtioWinConfig(ctx context.Context, arg UpsertVirtioWin
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CheckSchedule,
+		&i.CheckTimezone,
+		&i.NextCheckAt,
 	)
 	return i, err
 }
