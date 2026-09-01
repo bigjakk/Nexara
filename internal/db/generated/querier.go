@@ -362,6 +362,21 @@ type Querier interface {
 	// construction — the WHERE clause only touches rows that have none yet, so a
 	// pruned session cannot un-attribute a job that was already resolved.
 	DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error
+	// DisableScheduledTaskForBadSchedule parks a task whose cron can never fire.
+	//
+	// Leaving it enabled is the busy loop: this table's due predicate counts NULL
+	// next_run_at as "due now", and a cron that never comes round has no other
+	// value to write — so the row would be claimed, RUN, and re-queued on every
+	// tick, repeating whatever action it carries. Disabling makes it inert while
+	// last_error says why, and next_run_at NULL means that fixing the expression
+	// and re-enabling runs it once, promptly, instead of waiting for a slot the
+	// old expression never had.
+	//
+	// last_status is a parameter rather than a literal 'failed' because it
+	// describes the RUN, not the schedule: a task can execute perfectly and still
+	// have an expression that can never come round again, and recording that run
+	// as a failure would send the operator looking for a problem in the wrong half.
+	DisableScheduledTaskForBadSchedule(ctx context.Context, arg DisableScheduledTaskForBadScheduleParams) error
 	DismissNotificationDLQ(ctx context.Context, id uuid.UUID) error
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) (int64, error)
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) (int64, error)

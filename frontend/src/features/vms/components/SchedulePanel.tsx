@@ -118,7 +118,27 @@ export function SchedulePanel({
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">{s.schedule}</td>
                   <td className="px-4 py-2">
-                    <StatusIcon status={s.last_status} />
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <StatusIcon status={s.last_status} />
+                        {/* The scheduler disables a task whose cron can never
+                            fire. Without this the row just stops, with a failed
+                            icon and no next run, and nothing saying why. */}
+                        {!s.enabled && (
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Disabled
+                          </span>
+                        )}
+                      </div>
+                      {s.last_error ? (
+                        <span
+                          className="max-w-[22rem] truncate text-xs text-destructive"
+                          title={s.last_error}
+                        >
+                          {s.last_error}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-4 py-2 text-xs text-muted-foreground">
                     {s.next_run_at

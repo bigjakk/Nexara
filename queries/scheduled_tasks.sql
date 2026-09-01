@@ -50,6 +50,30 @@ FROM due
 WHERE st.id = due.id
 RETURNING st.*;
 
+-- DisableScheduledTaskForBadSchedule parks a task whose cron can never fire.
+--
+-- Leaving it enabled is the busy loop: this table's due predicate counts NULL
+-- next_run_at as "due now", and a cron that never comes round has no other
+-- value to write — so the row would be claimed, RUN, and re-queued on every
+-- tick, repeating whatever action it carries. Disabling makes it inert while
+-- last_error says why, and next_run_at NULL means that fixing the expression
+-- and re-enabling runs it once, promptly, instead of waiting for a slot the
+-- old expression never had.
+--
+-- last_status is a parameter rather than a literal 'failed' because it
+-- describes the RUN, not the schedule: a task can execute perfectly and still
+-- have an expression that can never come round again, and recording that run
+-- as a failure would send the operator looking for a problem in the wrong half.
+-- name: DisableScheduledTaskForBadSchedule :exec
+UPDATE scheduled_tasks
+SET enabled     = false,
+    last_run_at = now(),
+    next_run_at = NULL,
+    last_status = $2,
+    last_error  = $3,
+    updated_at  = now()
+WHERE id = $1;
+
 -- name: UpdateTaskLastRun :exec
 UPDATE scheduled_tasks
 SET last_run_at = $2, next_run_at = $3, last_status = $4, last_error = $5, updated_at = now()

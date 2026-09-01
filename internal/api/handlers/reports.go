@@ -390,7 +390,18 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 		}
 	}
 
-	if err := h.validateScheduleRequest(c, name, reportType, clusterID.String(), timeRangeHours, scheduleStr, format, emailEnabled, nil, emailRecipients, parameters); err != nil {
+	// Validate the cron the CALLER supplied, not the effective one. An update
+	// that leaves the schedule alone — the enable/disable toggle sends only
+	// `enabled` — must not be rejected because of an expression already in the
+	// row. A stored expression that can never fire predates this validation,
+	// and disabling it is precisely the action an operator needs to reach.
+	// It stays inert either way: the scheduler writes next_run_at NULL, which
+	// this table's due predicate never matches.
+	suppliedSchedule := ""
+	if req.Schedule != nil {
+		suppliedSchedule = *req.Schedule
+	}
+	if err := h.validateScheduleRequest(c, name, reportType, clusterID.String(), timeRangeHours, suppliedSchedule, format, emailEnabled, nil, emailRecipients, parameters); err != nil {
 		return err
 	}
 

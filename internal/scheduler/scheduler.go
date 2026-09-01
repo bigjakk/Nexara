@@ -666,14 +666,24 @@ func (s *Scheduler) executeTask(ctx context.Context, client *proxmox.Client, tas
 
 	nextRun, cronErr := NextRunTime(task.Schedule, now)
 	if cronErr != nil {
-		s.logger.Error("failed to compute next run time",
-			"task_id", task.ID, "error", cronErr)
+		// No usable next run, so there is no safe value to write: a NULL
+		// next_run_at reads as "due now" in this table's due predicate, which
+		// would claim and RE-RUN this task — the reboot or snapshot it carries
+		// — on every tick. Park it instead, with the reason on the row.
+		// status/errMsg ride along: the run that just finished has its own
+		// outcome, independent of the schedule being unusable. A snapshot that
+		// succeeded must not be recorded as failed just because the task is
+		// being parked, and a run that DID fail must not have its reason
+		// replaced by the schedule message — last_error is the only field the
+		// operator sees.
+		s.parkUnschedulableTask(ctx, task, cronErr, status, errMsg)
+		return
 	}
 
 	if err := s.queries.UpdateTaskLastRun(ctx, db.UpdateTaskLastRunParams{
 		ID:         task.ID,
 		LastRunAt:  pgtype.Timestamptz{Time: now, Valid: true},
-		NextRunAt:  pgtype.Timestamptz{Time: nextRun, Valid: cronErr == nil},
+		NextRunAt:  pgtype.Timestamptz{Time: nextRun, Valid: true},
 		LastStatus: pgtype.Text{String: status, Valid: true},
 		LastError:  pgtype.Text{String: errMsg, Valid: errMsg != ""},
 	}); err != nil {
@@ -830,7 +840,15 @@ func (s *Scheduler) createClient(ctx context.Context, clusterID uuid.UUID) (*pro
 
 func (s *Scheduler) markFailed(ctx context.Context, task db.ScheduledTask, errMsg string) {
 	now := time.Now()
-	nextRun, _ := NextRunTime(task.Schedule, now)
+	nextRun, cronErr := NextRunTime(task.Schedule, now)
+	if cronErr != nil {
+		// This path used to discard the error and store the result anyway,
+		// which wrote the zero time — year 1, permanently in the past — for
+		// both an unparseable and an unsatisfiable expression, and so re-ran
+		// the task every tick forever. See parkUnschedulableTask.
+		s.parkUnschedulableTask(ctx, task, cronErr, "failed", errMsg)
+		return
+	}
 
 	_ = s.queries.UpdateTaskLastRun(ctx, db.UpdateTaskLastRunParams{
 		ID:         task.ID,
@@ -839,6 +857,44 @@ func (s *Scheduler) markFailed(ctx context.Context, task db.ScheduledTask, errMs
 		LastStatus: pgtype.Text{String: "failed", Valid: true},
 		LastError:  pgtype.Text{String: errMsg, Valid: true},
 	})
+}
+
+// parkUnschedulableTask disables a task whose cron cannot yield a future run,
+// recording why on the row.
+//
+// Disabling is the only value that breaks the loop here. scheduled_tasks
+// matches `next_run_at IS NULL OR next_run_at <= now()`, so neither NULL nor
+// the zero time robfig returns for an unsatisfiable expression is inert — both
+// mean due now. The API rejects such an expression on write, so reaching this
+// is a row from before that check existed, or one edited by hand.
+// runStatus and runErr describe the run that just finished; they are recorded
+// as-is rather than being replaced by the schedule problem, because the two are
+// independent. A snapshot can be taken perfectly by a task whose expression can
+// never come round again — writing 'failed' there sends the operator looking
+// for a problem in the wrong half — and a run that genuinely failed must keep
+// its own reason, since last_error is the only field that surfaces either.
+func (s *Scheduler) parkUnschedulableTask(
+	ctx context.Context,
+	task db.ScheduledTask,
+	cronErr error,
+	runStatus string,
+	runErr string,
+) {
+	s.logger.Error("scheduled task disabled: its schedule can never fire",
+		"task_id", task.ID, "action", task.Action, "schedule", task.Schedule,
+		"error", cronErr, "run_status", runStatus, "run_error", runErr)
+	msg := "disabled: " + cronErr.Error()
+	if runErr != "" {
+		msg = runErr + "; disabled: " + cronErr.Error()
+	}
+	if err := s.queries.DisableScheduledTaskForBadSchedule(ctx, db.DisableScheduledTaskForBadScheduleParams{
+		ID:         task.ID,
+		LastStatus: pgtype.Text{String: runStatus, Valid: runStatus != ""},
+		LastError:  pgtype.Text{String: msg, Valid: true},
+	}); err != nil {
+		s.logger.Error("failed to disable task with an unusable schedule",
+			"task_id", task.ID, "error", err)
+	}
 }
 
 // RunAlertEvaluation evaluates all enabled alert rules against current metrics.
@@ -956,6 +1012,14 @@ func (s *Scheduler) generateScheduledReport(ctx context.Context, sched db.Report
 func (s *Scheduler) updateScheduleNextRun(ctx context.Context, sched db.ReportSchedule) {
 	now := time.Now()
 	nextRun, err := NextRunTime(sched.Schedule, now)
+	if err != nil {
+		// Unlike scheduled_tasks, this table's due predicate is a bare
+		// `next_run_at <= now()`, so NULL is genuinely inert and leaving the
+		// row enabled with no next run is a safe stop rather than a loop. Say
+		// so loudly all the same: from the UI it just stops generating.
+		s.logger.Error("report schedule will not run again: its schedule can never fire",
+			"schedule_id", sched.ID, "schedule", sched.Schedule, "error", err)
+	}
 	next := pgtype.Timestamptz{Time: nextRun, Valid: err == nil}
 
 	if uErr := s.queries.UpdateReportScheduleLastRun(ctx, db.UpdateReportScheduleLastRunParams{
