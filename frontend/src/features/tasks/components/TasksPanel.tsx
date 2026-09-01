@@ -11,43 +11,26 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SortableTableHead } from "@/components/SortableTableHead";
+import { TaskProgressCell } from "@/components/TaskProgressCell";
+import {
+  displayProgress,
+  type DisplayStatus,
+} from "@/components/layout/task-status";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
-import { isOkExit } from "@/components/layout/task-status";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { selectClass, statusFilters } from "../lib/task-filters";
+import {
+  deriveDisplayStatus,
+  taskColumnCount,
+  taskColumns,
+  useTaskSort,
+  type TaskSortKey,
+} from "../lib/task-columns";
 import { useTasks, type TaskRecord } from "../api/tasks-queries";
 
 const PAGE_SIZE = 50;
-
-type DisplayStatus = "running" | "ok" | "failed";
-
-/**
- * Resolve the display status. The reconciled task_history status is
- * authoritative once terminal (preserves the d86b7df fix); only a row the
- * server still reports as running is refined by the live poll, so it flips to
- * done before the next reconcile tick.
- */
-function deriveDisplayStatus(
-  task: TaskRecord,
-  live: { status: string; exit_status: string } | undefined,
-): DisplayStatus {
-  switch (task.status) {
-    case "completed":
-      return "ok";
-    case "failed":
-      return "failed";
-    case "stopped":
-      return isOkExit(task.exit_status) ? "ok" : "failed";
-    case "running":
-      if (live && live.status === "stopped") {
-        return isOkExit(live.exit_status) ? "ok" : "failed";
-      }
-      return "running";
-    default:
-      return isOkExit(task.exit_status) ? "ok" : "failed";
-  }
-}
 
 function StatusIcon({ status }: { status: DisplayStatus }) {
   if (status === "running")
@@ -67,6 +50,43 @@ const STATUS_LABEL: Record<DisplayStatus, string> = {
   ok: "Completed",
   failed: "Failed",
 };
+
+/**
+ * The shared `<thead>`. Both task tables render the same columns from the same
+ * definition, so adding or renaming one is a single edit in task-columns.ts.
+ *
+ * `px-4` lines the headers up with TaskRow's cells — the shared
+ * SortableTableHead is sized for the shadcn `<Table>`, and these two tables are
+ * hand-rolled at a wider gutter.
+ */
+export function TaskTableHeader({
+  withVM,
+  directionFor,
+  onSort,
+}: {
+  withVM: boolean;
+  directionFor: (key: TaskSortKey) => "asc" | "desc" | null;
+  onSort: (key: TaskSortKey) => void;
+}) {
+  return (
+    <thead>
+      <tr className="border-b bg-muted/50">
+        {taskColumns(withVM).map((col) => (
+          <SortableTableHead
+            key={col.key}
+            className="px-4"
+            direction={directionFor(col.key)}
+            onSort={() => {
+              onSort(col.key);
+            }}
+          >
+            {col.label}
+          </SortableTableHead>
+        ))}
+      </tr>
+    </thead>
+  );
+}
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleString();
@@ -109,7 +129,11 @@ export function TaskRow({
   );
 
   const display = deriveDisplayStatus(task, live);
-  const progress = display === "running" ? live?.progress : undefined;
+  const progress = displayProgress(
+    display,
+    task.progress,
+    display === "running" ? live?.progress : undefined,
+  );
   const exitText = task.exit_status || live?.exit_status || "";
 
   const { data: logLines, isLoading: logLoading } = useTaskLog(
@@ -144,23 +168,13 @@ export function TaskRow({
               </span>
             )}
             <span>{task.description || task.upid}</span>
-            {display === "running" && progress != null && (
-              <div className="flex items-center gap-1.5">
-                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-blue-500 transition-all duration-500"
-                    style={{ width: `${String(Math.round(progress * 100))}%` }}
-                  />
-                </div>
-                <span className="text-[10px] tabular-nums text-blue-500">
-                  {Math.round(progress * 100)}%
-                </span>
-              </div>
-            )}
           </div>
         </td>
         {vmName !== undefined && <td className="px-4 py-2">{vmName}</td>}
         <td className="px-4 py-2 text-muted-foreground">{task.node || "—"}</td>
+        <td className="px-4 py-2">
+          <TaskProgressCell display={display} value={progress} />
+        </td>
         <td className="px-4 py-2">
           <span
             className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[display]}`}
@@ -171,7 +185,10 @@ export function TaskRow({
       </tr>
       {expanded && (
         <tr className="border-b bg-muted/10">
-          <td colSpan={vmName !== undefined ? 7 : 6} className="px-4 py-3">
+          <td
+            colSpan={taskColumnCount(vmName !== undefined)}
+            className="px-4 py-3"
+          >
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               <span className="text-muted-foreground">Description</span>
               <span>{task.description || "—"}</span>
@@ -266,12 +283,18 @@ export function TasksPanel() {
   const [statusFilter, setStatusFilter] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const { sort, toggle, directionFor } = useTaskSort(() => {
+    setPage(0);
+  });
+
   const { data: clusters } = useClusters();
   const { data, isLoading, error } = useTasks({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
     clusterId: clusterFilter || undefined,
     status: statusFilter || undefined,
+    sort: sort.key,
+    order: sort.direction,
   });
 
   const clusterName = (id: string): string => {
@@ -330,18 +353,11 @@ export function TasksPanel() {
         <>
           <div className="overflow-x-auto rounded-md border">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-2 text-left font-medium">Started</th>
-                  <th className="px-4 py-2 text-left font-medium">Cluster</th>
-                  <th className="px-4 py-2 text-left font-medium">Type</th>
-                  <th className="px-4 py-2 text-left font-medium">
-                    Description
-                  </th>
-                  <th className="px-4 py-2 text-left font-medium">Node</th>
-                  <th className="px-4 py-2 text-left font-medium">Status</th>
-                </tr>
-              </thead>
+              <TaskTableHeader
+                withVM={false}
+                directionFor={directionFor}
+                onSort={toggle}
+              />
               <tbody>
                 {data?.items.map((task) => (
                   <TaskRow
@@ -357,7 +373,7 @@ export function TasksPanel() {
                 {data?.items.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={taskColumnCount(false)}
                       className="px-4 py-8 text-center text-muted-foreground"
                     >
                       No tasks found.

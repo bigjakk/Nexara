@@ -95,6 +95,44 @@ var validTaskStatuses = map[string]bool{
 	"running": true, "completed": true, "failed": true, "stopped": true,
 }
 
+// taskSortColumns whitelists the ?sort= keys ListTaskHistoryFiltered knows how
+// to order on, and defaultTaskSort/defaultTaskOrder are the ordering the page
+// opens with (newest first, as it always has).
+//
+// The SQL matches these on the string, so an unrecognised value would fall
+// through to the default order and silently ignore the caller — the whitelist
+// turns that into a 400 instead, the same way validTaskStatuses does for
+// ?status=. Keep in sync with TaskSortKey in the frontend's
+// features/tasks/lib/task-columns.ts.
+var taskSortColumns = map[string]bool{
+	"started": true, "cluster": true, "type": true, "description": true,
+	"vm": true, "node": true, "progress": true, "status": true,
+}
+
+const (
+	defaultTaskSort  = "started"
+	defaultTaskOrder = "desc"
+)
+
+// parseTaskSort reads the ?sort= / ?order= pair, defaulting both. Returns an
+// error naming the offending parameter so a typo is diagnosable from the
+// response rather than showing up as a mysteriously unsorted table.
+func parseTaskSort(sortBy, order string) (col string, dir string, err error) {
+	if sortBy == "" {
+		sortBy = defaultTaskSort
+	}
+	if order == "" {
+		order = defaultTaskOrder
+	}
+	if !taskSortColumns[sortBy] {
+		return "", "", fmt.Errorf("invalid sort column %q", sortBy)
+	}
+	if order != "asc" && order != "desc" {
+		return "", "", fmt.Errorf("invalid sort order %q", order)
+	}
+	return sortBy, order, nil
+}
+
 // maxVmidsFilter bounds the ?vmids= list so a hostile query string can't grow
 // the SQL ANY() array without limit. Proxmox VMIDs are 100..999999999.
 const maxVmidsFilter = 500
@@ -158,10 +196,19 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 		offset = 0
 	}
 
-	listP := db.ListTaskHistoryFilteredParams{
-		Limit:  safeconv.Int32(limit),
-		Offset: safeconv.Int32(offset),
+	sortBy, order, err := parseTaskSort(c.Query("sort"), c.Query("order"))
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
+
+	listP := db.ListTaskHistoryFilteredParams{
+		Limit:   safeconv.Int32(limit),
+		Offset:  safeconv.Int32(offset),
+		SortBy:  sortBy,
+		SortDir: order,
+	}
+	// Sorting never reaches the count — ORDER BY cannot change how many rows
+	// match, and the two queries must stay filter-for-filter identical.
 	var countP db.CountTaskHistoryFilteredParams
 
 	// Optional cluster filter — the caller must have view:task on it.
@@ -221,7 +268,10 @@ func (h *TaskHandler) List(c fiber.Ctx) error {
 		if !access.PermitsCluster(t.ClusterID) {
 			continue
 		}
-		resp = append(resp, mapTaskHistory(t))
+		// ListTaskHistoryFilteredRow is the table's own shape — the query
+		// returns task_history's columns and nothing else — so the conversion
+		// is a compile-time assertion that the two stay identical.
+		resp = append(resp, mapTaskHistory(db.TaskHistory(t)))
 	}
 	return RespondList(c, resp, total)
 }

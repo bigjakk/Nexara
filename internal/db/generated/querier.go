@@ -964,7 +964,33 @@ type Querier interface {
 	// accessible_cluster_ids carries the caller's view:task RBAC scope: NULL means
 	// global access (no restriction); an array restricts rows — and the Total the
 	// count query feeds into pagination — to those clusters ('{}' matches nothing).
-	ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]TaskHistory, error)
+	//
+	// sort_by/sort_dir drive server-side column sorting. The table is paginated at
+	// 50 rows out of a history that runs to thousands, so the ordering has to be
+	// applied to the whole filtered set — sorting the delivered page client-side
+	// would only ever reshuffle the 50 rows already on screen. Both are validated
+	// against a whitelist in the handler before they reach here; an unrecognised
+	// value simply matches no CASE branch and falls through to the default order.
+	//
+	// Sort keys order on the value the CELL RENDERS, not the raw column:
+	//   * blank text ('' node / task_type) sorts as absent, because the cell shows
+	//     an em dash for it;
+	//   * description falls back to the UPID, exactly as the cell does;
+	//   * cluster and vm sort by the joined NAME — the cell shows a name, and
+	//     ordering it by UUID or VMID would look arbitrary to the operator;
+	//   * status sorts by displayed severity (see sort_status), not alphabetically,
+	//     because 'stopped' renders as Completed or Failed depending on exit_status;
+	//   * progress sorts on the displayed fraction (see sort_progress).
+	//
+	// Both LEFT JOINs are non-multiplying: clusters.id is a primary key and vms
+	// carries UNIQUE (cluster_id, vmid), so neither can fan a task row out into
+	// several. That is load-bearing — CountTaskHistoryFiltered does not join, and
+	// a duplicated row here would make Items and Total disagree.
+	// Only task_history's own columns are returned. cluster_name/vm_label/
+	// sort_status/sort_progress exist to be ordered on, and Postgres keeps them
+	// visible to ORDER BY as columns of `ranked` without carrying them into the
+	// result — which keeps the generated row struct the shape of the table.
+	ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]ListTaskHistoryFilteredRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
 	ListUserSessions(ctx context.Context, userID uuid.UUID) ([]Session, error)

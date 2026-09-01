@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ChevronUp,
@@ -19,66 +19,24 @@ import {
   useTaskStatus,
   useTaskLog,
 } from "@/features/vms/api/vm-queries";
-import { deriveTaskStatus, parseDetails } from "./task-status";
-
-function formatRelativeTime(iso: string): string {
-  const ago = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (ago < 60) return `${String(ago)}s ago`;
-  if (ago < 3600) return `${String(Math.floor(ago / 60))}m ago`;
-  if (ago < 86400) return `${String(Math.floor(ago / 3600))}h ago`;
-  return `${String(Math.floor(ago / 86400))}d ago`;
-}
-
-function formatTimestamp(iso: string): string {
-  return new Date(iso).toLocaleString();
-}
-
-function formatAction(action: string): string {
-  return action
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-type Severity = "info" | "warning" | "error";
-
-function deriveSeverity(action: string, details: string): Severity {
-  if (details && details !== "{}" && details !== "null") {
-    try {
-      const d = JSON.parse(details) as Record<string, unknown>;
-      if (typeof d["error"] === "string" && d["error"] !== "") return "error";
-      if (d["status"] === "failed" || d["status"] === "error") return "error";
-    } catch {
-      // ignore
-    }
-  }
-  const a = action.toLowerCase();
-  if (a.includes("error") || a.includes("failed") || a.includes("fail")) return "error";
-  if (
-    a.includes("delete") ||
-    a.includes("destroy") ||
-    a.includes("disable") ||
-    a.includes("revoke") ||
-    a.includes("reset") ||
-    a.includes("stop") ||
-    a.includes("shutdown") ||
-    a.includes("suspend") ||
-    a.includes("cancel")
-  )
-    return "warning";
-  return "info";
-}
-
-const SEVERITY_STYLES: Record<Severity, string> = {
-  info: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  warning: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  error: "bg-red-500/15 text-red-600 dark:text-red-400",
-};
-
-const SEVERITY_LABELS: Record<Severity, string> = {
-  info: "info",
-  warning: "warn",
-  error: "error",
-};
+import { SortableTableHead } from "@/components/SortableTableHead";
+import { TaskProgressCell } from "@/components/TaskProgressCell";
+import { useTableSort } from "@/hooks/useTableSort";
+import { parseDetails } from "./task-status";
+import {
+  ACTIVITY_ACCESSORS,
+  ACTIVITY_COLUMNS,
+  DEFAULT_ACTIVITY_SORT,
+  SEVERITY_LABELS,
+  SEVERITY_STYLES,
+  activityColumnVisibility,
+  activityRowKey,
+  decorateActivity,
+  formatRelativeTime,
+  formatTimestamp,
+  type ActivityRowData,
+  type LiveTaskStatus,
+} from "./activity-columns";
 
 function getClusterIdFromEntry(entry: AuditLogEntry): string {
   return entry.cluster_id ?? "";
@@ -118,53 +76,28 @@ function ActiveTaskPoller({
 }
 
 function ActivityRow({
-  entry,
+  row,
   expanded,
   onToggle,
   onFocus,
-  taskStatus,
 }: {
-  entry: AuditLogEntry;
+  row: ActivityRowData;
   expanded: boolean;
   onToggle: () => void;
   onFocus: () => void;
-  taskStatus: { status: string; exitStatus: string; progress?: number } | undefined;
 }) {
   const { t } = useTranslation("common");
-  const details = parseDetails(entry.details);
-  const hasUpid = !!details.upid;
+  const { entry, details, upid, status, severity, progress } = row;
+  const hasUpid = !!upid;
   const clusterId = getClusterIdFromEntry(entry);
 
-  const status = deriveTaskStatus(entry, details, taskStatus);
   const isRunning = status === "running";
   const isOk = status === "ok";
   const isFailed = status === "failed";
-  const progress = isRunning ? taskStatus?.progress : undefined;
-  const exitStatusText =
-    taskStatus?.exitStatus ||
-    entry.task_exit_status ||
-    (typeof details["status"] === "string" ? details["status"] : "");
-
-  // Derive severity — task failure overrides to error
-  let severity = deriveSeverity(entry.action, entry.details);
-  if (isFailed) severity = "error";
-
-  // For Proxmox-sourced entries, resolve resource_name from details JSON
-  let resourceLabel =
-    entry.resource_name && entry.resource_vmid
-      ? `${entry.resource_name} (${String(entry.resource_vmid)})`
-      : entry.resource_name || entry.resource_id;
-  if (!entry.resource_name && details["resource_name"]) {
-    const rn = typeof details["resource_name"] === "string" ? details["resource_name"] : null;
-    const ri = typeof details["resource_id"] === "string" ? details["resource_id"] : null;
-    if (rn) {
-      resourceLabel = ri ? `${rn} (${ri})` : rn;
-    }
-  }
 
   const { data: logLines, isLoading: logLoading } = useTaskLog(
     clusterId,
-    details.upid ?? null,
+    upid ?? null,
     expanded && hasUpid,
   );
 
@@ -178,7 +111,7 @@ function ActivityRow({
           onFocus();
         }}
       >
-        <td className="px-2 py-1">
+        <td className={`px-2 py-1 ${activityColumnVisibility("status")}`}>
           <div className="flex items-center gap-1.5">
             <ChevronRight
               className={`h-3 w-3 text-muted-foreground transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -209,12 +142,12 @@ function ActivityRow({
             </span>
           </div>
         </td>
-        <td className="px-2 py-1">
+        <td className={`px-2 py-1 ${activityColumnVisibility("level")}`}>
           <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none ${SEVERITY_STYLES[severity]}`}>
             {SEVERITY_LABELS[severity]}
           </span>
         </td>
-        <td className="px-2 py-1">
+        <td className={`px-2 py-1 ${activityColumnVisibility("action")}`}>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             {entry.source === "proxmox" && (
               <span className="inline-flex items-center gap-0.5 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-orange-600 dark:text-orange-400">
@@ -222,40 +155,39 @@ function ActivityRow({
                 PVE
               </span>
             )}
-            <span className="font-medium">{formatAction(entry.action)}</span>
-            {resourceLabel && (
+            <span className="font-medium">{row.actionLabel}</span>
+            {row.resourceLabel && (
               <span className="text-muted-foreground">
-                — {resourceLabel}
+                — {row.resourceLabel}
               </span>
             )}
-            {isRunning && progress != null && (
-              <div className="flex items-center gap-1.5">
-                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-blue-500 transition-all duration-500"
-                    style={{ width: `${String(Math.round(progress * 100))}%` }}
-                  />
-                </div>
-                <span className="text-[10px] tabular-nums text-blue-500">
-                  {Math.round(progress * 100)}%
-                </span>
-              </div>
-            )}
-            {isRunning && progress == null && (
-              <span className="text-xs text-blue-500">{t("running").toLowerCase()}</span>
+            {isRunning && (
+              <span className="md:hidden">
+                <TaskProgressCell display={status} value={progress} />
+              </span>
             )}
           </div>
         </td>
-        <td className="hidden px-2 py-1 text-muted-foreground md:table-cell">
+        <td
+          className={`px-2 py-1 text-muted-foreground ${activityColumnVisibility("cluster")}`}
+        >
           {entry.cluster_name || "—"}
         </td>
-        <td className="px-2 py-1 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+        <td className={`px-2 py-1 ${activityColumnVisibility("progress")}`}>
+          <TaskProgressCell
+            display={status === "none" ? null : status}
+            value={progress}
+          />
+        </td>
+        <td
+          className={`px-2 py-1 text-right font-mono text-[11px] tabular-nums text-muted-foreground ${activityColumnVisibility("time")}`}
+        >
           {formatRelativeTime(entry.created_at)}
         </td>
       </tr>
       {expanded && (
         <tr className="border-b bg-muted/10">
-          <td colSpan={5} className="px-4 py-2">
+          <td colSpan={ACTIVITY_COLUMNS.length} className="px-4 py-2">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               <span className="text-muted-foreground">Action</span>
               <span>{entry.action}</span>
@@ -271,11 +203,11 @@ function ActivityRow({
               </span>
               <span className="text-muted-foreground">Time</span>
               <span>{formatTimestamp(entry.created_at)}</span>
-              {isFailed && exitStatusText !== "" && (
+              {isFailed && row.exitStatusText !== "" && (
                 <>
                   <span className="text-muted-foreground">Exit Status</span>
                   <span className="text-red-500">
-                    {exitStatusText}
+                    {row.exitStatusText}
                   </span>
                 </>
               )}
@@ -356,7 +288,7 @@ export function TaskLogPanel() {
 
   // Track live task statuses from pollers
   const [taskStatuses, setTaskStatuses] = useState<
-    Record<string, { status: string; exitStatus: string; progress?: number }>
+    Record<string, LiveTaskStatus>
   >({});
 
   const handleTaskStatus = useCallback(
@@ -391,6 +323,31 @@ export function TaskLogPanel() {
     entries?.filter(
       (e) => e.task_status === "running" && !!parseDetails(e.details).upid,
     ) ?? [];
+
+  // Resolve every cell's value once, then sort on those same values.
+  //
+  // Sorting is client-side here, unlike the Tasks page. useRecentActivity
+  // fetches a fixed window (the server's LIMIT 50, newest first) rather than
+  // paging, so re-ordering it cannot hide rows that a next page would have
+  // held — there is no next page. It ranks WITHIN the 50 most recent entries
+  // and nothing further back; a failure older than that is not on screen to
+  // be sorted to the top, which is why the Events → Tasks table, and not this
+  // drawer, is where a full failure history is read.
+  const rows = useMemo(
+    () => (entries ?? []).map((e) => decorateActivity(e, taskStatuses)),
+    [entries, taskStatuses],
+  );
+
+  const {
+    rows: sortedRows,
+    toggle,
+    directionFor,
+  } = useTableSort(
+    rows,
+    ACTIVITY_ACCESSORS,
+    activityRowKey,
+    DEFAULT_ACTIVITY_SORT,
+  );
 
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(
     null,
@@ -477,45 +434,44 @@ export function TaskLogPanel() {
           {entries && entries.length > 0 && (
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                  <th className="w-12 px-2 py-1.5" />
-                  <th className="w-14 px-2 py-1.5 font-medium">Level</th>
-                  <th className="px-2 py-1.5 font-medium">Action</th>
-                  <th className="hidden px-2 py-1.5 font-medium md:table-cell">Cluster</th>
-                  <th className="w-24 px-2 py-1.5 text-right font-medium">
-                    Time
-                  </th>
+                <tr className="border-b">
+                  {ACTIVITY_COLUMNS.map((col) => (
+                    <SortableTableHead
+                      key={col.key}
+                      className={`h-auto py-1.5 ${col.className} ${activityColumnVisibility(col.key)}`}
+                      align={col.align ?? "left"}
+                      direction={directionFor(col.key)}
+                      onSort={() => {
+                        toggle(col.key);
+                      }}
+                    >
+                      {col.label}
+                    </SortableTableHead>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {entries.map((entry) => {
-                  const details = parseDetails(entry.details);
-                  const upid = details.upid;
-                  return (
-                    <ActivityRow
-                      key={entry.id}
-                      entry={entry}
-                      expanded={expandedId === entry.id}
-                      onToggle={() => {
-                        setExpandedId(
-                          expandedId === entry.id ? null : entry.id,
-                        );
-                      }}
-                      onFocus={() => {
-                        if (upid && entry.cluster_id) {
-                          setFocusedTask({
-                            clusterId: entry.cluster_id,
-                            upid,
-                            description: `${formatAction(entry.action)} — ${entry.resource_name || entry.resource_id}`,
-                          });
-                        }
-                      }}
-                      taskStatus={
-                        upid ? taskStatuses[upid] : undefined
+                {sortedRows.map((row) => (
+                  <ActivityRow
+                    key={row.entry.id}
+                    row={row}
+                    expanded={expandedId === row.entry.id}
+                    onToggle={() => {
+                      setExpandedId(
+                        expandedId === row.entry.id ? null : row.entry.id,
+                      );
+                    }}
+                    onFocus={() => {
+                      if (row.upid && row.entry.cluster_id) {
+                        setFocusedTask({
+                          clusterId: row.entry.cluster_id,
+                          upid: row.upid,
+                          description: `${row.actionLabel} — ${row.resourceLabel}`,
+                        });
                       }
-                    />
-                  );
-                })}
+                    }}
+                  />
+                ))}
               </tbody>
             </table>
           )}

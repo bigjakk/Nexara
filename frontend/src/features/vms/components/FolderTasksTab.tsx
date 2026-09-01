@@ -8,8 +8,15 @@ import {
   useTasks,
   type TaskRecord,
 } from "@/features/tasks/api/tasks-queries";
-import { TaskRow } from "@/features/tasks/components/TasksPanel";
+import {
+  TaskRow,
+  TaskTableHeader,
+} from "@/features/tasks/components/TasksPanel";
 import { selectClass, statusFilters } from "@/features/tasks/lib/task-filters";
+import {
+  taskColumnCount,
+  useTaskSort,
+} from "@/features/tasks/lib/task-columns";
 import { upidVmid } from "@/lib/upid";
 
 const PAGE_SIZE = 50;
@@ -44,6 +51,10 @@ export function FolderTasksTab({
   const [page, setPage] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const { sort, toggle, directionFor } = useTaskSort(() => {
+    setPage(0);
+  });
+
   const vmidList = useMemo(
     () => [...vmids].sort((a, b) => a - b),
     [vmids],
@@ -59,6 +70,8 @@ export function FolderTasksTab({
     offset: page * PAGE_SIZE,
     clusterId,
     status: statusFilter || undefined,
+    sort: sort.key,
+    order: sort.direction,
     vmids: vmidList,
     enabled: hasVMs && !tooManyVMs,
   });
@@ -119,17 +132,11 @@ export function FolderTasksTab({
 
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="px-4 py-2 text-left font-medium">Started</th>
-              <th className="px-4 py-2 text-left font-medium">Cluster</th>
-              <th className="px-4 py-2 text-left font-medium">Type</th>
-              <th className="px-4 py-2 text-left font-medium">Description</th>
-              <th className="px-4 py-2 text-left font-medium">VM</th>
-              <th className="px-4 py-2 text-left font-medium">Node</th>
-              <th className="px-4 py-2 text-left font-medium">Status</th>
-            </tr>
-          </thead>
+          <TaskTableHeader
+            withVM
+            directionFor={directionFor}
+            onSort={toggle}
+          />
           <tbody>
             {items.map((task) => {
               const vmid = taskVmid(task);
@@ -166,7 +173,7 @@ export function FolderTasksTab({
             {items.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={taskColumnCount(true)}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   No tasks for VMs in this folder.

@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -241,5 +243,75 @@ func TestTaskList_ScopeGatesBeforeDB(t *testing.T) {
 				t.Fatalf("items must be an empty array, got %s", body)
 			}
 		})
+	}
+}
+
+func TestParseTaskSort(t *testing.T) {
+	tests := []struct {
+		name      string
+		sortBy    string
+		order     string
+		wantSort  string
+		wantOrder string
+		wantErr   bool
+	}{
+		{"defaults when both empty", "", "", "started", "desc", false},
+		{"order defaults alone", "node", "", "node", "desc", false},
+		{"sort defaults alone", "", "asc", "started", "asc", false},
+		{"explicit pair", "progress", "asc", "progress", "asc", false},
+		{"derived status column", "status", "desc", "status", "desc", false},
+		{"joined cluster column", "cluster", "asc", "cluster", "asc", false},
+		{"joined vm column", "vm", "asc", "vm", "asc", false},
+		// The SQL matches sort_by on the string, so an unrecognised key would
+		// silently fall through to the default order and quietly ignore the
+		// caller. These must be rejected, not absorbed.
+		{"unknown column", "upid", "asc", "", "", true},
+		{"raw sql column name", "started_at", "asc", "", "", true},
+		{"injection attempt", "started; DROP TABLE task_history", "asc", "", "", true},
+		{"unknown order", "started", "sideways", "", "", true},
+		{"uppercase order", "started", "ASC", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotSort, gotOrder, err := parseTaskSort(tt.sortBy, tt.order)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseTaskSort(%q, %q) = (%q, %q, nil); want an error",
+						tt.sortBy, tt.order, gotSort, gotOrder)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseTaskSort(%q, %q) returned unexpected error: %v", tt.sortBy, tt.order, err)
+			}
+			if gotSort != tt.wantSort || gotOrder != tt.wantOrder {
+				t.Errorf("parseTaskSort(%q, %q) = (%q, %q); want (%q, %q)",
+					tt.sortBy, tt.order, gotSort, gotOrder, tt.wantSort, tt.wantOrder)
+			}
+		})
+	}
+}
+
+// TestTaskSortColumnsMatchSQL guards the whitelist against the ORDER BY it
+// gates: a key accepted here but absent from queries/tasks.sql would return
+// 200 with silently unsorted rows, which is worse than the 400 the whitelist
+// exists to produce.
+func TestTaskSortColumnsMatchSQL(t *testing.T) {
+	query, err := os.ReadFile(filepath.Join("..", "..", "..", "queries", "tasks.sql"))
+	if err != nil {
+		t.Fatalf("read queries/tasks.sql: %v", err)
+	}
+	sql := string(query)
+	for col := range taskSortColumns {
+		if !strings.Contains(sql, "'"+col+"'") {
+			t.Errorf("sort column %q is accepted by the handler but never matched in queries/tasks.sql", col)
+		}
+	}
+	if !taskSortColumns[defaultTaskSort] {
+		t.Errorf("defaultTaskSort %q is not in taskSortColumns", defaultTaskSort)
+	}
+	if defaultTaskOrder != "asc" && defaultTaskOrder != "desc" {
+		t.Errorf("defaultTaskOrder %q is not a valid direction", defaultTaskOrder)
 	}
 }
