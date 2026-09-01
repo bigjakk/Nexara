@@ -54,6 +54,7 @@ type Querier interface {
 	// and survives to be serviced by the following tick instead of being cleared
 	// without ever being acted on.
 	ClearDRSEvalRequest(ctx context.Context, arg ClearDRSEvalRequestParams) error
+	ClearGuestToolsCDROMRestore(ctx context.Context, arg ClearGuestToolsCDROMRestoreParams) error
 	// ClearJobCleanupPending is self-guarding: the flag only clears when no
 	// job-level marker and no node-level record still holds state, so a release
 	// racing a concurrent record-write cannot retire the job from the sweep
@@ -153,6 +154,7 @@ type Querier interface {
 	// (a dry-run or a preview endpoint).
 	CountClustersSharingBootstrapUser(ctx context.Context, arg CountClustersSharingBootstrapUserParams) (int64, error)
 	CountCompletedNodes(ctx context.Context, jobID uuid.UUID) (CountCompletedNodesRow, error)
+	CountGuestToolsInFlightForCluster(ctx context.Context, clusterID uuid.UUID) (int64, error)
 	CountNodeStatusesByCluster(ctx context.Context) ([]CountNodeStatusesByClusterRow, error)
 	CountNotificationDLQByState(ctx context.Context) (CountNotificationDLQByStateRow, error)
 	CountRecoveryCodes(ctx context.Context, userID uuid.UUID) (int64, error)
@@ -236,6 +238,15 @@ type Querier interface {
 	// but it must be a non-nil empty slice. pgx encodes a nil slice as SQL NULL,
 	// and NOT (x = ANY(NULL)) is NULL, so a nil list silently deletes nothing.
 	DeleteGuestSnapshotsNotInSet(ctx context.Context, arg DeleteGuestSnapshotsNotInSetParams) (int64, error)
+	DeleteGuestToolsConfig(ctx context.Context, clusterID uuid.UUID) error
+	DeleteGuestToolsPolicy(ctx context.Context, arg DeleteGuestToolsPolicyParams) error
+	// DeleteGuestToolsStateForVanishedGuests drops rows for guests that no longer
+	// exist in the cluster.
+	//
+	// @vmids must be a non-nil, possibly-empty slice: pgx encodes a nil slice as
+	// SQL NULL, and `NOT (x = ANY(NULL))` is NULL rather than true, so a nil list
+	// silently deletes nothing instead of everything.
+	DeleteGuestToolsStateForVanishedGuests(ctx context.Context, arg DeleteGuestToolsStateForVanishedGuestsParams) error
 	DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error
 	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
 	DeleteNotificationChannel(ctx context.Context, id uuid.UUID) error
@@ -360,6 +371,9 @@ type Querier interface {
 	// sit 'pending' with no task to reconcile against forever.
 	FailStalePendingVMImportJobs(ctx context.Context) error
 	FailVMImportJob(ctx context.Context, arg FailVMImportJobParams) error
+	// FinishGuestToolsUpdate records a terminal outcome and clears the borrowed
+	// CD-ROM bookkeeping, which the reconciler has restored by this point.
+	FinishGuestToolsUpdate(ctx context.Context, arg FinishGuestToolsUpdateParams) error
 	FinishVirtioWinDownload(ctx context.Context, arg FinishVirtioWinDownloadParams) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error)
 	GetAPIKeyByID(ctx context.Context, id uuid.UUID) (ApiKey, error)
@@ -453,6 +467,9 @@ type Querier interface {
 	GetEnabledOIDCConfig(ctx context.Context) (OidcConfig, error)
 	GetExternalFeedCache(ctx context.Context, source string) (ExternalFeedCache, error)
 	GetFirewallTemplate(ctx context.Context, id uuid.UUID) (FirewallTemplate, error)
+	GetGuestToolsConfig(ctx context.Context, clusterID uuid.UUID) (GuestToolsConfig, error)
+	GetGuestToolsPolicy(ctx context.Context, arg GetGuestToolsPolicyParams) (GuestToolsPolicy, error)
+	GetGuestToolsState(ctx context.Context, arg GetGuestToolsStateParams) (GuestToolsState, error)
 	// GetGuestVeeamMalware is the vm-scoped counterpart of
 	// GetClusterVeeamMalwareStats.
 	GetGuestVeeamMalware(ctx context.Context, arg GetGuestVeeamMalwareParams) (GetGuestVeeamMalwareRow, error)
@@ -676,6 +693,7 @@ type Querier interface {
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
 	ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
+	ListActiveGuestToolsConfigs(ctx context.Context) ([]GuestToolsConfig, error)
 	ListActiveMaintenanceWindows(ctx context.Context) ([]MaintenanceWindow, error)
 	ListActivePBSServers(ctx context.Context) ([]PbsServer, error)
 	ListActiveVMImportJobs(ctx context.Context) ([]VmImportJob, error)
@@ -786,6 +804,22 @@ type Querier interface {
 	// cluster's rows, oldest dated first (unknown ages last), with the guest
 	// name rejoined live (NULL when the guest is gone from inventory).
 	ListGuestSnapshotsForReport(ctx context.Context, clusterID uuid.UUID) ([]ListGuestSnapshotsForReportRow, error)
+	// ListGuestToolsFleet is the cluster-wide view: every Windows guest Nexara
+	// knows about, with whatever has been observed and whatever policy applies.
+	//
+	// Driven from vms rather than from guest_tools_state so a guest that has never
+	// been probed still appears — "we have never looked at this one" is exactly
+	// what an operator needs to see. Windows detection matches the frontend's rule
+	// (os-classify.ts): config_ostype prefixed win/w2k plus the two odd ones, or an
+	// agent that self-reports mswindows.
+	ListGuestToolsFleet(ctx context.Context, clusterID uuid.UUID) ([]ListGuestToolsFleetRow, error)
+	ListGuestToolsInFlight(ctx context.Context) ([]GuestToolsState, error)
+	// ListGuestToolsPendingCDROMRestore finds guests whose update has finished but
+	// whose borrowed drive was never put back, because the restore failed at the
+	// time. Retried on later passes so a transient Proxmox error does not strand
+	// the ISO on the guest permanently.
+	ListGuestToolsPendingCDROMRestore(ctx context.Context) ([]GuestToolsState, error)
+	ListGuestToolsPolicies(ctx context.Context, clusterID uuid.UUID) ([]GuestToolsPolicy, error)
 	// Guests whose HA resource state is "error" (needs manual intervention).
 	ListHAErrorGuests(ctx context.Context) ([]ListHAErrorGuestsRow, error)
 	// Guests paused by a storage I/O error (Proxmox signals this via the guest lock).
@@ -1124,6 +1158,11 @@ type Querier interface {
 	RevokeSession(ctx context.Context, id uuid.UUID) error
 	RevokeUserRole(ctx context.Context, arg RevokeUserRoleParams) error
 	SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error
+	SetGuestToolsRunning(ctx context.Context, arg SetGuestToolsRunningParams) error
+	// SetGuestToolsStage moves the staging state machine and records what the
+	// guest's CD-ROM looked like before we borrowed it.
+	SetGuestToolsStage(ctx context.Context, arg SetGuestToolsStageParams) error
+	SetGuestToolsUptime(ctx context.Context, arg SetGuestToolsUptimeParams) error
 	SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabledParams) error
 	SetJobDisabledHARules(ctx context.Context, arg SetJobDisabledHARulesParams) error
 	SetJobNativeCRSPaused(ctx context.Context, arg SetJobNativeCRSPausedParams) error
@@ -1287,6 +1326,19 @@ type Querier interface {
 	// low-confidence name tier with nothing to indicate why.
 	UpsertGuestSmbios(ctx context.Context, arg UpsertGuestSmbiosParams) error
 	UpsertGuestSnapshot(ctx context.Context, arg UpsertGuestSnapshotParams) (GuestSnapshot, error)
+	//
+	// snapshot_before follows the omit-vs-assert idiom from UpsertDRSConfig. It is
+	// the rollback for a driver swap that can leave a guest unbootable, so an
+	// absent key preserves the stored value rather than reading as false: a client
+	// that predates the field must not be able to disarm it, and a stale browser
+	// tab saving an unrelated change must not either.
+	UpsertGuestToolsConfig(ctx context.Context, arg UpsertGuestToolsConfigParams) (GuestToolsConfig, error)
+	UpsertGuestToolsDetection(ctx context.Context, arg UpsertGuestToolsDetectionParams) error
+	//
+	// excluded uses the same omit-vs-assert guard, for the same reason in reverse:
+	// an exclusion is the operator saying "never touch this guest", and no client
+	// that simply does not know about the field should be able to clear it.
+	UpsertGuestToolsPolicy(ctx context.Context, arg UpsertGuestToolsPolicyParams) (GuestToolsPolicy, error)
 	UpsertKEVEntry(ctx context.Context, arg UpsertKEVEntryParams) error
 	UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error)
 	UpsertNodeDisk(ctx context.Context, arg UpsertNodeDiskParams) (NodeDisk, error)

@@ -955,6 +955,163 @@ func (c *Client) GetGuestAgentNetworkInterfaces(ctx context.Context, node string
 	}
 	return wrapper.Result, nil
 }
+// maxGuestFileWriteBytes bounds a single agent/file-write. Proxmox validates
+// the content parameter at 61440 characters, so anything larger is rejected by
+// the API rather than by the guest. Callers that need more must chunk; nothing
+// here does, because the only thing written into a guest is a short script.
+const maxGuestFileWriteBytes = 60 * 1024
+
+// GuestAgentExec starts a command inside the guest via the QEMU guest agent and
+// returns its PID, to be polled with GuestAgentExecStatus.
+//
+// Returns (0, nil) when the agent is not running, matching the other agent
+// helpers: an absent agent is a state, not a failure.
+//
+// The PID is deliberately an int rather than a string. Proxmox returns a
+// process id here, not a UPID, and typing it as a string would both invite that
+// confusion and drag the method into the UPID/TrackTask guard list.
+//
+// IMPORTANT: whatever is started here is a child of the guest agent. A command
+// that restarts the agent's own service — which installing virtio-win guest
+// tools does — kills the process tree and loses the PID table with it. Run such
+// things detached (a scheduled task), not directly through this.
+func (c *Client) GuestAgentExec(ctx context.Context, node string, vmid int, command []string, inputData string) (int, error) {
+	if err := validateNodeName(node); err != nil {
+		return 0, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return 0, err
+	}
+	if len(command) == 0 {
+		return 0, fmt.Errorf("command is required")
+	}
+
+	form := url.Values{}
+	// Proxmox takes the command as a repeated parameter, one element per
+	// argument — NOT a single shell string. Passing it as one value makes the
+	// agent try to execute the whole line as a program name.
+	for _, arg := range command {
+		form.Add("command", arg)
+	}
+	if inputData != "" {
+		form.Set("input-data", inputData)
+	}
+
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/agent/exec"
+	var wrapper struct {
+		PID int `json:"pid"`
+	}
+	if err := c.doPost(ctx, path, form, &wrapper); err != nil {
+		if isAgentNotRunning(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("guest agent exec on VM %d on %s: %w", vmid, node, err)
+	}
+	return wrapper.PID, nil
+}
+
+// GuestAgentExecStatus polls a command started by GuestAgentExec.
+// Returns (nil, nil) when the agent is not running.
+func (c *Client) GuestAgentExecStatus(ctx context.Context, node string, vmid, pid int) (*GuestExecStatus, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	if pid <= 0 {
+		return nil, fmt.Errorf("pid must be positive")
+	}
+
+	q := url.Values{}
+	q.Set("pid", strconv.Itoa(pid))
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) +
+		"/agent/exec-status?" + q.Encode()
+
+	var status GuestExecStatus
+	if err := c.do(ctx, path, &status); err != nil {
+		if isAgentNotRunning(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("guest agent exec-status for pid %d on VM %d on %s: %w", pid, vmid, node, err)
+	}
+	return &status, nil
+}
+
+// GuestAgentFileWrite writes content to a file inside the guest.
+//
+// Proxmox base64-encodes the content on our behalf (encode=1), so callers pass
+// plain bytes. The size cap is the API's, not the agent's.
+func (c *Client) GuestAgentFileWrite(ctx context.Context, node string, vmid int, file string, content []byte) error {
+	if err := validateNodeName(node); err != nil {
+		return err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return err
+	}
+	if file == "" {
+		return fmt.Errorf("file path is required")
+	}
+	if len(content) > maxGuestFileWriteBytes {
+		return fmt.Errorf("content is %d bytes, over the %d-byte limit Proxmox accepts for a single write",
+			len(content), maxGuestFileWriteBytes)
+	}
+
+	form := url.Values{}
+	form.Set("file", file)
+	form.Set("content", string(content))
+	form.Set("encode", "1")
+
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/agent/file-write"
+	if err := c.doPost(ctx, path, form, nil); err != nil {
+		if isAgentNotRunning(err) {
+			return ErrGuestAgentUnavailable
+		}
+		return fmt.Errorf("guest agent file-write %s on VM %d on %s: %w", file, vmid, node, err)
+	}
+	return nil
+}
+
+// GuestAgentFileRead reads a file from inside the guest.
+// Returns (nil, nil) when the agent is not running.
+//
+// Proxmox decodes the agent's base64 for us (decode=1). A file larger than the
+// agent's own limit comes back truncated, which is surfaced as an error rather
+// than silently handing back a partial file — callers here parse JSON, and half
+// a JSON document is worse than none.
+func (c *Client) GuestAgentFileRead(ctx context.Context, node string, vmid int, file string) ([]byte, error) {
+	if err := validateNodeName(node); err != nil {
+		return nil, err
+	}
+	if err := validateVMID(vmid); err != nil {
+		return nil, err
+	}
+	if file == "" {
+		return nil, fmt.Errorf("file path is required")
+	}
+
+	q := url.Values{}
+	q.Set("file", file)
+	q.Set("decode", "1")
+	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) +
+		"/agent/file-read?" + q.Encode()
+
+	var wrapper struct {
+		Content   string `json:"content"`
+		Truncated bool   `json:"truncated"`
+	}
+	if err := c.do(ctx, path, &wrapper); err != nil {
+		if isAgentNotRunning(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("guest agent file-read %s on VM %d on %s: %w", file, vmid, node, err)
+	}
+	if wrapper.Truncated {
+		return nil, fmt.Errorf("guest agent file-read %s on VM %d on %s: file was truncated", file, vmid, node)
+	}
+	return []byte(wrapper.Content), nil
+}
+
 func (c *Client) GetCTConfig(ctx context.Context, node string, vmid int) (VMConfig, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err

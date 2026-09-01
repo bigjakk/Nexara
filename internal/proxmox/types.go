@@ -1218,6 +1218,23 @@ type GuestIPAddress struct {
 }
 
 // GuestNetworkInterface represents a network interface reported by the QEMU guest agent.
+// GuestExecStatus is the result of polling a guest-agent exec by PID.
+//
+// Exited is the field to branch on: a process that has not exited yet returns
+// with ExitCode unset, and treating that as exit code 0 would read every
+// in-flight command as an immediate success.
+type GuestExecStatus struct {
+	// FlexBool, not bool: Proxmox's schema declares these boolean but the guest
+	// agent sends 0/1 on the wire, which fails a plain bool decode outright.
+	Exited       FlexBool `json:"exited"`
+	ExitCode     FlexInt  `json:"exitcode"`
+	Signal       FlexInt  `json:"signal,omitempty"`
+	OutData      string   `json:"out-data,omitempty"`
+	ErrData      string   `json:"err-data,omitempty"`
+	OutTruncated FlexBool `json:"out-truncated,omitempty"`
+	ErrTruncated FlexBool `json:"err-truncated,omitempty"`
+}
+
 type GuestNetworkInterface struct {
 	Name            string           `json:"name"`
 	HardwareAddress string           `json:"hardware-address"`

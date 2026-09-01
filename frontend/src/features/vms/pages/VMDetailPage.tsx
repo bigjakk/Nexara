@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
+import { VMGuestToolsCard } from "@/features/guest-tools/components/VMGuestToolsCard";
+import { VMGuestToolsSummary } from "@/features/guest-tools/components/VMGuestToolsSummary";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { ArrowLeft, Monitor, Terminal, Pencil, Check, X, Container, Server } from "lucide-react";
 import { OSIcon } from "@/components/OSIcon";
@@ -119,6 +121,10 @@ export function VMDetailPage() {
 
   const normalizedStatus = vm.status.toLowerCase() as ResourceStatus;
   const consoleAllowed = canConsole(kind === "ct" ? "container" : "vm");
+  // Guest tools are a Windows-only concept, so the tab only exists for them.
+  const isWindowsGuest =
+    classifyOS(vm.config_ostype) === "windows" ||
+    classifyOS(vm.ostype) === "windows";
 
   function openConsole(type: "terminal" | "vnc") {
     if (!vm) return;
@@ -303,6 +309,9 @@ export function VMDetailPage() {
           {kind === "vm" && (
             <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
           )}
+          {kind === "vm" && isWindowsGuest && (
+            <TabsTrigger value="guest-tools">Guest Tools</TabsTrigger>
+          )}
           <TabsTrigger value="backups">Backups</TabsTrigger>
           <TabsTrigger value="schedules">Schedules</TabsTrigger>
         </TabsList>
@@ -326,8 +335,15 @@ export function VMDetailPage() {
 
           {/* Guest Agent — QEMU VMs only, when running */}
           {kind === "vm" && normalizedStatus === "running" && (
-            <GuestAgentSection clusterId={clusterId} vmId={vmId} />
+            <GuestAgentSection
+              clusterId={clusterId}
+              vmId={vmId}
+              vmid={vm.vmid}
+              configOstype={vm.config_ostype}
+              ostype={vm.ostype}
+            />
           )}
+
 
           {/* Metrics */}
           <VMMetricsPanel
@@ -362,6 +378,17 @@ export function VMDetailPage() {
         {kind === "vm" && (
           <TabsContent value="cloud-init" className="mt-4">
             <CloudInitPanel clusterId={clusterId} vmId={vmId} />
+          </TabsContent>
+        )}
+
+        {kind === "vm" && isWindowsGuest && (
+          <TabsContent value="guest-tools" className="mt-4">
+            <VMGuestToolsCard
+              clusterId={clusterId}
+              vmid={vm.vmid}
+              configOstype={vm.config_ostype}
+              ostype={vm.ostype}
+            />
           </TabsContent>
         )}
 
@@ -459,7 +486,19 @@ export function VMDetailPage() {
   );
 }
 
-function GuestAgentSection({ clusterId, vmId }: { clusterId: string; vmId: string }) {
+function GuestAgentSection({
+  clusterId,
+  vmId,
+  vmid,
+  configOstype,
+  ostype,
+}: {
+  clusterId: string;
+  vmId: string;
+  vmid: number;
+  configOstype: string;
+  ostype: string;
+}) {
   const { data, isLoading } = useGuestAgentInfo(clusterId, vmId, true);
 
   return (
@@ -496,6 +535,14 @@ function GuestAgentSection({ clusterId, vmId }: { clusterId: string; vmId: strin
                 <p className="text-sm">{data.os_info.name}</p>
               </div>
             )}
+            {/* Read-only status so "is an update waiting?" is answerable from
+                Overview. The controls live on the Guest Tools tab. */}
+            <VMGuestToolsSummary
+              clusterId={clusterId}
+              vmid={vmid}
+              configOstype={configOstype}
+              ostype={ostype}
+            />
           </div>
           {data.network_interfaces && data.network_interfaces.length > 0 && (
             <div>

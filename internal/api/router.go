@@ -214,6 +214,15 @@ func (s *Server) setupRoutes() {
 			clusters.Get("/:cluster_id/appliances", s.storageHandler.ListAppliances)
 			clusters.Get("/:cluster_id/scan/iscsi", s.storageHandler.ScanISCSI)
 		}
+		if s.guestToolsHandler != nil {
+			clusters.Get("/:cluster_id/guest-tools/config", s.guestToolsHandler.GetConfig)
+			clusters.Put("/:cluster_id/guest-tools/config", s.guestToolsHandler.UpdateConfig)
+			clusters.Get("/:cluster_id/guest-tools/guests", s.guestToolsHandler.ListFleet)
+			clusters.Put("/:cluster_id/guest-tools/guests/:vmid/policy", s.guestToolsHandler.SetPolicy)
+			clusters.Post("/:cluster_id/guest-tools/guests/:vmid/detect", s.guestToolsHandler.Detect)
+			clusters.Post("/:cluster_id/guest-tools/guests/:vmid/update", s.guestToolsHandler.StageUpdate)
+			clusters.Delete("/:cluster_id/guest-tools/guests/:vmid/update", s.guestToolsHandler.CancelUpdate)
+		}
 		if s.virtioWinHandler != nil {
 			clusters.Get("/:cluster_id/virtio-win/config", s.virtioWinHandler.GetConfig)
 			clusters.Put("/:cluster_id/virtio-win/config", s.virtioWinHandler.UpdateConfig)

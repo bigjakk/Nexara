@@ -378,6 +378,56 @@ type GuestSnapshot struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
+type GuestToolsConfig struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	// disabled = nothing; report = detect installed versions only, no writes to any guest; staged = also stage updates for guests that are behind
+	Mode string `json:"mode"`
+	// Pinned upstream version; empty means follow the cluster's virtio-win ISO target, which in turn may follow upstream stable
+	TargetVersion string `json:"target_version"`
+	// Take a snapshot before staging an update. The full guest-tools bundle replaces storage and network drivers, and a bad viostor can leave a guest unbootable — this is the rollback
+	SnapshotBefore bool `json:"snapshot_before"`
+	// Cap on guests staged per pass. Swapping boot-disk drivers across a whole fleet at once turns one bad release into an outage
+	MaxConcurrent int32     `json:"max_concurrent"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type GuestToolsPolicy struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+	// Never stage an update for this guest. Excluded guests stay visible in the fleet view rather than being filtered out — an exclusion nobody can see is one nobody can audit
+	Excluded      bool   `json:"excluded"`
+	TargetVersion string `json:"target_version"`
+	// Free text for why this guest is excluded or pinned, so the reason outlives the person who set it
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type GuestToolsState struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Vmid      int32     `json:"vmid"`
+	// DisplayVersion reported by the guest for the virtio-win installer, e.g. "0.1.285" — the ISO-filename form, without upstream's release suffix
+	InstalledVersion string             `json:"installed_version"`
+	AgentVersion     string             `json:"agent_version"`
+	AgentRunning     bool               `json:"agent_running"`
+	DetectedAt       pgtype.Timestamptz `json:"detected_at"`
+	// idle -> staging -> staged -> running -> succeeded|failed. staged means the scheduled task is registered in the guest and will fire at next boot; running means it was also started on demand
+	Stage         string             `json:"stage"`
+	StagedVersion string             `json:"staged_version"`
+	StagedAt      pgtype.Timestamptz `json:"staged_at"`
+	// CD-ROM device the ISO was attached to, and its previous value, so the guest's original media is restored once the update finishes. Empty when no drive had to be borrowed
+	PriorCdromKey   string `json:"prior_cdrom_key"`
+	PriorCdromValue string `json:"prior_cdrom_value"`
+	// Guest uptime at the last poll. A drop means the guest rebooted, which is how a staged (boot-triggered) install is noticed without anything in the guest reporting in
+	LastUptime   int64              `json:"last_uptime"`
+	LastError    string             `json:"last_error"`
+	LastResultAt pgtype.Timestamptz `json:"last_result_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+	// Installer returned 3010: the update is installed but a driver that was in use is only replaced at the guest's next restart. Not an error, and not fully finished either
+	RebootRequired bool `json:"reboot_required"`
+}
+
 type KevCache struct {
 	CveID             string      `json:"cve_id"`
 	DateAdded         pgtype.Date `json:"date_added"`

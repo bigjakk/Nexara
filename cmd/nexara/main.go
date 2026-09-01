@@ -689,6 +689,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		ReportGen:     application.ReportGen,
 		RollingOrch:   application.RollingOrch,
 		VirtioWin:     application.VirtioWin,
+		GuestTools:    application.GuestTools,
 	})
 
 	runWithLeaderRetry(ctx, application.Pool, "scheduler", logger, func(ctx context.Context) {
@@ -703,6 +704,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			"task_retention_interval", "1h",
 			"rolling_update_interval", "15s",
 			"virtio_win_interval", "6h",
+			"guest_tools_interval", "1h",
 		)
 
 		// Clean up stale DRS history entries from previous interrupted runs.
@@ -742,6 +744,8 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		runImports := engine("vm_import_reconcile", sched.RunVMImportReconcile)
 		runVirtioWin := engine("virtio_win_check", sched.RunVirtioWinCheck)
 		runVirtioWinReconcile := engine("virtio_win_reconcile", sched.RunVirtioWinReconcile)
+		runGuestTools := engine("guest_tools_pass", sched.RunGuestToolsPass)
+		runGuestToolsReconcile := engine("guest_tools_reconcile", sched.RunGuestToolsReconcile)
 
 		// Run initial checks immediately.
 		runTasks()
@@ -756,6 +760,8 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		runImports()
 		runVirtioWin()
 		runVirtioWinReconcile()
+		runGuestTools()
+		runGuestToolsReconcile()
 
 		taskTicker := time.NewTicker(60 * time.Second)
 		defer taskTicker.Stop()
@@ -797,6 +803,16 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		virtioWinReconcileTicker := time.NewTicker(30 * time.Second)
 		defer virtioWinReconcileTicker.Stop()
 
+		// Detection reaches into every running Windows guest, so it runs on a
+		// human timescale rather than a machine one.
+		guestToolsTicker := time.NewTicker(1 * time.Hour)
+		defer guestToolsTicker.Stop()
+
+		// The reconcile half is frequent: a staged install fires on the guest's
+		// own reboot, which nothing here triggers or observes.
+		guestToolsReconcileTicker := time.NewTicker(60 * time.Second)
+		defer guestToolsReconcileTicker.Stop()
+
 		for {
 			select {
 			case <-taskTicker.C:
@@ -823,6 +839,10 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 				runVirtioWin()
 			case <-virtioWinReconcileTicker.C:
 				runVirtioWinReconcile()
+			case <-guestToolsTicker.C:
+				runGuestTools()
+			case <-guestToolsReconcileTicker.C:
+				runGuestToolsReconcile()
 			case <-ctx.Done():
 				logger.Info("scheduler stopped")
 				return

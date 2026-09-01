@@ -15,6 +15,7 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
+	"github.com/bigjakk/nexara/internal/guesttools"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/reports"
@@ -36,6 +37,7 @@ type Scheduler struct {
 	reportGen     *reports.Generator
 	rollingOrch   *rolling.Orchestrator
 	virtioWin     *virtiowin.Engine
+	guestTools    *guesttools.Engine
 	eventPub      *events.Publisher
 	cache         *proxmox.ClientCache // nil-safe; passed through to sub-engines
 	drsLastEval   map[uuid.UUID]time.Time
@@ -59,6 +61,7 @@ type Deps struct {
 	ReportGen   *reports.Generator
 	RollingOrch *rolling.Orchestrator
 	VirtioWin   *virtiowin.Engine
+	GuestTools  *guesttools.Engine
 }
 
 // New creates a Scheduler over the shared engines in d.
@@ -79,6 +82,7 @@ func New(d Deps) *Scheduler {
 		reportGen:     d.ReportGen,
 		rollingOrch:   d.RollingOrch,
 		virtioWin:     d.VirtioWin,
+		guestTools:    d.GuestTools,
 		eventPub:      d.EventPub,
 		cache:         d.Cache,
 		drsLastEval:   make(map[uuid.UUID]time.Time),
@@ -387,6 +391,46 @@ func (s *Scheduler) RunVirtioWinCheck(ctx context.Context) {
 	}
 
 	s.virtioWin.TrimHistory(ctx, virtioWinHistoryRetention)
+}
+
+// RunGuestToolsPass detects installed guest tools across every cluster with the
+// feature on, and stages updates for guests that are behind.
+//
+// Hourly rather than minutely: this reaches into every running Windows guest
+// with a registry read, and nothing about a driver version changes on a shorter
+// timescale than an operator installing something.
+func (s *Scheduler) RunGuestToolsPass(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("guest tools pass panicked", "panic", r)
+		}
+	}()
+	if s.guestTools == nil {
+		return
+	}
+	if err := s.guestTools.RunPass(ctx); err != nil {
+		s.logger.Warn("guest tools: pass failed", "error", err)
+	}
+}
+
+// RunGuestToolsReconcile advances guests with an update in flight.
+//
+// Separate from the pass, and far more frequent, because a staged install fires
+// on the guest's own reboot — which Nexara neither triggers nor observes. The
+// only way to learn the outcome is to keep checking for the result file the
+// in-guest updater leaves behind.
+func (s *Scheduler) RunGuestToolsReconcile(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("guest tools reconcile panicked", "panic", r)
+		}
+	}()
+	if s.guestTools == nil {
+		return
+	}
+	if err := s.guestTools.Reconcile(ctx); err != nil {
+		s.logger.Warn("guest tools: reconcile failed", "error", err)
+	}
 }
 
 // RunVirtioWinReconcile advances in-flight virtio-win downloads by polling the

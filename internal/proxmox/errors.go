@@ -19,6 +19,12 @@ var (
 	// ErrInvalidResponse indicates the API returned an unparseable response.
 	ErrInvalidResponse = errors.New("invalid response")
 
+	// ErrGuestAgentUnavailable indicates the QEMU guest agent is not responding
+	// in the guest. Read paths model this as a nil result instead, because "no
+	// agent" is a normal state to report; write paths return this error, since
+	// there the caller asked for something that demonstrably did not happen.
+	ErrGuestAgentUnavailable = errors.New("qemu guest agent unavailable")
+
 	// ErrInvalidInput indicates the caller supplied an argument the client
 	// refused to send — a malformed identifier that would corrupt the request
 	// path, say. It never reaches the network, so handlers should surface it as
