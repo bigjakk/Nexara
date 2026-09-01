@@ -85,8 +85,19 @@ func (e *Engine) ResolveTarget(ctx context.Context, clusterID uuid.UUID, cfg db.
 	if cfg.TargetVersion != "" {
 		candidates = append(candidates, cfg.TargetVersion)
 	}
-	if vwCfg, err := e.queries.GetVirtioWinConfig(ctx, clusterID); err == nil && vwCfg.TargetVersion != "" {
-		candidates = append(candidates, vwCfg.TargetVersion)
+	switch vwCfg, err := e.queries.GetVirtioWinConfig(ctx, clusterID); {
+	case err == nil:
+		if vwCfg.TargetVersion != "" {
+			candidates = append(candidates, vwCfg.TargetVersion)
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+		// No virtio-win row for this cluster: genuinely unpinned at this layer.
+	default:
+		// A failed read is not an absent pin. Swallowing it here would demote a
+		// pinned cluster to "follow stable" for the duration of a database
+		// blip, resolving to a version the operator did not choose — and
+		// callers act on the answer, staging it or withdrawing against it.
+		return Target{}, fmt.Errorf("read virtio-win config: %w", err)
 	}
 
 	// Only the most specific pin matters, and candidates is already ordered
@@ -338,8 +349,8 @@ func restoreActionFor(placement cdromPlacement, config proxmox.VMConfig) string 
 
 // StageResult describes what staging did to a guest.
 type StageResult struct {
-	VMID       int
-	Target     Target
+	VMID     int
+	Target   Target
 	CDROMKey string
 	RanNow   bool
 	// SnapshotName and SnapshotUPID are set only when a snapshot was taken,
@@ -610,6 +621,44 @@ if (Test-Path -LiteralPath '`+GuestResultPath+`') { 'FAILED' } else { 'OK' }`)
 	return nil
 }
 
+// updaterTaskPresence asks the guest whether the updater task is registered,
+// and whether it is running right now.
+func (e *Engine) updaterTaskPresence(ctx context.Context, client *proxmox.Client, node string, vmid int) (taskPresence, error) {
+	out, err := e.runScript(ctx, client, node, vmid, buildTaskStateScript())
+	if err != nil {
+		// taskUnknown, not taskAbsent, and it matters that it is also the zero
+		// value: a caller that ever drops the error must not be handed the one
+		// answer that both authorises a withdrawal and satisfies the
+		// post-delete verification.
+		return taskUnknown, fmt.Errorf("read updater task state in guest %d: %w", vmid, err)
+	}
+	return parseTaskPresence(out), nil
+}
+
+// deleteUpdaterTask removes the updater's scheduled task and VERIFIES it is
+// gone, rather than trusting an exit code.
+//
+// schtasks exits non-zero when the task is not there — which is the outcome we
+// want — and can report success in cases where the task survives, so neither
+// direction of its exit code answers the question. The same lesson as
+// clearResultFile: a delete that silently does nothing is the worst shape here,
+// because the caller goes on to record the update as withdrawn while the guest
+// is still armed to install it.
+func (e *Engine) deleteUpdaterTask(ctx context.Context, client *proxmox.Client, node string, vmid int) error {
+	if err := e.runArgv(ctx, client, node, vmid, buildDeleteTaskCommand()); err != nil {
+		e.logger.Debug("guest tools: delete of the updater task reported an error, verifying anyway",
+			"vmid", vmid, "error", err)
+	}
+	presence, err := e.updaterTaskPresence(ctx, client, node, vmid)
+	if err != nil {
+		return err
+	}
+	if presence != taskAbsent {
+		return fmt.Errorf("guest %d: the updater task is still registered after deleting it", vmid)
+	}
+	return nil
+}
+
 // ReadResult fetches and parses the updater's result file from a guest.
 // Returns (nil, nil) when the file is not there yet.
 func (e *Engine) ReadResult(ctx context.Context, client *proxmox.Client, node string, vmid int) (*GuestUpdateResult, error) {
@@ -666,6 +715,18 @@ func (e *Engine) CancelStaged(ctx context.Context, client *proxmox.Client, clust
 		e.logger.Debug("guest tools: delete scheduled task failed during cancel",
 			"vmid", vmid, "error", err)
 	}
+	return e.finishCancel(ctx, client, clusterID, node, vmid, state)
+}
+
+// finishCancel puts back the borrowed media and returns the row to idle,
+// without touching the in-guest task.
+//
+// Split out for the automatic withdrawal path, which has already removed the
+// task AND verified it is gone — something CancelStaged's best-effort delete
+// deliberately does not do — or which is working against a stopped guest with
+// no agent to reach a task through. Either way, running that delete again would
+// be a guest round trip that cannot accomplish anything.
+func (e *Engine) finishCancel(ctx context.Context, client *proxmox.Client, clusterID uuid.UUID, node string, vmid int, state db.GuestToolsState) error {
 	// Same rule as the reconcile path: only forget which drive to put back once
 	// it has actually been put back, so a failure here leaves a record for
 	// retryPendingCDROMRestores instead of stranding the ISO on the guest.

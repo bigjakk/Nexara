@@ -255,6 +255,129 @@ func TestIsInFlightStage(t *testing.T) {
 	}
 }
 
+// Changing the target has to change what installs, including on guests that
+// were already staged for the old one — a staged install fires at the guest's
+// next boot, which can be weeks out.
+func TestSupersededStaging(t *testing.T) {
+	tests := []struct {
+		name   string
+		stage  string
+		staged string
+		target string
+		want   bool
+	}{
+		// The case this exists for: 0.1.302 went out, broke something, and the
+		// operator pinned back to 0.1.285. Every guest staged for 0.1.302 is
+		// still armed with it until this withdraws them.
+		{"target moved back", "staged", "0.1.302-1", "0.1.285-1", true},
+		{"target moved forward", "staged", "0.1.302-1", "0.1.310-1", true},
+		{"target moved sideways", "staged", "0.1.302-1", "0.1.290-1", true},
+		{"target unchanged", "staged", "0.1.302-1", "0.1.302-1", false},
+
+		// A release suffix is a real difference: 0.1.302-2 is not 0.1.302-1.
+		{"release suffix differs", "staged", "0.1.302-1", "0.1.302-2", true},
+
+		// Withdrawing means deleting the in-guest task and taking the ISO back
+		// off. Neither means anything once the installer is running, and
+		// 'staging' is Stage() still writing this very row.
+		{"running is past withdrawal", "running", "0.1.302-1", "0.1.285-1", false},
+		{"staging is mid-flight", "staging", "0.1.302-1", "0.1.285-1", false},
+		{"idle has nothing staged", "idle", "0.1.302-1", "0.1.285-1", false},
+		{"succeeded already ran", "succeeded", "0.1.302-1", "0.1.285-1", false},
+		{"failed already ran", "failed", "0.1.302-1", "0.1.285-1", false},
+
+		// "We could not resolve a target" must never read as "the target
+		// changed" — that would unstage the fleet the moment a pin named a
+		// version the catalog had not caught up with.
+		{"unresolvable target", "staged", "0.1.302-1", "", false},
+		{"nothing staged", "staged", "", "0.1.285-1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := supersededStaging(tt.stage, tt.staged, tt.target); got != tt.want {
+				t.Errorf("supersededStaging(%q, %q, %q) = %v, want %v",
+					tt.stage, tt.staged, tt.target, got, tt.want)
+			}
+		})
+	}
+}
+
+// A boot-triggered install spends its whole runtime in stage 'staged' and has
+// not written its result file yet, so the database cannot tell "waiting for a
+// reboot" from "installing right now". Asking the guest is the only way, and
+// misreading the answer means pulling the ISO out from under a live driver
+// install.
+func TestParseTaskPresence(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		want taskPresence
+	}{
+		{"running", "Running", taskRunning},
+		// The scheduler has committed to starting it; by the time we act on
+		// this answer the installer may already be going.
+		{"queued counts as running", "Queued", taskRunning},
+		{"ready", "Ready", taskReady},
+		{"disabled is still registered", "Disabled", taskReady},
+		{"absent", "Absent", taskAbsent},
+
+		// PowerShell casing is not guaranteed across Windows versions.
+		{"lower case", "running", taskRunning},
+		{"surrounding space", "  Running  ", taskRunning},
+
+		// The distinction the whole probe exists for. "I could not look" must
+		// never reduce to "it is gone": a Task Scheduler service or CIM
+		// provider that will not answer yields no task object for one that is
+		// sitting right there, and reading that as absent would let a
+		// withdrawal proceed against a task still armed — and would let the
+		// post-delete verification pass without the delete having worked.
+		{"cannot look", "Unknown", taskUnknown},
+		{"no output at all", "", taskUnknown},
+		{"only whitespace", "  \r\n", taskUnknown},
+
+		// An unrecognised state name is still a state name, so the task exists.
+		{"unrecognised state is not absence", "SomethingNew", taskReady},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseTaskPresence(tt.out); got != tt.want {
+				t.Errorf("parseTaskPresence(%q) = %v, want %v", tt.out, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskStateScriptProvesItCouldLook(t *testing.T) {
+	script := buildTaskStateScript()
+
+	// Same constraint as the install script: Proxmox's agent/file-write and
+	// exec path die on wide characters.
+	if i := NonASCIIAt(script); i != -1 {
+		t.Errorf("task state script has a non-ASCII byte at offset %d", i)
+	}
+	if !strings.Contains(script, GuestTaskName) {
+		t.Error("task state script does not name the updater task")
+	}
+
+	// A guest that cannot answer must say so rather than report an absence.
+	// Without these two, a guest whose Task Scheduler or CIM provider is sick
+	// reports "Absent" for a task sitting right there, and both callers pass
+	// vacuously: the mid-install guard can never fire and the post-delete
+	// verification confirms a removal that never happened.
+	if !strings.Contains(script, "Get-Command Get-ScheduledTask") {
+		t.Error("script does not check the cmdlet exists before relying on it")
+	}
+	// A null lookup has to survive an enumeration before it counts as absence,
+	// and an empty enumeration is a broken answer, not "no tasks" — every
+	// Windows install carries built-in ones.
+	if !strings.Contains(script, "@(Get-ScheduledTask).Count -eq 0") {
+		t.Error("script calls the task absent without proving the lookup works")
+	}
+	if strings.Count(script, "'Unknown'") < 2 {
+		t.Error("script does not report Unknown for both failure routes")
+	}
+}
+
 // The detection script must order versions numerically. A guest carrying a
 // superseded uninstall entry can hold both 0.1.96 and 0.1.302, and a lexical
 // sort picks 0.1.96 because '9' > '3'.

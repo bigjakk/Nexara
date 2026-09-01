@@ -23,6 +23,7 @@ import {
 } from "../api/guest-tools-queries";
 import {
   guestToolsStateLabel,
+  guestToolsStagedMismatch,
   guestToolsStateVariant,
 } from "../lib/guest-tools-state";
 
@@ -115,6 +116,11 @@ export function VMGuestToolsCard({
       ? "Reinstall"
       : "Install";
 
+  // Non-null only while what is staged is not what the target names — the
+  // window between an operator changing the target and the reconcile loop
+  // withdrawing the staging it superseded.
+  const stagedMismatch = guestToolsStagedMismatch(guest);
+
   return (
     <div className="rounded-lg border p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -157,6 +163,15 @@ export function VMGuestToolsCard({
         </div>
       </div>
 
+      {stagedMismatch ? (
+        <p
+          role="status"
+          className="mt-3 text-xs text-amber-600 dark:text-amber-400"
+        >
+          {stagedMismatch}
+        </p>
+      ) : null}
+
       {guest.last_error ? (
         <p
           className={
@@ -193,7 +208,10 @@ export function VMGuestToolsCard({
             variant="outline"
             disabled={busy || !mayExecute}
             onClick={() => {
-              void run(() => cancel.mutateAsync(vmid), "Staged update cancelled.");
+              void run(
+                () => cancel.mutateAsync(vmid),
+                "Staged update cancelled.",
+              );
             }}
           >
             <X className="mr-2 h-3.5 w-3.5" />
@@ -260,8 +278,8 @@ export function VMGuestToolsCard({
               Exclude from automatic updates
             </Label>
             <p className="text-xs text-muted-foreground">
-              The guest stays visible in the fleet view; nothing is staged for it
-              automatically.
+              The guest stays visible in the fleet view; nothing is staged for
+              it automatically.
             </p>
           </div>
         </div>
@@ -311,7 +329,9 @@ export function VMGuestToolsCard({
         </div>
       </div>
 
-      {note ? <p className="mt-3 text-xs text-muted-foreground">{note}</p> : null}
+      {note ? (
+        <p className="mt-3 text-xs text-muted-foreground">{note}</p>
+      ) : null}
     </div>
   );
 }

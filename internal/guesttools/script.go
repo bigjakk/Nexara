@@ -65,8 +65,8 @@ try {
     throw "installer not found at $installer"
   }
 
-  $proc = Start-Process -FilePath $installer `+"`"+`
-    -ArgumentList '/install','/quiet','/norestart' `+"`"+`
+  $proc = Start-Process -FilePath $installer ` + "`" + `
+    -ArgumentList '/install','/quiet','/norestart' ` + "`" + `
     -Wait -PassThru
   $result.exitCode = $proc.ExitCode
 
@@ -207,14 +207,123 @@ func buildDeleteTaskCommand() []string {
 	return []string{"schtasks.exe", "/Delete", "/TN", GuestTaskName, "/F"}
 }
 
+// taskPresence is what the guest says about the updater's scheduled task.
+type taskPresence int
+
+const (
+	// taskUnknown means the guest could not be asked — the cmdlet is missing,
+	// the Task Scheduler service is down, or the query errored. Distinct from
+	// taskAbsent on purpose, and the difference is load bearing: "I looked and
+	// it is gone" permits a withdrawal, "I could not look" must not.
+	taskUnknown taskPresence = iota
+	// taskAbsent means the lookup worked and no such task is registered: either
+	// it never was, or it ran and deleted itself.
+	taskAbsent
+	// taskReady means the task is registered and waiting for its trigger.
+	taskReady
+	// taskRunning means the installer is executing RIGHT NOW. Nothing may take
+	// the ISO away from a guest in this state.
+	taskRunning
+)
+
+func (p taskPresence) String() string {
+	switch p {
+	case taskAbsent:
+		return "absent"
+	case taskReady:
+		return "ready"
+	case taskRunning:
+		return "running"
+	default:
+		return "unknown"
+	}
+}
+
+// buildTaskStateScript returns PowerShell reporting the updater task's state.
+//
+// This is the only reliable way to tell "staged, waiting for a reboot" from
+// "staged, and the installer is running this second". The database cannot tell
+// them apart: a boot-triggered install spends its whole runtime in stage
+// 'staged', and the result file it will eventually write does not exist yet, so
+// both states look identical from outside the guest.
+//
+// Get-ScheduledTask rather than schtasks /Query, because its State is a plain
+// enum value ("Ready", "Running") instead of a localised table that would have
+// to be parsed out of console output in whatever language the guest runs.
+//
+// The shape below exists to keep "absent" honest, and every branch is load
+// bearing. Get-ScheduledTask is CIM-backed, served by a provider the Task
+// Scheduler service hosts, so a stopped service or an unhealthy CIM repository
+// yields $null for a task that is sitting right there. Under SilentlyContinue
+// that is indistinguishable from a task which genuinely is not there, and
+// reporting both as "Absent" would make both callers pass vacuously: the
+// mid-install guard could never fire, and the post-delete verification would
+// confirm a removal that never happened — then record task_removed: true about
+// a guest still armed to install.
+//
+// So absence has to be earned. The cmdlet is checked for first, and a null
+// lookup then has to survive an enumeration that proves the subsystem answers:
+// under 'Stop' a CIM fault there terminates into the catch, and a successful
+// enumeration returning nothing at all is itself impossible on a real Windows
+// install (there are always tasks under \Microsoft\Windows\), so it is read as
+// a broken answer rather than an empty one. That keeps the guarantee structural
+// instead of resting on the enumeration happening to throw.
+func buildTaskStateScript() string {
+	return `$ErrorActionPreference = 'Stop'
+try {
+  if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+    'Unknown'
+  } else {
+    $t = Get-ScheduledTask -TaskName '` + GuestTaskName + `' -ErrorAction SilentlyContinue
+    if ($t) {
+      [string]$t.State
+    } else {
+      # Only call it gone once the lookup has proved it works. Every Windows
+      # install carries built-in tasks, so an enumeration that comes back empty
+      # did not answer rather than answering "none".
+      if (@(Get-ScheduledTask).Count -eq 0) { 'Unknown' } else { 'Absent' }
+    }
+  }
+} catch {
+  'Unknown'
+}`
+}
+
+// parseTaskPresence reads what buildTaskStateScript printed.
+//
+// Queued counts as running: the Task Scheduler has committed to starting it and
+// the installer may be underway by the time we act on the answer.
+//
+// Everything that is not a recognised state reads as "still there" in one form
+// or another — never as absent. Empty output means the script produced nothing
+// at all, which is a failure to ask rather than an answer, so it maps to
+// taskUnknown; an unrecognised state name maps to taskReady. Both keep a guest
+// out of the withdrawable set, which is the only safe direction: treating a
+// task we could not see as gone is exactly what lets a withdrawal proceed
+// against one that is still armed.
+func parseTaskPresence(out string) taskPresence {
+	switch strings.ToLower(strings.TrimSpace(out)) {
+	case "":
+		return taskUnknown
+	case "unknown":
+		return taskUnknown
+	case "absent":
+		return taskAbsent
+	case "running", "queued":
+		return taskRunning
+	default:
+		return taskReady
+	}
+}
+
 // GuestUpdateResult is what the in-guest script leaves in the result file.
 type GuestUpdateResult struct {
-	Version          string `json:"version"`
+	Version string `json:"version"`
 	// RebootRequired is set when the installer returned 3010: the install
 	// succeeded but a driver that was in use will only be swapped at the next
 	// restart. Distinct from both success and failure, because it is the one
 	// outcome that leaves the operator with an action.
-	RebootRequired bool `json:"rebootRequired"`
+	RebootRequired   bool   `json:"rebootRequired"`
 	StartedAt        string `json:"startedAt"`
 	FinishedAt       string `json:"finishedAt"`
 	ExitCode         int    `json:"exitCode"`

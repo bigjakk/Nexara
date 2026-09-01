@@ -33,6 +33,33 @@ export function guestToolsStateLabel(g: GuestToolsGuest): string {
   return "Unknown";
 }
 
+/**
+ * What will actually install, when that is not what the Target column says.
+ *
+ * A staged install fires at the guest's next boot, so the version staged and
+ * the version currently targeted can drift apart — the operator changes the
+ * target to back out a bad release, and every already-staged guest is still
+ * armed with the release being backed out. The reconcile loop withdraws those
+ * within a tick or so, but until it does, "Staged for next boot" sitting beside
+ * a Target column naming a different version is actively misleading: the target
+ * is not what would land.
+ *
+ * Returns null when there is nothing to say, which is the overwhelmingly common
+ * case — the two agree, and saying so twice is noise.
+ */
+export function guestToolsStagedMismatch(g: GuestToolsGuest): string | null {
+  // 'staged' only, matching exactly what the backend will act on, so the UI
+  // never promises a withdrawal that is not coming. 'staging' is a row being
+  // written right now and about to carry the new version anyway; 'running' is
+  // an install already underway, which nothing withdraws. On a terminal row
+  // staged_version records what ran rather than what will run, and flagging it
+  // would read as a warning about an install that already finished.
+  if (g.stage !== "staged") return null;
+  if (!g.staged_version || !g.target_version) return null;
+  if (g.staged_version === g.target_version) return null;
+  return `Will install ${g.staged_version}, not ${g.target_version}`;
+}
+
 export type GuestToolsBadgeVariant =
   | "default"
   | "secondary"

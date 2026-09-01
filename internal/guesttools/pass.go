@@ -2,14 +2,18 @@ package guesttools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/safeconv"
@@ -27,6 +31,14 @@ const stagedUpdateMaxAge = 30 * 24 * time.Hour
 // runningUpdateMaxAge bounds a guest whose task was actually started. The
 // installer takes minutes; a few hours means it is not coming back.
 const runningUpdateMaxAge = 6 * time.Hour
+
+// bootInstallGrace is how long after a boot a guest is left out of the
+// automatic-withdrawal path, in seconds to match the uptime Proxmox reports.
+//
+// Comfortably clear of the updater task's PT1M trigger delay plus the guest
+// round trips a withdrawal takes, so the decision cannot be overtaken by the
+// install it is deciding about.
+const bootInstallGrace = 5 * 60
 
 // RunPass detects guest tools versions across every cluster with the feature
 // on, and stages updates for guests that are behind.
@@ -137,6 +149,18 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 		}
 
 		if _, err := e.Stage(ctx, client, cfg.ClusterID, cfg, guest.NodeName, vmid, target, storage, false); err != nil {
+			// A target whose ISO has not been downloaded yet is "not yet", not
+			// "this guest failed". The catalog flips to a new stable release
+			// the moment upstream publishes one, while the ~840 MiB fetch that
+			// follows takes minutes — so a pass landing in that window would
+			// otherwise paint every guest in the cluster red for a condition
+			// none of them has anything to do with, and that nothing about the
+			// guest can fix. Left alone, they stage on a later pass.
+			if errors.Is(err, ErrISOUnavailable) {
+				e.logger.Info("guest tools: target ISO is not on storage yet, deferring",
+					"cluster_id", cfg.ClusterID, "vmid", vmid, "version", target.Version)
+				continue
+			}
 			e.logger.Warn("guest tools: staging failed", "vmid", vmid, "error", err)
 			e.markFailed(ctx, cfg.ClusterID, guest.Vmid, err.Error())
 			continue
@@ -272,14 +296,32 @@ func (e *Engine) reconcileOne(ctx context.Context, state db.GuestToolsState) {
 	if e.expireIfStale(ctx, state) {
 		return
 	}
-	if !strings.EqualFold(vm.Status, "running") {
-		return // nothing to read from a stopped guest
-	}
 
 	client, err := e.CreateClient(ctx, state.ClusterID)
 	if err != nil {
 		e.logger.Warn("guest tools: reconcile client build failed", "vmid", vmid, "error", err)
 		return
+	}
+
+	// A stopped guest still gets the superseded-staging check, ahead of the
+	// running-guest gate below.
+	//
+	// It is the case that needs it most: a powered-off guest has not had the
+	// chance to install yet, so it is exactly the one a bad release is still
+	// ahead of. There is no agent to delete the scheduled task through, but
+	// detaching the ISO is enough on its own, and UpdateVMConfigSync works fine
+	// against a stopped guest.
+	//
+	// What the orphaned task then does at next boot is self-limiting: the
+	// updater looks its media up by volume label, throws when nothing matches,
+	// and its finally block still deletes the task and writes a failed result.
+	// So it fires exactly once and removes itself. That result is never
+	// mistaken for a real outcome because ListGuestToolsInFlight selects only
+	// staging/staged/running — this row is idle by then, so the reconciler
+	// never looks at it — and the file itself is cleared by the next Stage().
+	if !strings.EqualFold(vm.Status, "running") {
+		e.withdrawSuperseded(ctx, client, node.Name, state, false, vm.Uptime)
+		return // nothing else to read from a stopped guest
 	}
 
 	result, err := e.ReadResult(ctx, client, node.Name, vmid)
@@ -288,6 +330,13 @@ func (e *Engine) reconcileOne(ctx context.Context, state db.GuestToolsState) {
 		return
 	}
 	if result == nil {
+		// Nothing has reported in, so a staged version the target no longer
+		// names can still be withdrawn. Checked only on this branch: a guest
+		// that rebooted and installed moments ago has an outcome to record, and
+		// withdrawing instead would throw it away.
+		if e.withdrawSuperseded(ctx, client, node.Name, state, true, vm.Uptime) {
+			return
+		}
 		// No result yet. Track uptime so a reboot is visible in the UI even
 		// before the install reports in.
 		if vm.Uptime < state.LastUptime {
@@ -364,6 +413,241 @@ func (e *Engine) reconcileOne(ctx context.Context, state db.GuestToolsState) {
 		"cluster_id", state.ClusterID, "vmid", vmid, "stage", stage,
 		"version", result.Version, "installed", result.InstalledVersion,
 		"reboot_required", result.RebootRequired, "message", message)
+}
+
+// withdrawSuperseded takes back a staged update whose version the target no
+// longer names, reporting whether it did.
+//
+// This is what makes changing the target mean something for a guest that is
+// already staged. A staged install fires at the guest's NEXT BOOT, which may be
+// weeks away, and nothing else here revisits the decision: without this,
+// lowering the pin to back out a bad release leaves every staged guest still
+// armed with the release being backed out, and it lands anyway — days later, on
+// a guest whose Target column has read the new version the whole time.
+//
+// The comparison is staged-vs-target, not installed-vs-target. A target moved
+// sideways (0.1.302 -> 0.1.290) is just as superseded as one moved back, and
+// both want the stale staging gone so the next pass can decide afresh.
+//
+// agentUp says whether the guest is running and reachable. When it is not, the
+// ISO is still detached — that alone neuters the install, because the updater
+// finds its media by volume label — but the in-guest task is left in place for
+// want of anything to delete it with.
+func (e *Engine) withdrawSuperseded(ctx context.Context, client *proxmox.Client, node string, state db.GuestToolsState, agentUp bool, uptime int64) bool {
+	// Cheap pre-filter before the queries and guest round trips below. The rule
+	// itself lives in supersededStaging and is applied in full further down.
+	if state.Stage != "staged" || state.StagedVersion == "" {
+		return false
+	}
+
+	// Leave a freshly booted guest alone.
+	//
+	// The task's boot trigger carries a PT1M delay, and the checks below take
+	// several guest round trips at guestExecPollEvery apiece — so a guest that
+	// reads as Ready at the start of this function can cross its trigger before
+	// the ISO is detached at the end of it, which is the one outcome none of
+	// this may produce. Waiting a few minutes costs a tick; the guest is picked
+	// up on the next one, or its install completes and is recorded normally.
+	//
+	// Zero blocks too. On a running guest it means either "booted within the
+	// last second" or "we have not got an uptime", and both are reasons to wait
+	// rather than reasons to proceed — every other thing this function cannot
+	// establish leaves the staging alone, and an uptime it cannot read is no
+	// different.
+	if agentUp && uptime < bootInstallGrace {
+		e.logger.Debug("guest tools: guest booted too recently to withdraw safely",
+			"vmid", state.Vmid, "uptime", uptime)
+		return false
+	}
+
+	// Re-read the row. ListGuestToolsInFlight snapshots every in-flight guest at
+	// the top of the pass, and each guest reconciled before this one may have
+	// spent up to guestExecTimeout in the guest — so `state` can be minutes old.
+	// Acting on it could tear down an update an operator started in between.
+	fresh, err := e.queries.GetGuestToolsState(ctx, db.GetGuestToolsStateParams{
+		ClusterID: state.ClusterID, Vmid: state.Vmid,
+	})
+	if err != nil {
+		e.logger.Debug("guest tools: could not re-read state before withdrawing",
+			"vmid", state.Vmid, "error", err)
+		return false
+	}
+	state = fresh
+	if state.Stage != "staged" || state.StagedVersion == "" {
+		return false
+	}
+
+	target, err := e.resolveTargetForState(ctx, state)
+	if err != nil {
+		// "We cannot resolve a target" is not "the target changed". Withdrawing
+		// on an unresolvable one would unstage the fleet the moment a pin named
+		// a version the catalog has not caught up with.
+		e.logger.Debug("guest tools: no target to compare a staged version against",
+			"vmid", state.Vmid, "error", err)
+		return false
+	}
+	if !supersededStaging(state.Stage, state.StagedVersion, target.Version) {
+		return false
+	}
+
+	vmid := int(state.Vmid)
+
+	// A boot-triggered install spends its ENTIRE runtime in stage 'staged' —
+	// nothing moves it to 'running', which only the operator's run-now path
+	// ever sets. So the stage tells us nothing about whether the installer is
+	// going right now, and ReadResult returning nil covers both "has not
+	// started" and "is running and has not written its result yet".
+	//
+	// Ask the guest instead. Pulling the ISO out from under a live installer
+	// leaves half-swapped storage and network drivers, and the staged path
+	// deliberately takes no snapshot to roll back to.
+	if agentUp {
+		switch presence, err := e.updaterTaskPresence(ctx, client, node, vmid); {
+		case err != nil:
+			e.logger.Debug("guest tools: could not read the updater task state, leaving the staging alone",
+				"vmid", vmid, "error", err)
+			return false
+		case presence == taskRunning:
+			e.logger.Info("guest tools: not withdrawing a superseded update, the installer is already running",
+				"cluster_id", state.ClusterID, "vmid", vmid, "staged_version", state.StagedVersion)
+			return false
+		case presence == taskUnknown:
+			// The guest could not be asked: its Task Scheduler service or CIM
+			// provider is not answering. Withdrawing blind could pull the ISO
+			// from under a live install, so such a guest is only ever cancelled
+			// by hand — or expired by expireIfStale at stagedUpdateMaxAge.
+			e.logger.Debug("guest tools: cannot determine the updater task state, leaving the staging alone",
+				"cluster_id", state.ClusterID, "vmid", vmid)
+			return false
+		}
+	}
+
+	// CancelStaged's own task delete is best-effort and it returns nil even when
+	// nothing was removed, so the deletion is done and VERIFIED here first. A
+	// row marked withdrawn while its task is still armed is the exact failure
+	// this whole function exists to prevent, and the audit row would assert the
+	// opposite.
+	taskRemoved := false
+	if agentUp {
+		if err := e.deleteUpdaterTask(ctx, client, node, vmid); err != nil {
+			e.logger.Warn("guest tools: could not remove the updater task, leaving the staging in place",
+				"cluster_id", state.ClusterID, "vmid", vmid, "error", err)
+			return false
+		}
+		taskRemoved = true
+	}
+
+	// finishCancel, not CancelStaged: the task is already gone and verified, or
+	// there is no agent to reach one through, so CancelStaged's own best-effort
+	// delete would be a guest round trip that cannot accomplish anything.
+	if err := e.finishCancel(ctx, client, state.ClusterID, node, vmid, state); err != nil {
+		// Leave the row staged and try again next tick. Returning false matters:
+		// a half-withdrawn guest must not be reported as withdrawn.
+		e.logger.Warn("guest tools: could not withdraw a superseded staged update",
+			"cluster_id", state.ClusterID, "vmid", vmid,
+			"staged_version", state.StagedVersion, "target_version", target.Version, "error", err)
+		return false
+	}
+
+	e.logger.Info("guest tools: withdrew a staged update the target no longer names",
+		"cluster_id", state.ClusterID, "vmid", vmid,
+		"staged_version", state.StagedVersion, "target_version", target.Version,
+		"task_removed", taskRemoved)
+	e.auditSupersededCancel(ctx, state, target.Version, taskRemoved)
+	return true
+}
+
+// resolveTargetForState resolves the effective target for one guest_tools_state
+// row, distinguishing "there is no pin" from "we could not read whether there
+// is a pin".
+//
+// That distinction is the whole point of not reusing policyFor here. policyFor
+// maps every error to nil, which reads identically to "this guest has no pin" —
+// so a pool timeout on the per-guest lookup would resolve to the cluster or
+// stable target and withdraw a correctly staged, pinned guest, with an audit row
+// claiming the target had changed when it had not. A blip hits many rows at once.
+func (e *Engine) resolveTargetForState(ctx context.Context, state db.GuestToolsState) (Target, error) {
+	cfg, err := e.queries.GetGuestToolsConfig(ctx, state.ClusterID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return Target{}, fmt.Errorf("read guest tools config: %w", err)
+		}
+		// No cluster policy row: the target still resolves from the virtio-win
+		// pin or upstream stable, exactly as the fleet view resolves it.
+		cfg = db.GuestToolsConfig{ClusterID: state.ClusterID}
+	}
+
+	var policy *db.GuestToolsPolicy
+	p, err := e.queries.GetGuestToolsPolicy(ctx, db.GetGuestToolsPolicyParams{
+		ClusterID: state.ClusterID, Vmid: state.Vmid,
+	})
+	switch {
+	case err == nil:
+		policy = &p
+	case errors.Is(err, pgx.ErrNoRows):
+		// Genuinely no per-guest pin.
+	default:
+		return Target{}, fmt.Errorf("read guest tools policy: %w", err)
+	}
+
+	return e.ResolveTarget(ctx, state.ClusterID, cfg, policy)
+}
+
+// supersededStaging reports whether a staged update should be withdrawn because
+// the target no longer names the version it would install.
+//
+// Split out from withdrawSuperseded so the rule is testable without a database
+// or a Proxmox client, because every clause is one somebody will get wrong
+// later:
+//
+//   - Only 'staged'. 'staging' is Stage() still mid-flight writing this very
+//     row, and 'running' is an operator-started install already underway. Note
+//     that 'staged' does NOT imply the installer is idle — a boot-triggered
+//     install never leaves that stage — so the caller has to ask the guest
+//     directly before acting on a true from here.
+//   - An empty target withdraws nothing. Ending up here with no target means
+//     resolution failed, and "we do not know" must never read as "it changed".
+//   - Plain string inequality, deliberately, not a version comparison. Both
+//     sides come from a catalog row's Version, so they are already the same
+//     shape — and a target moved DOWN (0.1.302-1 -> 0.1.285-1, backing a bad
+//     release out) is the case this exists for. Ordering them would miss it.
+func supersededStaging(stage, stagedVersion, targetVersion string) bool {
+	if stage != "staged" || stagedVersion == "" || targetVersion == "" {
+		return false
+	}
+	return stagedVersion != targetVersion
+}
+
+// auditSupersededCancel records an automatic withdrawal in the audit log.
+//
+// Nobody pressed anything for this one, which is exactly why it needs a row: a
+// staged update that vanishes between two glances at the fleet table is
+// otherwise unexplainable, and "Nexara withdrew it because you moved the
+// target" is the answer an operator has to be able to find. Its own action name
+// rather than the manual guest_tools_cancel, so the two are tellable apart.
+func (e *Engine) auditSupersededCancel(ctx context.Context, state db.GuestToolsState, targetVersion string, taskRemoved bool) {
+	details, _ := json.Marshal(map[string]any{
+		"vmid":           state.Vmid,
+		"staged_version": state.StagedVersion,
+		"target_version": targetVersion,
+		"reason":         "the staged version is no longer the target for this guest",
+		// False for a guest that was powered off: the ISO was detached, which
+		// is enough to stop the install, but the in-guest task is still
+		// registered and will fire (and fail to find its media) at next boot.
+		// Recorded because it is the difference between "gone" and "defused".
+		"task_removed": taskRemoved,
+	})
+	if err := e.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: state.ClusterID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+		ResourceType: "vm",
+		ResourceID:   strconv.Itoa(int(state.Vmid)),
+		Action:       "guest_tools_auto_cancel",
+		Details:      details,
+	}); err != nil {
+		e.logger.Warn("guest tools: audit of a superseded-staging withdrawal failed",
+			"vmid", state.Vmid, "error", err)
+	}
 }
 
 // expireIfStale abandons an update that has waited past its ceiling, freeing

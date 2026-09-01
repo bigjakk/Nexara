@@ -1,11 +1,6 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,6 +25,7 @@ import {
 import type { GuestToolsGuest } from "../types/guest-tools";
 import {
   guestToolsStateLabel,
+  guestToolsStagedMismatch,
   guestToolsStateVariant,
 } from "../lib/guest-tools-state";
 
@@ -113,7 +109,9 @@ const COLUMNS: ColumnDef<GuestToolsGuest, FleetSortKey, FleetCtx>[] = [
     width: 130,
     sortValue: (g) => g.installed_version || null,
     cell: (g) =>
-      g.installed_version || <span className="text-muted-foreground">&mdash;</span>,
+      g.installed_version || (
+        <span className="text-muted-foreground">&mdash;</span>
+      ),
   },
   {
     key: "target",
@@ -136,24 +134,37 @@ const COLUMNS: ColumnDef<GuestToolsGuest, FleetSortKey, FleetCtx>[] = [
     sortValue: (g) => guestToolsStateLabel(g),
     // last_error is the only explanation a failed update gives.
     wrap: true,
-    cell: (g) => (
-      <div className="space-y-1">
-        <Badge variant={guestToolsStateVariant(g)}>
-          {guestToolsStateLabel(g)}
-        </Badge>
-        {g.last_error ? (
-          <p
-            className={
-              g.reboot_required
-                ? "break-words text-xs text-muted-foreground"
-                : "break-words text-xs text-destructive"
-            }
-          >
-            {g.last_error}
-          </p>
-        ) : null}
-      </div>
-    ),
+    cell: (g) => {
+      // Amber, not muted: this is the one line telling the operator the Target
+      // column beside it is not what would install, so it must not be the
+      // quietest text in the row. Deliberately NOT a live region — a target
+      // change supersedes the whole fleet at once, and one role=status per row
+      // would queue an announcement per affected guest.
+      const mismatch = guestToolsStagedMismatch(g);
+      return (
+        <div className="space-y-1">
+          <Badge variant={guestToolsStateVariant(g)}>
+            {guestToolsStateLabel(g)}
+          </Badge>
+          {mismatch ? (
+            <p className="break-words text-xs text-amber-600 dark:text-amber-400">
+              {mismatch}
+            </p>
+          ) : null}
+          {g.last_error ? (
+            <p
+              className={
+                g.reboot_required
+                  ? "break-words text-xs text-muted-foreground"
+                  : "break-words text-xs text-destructive"
+              }
+            >
+              {g.last_error}
+            </p>
+          ) : null}
+        </div>
+      );
+    },
   },
   {
     // No sortValue: there is nothing meaningful to order buttons by. `fixed`
