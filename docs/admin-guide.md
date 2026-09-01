@@ -9,13 +9,16 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 - [Topology Map](#topology-map)
 - [User Management](#user-management)
 - [RBAC Setup](#rbac-setup)
+- [Proxmox Access Control](#proxmox-access-control)
 - [Authentication Providers](#authentication-providers)
 - [DRS Configuration](#drs-configuration)
 - [High Availability](#high-availability)
 - [Storage Management](#storage-management)
 - [VM Imports](#vm-imports)
 - [Backup Management](#backup-management)
+- [Veeam Backup & Replication](#veeam-backup--replication)
 - [Snapshots](#snapshots)
+- [Windows Guest Tools](#windows-guest-tools)
 - [Alert Configuration](#alert-configuration)
 - [CVE Scanning](#cve-scanning)
 - [Rolling Updates](#rolling-updates)
@@ -35,11 +38,16 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 
 1. Navigate to **Clusters** from the sidebar
 2. Click **Add Cluster**
-3. Fill in:
-   - **Cluster Name** — a display name for the cluster
-   - **API URL** — the Proxmox VE API endpoint (e.g., `https://pve.example.com:8006`)
-   - **API Token ID** — e.g. `root@pam!nexara`
-   - **API Token Secret** — the UUID Proxmox showed you when the token was created
+3. Fill in the **Cluster Name** and the **API URL** (e.g., `https://pve.example.com:8006`), then choose how Nexara gets its credential:
+
+   **Create a token for me** (the default tab). Supply a privileged Proxmox login once — typically `root@pam` and its password, plus a TOTP code if the account has two-factor enabled. Nexara logs in, creates a dedicated `nexara@pve` user, grants it an ACL, mints an API token and verifies it works before saving anything. It retries the verification to ride out ACL replication across the cluster.
+
+   The password is used for that single request: it is never persisted, never logged and never written to the audit log. Only the minted token's ciphertext is stored, and the dialog's summary reports object names only — never the secret. The `pve` realm is deliberate: a PVE-realm account has no shell, no home directory and no `/etc/passwd` entry, so it cannot be used to log into a node. You can override the **Token Name** (`nexara`) if you have a naming convention; the created user id (`nexara@pve`) is overridable only through the API's `bootstrap.user_id` field, not the dialog.
+
+   Over plain HTTP the dialog warns before accepting a password — it belongs to a privileged human account that is very likely reused elsewhere. It warns rather than hides the option, because a lab reached over a trusted LAN is a legitimate setup.
+
+   **I have a token.** Supply the **API Token ID** (e.g. `root@pam!nexara`) and **API Token Secret** you created in the Proxmox UI.
+
 4. Click **Connect**. Nexara probes the endpoint's certificate:
    - a CA-signed certificate is confirmed as **Trusted Certificate** and you continue
    - a self-signed certificate shows its **SHA-256 fingerprint**; verify it against the Proxmox host, then tick *I have verified this fingerprint and trust this certificate*
@@ -53,6 +61,10 @@ The collector starts syncing inventory (nodes, VMs, containers, storage) and met
 
 Click the cluster name to open its detail page, then click **Edit** to update the name, API URL, or token.
 
+**Changing the API URL requires re-entering the token secret.** A stored credential is only ever sent to the address it was saved for — leaving the secret blank while moving the address would deliver it to whatever the new URL points at. The refusal is audited.
+
+Changing the address also **clears the cluster's stored SSH credential and every pinned host key**, because node addresses are learned from the cluster API and those secrets were entrusted to machines the cluster is leaving. Nexara warns first, naming what will be lost; the credential cannot be recovered afterwards.
+
 ### Removing a Cluster
 
 From the cluster list, click the delete button. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster.
@@ -60,6 +72,10 @@ From the cluster list, click the delete button. This removes the cluster from Ne
 ### API Token Requirements
 
 The Proxmox API token needs sufficient privileges to read cluster state and perform actions. For full functionality, use a token with `PVEAdmin` role or equivalent. For read-only monitoring, `PVEAuditor` is sufficient.
+
+A token Nexara minted itself is provisioned with the privileges it needs, so this only applies to tokens you create by hand. The cluster row records which route it came from, so you can tell later which clusters Nexara onboarded itself.
+
+Once a cluster is connected, the cluster's **Access Control** tab manages Proxmox's own users, tokens, groups, roles and ACLs from Nexara — see [Proxmox Access Control](#proxmox-access-control).
 
 ---
 
@@ -227,6 +243,74 @@ curl -X POST https://nexara.example.com/api/v1/rbac/users/$USER_ID/roles \
 ```
 
 The assignment's scope shows as a badge next to the role name in the user's role dialog.
+
+---
+
+## Proxmox Access Control
+
+A cluster's **Access Control** tab manages its **own** Proxmox users, API tokens,
+groups, roles and ACL entries, so you do not have to leave for the Proxmox UI.
+
+This is not Nexara's RBAC. The two are separate systems:
+
+| | Nexara RBAC | Proxmox access control |
+|--|--|--|
+| Governs | who can do what **in Nexara** | who can do what **on the cluster** |
+| Subjects | Nexara users (local, LDAP, OIDC) | PVE users and API tokens |
+| Where | Nexara's database | `/etc/pve/user.cfg` on the cluster |
+| See | [RBAC Setup](#rbac-setup) | this section |
+
+### Permissions
+
+Reads need `view:access` (Admin, Operator and Viewer by default). Writes need
+`manage:access`, granted to **Admin only**.
+
+That asymmetry is deliberate: `manage:access` can mint a PVE token holding the
+**Administrator** role, which is full control of the cluster *and* a way out of
+Nexara's own RBAC — the holder could take the token and drive Proxmox directly,
+with no Nexara permission check in the path. Granting it to Operator by default
+would make Operator silently equivalent to Admin.
+
+What Nexara can actually do is bounded by what the cluster's stored credential is
+permitted to do. **Access Control → Permissions** reports exactly that; check it first
+when an action fails with a Proxmox-side error rather than a Nexara 403.
+
+### What You Can Manage
+
+- **Users** — `name@realm`. Deleting a user takes **every API token it owns** with it; that is Proxmox behaviour, not Nexara's
+- **API tokens** — create, edit, regenerate and revoke
+- **Groups** — so an ACL can name a set of users rather than one
+- **Roles** — built-in roles are read-only; custom ones can be created and edited
+- **ACL entries** — grant a role to a user, token or group on a path (`/vms/101`, `/storage/local`, `/` for the whole cluster), with optional propagation
+- **Realms** — **read-only.** Creating or editing one needs the `Realm.Allocate` privilege, which no bundled Proxmox role except `Administrator` carries
+
+### Token Secrets Are Shown Once
+
+Minting a token returns its secret exactly once. Proxmox has no read-back
+endpoint, so there is nothing for Nexara to re-fetch. The secret is **never**
+written to the audit log and **never** persisted — note that `view:audit` is held
+by every built-in Viewer, which makes an audit row exactly the wrong place for a
+credential.
+
+If you lose a secret, regenerate it rather than looking for it anywhere.
+
+### Nexara Will Not Quietly Cut Its Own Connection
+
+Deleting or regenerating the token Nexara authenticates with — or deleting the
+user that owns it, which takes its tokens along — returns **409** with an
+explanation rather than proceeding.
+
+It warns rather than blocking outright: an operator rotating credentials by hand
+has a legitimate reason to do exactly this, and a hard block would just send them
+to the Proxmox UI to do it less safely. Append `?force=true` (the UI puts this
+behind a type-the-name confirmation) to proceed; the cluster will then show as
+unreachable until you update its credentials.
+
+The guard is narrow on purpose — it fires only for the specific credential this
+cluster authenticates with, and only for changes that could actually break it.
+Cosmetic edits (comment, email, SSH keys) are not guarded, because making every
+edit to `nexara@pve` demand a force flag would train operators to pass it
+reflexively.
 
 ---
 
@@ -533,6 +617,10 @@ Beyond datastore management, the Backup dashboard carries four more tabs:
 - **Tasks** — the PBS server's own task log, so a stuck garbage collection or verify is visible without leaving Nexara
 - **Coverage** — the one that matters at review time. Four cards count **Total VMs**, **Protected (<24h)**, **Stale (>24h)** and **No Backup**, over a searchable per-guest table showing how long ago each guest was last backed up. A guest that has never been backed up reads "Never"
 
+  Coverage spans **both providers**: freshness is taken from the newest restore point either PBS or Veeam holds, so a guest protected only by Veeam is no longer reported as unprotected. Each row also carries an **eligibility** verdict — Veeam's own worker appliances and the VBR server are not backup targets, and counting them as unprotected is how a coverage view teaches operators to ignore it. LXC containers are reported as backup targets but not Veeam-capable, since Veeam cannot back them up and PBS can.
+
+  A viewer holding `view:backup` but not `view:veeam` sees exactly the report that existed before Veeam support: no restore-point data and no eligibility refinement, rather than a partial answer
+
 ### Backup Jobs
 
 1. Navigate to **Backup** from the sidebar and select a PBS server
@@ -566,6 +654,91 @@ The jobs table shows the schedule in plain English with the raw calendar event u
 
 ---
 
+## Veeam Backup & Replication
+
+Veeam is a **second backup provider alongside PBS**. Nexara reads a Veeam
+Backup & Replication server's inventory, correlates its backup objects to
+Proxmox guests, folds the result into backup coverage, and can start and stop
+jobs.
+
+**Requirements:** VBR **13.1 or later**, Enterprise Plus, reachable on its REST
+API port (9419 by default).
+
+### Connecting a Server
+
+1. Navigate to **Backup** from the sidebar and open the **Veeam** tab
+2. Click **Add Veeam Server**
+3. Enter:
+   - **Server Name** — display name
+   - **REST API URL** — `https://host:9419`. This is the **REST API root, not the console URL** — getting it wrong is the most common first-time failure
+   - **Proxmox Username** — a VBR admin account, often `DOMAIN\user`. The backslash is significant
+   - **Password** — encrypted at rest with AES-256-GCM, like every other stored credential
+4. Click **Continue** to fetch the certificate, accept the fingerprint the same way as for a cluster, then click **Add Server**
+
+Nexara performs a real logon before saving, so **a failed connection is a failed create**. The product version, API revision and licence edition it negotiates are recorded on the server row and shown in the UI.
+
+The **Test** action on an already-registered server re-runs that logon and reports the same figures, but deliberately **persists nothing** — diagnosing a broken server should not rewrite its row. It needs `manage:veeam`, not just `view`, because it makes an outbound authenticated connection with stored admin credentials.
+
+Registration schedules the first inventory sync rather than blocking on one. Until it finishes the server shows as **syncing** rather than reporting an empty inventory as though it were a finished one.
+
+Changing a server's base URL later requires re-entering the password, for the same reason it does on a cluster.
+
+### Mapping Platforms to Clusters
+
+**Do this first — nothing appears on the cluster pages until you do.**
+
+One Veeam server can protect several Proxmox clusters. Everything Veeam returns is tagged with a `platformId` identifying one Proxmox connection, and that is the *only* cluster discriminator its REST API exposes. Nexara asks you to confirm the mapping once.
+
+Open the server's **Clusters** tab — it carries an amber count of platforms still unmapped. Each discovered platform is listed with a label taken from the licence workload hostname, usually the Proxmox cluster name. Treat that as a hint, not proof, and pick the actual cluster.
+
+Until a platform is mapped, its rows are not attributable to any cluster, so they are visible only to a holder of **global** `view:veeam`, and coverage reports that cluster's guests using PBS data alone. That is deliberate: guessing the mapping from a hostname string would show one tenant's backup inventory to an operator scoped to a different cluster.
+
+Removing a cluster from Nexara unmaps its platform rather than deleting the collected Veeam history — re-add the cluster and re-confirm.
+
+### Coverage, Orphans and Manual Pins
+
+Backup objects are correlated to guests on the **SMBIOS UUID**, which Veeam happens to use as its `objectId`. That makes the match deterministic rather than a name guess — and a name match would silently report a rebuilt guest as protected by a backup of the machine it replaced.
+
+- **Orphans** (the server's **Orphaned** tab) are backup objects whose platform *is* mapped but which match no guest on it: a deleted VM, a template whose name was reused under a new UUID, a host rebuilt in place. They consume repository space for machines that no longer exist in the form that was backed up, and the Veeam console does not call them out.
+- **Manual pins** are the escape hatch for what automatic resolution cannot know — a guest whose SMBIOS UUID changed, or an orphan you recognise. Pin the object to a guest and no sync overwrites it.
+
+  A pin records the guest's SMBIOS UUID as it stood when you made it. Proxmox reuses a VMID once its guest is destroyed, so without that check a pin to VMID 105 would silently transfer to whatever new machine inherits 105. A collector churn or a rename leaves the pin alone; a genuine identity change invalidates it and the object returns to automatic resolution.
+
+### Running Jobs
+
+Job control needs **`execute:veeam`**, which is separate from `manage:veeam`. The built-in **Admin and Operator** roles both hold it, and on upgrade it was mirrored onto every custom role that already held `manage:backup`. Add it to any other custom role that should be able to run backups.
+
+The server's tabs are **Jobs**, **Runs**, **Repositories**, **Clusters** and **Orphaned**.
+
+From **Jobs** you can **start** and **stop** a run, and **enable** or **disable** a job's schedule. **Runs** lists the sessions; open one to see its per-guest **tasks**, which is what names *which* guest in a job failed rather than showing the job as a single red row. Session logs are read live from Veeam on demand rather than stored, so an empty log is the normal result for a run that was killed.
+
+Job control has its own rate limit (30/min per IP), deliberately separate from and looser than the 10/min budget shared by add/edit/test — an afternoon of ordinary job control should not lock you out of registering a server.
+
+A job Nexara itself stopped is excluded from the `veeam_job_failed` alert metric; stopping a run on purpose should not page anyone.
+
+### Veeam's Own Guests, and DRS
+
+A Veeam deployment puts machines on the cluster it protects — worker appliances it powers on for a job and off again afterwards, and often the VBR server itself. Nexara identifies them and shows them alongside the mapping on the **Clusters** tab, so coverage does not count them as unprotected guests. The coverage report reports them as *excluded (Veeam infrastructure)* rather than unprotected.
+
+**DRS keeps off them by default** — the cluster's DRS settings carry a **Never migrate Veeam's own guests** checkbox (the `exclude_veeam_workers` field in the API), on by default including for existing installs. DRS treating a worker as ordinary load migrates it mid-backup and the job running on it fails. They are still *scored* — their load is real — but never selected for migration.
+
+Note the limit: this pins the guests Veeam **owns**. It does not stop DRS moving a *protected* guest away from the node its worker happens to be on, which silently downgrades that guest's transport from hot-add to network mode — no error, just a slower backup. Covering that would mean pinning half the estate to wherever Veeam last placed a worker, and Veeam re-places them per job run.
+
+### Veeam Alerts
+
+Four metrics are backed by the Veeam inventory rather than the metric tables, and are configured like any other alert rule:
+
+| Metric | Unit | Scopes | Meaning |
+|--------|------|--------|---------|
+| `veeam_rpo_hours` | hours | cluster, VM | Hours since the newest restore point. At cluster scope, reports the **worst** guest |
+| `veeam_malware_status` | 0–3 | cluster, VM | Newest restore point's verdict: Clean 0, Informative 1, Suspicious 2, Infected 3 |
+| `veeam_repo_used_percent` | % | **global only** | The fullest repository |
+| `veeam_job_failed` | count | **cluster only** | Jobs whose latest run failed, excluding runs Nexara stopped |
+
+`veeam_repo_used_percent` is global-scope only because one repository holds the backups of every cluster a Veeam server protects — there is no cluster to attribute it to. A global rule raises alerts with no cluster, which existing RBAC already handles: such an alert is readable only by a holder of global `view:alert`. `veeam_job_failed` is cluster-only because a job protects many guests, so there is no single VM to blame.
+
+---
+
 ## Snapshots
 
 Navigate to **Snapshots** from the sidebar for every guest snapshot across every cluster in one table — the page exists to find the ones somebody took "just for a minute" eight months ago.
@@ -587,6 +760,53 @@ Filter by cluster, guest type (VMs / containers), age bucket (older than 7 days,
 Proxmox has no bulk snapshot endpoint, so the collector walks one listing per guest on its own cadence — every **5 minutes** by default, tuned with `SNAPSHOT_SYNC_INTERVAL`. That pass is deliberately conservative about deleting rows: a guest on an offline node, a guest whose listing errored, or a listing that came back empty (which Proxmox never legitimately returns) leaves that guest's rows untouched, so a transient blip can never look like "all your snapshots vanished". Rows are only removed when the guest itself has left the inventory, or when a successful listing says the snapshot is gone.
 
 > Snapshot age is also an alertable metric — see the `snapshot_age_days` metric under [Alert Configuration](#alert-configuration) — and **Snapshot Inventory** is one of the [report](#reports) types.
+
+---
+
+## Windows Guest Tools
+
+Nexara tracks the **virtio-win drivers** and **QEMU guest agent** inside Windows
+guests, and can stage updates to them.
+
+### Why Updates Apply on Reboot
+
+Installing the virtio-win tools restarts the QEMU-GA service — the very channel an install would be driven through. Running the installer directly kills its own session mid-install. On top of that, upstream's driver upgrade fails with error 1603 when the drivers are in use, and a `viostor` boot disk always is.
+
+So Nexara does not run the installer through the guest agent. It writes a script into the guest and registers it as a scheduled task running as SYSTEM, which executes detached — at the next boot, or immediately if you ask — and leaves a result file Nexara reads back. That is both the workaround and the natural implementation of "update on reboot".
+
+### Configuring a Cluster
+
+**Cluster → Guest Tools**. The cluster `mode` is:
+
+| Mode | Behaviour |
+|------|-----------|
+| `disabled` | **Default.** Nexara does nothing |
+| `report` | Detect and report versions. Never writes into a guest |
+| `staged` | Detect, and stage updates on guests that need them |
+
+Also on the cluster config:
+
+- **Target version** — pin the fleet to a specific virtio-win version instead of the newest catalogued
+- **Snapshot before** — take a snapshot before staging an update (off by default; not every storage type supports snapshots)
+- **Max concurrent** — how many guests may be staged at once (default 5)
+
+Per guest you can set an **exclusion** (never touch this one, whatever the cluster mode says), a **target version** of its own, and a **note** — so the reason an exclusion exists outlives whoever set it.
+
+### The Fleet View
+
+The guest list shows each Windows guest's installed guest-tools version alongside the target, and its **staging state** — which moves `idle → staging → staged → running → succeeded` or `failed`. The QEMU guest agent's own version and whether its service is running are on the guest's **Guest Tools** card, not the fleet table.
+
+**Detect** re-reads one guest now. **Update** stages an update; **Cancel** removes a staged task that has not fired yet. Detection is a read (`view:guest_tools`); changing policy needs `manage:guest_tools`; staging or cancelling needs `execute:guest_tools`.
+
+> Two version spellings are unavoidably in play: upstream's directory version (`0.1.302-1`) and the installer's `DisplayVersion` as Windows reports it (`0.1.302`), which matches the ISO filename. Nexara stores what the guest said and normalises to the suffix-less form when comparing.
+
+### virtio-win ISOs
+
+An update needs an ISO to install from, and Nexara can keep one in Proxmox storage for you. The **Cluster → Guest Tools** tab stacks everything on one page: the virtio-win storage config at the top, then the cluster's guest-tools policy, the fleet table, and the ISO download history at the bottom.
+
+These actions are gated on the **storage** permissions (`view:storage` / `manage:storage`), not the guest-tools ones, because downloading writes into a Proxmox storage.
+
+> Upstream publishes **no ISO checksum** — its `CHECKSUM` file covers only the RPMs — so the field is empty unless you supply one, in which case Proxmox verifies it. Downloads are dispatched asynchronously and reconciled from their Proxmox task ID, so a download finishes correctly even if Nexara restarts.
 
 ---
 

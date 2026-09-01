@@ -73,15 +73,19 @@ docker compose up -d
 
 Open **http://localhost** and create your admin account. That's it.
 
-### What you'll need from Proxmox
+### Connecting your first cluster
 
-To connect a cluster, you need a **Proxmox API token**. In your Proxmox web UI:
+**Add Cluster** → enter the API URL (`https://your-proxmox:8006`) and pick how Nexara gets its credential:
 
-1. **Datacenter** → **Permissions** → **API Tokens** → **Add**
-2. Create a token for an admin user (e.g. `root@pam`) — uncheck "Privilege Separation" for full access
-3. Copy the **Token ID** (e.g. `root@pam!nexara`) and **Secret**
+**Create a token for me (the default tab).** Supply a privileged Proxmox login once — `root@pam` and its password, plus a TOTP code if the account has 2FA. Nexara logs in, creates a dedicated `nexara@pve` user, grants it an ACL, mints a token and verifies it works. The password is used for that one request and is never stored, logged or audited; only the minted token's ciphertext is kept.
 
-Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:8006`), Token ID, and Secret. Proxmox's default self-signed certificate means you'll be shown its SHA-256 fingerprint to verify and accept before the cluster is saved.
+> The `pve` realm is deliberate — a PVE-realm account has no shell, no home directory and no `/etc/passwd` entry, so it cannot be used to log into a node.
+>
+> Over plain HTTP the UI warns before accepting a password, since it belongs to a privileged human account that is probably reused elsewhere. Pasting a token instead is no worse over HTTP than it already was.
+
+**I have a token.** In the Proxmox web UI: **Datacenter** → **Permissions** → **API Tokens** → **Add**, create a token for an admin user (uncheck "Privilege Separation" for full access), then copy the **Token ID** (e.g. `root@pam!nexara`) and **Secret**.
+
+Either way, Proxmox's default self-signed certificate means you'll be shown its SHA-256 fingerprint to verify and accept before the cluster is saved.
 
 ---
 
@@ -126,10 +130,12 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 ### Storage & Backup
 - **Storage management** — add, edit and remove datastores across 13 storage types (Directory, BTRFS, NFS, CIFS/SMB, GlusterFS, LVM, LVM-Thin, ZFS, iSCSI, iSCSI Direct, RBD, CephFS, PBS), with iSCSI target discovery instead of hand-typed IQNs
 - **Content management** — ISO/template upload, download-from-URL, OCI pulls, and the Proxmox appliance browser
-- PBS integration with datastore monitoring
+- PBS integration with datastore monitoring, and retention read from **prune jobs** rather than `datastore.cfg` alone
 - Scheduled backups with retention policies — target all guests, all-except-a-list, a resource pool, or a picked set of guests, on a schedule built from hourly/daily/weekly/monthly presets or a raw calendar string
 - Restore to any cluster/node
 - **Snapshot inventory** — every guest snapshot across all clusters on one page, with age filters, snapshot-age alerts, and a scheduled snapshot report
+- **Veeam Backup & Replication** (VBR 13.1+) — inventory collection, job and session control, per-guest protection, and orphaned-restore-point detection. Backup objects are correlated to Proxmox guests on the **SMBIOS UUID**, not the name, so a rebuilt VM is never reported as protected by a backup of the machine it replaced
+- **Unified backup coverage** — one report across PBS *and* Veeam, with eligibility so Veeam's own worker appliances aren't counted as unprotected guests
 - Ceph management — health, OSD, pool and CephFS monitoring; pool create/delete; OSD mark in/out and daemon start/stop/restart with a redundancy pre-flight
 
 </td>
@@ -138,17 +144,19 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 <td>
 
 ### Automation
-- **DRS** — automatic workload balancing with affinity rules; coexists with Proxmox 9.2's native CRS dynamic balancer (defers automatic moves to it)
+- **DRS** — automatic workload balancing with affinity rules; coexists with Proxmox 9.2's native CRS dynamic balancer (defers automatic moves to it), and keeps off the guests Veeam owns so a worker isn't migrated mid-backup
 - **Rolling updates** — drain/upgrade/reboot/restore pipeline (pauses native CRS auto-rebalance while running)
 - **Alert engine** — threshold alerts, escalation chains, 7 notification channels (SMTP, Slack, Discord, Teams, Telegram, Webhook, PagerDuty)
 - **CVE scanning** — automated vulnerability scanning
 - **Scheduled tasks** — cron-based guest snapshots and reboots
+- **Windows guest tools** — track virtio-win driver and QEMU guest agent versions per guest, stage updates that apply on reboot, and pull virtio-win ISOs into Proxmox storage automatically
 
 </td>
 <td>
 
 ### Security & Enterprise
 - **RBAC** — granular roles and permissions
+- **Proxmox access control** — manage a cluster's own PVE users, API tokens, groups, roles and ACLs
 - **LDAP/AD** — JIT provisioning, group-to-role mapping
 - **OIDC/SSO** — Google, Okta, Keycloak, etc.
 - **2FA** — TOTP with recovery codes
@@ -164,7 +172,7 @@ Then in Nexara: **Add Cluster** → paste the API URL (`https://your-proxmox:800
 ### Networking
 - Firewall management at cluster, node, and VM level with reusable templates
 - SDN — zones, VNets, subnets, controllers, IPAM, DNS plugins
-- Network interfaces — bridges, bonds, VLANs, OVS; inline edit, apply/revert
+- Network interfaces — bridges, bonds, VLANs, OVS; create/edit dialogs at parity with Proxmox's own per-type options; inline edit, apply/revert
 - ACME certificate management per node
 
 </td>

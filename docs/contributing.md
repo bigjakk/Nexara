@@ -87,6 +87,7 @@ nexara/
 │   ├── debug/              # pprof endpoints (PPROF_ENABLED)
 │   ├── drs/                # Distributed Resource Scheduler
 │   ├── events/             # Redis pub/sub event publisher
+│   ├── guesttools/         # Windows virtio-win / QEMU-GA tracking and staged in-guest updates
 │   ├── migration/          # Cross-cluster guest migration: pre-flight checks + orchestrator
 │   ├── netguard/           # SSRF guards for outbound requests
 │   ├── notifications/      # Alert engine, dispatchers
@@ -98,6 +99,8 @@ nexara/
 │   ├── scheduler/          # Scheduler engine
 │   ├── ssh/                # SSH client for rolling updates
 │   ├── syslog/             # RFC 5424 audit-event forwarding
+│   ├── veeam/              # Veeam Backup & Replication REST client (VBR 13.1+)
+│   ├── virtiowin/          # virtio-win release discovery + ISO download into Proxmox storage
 │   └── ws/                 # WebSocket hub and handlers
 ├── pkg/
 │   └── redisutil/          # Shared Redis connection helpers
@@ -446,9 +449,14 @@ Several of those items are enforced mechanically — a violation fails `make tes
 | `internal/api/rbac_route_guard_test.go` | every registered route resolves to a handler that can reach a permission check, and the permission `api_docs.go` advertises matches the one the handler enforces |
 | `internal/api/handlers/tracktask_guard_test.go` | every handler that captures a UPID from a Proxmox client call records it via `handlers.TrackTask`, and no handler defines its own `auditLog` wrapper instead of the shared `handlers.AuditLog` |
 | `internal/api/api_docs_drift_test.go` | every `endpointMeta` key in `handlers/api_docs.go` matches a route actually registered in `router.go` |
+| `internal/api/handlers/list_envelope_guard_test.go` | every collection response goes out as `handlers.ListResponse[T]` via `RespondItems`/`RespondList`, never a bare JSON array — the shape external clients depend on since v1.10.0 |
+| `internal/api/handlers/credential_redirect_guard_test.go` | an `Update` handler that carries a stored secret forward while letting the caller change the address must consult `credentialRedirected` before the write, so a saved credential is never re-pointed at a new host |
+| `internal/api/handlers/confirm_gate_guard_test.go` | a confirm gate *returns* its refusal instead of writing the response itself — a gate that writes and returns `nil` leaves `err != nil` false, and the handler runs on and performs the action it just "refused" |
 | `internal/api/handlers/scope_params_guard_test.go` | every RBAC-scoped list query is built with `AccessibleClusterIds` set — a nil reaches SQL as NULL and lifts the filter |
 | `internal/api/handlers/audit_cluster_guard_test.go` | every `AuditLog`/`AuditLogAs` call passes the audited resource's cluster, unless the call site is on the documented global-audit exemption list |
 | `internal/api/handlers/metrics_authz_guard_test.go` | every historical-metrics endpoint gates on a cluster-scoped permission |
+| `internal/app/guard_test.go` | each domain-service constructor is called exactly once, from the composition root. Before `internal/app` existed each was called at two to four sites with differing dependencies, and the differences were silent bugs — a rolling orchestrator with a nil notification registry dropped job-failure notifications, per-request DRS engines raced the scheduler's leader lock |
+| `internal/proxmox/transport_guard_test.go`, `internal/veeam/transport_guard_test.go` | nothing in those packages builds its own `http.Transport`/`http.Client` — `buildHTTPClient` is the sole owner of the SSRF dial guard, TLS fingerprint pinning and redirect refusal. A second constructor silently forks that hardening, and the fork is the one talking to a user-supplied URL |
 | `internal/db/scope_sql_guard_test.go` | scoped reads in `queries/*.sql` carry the exact `cluster_id = ANY(...)` scope clause |
 | `internal/db/testdb_guard_test.go` | migration tests obtain `NEXARA_TEST_DB_URL` through the throwaway-database guard, never `os.Getenv` directly |
 
