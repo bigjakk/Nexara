@@ -3,7 +3,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -16,8 +15,15 @@ import {
   PlugZap,
   Trash2,
 } from "lucide-react";
-import { SortableTableHead } from "@/components/SortableTableHead";
-import { byId, useTableSort, type SortAccessors } from "@/hooks/useTableSort";
+import { byId, useTableSort } from "@/hooks/useTableSort";
+import {
+  sortAccessorsFrom,
+  useColumnLayout,
+  type ColumnDef,
+} from "@/hooks/useColumnLayout";
+import { DataTableHead } from "@/components/DataTableHead";
+import { DataTableCells } from "@/components/DataTableCells";
+import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useTestVeeamServer } from "../api/backup-queries";
 import type { VeeamProbeResult, VeeamServer } from "../types/backup";
 import { VeeamProbeSummary } from "./VeeamProbeSummary";
@@ -35,7 +41,23 @@ interface VeeamServerTableProps {
 
 const REQUIRED_EDITION = "EnterprisePlus";
 
-type ServerSortKey = "name" | "address" | "version" | "edition" | "status";
+type ServerSortKey =
+  | "expand"
+  | "name"
+  | "address"
+  | "version"
+  | "edition"
+  | "status"
+  | "actions";
+
+/** What the chevron and action cells need beyond the server row itself. */
+interface ServerCtx {
+  expanded: Set<string>;
+  testingId: string | null;
+  onTest: (server: VeeamServer) => void;
+  onEdit: (server: VeeamServer) => void;
+  onDelete: (server: VeeamServer) => void;
+}
 
 /**
  * Severity order for the Status column, not alphabetical.
@@ -52,14 +74,124 @@ const STATUS_RANK: Record<VeeamServerStatus, number> = {
   Connected: 3,
 };
 
-/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
-const SERVER_SORT: SortAccessors<VeeamServer, ServerSortKey> = {
-  name: (server) => server.name,
-  address: (server) => server.base_url,
-  version: (server) => server.product_version || null,
-  edition: (server) => server.license_edition || null,
-  status: (server) => STATUS_RANK[veeamServerStatus(server)],
-};
+/** Each column sorts on what its cell SHOWS, not on the underlying field. */
+const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
+  {
+    key: "expand",
+    label: "",
+    width: 40,
+    fixed: true,
+    cell: (server, ctx) =>
+      ctx.expanded.has(server.id) ? (
+        <ChevronDown className="h-4 w-4" />
+      ) : (
+        <ChevronRight className="h-4 w-4" />
+      ),
+  },
+  {
+    key: "name",
+    label: "Name",
+    width: 180,
+    sortValue: (server) => server.name,
+    cell: (server) => <span className="font-medium">{server.name}</span>,
+  },
+  {
+    key: "address",
+    label: "Address",
+    width: 260,
+    sortValue: (server) => server.base_url,
+    // A Veeam base URL is an FQDN with a port; clipping it hides which host a
+    // row is even about.
+    wrap: true,
+    cell: (server) => (
+      <span className="font-mono text-xs break-all">{server.base_url}</span>
+    ),
+  },
+  {
+    key: "version",
+    label: "Version",
+    width: 140,
+    sortValue: (server) => server.product_version || null,
+    cell: (server) => (
+      <span className="font-mono text-sm">{server.product_version || "-"}</span>
+    ),
+  },
+  {
+    key: "edition",
+    label: "Edition",
+    width: 150,
+    sortValue: (server) => server.license_edition || null,
+    cell: (server) =>
+      server.license_edition === "" ? (
+        <span className="text-muted-foreground">-</span>
+      ) : (
+        <Badge
+          variant={
+            server.license_edition === REQUIRED_EDITION ? "default" : "secondary"
+          }
+        >
+          {server.license_edition}
+        </Badge>
+      ),
+  },
+  {
+    key: "status",
+    label: "Status",
+    width: 130,
+    sortValue: (server) => STATUS_RANK[veeamServerStatus(server)],
+    cell: (server) => <VeeamServerStatusBadge server={server} />,
+  },
+  {
+    key: "actions",
+    label: "Actions",
+    width: 140,
+    align: "right",
+    fixed: true,
+    // The row toggles expansion on click, so the buttons stop the event
+    // themselves — otherwise testing a connection would also expand the row.
+    cell: (server, ctx) => (
+      <div
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+      >
+        <Button
+          variant="ghost"
+          size="sm"
+          title="Test connection"
+          disabled={ctx.testingId === server.id}
+          onClick={() => {
+            ctx.onTest(server);
+          }}
+        >
+          <PlugZap className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          title="Edit"
+          onClick={() => {
+            ctx.onEdit(server);
+          }}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          title="Delete"
+          onClick={() => {
+            ctx.onDelete(server);
+          }}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    ),
+  },
+];
+
+const SERVER_SORT = sortAccessorsFrom(COLUMNS);
 
 function formatTimestamp(value: string | null): string {
   if (value == null || value === "") return "Never";
@@ -78,6 +210,7 @@ export function VeeamServerTable({
     toggle: toggleSort,
     directionFor,
   } = useTableSort(servers, SERVER_SORT, byId);
+  const layout = useColumnLayout("veeam-servers", COLUMNS);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Per-server test results, keyed by id: one server's probe must not clear
@@ -99,6 +232,14 @@ export function VeeamServerTable({
       return next;
     });
   }
+
+  const cellCtx: ServerCtx = {
+    expanded,
+    testingId,
+    onTest: handleTest,
+    onEdit,
+    onDelete,
+  };
 
   function handleTest(server: VeeamServer) {
     setTestingId(server.id);
@@ -132,52 +273,24 @@ export function VeeamServerTable({
 
   return (
     <div className="rounded-md border">
+      <div className="flex justify-end px-2 pt-2">
+        <ResetColumnsButton layout={layout} />
+      </div>
       <div className="overflow-x-auto">
-        <Table>
+        <Table className="table-fixed" style={{ width: layout.totalWidth }}>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-8" />
-              <SortableTableHead
-                direction={directionFor("name")}
-                onSort={() => {
-                  toggleSort("name");
-                }}
-              >
-                Name
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("address")}
-                onSort={() => {
-                  toggleSort("address");
-                }}
-              >
-                Address
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("version")}
-                onSort={() => {
-                  toggleSort("version");
-                }}
-              >
-                Version
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("edition")}
-                onSort={() => {
-                  toggleSort("edition");
-                }}
-              >
-                Edition
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("status")}
-                onSort={() => {
-                  toggleSort("status");
-                }}
-              >
-                Status
-              </SortableTableHead>
-              <TableHead className="w-32 text-right">Actions</TableHead>
+              {layout.columns.map((col) => (
+                <DataTableHead
+                  key={col.key}
+                  column={col}
+                  layout={layout}
+                  direction={directionFor(col.key)}
+                  onSort={() => {
+                    toggleSort(col.key);
+                  }}
+                />
+              ))}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -185,7 +298,6 @@ export function VeeamServerTable({
               const isExpanded = expanded.has(server.id);
               const probe = probes[server.id];
               const probeError = probeErrors[server.id];
-              const editionOK = server.license_edition === REQUIRED_EDITION;
 
               return (
                 <Fragment key={server.id}>
@@ -195,75 +307,19 @@ export function VeeamServerTable({
                       toggleExpand(server.id);
                     }}
                   >
-                    <TableCell className="px-2">
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </TableCell>
-                    <TableCell className="font-medium">{server.name}</TableCell>
-                    <TableCell className="break-all font-mono text-xs">
-                      {server.base_url}
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {server.product_version || "-"}
-                    </TableCell>
-                    <TableCell>
-                      {server.license_edition === "" ? (
-                        <span className="text-muted-foreground">-</span>
-                      ) : (
-                        <Badge variant={editionOK ? "default" : "secondary"}>
-                          {server.license_edition}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <VeeamServerStatusBadge server={server} />
-                    </TableCell>
-                    <TableCell
-                      className="text-right"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                      }}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title="Test connection"
-                        disabled={testingId === server.id}
-                        onClick={() => {
-                          handleTest(server);
-                        }}
-                      >
-                        <PlugZap className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title="Edit"
-                        onClick={() => {
-                          onEdit(server);
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        title="Delete"
-                        onClick={() => {
-                          onDelete(server);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
+                    <DataTableCells
+                      row={server}
+                      layout={layout}
+                      ctx={cellCtx}
+                    />
                   </TableRow>
 
                   {isExpanded && (
                     <TableRow>
-                      <TableCell colSpan={7} className="bg-muted/30">
+                      <TableCell
+                        colSpan={layout.columns.length}
+                        className="bg-muted/30"
+                      >
                         <div className="space-y-4 px-2 py-3">
                           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
                             <div>

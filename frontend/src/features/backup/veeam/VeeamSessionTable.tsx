@@ -3,15 +3,21 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
-import { SortableTableHead } from "@/components/SortableTableHead";
-import { byId, useTableSort, type SortAccessors } from "@/hooks/useTableSort";
+import { byId, useTableSort } from "@/hooks/useTableSort";
+import {
+  sortAccessorsFrom,
+  useColumnLayout,
+  type ColumnDef,
+} from "@/hooks/useColumnLayout";
+import { DataTableHead } from "@/components/DataTableHead";
+import { DataTableCells } from "@/components/DataTableCells";
+import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { veeamDurationSeconds } from "./veeam-duration";
 import { VeeamSessionActions } from "./VeeamSessionActions";
 import { VeeamSessionLog } from "./VeeamSessionLog";
@@ -85,28 +91,129 @@ function resultVariant(
 }
 
 type SessionSortKey =
+  | "expand"
   | "name"
   | "state"
   | "result"
   | "mode"
   | "started"
   | "duration"
-  | "transferred";
+  | "transferred"
+  | "actions";
 
-/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
-const SESSION_SORT: SortAccessors<VeeamSession, SessionSortKey> = {
-  name: (session) => session.name,
-  state: (session) => session.state || null,
-  result: (session) => {
-    const label = sessionResultLabel(session);
-    return label === null ? null : (SESSION_RESULT_RANK[label] ?? 99);
+/** What the chevron and action cells need beyond the session row itself. */
+interface SessionCtx {
+  serverId: string;
+  expanded: Set<string>;
+}
+
+/** Each column sorts on what its cell SHOWS, not on the underlying field. */
+const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
+  {
+    key: "expand",
+    label: "",
+    width: 40,
+    fixed: true,
+    cell: (session, ctx) =>
+      ctx.expanded.has(session.id) ? (
+        <ChevronDown className="h-4 w-4" />
+      ) : (
+        <ChevronRight className="h-4 w-4" />
+      ),
   },
-  mode: (session) => session.algorithm || null,
-  started: (session) => toEpoch(session.creation_time),
-  duration: (session) =>
-    session.duration === "" ? null : veeamDurationSeconds(session.duration),
-  transferred: (session) => session.transferred_size,
-};
+  {
+    key: "name",
+    label: "Job",
+    width: 220,
+    sortValue: (session) => session.name,
+    cell: (session) => <span className="font-medium">{session.name}</span>,
+  },
+  {
+    key: "state",
+    label: "State",
+    width: 130,
+    sortValue: (session) => session.state || null,
+    cell: (session) => (
+      <Badge variant="secondary">{session.state || "-"}</Badge>
+    ),
+  },
+  {
+    key: "result",
+    label: "Result",
+    width: 190,
+    sortValue: (session) => {
+      const label = sessionResultLabel(session);
+      return label === null ? null : (SESSION_RESULT_RANK[label] ?? 99);
+    },
+    cell: (session) =>
+      session.result === "" ? (
+        <span className="text-muted-foreground">—</span>
+      ) : (
+        <Badge variant={resultVariant(session.result)}>
+          {/* Never a bare "Failed": Veeam records an API-cancelled run
+              identically to a real failure. Keyed on nexara_STOPPED, not
+              nexara_initiated — a run Nexara STARTED can fail for a completely
+              real reason, and labelling that "stopped" would tell an operator
+              to ignore a genuine backup failure. */}
+          {sessionResultLabel(session)}
+        </Badge>
+      ),
+  },
+  {
+    key: "mode",
+    label: "Mode",
+    width: 130,
+    sortValue: (session) => session.algorithm || null,
+    cell: (session) => <span className="text-sm">{session.algorithm || "—"}</span>,
+  },
+  {
+    key: "started",
+    label: "Started",
+    width: 180,
+    sortValue: (session) => toEpoch(session.creation_time),
+    cell: (session) => (
+      <span className="text-sm">{formatTime(session.creation_time)}</span>
+    ),
+  },
+  {
+    key: "duration",
+    label: "Duration",
+    width: 120,
+    sortValue: (session) =>
+      session.duration === "" ? null : veeamDurationSeconds(session.duration),
+    cell: (session) => (
+      <span className="font-mono text-sm">{session.duration || "—"}</span>
+    ),
+  },
+  {
+    key: "transferred",
+    label: "Transferred",
+    width: 130,
+    align: "right",
+    sortValue: (session) => session.transferred_size,
+    cell: (session) => (
+      <span className="font-mono text-sm">
+        {formatBytes(session.transferred_size)}
+      </span>
+    ),
+  },
+  {
+    key: "actions",
+    label: "Actions",
+    width: 230,
+    align: "right",
+    fixed: true,
+    // The action components render their mutation errors and notices inline
+    // beside the buttons; truncating this cell would clip the only feedback a
+    // failed start/stop ever gives.
+    wrap: true,
+    cell: (session, ctx) => (
+      <VeeamSessionActions serverId={ctx.serverId} session={session} />
+    ),
+  },
+];
+
+const SESSION_SORT = sortAccessorsFrom(COLUMNS);
 
 export function VeeamSessionTable({
   sessions,
@@ -118,6 +225,7 @@ export function VeeamSessionTable({
     toggle: toggleSort,
     directionFor,
   } = useTableSort(sessions, SESSION_SORT, byId);
+  const layout = useColumnLayout("veeam-sessions", COLUMNS);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Row ids are server-scoped, so switching servers must not carry a stale
@@ -137,6 +245,8 @@ export function VeeamSessionTable({
     );
   }
 
+  const cellCtx: SessionCtx = { serverId, expanded };
+
   function toggle(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -148,69 +258,24 @@ export function VeeamSessionTable({
 
   return (
     <div className="rounded-md border">
+      <div className="flex justify-end px-2 pt-2">
+        <ResetColumnsButton layout={layout} />
+      </div>
       <div className="overflow-x-auto">
-        <Table>
+        <Table className="table-fixed" style={{ width: layout.totalWidth }}>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-8" />
-              <SortableTableHead
-                direction={directionFor("name")}
-                onSort={() => {
-                  toggleSort("name");
-                }}
-              >
-                Job
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("state")}
-                onSort={() => {
-                  toggleSort("state");
-                }}
-              >
-                State
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("result")}
-                onSort={() => {
-                  toggleSort("result");
-                }}
-              >
-                Result
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("mode")}
-                onSort={() => {
-                  toggleSort("mode");
-                }}
-              >
-                Mode
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("started")}
-                onSort={() => {
-                  toggleSort("started");
-                }}
-              >
-                Started
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("duration")}
-                onSort={() => {
-                  toggleSort("duration");
-                }}
-              >
-                Duration
-              </SortableTableHead>
-              <SortableTableHead
-                align="right"
-                direction={directionFor("transferred")}
-                onSort={() => {
-                  toggleSort("transferred");
-                }}
-              >
-                Transferred
-              </SortableTableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              {layout.columns.map((col) => (
+                <DataTableHead
+                  key={col.key}
+                  column={col}
+                  layout={layout}
+                  direction={directionFor(col.key)}
+                  onSort={() => {
+                    toggleSort(col.key);
+                  }}
+                />
+              ))}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -225,57 +290,19 @@ export function VeeamSessionTable({
                       toggle(session.id);
                     }}
                   >
-                    <TableCell className="px-2">
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {session.name}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{session.state || "-"}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      {session.result === "" ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : (
-                        <Badge variant={resultVariant(session.result)}>
-                          {/* Never a bare "Failed": Veeam records an
-                              API-cancelled run identically to a real failure.
-                              Keyed on nexara_STOPPED, not nexara_initiated — a
-                              run Nexara STARTED can fail for a completely real
-                              reason, and labelling that "stopped" would tell an
-                              operator to ignore a genuine backup failure. */}
-                          {sessionResultLabel(session)}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {session.algorithm || "—"}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatTime(session.creation_time)}
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {session.duration || "—"}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {formatBytes(session.transferred_size)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <VeeamSessionActions
-                        serverId={serverId}
-                        session={session}
-                      />
-                    </TableCell>
+                    <DataTableCells
+                      row={session}
+                      layout={layout}
+                      ctx={cellCtx}
+                    />
                   </TableRow>
 
                   {isExpanded && (
                     <TableRow>
-                      <TableCell colSpan={9} className="bg-muted/30">
+                      <TableCell
+                        colSpan={layout.columns.length}
+                        className="bg-muted/30"
+                      >
                         <div className="space-y-3 px-2 py-3">
                           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                             <div>

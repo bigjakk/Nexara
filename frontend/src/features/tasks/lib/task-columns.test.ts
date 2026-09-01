@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  deriveDisplayStatus,
-  taskColumnCount,
-  taskColumns,
-} from "./task-columns";
+import { deriveDisplayStatus } from "./task-columns";
+import { TASK_COLUMNS, TASK_COLUMNS_WITH_VM } from "./task-column-defs";
 import type { TaskRecord } from "../api/tasks-queries";
 
 function task(over: Partial<TaskRecord>): TaskRecord {
@@ -24,23 +21,40 @@ function task(over: Partial<TaskRecord>): TaskRecord {
   };
 }
 
-describe("taskColumns", () => {
+describe("task columns", () => {
   it("drops the VM column outside guest-scoped views", () => {
-    expect(taskColumns(false).map((c) => c.key)).not.toContain("vm");
-    expect(taskColumns(true).map((c) => c.key)).toContain("vm");
+    expect(TASK_COLUMNS.map((c) => c.key)).not.toContain("vm");
+    expect(TASK_COLUMNS_WITH_VM.map((c) => c.key)).toContain("vm");
   });
 
-  it("keeps colSpan in step with the rendered columns", () => {
-    // The expanded detail row and the empty state span the table; a count that
-    // drifts from the header leaves a ragged row rather than a full-width one.
-    expect(taskColumnCount(false)).toBe(taskColumns(false).length);
-    expect(taskColumnCount(true)).toBe(taskColumns(false).length + 1);
+  it("differs from the guest-scoped set by exactly the VM column", () => {
+    expect(TASK_COLUMNS_WITH_VM.length).toBe(TASK_COLUMNS.length + 1);
   });
 
   it("puts Progress between Node and Status", () => {
-    const keys = taskColumns(false).map((c) => c.key);
+    const keys = TASK_COLUMNS.map((c) => c.key);
     expect(keys.indexOf("progress")).toBe(keys.indexOf("node") + 1);
     expect(keys.indexOf("status")).toBe(keys.indexOf("progress") + 1);
+  });
+
+  it("gives every column a width, so table-fixed has one to use", () => {
+    // A column with no width renders at zero under `table-layout: fixed`,
+    // which reads as a missing column rather than a mis-sized one.
+    for (const col of TASK_COLUMNS_WITH_VM) {
+      expect(col.width).toBeGreaterThan(0);
+    }
+  });
+
+  it("is sortable without a client accessor — this table sorts server-side", () => {
+    // Both halves matter. `sortable` is what puts the control on the header at
+    // all; without it every heading in this table would be inert. No
+    // sortValue, because a client accessor would re-sort the delivered page on
+    // top of the server's ordering — the bug server-side sorting exists to
+    // avoid.
+    for (const col of TASK_COLUMNS_WITH_VM) {
+      expect(col.sortable).toBe(true);
+      expect(col.sortValue).toBeUndefined();
+    }
   });
 });
 

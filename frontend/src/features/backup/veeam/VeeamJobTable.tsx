@@ -3,15 +3,21 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
-import { SortableTableHead } from "@/components/SortableTableHead";
-import { byId, useTableSort, type SortAccessors } from "@/hooks/useTableSort";
+import { byId, useTableSort } from "@/hooks/useTableSort";
+import {
+  sortAccessorsFrom,
+  useColumnLayout,
+  type ColumnDef,
+} from "@/hooks/useColumnLayout";
+import { DataTableHead } from "@/components/DataTableHead";
+import { DataTableCells } from "@/components/DataTableCells";
+import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { VeeamJobActions } from "./VeeamJobActions";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamJob } from "../types/backup";
@@ -78,13 +84,21 @@ function formatTime(value: string | null): string {
 }
 
 type JobSortKey =
+  | "expand"
   | "name"
   | "status"
   | "result"
   | "lastRun"
   | "nextRun"
   | "repository"
-  | "guests";
+  | "guests"
+  | "actions";
+
+/** What the chevron and action cells need beyond the job row itself. */
+interface JobCtx {
+  serverId: string;
+  expanded: Set<string>;
+}
 
 /**
  * Domain order for the two badge columns, not alphabetical.
@@ -108,23 +122,136 @@ const JOB_RESULT_RANK: Record<string, number> = {
   Success: 2,
 };
 
-/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
-const JOB_SORT: SortAccessors<VeeamJob, JobSortKey> = {
-  name: (job) => job.name,
-  status: (job) => {
-    if (isRunning(job)) return JOB_STATUS_RANK["Running"] ?? 0;
-    if (job.status === "") return null;
-    return JOB_STATUS_RANK[job.status] ?? 99;
+/** Each column sorts on what its cell SHOWS, not on the underlying field. */
+const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
+  {
+    // The expand affordance. Unlabelled and unsortable, and pinned so it
+    // cannot be dragged into the middle of the data.
+    key: "expand",
+    label: "",
+    width: 40,
+    fixed: true,
+    cell: (job, ctx) =>
+      ctx.expanded.has(job.id) ? (
+        <ChevronDown className="h-4 w-4" />
+      ) : (
+        <ChevronRight className="h-4 w-4" />
+      ),
   },
-  result: (job) =>
-    job.last_result === ""
-      ? null
-      : (JOB_RESULT_RANK[resultLabel(job.last_result)] ?? 99),
-  lastRun: (job) => toEpoch(job.last_run),
-  nextRun: (job) => toEpoch(job.next_run),
-  repository: (job) => job.repository_name || null,
-  guests: (job) => job.objects_count,
-};
+  {
+    key: "name",
+    label: "Job",
+    width: 220,
+    sortValue: (job) => job.name,
+    cell: (job) => <span className="font-medium">{job.name}</span>,
+  },
+  {
+    key: "status",
+    label: "Status",
+    width: 170,
+    sortValue: (job) => {
+      if (isRunning(job)) return JOB_STATUS_RANK["Running"] ?? 0;
+      if (job.status === "") return null;
+      return JOB_STATUS_RANK[job.status] ?? 99;
+    },
+    cell: (job) => {
+      // Whether progress_percent describes THIS run. It is written by the same
+      // pass that writes status, so it is only trustworthy when status agrees
+      // a run is in flight.
+      const measured = job.status === "Running";
+      if (!isRunning(job)) {
+        return <Badge variant="secondary">{job.status || "-"}</Badge>;
+      }
+      return (
+        <div className="flex items-center gap-2">
+          <Badge variant="default">Running</Badge>
+          {/* The bar renders ONLY when Veeam itself reports the job as
+              running, because progress_percent is refreshed by the same
+              inventory pass that sets status. For a run derived from a live
+              session that number is the PREVIOUS run's — normally 100 — so
+              drawing it would show a backup that started seconds ago as
+              finished. A badge with no bar says "running, progress not
+              measured yet", which is the truth. */}
+          {measured && (
+            <div
+              data-testid="job-progress"
+              className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted"
+            >
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{
+                  width: `${String(Math.min(Math.max(job.progress_percent, 0), 100))}%`,
+                }}
+              />
+            </div>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    key: "result",
+    label: "Last Result",
+    width: 170,
+    sortValue: (job) =>
+      job.last_result === ""
+        ? null
+        : (JOB_RESULT_RANK[resultLabel(job.last_result)] ?? 99),
+    cell: (job) =>
+      job.last_result === "" ? (
+        <span className="text-muted-foreground">-</span>
+      ) : (
+        <Badge variant={resultVariant(job.last_result)}>
+          {resultLabel(job.last_result)}
+        </Badge>
+      ),
+  },
+  {
+    key: "lastRun",
+    label: "Last Run",
+    width: 180,
+    sortValue: (job) => toEpoch(job.last_run),
+    cell: (job) => <span className="text-sm">{formatTime(job.last_run)}</span>,
+  },
+  {
+    key: "nextRun",
+    label: "Next Run",
+    width: 180,
+    sortValue: (job) => toEpoch(job.next_run),
+    cell: (job) => <span className="text-sm">{formatTime(job.next_run)}</span>,
+  },
+  {
+    key: "repository",
+    label: "Repository",
+    width: 180,
+    sortValue: (job) => job.repository_name || null,
+    cell: (job) => <span className="text-sm">{job.repository_name || "-"}</span>,
+  },
+  {
+    key: "guests",
+    label: "Guests",
+    width: 90,
+    align: "right",
+    sortValue: (job) => job.objects_count,
+    cell: (job) => job.objects_count,
+  },
+  {
+    key: "actions",
+    label: "Actions",
+    width: 230,
+    align: "right",
+    fixed: true,
+    // The action components render their mutation errors and notices inline
+    // beside the buttons; truncating this cell would clip the only feedback a
+    // failed start/stop ever gives.
+    wrap: true,
+    cell: (job, ctx) => (
+      <VeeamJobActions serverId={ctx.serverId} job={job} />
+    ),
+  },
+];
+
+const JOB_SORT = sortAccessorsFrom(COLUMNS);
 
 export function VeeamJobTable({
   jobs,
@@ -136,6 +263,7 @@ export function VeeamJobTable({
     toggle: toggleSort,
     directionFor,
   } = useTableSort(jobs, JOB_SORT, byId);
+  const layout = useColumnLayout("veeam-jobs", COLUMNS);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Row ids are server-scoped, so switching servers must not carry a stale
@@ -164,81 +292,33 @@ export function VeeamJobTable({
     });
   }
 
+  const cellCtx: JobCtx = { serverId, expanded };
+
   return (
     <div className="rounded-md border">
+      <div className="flex justify-end px-2 pt-2">
+        <ResetColumnsButton layout={layout} />
+      </div>
       <div className="overflow-x-auto">
-        <Table>
+        <Table className="table-fixed" style={{ width: layout.totalWidth }}>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-8" />
-              <SortableTableHead
-                direction={directionFor("name")}
-                onSort={() => {
-                  toggleSort("name");
-                }}
-              >
-                Job
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("status")}
-                onSort={() => {
-                  toggleSort("status");
-                }}
-              >
-                Status
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("result")}
-                onSort={() => {
-                  toggleSort("result");
-                }}
-              >
-                Last Result
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("lastRun")}
-                onSort={() => {
-                  toggleSort("lastRun");
-                }}
-              >
-                Last Run
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("nextRun")}
-                onSort={() => {
-                  toggleSort("nextRun");
-                }}
-              >
-                Next Run
-              </SortableTableHead>
-              <SortableTableHead
-                direction={directionFor("repository")}
-                onSort={() => {
-                  toggleSort("repository");
-                }}
-              >
-                Repository
-              </SortableTableHead>
-              <SortableTableHead
-                align="right"
-                direction={directionFor("guests")}
-                onSort={() => {
-                  toggleSort("guests");
-                }}
-              >
-                Guests
-              </SortableTableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              {layout.columns.map((col) => (
+                <DataTableHead
+                  key={col.key}
+                  column={col}
+                  layout={layout}
+                  direction={directionFor(col.key)}
+                  onSort={() => {
+                    toggleSort(col.key);
+                  }}
+                />
+              ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {sortedJobs.map((job) => {
               const isExpanded = expanded.has(job.id);
-              const running = isRunning(job);
-              // Whether progress_percent describes THIS run. It is written by
-              // the same pass that writes status, so it is only trustworthy
-              // when status agrees a run is in flight.
-              const measured = job.status === "Running";
 
               return (
                 <Fragment key={job.id}>
@@ -248,74 +328,15 @@ export function VeeamJobTable({
                       toggle(job.id);
                     }}
                   >
-                    <TableCell className="px-2">
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </TableCell>
-                    <TableCell className="font-medium">{job.name}</TableCell>
-                    <TableCell>
-                      {running ? (
-                        <div className="flex items-center gap-2">
-                          <Badge variant="default">Running</Badge>
-                          {/* The bar renders ONLY when Veeam itself reports
-                              the job as running, because progress_percent is
-                              refreshed by the same inventory pass that sets
-                              status. For a run derived from a live session
-                              that number is the PREVIOUS run's — normally 100
-                              — so drawing it would show a backup that started
-                              seconds ago as finished. A badge with no bar says
-                              "running, progress not measured yet", which is
-                              the truth. */}
-                          {measured && (
-                            <div
-                              data-testid="job-progress"
-                              className="h-1.5 w-16 overflow-hidden rounded-full bg-muted"
-                            >
-                              <div
-                                className="h-full rounded-full bg-primary transition-all"
-                                style={{
-                                  width: `${String(Math.min(Math.max(job.progress_percent, 0), 100))}%`,
-                                }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <Badge variant="secondary">{job.status || "-"}</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {job.last_result === "" ? (
-                        <span className="text-muted-foreground">-</span>
-                      ) : (
-                        <Badge variant={resultVariant(job.last_result)}>
-                          {resultLabel(job.last_result)}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatTime(job.last_run)}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {formatTime(job.next_run)}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {job.repository_name || "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {job.objects_count}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <VeeamJobActions serverId={serverId} job={job} />
-                    </TableCell>
+                    <DataTableCells row={job} layout={layout} ctx={cellCtx} />
                   </TableRow>
 
                   {isExpanded && (
                     <TableRow>
-                      <TableCell colSpan={9} className="bg-muted/30">
+                      <TableCell
+                        colSpan={layout.columns.length}
+                        className="bg-muted/30"
+                      >
                         <div className="space-y-3 px-2 py-3">
                           {job.description !== "" && (
                             <p className="text-sm text-muted-foreground">

@@ -13,10 +13,10 @@ import {
   TaskTableHeader,
 } from "@/features/tasks/components/TasksPanel";
 import { selectClass, statusFilters } from "@/features/tasks/lib/task-filters";
-import {
-  taskColumnCount,
-  useTaskSort,
-} from "@/features/tasks/lib/task-columns";
+import { useTaskSort } from "@/features/tasks/lib/task-columns";
+import { TASK_COLUMNS_WITH_VM } from "@/features/tasks/lib/task-column-defs";
+import { useColumnLayout } from "@/hooks/useColumnLayout";
+import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { upidVmid } from "@/lib/upid";
 
 const PAGE_SIZE = 50;
@@ -54,6 +54,7 @@ export function FolderTasksTab({
   const { sort, toggle, directionFor } = useTaskSort(() => {
     setPage(0);
   });
+  const layout = useColumnLayout("folder-tasks", TASK_COLUMNS_WITH_VM);
 
   const vmidList = useMemo(
     () => [...vmids].sort((a, b) => a - b),
@@ -115,6 +116,7 @@ export function FolderTasksTab({
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
       <select
         className={selectClass}
         value={statusFilter}
@@ -129,11 +131,17 @@ export function FolderTasksTab({
           </option>
         ))}
       </select>
+        <span className="flex-1" />
+        <ResetColumnsButton layout={layout} />
+      </div>
 
       <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
+        <table
+          className="table-fixed text-sm"
+          style={{ width: layout.totalWidth }}
+        >
           <TaskTableHeader
-            withVM
+            layout={layout}
             directionFor={directionFor}
             onSort={toggle}
           />
@@ -146,6 +154,7 @@ export function FolderTasksTab({
                   key={task.id}
                   task={task}
                   clusterName={clusterName}
+                  layout={layout}
                   vmName={
                     link ? (
                       <Link
@@ -173,7 +182,7 @@ export function FolderTasksTab({
             {items.length === 0 && (
               <tr>
                 <td
-                  colSpan={taskColumnCount(true)}
+                  colSpan={layout.columns.length}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   No tasks for VMs in this folder.

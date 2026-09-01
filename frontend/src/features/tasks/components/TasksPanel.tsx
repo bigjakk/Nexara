@@ -1,87 +1,55 @@
 import { useState, type ReactNode } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  Activity,
-  Monitor,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { SortableTableHead } from "@/components/SortableTableHead";
-import { TaskProgressCell } from "@/components/TaskProgressCell";
-import {
-  displayProgress,
-  type DisplayStatus,
-} from "@/components/layout/task-status";
+import { DataTableHead } from "@/components/DataTableHead";
+import { DataTableCells } from "@/components/DataTableCells";
+import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
+import { displayProgress } from "@/components/layout/task-status";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { selectClass, statusFilters } from "../lib/task-filters";
 import {
   deriveDisplayStatus,
-  taskColumnCount,
-  taskColumns,
   useTaskSort,
+  type TaskCellCtx,
   type TaskSortKey,
 } from "../lib/task-columns";
+import { TASK_COLUMNS } from "../lib/task-column-defs";
 import { useTasks, type TaskRecord } from "../api/tasks-queries";
 
 const PAGE_SIZE = 50;
 
-function StatusIcon({ status }: { status: DisplayStatus }) {
-  if (status === "running")
-    return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />;
-  if (status === "ok")
-    return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
-  return <XCircle className="h-3.5 w-3.5 text-red-500" />;
-}
-
-const STATUS_BADGE: Record<DisplayStatus, string> = {
-  running: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  ok: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  failed: "bg-red-500/15 text-red-600 dark:text-red-400",
-};
-const STATUS_LABEL: Record<DisplayStatus, string> = {
-  running: "Running",
-  ok: "Completed",
-  failed: "Failed",
-};
-
 /**
  * The shared `<thead>`. Both task tables render the same columns from the same
- * definition, so adding or renaming one is a single edit in task-columns.ts.
- *
- * `px-4` lines the headers up with TaskRow's cells — the shared
- * SortableTableHead is sized for the shadcn `<Table>`, and these two tables are
- * hand-rolled at a wider gutter.
+ * layout, so adding or renaming one is a single edit in task-columns.tsx.
  */
+export type TaskLayout = ColumnLayout<TaskRecord, TaskSortKey, TaskCellCtx>;
+
 export function TaskTableHeader({
-  withVM,
+  layout,
   directionFor,
   onSort,
 }: {
-  withVM: boolean;
+  layout: TaskLayout;
   directionFor: (key: TaskSortKey) => "asc" | "desc" | null;
   onSort: (key: TaskSortKey) => void;
 }) {
   return (
     <thead>
       <tr className="border-b bg-muted/50">
-        {taskColumns(withVM).map((col) => (
-          <SortableTableHead
+        {layout.columns.map((col) => (
+          <DataTableHead
             key={col.key}
-            className="px-4"
+            column={col}
+            layout={layout}
             direction={directionFor(col.key)}
             onSort={() => {
               onSort(col.key);
             }}
-          >
-            {col.label}
-          </SortableTableHead>
+          />
         ))}
       </tr>
     </thead>
@@ -108,15 +76,18 @@ export function TaskRow({
   vmName,
   expanded,
   onToggle,
+  layout,
 }: {
   task: TaskRecord;
   clusterName: string;
-  /** When provided (folder/VM-scoped views), an extra VM column is rendered
-   * between Description and Node — the parent table must add a matching
-   * header cell. */
+  /** Rendered by the `vm` column, which only the folder-scoped layout
+   * includes. */
   vmName?: ReactNode;
   expanded: boolean;
   onToggle: () => void;
+  /** The parent's layout — the SAME instance its header row uses, so a
+   * dragged column moves the heading and these cells together. */
+  layout: TaskLayout;
 }) {
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const isRunning = task.status === "running";
@@ -148,47 +119,21 @@ export function TaskRow({
         className="cursor-pointer border-b hover:bg-muted/20"
         onClick={onToggle}
       >
-        <td className="px-4 py-2 whitespace-nowrap text-muted-foreground">
-          <div className="flex items-center gap-1.5">
-            <ChevronDown
-              className={`h-3 w-3 text-muted-foreground transition-transform ${expanded ? "" : "-rotate-90"}`}
-            />
-            <StatusIcon status={display} />
-            {formatTime(task.started_at)}
-          </div>
-        </td>
-        <td className="px-4 py-2">{clusterName}</td>
-        <td className="px-4 py-2 font-mono text-xs">{task.task_type || "—"}</td>
-        <td className="px-4 py-2">
-          <div className="flex items-center gap-2">
-            {task.source === "proxmox" && (
-              <span className="inline-flex items-center gap-0.5 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-orange-600 dark:text-orange-400">
-                <Monitor className="h-2.5 w-2.5" />
-                PVE
-              </span>
-            )}
-            <span>{task.description || task.upid}</span>
-          </div>
-        </td>
-        {vmName !== undefined && <td className="px-4 py-2">{vmName}</td>}
-        <td className="px-4 py-2 text-muted-foreground">{task.node || "—"}</td>
-        <td className="px-4 py-2">
-          <TaskProgressCell display={display} value={progress} />
-        </td>
-        <td className="px-4 py-2">
-          <span
-            className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[display]}`}
-          >
-            {STATUS_LABEL[display]}
-          </span>
-        </td>
+        <DataTableCells
+          row={task}
+          layout={layout}
+          ctx={{
+            clusterName,
+            vmName,
+            display,
+            progress,
+            expanded,
+          }}
+        />
       </tr>
       {expanded && (
         <tr className="border-b bg-muted/10">
-          <td
-            colSpan={taskColumnCount(vmName !== undefined)}
-            className="px-4 py-3"
-          >
+          <td colSpan={layout.columns.length} className="px-4 py-3">
             <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               <span className="text-muted-foreground">Description</span>
               <span>{task.description || "—"}</span>
@@ -286,6 +231,7 @@ export function TasksPanel() {
   const { sort, toggle, directionFor } = useTaskSort(() => {
     setPage(0);
   });
+  const layout = useColumnLayout("tasks", TASK_COLUMNS);
 
   const { data: clusters } = useClusters();
   const { data, isLoading, error } = useTasks({
@@ -307,7 +253,7 @@ export function TasksPanel() {
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <select
           className={selectClass}
           value={clusterFilter}
@@ -338,6 +284,9 @@ export function TasksPanel() {
             </option>
           ))}
         </select>
+
+        <span className="flex-1" />
+        <ResetColumnsButton layout={layout} />
       </div>
 
       {/* Table */}
@@ -352,9 +301,12 @@ export function TasksPanel() {
       ) : (
         <>
           <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-sm">
+            <table
+              className="table-fixed text-sm"
+              style={{ width: layout.totalWidth }}
+            >
               <TaskTableHeader
-                withVM={false}
+                layout={layout}
                 directionFor={directionFor}
                 onSort={toggle}
               />
@@ -364,6 +316,7 @@ export function TasksPanel() {
                     key={task.id}
                     task={task}
                     clusterName={clusterName(task.cluster_id)}
+                    layout={layout}
                     expanded={expandedId === task.id}
                     onToggle={() => {
                       setExpandedId(expandedId === task.id ? null : task.id);
@@ -373,7 +326,7 @@ export function TasksPanel() {
                 {data?.items.length === 0 && (
                   <tr>
                     <td
-                      colSpan={taskColumnCount(false)}
+                      colSpan={layout.columns.length}
                       className="px-4 py-8 text-center text-muted-foreground"
                     >
                       No tasks found.

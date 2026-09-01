@@ -6,13 +6,30 @@
  * list, the sort keys and the rules for what a cell shows live here once
  * rather than being restated (and drifting) in each panel.
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   isOkExit,
   type DisplayStatus,
 } from "@/components/layout/task-status";
 import type { SortDirection } from "@/hooks/useTableSort";
 import type { TaskRecord } from "../api/tasks-queries";
+
+/**
+ * What a task cell needs beyond the row: the resolved cluster name, the VM
+ * link the folder view supplies, and the display status and progress TaskRow
+ * derives from its own live poll.
+ *
+ * Declared here, away from the cells that consume it, so this module stays
+ * free of JSX — the hooks and derivations below are unit-tested with no
+ * renderer involved.
+ */
+export interface TaskCellCtx {
+  clusterName: string;
+  vmName: ReactNode;
+  display: DisplayStatus;
+  progress: number | null;
+  expanded: boolean;
+}
 
 /**
  * The sortable columns, by the name the API expects in ?sort=.
@@ -33,33 +50,6 @@ export type TaskSortKey =
   | "progress"
   | "status";
 
-export interface TaskColumn {
-  key: TaskSortKey;
-  label: string;
-}
-
-/** Column order, left to right. `vm` is present only in guest-scoped views. */
-const ALL_COLUMNS: readonly TaskColumn[] = [
-  { key: "started", label: "Started" },
-  { key: "cluster", label: "Cluster" },
-  { key: "type", label: "Type" },
-  { key: "description", label: "Description" },
-  { key: "vm", label: "VM" },
-  { key: "node", label: "Node" },
-  { key: "progress", label: "Progress" },
-  { key: "status", label: "Status" },
-];
-
-/** The columns a table renders. `withVM` matches TaskRow's `vmName` prop. */
-export function taskColumns(withVM: boolean): readonly TaskColumn[] {
-  return withVM ? ALL_COLUMNS : ALL_COLUMNS.filter((c) => c.key !== "vm");
-}
-
-/** colSpan for the expanded detail row and the empty state. */
-export function taskColumnCount(withVM: boolean): number {
-  return taskColumns(withVM).length;
-}
-
 export interface TaskSortState {
   key: TaskSortKey;
   direction: SortDirection;
@@ -73,7 +63,7 @@ export const DEFAULT_TASK_SORT: TaskSortState = {
 
 /**
  * Server-side sort state, shaped like useTableSort's return so the panels and
- * SortableTableHead read the same either way. It holds no rows: the ordering
+ * DataTableHead read the same either way. It holds no rows: the ordering
  * is a query parameter, and TanStack Query refetches when it changes.
  *
  * `onSortChange` exists to reset pagination — a new ordering makes the current

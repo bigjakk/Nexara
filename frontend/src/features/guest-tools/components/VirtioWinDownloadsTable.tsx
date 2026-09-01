@@ -2,7 +2,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
-  TableCell,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -10,8 +9,14 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { History } from "lucide-react";
 import { useTableSort, byId } from "@/hooks/useTableSort";
-import type { SortAccessors } from "@/hooks/useTableSort";
-import { SortableTableHead } from "@/components/SortableTableHead";
+import {
+  sortAccessorsFrom,
+  useColumnLayout,
+  type ColumnDef,
+} from "@/hooks/useColumnLayout";
+import { DataTableHead } from "@/components/DataTableHead";
+import { DataTableCells } from "@/components/DataTableCells";
+import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useVirtioWinDownloads } from "../api/virtio-win-queries";
 import type {
   VirtioWinDownload,
@@ -25,16 +30,6 @@ type DownloadSortKey =
   | "status"
   | "trigger"
   | "started";
-
-/** Each accessor sorts on what its cell SHOWS, not on the underlying field. */
-const DOWNLOAD_SORT: SortAccessors<VirtioWinDownload, DownloadSortKey> = {
-  version: (d) => d.version,
-  storage: (d) => d.storage,
-  node: (d) => d.node,
-  status: (d) => d.status,
-  trigger: (d) => d.triggered_by,
-  started: (d) => new Date(d.started_at).getTime(),
-};
 
 function statusVariant(
   status: VirtioWinDownloadStatus,
@@ -52,6 +47,69 @@ function statusVariant(
   }
 }
 
+/** Each column sorts on what its cell SHOWS, not on the underlying field. */
+const COLUMNS: ColumnDef<VirtioWinDownload, DownloadSortKey>[] = [
+  {
+    key: "version",
+    label: "Version",
+    width: 150,
+    sortValue: (d) => d.version,
+    cell: (d) => <span className="font-medium">{d.version}</span>,
+  },
+  {
+    key: "storage",
+    label: "Storage",
+    width: 130,
+    sortValue: (d) => d.storage,
+    cell: (d) => d.storage,
+  },
+  {
+    key: "node",
+    label: "Node",
+    width: 130,
+    sortValue: (d) => d.node,
+    cell: (d) => d.node,
+  },
+  {
+    key: "status",
+    label: "Status",
+    width: 260,
+    sortValue: (d) => d.status,
+    // The error string is the only diagnostic this table offers.
+    wrap: true,
+    cell: (d) => (
+      <div className="space-y-1">
+        <Badge variant={statusVariant(d.status)}>{d.status}</Badge>
+        {d.error ? (
+          <p className="break-words text-xs text-destructive">{d.error}</p>
+        ) : null}
+      </div>
+    ),
+  },
+  {
+    key: "trigger",
+    label: "Trigger",
+    width: 130,
+    sortValue: (d) => d.triggered_by,
+    cell: (d) => (
+      <span className="text-muted-foreground">{d.triggered_by}</span>
+    ),
+  },
+  {
+    key: "started",
+    label: "Started",
+    width: 190,
+    sortValue: (d) => new Date(d.started_at).getTime(),
+    cell: (d) => (
+      <span className="text-muted-foreground">
+        {new Date(d.started_at).toLocaleString()}
+      </span>
+    ),
+  },
+];
+
+const DOWNLOAD_SORT = sortAccessorsFrom(COLUMNS);
+
 interface VirtioWinDownloadsTableProps {
   clusterId: string;
 }
@@ -65,6 +123,7 @@ export function VirtioWinDownloadsTable({
     toggle: toggleSort,
     directionFor,
   } = useTableSort(downloads ?? [], DOWNLOAD_SORT, byId);
+  const layout = useColumnLayout("virtio-win-downloads", COLUMNS);
 
   if (isLoading) {
     return <Skeleton className="h-48 w-full" />;
@@ -76,6 +135,8 @@ export function VirtioWinDownloadsTable({
         <CardTitle className="flex items-center gap-2">
           <History className="h-5 w-5" />
           Download history
+          <span className="flex-1" />
+          <ResetColumnsButton layout={layout} />
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -85,83 +146,29 @@ export function VirtioWinDownloadsTable({
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <Table>
+            <Table
+              className="table-fixed"
+              style={{ width: layout.totalWidth }}
+            >
               <TableHeader>
                 <TableRow>
-                  <SortableTableHead
-                    direction={directionFor("version")}
-                    onSort={() => {
-                      toggleSort("version");
-                    }}
-                  >
-                    Version
-                  </SortableTableHead>
-                  <SortableTableHead
-                    direction={directionFor("storage")}
-                    onSort={() => {
-                      toggleSort("storage");
-                    }}
-                  >
-                    Storage
-                  </SortableTableHead>
-                  <SortableTableHead
-                    direction={directionFor("node")}
-                    onSort={() => {
-                      toggleSort("node");
-                    }}
-                  >
-                    Node
-                  </SortableTableHead>
-                  <SortableTableHead
-                    direction={directionFor("status")}
-                    onSort={() => {
-                      toggleSort("status");
-                    }}
-                  >
-                    Status
-                  </SortableTableHead>
-                  <SortableTableHead
-                    direction={directionFor("trigger")}
-                    onSort={() => {
-                      toggleSort("trigger");
-                    }}
-                  >
-                    Trigger
-                  </SortableTableHead>
-                  <SortableTableHead
-                    direction={directionFor("started")}
-                    onSort={() => {
-                      toggleSort("started");
-                    }}
-                  >
-                    Started
-                  </SortableTableHead>
+                  {layout.columns.map((col) => (
+                    <DataTableHead
+                      key={col.key}
+                      column={col}
+                      layout={layout}
+                      direction={directionFor(col.key)}
+                      onSort={() => {
+                        toggleSort(col.key);
+                      }}
+                    />
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sorted.map((d) => (
                   <TableRow key={d.id}>
-                    <TableCell className="font-medium">{d.version}</TableCell>
-                    <TableCell>{d.storage}</TableCell>
-                    <TableCell>{d.node}</TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <Badge variant={statusVariant(d.status)}>
-                          {d.status}
-                        </Badge>
-                        {d.error ? (
-                          <p className="max-w-md break-words text-xs text-destructive">
-                            {d.error}
-                          </p>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {d.triggered_by}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {new Date(d.started_at).toLocaleString()}
-                    </TableCell>
+                    <DataTableCells row={d} layout={layout} ctx={undefined} />
                   </TableRow>
                 ))}
               </TableBody>

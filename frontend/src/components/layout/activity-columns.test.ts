@@ -1,12 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   ACTIVITY_ACCESSORS,
-  ACTIVITY_COLUMNS,
   DEFAULT_ACTIVITY_SORT,
-  activityColumnVisibility,
   decorateActivity,
   type LiveTaskStatus,
 } from "./activity-columns";
+import { ACTIVITY_COLUMN_DEFS } from "./activity-column-defs";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 
 function entry(over: Partial<AuditLogEntry>): AuditLogEntry {
@@ -31,9 +30,37 @@ function entry(over: Partial<AuditLogEntry>): AuditLogEntry {
 
 const noLive: Record<string, LiveTaskStatus> = {};
 
-describe("ACTIVITY_COLUMNS", () => {
+describe("ACTIVITY_COLUMN_DEFS", () => {
+  it("hides Cluster and Progress below md, where the drawer has no room", () => {
+    // hideBelowMd, not a CSS class: the column leaves the layout entirely, so
+    // its width goes with it. A `hidden md:table-cell` column still counts
+    // toward the table's width, which would leave the drawer scrolling
+    // sideways on a phone despite the column being invisible.
+    const hidden = ACTIVITY_COLUMN_DEFS.filter((c) => c.hideBelowMd).map(
+      (c) => c.key,
+    );
+    expect(hidden).toEqual(["cluster", "progress"]);
+    expect(
+      ACTIVITY_COLUMN_DEFS.every((c) => !c.className?.includes("hidden")),
+    ).toBe(true);
+  });
+
+  it("gives every column a width, so table-fixed has one to use", () => {
+    for (const col of ACTIVITY_COLUMN_DEFS) {
+      expect(col.width).toBeGreaterThan(0);
+    }
+  });
+
+  it("gives every column a sort accessor", () => {
+    // A column with neither sortValue nor sortable renders an inert heading —
+    // it looks sortable and does nothing when clicked.
+    for (const col of ACTIVITY_COLUMN_DEFS) {
+      expect(col.sortValue).toBeTypeOf("function");
+    }
+  });
+
   it("puts Progress between Cluster and Time", () => {
-    const keys = ACTIVITY_COLUMNS.map((c) => c.key);
+    const keys = ACTIVITY_COLUMN_DEFS.map((c) => c.key);
     expect(keys.indexOf("progress")).toBe(keys.indexOf("cluster") + 1);
     expect(keys.indexOf("time")).toBe(keys.indexOf("progress") + 1);
   });
@@ -43,7 +70,7 @@ describe("ACTIVITY_COLUMNS", () => {
   });
 
   it("has an accessor for every column", () => {
-    for (const col of ACTIVITY_COLUMNS) {
+    for (const col of ACTIVITY_COLUMN_DEFS) {
       expect(ACTIVITY_ACCESSORS[col.key]).toBeTypeOf("function");
     }
   });
@@ -154,27 +181,5 @@ describe("ACTIVITY_ACCESSORS", () => {
         decorateActivity(entry({ created_at: "2026-09-01T10:00:00Z" }), noLive),
       ),
     ).toBe(Date.parse("2026-09-01T10:00:00Z"));
-  });
-});
-
-describe("activityColumnVisibility", () => {
-  it("yields Cluster and Progress below md, where the drawer has no room", () => {
-    expect(activityColumnVisibility("cluster")).toBe("hidden md:table-cell");
-    expect(activityColumnVisibility("progress")).toBe("hidden md:table-cell");
-  });
-
-  it("keeps the rest visible at every width", () => {
-    for (const key of ["status", "level", "action", "time"] as const) {
-      expect(activityColumnVisibility(key)).toBe("");
-    }
-  });
-
-  it("carries no visibility class in the column definitions themselves", () => {
-    // Header and cell both read activityColumnVisibility(); a stray `hidden`
-    // baked into className would apply to the header only and shift every
-    // following cell under the wrong heading.
-    for (const col of ACTIVITY_COLUMNS) {
-      expect(col.className).not.toContain("hidden");
-    }
   });
 });

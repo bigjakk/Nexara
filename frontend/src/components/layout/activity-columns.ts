@@ -181,45 +181,6 @@ export type ActivitySortKey =
   | "progress"
   | "time";
 
-interface ActivityColumn {
-  key: ActivitySortKey;
-  label: string;
-  className: string;
-  align?: "left" | "right";
-}
-
-/**
- * Responsive visibility, shared by a column's header and its cell.
- *
- * These MUST agree: a class on one and not the other shifts every following
- * cell under the wrong header. EVERY header and EVERY body cell reads from
- * here — including the four that need nothing today — so adding a breakpoint
- * to a column below is a one-line change that cannot desync the two.
- *
- * The panel is a drawer, not a page, and below `md` there is not enough width
- * for six columns — the resource UUID in the Action cell alone is ~230px of
- * unbreakable min-content. Cluster and Progress are the two that yield; a
- * running task's bar is re-rendered inside the Action cell at those widths, so
- * nothing about a task in flight is actually lost.
- */
-const COLUMN_VISIBILITY: Partial<Record<ActivitySortKey, string>> = {
-  cluster: "hidden md:table-cell",
-  progress: "hidden md:table-cell",
-};
-
-export function activityColumnVisibility(key: ActivitySortKey): string {
-  return COLUMN_VISIBILITY[key] ?? "";
-}
-
-export const ACTIVITY_COLUMNS: readonly ActivityColumn[] = [
-  { key: "status", label: "Status", className: "w-20" },
-  { key: "level", label: "Level", className: "w-16" },
-  { key: "action", label: "Action", className: "" },
-  { key: "cluster", label: "Cluster", className: "" },
-  { key: "progress", label: "Progress", className: "w-28" },
-  { key: "time", label: "Time", className: "w-24", align: "right" },
-];
-
 /**
  * Rank by what the badge MEANS, not what it reads. Alphabetically the first
  * click on Level would put "error" first only by luck and "info" before
