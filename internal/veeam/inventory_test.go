@@ -3,6 +3,7 @@ package veeam
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -607,5 +608,88 @@ func TestManagedServers_IdentifiesTheBackupServer(t *testing.T) {
 	// name and matches nothing.
 	if got := backupServers[0].Name; got != "vbr01.example.lan" {
 		t.Errorf("backup server name = %q, want the FQDN", got)
+	}
+}
+
+// Session re-reads one run by id — the only call that can report the final
+// state of a run the createdAfterFilter window has already scrolled past.
+func TestSession_ReadsOneRunByID(t *testing.T) {
+	f, srv := newFakeVBR(t)
+	f.respond("GET /api/v1/sessions/"+testSessionID, http.StatusOK, `{
+		"id": "`+testSessionID+`",
+		"name": "Onsite_Daily_Offsite_Linux",
+		"sessionType": "PlatformBackupJob",
+		"platformName": "Proxmox",
+		"state": "Stopped",
+		"creationTime": "2026-08-31T22:00:00.000Z",
+		"endTime": "2026-09-01T00:14:00.000Z",
+		"result": {"result": "Success", "message": ""}
+	}`)
+	c := newTestClient(t, srv, `ad\jdoe`)
+
+	s, err := c.Session(context.Background(), testSessionID)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	// A single session is NOT wrapped in the {data, pagination} envelope the
+	// listings use — decoding it as one yields a zero-valued session, which
+	// reads as a run that never finished.
+	if s.State != "Stopped" || s.Result.Result != "Success" {
+		t.Errorf("session = %+v, want the finished run", s)
+	}
+	if s.EndTime == nil || s.EndTime.IsZero() {
+		t.Error("endTime did not decode — a run with no end time is what pins a job to Running")
+	}
+}
+
+// A run Veeam has forgotten must be distinguishable from a transient failure:
+// the collector deletes on the first and retries on the second, and confusing
+// them either strands the row forever or destroys a run's history.
+func TestSession_VanishedSessionIsErrSessionNotFound(t *testing.T) {
+	f, srv := newFakeVBR(t)
+	f.respond("GET /api/v1/sessions/"+testSessionID, http.StatusNotFound,
+		`{"errorCode":"NotFound","message":"Session not found.","status":404}`)
+	c := newTestClient(t, srv, `ad\jdoe`)
+
+	_, err := c.Session(context.Background(), testSessionID)
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("Session on a vanished run: %v, want ErrSessionNotFound", err)
+	}
+}
+
+// The reason ErrSessionNotFound exists at all.
+//
+// A 404 reaching this caller does NOT prove the session endpoint sent it: a
+// failed token grant surfaces the TOKEN endpoint's *APIError verbatim, with
+// its own status, through the 401-retry path. The collector DELETES the stored
+// run on the sentinel, so if a restarting VBR's 404 on /oauth2/token could
+// produce it, one restart would destroy every in-flight run it still had.
+func TestSession_A404FromTheTokenEndpointIsNotASessionNotFound(t *testing.T) {
+	f, srv := newFakeVBR(t)
+	// The first grant works, so the request is actually attempted; the API
+	// then rejects the token, and the re-grant lands on a 404.
+	f.rejectAllAPI = true
+	f.tokenFailAfter = 1
+	f.tokenFailStatus = http.StatusNotFound
+	c := newTestClient(t, srv, `ad\jdoe`)
+
+	_, err := c.Session(context.Background(), testSessionID)
+	if err == nil {
+		t.Fatal("Session succeeded against a server that rejected every call")
+	}
+	if errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("a 404 from %s was reported as a missing session (%v) — the collector deletes the run on this",
+			tokenPath, err)
+	}
+}
+
+// The id never reaches the network unvalidated — it is interpolated into the
+// path, and a caller-supplied string is exactly where a traversal would enter.
+func TestSession_RejectsANonUUIDID(t *testing.T) {
+	_, srv := newFakeVBR(t)
+	c := newTestClient(t, srv, `ad\jdoe`)
+
+	if _, err := c.Session(context.Background(), "../../jobs"); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("Session with a path fragment: %v, want ErrInvalidInput", err)
 	}
 }

@@ -357,6 +357,22 @@ type Querier interface {
 	// the resources payload was well-formed before treating it as authoritative.
 	DeleteVMsAbsentFromCluster(ctx context.Context, arg DeleteVMsAbsentFromClusterParams) (int64, error)
 	DeleteVeeamServer(ctx context.Context, id uuid.UUID) error
+	// Drops one session the upstream server no longer has.
+	//
+	// Only ever called when GET /sessions/{id} ITSELF answered 404. A non-terminal
+	// row Veeam has forgotten can never reach a terminal state on its own, and
+	// leaving it is what pins a job to "Running" forever — so the mirror drops it.
+	//
+	// Unlike the sweeps beside it this has NO grace window, because it needs none:
+	// a sweep infers absence from a row missing out of a listing, where one
+	// non-observation is indistinguishable from a hiccup, while this is VBR
+	// answering a direct question about one id. What carries the weight instead is
+	// the caller's classification — see veeam.ErrSessionNotFound, which exists
+	// precisely so a 404 raised anywhere else on the way cannot reach here.
+	//
+	// Nothing references veeam_sessions by foreign key; veeam_jobs.last_session_id
+	// and veeam_restore_points.session_id carry Veeam's own UUID, not a row id.
+	DeleteVeeamSession(ctx context.Context, arg DeleteVeeamSessionParams) error
 	DeleteVirtioWinConfig(ctx context.Context, clusterID uuid.UUID) error
 	// Job states carry no platformId; sessions are the only bridge. STICKY by
 	// construction — the WHERE clause only touches rows that have none yet, so a
@@ -1117,6 +1133,18 @@ type Querier interface {
 	// global-only. pgx sends a nil slice as NULL and a non-nil empty slice as
 	// '{}', and that distinction is what makes both cases work.
 	ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSessionsByServerParams) ([]VeeamSession, error)
+	// The stored runs that have not reached a terminal state, newest first.
+	//
+	// Deliberately the SAME predicate as the live-run LATERAL in
+	// ListVeeamJobsByServer: these are exactly the rows that paint a job
+	// "Running", so re-reading precisely this set is what stops one being painted
+	// from a row the poll can no longer reach. If that predicate ever changes,
+	// this one changes with it.
+	//
+	// Bounded by the caller. A backlog larger than the limit converges over
+	// successive passes, newest first, because a run from ten minutes ago is the
+	// one an operator is looking at.
+	ListVeeamUnfinishedSessions(ctx context.Context, arg ListVeeamUnfinishedSessionsParams) ([]uuid.UUID, error)
 	ListVirtioWinDownloadsByCluster(ctx context.Context, arg ListVirtioWinDownloadsByClusterParams) ([]VirtioWinDownload, error)
 	ListVirtioWinReleases(ctx context.Context) ([]VirtioWinRelease, error)
 	ListVulnsBySSVCInScan(ctx context.Context, arg ListVulnsBySSVCInScanParams) ([]ListVulnsBySSVCInScanRow, error)

@@ -3,8 +3,10 @@ package collector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +36,8 @@ type fakeVeeamQueries struct {
 	objects       []db.UpsertVeeamBackupObjectParams
 	restorePoints []db.UpsertVeeamRestorePointParams
 	sessions      []db.UpsertVeeamSessionParams
+	unfinished    []uuid.UUID
+	deletedSess   []db.DeleteVeeamSessionParams
 	platforms     []db.UpsertVeeamPlatformParams
 	syncErrors    []db.SetVeeamServerSyncErrorParams
 	syncSuccesses []uuid.UUID
@@ -257,6 +261,21 @@ func (q *fakeVeeamQueries) UpsertVeeamSession(_ context.Context, arg db.UpsertVe
 	return nil
 }
 
+func (q *fakeVeeamQueries) ListVeeamUnfinishedSessions(
+	_ context.Context, _ db.ListVeeamUnfinishedSessionsParams,
+) ([]uuid.UUID, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return append([]uuid.UUID(nil), q.unfinished...), nil
+}
+
+func (q *fakeVeeamQueries) DeleteVeeamSession(_ context.Context, arg db.DeleteVeeamSessionParams) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.deletedSess = append(q.deletedSess, arg)
+	return nil
+}
+
 func (q *fakeVeeamQueries) PruneVeeamSessions(_ context.Context, arg db.PruneVeeamSessionsParams) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -274,6 +293,12 @@ type fakeVeeamClient struct {
 	points       map[string][]veeam.RestorePoint
 	sessions     []veeam.Session
 	license      *veeam.License
+
+	// byID answers the single-session re-read; sessionErrByID overrides it
+	// with a failure for one id.
+	byID           map[string]veeam.Session
+	sessionErrByID map[string]error
+	sessionGets    []string
 
 	reposErr    error
 	jobsErr     error
@@ -350,6 +375,20 @@ func (c *fakeVeeamClient) Sessions(_ context.Context, since time.Time, _ int) ([
 	c.sessionsSince = append(c.sessionsSince, since)
 	c.mu.Unlock()
 	return c.sessions, c.sessionsErr
+}
+
+func (c *fakeVeeamClient) Session(_ context.Context, sessionID string) (*veeam.Session, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sessionGets = append(c.sessionGets, sessionID)
+	if err, failing := c.sessionErrByID[sessionID]; failing {
+		return nil, err
+	}
+	s, ok := c.byID[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", veeam.ErrSessionNotFound, sessionID)
+	}
+	return &s, nil
 }
 
 func (c *fakeVeeamClient) License(context.Context) (*veeam.License, error) {
@@ -991,6 +1030,266 @@ func TestVeeamSync_SkipsSessionsWithNoParseableTime(t *testing.T) {
 	if len(q.sessions) != 1 || q.sessions[0].Name != "good" {
 		t.Errorf("stored %+v, want only the session with a usable timestamp",
 			q.sessions)
+	}
+}
+
+// The bug: a job painted "Running" for hours after its run finished.
+//
+// The poll filters on CREATION time, but a session's STATE keeps changing long
+// after it is created — so once a newer run pushes the watermark past a run
+// that is still in flight, no later poll ever asks for that run again. Its
+// state froze at "Working", ListVeeamJobsByServer derived a live run from it,
+// and the job showed Running with a Stop button until the 30-day prune.
+func TestVeeamSync_ReReadsAnInFlightSessionThePollHasPassed(t *testing.T) {
+	server := testVeeamServer(t)
+	server.SessionsSyncedAt = pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}
+
+	// Stored as "Working" yesterday, and now well behind the watermark.
+	stuck := uuid.New()
+	started := time.Now().Add(-20 * time.Hour)
+	q := &fakeVeeamQueries{
+		servers:    []db.VeeamServer{server},
+		watermark:  time.Now().Add(-time.Hour),
+		unfinished: []uuid.UUID{stuck},
+	}
+
+	// The poll returns nothing — the run is far outside its window. Veeam
+	// still knows the session, and reports it finished.
+	ended := started.Add(2 * time.Hour)
+	c := &fakeVeeamClient{
+		byID: map[string]veeam.Session{
+			stuck.String(): {
+				ID: stuck.String(), SessionType: veeam.PlatformBackupSessionType,
+				PlatformName: "Proxmox", Name: "Onsite_Daily_Offsite_Linux",
+				State: "Stopped", CreationTime: veeam.Timestamp{Time: started},
+				EndTime: &veeam.Timestamp{Time: ended},
+				Result:  veeam.SessionResult{Result: "Success"},
+			},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	if len(c.sessionGets) != 1 || c.sessionGets[0] != stuck.String() {
+		t.Fatalf("single-session reads = %v, want the one stuck run (%s)",
+			c.sessionGets, stuck)
+	}
+	if len(q.sessions) != 1 {
+		t.Fatalf("stored %d sessions, want the re-read one", len(q.sessions))
+	}
+	// "Stopped" is the whole point: it is the only state the live-run LATERAL
+	// treats as terminal, so anything else leaves the job painted Running.
+	if got := q.sessions[0].State; got != "Stopped" {
+		t.Errorf("state = %q, want %q — a job stays Running until its session reaches a terminal state",
+			got, "Stopped")
+	}
+	if !q.sessions[0].EndTime.Valid {
+		t.Error("end_time is still NULL after the re-read")
+	}
+	if len(q.deletedSess) != 0 {
+		t.Errorf("deleted %v — a session Veeam still has must be converged, not dropped", q.deletedSess)
+	}
+}
+
+// A run the poll just refreshed is already current; spending a request per
+// session to learn that would make every pass cost one call per running job
+// for nothing.
+func TestVeeamSync_DoesNotReReadASessionThePollJustStored(t *testing.T) {
+	server := testVeeamServer(t)
+	live := uuid.New()
+	q := &fakeVeeamQueries{
+		servers:    []db.VeeamServer{server},
+		unfinished: []uuid.UUID{live},
+	}
+	c := &fakeVeeamClient{
+		sessions: []veeam.Session{{
+			ID: live.String(), SessionType: veeam.PlatformBackupSessionType,
+			PlatformName: "Proxmox", Name: "in-flight", State: "Working",
+			CreationTime: veeam.Timestamp{Time: time.Now().Add(-5 * time.Minute)},
+		}},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	if len(c.sessionGets) != 0 {
+		t.Errorf("re-read %v, want none — the poll had already stored it this pass", c.sessionGets)
+	}
+	if len(q.sessions) != 1 {
+		t.Fatalf("stored %d sessions, want 1", len(q.sessions))
+	}
+}
+
+// A 404 means Veeam has forgotten the session. It can never reach a terminal
+// state now, so leaving the row is precisely what pins its job to "Running"
+// forever — the mirror drops it, as the sweeps do for every other object.
+func TestVeeamSync_DropsAnUnfinishedSessionVeeamNoLongerHas(t *testing.T) {
+	server := testVeeamServer(t)
+	gone := uuid.New()
+	q := &fakeVeeamQueries{
+		servers:    []db.VeeamServer{server},
+		unfinished: []uuid.UUID{gone},
+	}
+	// byID is empty, so the fake answers 404.
+	c := &fakeVeeamClient{}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	if len(q.deletedSess) != 1 || q.deletedSess[0].VeeamID != gone {
+		t.Fatalf("deleted %v, want the vanished session (%s)", q.deletedSess, gone)
+	}
+	if q.deletedSess[0].VeeamServerID != server.ID {
+		t.Errorf("deleted scoped to server %s, want %s — an unscoped delete reaches another server's rows",
+			q.deletedSess[0].VeeamServerID, server.ID)
+	}
+}
+
+// Every failure that is NOT a definite 404 is transient. Deleting a run's
+// history over a momentary error is not recoverable, so the row waits for the
+// next pass.
+func TestVeeamSync_KeepsAnUnfinishedSessionWhenTheReReadFails(t *testing.T) {
+	server := testVeeamServer(t)
+	unreadable := uuid.New()
+	q := &fakeVeeamQueries{
+		servers:    []db.VeeamServer{server},
+		unfinished: []uuid.UUID{unreadable},
+	}
+	c := &fakeVeeamClient{
+		sessionErrByID: map[string]error{
+			unreadable.String(): &veeam.APIError{StatusCode: http.StatusInternalServerError, Message: "boom"},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	if len(q.deletedSess) != 0 {
+		t.Errorf("deleted %v on a transient failure — the run's history is gone for good", q.deletedSess)
+	}
+	// The pass itself still succeeded: the poll worked, and losing its
+	// watermark advance would re-fetch the whole window every pass for as long
+	// as this one session stayed unreadable.
+	if !q.sessionsSynced {
+		t.Error("an unreadable session failed the whole pass, which stalls the watermark")
+	}
+}
+
+// The near-miss this fix nearly shipped: a 404 does NOT reach the collector
+// only from the session endpoint. A failed token grant surfaces the token
+// endpoint's own *APIError verbatim, so a restarting VBR answering 404 on
+// /oauth2/token used to look byte-identical to "this run is gone" — and,
+// because a failed grant leaves the cached token untouched, every remaining id
+// in the batch failed the same way. One restart would have deleted up to fifty
+// rows, including runs in flight at that moment, taking the nexara_stopped
+// provenance that suppresses a false veeam_job_failed with them.
+func TestVeeamSync_A404FromElsewhereDoesNotDeleteSessions(t *testing.T) {
+	server := testVeeamServer(t)
+	live := uuid.New()
+	q := &fakeVeeamQueries{
+		servers:    []db.VeeamServer{server},
+		unfinished: []uuid.UUID{live},
+	}
+	// A 404 *APIError that did NOT come from GET /sessions/{id} — exactly what
+	// the token endpoint hands back through a failed re-grant.
+	c := &fakeVeeamClient{
+		sessionErrByID: map[string]error{
+			live.String(): &veeam.APIError{
+				StatusCode: http.StatusNotFound, ErrorCode: "NotFound", Message: "Not Found",
+			},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	if len(q.deletedSess) != 0 {
+		t.Errorf("deleted %v on a 404 the session endpoint never sent — only veeam.ErrSessionNotFound may delete a run",
+			q.deletedSess)
+	}
+}
+
+// A broken credential is a fact about the CLIENT, not about one row: every
+// remaining id would fail identically, so the batch is abandoned rather than
+// spending fifty doomed round-trips on it.
+func TestVeeamSync_AbandonsTheBatchOnAClientWideFailure(t *testing.T) {
+	server := testVeeamServer(t)
+	first, second := uuid.New(), uuid.New()
+	q := &fakeVeeamQueries{
+		servers: []db.VeeamServer{server},
+		// ListVeeamUnfinishedSessions orders newest first; the fake preserves
+		// the order it is given.
+		unfinished: []uuid.UUID{first, second},
+	}
+	c := &fakeVeeamClient{
+		sessionErrByID: map[string]error{first.String(): veeam.ErrAuthFailed},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	if len(c.sessionGets) != 1 {
+		t.Errorf("re-read %v, want to stop after the first — the credential is broken for every id",
+			c.sessionGets)
+	}
+	if len(q.deletedSess) != 0 {
+		t.Errorf("deleted %v while the client was unusable", q.deletedSess)
+	}
+}
+
+// The opposite of the case above: a per-session failure must NOT block the
+// rows behind it. Newest-first ordering means one permanently-failing run
+// would otherwise starve every older one forever.
+func TestVeeamSync_APerSessionFailureDoesNotBlockTheRest(t *testing.T) {
+	server := testVeeamServer(t)
+	broken, healthy := uuid.New(), uuid.New()
+	q := &fakeVeeamQueries{
+		servers:    []db.VeeamServer{server},
+		unfinished: []uuid.UUID{broken, healthy},
+	}
+	c := &fakeVeeamClient{
+		sessionErrByID: map[string]error{
+			broken.String(): &veeam.APIError{StatusCode: http.StatusInternalServerError, Message: "boom"},
+		},
+		byID: map[string]veeam.Session{
+			healthy.String(): {
+				ID: healthy.String(), SessionType: veeam.PlatformBackupSessionType,
+				PlatformName: "Proxmox", Name: "behind-the-broken-one", State: "Stopped",
+				CreationTime: veeam.Timestamp{Time: time.Now().Add(-3 * time.Hour)},
+			},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	if len(q.sessions) != 1 || q.sessions[0].Name != "behind-the-broken-one" {
+		t.Errorf("stored %+v, want the run queued behind the failing one", q.sessions)
+	}
+}
+
+// The same guard the poll applies, for the same reason: creation_time is NOT
+// NULL, feeds the watermark, and a zero value would be pruned on this very
+// pass. A list envelope decoded as a single session yields exactly this.
+func TestVeeamSync_SkipsAReReadSessionWithNoParseableTime(t *testing.T) {
+	server := testVeeamServer(t)
+	empty := uuid.New()
+	q := &fakeVeeamQueries{
+		servers:    []db.VeeamServer{server},
+		unfinished: []uuid.UUID{empty},
+	}
+	c := &fakeVeeamClient{
+		byID: map[string]veeam.Session{
+			empty.String(): {ID: empty.String(), Name: "no-timestamp", State: "Working"},
+		},
+	}
+	syncer := newVeeamTestSyncer(t, q, c)
+
+	syncer.SyncSessions(context.Background())
+
+	if len(q.sessions) != 0 {
+		t.Errorf("stored %+v, want nothing — a zero creation_time corrupts the watermark", q.sessions)
 	}
 }
 

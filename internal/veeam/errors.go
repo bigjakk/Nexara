@@ -41,6 +41,18 @@ var (
 	// ErrInvalidInput indicates the caller supplied an argument the client
 	// refused to send. It never reaches the network.
 	ErrInvalidInput = errors.New("veeam: invalid input")
+
+	// ErrSessionNotFound indicates GET /sessions/{id} ITSELF answered 404 —
+	// the run is gone from VBR.
+	//
+	// A sentinel rather than a status code the caller reads off an *APIError,
+	// because a 404 can reach the caller from somewhere else entirely: a
+	// failed token grant surfaces the token endpoint's own *APIError verbatim
+	// (see requestToken), so a restarting VBR answering 404 on /oauth2/token
+	// is byte-identical to this at the *APIError level. The collector DELETES
+	// the stored run on this sentinel, so the distinction is the difference
+	// between converging one row and destroying a server's in-flight history.
+	ErrSessionNotFound = errors.New("veeam: session not found")
 )
 
 // APIError carries Veeam's structured error body. VBR shapes these

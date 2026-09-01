@@ -360,6 +360,36 @@ func (q *Queries) DeleteVeeamServer(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deleteVeeamSession = `-- name: DeleteVeeamSession :exec
+DELETE FROM veeam_sessions
+WHERE veeam_server_id = $1 AND veeam_id = $2
+`
+
+type DeleteVeeamSessionParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	VeeamID       uuid.UUID `json:"veeam_id"`
+}
+
+// Drops one session the upstream server no longer has.
+//
+// Only ever called when GET /sessions/{id} ITSELF answered 404. A non-terminal
+// row Veeam has forgotten can never reach a terminal state on its own, and
+// leaving it is what pins a job to "Running" forever — so the mirror drops it.
+//
+// Unlike the sweeps beside it this has NO grace window, because it needs none:
+// a sweep infers absence from a row missing out of a listing, where one
+// non-observation is indistinguishable from a hiccup, while this is VBR
+// answering a direct question about one id. What carries the weight instead is
+// the caller's classification — see veeam.ErrSessionNotFound, which exists
+// precisely so a 404 raised anywhere else on the way cannot reach here.
+//
+// Nothing references veeam_sessions by foreign key; veeam_jobs.last_session_id
+// and veeam_restore_points.session_id carry Veeam's own UUID, not a row id.
+func (q *Queries) DeleteVeeamSession(ctx context.Context, arg DeleteVeeamSessionParams) error {
+	_, err := q.db.Exec(ctx, deleteVeeamSession, arg.VeeamServerID, arg.VeeamID)
+	return err
+}
+
 const deriveVeeamJobPlatforms = `-- name: DeriveVeeamJobPlatforms :exec
 UPDATE veeam_jobs j
 SET platform_id = s.platform_id
@@ -2072,6 +2102,51 @@ func (q *Queries) ListVeeamSessionsByServer(ctx context.Context, arg ListVeeamSe
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVeeamUnfinishedSessions = `-- name: ListVeeamUnfinishedSessions :many
+SELECT veeam_id FROM veeam_sessions
+WHERE veeam_server_id = $1
+  AND state <> 'Stopped'
+  AND state <> ''
+ORDER BY creation_time DESC
+LIMIT $2
+`
+
+type ListVeeamUnfinishedSessionsParams struct {
+	VeeamServerID uuid.UUID `json:"veeam_server_id"`
+	Limit         int32     `json:"limit"`
+}
+
+// The stored runs that have not reached a terminal state, newest first.
+//
+// Deliberately the SAME predicate as the live-run LATERAL in
+// ListVeeamJobsByServer: these are exactly the rows that paint a job
+// "Running", so re-reading precisely this set is what stops one being painted
+// from a row the poll can no longer reach. If that predicate ever changes,
+// this one changes with it.
+//
+// Bounded by the caller. A backlog larger than the limit converges over
+// successive passes, newest first, because a run from ten minutes ago is the
+// one an operator is looking at.
+func (q *Queries) ListVeeamUnfinishedSessions(ctx context.Context, arg ListVeeamUnfinishedSessionsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listVeeamUnfinishedSessions, arg.VeeamServerID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var veeam_id uuid.UUID
+		if err := rows.Scan(&veeam_id); err != nil {
+			return nil, err
+		}
+		items = append(items, veeam_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
