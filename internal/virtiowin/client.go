@@ -46,7 +46,7 @@ type Release struct {
 type Client struct {
 	http   *http.Client
 	logger *slog.Logger
-	base   string // overridable in tests; defaults to BaseURL
+	base   string // NormalizeBase'd download root; defaults to BaseURL
 }
 
 // NewClient builds a Client over an SSRF-guarded, non-redirect-following HTTP
@@ -104,7 +104,7 @@ func (c *Client) do(ctx context.Context, method, rawURL string) (*http.Response,
 // the URL rebuilt under the configured base, so the header is never trusted as
 // a URL and its scheme is never inherited.
 func (c *Client) CheckStable(ctx context.Context) (Release, error) {
-	resp, err := c.do(ctx, http.MethodGet, strings.TrimSuffix(c.base, "/")+"/stable-virtio/")
+	resp, err := c.do(ctx, http.MethodGet, c.base+"/stable-virtio/")
 	if err != nil {
 		return Release{}, err
 	}
@@ -139,7 +139,7 @@ var hrefPattern = regexp.MustCompile(`href="([^"]+)"`)
 // Parsing an autoindex is brittle by nature, so callers treat a failure here as
 // non-fatal when they already have a stable answer.
 func (c *Client) ListArchive(ctx context.Context) ([]Release, error) {
-	resp, err := c.do(ctx, http.MethodGet, strings.TrimSuffix(c.base, "/")+"/archive-virtio/")
+	resp, err := c.do(ctx, http.MethodGet, c.base+"/archive-virtio/")
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +237,7 @@ func (c *Client) ProbeSize(ctx context.Context, isoURL string) (int64, error) {
 // that validated version, and WithBase admits no base that NormalizeBase has
 // not already required to be http(s) with a host.
 func (c *Client) releaseFor(version string) (Release, error) {
-	isoURL, err := c.buildISOURL(version)
+	isoURL, err := BuildISOURLFrom(c.base, version)
 	if err != nil {
 		return Release{}, err
 	}
@@ -248,10 +248,4 @@ func (c *Client) releaseFor(version string) (Release, error) {
 		ISOFilename: ISOFilename(version),
 		ISOURL:      isoURL,
 	}, nil
-}
-
-// buildISOURL builds the ISO URL under this client's base, which is upstream
-// unless an operator configured a mirror (or a test pointed it at httptest).
-func (c *Client) buildISOURL(version string) (string, error) {
-	return BuildISOURLFrom(c.base, version)
 }

@@ -56,10 +56,21 @@ func NormalizeBase(raw string) (string, error) {
 	}
 	// A query or fragment on a base cannot survive having a path appended to
 	// it, so silently keeping either would build URLs that 404 with no clue why.
-	if u.RawQuery != "" || u.Fragment != "" {
+	// ForceQuery is the empty-but-present "?" that RawQuery reports as absent:
+	// without it, a base typed with a bare trailing "?" comes back unchanged
+	// and turns the whole appended path into a query string.
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 		return "", errors.New("virtiowin: mirror URL must not carry a query or fragment")
 	}
-	u.Path = strings.TrimSuffix(u.Path, "/")
+	// TrimRight, not TrimSuffix: the callers append "/archive-virtio/…" to this
+	// and do not trim again, so one leftover slash out of several is a request
+	// for "//archive-virtio/". RawPath is cleared with it — url.String prefers
+	// RawPath when it is set, which would put the untrimmed path back. Clearing
+	// it also re-encodes the path from its decoded form, which is why a literal
+	// %2F in a base becomes a real separator; every other escape round-trips
+	// unchanged, and a mirror root needing an encoded slash is not a shape
+	// `wget -m -np` can produce.
+	u.Path, u.RawPath = strings.TrimRight(u.Path, "/"), ""
 	return u.String(), nil
 }
 

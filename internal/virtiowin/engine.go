@@ -73,7 +73,7 @@ func (e *Engine) RefreshCatalog(ctx context.Context) (Release, error) {
 			if rel.Version == latest.Version {
 				continue
 			}
-			if _, err := e.storeRelease(ctx, rel); err != nil {
+			if err := e.storeRelease(ctx, rel); err != nil {
 				e.logger.Warn("virtio-win: store archive release failed", "version", rel.Version, "error", err)
 			}
 		}
@@ -87,7 +87,7 @@ func (e *Engine) RefreshCatalog(ctx context.Context) (Release, error) {
 		e.logger.Debug("virtio-win: ISO size probe failed", "version", latest.Version, "error", err)
 	}
 
-	if _, err := e.storeRelease(ctx, latest); err != nil {
+	if err := e.storeRelease(ctx, latest); err != nil {
 		return Release{}, fmt.Errorf("virtio-win: store release %s: %w", latest.Version, err)
 	}
 	// Reassert the flag against THIS refresh, whichever way it went. When the
@@ -111,8 +111,8 @@ func (e *Engine) RefreshCatalog(ctx context.Context) (Release, error) {
 	return latest, nil
 }
 
-func (e *Engine) storeRelease(ctx context.Context, rel Release) (db.VirtioWinRelease, error) {
-	return e.queries.UpsertVirtioWinRelease(ctx, db.UpsertVirtioWinReleaseParams{
+func (e *Engine) storeRelease(ctx context.Context, rel Release) error {
+	_, err := e.queries.UpsertVirtioWinRelease(ctx, db.UpsertVirtioWinReleaseParams{
 		Version:     rel.Version,
 		IsoVersion:  rel.ISOVersion,
 		IsoFilename: rel.ISOFilename,
@@ -120,6 +120,7 @@ func (e *Engine) storeRelease(ctx context.Context, rel Release) (db.VirtioWinRel
 		IsoSize:     rel.ISOSize,
 		IsStable:    rel.IsStable,
 	})
+	return err
 }
 
 // ErrNoTarget reports that a cluster's effective target version could not be
@@ -247,7 +248,7 @@ func (e *Engine) SyncCluster(ctx context.Context, cfg db.VirtioWinConfig) (*db.V
 		// Already there. Prune still runs — a satisfied target is exactly when
 		// superseded ISOs become removable.
 		if cfg.PruneEnabled {
-			e.pruneCluster(ctx, client, cfg, target)
+			e.pruneCluster(ctx, client, cfg, node, target)
 		}
 		return nil, nil
 	}
@@ -507,11 +508,22 @@ func (e *Engine) pruneAfterDownload(ctx context.Context, client *proxmox.Client,
 	if err != nil || !cfg.PruneEnabled {
 		return
 	}
+	// row.Node was chosen for row.Storage, and up to downloadMaxAge can pass
+	// before this runs — long enough for an operator to point the config at a
+	// different storage. Prune reads and deletes at (node, cfg.Storage), so the
+	// two have to have come from the same decision. When they have not, this
+	// download is not the one to prune against; the next scheduled sync will,
+	// with a node picked for the storage the config now names.
+	if row.Storage != cfg.Storage {
+		e.logger.Debug("virtio-win: prune skipped, download storage is no longer the configured one",
+			"cluster_id", row.ClusterID, "download_storage", row.Storage, "config_storage", cfg.Storage)
+		return
+	}
 	target, err := e.ResolveTarget(ctx, cfg)
 	if err != nil {
 		return
 	}
-	e.pruneCluster(ctx, client, cfg, target)
+	e.pruneCluster(ctx, client, cfg, row.Node, target)
 }
 
 // pruneCluster removes virtio-win ISOs that are neither the cluster's target
@@ -524,7 +536,12 @@ func (e *Engine) pruneAfterDownload(ctx context.Context, client *proxmox.Client,
 //   - An empty keep-set means something went wrong upstream (no catalog, no
 //     target). Deleting everything is never the right answer to "I don't know
 //     what to keep", so it refuses and logs.
-func (e *Engine) pruneCluster(ctx context.Context, client *proxmox.Client, cfg db.VirtioWinConfig, target db.VirtioWinRelease) {
+//
+// node is the caller's, not re-picked here. Both callers already hold the node
+// whose storage they just read or wrote — pickNode is free to answer with a
+// different one, and against a node-local storage that would list, and delete
+// from, a storage other than the one the decision was made about.
+func (e *Engine) pruneCluster(ctx context.Context, client *proxmox.Client, cfg db.VirtioWinConfig, node string, target db.VirtioWinRelease) {
 	keep, err := e.keepSet(ctx, target)
 	if err != nil {
 		e.logger.Warn("virtio-win: prune skipped, keep-set unavailable", "cluster_id", cfg.ClusterID, "error", err)
@@ -535,10 +552,6 @@ func (e *Engine) pruneCluster(ctx context.Context, client *proxmox.Client, cfg d
 		return
 	}
 
-	node, err := e.pickNode(ctx, cfg)
-	if err != nil {
-		return
-	}
 	items, err := client.GetStorageContentByType(ctx, node, cfg.Storage, "iso")
 	if err != nil {
 		e.logger.Warn("virtio-win: prune skipped, storage listing failed", "cluster_id", cfg.ClusterID, "error", err)

@@ -167,6 +167,10 @@ func psEscape(s string) string {
 // buildRegisterTaskScript returns PowerShell that registers the updater to run
 // at boot as SYSTEM.
 //
+// GuestScriptPath is baked in rather than taken as an argument: it has to be
+// the same path Stage writes the script to, and a parameter here is a way for
+// the two to drift into a task that points at nothing.
+//
 // Register-ScheduledTask rather than schtasks.exe, because the settings that
 // matter cannot be expressed on the schtasks command line. A task created with
 // "schtasks /SC ONSTART" gets DisallowStartIfOnBatteries=true, no execution
@@ -187,7 +191,7 @@ func psEscape(s string) string {
 //     veto or kill a driver install halfway.
 //   - ExecutionTimeLimit PT1H: bounds a hung installer instead of leaving the
 //     task running forever and blocking the next run.
-func buildRegisterTaskScript(scriptPath string) string {
+func buildRegisterTaskScript() string {
 	return fmt.Sprintf(`$ErrorActionPreference = 'Stop'
 $action    = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%s"'
 $trigger   = New-ScheduledTaskTrigger -AtStartup
@@ -195,7 +199,7 @@ $trigger.Delay = 'PT1M'
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 Register-ScheduledTask -TaskName '%s' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-'OK'`, scriptPath, GuestTaskName)
+'OK'`, GuestScriptPath, GuestTaskName)
 }
 
 // buildRunTaskCommand starts the registered task immediately. The Task

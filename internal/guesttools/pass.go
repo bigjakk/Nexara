@@ -120,7 +120,11 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 	// scheduled task and swapped CD-ROM stay in the guest with nothing left to
 	// record the outcome or restore the media. Deferring the sweep costs a few
 	// stale rows until the fleet settles; getting it wrong costs a guest.
-	if inFlightBefore, err := e.queries.CountGuestToolsInFlightForCluster(ctx, cfg.ClusterID); err == nil && inFlightBefore == 0 {
+	inFlight, err := e.queries.CountGuestToolsInFlightForCluster(ctx, cfg.ClusterID)
+	if err != nil {
+		return fmt.Errorf("count in-flight: %w", err)
+	}
+	if inFlight == 0 {
 		if err := e.queries.DeleteGuestToolsStateForVanishedGuests(ctx, db.DeleteGuestToolsStateForVanishedGuestsParams{
 			ClusterID: cfg.ClusterID,
 			Vmids:     vmids,
@@ -129,10 +133,10 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 		}
 	}
 
-	inFlight, err := e.queries.CountGuestToolsInFlightForCluster(ctx, cfg.ClusterID)
-	if err != nil {
-		return fmt.Errorf("count in-flight: %w", err)
-	}
+	// One read, used for both the sweep gate above and the budget below. They
+	// are the same question, and the sweep between two reads could not have
+	// changed the answer: it only runs when the count is already zero, and it
+	// deletes rows for guests that are not in the fleet at all.
 	budget := int64(cfg.MaxConcurrent) - inFlight
 
 	storage := ""
@@ -197,7 +201,7 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 			e.logger.Debug("guest tools: could not read the per-guest pin", "vmid", vmid, "error", err)
 			continue
 		}
-		target, err := e.ResolveTarget(ctx, cfg.ClusterID, cfg, policy)
+		target, err := e.ResolveTarget(ctx, cfg, policy)
 		if err != nil {
 			e.logger.Debug("guest tools: no target for guest", "vmid", vmid, "error", err)
 			continue
@@ -211,7 +215,7 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 			continue
 		}
 
-		if _, err := e.Stage(ctx, client, cfg.ClusterID, cfg, guest.NodeName, vmid, target, storage, false); err != nil {
+		if _, err := e.Stage(ctx, client, cfg, guest.NodeName, vmid, target, storage, false); err != nil {
 			// A target whose ISO has not been downloaded yet is "not yet", not
 			// "this guest failed". The catalog flips to a new stable release
 			// the moment upstream publishes one, while the ~840 MiB fetch that
@@ -692,7 +696,7 @@ func (e *Engine) resolveTargetForState(ctx context.Context, state db.GuestToolsS
 	if err != nil {
 		return Target{}, err
 	}
-	return e.ResolveTarget(ctx, state.ClusterID, cfg, policy)
+	return e.ResolveTarget(ctx, cfg, policy)
 }
 
 // supersededStaging reports whether a staged update should be withdrawn because
@@ -877,7 +881,7 @@ func (e *Engine) StageOne(ctx context.Context, clusterID uuid.UUID, vmid int, ru
 		return out, fmt.Errorf("%w: guest %d is excluded from guest tools updates", ErrNotEligible, vmid)
 	}
 
-	target, err := e.ResolveTarget(ctx, clusterID, cfg, policy)
+	target, err := e.ResolveTarget(ctx, cfg, policy)
 	if err != nil {
 		return out, err
 	}
@@ -897,7 +901,7 @@ func (e *Engine) StageOne(ctx context.Context, clusterID uuid.UUID, vmid int, ru
 	if err != nil {
 		return out, err
 	}
-	result, err := e.Stage(ctx, client, clusterID, cfg, node, vmid, target, vwCfg.Storage, runNow)
+	result, err := e.Stage(ctx, client, cfg, node, vmid, target, vwCfg.Storage, runNow)
 	if err != nil {
 		// Do not leave the row wearing the 'staging' marker Stage wrote on its
 		// way in. Nothing else on this path records a failure — markFailed is

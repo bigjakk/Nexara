@@ -12,6 +12,13 @@ func TestNormalizeBase(t *testing.T) {
 		{name: "empty means upstream", in: "", want: ""},
 		{name: "whitespace is trimmed to empty", in: "   ", want: ""},
 		{name: "trailing slash removed", in: "https://mirror.internal/virtio/", want: "https://mirror.internal/virtio"},
+		// Every trailing slash, not just the last one: callers append a path to
+		// this result without trimming again, so one survivor builds "//…".
+		{name: "several trailing slashes removed", in: "https://mirror.internal/virtio////", want: "https://mirror.internal/virtio"},
+		{name: "root path of slashes removed", in: "https://mirror.internal//", want: "https://mirror.internal"},
+		// Percent-encoded slashes decode into the path, so they have to be
+		// trimmed on the decoded form and RawPath dropped with it.
+		{name: "encoded trailing slash removed", in: "https://mirror.internal/virtio%2f", want: "https://mirror.internal/virtio"},
 		{name: "bare host kept", in: "https://mirror.internal", want: "https://mirror.internal"},
 		{name: "plain http allowed here", in: "http://10.0.0.5/isos", want: "http://10.0.0.5/isos"},
 		// The handler decides whether to demand the insecure confirmation by
@@ -26,6 +33,9 @@ func TestNormalizeBase(t *testing.T) {
 		{name: "credentials rejected", in: "https://user:pw@mirror.internal", wantErr: true},
 		{name: "query rejected", in: "https://mirror.internal/virtio?token=x", wantErr: true},
 		{name: "fragment rejected", in: "https://mirror.internal/virtio#frag", wantErr: true},
+		// A bare "?" leaves RawQuery empty but ForceQuery set, so it survives
+		// the RawQuery check alone and turns the appended path into a query.
+		{name: "bare question mark rejected", in: "https://mirror.internal/virtio?", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

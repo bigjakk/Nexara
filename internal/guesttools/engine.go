@@ -80,14 +80,14 @@ type Target struct {
 // wins — including over a newer version. Pinning that silently drifts forward
 // is not pinning. Only the most specific pin is looked up, so the broader
 // layers are not even read once one is set.
-func (e *Engine) ResolveTarget(ctx context.Context, clusterID uuid.UUID, cfg db.GuestToolsConfig, policy *db.GuestToolsPolicy) (Target, error) {
+func (e *Engine) ResolveTarget(ctx context.Context, cfg db.GuestToolsConfig, policy *db.GuestToolsPolicy) (Target, error) {
 	var pin string
 	if policy != nil {
 		pin = policy.TargetVersion
 	}
 	pin = cmp.Or(pin, cfg.TargetVersion)
 	if pin == "" {
-		switch vwCfg, err := e.queries.GetVirtioWinConfig(ctx, clusterID); {
+		switch vwCfg, err := e.queries.GetVirtioWinConfig(ctx, cfg.ClusterID); {
 		case err == nil:
 			pin = vwCfg.TargetVersion
 		case errors.Is(err, pgx.ErrNoRows):
@@ -266,7 +266,6 @@ type StageResult struct {
 func (e *Engine) Stage(
 	ctx context.Context,
 	client *proxmox.Client,
-	clusterID uuid.UUID,
 	cfg db.GuestToolsConfig,
 	node string,
 	vmid int,
@@ -335,7 +334,7 @@ func (e *Engine) Stage(
 	// terminal stage; only Stage differs between the two, so it is one value
 	// carried down rather than two literals that have to be kept in step.
 	stage := db.SetGuestToolsStageParams{
-		ClusterID:       clusterID,
+		ClusterID:       cfg.ClusterID,
 		Vmid:            safeconv.Int32(vmid),
 		Stage:           "staging",
 		StagedVersion:   target.Version,
@@ -383,7 +382,7 @@ func (e *Engine) Stage(
 		return result, fmt.Errorf("write updater into guest %d: %w", vmid, err)
 	}
 
-	if _, err := runScript(ctx, client, node, vmid, buildRegisterTaskScript(GuestScriptPath)); err != nil {
+	if _, err := runScript(ctx, client, node, vmid, buildRegisterTaskScript()); err != nil {
 		return result, fmt.Errorf("register scheduled task in guest %d: %w", vmid, err)
 	}
 

@@ -14,9 +14,10 @@ func testClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	c := NewClient(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	c.base = srv.URL
-	return c
+	// WithBase, not a direct write to c.base: it is the only writer that
+	// normalises, and releaseFor builds URLs on the assumption that every base
+	// has been through it.
+	return NewClient(slog.New(slog.NewTextHandler(io.Discard, nil))).WithBase(srv.URL)
 }
 
 const archiveIndex = `<html><head><title>Index</title></head><body>

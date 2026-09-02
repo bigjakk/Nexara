@@ -117,7 +117,7 @@ func (h *GuestToolsHandler) GetConfig(c fiber.Ctx) error {
 		resp.ISOStorage = vwCfg.Storage
 	}
 	if h.engine != nil {
-		if target, err := h.engine.ResolveTarget(c.Context(), clusterID, cfg, nil); err == nil {
+		if target, err := h.engine.ResolveTarget(c.Context(), cfg, nil); err == nil {
 			resp.EffectiveVersion = target.Version
 		}
 	}
@@ -183,7 +183,7 @@ func (h *GuestToolsHandler) UpdateConfig(c fiber.Ctx) error {
 		resp.ISOStorage = vwCfg.Storage
 	}
 	if h.engine != nil {
-		if target, err := h.engine.ResolveTarget(c.Context(), clusterID, cfg, nil); err == nil {
+		if target, err := h.engine.ResolveTarget(c.Context(), cfg, nil); err == nil {
 			resp.EffectiveVersion = target.Version
 		}
 	}
@@ -245,7 +245,7 @@ func (h *GuestToolsHandler) ListFleet(c fiber.Ctx) error {
 			policy = &db.GuestToolsPolicy{TargetVersion: r.PolicyTargetVersion.String}
 		}
 		if h.engine != nil {
-			if target, err := h.engine.ResolveTarget(c.Context(), clusterID, cfg, policy); err == nil {
+			if target, err := h.engine.ResolveTarget(c.Context(), cfg, policy); err == nil {
 				item.TargetVersion = target.Version
 				item.UpToDate = guesttools.UpToDate(item.InstalledVersion, target.Version)
 				item.NeedsUpdate = guesttools.NeedsUpdate(item.InstalledVersion, target.Version)

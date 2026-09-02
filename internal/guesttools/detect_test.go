@@ -211,14 +211,20 @@ func TestPSEscape(t *testing.T) {
 func TestTaskCommandsAreArgv(t *testing.T) {
 	// Proxmox takes the command as a repeated parameter, one element per
 	// argument. A single shell-style string would be treated as a program name.
-	reg := buildRegisterTaskScript(GuestScriptPath)
+	reg := buildRegisterTaskScript()
 	// StartWhenAvailable is the one that matters most: without it a missed boot
 	// trigger means the update never happens rather than happening late. A live
 	// Server 2022 guest reproduced exactly that with a schtasks-created task.
 	for _, want := range []string{
 		"-AtStartup", "StartWhenAvailable", "AllowStartIfOnBatteries",
 		"DontStopIfGoingOnBatteries", "ExecutionTimeLimit",
-		"-UserId 'SYSTEM'", "-RunLevel Highest", GuestScriptPath,
+		"-UserId 'SYSTEM'", "-RunLevel Highest",
+		// The path and the task name are two %s args on one Sprintf, so pin
+		// which slot each lands in. Swapped, the task would be named after the
+		// script path and -File would point at the task name, and every other
+		// assertion here would still pass.
+		`-File "` + GuestScriptPath + `"`,
+		"-TaskName '" + GuestTaskName + "'",
 	} {
 		if !strings.Contains(reg, want) {
 			t.Errorf("register script missing %q", want)
