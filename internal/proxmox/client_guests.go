@@ -1,10 +1,13 @@
 package proxmox
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
+	"time"
 )
 
 func (c *Client) vmStatusAction(ctx context.Context, node string, vmid int, action string) (string, error) {
@@ -976,7 +979,7 @@ const maxGuestFileWriteBytes = 60 * 1024
 // that restarts the agent's own service — which installing virtio-win guest
 // tools does — kills the process tree and loses the PID table with it. Run such
 // things detached (a scheduled task), not directly through this.
-func (c *Client) GuestAgentExec(ctx context.Context, node string, vmid int, command []string, inputData string) (int, error) {
+func (c *Client) GuestAgentExec(ctx context.Context, node string, vmid int, command []string) (int, error) {
 	if err := validateNodeName(node); err != nil {
 		return 0, err
 	}
@@ -993,9 +996,6 @@ func (c *Client) GuestAgentExec(ctx context.Context, node string, vmid int, comm
 	// agent try to execute the whole line as a program name.
 	for _, arg := range command {
 		form.Add("command", arg)
-	}
-	if inputData != "" {
-		form.Set("input-data", inputData)
 	}
 
 	path := "/nodes/" + url.PathEscape(node) + "/qemu/" + strconv.Itoa(vmid) + "/agent/exec"
@@ -1037,6 +1037,56 @@ func (c *Client) GuestAgentExecStatus(ctx context.Context, node string, vmid, pi
 		return nil, fmt.Errorf("guest agent exec-status for pid %d on VM %d on %s: %w", pid, vmid, node, err)
 	}
 	return &status, nil
+}
+
+// GuestAgentExecWait runs a command in the guest and blocks until it exits,
+// returning its final status. It is GuestAgentExec followed by a poll of
+// GuestAgentExecStatus every poll interval until the command exits or timeout
+// elapses.
+//
+// A command that exits non-zero returns both the status and an error naming the
+// exit code and whatever the guest wrote — stderr if there is any, stdout
+// otherwise, since PowerShell routinely reports failures on stdout.
+//
+// ErrGuestAgentUnavailable comes back unwrapped when the agent is not running,
+// either at exec time (pid 0) or when it disappears mid-poll, so callers can
+// errors.Is it without unwrapping. The same caveat as GuestAgentExec applies:
+// a command that restarts the agent's own service loses its PID table, and must
+// be run detached rather than waited on here.
+func (c *Client) GuestAgentExecWait(ctx context.Context, node string, vmid int, argv []string, timeout, poll time.Duration) (*GuestExecStatus, error) {
+	pid, err := c.GuestAgentExec(ctx, node, vmid, argv)
+	if err != nil {
+		return nil, err
+	}
+	if pid == 0 {
+		return nil, ErrGuestAgentUnavailable
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("guest %d: %s did not finish within %s", vmid, argv[0], timeout)
+		}
+		status, err := c.GuestAgentExecStatus(ctx, node, vmid, pid)
+		if err != nil {
+			return nil, err
+		}
+		if status == nil {
+			return nil, ErrGuestAgentUnavailable
+		}
+		if status.Exited {
+			if status.ExitCode != 0 {
+				return status, fmt.Errorf("guest %d: %s exited %d: %s", vmid, argv[0], int(status.ExitCode),
+					cmp.Or(strings.TrimSpace(status.ErrData), strings.TrimSpace(status.OutData)))
+			}
+			return status, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(poll):
+		}
+	}
 }
 
 // GuestAgentFileWrite writes content to a file inside the guest.

@@ -2,7 +2,6 @@ package guesttools
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -184,38 +183,22 @@ else { "PARSE_OK" }`
 // failing the test on a non-zero exit.
 func runGuestScript(ctx context.Context, t *testing.T, client *proxmox.Client, node string, vmid int, script string) string {
 	t.Helper()
-	pid, err := client.GuestAgentExec(ctx, node, vmid,
-		[]string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script}, "")
+	status, err := client.GuestAgentExecWait(ctx, node, vmid,
+		[]string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script},
+		guestExecTimeout, guestExecPollEvery)
+	// Both streams are worth reporting here even on success: these probes exist
+	// to learn what a real Windows guest does, and a script that exits 0 while
+	// warning on stderr is exactly the kind of thing they are looking for.
+	if status != nil && status.ErrData != "" {
+		t.Logf("stderr: %s", status.ErrData)
+	}
 	if err != nil {
-		t.Fatalf("exec: %v", err)
+		if status != nil {
+			t.Fatalf("guest script: %v (stdout=%q)", err, status.OutData)
+		}
+		t.Fatalf("guest script: %v", err)
 	}
-	if pid == 0 {
-		t.Fatal("exec returned pid 0 (agent not running)")
-	}
-
-	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) {
-		status, err := client.GuestAgentExecStatus(ctx, node, vmid, pid)
-		if err != nil {
-			t.Fatalf("exec-status: %v", err)
-		}
-		if status == nil {
-			t.Fatal("exec-status: agent went away")
-		}
-		if !status.Exited {
-			time.Sleep(2 * time.Second)
-			continue
-		}
-		if status.ExitCode != 0 {
-			t.Fatalf("guest command exited %d: out=%q err=%q", status.ExitCode, status.OutData, status.ErrData)
-		}
-		if status.ErrData != "" {
-			t.Logf("stderr: %s", status.ErrData)
-		}
-		return strings.TrimSpace(status.OutData)
-	}
-	t.Fatal("guest command did not finish in time")
-	return ""
+	return strings.TrimSpace(status.OutData)
 }
 
 // TestLiveVerifyStaged inspects a guest that Nexara has already staged an
@@ -391,7 +374,7 @@ $out | ConvertTo-Json -Compress`
 			t.Logf("  [%s] agent not answering yet", time.Now().Format("15:04:05"))
 			continue
 		}
-		raw, err := runGuestScriptSoft(ctx, client, node, vmid, inspect)
+		raw, err := runScript(ctx, client, node, vmid, inspect)
 		if err != nil {
 			t.Logf("  [%s] agent up, exec not ready: %v", time.Now().Format("15:04:05"), err)
 			continue
@@ -421,31 +404,6 @@ $out | ConvertTo-Json -Compress`
 			}
 		}
 	}
-}
-
-// runGuestScriptSoft is runGuestScript without the test-failing behaviour, for
-// polling a guest that is still coming up.
-func runGuestScriptSoft(ctx context.Context, client *proxmox.Client, node string, vmid int, script string) (string, error) {
-	pid, err := client.GuestAgentExec(ctx, node, vmid,
-		[]string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script}, "")
-	if err != nil || pid == 0 {
-		return "", fmt.Errorf("exec unavailable: %v", err)
-	}
-	for i := 0; i < 30; i++ {
-		time.Sleep(2 * time.Second)
-		st, err := client.GuestAgentExecStatus(ctx, node, vmid, pid)
-		if err != nil || st == nil {
-			return "", fmt.Errorf("exec-status unavailable: %v", err)
-		}
-		if !st.Exited {
-			continue
-		}
-		if st.ExitCode != 0 {
-			return "", fmt.Errorf("exit %d: %s", int(st.ExitCode), st.ErrData)
-		}
-		return strings.TrimSpace(st.OutData), nil
-	}
-	return "", fmt.Errorf("timed out")
 }
 
 // TestLiveTaskDiagnostic reports whether the scheduled task has run, its last

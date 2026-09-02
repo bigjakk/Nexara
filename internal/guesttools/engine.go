@@ -164,7 +164,7 @@ func (e *Engine) newestTarget(ctx context.Context) (Target, error) {
 // Returns the detection, or a zero Detection when the agent is unreachable —
 // that is a normal state for a stopped or agent-less guest, not an error.
 func (e *Engine) Detect(ctx context.Context, client *proxmox.Client, clusterID uuid.UUID, node string, vmid int, uptime int64) (Detection, error) {
-	out, err := e.runScript(ctx, client, node, vmid, detectScript)
+	out, err := runScript(ctx, client, node, vmid, detectScript)
 	if err != nil {
 		return Detection{}, err
 	}
@@ -191,51 +191,14 @@ func (e *Engine) Detect(ctx context.Context, client *proxmox.Client, clusterID u
 // The command is passed as argv, not a shell line: Proxmox takes `command` as a
 // repeated parameter and would otherwise treat the whole string as a program
 // name.
-func (e *Engine) runScript(ctx context.Context, client *proxmox.Client, node string, vmid int, script string) (string, error) {
-	pid, err := client.GuestAgentExec(ctx, node, vmid,
-		[]string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script}, "")
+func runScript(ctx context.Context, client *proxmox.Client, node string, vmid int, script string) (string, error) {
+	status, err := client.GuestAgentExecWait(ctx, node, vmid,
+		[]string{"powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script},
+		guestExecTimeout, guestExecPollEvery)
 	if err != nil {
-		return "", fmt.Errorf("exec in guest %d: %w", vmid, err)
+		return "", err
 	}
-	if pid == 0 {
-		return "", proxmox.ErrGuestAgentUnavailable
-	}
-
-	deadline := time.Now().Add(guestExecTimeout)
-	for {
-		if time.Now().After(deadline) {
-			return "", fmt.Errorf("guest %d: command did not finish within %s", vmid, guestExecTimeout)
-		}
-		status, err := client.GuestAgentExecStatus(ctx, node, vmid, pid)
-		if err != nil {
-			return "", fmt.Errorf("exec-status in guest %d: %w", vmid, err)
-		}
-		if status == nil {
-			return "", proxmox.ErrGuestAgentUnavailable
-		}
-		if !status.Exited {
-			select {
-			case <-ctx.Done():
-				return "", ctx.Err()
-			case <-time.After(guestExecPollEvery):
-			}
-			continue
-		}
-		if status.ExitCode != 0 {
-			return "", fmt.Errorf("guest %d: command exited %d: %s",
-				vmid, int(status.ExitCode), firstNonEmpty(strings.TrimSpace(status.ErrData), strings.TrimSpace(status.OutData)))
-		}
-		return strings.TrimSpace(status.OutData), nil
-	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
+	return strings.TrimSpace(status.OutData), nil
 }
 
 // cdromSlots are the device keys a CD-ROM may occupy, in the order Proxmox's
@@ -488,13 +451,13 @@ func (e *Engine) Stage(
 		return result, fmt.Errorf("write updater into guest %d: %w", vmid, err)
 	}
 
-	if _, err := e.runScript(ctx, client, node, vmid, buildRegisterTaskScript(GuestScriptPath)); err != nil {
+	if _, err := runScript(ctx, client, node, vmid, buildRegisterTaskScript(GuestScriptPath)); err != nil {
 		return result, fmt.Errorf("register scheduled task in guest %d: %w", vmid, err)
 	}
 
 	stage := "staged"
 	if runNow {
-		if err := e.runArgv(ctx, client, node, vmid, buildRunTaskCommand()); err != nil {
+		if err := runArgv(ctx, client, node, vmid, buildRunTaskCommand()); err != nil {
 			return result, fmt.Errorf("start scheduled task in guest %d: %w", vmid, err)
 		}
 		stage = "running"
@@ -553,40 +516,9 @@ func firstField(value string) string {
 // runArgv runs a command in the guest, for commands that are already argv
 // rather than a PowerShell script. Output is folded into the error on failure;
 // nothing here reads stdout on success.
-func (e *Engine) runArgv(ctx context.Context, client *proxmox.Client, node string, vmid int, argv []string) error {
-	pid, err := client.GuestAgentExec(ctx, node, vmid, argv, "")
-	if err != nil {
-		return err
-	}
-	if pid == 0 {
-		return proxmox.ErrGuestAgentUnavailable
-	}
-	deadline := time.Now().Add(guestExecTimeout)
-	for {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("guest %d: %s did not finish within %s", vmid, argv[0], guestExecTimeout)
-		}
-		status, err := client.GuestAgentExecStatus(ctx, node, vmid, pid)
-		if err != nil {
-			return err
-		}
-		if status == nil {
-			return proxmox.ErrGuestAgentUnavailable
-		}
-		if !status.Exited {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(guestExecPollEvery):
-			}
-			continue
-		}
-		if status.ExitCode != 0 {
-			return fmt.Errorf("guest %d: %s exited %d: %s", vmid, argv[0], int(status.ExitCode),
-				firstNonEmpty(strings.TrimSpace(status.ErrData), strings.TrimSpace(status.OutData)))
-		}
-		return nil
-	}
+func runArgv(ctx context.Context, client *proxmox.Client, node string, vmid int, argv []string) error {
+	_, err := client.GuestAgentExecWait(ctx, node, vmid, argv, guestExecTimeout, guestExecPollEvery)
+	return err
 }
 
 func (e *Engine) isoOnStorage(ctx context.Context, client *proxmox.Client, node, storage, filename string) (bool, error) {
@@ -618,7 +550,7 @@ func (e *Engine) isoOnStorage(ctx context.Context, client *proxmox.Client, node,
 // PowerShell's Remove-Item takes the path literally, and the Test-Path check
 // afterwards means the caller learns the truth either way.
 func (e *Engine) clearResultFile(ctx context.Context, client *proxmox.Client, node string, vmid int) error {
-	out, err := e.runScript(ctx, client, node, vmid,
+	out, err := runScript(ctx, client, node, vmid,
 		`Remove-Item -LiteralPath '`+GuestResultPath+`' -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath '`+GuestResultPath+`') { 'FAILED' } else { 'OK' }`)
 	if err != nil {
@@ -633,7 +565,7 @@ if (Test-Path -LiteralPath '`+GuestResultPath+`') { 'FAILED' } else { 'OK' }`)
 // updaterTaskPresence asks the guest whether the updater task is registered,
 // and whether it is running right now.
 func (e *Engine) updaterTaskPresence(ctx context.Context, client *proxmox.Client, node string, vmid int) (taskPresence, error) {
-	out, err := e.runScript(ctx, client, node, vmid, buildTaskStateScript())
+	out, err := runScript(ctx, client, node, vmid, buildTaskStateScript())
 	if err != nil {
 		// taskUnknown, not taskAbsent, and it matters that it is also the zero
 		// value: a caller that ever drops the error must not be handed the one
@@ -654,7 +586,7 @@ func (e *Engine) updaterTaskPresence(ctx context.Context, client *proxmox.Client
 // because the caller goes on to record the update as withdrawn while the guest
 // is still armed to install it.
 func (e *Engine) deleteUpdaterTask(ctx context.Context, client *proxmox.Client, node string, vmid int) error {
-	if err := e.runArgv(ctx, client, node, vmid, buildDeleteTaskCommand()); err != nil {
+	if err := runArgv(ctx, client, node, vmid, buildDeleteTaskCommand()); err != nil {
 		e.logger.Debug("guest tools: delete of the updater task reported an error, verifying anyway",
 			"vmid", vmid, "error", err)
 	}
@@ -720,7 +652,7 @@ func (e *Engine) RestoreCDROM(ctx context.Context, client *proxmox.Client, node 
 func (e *Engine) CancelStaged(ctx context.Context, client *proxmox.Client, clusterID uuid.UUID, node string, vmid int, state db.GuestToolsState) error {
 	// Best-effort: a guest that has already rebooted and run the task no longer
 	// has one to delete, and that is not a failure to cancel.
-	if err := e.runArgv(ctx, client, node, vmid, buildDeleteTaskCommand()); err != nil {
+	if err := runArgv(ctx, client, node, vmid, buildDeleteTaskCommand()); err != nil {
 		e.logger.Debug("guest tools: delete scheduled task failed during cancel",
 			"vmid", vmid, "error", err)
 	}
