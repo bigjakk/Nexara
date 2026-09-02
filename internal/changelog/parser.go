@@ -77,20 +77,20 @@ var (
 // shouldn't surface in the popup — boilerplate, dependency bumps, build /
 // CI churn, etc. Match is case-insensitive and against the trimmed heading.
 var skipHeadings = map[string]bool{
-	"chore":               true,
-	"chores":              true,
-	"container image":     true,
-	"container":           true,
-	"full changelog":      true,
-	"internal":            true,
-	"internal changes":    true,
-	"dependencies":        true,
-	"dependency updates":  true,
-	"build":               true,
-	"ci":                  true,
+	"chore":                  true,
+	"chores":                 true,
+	"container image":        true,
+	"container":              true,
+	"full changelog":         true,
+	"internal":               true,
+	"internal changes":       true,
+	"dependencies":           true,
+	"dependency updates":     true,
+	"build":                  true,
+	"ci":                     true,
 	"continuous integration": true,
-	"tests":               true,
-	"test":                true,
+	"tests":                  true,
+	"test":                   true,
 }
 
 // extractHighlightsSection picks the relevant region of the release body:

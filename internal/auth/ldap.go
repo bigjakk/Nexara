@@ -180,7 +180,7 @@ func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*LDAPUser, er
 		c.cfg.SearchBaseDN,
 		ldap.ScopeWholeSubtree,
 		ldap.NeverDerefAliases,
-		1, // sizeLimit
+		1,  // sizeLimit
 		30, // timeLimit seconds
 		false,
 		filter,

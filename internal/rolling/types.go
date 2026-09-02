@@ -10,7 +10,7 @@ import (
 type GuestSnapshot struct {
 	VMID        int    `json:"vmid"`
 	Name        string `json:"name"`
-	Type        string `json:"type"`   // "qemu" or "lxc"
+	Type        string `json:"type"` // "qemu" or "lxc"
 	Status      string `json:"status"`
 	Passthrough bool   `json:"passthrough,omitempty"` // PCI/USB passthrough — cannot live-migrate
 }

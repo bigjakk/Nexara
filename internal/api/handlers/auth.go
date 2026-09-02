@@ -136,9 +136,9 @@ type authResponse struct {
 	// HttpOnly cookie (see RefreshCookieName); the native app that used to read it
 	// from the body was removed in v1.9.x. The field is retained so the response
 	// shape stays stable for existing API consumers.
-	RefreshToken string           `json:"refresh_token"`
-	ExpiresAt    int64            `json:"expires_at"`
-	Permissions  []string         `json:"permissions"`
+	RefreshToken string   `json:"refresh_token"`
+	ExpiresAt    int64    `json:"expires_at"`
+	Permissions  []string `json:"permissions"`
 }
 
 type authUserResponse struct {

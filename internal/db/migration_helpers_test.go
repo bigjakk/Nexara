@@ -165,4 +165,3 @@ func setupMigration(t *testing.T) *migrationTestEnv {
 		Cleanup: cleanup,
 	}
 }
-

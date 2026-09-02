@@ -955,6 +955,7 @@ func (c *Client) GetGuestAgentNetworkInterfaces(ctx context.Context, node string
 	}
 	return wrapper.Result, nil
 }
+
 // maxGuestFileWriteBytes bounds a single agent/file-write. Proxmox validates
 // the content parameter at 61440 characters, so anything larger is rejected by
 // the API rather than by the guest. Callers that need more must chunk; nothing

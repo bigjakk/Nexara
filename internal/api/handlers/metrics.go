@@ -39,7 +39,7 @@ var rangeDurations = map[string]time.Duration{
 
 // rawRow is a generic container for rows from any metric query.
 type rawRow struct {
-	bucket                                                      time.Time
+	bucket                                                     time.Time
 	cpu, memUsed, memTotal, diskRead, diskWrite, netIn, netOut float64
 }
 

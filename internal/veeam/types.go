@@ -69,12 +69,12 @@ type License struct {
 // the Proxmox cluster name as Veeam knows it — a human-readable correlation
 // signal, and the only place a cluster label appears anywhere in the API.
 type LicenseWorkload struct {
-	PlatformType string  `json:"platformType"`
-	Name         string  `json:"name"`
-	DisplayName  string  `json:"displayName"`
-	HostName     string  `json:"hostName"`
-	Type         string  `json:"type"`
-	InstanceID   string  `json:"instanceId"`
+	PlatformType  string  `json:"platformType"`
+	Name          string  `json:"name"`
+	DisplayName   string  `json:"displayName"`
+	HostName      string  `json:"hostName"`
+	Type          string  `json:"type"`
+	InstanceID    string  `json:"instanceId"`
 	UsedInstances float64 `json:"usedInstancesNumber"`
 }
 

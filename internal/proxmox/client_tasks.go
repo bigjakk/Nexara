@@ -35,6 +35,7 @@ func (c *Client) GetTaskLog(ctx context.Context, node string, upid string, start
 	}
 	return entries, nil
 }
+
 // StopNodeTask aborts a running task via DELETE /nodes/{node}/tasks/{upid}. Best-effort;
 // returns an error if the task can't be signalled (e.g. already finished). Does not
 // return a UPID.

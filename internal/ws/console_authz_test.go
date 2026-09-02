@@ -115,10 +115,10 @@ func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		path       string
-		token      string
-		extra      string // query string fragment appended after token=...
+		name  string
+		path  string
+		token string
+		extra string // query string fragment appended after token=...
 		// useSubprotocol — when true, send the token via Sec-WebSocket-Protocol
 		// instead of as a query param. Both paths should accept the same tokens.
 		useSubprotocol bool

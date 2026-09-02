@@ -50,8 +50,8 @@ func TestCompareValue(t *testing.T) {
 func TestExtractNodeMetric(t *testing.T) {
 	row := db.GetNodeRecentMetricsRow{
 		CpuUsage:  75.5,
-		MemUsed:   4 * 1024 * 1024 * 1024,  // 4 GB
-		MemTotal:  8 * 1024 * 1024 * 1024,  // 8 GB
+		MemUsed:   4 * 1024 * 1024 * 1024, // 4 GB
+		MemTotal:  8 * 1024 * 1024 * 1024, // 8 GB
 		DiskRead:  1000,
 		DiskWrite: 2000,
 		NetIn:     3000,

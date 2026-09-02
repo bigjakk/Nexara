@@ -3,22 +3,22 @@ package handlers
 import (
 	"fmt"
 
-	"github.com/gofiber/fiber/v3"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/gofiber/fiber/v3"
 )
 
 // --- Live Disk List (from Proxmox, not DB) ---
 
 type liveDiskResponse struct {
-	DevPath string `json:"dev_path"`
-	Model   string `json:"model"`
-	Serial  string `json:"serial"`
-	Size    int64  `json:"size"`
+	DevPath  string `json:"dev_path"`
+	Model    string `json:"model"`
+	Serial   string `json:"serial"`
+	Size     int64  `json:"size"`
 	DiskType string `json:"disk_type"`
-	Health  string `json:"health"`
-	Wearout string `json:"wearout"`
-	GPT     int    `json:"gpt"`
-	Used    string `json:"used"`
+	Health   string `json:"health"`
+	Wearout  string `json:"wearout"`
+	GPT      int    `json:"gpt"`
+	Used     string `json:"used"`
 }
 
 // ListLiveDisks handles GET /api/v1/clusters/:cluster_id/nodes/:node_name/disks/list.

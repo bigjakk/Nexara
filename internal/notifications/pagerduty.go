@@ -59,9 +59,9 @@ func (d *PagerDutyDispatcher) Send(ctx context.Context, config json.RawMessage, 
 		"event_action": eventAction,
 		"dedup_key":    pagerdutyDedupKey(payload),
 		"payload": map[string]interface{}{
-			"summary":  fmt.Sprintf("%s: %s on %s", payload.Severity, payload.RuleName, payload.ResourceName),
-			"severity": pdSeverity,
-			"source":   payload.ResourceName,
+			"summary":   fmt.Sprintf("%s: %s on %s", payload.Severity, payload.RuleName, payload.ResourceName),
+			"severity":  pdSeverity,
+			"source":    payload.ResourceName,
 			"component": payload.Metric,
 			"custom_details": map[string]interface{}{
 				"metric":        payload.Metric,

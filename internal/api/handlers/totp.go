@@ -38,11 +38,11 @@ var totpCodePattern = regexp.MustCompile(`^\d{6}$`)
 
 // TOTPHandler handles TOTP 2FA endpoints.
 type TOTPHandler struct {
-	queries      *db.Queries
-	totpService  *auth.TOTPService
-	rdb          *redis.Client
-	eventPub     *events.Publisher
-	issueTokens  func(c fiber.Ctx, user db.User, auditAction string) error
+	queries     *db.Queries
+	totpService *auth.TOTPService
+	rdb         *redis.Client
+	eventPub    *events.Publisher
+	issueTokens func(c fiber.Ctx, user db.User, auditAction string) error
 }
 
 // NewTOTPHandler creates a new TOTP handler.

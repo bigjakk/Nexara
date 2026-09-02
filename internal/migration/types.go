@@ -2,12 +2,12 @@ package migration
 
 // Status constants for migration jobs.
 const (
-	StatusPending    = "pending"
-	StatusChecking   = "checking"
-	StatusMigrating  = "migrating"
-	StatusCompleted  = "completed"
-	StatusFailed     = "failed"
-	StatusCancelled  = "cancelled"
+	StatusPending   = "pending"
+	StatusChecking  = "checking"
+	StatusMigrating = "migrating"
+	StatusCompleted = "completed"
+	StatusFailed    = "failed"
+	StatusCancelled = "cancelled"
 )
 
 // Migration type constants.
@@ -47,8 +47,8 @@ type CheckResult struct {
 
 // PreFlightReport is the collection of all pre-flight check results.
 type PreFlightReport struct {
-	Checks  []CheckResult `json:"checks"`
-	Passed  bool          `json:"passed"`
+	Checks []CheckResult `json:"checks"`
+	Passed bool          `json:"passed"`
 }
 
 // StorageMapping maps source storage names to target storage names.

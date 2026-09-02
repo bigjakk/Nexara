@@ -49,10 +49,10 @@ func TestParseCRSSettings(t *testing.T) {
 
 func TestCRSPauseRestore(t *testing.T) {
 	tests := []struct {
-		name         string
-		in           interface{}
-		wantRestore  string
-		wantPaused   string
+		name        string
+		in          interface{}
+		wantRestore string
+		wantPaused  string
 	}{
 		{
 			// String shape: original is replayed verbatim for restore; only the

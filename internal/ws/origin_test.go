@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	gorillaws "github.com/gorilla/websocket"
 	"github.com/google/uuid"
+	gorillaws "github.com/gorilla/websocket"
 
 	"github.com/bigjakk/nexara/internal/auth"
 )

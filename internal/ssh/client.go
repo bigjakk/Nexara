@@ -41,10 +41,10 @@ type Config struct {
 // HostKeyMismatchError indicates the remote presented a key that does not
 // match the pinned key. The handshake aborts before any auth is attempted.
 type HostKeyMismatchError struct {
-	Host                string
-	ExpectedFingerprint string
+	Host                 string
+	ExpectedFingerprint  string
 	PresentedFingerprint string
-	PresentedPublicKey  string
+	PresentedPublicKey   string
 }
 
 func (e *HostKeyMismatchError) Error() string {

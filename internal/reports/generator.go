@@ -539,13 +539,13 @@ func (g *Generator) generatePatchStatus(ctx context.Context, data *ReportData, c
 		Title:   "CVE Scan Summary",
 		Headers: []string{"Scan Date", "Total Vulnerabilities", "Critical", "High", "Medium", "Low", "Status"},
 		Rows: []map[string]string{{
-			"Scan Date":            scan.CreatedAt.Format("2006-01-02 15:04"),
+			"Scan Date":             scan.CreatedAt.Format("2006-01-02 15:04"),
 			"Total Vulnerabilities": strconv.FormatInt(int64(scan.TotalVulns), 10),
-			"Critical":             strconv.FormatInt(int64(scan.CriticalCount), 10),
-			"High":                 strconv.FormatInt(int64(scan.HighCount), 10),
-			"Medium":               strconv.FormatInt(int64(scan.MediumCount), 10),
-			"Low":                  strconv.FormatInt(int64(scan.LowCount), 10),
-			"Status":               scan.Status,
+			"Critical":              strconv.FormatInt(int64(scan.CriticalCount), 10),
+			"High":                  strconv.FormatInt(int64(scan.HighCount), 10),
+			"Medium":                strconv.FormatInt(int64(scan.MediumCount), 10),
+			"Low":                   strconv.FormatInt(int64(scan.LowCount), 10),
+			"Status":                scan.Status,
 		}},
 	}
 
@@ -800,13 +800,13 @@ func (g *Generator) generateVMResourceUsage(ctx context.Context, data *ReportDat
 	}
 	for _, s := range topNet[:limit] {
 		netSection.Rows = append(netSection.Rows, map[string]string{
-			"VM Name":  s.name,
-			"VMID":     strconv.Itoa(s.vmid),
-			"Type":     s.vmType,
-			"Node":     s.nodeName,
-			"Net In/s": formatBytesRate(s.netIn),
+			"VM Name":   s.name,
+			"VMID":      strconv.Itoa(s.vmid),
+			"Type":      s.vmType,
+			"Node":      s.nodeName,
+			"Net In/s":  formatBytesRate(s.netIn),
 			"Net Out/s": formatBytesRate(s.netOut),
-			"Total/s":  formatBytesRate(s.netIn + s.netOut),
+			"Total/s":   formatBytesRate(s.netIn + s.netOut),
 		})
 	}
 
@@ -843,17 +843,17 @@ func (g *Generator) generateVMResourceUsage(ctx context.Context, data *ReportDat
 	}
 	for _, s := range stats {
 		allVMs.Rows = append(allVMs.Rows, map[string]string{
-			"VM Name":   s.name,
-			"VMID":      strconv.Itoa(s.vmid),
-			"Type":      s.vmType,
-			"Node":      s.nodeName,
-			"Status":    s.status,
-			"vCPUs":     strconv.Itoa(s.cpuCount),
-			"CPU Avg %": fmt.Sprintf("%.1f", s.cpuAvg),
-			"Mem Avg %": fmt.Sprintf("%.1f", s.memPct),
+			"VM Name":    s.name,
+			"VMID":       strconv.Itoa(s.vmid),
+			"Type":       s.vmType,
+			"Node":       s.nodeName,
+			"Status":     s.status,
+			"vCPUs":      strconv.Itoa(s.cpuCount),
+			"CPU Avg %":  fmt.Sprintf("%.1f", s.cpuAvg),
+			"Mem Avg %":  fmt.Sprintf("%.1f", s.memPct),
 			"Disk Alloc": formatBytes(float64(s.diskTotal)),
-			"Net In/s":  formatBytesRate(s.netIn),
-			"Net Out/s": formatBytesRate(s.netOut),
+			"Net In/s":   formatBytesRate(s.netIn),
+			"Net Out/s":  formatBytesRate(s.netOut),
 		})
 	}
 

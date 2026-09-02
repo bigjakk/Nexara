@@ -39,15 +39,15 @@ func TestIsAlwaysBlocked(t *testing.T) {
 		want bool
 	}{
 		// Always blocked
-		{"169.254.169.254", true},   // cloud metadata
-		{"0.0.0.0", true},           // unspecified IPv4
-		{"::", true},                // unspecified IPv6
-		{"224.0.0.1", true},         // multicast IPv4
-		{"239.255.255.250", true},   // multicast IPv4 (SSDP)
-		{"ff02::1", true},           // multicast IPv6
-		{"255.255.255.255", true},   // limited broadcast
-		{"240.0.0.1", true},         // class E
-		{"255.255.255.0", true},     // class E (just under limited broadcast)
+		{"169.254.169.254", true}, // cloud metadata
+		{"0.0.0.0", true},         // unspecified IPv4
+		{"::", true},              // unspecified IPv6
+		{"224.0.0.1", true},       // multicast IPv4
+		{"239.255.255.250", true}, // multicast IPv4 (SSDP)
+		{"ff02::1", true},         // multicast IPv6
+		{"255.255.255.255", true}, // limited broadcast
+		{"240.0.0.1", true},       // class E
+		{"255.255.255.0", true},   // class E (just under limited broadcast)
 		{"::ffff:169.254.169.254", true},
 
 		// NOT always blocked (private but legitimate Proxmox/SSH targets)

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	gorillaws "github.com/gorilla/websocket"
 	"github.com/google/uuid"
+	gorillaws "github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/auth"

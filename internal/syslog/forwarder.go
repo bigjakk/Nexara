@@ -19,8 +19,8 @@ type Config struct {
 	Host          string `json:"host"`
 	Port          int    `json:"port"`
 	Protocol      string `json:"protocol"`        // "udp", "tcp", "tls"
-	Facility      int    `json:"facility"`         // syslog facility (0-23), default 16 (local0)
-	TLSSkipVerify bool   `json:"tls_skip_verify"`  // skip TLS certificate verification
+	Facility      int    `json:"facility"`        // syslog facility (0-23), default 16 (local0)
+	TLSSkipVerify bool   `json:"tls_skip_verify"` // skip TLS certificate verification
 }
 
 // Message represents an audit event to be forwarded as a syslog message.

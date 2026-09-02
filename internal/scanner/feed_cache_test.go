@@ -244,4 +244,3 @@ func TestSha256Hex_Stable(t *testing.T) {
 		t.Fatal("sha256Hex of \"abc\" changed")
 	}
 }
-

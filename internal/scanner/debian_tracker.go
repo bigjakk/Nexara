@@ -45,11 +45,11 @@ type CVEClient struct {
 	queries    *db.Queries
 	logger     *slog.Logger
 
-	mu                sync.Mutex
-	trackerData       map[string]map[string]debianCVEEntry
-	trackerLoadedAt   time.Time
-	cacheTTL          time.Duration // overridable for tests
-	feedURL           string        // overridable for tests
+	mu              sync.Mutex
+	trackerData     map[string]map[string]debianCVEEntry
+	trackerLoadedAt time.Time
+	cacheTTL        time.Duration // overridable for tests
+	feedURL         string        // overridable for tests
 }
 
 // debianCVEEntry is the per-CVE entry inside a package's map.

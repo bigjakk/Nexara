@@ -87,10 +87,10 @@ var auditClusterExempt = map[string]string{
 	"audit.go.TestSyslog":           "syslog forwarding is an install-global setting",
 
 	// Resources whose tables have no cluster_id column at all.
-	"alerts.go.CreateChannel":    "notification_channels has no cluster_id column",
-	"alerts.go.UpdateChannel":    "notification_channels has no cluster_id column",
-	"alerts.go.DeleteChannel":    "notification_channels has no cluster_id column",
-	"alerts.go.TestChannel":      "notification_channels has no cluster_id column",
+	"alerts.go.CreateChannel": "notification_channels has no cluster_id column",
+	"alerts.go.UpdateChannel": "notification_channels has no cluster_id column",
+	"alerts.go.DeleteChannel": "notification_channels has no cluster_id column",
+	"alerts.go.TestChannel":   "notification_channels has no cluster_id column",
 	// A Veeam server can protect several Proxmox clusters at once, so
 	// veeam_servers has no cluster_id column and naming any one cluster would
 	// be wrong rather than merely incomplete. Every route on the registry is

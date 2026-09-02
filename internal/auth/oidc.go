@@ -49,11 +49,11 @@ type OIDCUserInfo struct {
 
 // OIDCProvider wraps the go-oidc provider with oauth2 config and Redis for state.
 type OIDCProvider struct {
-	provider    *oidc.Provider
-	oauth2Cfg   oauth2.Config
-	verifier    *oidc.IDTokenVerifier
-	rdb         *redis.Client
-	cfg         OIDCConfig
+	provider  *oidc.Provider
+	oauth2Cfg oauth2.Config
+	verifier  *oidc.IDTokenVerifier
+	rdb       *redis.Client
+	cfg       OIDCConfig
 }
 
 // NewOIDCProvider discovers OIDC metadata and creates a provider.

@@ -10,9 +10,9 @@ import (
 // will fail this test; that's intentional — the anchors are the contract.
 func TestComputePostureScoreAnchors(t *testing.T) {
 	cases := []struct {
-		name                                          string
-		critical, high, medium, low, unknown          int32
-		minScore, maxScore                            float32
+		name                                 string
+		critical, high, medium, low, unknown int32
+		minScore, maxScore                   float32
 	}{
 		{"clean cluster", 0, 0, 0, 0, 0, 100, 100},
 		{"one low", 0, 0, 0, 1, 0, 97, 99},

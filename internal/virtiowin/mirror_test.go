@@ -42,7 +42,7 @@ func TestNormalizeBase(t *testing.T) {
 
 // TestBuildISOURLFrom pins the two things a mirror URL has to get right: the
 // upstream directory layout below the root, and the release-suffix split that
-//404s every download when it is wrong (dir "…-0.1.302-1", file "…-0.1.302.iso").
+// 404s every download when it is wrong (dir "…-0.1.302-1", file "…-0.1.302.iso").
 func TestBuildISOURLFrom(t *testing.T) {
 	tests := []struct {
 		name    string

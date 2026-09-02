@@ -323,7 +323,6 @@ func TestSessionLogs_EmptyIsNotAnError(t *testing.T) {
 	}
 }
 
-
 // The per-guest breakdown, and the two things about it that are easy to get
 // wrong: it is the PLAIN endpoint (unlike /jobs and /proxies, whose Proxmox
 // rows live only under /states), and its rows carry a platformId of their own.

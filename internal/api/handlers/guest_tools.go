@@ -74,14 +74,14 @@ type guestToolsGuestResponse struct {
 	// RebootRequired: the installer returned 3010 — installed, but a driver that
 	// was in use only swaps at the guest's next restart. Neither an error nor
 	// fully done, so the UI can say exactly that.
-	RebootRequired bool `json:"reboot_required"`
-	StagedVersion    string  `json:"staged_version"`
-	StagedAt         *string `json:"staged_at"`
-	LastError        string  `json:"last_error"`
-	LastResultAt     *string `json:"last_result_at"`
-	Excluded         bool    `json:"excluded"`
-	PolicyVersion    string  `json:"policy_target_version"`
-	Note             string  `json:"note"`
+	RebootRequired bool    `json:"reboot_required"`
+	StagedVersion  string  `json:"staged_version"`
+	StagedAt       *string `json:"staged_at"`
+	LastError      string  `json:"last_error"`
+	LastResultAt   *string `json:"last_result_at"`
+	Excluded       bool    `json:"excluded"`
+	PolicyVersion  string  `json:"policy_target_version"`
+	Note           string  `json:"note"`
 	// TargetVersion is the effective target for THIS guest, and UpToDate /
 	// NeedsUpdate are computed server-side. Three fields rather than one so the
 	// UI can distinguish "current", "behind" and "we have never looked".

@@ -111,9 +111,9 @@ func (e *Engine) RunScanWithID(ctx context.Context, clusterID, scanID uuid.UUID)
 	})
 
 	_ = e.queries.UpdateCVEScanCounts(ctx, db.UpdateCVEScanCountsParams{
-		ID:           scanID,
-		ScannedNodes: 0,
-		TotalVulns:   0,
+		ID:            scanID,
+		ScannedNodes:  0,
+		TotalVulns:    0,
 		CriticalCount: 0,
 		HighCount:     0,
 		MediumCount:   0,

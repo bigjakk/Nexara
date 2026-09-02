@@ -348,4 +348,3 @@ func isAgentNotRunning(err error) bool {
 	}
 	return false
 }
-
