@@ -241,9 +241,7 @@ WITH scoped AS (
            c.name AS cluster_name,
            -- What the VM cell shows: the guest's name, or '#<vmid>' when the
            -- guest is gone (or was never one), or NULL for a non-guest task.
-           COALESCE(NULLIF(v.name, ''),
-                    CASE WHEN t.vmid IS NOT NULL
-                         THEN '#' || t.vmid::text END) AS vm_label,
+           COALESCE(NULLIF(v.name, ''), '#' || t.vmid::text) AS vm_label,
            -- Displayed severity, ordered so an ascending click surfaces
            -- failures first: 0 = Failed, 1 = Completed, 2 = Running.
            --
@@ -271,8 +269,14 @@ WITH scoped AS (
       AND ($8::uuid[] IS NULL
            OR t.cluster_id = ANY($8::uuid[]))
 ), ranked AS (
-    -- A second level only because sort_progress reads sort_status, and sibling
-    -- output columns cannot see each other in one SELECT list.
+    -- A second level so that each derived sort key is named once and both
+    -- direction terms below can share it, without any of them reaching the
+    -- result. (Not because ORDER BY cannot see them: it reads cluster_name,
+    -- vm_label and sort_status straight off ` + "`" + `scoped` + "`" + `. The restriction that
+    -- does bite is narrower — sibling output columns cannot see each other
+    -- within one SELECT list, and both keys here read a sibling of ` + "`" + `scoped` + "`" + `:
+    -- sort_progress reads sort_status, sort_text reads cluster_name and
+    -- vm_label. Neither can move up a level.)
     --
     -- A row the UI draws as Completed shows a full bar whatever the stored
     -- progress is (Proxmox reports none for most task types), so it sorts as
@@ -290,7 +294,16 @@ WITH scoped AS (
     -- they cannot be ordered on here. If a reconciler ever starts persisting
     -- progress, this expression starts sorting properly with no change.
     SELECT scoped.id, scoped.cluster_id, scoped.user_id, scoped.upid, scoped.description, scoped.status, scoped.exit_status, scoped.node, scoped.task_type, scoped.progress, scoped.started_at, scoped.finished_at, scoped.created_at, scoped.updated_at, scoped.source, scoped.vmid, scoped.cluster_name, scoped.vm_label, scoped.sort_status,
-           CASE WHEN sort_status = 1 THEN 1.0 ELSE progress END AS sort_progress
+           CASE WHEN sort_status = 1 THEN 1.0 ELSE progress END AS sort_progress,
+           -- Every text-valued key, resolved once. Which one is live depends on
+           -- sort_by; the rest are simply not selected.
+           CASE $4::text
+               WHEN 'cluster'     THEN cluster_name
+               WHEN 'type'        THEN NULLIF(task_type, '')
+               WHEN 'description' THEN COALESCE(NULLIF(description, ''), upid)
+               WHEN 'vm'          THEN vm_label
+               WHEN 'node'        THEN NULLIF(node, '')
+           END AS sort_text
     FROM scoped
 )
 SELECT id, cluster_id, user_id, upid, description, status, exit_status, node,
@@ -298,28 +311,10 @@ SELECT id, cluster_id, user_id, upid, description, status, exit_status, node,
        source, vmid
 FROM ranked
 ORDER BY
-    -- One CASE per direction over every text-valued key: the inner CASE picks
-    -- the column, the outer one blanks the whole term when the other direction
-    -- is active. A term that matches nothing is NULL for every row, so it ties
-    -- and control passes to the next term.
-    CASE WHEN $3::text = 'asc' THEN
-        CASE $4::text
-            WHEN 'cluster'     THEN cluster_name
-            WHEN 'type'        THEN NULLIF(task_type, '')
-            WHEN 'description' THEN COALESCE(NULLIF(description, ''), upid)
-            WHEN 'vm'          THEN vm_label
-            WHEN 'node'        THEN NULLIF(node, '')
-        END
-    END ASC NULLS LAST,
-    CASE WHEN $3::text = 'desc' THEN
-        CASE $4::text
-            WHEN 'cluster'     THEN cluster_name
-            WHEN 'type'        THEN NULLIF(task_type, '')
-            WHEN 'description' THEN COALESCE(NULLIF(description, ''), upid)
-            WHEN 'vm'          THEN vm_label
-            WHEN 'node'        THEN NULLIF(node, '')
-        END
-    END DESC NULLS LAST,
+    -- One term per direction, each blanked when the other direction is active.
+    -- A term that is NULL for every row ties, so control passes to the next.
+    CASE WHEN $3::text = 'asc'  THEN sort_text END ASC NULLS LAST,
+    CASE WHEN $3::text = 'desc' THEN sort_text END DESC NULLS LAST,
     CASE WHEN $4::text = 'progress' AND $3::text = 'asc'
          THEN sort_progress END ASC NULLS LAST,
     CASE WHEN $4::text = 'progress' AND $3::text = 'desc'
@@ -398,9 +393,9 @@ type ListTaskHistoryFilteredRow struct {
 // several. That is load-bearing — CountTaskHistoryFiltered does not join, and
 // a duplicated row here would make Items and Total disagree.
 // Only task_history's own columns are returned. cluster_name/vm_label/
-// sort_status/sort_progress exist to be ordered on, and Postgres keeps them
-// visible to ORDER BY as columns of `ranked` without carrying them into the
-// result — which keeps the generated row struct the shape of the table.
+// sort_status/sort_progress/sort_text exist to be ordered on, and Postgres
+// keeps them visible to ORDER BY as columns of `ranked` without carrying them
+// into the result — which keeps the generated row struct the shape of the table.
 func (q *Queries) ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]ListTaskHistoryFilteredRow, error) {
 	rows, err := q.db.Query(ctx, listTaskHistoryFiltered,
 		arg.Limit,

@@ -996,9 +996,9 @@ type Querier interface {
 	// several. That is load-bearing — CountTaskHistoryFiltered does not join, and
 	// a duplicated row here would make Items and Total disagree.
 	// Only task_history's own columns are returned. cluster_name/vm_label/
-	// sort_status/sort_progress exist to be ordered on, and Postgres keeps them
-	// visible to ORDER BY as columns of `ranked` without carrying them into the
-	// result — which keeps the generated row struct the shape of the table.
+	// sort_status/sort_progress/sort_text exist to be ordered on, and Postgres
+	// keeps them visible to ORDER BY as columns of `ranked` without carrying them
+	// into the result — which keeps the generated row struct the shape of the table.
 	ListTaskHistoryFiltered(ctx context.Context, arg ListTaskHistoryFilteredParams) ([]ListTaskHistoryFilteredRow, error)
 	ListUserIDsByRole(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 	ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUserRolesRow, error)
