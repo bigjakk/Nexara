@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/netguard"
 	"github.com/bigjakk/nexara/internal/notifications"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/safeconv"
@@ -47,7 +48,11 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger, r
 		logger = slog.Default()
 	}
 
-	httpClient := newScannerHTTPClient(120 * time.Second)
+	// One client for the whole Engine, shared by all three feed clients below.
+	// Each of their constructors would otherwise build its own when handed a
+	// nil, so three feeds refreshing on their TTLs would hold three connection
+	// pools and pay three TLS handshakes for what is one outbound role.
+	httpClient := netguard.NewHTTPClient(120 * time.Second)
 	e := &Engine{
 		queries:       queries,
 		encryptionKey: encryptionKey,

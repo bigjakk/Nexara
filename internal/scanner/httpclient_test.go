@@ -3,36 +3,9 @@ package scanner
 import (
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
-
-func TestNewScannerHTTPClient_RefusesRedirects(t *testing.T) {
-	t.Parallel()
-	// A test server that 302s to a different host. The client must
-	// surface the 3xx as a response (because CheckRedirect returned
-	// http.ErrUseLastResponse) rather than following it.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Location", "https://attacker.example/")
-		w.WriteHeader(http.StatusFound)
-	}))
-	t.Cleanup(srv.Close)
-
-	client := newScannerHTTPClient(5 * time.Second)
-	resp, err := client.Get(srv.URL)
-	if err != nil {
-		t.Fatalf("expected no transport error, got %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("expected 302 surfaced to caller, got %d", resp.StatusCode)
-	}
-	if loc := resp.Header.Get("Location"); loc != "https://attacker.example/" {
-		t.Fatalf("expected Location preserved for caller, got %q", loc)
-	}
-}
 
 func TestCheckUpstreamStatus_OK(t *testing.T) {
 	t.Parallel()

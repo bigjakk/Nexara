@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/netguard"
 )
 
 const (
@@ -75,7 +76,7 @@ func NewCVEClient(queries *db.Queries, httpClient *http.Client, logger *slog.Log
 		logger = slog.Default()
 	}
 	if httpClient == nil {
-		httpClient = newScannerHTTPClient(120 * time.Second)
+		httpClient = netguard.NewHTTPClient(120 * time.Second)
 	}
 	return &CVEClient{
 		httpClient: httpClient,

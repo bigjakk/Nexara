@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/netguard"
 )
 
 const (
@@ -55,7 +56,7 @@ func NewKEVClient(queries *db.Queries, httpClient *http.Client, logger *slog.Log
 		logger = slog.Default()
 	}
 	if httpClient == nil {
-		httpClient = newScannerHTTPClient(kevHTTPTimeout)
+		httpClient = netguard.NewHTTPClient(kevHTTPTimeout)
 	}
 	return &KEVClient{
 		httpClient: httpClient,

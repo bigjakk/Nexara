@@ -1260,7 +1260,6 @@ type GuestIPAddress struct {
 	Prefix        int    `json:"prefix"`
 }
 
-// GuestNetworkInterface represents a network interface reported by the QEMU guest agent.
 // GuestExecStatus is the result of polling a guest-agent exec by PID.
 //
 // Exited is the field to branch on: a process that has not exited yet returns
@@ -1278,6 +1277,7 @@ type GuestExecStatus struct {
 	ErrTruncated FlexBool `json:"err-truncated,omitempty"`
 }
 
+// GuestNetworkInterface represents a network interface reported by the QEMU guest agent.
 type GuestNetworkInterface struct {
 	Name            string           `json:"name"`
 	HardwareAddress string           `json:"hardware-address"`

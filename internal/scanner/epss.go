@@ -12,6 +12,7 @@ import (
 	"time"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/netguard"
 )
 
 const (
@@ -46,7 +47,7 @@ func NewEPSSClient(queries *db.Queries, httpClient *http.Client, logger *slog.Lo
 		logger = slog.Default()
 	}
 	if httpClient == nil {
-		httpClient = newScannerHTTPClient(epssHTTPTimeout)
+		httpClient = netguard.NewHTTPClient(epssHTTPTimeout)
 	}
 	return &EPSSClient{
 		httpClient: httpClient,
