@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/cronspec"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
-	"github.com/bigjakk/nexara/internal/scheduler"
 )
 
 // ScheduleHandler handles scheduled task CRUD endpoints.
@@ -118,7 +118,7 @@ func (h *ScheduleHandler) Create(c fiber.Ctx) error {
 	// One call, so the next run stored is the one the validation computed.
 	// It matters on this table: an invalid next_run_at reads as "due now", so
 	// a schedule that can never fire would be claimed and run on every tick.
-	nextRun, err := scheduler.NextValidRun(req.Schedule, time.Now())
+	nextRun, err := cronspec.NextValidRun(req.Schedule, time.Now())
 	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
@@ -197,7 +197,7 @@ func (h *ScheduleHandler) Update(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	if err := scheduler.ValidateCron(req.Schedule); err != nil {
+	if err := cronspec.ValidateCron(req.Schedule); err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 

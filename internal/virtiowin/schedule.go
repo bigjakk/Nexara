@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/robfig/cron/v3"
+	"github.com/bigjakk/nexara/internal/cronspec"
 )
 
 // DefaultInterval is how often a cluster with no explicit schedule is checked.
@@ -13,18 +13,13 @@ import (
 // release appearing and a cluster holding it, not to catch it within minutes.
 const DefaultInterval = 6 * time.Hour
 
-// cronParser matches the one in internal/scheduler: five fields, no seconds.
-// Duplicated rather than shared because internal/scheduler imports this
-// package, so the dependency cannot run the other way.
-var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-
 // ValidateSchedule checks a cron expression and an IANA zone name.
 //
 // Both are optional and both are validated the same way: empty is the default
 // (six-hourly, server time), anything else has to parse. A schedule that does
-// not parse must be rejected at the API rather than stored, because the
-// scheduler's fallback for an unparseable expression is to check anyway — so a
-// typo would silently mean "every minute" rather than "never".
+// not parse must be rejected at the API rather than stored, because NextCheck's
+// fallback for one is the six-hourly interval — so a typo would silently mean
+// "the default" rather than the schedule the operator typed.
 func ValidateSchedule(schedule, timezone string) error {
 	if timezone != "" {
 		if _, err := time.LoadLocation(timezone); err != nil {
@@ -34,20 +29,13 @@ func ValidateSchedule(schedule, timezone string) error {
 	if schedule == "" {
 		return nil
 	}
-	spec, err := cronParser.Parse(schedule)
-	if err != nil {
-		return fmt.Errorf("invalid check schedule %q: %w", schedule, err)
-	}
-	// Parsing is not enough. The parser range-checks each field on its own, so
-	// a date that never occurs — "0 3 31 4 *" (April 31), Feb 30, Sep 31 —
-	// parses cleanly and then never matches. robfig gives up searching after
-	// five years and answers with the ZERO time, which as a next_check_at is
+	// cronspec.ValidateCron is parse + "does it ever come round": the parser
+	// range-checks each field on its own, so a date that never occurs —
+	// "0 3 31 4 *" (April 31), Feb 30, Sep 31 — parses cleanly and then never
+	// matches. Stored, robfig's zero-time answer is a next_check_at
 	// permanently in the past: the cluster would be due on every 60s tick,
 	// forever, and recomputing it each pass would never heal it.
-	if next := spec.Next(time.Now()); next.IsZero() {
-		return fmt.Errorf("check schedule %q never comes round — check the day-of-month against the month", schedule)
-	}
-	return nil
+	return cronspec.ValidateCron(schedule)
 }
 
 // NextCheck returns when a cluster should next be checked, given its schedule
@@ -65,10 +53,6 @@ func NextCheck(schedule, timezone string, from time.Time) time.Time {
 	if schedule == "" {
 		return from.Add(DefaultInterval)
 	}
-	spec, err := cronParser.Parse(schedule)
-	if err != nil {
-		return from.Add(DefaultInterval)
-	}
 	loc := time.Local
 	if timezone != "" {
 		if l, err := time.LoadLocation(timezone); err == nil {
@@ -77,13 +61,15 @@ func NextCheck(schedule, timezone string, from time.Time) time.Time {
 	}
 	// robfig's SpecSchedule advances in the location of the time it is given,
 	// so the zone has to be applied to `from` — not to the result.
-	next := spec.Next(from.In(loc))
-	// A schedule that never comes round answers with the zero time, which the
-	// API refuses on write. Clamp anyway: a row written by a build that
-	// predates that check, or edited by hand, would otherwise be due on every
-	// tick forever, and this function recomputing the same zero time each pass
-	// is exactly what would stop it healing.
-	if !next.After(from) {
+	//
+	// One fallback for both failures: unparseable, and "parses but never comes
+	// round" (which cronspec.NextRunTime reports rather than answering with
+	// robfig's zero time). The API refuses both on write, so a row that
+	// reaches either was written by an older build or edited by hand — and
+	// without the clamp it would be due on every tick forever, since each
+	// recompute yields the same unusable answer.
+	next, err := cronspec.NextRunTime(schedule, from.In(loc))
+	if err != nil {
 		return from.Add(DefaultInterval)
 	}
 	return next

@@ -11,11 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/cronspec"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
 	"github.com/bigjakk/nexara/internal/reports"
 	"github.com/bigjakk/nexara/internal/safeconv"
-	"github.com/bigjakk/nexara/internal/scheduler"
 )
 
 // reportSemaphore limits concurrent report generations.
@@ -237,7 +237,7 @@ func (h *ReportHandler) CreateSchedule(c fiber.Ctx) error {
 
 	var nextRunAt pgtype.Timestamptz
 	if req.Schedule != "" && enabled {
-		next, err := scheduler.NextRunTime(req.Schedule, time.Now())
+		next, err := cronspec.NextRunTime(req.Schedule, time.Now())
 		if err == nil {
 			nextRunAt = pgtype.Timestamptz{Time: next, Valid: true}
 		}
@@ -407,7 +407,7 @@ func (h *ReportHandler) UpdateSchedule(c fiber.Ctx) error {
 
 	var nextRunAt pgtype.Timestamptz
 	if scheduleStr != "" && enabled {
-		next, err := scheduler.NextRunTime(scheduleStr, time.Now())
+		next, err := cronspec.NextRunTime(scheduleStr, time.Now())
 		if err == nil {
 			nextRunAt = pgtype.Timestamptz{Time: next, Valid: true}
 		}
@@ -698,7 +698,7 @@ func (h *ReportHandler) validateScheduleRequest(c fiber.Ctx, name, reportType, c
 		return fiber.NewError(fiber.StatusBadRequest, "time_range_hours must be between 1 and 8760")
 	}
 	if schedule != "" {
-		if err := scheduler.ValidateCron(schedule); err != nil {
+		if err := cronspec.ValidateCron(schedule); err != nil {
 			return fiber.NewError(fiber.StatusBadRequest, fmt.Sprintf("Invalid schedule: %v", err))
 		}
 	}

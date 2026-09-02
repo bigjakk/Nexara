@@ -14,23 +14,16 @@ func TestValidateSchedule(t *testing.T) {
 	}{
 		{name: "both empty is the default", schedule: "", timezone: ""},
 		{name: "daily at 03:00", schedule: "0 3 * * *"},
-		{name: "weekly Sunday 02:30", schedule: "30 2 * * 0"},
-		{name: "every six hours", schedule: "0 */6 * * *"},
 		{name: "zone without a schedule is allowed", timezone: "America/Chicago"},
 		{name: "schedule with a zone", schedule: "0 3 * * *", timezone: "Europe/Berlin"},
-		{name: "six fields is not our parser", schedule: "0 0 3 * * *", wantErr: true},
-		{name: "hour out of range", schedule: "0 99 * * *", wantErr: true},
-		{name: "prose is not a cron", schedule: "every day at 3", wantErr: true},
-		// Parseable but unsatisfiable. Each field is in range on its own, so
-		// the parser accepts it; the date never occurs, so robfig gives up
-		// after five years and answers with the zero time. Stored, that is a
-		// next_check_at permanently in the past — a 60s busy loop that cannot
-		// heal itself, since every recompute yields the same zero time.
-		{name: "April 31 never comes round", schedule: "0 3 31 4 *", wantErr: true},
-		{name: "February 30 never comes round", schedule: "0 3 30 2 *", wantErr: true},
-		{name: "September 31 never comes round", schedule: "0 3 31 9 *", wantErr: true},
-		{name: "February 29 does come round (leap year)", schedule: "0 3 29 2 *"},
 		{name: "unknown zone", schedule: "0 3 * * *", timezone: "Mars/Olympus", wantErr: true},
+
+		// The cron shapes are cronspec's table to enumerate, not this one's —
+		// these two rows are here to prove the delegation happens at all, one
+		// per branch: a malformed expression, and one that parses but names a
+		// date that never occurs (April has no 31st).
+		{name: "prose is not a cron", schedule: "every day at 3", wantErr: true},
+		{name: "April 31 never comes round", schedule: "0 3 31 4 *", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

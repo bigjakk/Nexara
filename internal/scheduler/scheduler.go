@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/auth"
+	"github.com/bigjakk/nexara/internal/cronspec"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/drs"
 	"github.com/bigjakk/nexara/internal/events"
@@ -633,7 +634,7 @@ func (s *Scheduler) executeTask(ctx context.Context, client *proxmox.Client, tas
 // must not have its reason replaced by the schedule message — last_error is
 // the only field the operator sees.
 func (s *Scheduler) finishTaskRun(ctx context.Context, task db.ScheduledTask, now time.Time, status, errMsg string) {
-	nextRun, cronErr := NextRunTime(task.Schedule, now)
+	nextRun, cronErr := cronspec.NextRunTime(task.Schedule, now)
 	if cronErr != nil {
 		s.parkUnschedulableTask(ctx, task, cronErr, status, errMsg)
 		return
@@ -971,7 +972,7 @@ func (s *Scheduler) generateScheduledReport(ctx context.Context, sched db.Report
 
 func (s *Scheduler) updateScheduleNextRun(ctx context.Context, sched db.ReportSchedule) {
 	now := time.Now()
-	nextRun, err := NextRunTime(sched.Schedule, now)
+	nextRun, err := cronspec.NextRunTime(sched.Schedule, now)
 	if err != nil {
 		// Unlike scheduled_tasks, this table's due predicate is a bare
 		// `next_run_at <= now()`, so NULL is genuinely inert and leaving the
