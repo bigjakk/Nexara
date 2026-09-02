@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"time"
 
@@ -192,26 +191,14 @@ type cdromPlacement struct {
 //  3. Nothing. Borrowing a drive that holds the operator's install media is
 //     not worth the failure mode where restore never runs.
 func planCDROM(config proxmox.VMConfig, isoVolid string) (cdromPlacement, error) {
-	// Deterministic iteration: ranging a Go map picks an arbitrary drive on a
-	// guest with two, which is exactly the test guest's shape.
-	keys := make([]string, 0, len(config))
-	for k := range config {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, key := range keys {
-		value, ok := config[key].(string)
-		if !ok || !strings.Contains(value, "media=cdrom") {
-			continue
-		}
-		if volid, _, _ := strings.Cut(value, ","); isVirtioWinVolid(volid) {
+	for _, drive := range config.CDROMDrives() {
+		if isVirtioWinVolid(drive.Volid) {
 			// Reuse this drive whether it already holds the target ISO or a
 			// superseded one. AlreadyAttached lets the caller skip a pointless
 			// media change; nothing is restored either way, because putting a
 			// superseded virtio-win ISO back would be worse than leaving the
 			// new one.
-			return cdromPlacement{Key: key, AlreadyAttached: volid == isoVolid}, nil
+			return cdromPlacement{Key: drive.Key, AlreadyAttached: drive.Volid == isoVolid}, nil
 		}
 	}
 
@@ -225,14 +212,7 @@ func planCDROM(config proxmox.VMConfig, isoVolid string) (cdromPlacement, error)
 
 // isVirtioWinVolid reports whether a volume id points at a virtio-win ISO.
 func isVirtioWinVolid(volid string) bool {
-	name := volid
-	if i := strings.LastIndex(volid, "/"); i >= 0 {
-		name = volid[i+1:]
-	}
-	if !strings.HasPrefix(name, "virtio-win-") || !strings.HasSuffix(name, ".iso") {
-		return false
-	}
-	return virtiowin.ValidVersion(strings.TrimSuffix(strings.TrimPrefix(name, "virtio-win-"), ".iso"))
+	return virtiowin.VersionFromISOFilename(proxmox.VolumeFilename(volid)) != ""
 }
 
 // restoreActionFor decides what should happen to the borrowed drive once the
@@ -296,7 +276,7 @@ func (e *Engine) Stage(
 	result := StageResult{VMID: vmid, Target: target}
 
 	isoVolid := storage + ":iso/" + target.ISOFilename
-	present, err := e.isoOnStorage(ctx, client, node, storage, target.ISOFilename)
+	present, err := virtiowin.ISOPresent(ctx, client, node, storage, target.ISOFilename)
 	if err != nil {
 		return result, fmt.Errorf("check ISO on %s: %w", storage, err)
 	}
@@ -468,23 +448,6 @@ func firstField(value string) string {
 func runArgv(ctx context.Context, client *proxmox.Client, node string, vmid int, argv []string) error {
 	_, err := client.GuestAgentExecWait(ctx, node, vmid, argv, guestExecTimeout, guestExecPollEvery)
 	return err
-}
-
-func (e *Engine) isoOnStorage(ctx context.Context, client *proxmox.Client, node, storage, filename string) (bool, error) {
-	items, err := client.GetStorageContentByType(ctx, node, storage, "iso")
-	if err != nil {
-		return false, err
-	}
-	for _, item := range items {
-		name := item.Volid
-		if i := strings.LastIndex(name, "/"); i >= 0 {
-			name = name[i+1:]
-		}
-		if name == filename {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // clearResultFile removes a previous run's result from the guest, and VERIFIES

@@ -146,6 +146,10 @@ func NonASCIIAt(s string) int {
 // ISOVolumeLabel returns the volume label the virtio-win ISO carries for a
 // given version. Upstream labels the image with the suffix-less version, so
 // "0.1.302-1" is labelled "virtio-win-0.1.302" (read off the real image).
+// The prefix is deliberately spelled out rather than shared with
+// virtiowin.ISOPrefix: the label and the ISO filename are two independent
+// upstream facts that happen to coincide, and binding them would let a
+// filename change silently break the in-guest search for the mounted disk.
 func ISOVolumeLabel(isoVersion string) string {
 	return "virtio-win-" + isoVersion
 }

@@ -249,7 +249,7 @@ func (e *Engine) SyncCluster(ctx context.Context, cfg db.VirtioWinConfig) (*db.V
 		return nil, err
 	}
 
-	present, err := e.isoPresent(ctx, client, node, cfg.Storage, target.IsoFilename)
+	present, err := ISOPresent(ctx, client, node, cfg.Storage, target.IsoFilename)
 	if err != nil {
 		return nil, fmt.Errorf("list %s content on %s: %w", cfg.Storage, node, err)
 	}
@@ -411,29 +411,18 @@ func (e *Engine) pickNode(ctx context.Context, cfg db.VirtioWinConfig) (string, 
 	return "", fmt.Errorf("virtio-win: no online node in cluster %s to run the download", cfg.ClusterID)
 }
 
-func (e *Engine) isoPresent(ctx context.Context, client *proxmox.Client, node, storage, filename string) (bool, error) {
+// ISOPresent reports whether filename is already on a node's ISO storage.
+func ISOPresent(ctx context.Context, client *proxmox.Client, node, storage, filename string) (bool, error) {
 	items, err := client.GetStorageContentByType(ctx, node, storage, "iso")
 	if err != nil {
 		return false, err
 	}
 	for _, item := range items {
-		if volumeFilename(item.Volid) == filename {
+		if proxmox.VolumeFilename(item.Volid) == filename {
 			return true, nil
 		}
 	}
 	return false, nil
-}
-
-// volumeFilename extracts the basename from a Proxmox volid such as
-// "local:iso/virtio-win-0.1.302.iso".
-func volumeFilename(volid string) string {
-	if idx := strings.LastIndex(volid, "/"); idx >= 0 {
-		return volid[idx+1:]
-	}
-	if idx := strings.Index(volid, ":"); idx >= 0 {
-		return volid[idx+1:]
-	}
-	return volid
 }
 
 // Reconcile advances every unfinished download by polling its Proxmox task.
@@ -580,8 +569,8 @@ func (e *Engine) pruneCluster(ctx context.Context, client *proxmox.Client, cfg d
 	}
 
 	for _, item := range items {
-		filename := volumeFilename(item.Volid)
-		version := versionFromISOFilename(filename)
+		filename := proxmox.VolumeFilename(item.Volid)
+		version := VersionFromISOFilename(filename)
 		if version == "" {
 			continue // not a virtio-win ISO; not ours to delete
 		}
@@ -665,30 +654,23 @@ func (e *Engine) attachedISOs(ctx context.Context, client *proxmox.Client, clust
 		if err != nil {
 			return nil, fmt.Errorf("read config for guest %d: %w", vm.Vmid, err)
 		}
-		for _, raw := range config {
-			value, ok := raw.(string)
-			if !ok || !strings.Contains(value, "media=cdrom") {
-				continue
-			}
-			// "local:iso/virtio-win-0.1.302.iso,media=cdrom" -> the volid.
-			volid, _, _ := strings.Cut(value, ",")
-			if volid != "" && volid != "none" {
-				inUse[volid] = struct{}{}
+		for _, drive := range config.CDROMDrives() {
+			if drive.Volid != "" {
+				inUse[drive.Volid] = struct{}{}
 			}
 		}
 	}
 	return inUse, nil
 }
 
-// isoNamePattern matches the virtio-win ISO filenames this feature creates.
-// Anything else on the storage is left alone.
-func versionFromISOFilename(filename string) string {
-	const prefix = "virtio-win-"
+// VersionFromISOFilename returns the version a virtio-win ISO filename names,
+// or "" for any other file. Anything else on the storage is left alone.
+func VersionFromISOFilename(filename string) string {
 	const suffix = ".iso"
-	if !strings.HasPrefix(filename, prefix) || !strings.HasSuffix(filename, suffix) {
+	if !strings.HasPrefix(filename, ISOPrefix) || !strings.HasSuffix(filename, suffix) {
 		return ""
 	}
-	version := filename[len(prefix) : len(filename)-len(suffix)]
+	version := filename[len(ISOPrefix) : len(filename)-len(suffix)]
 	if !ValidVersion(version) {
 		return ""
 	}
@@ -721,7 +703,7 @@ func (e *Engine) DownloadNow(ctx context.Context, cfg db.VirtioWinConfig, versio
 	if err != nil {
 		return nil, err
 	}
-	present, err := e.isoPresent(ctx, client, node, cfg.Storage, release.IsoFilename)
+	present, err := ISOPresent(ctx, client, node, cfg.Storage, release.IsoFilename)
 	if err != nil {
 		return nil, fmt.Errorf("list %s content on %s: %w", cfg.Storage, node, err)
 	}

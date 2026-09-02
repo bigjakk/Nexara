@@ -1,6 +1,7 @@
 package guesttools
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 func TestIsWindowsOSType(t *testing.T) {
@@ -641,6 +644,151 @@ func TestPendingRestoreIsRetryable(t *testing.T) {
 	for _, stage := range []string{"staging", "staged", "running"} {
 		if !isInFlightStage(stage) {
 			t.Errorf("stage %q must be excluded from the retry sweep", stage)
+		}
+	}
+}
+
+// planCDROM decides which of an operator's drives Nexara is allowed to touch,
+// so every branch of that decision is pinned here.
+func TestPlanCDROM(t *testing.T) {
+	const isoVolid = "local:iso/virtio-win-0.1.302.iso"
+
+	tests := []struct {
+		name    string
+		config  proxmox.VMConfig
+		want    cdromPlacement
+		wantErr error
+	}{
+		{
+			name:   "reuses the drive already holding the target ISO",
+			config: proxmox.VMConfig{"ide2": isoVolid + ",media=cdrom"},
+			want:   cdromPlacement{Key: "ide2", AlreadyAttached: true},
+		},
+		{
+			name:   "reuses a drive holding a superseded virtio-win ISO",
+			config: proxmox.VMConfig{"ide2": "local:iso/virtio-win-0.1.266.iso,media=cdrom"},
+			want:   cdromPlacement{Key: "ide2"},
+		},
+		{
+			name:   "recognises a virtio-win ISO on a storage with no content directory",
+			config: proxmox.VMConfig{"ide2": "local:virtio-win-0.1.266.iso,media=cdrom"},
+			want:   cdromPlacement{Key: "ide2"},
+		},
+		{
+			// Ranging a Go map picks an arbitrary drive on a guest with two,
+			// so the choice has to be pinned rather than observed once.
+			name: "picks the same drive every time when two hold virtio-win ISOs",
+			config: proxmox.VMConfig{
+				"sata0": "local:iso/virtio-win-0.1.266.iso,media=cdrom",
+				"ide2":  "local:iso/virtio-win-0.1.240.iso,media=cdrom",
+			},
+			want: cdromPlacement{Key: "ide2"},
+		},
+		{
+			name: "prefers the virtio-win drive over a free slot",
+			config: proxmox.VMConfig{
+				"sata0": "local:iso/virtio-win-0.1.266.iso,media=cdrom",
+				"scsi0": "local-lvm:vm-100-disk-0,size=32G",
+			},
+			want: cdromPlacement{Key: "sata0"},
+		},
+		{
+			name:   "never borrows a drive holding the operator's own media",
+			config: proxmox.VMConfig{"ide2": "local:iso/Win2022.iso,media=cdrom"},
+			want:   cdromPlacement{Key: "ide0", Eject: true},
+		},
+		{
+			// Two separate things are pinned here. Intended: an empty drive is
+			// not mistaken for a virtio-win one. Merely current: ide2 is then
+			// passed over by the free-slot loop, which tests key presence, so
+			// an empty and perfectly usable drive goes unused and ide0 is added
+			// beside it. A change that makes ide2 reusable should update this
+			// expectation — that is the follow-up landing, not a regression.
+			name:   "an empty drive is not mistaken for a virtio-win one, and is not reused either",
+			config: proxmox.VMConfig{"ide2": "none,media=cdrom"},
+			want:   cdromPlacement{Key: "ide0", Eject: true},
+		},
+		{
+			// CDROMDrives orders by config key, while cdromSlots is ordered by
+			// Proxmox's own UI preference and puts ide2 first. The two disagree
+			// only on ide0 vs ide2, and this is that case: the key order wins,
+			// so the target already mounted at ide2 is passed over in favour of
+			// a media change on ide0. Recorded current behaviour — the pre-
+			// refactor code sorted keys the same way — not a claim that it is
+			// the better answer.
+			name: "the key order decides, even when another drive already holds the target",
+			config: proxmox.VMConfig{
+				"ide0": "local:iso/virtio-win-0.1.240.iso,media=cdrom",
+				"ide2": isoVolid + ",media=cdrom",
+			},
+			want: cdromPlacement{Key: "ide0"},
+		},
+		{
+			name:   "takes a free slot and marks it for ejection",
+			config: proxmox.VMConfig{"scsi0": "local-lvm:vm-100-disk-0,size=32G"},
+			want:   cdromPlacement{Key: "ide2", Eject: true},
+		},
+		{
+			name:    "no drive and no free slot is a refusal, not a guess",
+			config:  occupiedCDROMSlots(),
+			wantErr: ErrNoCDROMSlot,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := planCDROM(tt.config, isoVolid)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("planCDROM() error = %v, want %v", err, tt.wantErr)
+				}
+				if got != (cdromPlacement{}) {
+					t.Errorf("planCDROM() returned %+v alongside an error, want the zero placement", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("planCDROM() unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("planCDROM() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// occupiedCDROMSlots fills every slot planCDROM may claim with a disk, so the
+// only honest answer is ErrNoCDROMSlot.
+func occupiedCDROMSlots() proxmox.VMConfig {
+	config := proxmox.VMConfig{}
+	for _, slot := range cdromSlots {
+		config[slot] = "local-lvm:vm-100-disk-0,size=32G"
+	}
+	return config
+}
+
+// planCDROM's drive choice has to be the same on every call, not merely sorted
+// on the call a test happens to make: Go randomises map iteration, so an
+// unsorted implementation returns the expected drive often enough to pass a
+// single-call assertion by luck. Only repetition can tell the two apart.
+func TestPlanCDROMIsRepeatable(t *testing.T) {
+	config := proxmox.VMConfig{
+		"ide0":  "local:iso/virtio-win-0.1.240.iso,media=cdrom",
+		"ide1":  "local:iso/virtio-win-0.1.248.iso,media=cdrom",
+		"ide2":  "local:iso/virtio-win-0.1.266.iso,media=cdrom",
+		"sata0": "local:iso/virtio-win-0.1.271.iso,media=cdrom",
+		"sata1": "local:iso/virtio-win-0.1.285.iso,media=cdrom",
+	}
+	first, err := planCDROM(config, "local:iso/virtio-win-0.1.302.iso")
+	if err != nil {
+		t.Fatalf("planCDROM() unexpected error: %v", err)
+	}
+	for i := range 100 {
+		got, err := planCDROM(config, "local:iso/virtio-win-0.1.302.iso")
+		if err != nil {
+			t.Fatalf("planCDROM() call %d unexpected error: %v", i, err)
+		}
+		if got != first {
+			t.Fatalf("planCDROM() call %d = %+v, first call = %+v; the choice is not stable", i, got, first)
 		}
 	}
 }

@@ -58,11 +58,14 @@ func SplitVersion(version string) (dirVersion, isoVersion string) {
 	return version, strings.SplitN(version, "-", 2)[0]
 }
 
+// ISOPrefix leads the virtio-win ISO filenames upstream publishes.
+const ISOPrefix = "virtio-win-"
+
 // ISOFilename returns the ISO basename for an upstream version, e.g.
 // "virtio-win-0.1.302.iso" for "0.1.302-1".
 func ISOFilename(version string) string {
 	_, isoVersion := SplitVersion(version)
-	return "virtio-win-" + isoVersion + ".iso"
+	return ISOPrefix + isoVersion + ".iso"
 }
 
 // BuildISOURL returns the full https URL of the ISO for an upstream version.

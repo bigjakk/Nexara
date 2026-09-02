@@ -5,26 +5,6 @@ import (
 	"testing"
 )
 
-func TestVolumeFilename(t *testing.T) {
-	tests := []struct {
-		name  string
-		volid string
-		want  string
-	}{
-		{"standard iso volid", "local:iso/virtio-win-0.1.302.iso", "virtio-win-0.1.302.iso"},
-		{"nested path", "nfs-store:iso/sub/dir/virtio-win-0.1.96.iso", "virtio-win-0.1.96.iso"},
-		{"no slash falls back to the colon", "local:virtio-win-0.1.302.iso", "virtio-win-0.1.302.iso"},
-		{"bare name", "virtio-win-0.1.302.iso", "virtio-win-0.1.302.iso"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := volumeFilename(tt.volid); got != tt.want {
-				t.Errorf("volumeFilename(%q) = %q, want %q", tt.volid, got, tt.want)
-			}
-		})
-	}
-}
-
 // Prune deletes files. Everything it must NOT touch is encoded here: anything
 // that is not a virtio-win ISO by naming convention returns "", and prune skips
 // on "". An operator's unrelated ISO sharing the storage has to stay invisible.
@@ -47,8 +27,8 @@ func TestVersionFromISOFilename(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := versionFromISOFilename(tt.filename); got != tt.want {
-				t.Errorf("versionFromISOFilename(%q) = %q, want %q", tt.filename, got, tt.want)
+			if got := VersionFromISOFilename(tt.filename); got != tt.want {
+				t.Errorf("VersionFromISOFilename(%q) = %q, want %q", tt.filename, got, tt.want)
 			}
 		})
 	}
@@ -61,7 +41,7 @@ func TestKeepSetMatchesISOFilenames(t *testing.T) {
 	pinned := "0.1.285-1"
 	_, isoVersion := SplitVersion(pinned)
 
-	onDisk := versionFromISOFilename("virtio-win-0.1.285.iso")
+	onDisk := VersionFromISOFilename("virtio-win-0.1.285.iso")
 	if onDisk != isoVersion {
 		t.Fatalf("pin %q reduces to %q but the ISO on disk reads as %q — prune would delete a pinned ISO",
 			pinned, isoVersion, onDisk)

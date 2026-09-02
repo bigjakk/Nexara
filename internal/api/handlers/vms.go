@@ -1950,14 +1950,10 @@ func (h *VMHandler) ListNodeISOs(c fiber.Ctx) error {
 			if item.Content != "iso" {
 				continue
 			}
-			name := item.Volid
-			if idx := strings.LastIndex(item.Volid, "/"); idx >= 0 {
-				name = item.Volid[idx+1:]
-			}
 			isos = append(isos, isoResponse{
 				Volid:   item.Volid,
 				Storage: pool.Storage,
-				Name:    name,
+				Name:    proxmox.VolumeFilename(item.Volid),
 				Size:    item.Size,
 				CTime:   item.CTime,
 			})
