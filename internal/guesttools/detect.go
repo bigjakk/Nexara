@@ -85,11 +85,10 @@ function Ver($pattern) {
 
 // Detection is what a guest reports about its own guest tools.
 type Detection struct {
-	Tools    string `json:"tools"`
-	Drivers  string `json:"drivers"`
-	Agent    string `json:"agent"`
-	Service  string `json:"service"`
-	rawEmpty bool
+	Tools   string `json:"tools"`
+	Drivers string `json:"drivers"`
+	Agent   string `json:"agent"`
+	Service string `json:"service"`
 }
 
 // InstalledVersion is the version to compare against a target.
@@ -122,7 +121,7 @@ func (d Detection) Installed() bool { return d.InstalledVersion() != "" }
 func ParseDetection(out []byte) (Detection, error) {
 	trimmed := strings.TrimSpace(string(out))
 	if trimmed == "" {
-		return Detection{rawEmpty: true}, nil
+		return Detection{}, nil
 	}
 	var d Detection
 	if err := json.Unmarshal([]byte(trimmed), &d); err != nil {

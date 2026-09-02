@@ -24,49 +24,6 @@ func TestSplitVersion(t *testing.T) {
 	}
 }
 
-// The directory carries the release suffix and the ISO filename does not.
-// Getting this backwards 404s every download, which is why it has its own test.
-func TestBuildISOURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		version string
-		want    string
-		wantErr bool
-	}{
-		{
-			name:    "suffixed version splits across dir and filename",
-			version: "0.1.302-1",
-			want:    "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.302-1/virtio-win-0.1.302.iso",
-		},
-		{
-			name:    "unsuffixed version repeats",
-			version: "0.1.96",
-			want:    "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.96/virtio-win-0.1.96.iso",
-		},
-		{name: "path traversal is rejected", version: "../../etc/passwd", wantErr: true},
-		{name: "empty is rejected", version: "", wantErr: true},
-		{name: "letters are rejected", version: "0.1.302-latest", wantErr: true},
-		{name: "embedded slash is rejected", version: "0.1.302/evil", wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := BuildISOURL(tt.version)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("BuildISOURL(%q) = %q, want error", tt.version, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("BuildISOURL(%q) returned error: %v", tt.version, err)
-			}
-			if got != tt.want {
-				t.Errorf("BuildISOURL(%q) = %q, want %q", tt.version, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestISOFilename(t *testing.T) {
 	if got, want := ISOFilename("0.1.302-1"), "virtio-win-0.1.302.iso"; got != want {
 		t.Errorf("ISOFilename = %q, want %q", got, want)
@@ -94,29 +51,6 @@ func TestCompare(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := Compare(tt.a, tt.b); got != tt.want {
 				t.Errorf("Compare(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNewest(t *testing.T) {
-	tests := []struct {
-		name     string
-		versions []string
-		want     string
-	}{
-		{
-			name:     "picks numerically highest, not lexically",
-			versions: []string{"0.1.96", "0.1.302-1", "0.1.271-1", "0.1.285-1"},
-			want:     "0.1.302-1",
-		},
-		{"single", []string{"0.1.240-1"}, "0.1.240-1"},
-		{"empty", nil, ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := Newest(tt.versions); got != tt.want {
-				t.Errorf("Newest(%v) = %q, want %q", tt.versions, got, tt.want)
 			}
 		})
 	}

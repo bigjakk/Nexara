@@ -826,6 +826,10 @@ func (e *Engine) expireIfStale(ctx context.Context, state db.GuestToolsState) bo
 		!fresh.StagedAt.Time.Equal(state.StagedAt.Time) {
 		return false
 	}
+	// The one field read below that the snapshot could have gone stale on —
+	// Stage — the check above proved equal, and the rest are the lookup keys, so
+	// this changes nothing today. It is here so that a field added later reads
+	// the row we verified rather than the pass-old snapshot.
 	state = fresh
 	e.markFailed(ctx, state.ClusterID, state.Vmid, reason)
 	e.logger.Warn("guest tools: abandoning a stale update",

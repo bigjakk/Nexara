@@ -10,7 +10,7 @@
 //
 // Note the last line: the directory carries a release suffix ("-1") that the
 // ISO filename does not. Getting that wrong 404s every download, so it lives in
-// one place — SplitVersion / BuildISOURL — and is covered by tests.
+// one place — SplitVersion / BuildISOURLFrom — and is covered by tests.
 package virtiowin
 
 import (
@@ -26,12 +26,14 @@ const (
 	// that downgrade into a URL we hand to Proxmox.
 	BaseURL = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads"
 
-	// StablePath is a redirect, not a document. A GET returns 301 whose
-	// Location names the current stable version directory.
-	StablePath = BaseURL + "/stable-virtio/"
+	// stableSuffix hangs off a download root and is a redirect, not a
+	// document: a GET returns 301 whose Location names the current stable
+	// version directory.
+	stableSuffix = "/stable-virtio/"
 
-	// ArchivePath is an Apache autoindex listing every published version.
-	ArchivePath = BaseURL + "/archive-virtio/"
+	// archiveSuffix hangs off a download root and is an Apache autoindex
+	// listing every published version.
+	archiveSuffix = "/archive-virtio/"
 )
 
 // versionPattern matches an upstream version with an optional release suffix:
@@ -68,17 +70,14 @@ func ISOFilename(version string) string {
 	return ISOPrefix + isoVersion + ".iso"
 }
 
-// BuildISOURL returns the full https URL of the ISO for an upstream version.
+// BuildISOURLFrom returns the full URL of the ISO for an upstream version,
+// under an arbitrary download root so the operator-configured mirror can be
+// used. The layout below the root is the upstream one — a mirror is expected to
+// be a copy of the tree (`wget -m -np` produces exactly this), not an arbitrary
+// file server.
+//
 // It returns an error rather than a malformed URL for an unparseable version,
 // because the result is handed to a Proxmox node to fetch.
-func BuildISOURL(version string) (string, error) {
-	return BuildISOURLFrom(BaseURL, version)
-}
-
-// BuildISOURLFrom is BuildISOURL against an arbitrary download root, for the
-// operator-configured mirror. The layout below the root is the upstream one —
-// a mirror is expected to be a copy of the tree (`wget -m -np` produces
-// exactly this), not an arbitrary file server.
 //
 // An empty base means upstream, so a caller need not special-case "no mirror".
 func BuildISOURLFrom(base, version string) (string, error) {
@@ -89,8 +88,8 @@ func BuildISOURLFrom(base, version string) (string, error) {
 		base = BaseURL
 	}
 	dirVersion, isoVersion := SplitVersion(version)
-	return fmt.Sprintf("%s/archive-virtio/virtio-win-%s/virtio-win-%s.iso",
-		strings.TrimSuffix(base, "/"), dirVersion, isoVersion), nil
+	return fmt.Sprintf("%s%svirtio-win-%s/virtio-win-%s.iso",
+		strings.TrimSuffix(base, "/"), archiveSuffix, dirVersion, isoVersion), nil
 }
 
 // ParseVersionFromPath pulls a version out of an upstream directory name or a
@@ -146,15 +145,4 @@ func compareNumericParts(a, b string) int {
 		}
 	}
 	return 0
-}
-
-// Newest returns the highest version in the slice, or "" when empty.
-func Newest(versions []string) string {
-	newest := ""
-	for _, v := range versions {
-		if newest == "" || Compare(v, newest) > 0 {
-			newest = v
-		}
-	}
-	return newest
 }

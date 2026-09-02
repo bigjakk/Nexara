@@ -325,6 +325,10 @@ func parseTaskPresence(out string) taskPresence {
 }
 
 // GuestUpdateResult is what the in-guest script leaves in the result file.
+//
+// The script also records startedAt/finishedAt. They are not decoded here
+// because nothing reads them: the row's own timestamps are what the UI and the
+// task history show.
 type GuestUpdateResult struct {
 	Version string `json:"version"`
 	// RebootRequired is set when the installer returned 3010: the install
@@ -332,8 +336,6 @@ type GuestUpdateResult struct {
 	// restart. Distinct from both success and failure, because it is the one
 	// outcome that leaves the operator with an action.
 	RebootRequired   bool   `json:"rebootRequired"`
-	StartedAt        string `json:"startedAt"`
-	FinishedAt       string `json:"finishedAt"`
 	ExitCode         int    `json:"exitCode"`
 	Status           string `json:"status"`
 	Message          string `json:"message"`

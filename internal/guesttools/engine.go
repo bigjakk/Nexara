@@ -170,10 +170,6 @@ const (
 // there before.
 type cdromPlacement struct {
 	Key string
-	// PriorValue is what to restore when the update finishes. Empty means
-	// nothing needs restoring: either the slot was free, or it already held a
-	// virtio-win ISO that this one supersedes.
-	PriorValue string
 	// Eject is set when the slot was free and should be emptied afterwards.
 	Eject bool
 	// AlreadyAttached is set when this drive already holds the exact target
@@ -241,7 +237,6 @@ func restoreActionFor(placement cdromPlacement, config proxmox.VMConfig) string 
 
 // StageResult describes what staging did to a guest.
 type StageResult struct {
-	VMID     int
 	Target   Target
 	CDROMKey string
 	RanNow   bool
@@ -273,7 +268,7 @@ func (e *Engine) Stage(
 	storage string,
 	runNow bool,
 ) (StageResult, error) {
-	result := StageResult{VMID: vmid, Target: target}
+	result := StageResult{Target: target}
 
 	isoVolid := storage + ":iso/" + target.ISOFilename
 	present, err := virtiowin.ISOPresent(ctx, client, node, storage, target.ISOFilename)

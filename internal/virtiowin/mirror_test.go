@@ -74,8 +74,11 @@ func TestBuildISOURLFrom(t *testing.T) {
 			want: "http://10.0.0.5/archive-virtio/virtio-win-0.1.271/virtio-win-0.1.271.iso",
 		},
 		{
+			// Spelled out rather than built from BaseURL: this is the one case
+			// that would catch a wrong host in the constant itself.
 			name: "empty base falls back to upstream", base: "", version: "0.1.302-1",
-			want: BaseURL + "/archive-virtio/virtio-win-0.1.302-1/virtio-win-0.1.302.iso",
+			want: "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads" +
+				"/archive-virtio/virtio-win-0.1.302-1/virtio-win-0.1.302.iso",
 		},
 		{name: "invalid version refuses to build", base: "https://mirror.internal", version: "../../etc", wantErr: true},
 	}
@@ -89,21 +92,5 @@ func TestBuildISOURLFrom(t *testing.T) {
 				t.Errorf("BuildISOURLFrom(%q, %q) = %q, want %q", tt.base, tt.version, got, tt.want)
 			}
 		})
-	}
-}
-
-// TestBuildISOURLMatchesUpstreamBuilder keeps the two entry points from drifting
-// now that one delegates to the other.
-func TestBuildISOURLMatchesUpstreamBuilder(t *testing.T) {
-	direct, err := BuildISOURL("0.1.302-1")
-	if err != nil {
-		t.Fatalf("BuildISOURL: %v", err)
-	}
-	viaBase, err := BuildISOURLFrom(BaseURL, "0.1.302-1")
-	if err != nil {
-		t.Fatalf("BuildISOURLFrom: %v", err)
-	}
-	if direct != viaBase {
-		t.Errorf("BuildISOURL = %q, BuildISOURLFrom(BaseURL, …) = %q; they must agree", direct, viaBase)
 	}
 }

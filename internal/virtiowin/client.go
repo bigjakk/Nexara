@@ -104,7 +104,7 @@ func (c *Client) do(ctx context.Context, method, rawURL string) (*http.Response,
 // the URL rebuilt under the configured base, so the header is never trusted as
 // a URL and its scheme is never inherited.
 func (c *Client) CheckStable(ctx context.Context) (Release, error) {
-	resp, err := c.do(ctx, http.MethodGet, c.base+"/stable-virtio/")
+	resp, err := c.do(ctx, http.MethodGet, c.base+stableSuffix)
 	if err != nil {
 		return Release{}, err
 	}
@@ -139,7 +139,7 @@ var hrefPattern = regexp.MustCompile(`href="([^"]+)"`)
 // Parsing an autoindex is brittle by nature, so callers treat a failure here as
 // non-fatal when they already have a stable answer.
 func (c *Client) ListArchive(ctx context.Context) ([]Release, error) {
-	resp, err := c.do(ctx, http.MethodGet, c.base+"/archive-virtio/")
+	resp, err := c.do(ctx, http.MethodGet, c.base+archiveSuffix)
 	if err != nil {
 		return nil, err
 	}
