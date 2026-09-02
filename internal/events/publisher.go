@@ -38,8 +38,6 @@ const (
 	KindSnapshotChange    = "snapshot_change"
 	KindAccessChange      = "access_change"
 	KindVeeamChange       = "veeam_change"
-	KindVirtioWinChange   = "virtio_win_change"
-	KindGuestToolsChange  = "guest_tools_change"
 )
 
 // Redis pub/sub channels for non-cluster events. Cluster events use

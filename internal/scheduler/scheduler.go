@@ -460,7 +460,7 @@ func (s *Scheduler) RunVirtioWinReconcile(ctx context.Context) {
 
 // trackVirtioWinDownload records a dispatched download the way every other
 // UPID-producing action in the codebase is recorded: a task_history row, an
-// audit entry, and the events that make both visible live.
+// audit entry, and the task_created event that makes the first visible live.
 //
 // The scheduler's other trackTask is bound to a db.ScheduledTask, which this is
 // not — the shape is shared deliberately rather than hand-rolling the three
@@ -508,8 +508,6 @@ func (s *Scheduler) trackVirtioWinDownload(ctx context.Context, row db.VirtioWin
 	if s.eventPub != nil {
 		s.eventPub.ClusterEvent(ctx, row.ClusterID.String(),
 			events.KindTaskCreated, "task", row.Upid, "virtio_win_download")
-		s.eventPub.ClusterEvent(ctx, row.ClusterID.String(),
-			events.KindVirtioWinChange, "storage", row.Storage, "virtio_win_download")
 	}
 }
 

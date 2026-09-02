@@ -19,10 +19,6 @@ var (
 	// Always wrapped by *VersionError, which carries the version we saw.
 	ErrVersionUnsupported = errors.New("veeam: unsupported Veeam version")
 
-	// ErrUnlicensed indicates the license edition does not cover Proxmox
-	// workloads. Always wrapped by *LicenseError.
-	ErrUnlicensed = errors.New("veeam: license edition does not cover Proxmox")
-
 	// ErrUnreachable indicates the transport never got an HTTP response —
 	// DNS, dial, TLS handshake, fingerprint mismatch or timeout.
 	ErrUnreachable = errors.New("veeam: server unreachable")
@@ -91,26 +87,6 @@ func (e *VersionError) Error() string {
 }
 
 func (e *VersionError) Unwrap() error { return ErrVersionUnsupported }
-
-// LicenseError reports an edition that cannot back up Proxmox workloads.
-//
-// Advisory, not fatal: the caller decides whether to warn or refuse. Nexara
-// warns, because a lab running a trial that is about to be upgraded is a real
-// case and Veeam itself is the authority that will refuse the backup.
-type LicenseError struct {
-	Edition string
-	Status  string
-}
-
-func (e *LicenseError) Error() string {
-	edition := e.Edition
-	if edition == "" {
-		edition = "unknown"
-	}
-	return fmt.Sprintf("veeam: license edition %s does not cover Proxmox workloads (Enterprise Plus required)", edition)
-}
-
-func (e *LicenseError) Unwrap() error { return ErrUnlicensed }
 
 // authFailure builds the 401 error, attaching the domain-qualifier hint when
 // the username contains a backslash.

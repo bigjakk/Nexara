@@ -292,7 +292,9 @@ func (v *VeeamSyncer) SyncInventory(ctx context.Context) {
 }
 
 // SyncSessions runs one session poll over every enabled server. Cheap and
-// frequent: a single watermarked, type-filtered listing per server.
+// frequent: a watermarked, type-filtered listing per server, followed by a
+// targeted re-read of the unfinished runs that listing can no longer reach
+// (see reconcileUnfinishedSessions).
 func (v *VeeamSyncer) SyncSessions(ctx context.Context) {
 	if !v.sessionsInFlight.CompareAndSwap(false, true) {
 		return

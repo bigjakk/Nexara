@@ -371,8 +371,8 @@ func (h *VirtioWinHandler) Download(c fiber.Ctx) error {
 }
 
 // trackDownload records a dispatched download the one way a Proxmox task is
-// recorded — TrackTask writes the audit row, the task_history row and the task
-// event together — and publishes the change so an open storage view updates.
+// recorded: TrackTask writes the audit row, the task_history row and the task
+// event together.
 //
 // Shared because "download now" and the scheduled check reach the same place by
 // different routes, and a task recorded two ways is a task that eventually gets
@@ -394,8 +394,6 @@ func (h *VirtioWinHandler) trackDownload(c fiber.Ctx, clusterID uuid.UUID, downl
 			"storage":  download.Storage,
 		},
 	})
-	h.eventPub.ClusterEvent(c.Context(), clusterID.String(),
-		events.KindVirtioWinChange, "storage", download.Storage, "virtio_win_download")
 }
 
 // ListDownloads returns a cluster's download history, most recent first.

@@ -407,8 +407,6 @@ func (h *GuestToolsHandler) StageUpdate(c fiber.Ctx) error {
 		action, stage = "guest_tools_update", "running"
 	}
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", strconv.Itoa(vmid), action, details)
-	h.eventPub.ClusterEvent(c.Context(), clusterID.String(),
-		events.KindGuestToolsChange, "vm", strconv.Itoa(vmid), action)
 
 	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
 		"vmid":     vmid,
@@ -438,8 +436,6 @@ func (h *GuestToolsHandler) CancelUpdate(c fiber.Ctx) error {
 	}
 	details, _ := json.Marshal(map[string]any{"vmid": vmid})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", strconv.Itoa(vmid), "guest_tools_cancel", details)
-	h.eventPub.ClusterEvent(c.Context(), clusterID.String(),
-		events.KindGuestToolsChange, "vm", strconv.Itoa(vmid), "guest_tools_cancel")
 	return c.JSON(fiber.Map{"status": "cancelled", "vmid": vmid})
 }
 
