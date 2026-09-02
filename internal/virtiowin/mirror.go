@@ -98,11 +98,22 @@ func (e *Engine) ResolveBase(ctx context.Context) string {
 		e.logger.Warn("virtio-win: mirror setting is not readable; using upstream", "error", err)
 		return BaseURL
 	}
-	base, err := NormalizeBase(mirror.BaseURL)
+	if _, err := NormalizeBase(mirror.BaseURL); err != nil {
+		e.logger.Warn("virtio-win: mirror setting is not a usable base URL; using upstream", "error", err)
+	}
+	return EffectiveBase(mirror.BaseURL)
+}
+
+// EffectiveBase turns a stored override into the root to use: the override when
+// it is set and usable, otherwise upstream.
+//
+// Pure, and separate from ResolveBase, so a caller that has already read the
+// setting — the mirror endpoint, which must report the raw stored value as well
+// — can answer "and what is actually in use?" without a second query and
+// without restating the rule.
+func EffectiveBase(stored string) string {
+	base, err := NormalizeBase(stored)
 	if err != nil || base == "" {
-		if err != nil {
-			e.logger.Warn("virtio-win: mirror setting is not a usable base URL; using upstream", "error", err)
-		}
 		return BaseURL
 	}
 	return base

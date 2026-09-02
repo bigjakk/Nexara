@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -109,20 +108,34 @@ type virtioWinDownloadResponse struct {
 	FinishedAt  *string   `json:"finished_at"`
 }
 
-func toVirtioWinReleaseResponse(r db.VirtioWinRelease) virtioWinReleaseResponse {
+// toVirtioWinReleaseResponse renders one catalog row against the download root
+// currently in force.
+//
+// iso_url is rebuilt rather than served from the column because the column is
+// whatever root discovered the release, and a download does not use it: dispatch
+// always rebuilds from the resolved base. Configure a mirror after the catalog
+// was populated and the stored URLs still say fedorapeople, so the API would
+// report one host for a fetch that goes to another. Falling back to the stored
+// value keeps a row whose version the builder rejects visible rather than
+// blanking its URL.
+func toVirtioWinReleaseResponse(r db.VirtioWinRelease, base string) virtioWinReleaseResponse {
+	isoURL := r.IsoUrl
+	if built, err := virtiowin.BuildISOURLFrom(base, r.Version); err == nil {
+		isoURL = built
+	}
 	return virtioWinReleaseResponse{
 		Version:      r.Version,
 		ISOVersion:   r.IsoVersion,
 		ISOFilename:  r.IsoFilename,
-		ISOURL:       r.IsoUrl,
+		ISOURL:       isoURL,
 		ISOSize:      r.IsoSize,
 		IsStable:     r.IsStable,
-		DiscoveredAt: r.DiscoveredAt.Format(time.RFC3339),
+		DiscoveredAt: r.DiscoveredAt.Format(time.RFC3339Nano),
 	}
 }
 
 func toVirtioWinDownloadResponse(d db.VirtioWinDownload) virtioWinDownloadResponse {
-	resp := virtioWinDownloadResponse{
+	return virtioWinDownloadResponse{
 		ID:          d.ID,
 		ClusterID:   d.ClusterID,
 		Node:        d.Node,
@@ -133,13 +146,9 @@ func toVirtioWinDownloadResponse(d db.VirtioWinDownload) virtioWinDownloadRespon
 		UPID:        d.Upid,
 		Error:       d.Error,
 		TriggeredBy: d.TriggeredBy,
-		StartedAt:   d.StartedAt.Format(time.RFC3339),
+		StartedAt:   d.StartedAt.Format(time.RFC3339Nano),
+		FinishedAt:  tsPtr(d.FinishedAt),
 	}
-	if d.FinishedAt.Valid {
-		s := d.FinishedAt.Time.Format(time.RFC3339)
-		resp.FinishedAt = &s
-	}
-	return resp
 }
 
 // toVirtioWinConfigResponse renders one config. Shared by GET, PUT and the
@@ -157,14 +166,8 @@ func (h *VirtioWinHandler) toVirtioWinConfigResponse(c fiber.Ctx, cfg db.VirtioW
 		CheckSchedule: cfg.CheckSchedule,
 		CheckTimezone: cfg.CheckTimezone,
 		SourceURL:     virtiowin.BaseURL,
-	}
-	if cfg.LastCheckAt.Valid {
-		t := cfg.LastCheckAt.Time.Format(time.RFC3339)
-		resp.LastCheckAt = &t
-	}
-	if cfg.NextCheckAt.Valid {
-		t := cfg.NextCheckAt.Time.Format(time.RFC3339)
-		resp.NextCheckAt = &t
+		LastCheckAt:   tsPtr(cfg.LastCheckAt),
+		NextCheckAt:   tsPtr(cfg.NextCheckAt),
 	}
 	if h.engine != nil {
 		if target, err := h.engine.ResolveTarget(c.Context(), cfg); err == nil {
@@ -189,9 +192,14 @@ func (h *VirtioWinHandler) ListReleases(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to list virtio-win releases")
 	}
+	// Resolved once for the whole list: it is the same answer for every row.
+	base := ""
+	if h.engine != nil {
+		base = h.engine.ResolveBase(c.Context())
+	}
 	out := make([]virtioWinReleaseResponse, 0, len(releases))
 	for _, r := range releases {
-		out = append(out, toVirtioWinReleaseResponse(r))
+		out = append(out, toVirtioWinReleaseResponse(r, base))
 	}
 	return RespondItems(c, out)
 }
@@ -357,6 +365,19 @@ func (h *VirtioWinHandler) Download(c fiber.Ctx) error {
 
 	// download-url returns a UPID, so this is a tracked Proxmox task like any
 	// other, not a bare audit row.
+	h.trackDownload(c, clusterID, *download)
+
+	return c.Status(fiber.StatusAccepted).JSON(toVirtioWinDownloadResponse(*download))
+}
+
+// trackDownload records a dispatched download the one way a Proxmox task is
+// recorded — TrackTask writes the audit row, the task_history row and the task
+// event together — and publishes the change so an open storage view updates.
+//
+// Shared because "download now" and the scheduled check reach the same place by
+// different routes, and a task recorded two ways is a task that eventually gets
+// recorded two different ways.
+func (h *VirtioWinHandler) trackDownload(c fiber.Ctx, clusterID uuid.UUID, download db.VirtioWinDownload) {
 	TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 		ClusterID:    clusterID,
 		Node:         download.Node,
@@ -375,8 +396,6 @@ func (h *VirtioWinHandler) Download(c fiber.Ctx) error {
 	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(),
 		events.KindVirtioWinChange, "storage", download.Storage, "virtio_win_download")
-
-	return c.Status(fiber.StatusAccepted).JSON(toVirtioWinDownloadResponse(*download))
 }
 
 // ListDownloads returns a cluster's download history, most recent first.
@@ -390,10 +409,8 @@ func (h *VirtioWinHandler) ListDownloads(c fiber.Ctx) error {
 	}
 
 	limit := int32(50)
-	if raw := c.Query("limit"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 500 {
-			limit = safeconv.Int32(n)
-		}
+	if l := fiber.Query[int](c, "limit", 50); l > 0 && l <= 500 {
+		limit = safeconv.Int32(l)
 	}
 
 	rows, err := h.queries.ListVirtioWinDownloadsByCluster(c.Context(), db.ListVirtioWinDownloadsByClusterParams{
@@ -437,11 +454,12 @@ func (h *VirtioWinHandler) CheckNow(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "virtio-win engine is not available")
 	}
 
+	// No row and an empty storage are the same answer to the operator — nothing
+	// is configured yet — so they get the same 400. A read failure is not: it is
+	// not the operator forgetting anything, and saying so would send them to fix
+	// the wrong thing.
 	cfg, err := h.queries.GetVirtioWinConfig(c.Context(), clusterID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusBadRequest, "configure a target ISO storage for this cluster first")
-		}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to read virtio-win config")
 	}
 	if cfg.Storage == "" {
@@ -473,24 +491,7 @@ func (h *VirtioWinHandler) CheckNow(c fiber.Ctx) error {
 	h.engine.MarkChecked(c.Context(), cfg, checkErr)
 
 	if download != nil {
-		TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
-			ClusterID:    clusterID,
-			Node:         download.Node,
-			ResourceType: "storage",
-			ResourceID:   download.Storage,
-			ResourceName: download.Storage,
-			Action:       "virtio_win_download",
-			UPID:         download.Upid,
-			TaskType:     "download",
-			Description:  "Download virtio-win " + download.Version + " to " + download.Storage,
-			Extra: map[string]any{
-				"version":  download.Version,
-				"filename": download.Filename,
-				"storage":  download.Storage,
-			},
-		})
-		h.eventPub.ClusterEvent(c.Context(), clusterID.String(),
-			events.KindVirtioWinChange, "storage", download.Storage, "virtio_win_download")
+		h.trackDownload(c, clusterID, *download)
 	}
 
 	// Re-read so the response carries the timestamps MarkChecked just wrote.
@@ -537,18 +538,15 @@ type virtioWinMirrorResponse struct {
 	UpstreamURL string `json:"upstream_url"`
 }
 
-func (h *VirtioWinHandler) mirrorResponse(c fiber.Ctx, base string) virtioWinMirrorResponse {
-	resp := virtioWinMirrorResponse{
+// mirrorResponse renders the stored override alongside what it resolves to.
+// Both come from the one value the caller already read — asking the engine
+// would re-read the same row to restate the same rule.
+func mirrorResponse(base string) virtioWinMirrorResponse {
+	return virtioWinMirrorResponse{
 		BaseURL:      base,
-		EffectiveURL: virtiowin.BaseURL,
+		EffectiveURL: virtiowin.EffectiveBase(base),
 		UpstreamURL:  virtiowin.BaseURL,
 	}
-	if h.engine != nil {
-		resp.EffectiveURL = h.engine.ResolveBase(c.Context())
-	} else if base != "" {
-		resp.EffectiveURL = base
-	}
-	return resp
 }
 
 // GetMirror returns the instance-wide download source.
@@ -575,7 +573,7 @@ func (h *VirtioWinHandler) GetMirror(c fiber.Ctx) error {
 	case !errors.Is(err, pgx.ErrNoRows):
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to read the virtio-win source")
 	}
-	return c.JSON(h.mirrorResponse(c, base))
+	return c.JSON(mirrorResponse(base))
 }
 
 // SetMirror writes the instance-wide download source.
@@ -638,10 +636,10 @@ func (h *VirtioWinHandler) SetMirror(c fiber.Ctx) error {
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, settingResourceType, virtioWinMirrorSettingKey,
 		"virtio_win_source_update", details)
 
-	// The catalog was discovered against the previous source: its versions and
-	// the URLs recorded for them no longer describe where the ISOs live. The
-	// next scheduled check restates both, and dispatch rebuilds the URL from
-	// the current base regardless — but say so rather than leaving a stale
-	// version list looking authoritative.
-	return c.JSON(h.mirrorResponse(c, base))
+	// The catalog itself is still the previous source's: which versions exist
+	// is only restated by the next check. The URLs are not stale — both the
+	// release listing and dispatch rebuild them from the base in force — but a
+	// version list discovered elsewhere can still name something the new source
+	// does not carry.
+	return c.JSON(mirrorResponse(base))
 }

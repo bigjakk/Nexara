@@ -94,3 +94,32 @@ func TestBuildISOURLFrom(t *testing.T) {
 		})
 	}
 }
+
+// TestEffectiveBase pins the resolution rule ResolveBase and the mirror
+// endpoint now share. The endpoint reaches it without a database, so this is
+// the only place the "malformed falls back to upstream" contract is stated
+// against the pure function rather than through the engine.
+func TestEffectiveBase(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored string
+		want   string
+	}{
+		{"unset follows upstream", "", BaseURL},
+		{"whitespace only follows upstream", "   ", BaseURL},
+		{"malformed falls back to upstream", "not a url", BaseURL},
+		{"wrong scheme falls back to upstream", "ftp://mirror.invalid", BaseURL},
+		{"no host falls back to upstream", "https://", BaseURL},
+		{"credentials fall back to upstream", "https://u:p@mirror.invalid", BaseURL},
+		{"query falls back to upstream", "https://mirror.invalid/?x=1", BaseURL},
+		{"usable base is normalized", "https://mirror.invalid/pub///", "https://mirror.invalid/pub"},
+		{"usable base is returned as-is", "http://10.0.0.5:8080/virt", "http://10.0.0.5:8080/virt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := EffectiveBase(tt.stored); got != tt.want {
+				t.Errorf("EffectiveBase(%q) = %q, want %q", tt.stored, got, tt.want)
+			}
+		})
+	}
+}
