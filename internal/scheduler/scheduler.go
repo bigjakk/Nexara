@@ -186,9 +186,6 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 	}
 
 	if len(configs) == 0 {
-		// Still trim: rows from a cluster that has since been switched off would
-		// otherwise be retained forever, because this is the only caller.
-		s.virtioWin.TrimHistory(ctx, virtioWinHistoryRetention)
 		return
 	}
 
@@ -354,9 +351,10 @@ func (s *Scheduler) RunVirtioWinCheck(ctx context.Context) {
 			s.logger.Error("virtio-win check panicked", "panic", r)
 		}
 	}()
-	if s.virtioWin == nil {
-		return
-	}
+	// Deferred, so retention covers the early returns below too: at the tail
+	// it ran only on a tick that found work, and the tick that finds nothing
+	// due is exactly the one a switched-off cluster produces forever.
+	defer s.virtioWin.TrimHistory(ctx, virtioWinHistoryRetention)
 
 	// Check who wants this BEFORE touching the network. Refreshing
 	// unconditionally would make every install — air-gapped ones included —
@@ -393,11 +391,9 @@ func (s *Scheduler) RunVirtioWinCheck(ctx context.Context) {
 			s.logger.Info("virtio-win: download dispatched",
 				"cluster_id", cfg.ClusterID, "storage", cfg.Storage,
 				"version", download.Version, "node", download.Node, "upid", download.Upid)
-			s.trackVirtioWinDownload(ctx, *download)
+			s.trackTask(ctx, virtioWinDownloadTask(*download))
 		}
 	}
-
-	s.virtioWin.TrimHistory(ctx, virtioWinHistoryRetention)
 }
 
 // RunGuestToolsPass detects installed guest tools across every cluster with the
@@ -407,17 +403,7 @@ func (s *Scheduler) RunVirtioWinCheck(ctx context.Context) {
 // with a registry read, and nothing about a driver version changes on a shorter
 // timescale than an operator installing something.
 func (s *Scheduler) RunGuestToolsPass(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			s.logger.Error("guest tools pass panicked", "panic", r)
-		}
-	}()
-	if s.guestTools == nil {
-		return
-	}
-	if err := s.guestTools.RunPass(ctx); err != nil {
-		s.logger.Warn("guest tools: pass failed", "error", err)
-	}
+	s.tick(ctx, "guest tools pass panicked", "guest tools: pass failed", s.guestTools.RunPass)
 }
 
 // RunGuestToolsReconcile advances guests with an update in flight.
@@ -427,17 +413,7 @@ func (s *Scheduler) RunGuestToolsPass(ctx context.Context) {
 // only way to learn the outcome is to keep checking for the result file the
 // in-guest updater leaves behind.
 func (s *Scheduler) RunGuestToolsReconcile(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			s.logger.Error("guest tools reconcile panicked", "panic", r)
-		}
-	}()
-	if s.guestTools == nil {
-		return
-	}
-	if err := s.guestTools.Reconcile(ctx); err != nil {
-		s.logger.Warn("guest tools: reconcile failed", "error", err)
-	}
+	s.tick(ctx, "guest tools reconcile panicked", "guest tools: reconcile failed", s.guestTools.Reconcile)
 }
 
 // RunVirtioWinReconcile advances in-flight virtio-win downloads by polling the
@@ -445,69 +421,47 @@ func (s *Scheduler) RunGuestToolsReconcile(ctx context.Context) {
 // a 6-hourly upstream poll while a download needs following minute by minute —
 // and because the transfer outlives any in-process watcher.
 func (s *Scheduler) RunVirtioWinReconcile(ctx context.Context) {
+	s.tick(ctx, "virtio-win reconcile panicked", "virtio-win: reconcile failed", s.virtioWin.Reconcile)
+}
+
+// tick runs one engine pass, isolating the scheduler from it: a panic is
+// logged instead of taking the process down, and a returned error is a warning
+// rather than a reason to stop ticking.
+//
+// No nil check on the engine: internal/app builds every one of them whenever
+// Queries is set, and the binary exits before that if it cannot reach the
+// database — so a nil here is unreachable, and pretending otherwise made the
+// guards read as a defence the unguarded call sites did not have.
+func (s *Scheduler) tick(ctx context.Context, panicMsg, failMsg string, run func(context.Context) error) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.logger.Error("virtio-win reconcile panicked", "panic", r)
+			s.logger.Error(panicMsg, "panic", r)
 		}
 	}()
-	if s.virtioWin == nil {
-		return
-	}
-	if err := s.virtioWin.Reconcile(ctx); err != nil {
-		s.logger.Warn("virtio-win: reconcile failed", "error", err)
+	if err := run(ctx); err != nil {
+		s.logger.Warn(failMsg, "error", err)
 	}
 }
 
-// trackVirtioWinDownload records a dispatched download the way every other
-// UPID-producing action in the codebase is recorded: a task_history row, an
-// audit entry, and the task_created event that makes the first visible live.
-//
-// The scheduler's other trackTask is bound to a db.ScheduledTask, which this is
-// not — the shape is shared deliberately rather than hand-rolling the three
-// writes at the call site. As there, a failed task_history insert skips the
-// audit row on purpose: an audit row carrying the UPID makes the collector's
-// external-task ingest dedup skip it, and the task would then appear nowhere.
-func (s *Scheduler) trackVirtioWinDownload(ctx context.Context, row db.VirtioWinDownload) {
-	if row.Upid == "" {
-		return
-	}
-	description := "Download virtio-win " + row.Version + " to " + row.Storage
-	if _, err := s.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
-		ClusterID:   row.ClusterID,
-		UserID:      auth.SystemUserID,
-		Upid:        row.Upid,
-		Description: description,
-		Status:      "running",
-		Node:        row.Node,
-		TaskType:    "download",
-	}); err != nil {
-		s.logger.Warn("virtio-win: insert task history failed",
-			"download_id", row.ID, "upid", row.Upid, "error", err)
-		return
-	}
-
-	details, _ := json.Marshal(map[string]string{
-		"upid":     row.Upid,
-		"node":     row.Node,
-		"storage":  row.Storage,
-		"version":  row.Version,
-		"filename": row.Filename,
-	})
-	if err := s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: row.ClusterID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+// virtioWinDownloadTask describes a dispatched virtio-win download.
+func virtioWinDownloadTask(row db.VirtioWinDownload) trackTaskParams {
+	return trackTaskParams{
+		ClusterID:    row.ClusterID,
+		Node:         row.Node,
 		ResourceType: "storage",
 		ResourceID:   row.Storage,
 		Action:       "virtio_win_download",
-		Details:      details,
-	}); err != nil {
-		s.logger.Warn("virtio-win: insert audit log failed",
-			"download_id", row.ID, "upid", row.Upid, "error", err)
-	}
-
-	if s.eventPub != nil {
-		s.eventPub.ClusterEvent(ctx, row.ClusterID.String(),
-			events.KindTaskCreated, "task", row.Upid, "virtio_win_download")
+		UPID:         row.Upid,
+		TaskType:     "download",
+		Description:  "Download virtio-win " + row.Version + " to " + row.Storage,
+		Source:       slog.String("download_id", row.ID.String()),
+		Details: map[string]string{
+			"upid":     row.Upid,
+			"node":     row.Node,
+			"storage":  row.Storage,
+			"version":  row.Version,
+			"filename": row.Filename,
+		},
 	}
 }
 
@@ -661,18 +615,26 @@ func (s *Scheduler) executeTask(ctx context.Context, client *proxmox.Client, tas
 			"task_id", task.ID, "action", task.Action)
 	}
 
+	s.finishTaskRun(ctx, task, now, status, errMsg)
+}
+
+// finishTaskRun records how a run ended and arms the next one.
+//
+// now is when the run STARTED, not when it finished, so a long run does not
+// push its own next occurrence out by its duration.
+//
+// When the cron can no longer yield a future run there is no safe value to
+// write: a NULL next_run_at reads as "due now" in this table's due predicate,
+// which would claim and RE-RUN this task — the reboot or snapshot it carries —
+// on every tick. Park it instead, with the reason on the row. status/errMsg
+// ride along: the run that just finished has its own outcome, independent of
+// the schedule being unusable. A snapshot that succeeded must not be recorded
+// as failed just because the task is being parked, and a run that DID fail
+// must not have its reason replaced by the schedule message — last_error is
+// the only field the operator sees.
+func (s *Scheduler) finishTaskRun(ctx context.Context, task db.ScheduledTask, now time.Time, status, errMsg string) {
 	nextRun, cronErr := NextRunTime(task.Schedule, now)
 	if cronErr != nil {
-		// No usable next run, so there is no safe value to write: a NULL
-		// next_run_at reads as "due now" in this table's due predicate, which
-		// would claim and RE-RUN this task — the reboot or snapshot it carries
-		// — on every tick. Park it instead, with the reason on the row.
-		// status/errMsg ride along: the run that just finished has its own
-		// outcome, independent of the schedule being unusable. A snapshot that
-		// succeeded must not be recorded as failed just because the task is
-		// being parked, and a run that DID fail must not have its reason
-		// replaced by the schedule message — last_error is the only field the
-		// operator sees.
 		s.parkUnschedulableTask(ctx, task, cronErr, status, errMsg)
 		return
 	}
@@ -718,8 +680,8 @@ func (s *Scheduler) executeSnapshot(ctx context.Context, client *proxmox.Client,
 	if err != nil {
 		return err
 	}
-	s.trackTask(ctx, task, upid, "scheduled_snapshot",
-		fmt.Sprintf("Scheduled snapshot %s — %s %s", snapName, task.ResourceType, task.ResourceID))
+	s.trackTask(ctx, scheduledTask(task, upid, "scheduled_snapshot",
+		fmt.Sprintf("Scheduled snapshot %s — %s %s", snapName, task.ResourceType, task.ResourceID)))
 	return nil
 }
 
@@ -738,63 +700,99 @@ func (s *Scheduler) executeReboot(ctx context.Context, client *proxmox.Client, t
 	if err != nil {
 		return err
 	}
-	s.trackTask(ctx, task, upid, "scheduled_reboot",
-		fmt.Sprintf("Scheduled reboot — %s %s", task.ResourceType, task.ResourceID))
+	s.trackTask(ctx, scheduledTask(task, upid, "scheduled_reboot",
+		fmt.Sprintf("Scheduled reboot — %s %s", task.ResourceType, task.ResourceID)))
 	return nil
 }
 
-// trackTask records a UPID-producing scheduled action the same way the DRS
-// executor records its migrations: a task_history row (status running — the
-// collector reconciler owns the running→done flip), a task_created event,
-// and an audit entry attributed to the system user. Previously the UPID was
-// discarded, so the action was invisible until the collector re-ingested it
-// as an external "proxmox" task mis-attributed to the API token user.
+// trackTaskParams is one UPID-producing action the scheduler dispatched on its
+// own behalf. Built by scheduledTask and virtioWinDownloadTask so the recording
+// below happens once, whatever produced the UPID.
+type trackTaskParams struct {
+	ClusterID    uuid.UUID
+	Node         string
+	ResourceType string
+	ResourceID   string
+	Action       string
+	UPID         string
+	TaskType     string
+	Description  string
+	Details      map[string]string
+	// Source identifies the row that dispatched this in the warnings below —
+	// task_id for a schedule, download_id for a download — so each keeps the
+	// key every other log line about that row already uses.
+	Source slog.Attr
+}
+
+// scheduledTask describes a UPID a scheduled_tasks row produced.
+func scheduledTask(task db.ScheduledTask, upid, taskType, description string) trackTaskParams {
+	return trackTaskParams{
+		ClusterID:    task.ClusterID,
+		Node:         task.Node,
+		ResourceType: task.ResourceType,
+		ResourceID:   task.ResourceID,
+		Action:       taskType,
+		UPID:         upid,
+		TaskType:     taskType,
+		Description:  description,
+		Source:       slog.String("task_id", task.ID.String()),
+		Details: map[string]string{
+			"upid":        upid,
+			"schedule_id": task.ID.String(),
+			"node":        task.Node,
+		},
+	}
+}
+
+// trackTask records a UPID the scheduler produced the same way the DRS executor
+// records its migrations: a task_history row (status running — the collector
+// reconciler owns the running→done flip) and an audit entry attributed to the
+// system user, each followed by the event that makes it visible live —
+// task_created and audit_entry. Previously the UPID was discarded, so the
+// action was invisible until the collector re-ingested it as an external
+// "proxmox" task mis-attributed to the API token user.
 //
 // If the task_history insert fails, the event and audit row are skipped on
 // purpose: an audit row containing the UPID would make the external-task
 // ingest dedup skip it, and the task would then never appear anywhere. With
 // nothing recorded, the next collector tick ingests it as external — a
 // degraded but visible fallback.
-func (s *Scheduler) trackTask(ctx context.Context, task db.ScheduledTask, upid, taskType, description string) {
-	if upid == "" {
+func (s *Scheduler) trackTask(ctx context.Context, p trackTaskParams) {
+	if p.UPID == "" {
 		return
 	}
 	if _, err := s.queries.InsertTaskHistory(ctx, db.InsertTaskHistoryParams{
-		ClusterID:   task.ClusterID,
+		ClusterID:   p.ClusterID,
 		UserID:      auth.SystemUserID,
-		Upid:        upid,
-		Description: description,
+		Upid:        p.UPID,
+		Description: p.Description,
 		Status:      "running",
-		Node:        task.Node,
-		TaskType:    taskType,
+		Node:        p.Node,
+		TaskType:    p.TaskType,
 	}); err != nil {
-		s.logger.Warn("failed to insert task history for scheduled task",
-			"task_id", task.ID, "upid", upid, "error", err)
+		s.logger.Warn("failed to insert task history for a scheduler-dispatched task",
+			p.Source, "action", p.Action, "upid", p.UPID, "error", err)
 		return
 	}
 
-	details, _ := json.Marshal(map[string]string{
-		"upid":        upid,
-		"schedule_id": task.ID.String(),
-		"node":        task.Node,
-	})
+	details, _ := json.Marshal(p.Details)
 	if err := s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: task.ClusterID, Valid: true},
+		ClusterID:    pgtype.UUID{Bytes: p.ClusterID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
-		ResourceType: task.ResourceType,
-		ResourceID:   task.ResourceID,
-		Action:       taskType,
+		ResourceType: p.ResourceType,
+		ResourceID:   p.ResourceID,
+		Action:       p.Action,
 		Details:      details,
 	}); err != nil {
-		s.logger.Warn("failed to insert audit log for scheduled task",
-			"task_id", task.ID, "upid", upid, "error", err)
+		s.logger.Warn("failed to insert audit log for a scheduler-dispatched task",
+			p.Source, "action", p.Action, "upid", p.UPID, "error", err)
 	}
 
 	if s.eventPub != nil {
-		s.eventPub.ClusterEvent(ctx, task.ClusterID.String(),
-			events.KindTaskCreated, "task", upid, taskType)
-		s.eventPub.ClusterEvent(ctx, task.ClusterID.String(),
-			events.KindAuditEntry, task.ResourceType, task.ResourceID, taskType)
+		s.eventPub.ClusterEvent(ctx, p.ClusterID.String(),
+			events.KindTaskCreated, "task", p.UPID, p.Action)
+		s.eventPub.ClusterEvent(ctx, p.ClusterID.String(),
+			events.KindAuditEntry, p.ResourceType, p.ResourceID, p.Action)
 	}
 }
 
@@ -814,25 +812,11 @@ func (s *Scheduler) createClient(ctx context.Context, clusterID uuid.UUID) (*pro
 	return proxmox.NewClientForCluster(ctx, s.queries, s.encryptionKey, clusterID, 60*time.Second)
 }
 
+// markFailed records a run that never reached an engine — the Proxmox client
+// could not be built, so nothing was dispatched. The run still finished, and
+// finishTaskRun still has to arm the next one.
 func (s *Scheduler) markFailed(ctx context.Context, task db.ScheduledTask, errMsg string) {
-	now := time.Now()
-	nextRun, cronErr := NextRunTime(task.Schedule, now)
-	if cronErr != nil {
-		// This path used to discard the error and store the result anyway,
-		// which wrote the zero time — year 1, permanently in the past — for
-		// both an unparseable and an unsatisfiable expression, and so re-ran
-		// the task every tick forever. See parkUnschedulableTask.
-		s.parkUnschedulableTask(ctx, task, cronErr, "failed", errMsg)
-		return
-	}
-
-	_ = s.queries.UpdateTaskLastRun(ctx, db.UpdateTaskLastRunParams{
-		ID:         task.ID,
-		LastRunAt:  pgtype.Timestamptz{Time: now, Valid: true},
-		NextRunAt:  pgtype.Timestamptz{Time: nextRun, Valid: true},
-		LastStatus: pgtype.Text{String: "failed", Valid: true},
-		LastError:  pgtype.Text{String: errMsg, Valid: true},
-	})
+	s.finishTaskRun(ctx, task, time.Now(), "failed", errMsg)
 }
 
 // parkUnschedulableTask disables a task whose cron cannot yield a future run,
@@ -861,7 +845,7 @@ func (s *Scheduler) parkUnschedulableTask(
 		"error", cronErr, "run_status", runStatus, "run_error", runErr)
 	msg := "disabled: " + cronErr.Error()
 	if runErr != "" {
-		msg = runErr + "; disabled: " + cronErr.Error()
+		msg = runErr + "; " + msg
 	}
 	if err := s.queries.DisableScheduledTaskForBadSchedule(ctx, db.DisableScheduledTaskForBadScheduleParams{
 		ID:         task.ID,
