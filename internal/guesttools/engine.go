@@ -240,6 +240,11 @@ type StageResult struct {
 	Target   Target
 	CDROMKey string
 	RanNow   bool
+	// Node the guest is on. Carried out because staging already had to resolve
+	// it to reach the guest at all, and the calling handler needs it to attribute
+	// the snapshot task — re-deriving it there costs two more queries for an
+	// answer this call already holds.
+	Node string
 	// MarkerWritten reports that this call wrote the row's 'staging' marker, so
 	// a caller handling an error knows the row is its to clean up. Set even on
 	// the error returns after that write — that is the case it exists for.
@@ -268,7 +273,7 @@ func (e *Engine) stage(
 	storage string,
 	runNow bool,
 ) (StageResult, error) {
-	result := StageResult{Target: target}
+	result := StageResult{Target: target, Node: node}
 
 	isoVolid := storage + ":iso/" + target.ISOFilename
 	present, err := virtiowin.ISOPresent(ctx, client, node, storage, target.ISOFilename)

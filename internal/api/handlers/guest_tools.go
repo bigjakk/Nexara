@@ -106,6 +106,18 @@ func (h *GuestToolsHandler) GetConfig(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to read guest tools config")
 	}
 
+	return c.JSON(h.configResponse(c, clusterID, cfg))
+}
+
+// configResponse decorates a stored config with the two values the UI would
+// otherwise have to derive: the version a guest with no override resolves to,
+// and the virtio-win storage staging will pull the ISO from.
+//
+// Both are best-effort. A cluster with no virtio-win row yet is the normal
+// pre-configuration state, and an unresolvable target is what an empty catalog
+// looks like — neither is worth failing a config read over, and an empty string
+// is what the UI renders as "not configured".
+func (h *GuestToolsHandler) configResponse(c fiber.Ctx, clusterID uuid.UUID, cfg db.GuestToolsConfig) guestToolsConfigResponse {
 	resp := guestToolsConfigResponse{
 		ClusterID:      cfg.ClusterID,
 		Mode:           cfg.Mode,
@@ -121,7 +133,7 @@ func (h *GuestToolsHandler) GetConfig(c fiber.Ctx) error {
 			resp.EffectiveVersion = target.Version
 		}
 	}
-	return c.JSON(resp)
+	return resp
 }
 
 // UpdateConfig writes a cluster's guest tools policy.
@@ -172,22 +184,7 @@ func (h *GuestToolsHandler) UpdateConfig(c fiber.Ctx) error {
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "cluster", clusterID.String(), "guest_tools_config_update", details)
 
-	resp := guestToolsConfigResponse{
-		ClusterID:      cfg.ClusterID,
-		Mode:           cfg.Mode,
-		TargetVersion:  cfg.TargetVersion,
-		SnapshotBefore: cfg.SnapshotBefore,
-		MaxConcurrent:  cfg.MaxConcurrent,
-	}
-	if vwCfg, err := h.queries.GetVirtioWinConfig(c.Context(), clusterID); err == nil {
-		resp.ISOStorage = vwCfg.Storage
-	}
-	if h.engine != nil {
-		if target, err := h.engine.ResolveTarget(c.Context(), cfg, nil); err == nil {
-			resp.EffectiveVersion = target.Version
-		}
-	}
-	return c.JSON(resp)
+	return c.JSON(h.configResponse(c, clusterID, cfg))
 }
 
 // ListFleet returns every Windows guest in the cluster with its guest tools
@@ -234,7 +231,10 @@ func (h *GuestToolsHandler) ListFleet(c fiber.Ctx) error {
 			StagedAt:         tsPtr(r.StagedAt),
 			LastResultAt:     tsPtr(r.LastResultAt),
 		}
-		if r.Stage.Valid && r.Stage.String != "" {
+		// Valid is the only test needed: the column is NOT NULL with a CHECK
+		// over six non-empty stages, so a row that has one cannot carry ''.
+		// Invalid means the LEFT JOIN found no state row at all.
+		if r.Stage.Valid {
 			item.Stage = r.Stage.String
 		}
 
@@ -287,7 +287,7 @@ func (h *GuestToolsHandler) SetPolicy(c fiber.Ctx) error {
 
 	policy, err := h.queries.UpsertGuestToolsPolicy(c.Context(), db.UpsertGuestToolsPolicyParams{
 		ClusterID:     clusterID,
-		Vmid:          vmid,
+		Vmid:          safeconv.Int32(vmid),
 		Excluded:      optionalBool(req.Excluded),
 		TargetVersion: req.TargetVersion,
 		Note:          req.Note,
@@ -302,7 +302,7 @@ func (h *GuestToolsHandler) SetPolicy(c fiber.Ctx) error {
 		"target_version": policy.TargetVersion,
 		"note":           policy.Note,
 	})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", strconv.Itoa(int(vmid)), "guest_tools_policy_update", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", strconv.Itoa(vmid), "guest_tools_policy_update", details)
 	return c.JSON(fiber.Map{
 		"cluster_id":     policy.ClusterID,
 		"vmid":           policy.Vmid,
@@ -325,7 +325,7 @@ func (h *GuestToolsHandler) Detect(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "guest tools engine is not available")
 	}
 
-	detection, err := h.engine.DetectOne(c.Context(), clusterID, int(vmid))
+	detection, err := h.engine.DetectOne(c.Context(), clusterID, vmid)
 	if err != nil {
 		if errors.Is(err, guesttools.ErrNotEligible) {
 			return fiber.NewError(fiber.StatusConflict, err.Error())
@@ -364,15 +364,13 @@ func (h *GuestToolsHandler) StageUpdate(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request body")
 	}
 
-	result, err := h.engine.StageOne(c.Context(), clusterID, int(vmid), req.RunNow)
+	result, err := h.engine.StageOne(c.Context(), clusterID, vmid, req.RunNow)
 	if err != nil {
 		switch {
-		case errors.Is(err, guesttools.ErrNotEligible):
+		case errors.Is(err, guesttools.ErrNotEligible), errors.Is(err, guesttools.ErrNoCDROMSlot):
 			return fiber.NewError(fiber.StatusConflict, err.Error())
 		case errors.Is(err, guesttools.ErrNoTargetVersion), errors.Is(err, guesttools.ErrISOUnavailable):
 			return fiber.NewError(fiber.StatusPreconditionFailed, err.Error())
-		case errors.Is(err, guesttools.ErrNoCDROMSlot):
-			return fiber.NewError(fiber.StatusConflict, err.Error())
 		default:
 			return fiber.NewError(fiber.StatusBadGateway, err.Error())
 		}
@@ -383,9 +381,9 @@ func (h *GuestToolsHandler) StageUpdate(c fiber.Ctx) error {
 	if result.SnapshotUPID != "" {
 		TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 			ClusterID:    clusterID,
-			Node:         nodeNameForVMID(c, h.queries, clusterID, vmid),
+			Node:         result.Node,
 			ResourceType: "vm",
-			ResourceID:   strconv.Itoa(int(vmid)),
+			ResourceID:   strconv.Itoa(vmid),
 			ResourceName: result.SnapshotName,
 			Action:       "snapshot_create",
 			UPID:         result.SnapshotUPID,
@@ -404,13 +402,13 @@ func (h *GuestToolsHandler) StageUpdate(c fiber.Ctx) error {
 		"iso":       result.Target.ISOFilename,
 		"triggered": "manual",
 	})
-	action := "guest_tools_stage"
+	action, stage := "guest_tools_stage", "staged"
 	if result.RanNow {
-		action = "guest_tools_update"
+		action, stage = "guest_tools_update", "running"
 	}
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", strconv.Itoa(int(vmid)), action, details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", strconv.Itoa(vmid), action, details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(),
-		events.KindGuestToolsChange, "vm", strconv.Itoa(int(vmid)), action)
+		events.KindGuestToolsChange, "vm", strconv.Itoa(vmid), action)
 
 	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
 		"vmid":     vmid,
@@ -418,15 +416,8 @@ func (h *GuestToolsHandler) StageUpdate(c fiber.Ctx) error {
 		"cdrom":    result.CDROMKey,
 		"run_now":  result.RanNow,
 		"snapshot": result.SnapshotName,
-		"stage":    stageFor(result.RanNow),
+		"stage":    stage,
 	})
-}
-
-func stageFor(ranNow bool) string {
-	if ranNow {
-		return "running"
-	}
-	return "staged"
 }
 
 // CancelUpdate clears a staged update from a guest.
@@ -442,46 +433,40 @@ func (h *GuestToolsHandler) CancelUpdate(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusServiceUnavailable, "guest tools engine is not available")
 	}
 
-	if err := h.engine.CancelOne(c.Context(), clusterID, int(vmid)); err != nil {
+	if err := h.engine.CancelOne(c.Context(), clusterID, vmid); err != nil {
 		return fiber.NewError(fiber.StatusBadGateway, err.Error())
 	}
 	details, _ := json.Marshal(map[string]any{"vmid": vmid})
-	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", strconv.Itoa(int(vmid)), "guest_tools_cancel", details)
+	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "vm", strconv.Itoa(vmid), "guest_tools_cancel", details)
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(),
-		events.KindGuestToolsChange, "vm", strconv.Itoa(int(vmid)), "guest_tools_cancel")
+		events.KindGuestToolsChange, "vm", strconv.Itoa(vmid), "guest_tools_cancel")
 	return c.JSON(fiber.Map{"status": "cancelled", "vmid": vmid})
 }
+
+// maxProxmoxVMID is the largest VMID Proxmox will assign.
+const maxProxmoxVMID = 999999999
 
 // clusterAndVMIDFromParams reads the cluster UUID and the Proxmox VMID.
 //
 // The VMID is the stable Proxmox identity, deliberately not a vms.id UUID: the
 // collector mints a new UUID whenever it churns a guest row, and per-guest state
 // keyed on it stops resolving at an arbitrary later time.
-func clusterAndVMIDFromParams(c fiber.Ctx) (uuid.UUID, int32, error) {
+// Returned as an int because that is what every consumer here wants — the
+// engine's methods, strconv.Itoa and the audit payloads. Only the sqlc params
+// are int32, and those narrow at the call.
+func clusterAndVMIDFromParams(c fiber.Ctx) (uuid.UUID, int, error) {
 	clusterID, err := clusterIDFromParam(c)
 	if err != nil {
 		return uuid.Nil, 0, err
 	}
-	raw := c.Params("vmid")
-	vmid, convErr := strconv.Atoi(raw)
-	if convErr != nil || vmid <= 0 {
+	// Bounded at both ends. The upper bound is Proxmox's own maximum VMID, and
+	// it is load-bearing rather than cosmetic: SetPolicy writes to a table with
+	// no FK on vmid, so an out-of-range value would be clamped by safeconv at
+	// the sqlc param while the audit row still recorded what the caller typed —
+	// an audit entry naming a guest that was never written.
+	vmid, convErr := strconv.Atoi(c.Params("vmid"))
+	if convErr != nil || vmid <= 0 || vmid > maxProxmoxVMID {
 		return uuid.Nil, 0, fiber.NewError(fiber.StatusBadRequest, "vmid must be a positive integer")
 	}
-	return clusterID, safeconv.Int32(vmid), nil
-}
-
-// nodeNameForVMID resolves the node a guest is on, for task attribution.
-// Returns "" when it cannot be resolved, which TrackTask tolerates.
-func nodeNameForVMID(c fiber.Ctx, queries *db.Queries, clusterID uuid.UUID, vmid int32) string {
-	vm, err := queries.GetVMByClusterAndVmid(c.Context(), db.GetVMByClusterAndVmidParams{
-		ClusterID: clusterID, Vmid: vmid,
-	})
-	if err != nil {
-		return ""
-	}
-	node, err := queries.GetNode(c.Context(), vm.NodeID)
-	if err != nil {
-		return ""
-	}
-	return node.Name
+	return clusterID, vmid, nil
 }
