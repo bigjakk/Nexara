@@ -7,7 +7,6 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -102,12 +101,9 @@ func (h *GuestToolsHandler) GetConfig(c fiber.Ctx) error {
 		return err
 	}
 
-	cfg, err := h.queries.GetGuestToolsConfig(c.Context(), clusterID)
+	cfg, err := guesttools.ConfigOrDefault(c.Context(), h.queries, clusterID)
 	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return fiber.NewError(fiber.StatusInternalServerError, "failed to read guest tools config")
-		}
-		cfg = db.GuestToolsConfig{ClusterID: clusterID, Mode: "disabled", MaxConcurrent: 5}
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to read guest tools config")
 	}
 
 	resp := guestToolsConfigResponse{
@@ -151,7 +147,7 @@ func (h *GuestToolsHandler) UpdateConfig(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "target_version is not a valid virtio-win version")
 	}
 	if req.MaxConcurrent <= 0 {
-		req.MaxConcurrent = 5
+		req.MaxConcurrent = guesttools.DefaultMaxConcurrent
 	}
 	if req.MaxConcurrent > 100 {
 		return fiber.NewError(fiber.StatusBadRequest, "max_concurrent must be 100 or less")
@@ -211,9 +207,9 @@ func (h *GuestToolsHandler) ListFleet(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to list guests")
 	}
 
-	cfg, cfgErr := h.queries.GetGuestToolsConfig(c.Context(), clusterID)
-	if cfgErr != nil {
-		cfg = db.GuestToolsConfig{ClusterID: clusterID, Mode: "disabled", MaxConcurrent: 5}
+	cfg, err := guesttools.ConfigOrDefault(c.Context(), h.queries, clusterID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "failed to read guest tools config")
 	}
 
 	out := make([]guestToolsGuestResponse, 0, len(rows))

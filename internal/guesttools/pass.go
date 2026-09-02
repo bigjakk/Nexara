@@ -147,6 +147,11 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 			"cluster_id", cfg.ClusterID, "error", err)
 	}
 
+	// Counters for the failures that are reported once for the pass rather than
+	// once per guest, because their cause is cluster-wide.
+	pinFailures := 0
+	var pinErr error
+
 	for _, guest := range fleet {
 		if guest.Template || !strings.EqualFold(guest.Status, "running") {
 			continue
@@ -177,7 +182,21 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 			continue
 		}
 
-		policy := e.policyFor(ctx, cfg.ClusterID, guest.Vmid)
+		policy, err := e.lookupPolicy(ctx, cfg.ClusterID, guest.Vmid)
+		if err != nil {
+			// Skipped rather than staged: resolving with a nil policy would
+			// stage the cluster target on a guest that may be pinned away from
+			// it. The row is read again next pass.
+			//
+			// Counted here and reported once below, like the virtio-win config
+			// read above. The cause is a database blip, which hits every guest
+			// in the cluster at once, so a line per guest buries the one fact
+			// that matters — how much of the fleet this pass skipped.
+			pinFailures++
+			pinErr = err
+			e.logger.Debug("guest tools: could not read the per-guest pin", "vmid", vmid, "error", err)
+			continue
+		}
 		target, err := e.ResolveTarget(ctx, cfg.ClusterID, cfg, policy)
 		if err != nil {
 			e.logger.Debug("guest tools: no target for guest", "vmid", vmid, "error", err)
@@ -214,6 +233,11 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 			"cluster_id", cfg.ClusterID, "vmid", vmid, "guest", guest.Name,
 			"from", detection.InstalledVersion(), "to", target.Version)
 	}
+
+	if pinFailures > 0 {
+		e.logger.Warn("guest tools: skipped guests whose per-guest pin could not be read",
+			"cluster_id", cfg.ClusterID, "guests", pinFailures, "error", pinErr)
+	}
 	return nil
 }
 
@@ -228,14 +252,29 @@ func isInFlightStage(stage string) bool {
 	}
 }
 
-func (e *Engine) policyFor(ctx context.Context, clusterID uuid.UUID, vmid int32) *db.GuestToolsPolicy {
+// lookupPolicy returns a guest's per-guest pin, distinguishing "there is no
+// pin" (nil, nil) from "we could not read whether there is a pin" (nil, err).
+//
+// Every caller must keep that distinction. Collapsing the error to a nil
+// policy reads identically to "this guest has no pin", which is wrong three
+// different ways: it withdraws a correctly staged pinned guest claiming the
+// target changed, it stages the cluster target on a guest pinned away from it,
+// and it walks straight past an Excluded flag — a guest the operator marked
+// "never touch this" gets the ISO attached and the installer registered. A
+// database blip hits many rows at once, so each of those is a fleet-wide
+// event, and none of them is visible in the result.
+func (e *Engine) lookupPolicy(ctx context.Context, clusterID uuid.UUID, vmid int32) (*db.GuestToolsPolicy, error) {
 	policy, err := e.queries.GetGuestToolsPolicy(ctx, db.GetGuestToolsPolicyParams{
 		ClusterID: clusterID, Vmid: vmid,
 	})
-	if err != nil {
-		return nil
+	switch {
+	case err == nil:
+		return &policy, nil
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("read guest tools policy: %w", err)
 	}
-	return &policy
 }
 
 // markFailed records a terminal failure, leaving the borrowed-CD-ROM record
@@ -640,35 +679,19 @@ func (e *Engine) withdrawSuperseded(ctx context.Context, client *proxmox.Client,
 // row, distinguishing "there is no pin" from "we could not read whether there
 // is a pin".
 //
-// That distinction is the whole point of not reusing policyFor here. policyFor
-// maps every error to nil, which reads identically to "this guest has no pin" —
-// so a pool timeout on the per-guest lookup would resolve to the cluster or
-// stable target and withdraw a correctly staged, pinned guest, with an audit row
-// claiming the target had changed when it had not. A blip hits many rows at once.
+// That distinction is what lookupPolicy returns and this function propagates;
+// see lookupPolicy for what collapsing it costs. No cluster config row is not
+// the same kind of unknown: the target still resolves from the virtio-win pin
+// or upstream stable, exactly as the fleet view resolves it.
 func (e *Engine) resolveTargetForState(ctx context.Context, state db.GuestToolsState) (Target, error) {
-	cfg, err := e.queries.GetGuestToolsConfig(ctx, state.ClusterID)
+	cfg, err := ConfigOrDefault(ctx, e.queries, state.ClusterID)
 	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return Target{}, fmt.Errorf("read guest tools config: %w", err)
-		}
-		// No cluster policy row: the target still resolves from the virtio-win
-		// pin or upstream stable, exactly as the fleet view resolves it.
-		cfg = db.GuestToolsConfig{ClusterID: state.ClusterID}
+		return Target{}, err
 	}
-
-	var policy *db.GuestToolsPolicy
-	p, err := e.queries.GetGuestToolsPolicy(ctx, db.GetGuestToolsPolicyParams{
-		ClusterID: state.ClusterID, Vmid: state.Vmid,
-	})
-	switch {
-	case err == nil:
-		policy = &p
-	case errors.Is(err, pgx.ErrNoRows):
-		// Genuinely no per-guest pin.
-	default:
-		return Target{}, fmt.Errorf("read guest tools policy: %w", err)
+	policy, err := e.lookupPolicy(ctx, state.ClusterID, state.Vmid)
+	if err != nil {
+		return Target{}, err
 	}
-
 	return e.ResolveTarget(ctx, state.ClusterID, cfg, policy)
 }
 
@@ -812,14 +835,12 @@ func (e *Engine) expireIfStale(ctx context.Context, state db.GuestToolsState) bo
 func (e *Engine) StageOne(ctx context.Context, clusterID uuid.UUID, vmid int, runNow bool) (StageResult, error) {
 	var out StageResult
 
-	cfg, err := e.queries.GetGuestToolsConfig(ctx, clusterID)
+	// Note that nothing below reads cfg.Mode: an explicit per-guest action is
+	// its own authorisation and does not need the cluster feature switched on,
+	// so the disabled default ConfigOrDefault returns is not a refusal here.
+	cfg, err := ConfigOrDefault(ctx, e.queries, clusterID)
 	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return out, fmt.Errorf("read guest tools config: %w", err)
-		}
-		// No policy row yet. An explicit per-guest action is its own
-		// authorisation; it does not need the cluster feature switched on.
-		cfg = db.GuestToolsConfig{ClusterID: clusterID, MaxConcurrent: 1}
+		return out, err
 	}
 
 	vm, err := e.queries.GetVMByClusterAndVmid(ctx, db.GetVMByClusterAndVmidParams{
@@ -844,7 +865,14 @@ func (e *Engine) StageOne(ctx context.Context, clusterID uuid.UUID, vmid int, ru
 		return out, fmt.Errorf("%w: guest %d is locked (%s)", ErrNotEligible, vmid, vm.LockState)
 	}
 
-	policy := e.policyFor(ctx, clusterID, safeconv.Int32(vmid))
+	// The error is returned, not dropped: the check below decides whether an
+	// operator's "never touch this guest" holds, and an unreadable pin that
+	// reads as nil walks straight past it. Refusing is the honest answer —
+	// StageUpdate maps this to a 502 and the operator can retry.
+	policy, err := e.lookupPolicy(ctx, clusterID, safeconv.Int32(vmid))
+	if err != nil {
+		return out, err
+	}
 	if policy != nil && policy.Excluded {
 		return out, fmt.Errorf("%w: guest %d is excluded from guest tools updates", ErrNotEligible, vmid)
 	}
@@ -865,16 +893,11 @@ func (e *Engine) StageOne(ctx context.Context, clusterID uuid.UUID, vmid int, ru
 		return out, fmt.Errorf("%w: configure a virtio-win ISO storage for this cluster first", ErrISOUnavailable)
 	}
 
-	node, err := e.queries.GetNode(ctx, vm.NodeID)
+	node, client, err := e.nodeAndClient(ctx, clusterID, vm)
 	if err != nil {
-		return out, fmt.Errorf("resolve node for guest %d: %w", vmid, err)
+		return out, err
 	}
-
-	client, err := e.CreateClient(ctx, clusterID)
-	if err != nil {
-		return out, fmt.Errorf("proxmox client: %w", err)
-	}
-	result, err := e.Stage(ctx, client, clusterID, cfg, node.Name, vmid, target, vwCfg.Storage, runNow)
+	result, err := e.Stage(ctx, client, clusterID, cfg, node, vmid, target, vwCfg.Storage, runNow)
 	if err != nil {
 		// Do not leave the row wearing the 'staging' marker Stage wrote on its
 		// way in. Nothing else on this path records a failure — markFailed is
@@ -910,15 +933,11 @@ func (e *Engine) CancelOne(ctx context.Context, clusterID uuid.UUID, vmid int) e
 	if err != nil {
 		return fmt.Errorf("guest %d not found", vmid)
 	}
-	node, err := e.queries.GetNode(ctx, vm.NodeID)
+	node, client, err := e.nodeAndClient(ctx, clusterID, vm)
 	if err != nil {
-		return fmt.Errorf("resolve node for guest %d: %w", vmid, err)
+		return err
 	}
-	client, err := e.CreateClient(ctx, clusterID)
-	if err != nil {
-		return fmt.Errorf("proxmox client: %w", err)
-	}
-	return e.CancelStaged(ctx, client, clusterID, node.Name, vmid, state)
+	return e.CancelStaged(ctx, client, clusterID, node, vmid, state)
 }
 
 // DetectOne probes a single guest on demand.
@@ -932,15 +951,11 @@ func (e *Engine) DetectOne(ctx context.Context, clusterID uuid.UUID, vmid int) (
 	if !strings.EqualFold(vm.Status, "running") {
 		return Detection{}, fmt.Errorf("%w: guest %d is not running", ErrNotEligible, vmid)
 	}
-	node, err := e.queries.GetNode(ctx, vm.NodeID)
+	node, client, err := e.nodeAndClient(ctx, clusterID, vm)
 	if err != nil {
-		return Detection{}, fmt.Errorf("resolve node for guest %d: %w", vmid, err)
+		return Detection{}, err
 	}
-	client, err := e.CreateClient(ctx, clusterID)
-	if err != nil {
-		return Detection{}, fmt.Errorf("proxmox client: %w", err)
-	}
-	detection, err := e.Detect(ctx, client, clusterID, node.Name, vmid, vm.Uptime)
+	detection, err := e.Detect(ctx, client, clusterID, node, vmid, vm.Uptime)
 	if err != nil {
 		if errors.Is(err, proxmox.ErrGuestAgentUnavailable) {
 			return Detection{}, fmt.Errorf("%w: the QEMU guest agent is not responding in guest %d", ErrNotEligible, vmid)

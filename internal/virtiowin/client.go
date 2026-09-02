@@ -82,15 +82,16 @@ func (c *Client) WithBase(base string) *Client {
 	return &clone
 }
 
-func (c *Client) get(ctx context.Context, rawURL string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+// do issues one upstream request under the User-Agent Anubis lets through.
+func (c *Client) do(ctx context.Context, method, rawURL string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("build request for %s: %w", rawURL, err)
+		return nil, fmt.Errorf("build %s request for %s: %w", method, rawURL, err)
 	}
 	req.Header.Set("User-Agent", userAgent)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", rawURL, err)
+		return nil, fmt.Errorf("%s %s: %w", method, rawURL, err)
 	}
 	return resp, nil
 }
@@ -103,7 +104,7 @@ func (c *Client) get(ctx context.Context, rawURL string) (*http.Response, error)
 // the URL rebuilt under the configured base, so the header is never trusted as
 // a URL and its scheme is never inherited.
 func (c *Client) CheckStable(ctx context.Context) (Release, error) {
-	resp, err := c.get(ctx, strings.TrimSuffix(c.base, "/")+"/stable-virtio/")
+	resp, err := c.do(ctx, http.MethodGet, strings.TrimSuffix(c.base, "/")+"/stable-virtio/")
 	if err != nil {
 		return Release{}, err
 	}
@@ -138,7 +139,7 @@ var hrefPattern = regexp.MustCompile(`href="([^"]+)"`)
 // Parsing an autoindex is brittle by nature, so callers treat a failure here as
 // non-fatal when they already have a stable answer.
 func (c *Client) ListArchive(ctx context.Context) ([]Release, error) {
-	resp, err := c.get(ctx, strings.TrimSuffix(c.base, "/")+"/archive-virtio/")
+	resp, err := c.do(ctx, http.MethodGet, strings.TrimSuffix(c.base, "/")+"/archive-virtio/")
 	if err != nil {
 		return nil, err
 	}
@@ -213,14 +214,9 @@ func (c *Client) CheckLatest(ctx context.Context) (Release, error) {
 // free reachability check before asking a Proxmox node to fetch ~837 MiB.
 // A failure is reported as size 0 with an error; callers may ignore it.
 func (c *Client) ProbeSize(ctx context.Context, isoURL string) (int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, isoURL, nil)
+	resp, err := c.do(ctx, http.MethodHead, isoURL)
 	if err != nil {
-		return 0, fmt.Errorf("build HEAD request: %w", err)
-	}
-	req.Header.Set("User-Agent", userAgent)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("HEAD %s: %w", isoURL, err)
+		return 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {

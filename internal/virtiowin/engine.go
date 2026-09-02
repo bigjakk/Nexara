@@ -239,19 +239,9 @@ func (e *Engine) SyncCluster(ctx context.Context, cfg db.VirtioWinConfig) (*db.V
 		return nil, err
 	}
 
-	client, err := e.createClient(ctx, cfg.ClusterID)
-	if err != nil {
-		return nil, fmt.Errorf("proxmox client: %w", err)
-	}
-
-	node, err := e.pickNode(ctx, cfg)
+	client, node, present, err := e.locate(ctx, cfg, target.IsoFilename)
 	if err != nil {
 		return nil, err
-	}
-
-	present, err := ISOPresent(ctx, client, node, cfg.Storage, target.IsoFilename)
-	if err != nil {
-		return nil, fmt.Errorf("list %s content on %s: %w", cfg.Storage, node, err)
 	}
 	if present {
 		// Already there. Prune still runs — a satisfied target is exactly when
@@ -333,11 +323,7 @@ func (e *Engine) dispatch(
 	upid, err := client.DownloadURLToStorage(ctx, node, cfg.Storage, params)
 	if err != nil {
 		msg := describeDownloadError(err)
-		if ferr := e.queries.FinishVirtioWinDownload(ctx, db.FinishVirtioWinDownloadParams{
-			ID: row.ID, Status: "failed", Error: msg,
-		}); ferr != nil {
-			e.logger.Warn("virtio-win: mark dispatch failure", "id", row.ID, "error", ferr)
-		}
+		e.finish(ctx, row, "failed", msg)
 		return nil, fmt.Errorf("start download of %s on %s/%s: %s", target.Version, node, cfg.Storage, msg)
 	}
 
@@ -698,22 +684,32 @@ func (e *Engine) DownloadNow(ctx context.Context, cfg db.VirtioWinConfig, versio
 	if err != nil {
 		return nil, fmt.Errorf("get release %q: %w", version, err)
 	}
-	client, err := e.createClient(ctx, cfg.ClusterID)
-	if err != nil {
-		return nil, fmt.Errorf("proxmox client: %w", err)
-	}
-	node, err := e.pickNode(ctx, cfg)
+	client, node, present, err := e.locate(ctx, cfg, release.IsoFilename)
 	if err != nil {
 		return nil, err
-	}
-	present, err := ISOPresent(ctx, client, node, cfg.Storage, release.IsoFilename)
-	if err != nil {
-		return nil, fmt.Errorf("list %s content on %s: %w", cfg.Storage, node, err)
 	}
 	if present {
 		return nil, nil
 	}
 	return e.dispatch(ctx, client, cfg, node, release, "manual")
+}
+
+// locate answers the question both download paths open with: which node do we
+// talk to, over which client, and is the ISO already sitting in the storage.
+func (e *Engine) locate(ctx context.Context, cfg db.VirtioWinConfig, filename string) (client *proxmox.Client, node string, present bool, err error) {
+	client, err = e.createClient(ctx, cfg.ClusterID)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("proxmox client: %w", err)
+	}
+	node, err = e.pickNode(ctx, cfg)
+	if err != nil {
+		return nil, "", false, err
+	}
+	present, err = ISOPresent(ctx, client, node, cfg.Storage, filename)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("list %s content on %s: %w", cfg.Storage, node, err)
+	}
+	return client, node, present, nil
 }
 
 // MarkChecked records the outcome of a cluster sync attempt and arms the next

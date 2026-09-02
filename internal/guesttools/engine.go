@@ -15,6 +15,7 @@ import (
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	"github.com/bigjakk/nexara/internal/safeconv"
 	"github.com/bigjakk/nexara/internal/virtiowin"
 )
 
@@ -321,8 +322,6 @@ func (e *Engine) Stage(
 		}
 	}
 
-	// Record the prior media BEFORE mutating anything, so a failure between
-	// here and the config write cannot lose it.
 	// Decide now what "done" should leave behind, and record it before mutating
 	// anything so a failure in between cannot lose it.
 	//
@@ -331,15 +330,19 @@ func (e *Engine) Stage(
 	// it attached would pin that ISO forever against pruning — prune skips any
 	// media a guest still has mounted, so every updated guest would block
 	// cleanup of the very release it just moved off.
-	priorValue := restoreActionFor(placement, config)
-	if err := e.queries.SetGuestToolsStage(ctx, db.SetGuestToolsStageParams{
+	//
+	// The same row is written again at the end of this function with the
+	// terminal stage; only Stage differs between the two, so it is one value
+	// carried down rather than two literals that have to be kept in step.
+	stage := db.SetGuestToolsStageParams{
 		ClusterID:       clusterID,
-		Vmid:            int32(vmid), //nolint:gosec // bounded by Proxmox
+		Vmid:            safeconv.Int32(vmid),
 		Stage:           "staging",
 		StagedVersion:   target.Version,
 		PriorCdromKey:   placement.Key,
-		PriorCdromValue: priorValue,
-	}); err != nil {
+		PriorCdromValue: restoreActionFor(placement, config),
+	}
+	if err := e.queries.SetGuestToolsStage(ctx, stage); err != nil {
 		return result, fmt.Errorf("record staging state: %w", err)
 	}
 	// From here on this call owns the row's 'staging' marker, and is the only
@@ -384,23 +387,16 @@ func (e *Engine) Stage(
 		return result, fmt.Errorf("register scheduled task in guest %d: %w", vmid, err)
 	}
 
-	stage := "staged"
+	stage.Stage = "staged"
 	if runNow {
 		if err := runArgv(ctx, client, node, vmid, buildRunTaskCommand()); err != nil {
 			return result, fmt.Errorf("start scheduled task in guest %d: %w", vmid, err)
 		}
-		stage = "running"
+		stage.Stage = "running"
 		result.RanNow = true
 	}
 
-	if err := e.queries.SetGuestToolsStage(ctx, db.SetGuestToolsStageParams{
-		ClusterID:       clusterID,
-		Vmid:            int32(vmid), //nolint:gosec // bounded by Proxmox
-		Stage:           stage,
-		StagedVersion:   target.Version,
-		PriorCdromKey:   placement.Key,
-		PriorCdromValue: priorValue,
-	}); err != nil {
+	if err := e.queries.SetGuestToolsStage(ctx, stage); err != nil {
 		return result, fmt.Errorf("record staged state: %w", err)
 	}
 	return result, nil
@@ -597,6 +593,47 @@ func (e *Engine) finishCancel(ctx context.Context, client *proxmox.Client, clust
 		RebootRequired: false,
 		CdromRestored:  cdromRestored,
 	})
+}
+
+// DefaultMaxConcurrent is the ceiling a cluster with no guest_tools_config row
+// behaves as. It matches the value UpdateConfig falls back to, so the number
+// the API reports for an unconfigured cluster is the one it would get on save.
+const DefaultMaxConcurrent = 5
+
+// ConfigOrDefault reads a cluster's guest tools config, treating an absent row
+// as the disabled default.
+//
+// Only an absent row is a default. Any other failure is returned, because "we
+// could not read the policy" must not render as "the policy says the feature
+// is off" — that is a real answer, and callers show it to an operator.
+func ConfigOrDefault(ctx context.Context, q *db.Queries, clusterID uuid.UUID) (db.GuestToolsConfig, error) {
+	cfg, err := q.GetGuestToolsConfig(ctx, clusterID)
+	switch {
+	case err == nil:
+		return cfg, nil
+	case errors.Is(err, pgx.ErrNoRows):
+		return db.GuestToolsConfig{
+			ClusterID:     clusterID,
+			Mode:          "disabled",
+			MaxConcurrent: DefaultMaxConcurrent,
+		}, nil
+	default:
+		return db.GuestToolsConfig{}, fmt.Errorf("read guest tools config: %w", err)
+	}
+}
+
+// nodeAndClient resolves the node a guest sits on and a client for its cluster
+// — the pair every per-guest operation needs before it can touch anything.
+func (e *Engine) nodeAndClient(ctx context.Context, clusterID uuid.UUID, vm db.Vm) (string, *proxmox.Client, error) {
+	node, err := e.queries.GetNode(ctx, vm.NodeID)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve node for guest %d: %w", vm.Vmid, err)
+	}
+	client, err := e.CreateClient(ctx, clusterID)
+	if err != nil {
+		return "", nil, fmt.Errorf("proxmox client: %w", err)
+	}
+	return node.Name, client, nil
 }
 
 // CreateClient returns a Proxmox client for a cluster.
