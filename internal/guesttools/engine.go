@@ -1,6 +1,7 @@
 package guesttools
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -38,8 +39,10 @@ func NewEngine(queries *db.Queries, encryptionKey string, logger *slog.Logger) *
 func (e *Engine) SetProxmoxCache(cache *proxmox.ClientCache) { e.cache = cache }
 
 var (
-	// ErrNoTargetVersion means no version could be resolved for a guest.
-	ErrNoTargetVersion = errors.New("guesttools: no target version resolved")
+	// ErrNoTargetVersion means no version could be resolved for a guest. It is
+	// virtiowin.ErrNoTarget under this package's name: resolution runs there,
+	// and callers matching on either sentinel must both keep working.
+	ErrNoTargetVersion = virtiowin.ErrNoTarget
 	// ErrISOUnavailable means the target ISO is not on the cluster's storage.
 	ErrISOUnavailable = errors.New("guesttools: target virtio-win ISO is not available on the configured storage")
 	// ErrNoCDROMSlot means the guest has no drive the ISO can be attached to.
@@ -75,88 +78,34 @@ type Target struct {
 //
 // Each layer is an operator statement of intent, and a more specific one always
 // wins — including over a newer version. Pinning that silently drifts forward
-// is not pinning.
+// is not pinning. Only the most specific pin is looked up, so the broader
+// layers are not even read once one is set.
 func (e *Engine) ResolveTarget(ctx context.Context, clusterID uuid.UUID, cfg db.GuestToolsConfig, policy *db.GuestToolsPolicy) (Target, error) {
-	candidates := []string{}
-	if policy != nil && policy.TargetVersion != "" {
-		candidates = append(candidates, policy.TargetVersion)
+	var pin string
+	if policy != nil {
+		pin = policy.TargetVersion
 	}
-	if cfg.TargetVersion != "" {
-		candidates = append(candidates, cfg.TargetVersion)
-	}
-	switch vwCfg, err := e.queries.GetVirtioWinConfig(ctx, clusterID); {
-	case err == nil:
-		if vwCfg.TargetVersion != "" {
-			candidates = append(candidates, vwCfg.TargetVersion)
-		}
-	case errors.Is(err, pgx.ErrNoRows):
-		// No virtio-win row for this cluster: genuinely unpinned at this layer.
-	default:
-		// A failed read is not an absent pin. Swallowing it here would demote a
-		// pinned cluster to "follow stable" for the duration of a database
-		// blip, resolving to a version the operator did not choose — and
-		// callers act on the answer, staging it or withdrawing against it.
-		return Target{}, fmt.Errorf("read virtio-win config: %w", err)
-	}
-
-	// Only the most specific pin matters, and candidates is already ordered
-	// most-specific-first. A pin naming a version we have never seen is a
-	// misconfiguration to report, NOT a reason to quietly fall back to a
-	// broader pin — that would install a version nobody asked for.
-	if len(candidates) > 0 {
-		version := candidates[0]
-		release, err := e.queries.GetVirtioWinRelease(ctx, version)
-		switch {
+	pin = cmp.Or(pin, cfg.TargetVersion)
+	if pin == "" {
+		switch vwCfg, err := e.queries.GetVirtioWinConfig(ctx, clusterID); {
 		case err == nil:
-			return Target{Version: release.Version, ISOVersion: release.IsoVersion, ISOFilename: release.IsoFilename}, nil
+			pin = vwCfg.TargetVersion
 		case errors.Is(err, pgx.ErrNoRows):
-			return Target{}, fmt.Errorf("%w: pinned version %q is not in the catalog", ErrNoTargetVersion, version)
+			// No virtio-win row for this cluster: genuinely unpinned at this layer.
 		default:
-			return Target{}, fmt.Errorf("look up pinned release %q: %w", version, err)
+			// A failed read is not an absent pin. Swallowing it here would demote a
+			// pinned cluster to "follow stable" for the duration of a database
+			// blip, resolving to a version the operator did not choose — and
+			// callers act on the answer, staging it or withdrawing against it.
+			return Target{}, fmt.Errorf("read virtio-win config: %w", err)
 		}
 	}
 
-	stable, err := e.queries.GetStableVirtioWinRelease(ctx)
-	if err == nil {
-		return Target{Version: stable.Version, ISOVersion: stable.IsoVersion, ISOFilename: stable.IsoFilename}, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return Target{}, fmt.Errorf("get stable release: %w", err)
-	}
-	return e.newestTarget(ctx)
-}
-
-// newestTarget is the fallback for an unpinned guest when nothing in the
-// catalog is flagged stable, mirroring virtiowin.Engine.newestRelease.
-//
-// The flag comes only from upstream's own stable-virtio/ redirect. An install
-// downloading from a mirror has no such redirect to copy, so its catalog never
-// carries one at all — and without this, every guest on such an install is
-// unresolvable: staging 412s, the scheduled pass can stage nothing, and the
-// fleet table's target column renders blank. An explicit pin at any layer is
-// handled above and still wins; this only covers "follow whatever is current".
-//
-// Ordering is done in Go because the comparison is numeric per component:
-// "0.1.96" is older than "0.1.302" but sorts after it as text.
-func (e *Engine) newestTarget(ctx context.Context) (Target, error) {
-	releases, err := e.queries.ListVirtioWinReleases(ctx)
+	release, err := virtiowin.ResolveRelease(ctx, e.queries, pin)
 	if err != nil {
-		return Target{}, fmt.Errorf("list releases: %w", err)
+		return Target{}, err
 	}
-	if len(releases) == 0 {
-		return Target{}, ErrNoTargetVersion
-	}
-	versions := make([]string, 0, len(releases))
-	for _, r := range releases {
-		versions = append(versions, r.Version)
-	}
-	newest := virtiowin.Newest(versions)
-	for _, r := range releases {
-		if r.Version == newest {
-			return Target{Version: r.Version, ISOVersion: r.IsoVersion, ISOFilename: r.IsoFilename}, nil
-		}
-	}
-	return Target{}, ErrNoTargetVersion
+	return Target{Version: release.Version, ISOVersion: release.IsoVersion, ISOFilename: release.IsoFilename}, nil
 }
 
 // Detect probes one guest for its installed guest tools and records the result.

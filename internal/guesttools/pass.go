@@ -136,8 +136,15 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 	budget := int64(cfg.MaxConcurrent) - inFlight
 
 	storage := ""
-	if vwCfg, err := e.queries.GetVirtioWinConfig(ctx, cfg.ClusterID); err == nil {
+	switch vwCfg, err := e.queries.GetVirtioWinConfig(ctx, cfg.ClusterID); {
+	case err == nil:
 		storage = vwCfg.Storage
+	case !errors.Is(err, pgx.ErrNoRows):
+		// Staging is skipped either way, but the per-guest warning below reads
+		// as "you never configured a storage". Record the real cause once so
+		// the operator is not sent to fix something that is already set.
+		e.logger.Warn("guest tools: cannot read virtio-win config for this cluster",
+			"cluster_id", cfg.ClusterID, "error", err)
 	}
 
 	for _, guest := range fleet {
@@ -847,8 +854,14 @@ func (e *Engine) StageOne(ctx context.Context, clusterID uuid.UUID, vmid int, ru
 		return out, err
 	}
 
+	// A read failure is not the operator forgetting to configure a storage;
+	// telling them to go configure one sends them to fix the wrong thing. Only
+	// an absent row or an empty storage is "not configured yet".
 	vwCfg, err := e.queries.GetVirtioWinConfig(ctx, clusterID)
-	if err != nil || vwCfg.Storage == "" {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return out, fmt.Errorf("read virtio-win config: %w", err)
+	}
+	if vwCfg.Storage == "" {
 		return out, fmt.Errorf("%w: configure a virtio-win ISO storage for this cluster first", ErrISOUnavailable)
 	}
 

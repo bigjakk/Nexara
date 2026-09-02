@@ -138,63 +138,73 @@ func isUniqueViolation(err error) bool {
 }
 
 // ResolveTarget returns the version a cluster should hold.
+func (e *Engine) ResolveTarget(ctx context.Context, cfg db.VirtioWinConfig) (db.VirtioWinRelease, error) {
+	return ResolveRelease(ctx, e.queries, cfg.TargetVersion)
+}
+
+// ResolveRelease returns the catalog row a caller should target: the pinned
+// version when pin is set, otherwise whatever is currently stable.
 //
 // An explicit pin always wins, including over a newer stable release: pinning
 // is the operator saying "this version, until I say otherwise", and silently
-// moving past it would defeat the point. With no pin, follow upstream stable.
-func (e *Engine) ResolveTarget(ctx context.Context, cfg db.VirtioWinConfig) (db.VirtioWinRelease, error) {
-	if cfg.TargetVersion != "" {
-		rel, err := e.queries.GetVirtioWinRelease(ctx, cfg.TargetVersion)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return db.VirtioWinRelease{}, fmt.Errorf("%w: pinned version %q is not in the catalog", ErrNoTarget, cfg.TargetVersion)
-			}
-			return db.VirtioWinRelease{}, fmt.Errorf("get pinned release %q: %w", cfg.TargetVersion, err)
+// moving past it would defeat the point. A pin naming a version the catalog has
+// never seen is a misconfiguration to report, NOT a reason to quietly fall back
+// to stable — that would install a version nobody asked for.
+//
+// With no stable release flagged, fall back to the newest one known. That flag
+// is set only from upstream's own stable-virtio/ redirect, and CheckLatest
+// deliberately does not set it when it had to fall back to the archive index —
+// the newest directory name is a guess at what is current, not upstream's
+// statement of it. Without this fallback that caution becomes a dead end for
+// exactly the installs the mirror support was added for: a mirror made with
+// `wget -m -np` has no such redirect to copy, so an unpinned cluster would
+// never resolve a target at all.
+func ResolveRelease(ctx context.Context, q *db.Queries, pin string) (db.VirtioWinRelease, error) {
+	if pin != "" {
+		rel, err := q.GetVirtioWinRelease(ctx, pin)
+		switch {
+		case err == nil:
+			return rel, nil
+		case errors.Is(err, pgx.ErrNoRows):
+			return db.VirtioWinRelease{}, fmt.Errorf("%w: pinned version %q is not in the catalog", ErrNoTarget, pin)
+		default:
+			return db.VirtioWinRelease{}, fmt.Errorf("get pinned release %q: %w", pin, err)
 		}
-		return rel, nil
 	}
-	rel, err := e.queries.GetStableVirtioWinRelease(ctx)
+
+	rel, err := q.GetStableVirtioWinRelease(ctx)
 	if err == nil {
 		return rel, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return db.VirtioWinRelease{}, fmt.Errorf("get stable release: %w", err)
 	}
-	return e.newestRelease(ctx)
-}
 
-// newestRelease is the fallback for an unpinned cluster when nothing in the
-// catalog is flagged stable.
-//
-// That flag is set only from upstream's own stable-virtio/ redirect, and
-// CheckLatest deliberately does not set it when it had to fall back to the
-// archive index — the newest directory name is a guess at what is current, not
-// upstream's statement of it. Without this fallback that caution becomes a
-// dead end for exactly the installs the mirror support was added for: a mirror
-// made with `wget -m -np` has no such redirect to copy, so an unpinned cluster
-// would never resolve a target at all.
-//
-// Ordering is done in Go rather than SQL because the comparison is numeric per
-// component: "0.1.96" is older than "0.1.302" but sorts after it as text.
-func (e *Engine) newestRelease(ctx context.Context) (db.VirtioWinRelease, error) {
-	releases, err := e.queries.ListVirtioWinReleases(ctx)
+	releases, err := q.ListVirtioWinReleases(ctx)
 	if err != nil {
 		return db.VirtioWinRelease{}, fmt.Errorf("list releases: %w", err)
 	}
-	if len(releases) == 0 {
+	newest, ok := NewestRelease(releases)
+	if !ok {
 		return db.VirtioWinRelease{}, ErrNoTarget
 	}
-	versions := make([]string, 0, len(releases))
+	return newest, nil
+}
+
+// NewestRelease returns the highest-versioned release in releases, and false
+// when there are none.
+//
+// Ordering is done in Go rather than SQL because the comparison is numeric per
+// component: "0.1.96" is older than "0.1.302" but sorts after it as text.
+func NewestRelease(releases []db.VirtioWinRelease) (db.VirtioWinRelease, bool) {
+	var newest db.VirtioWinRelease
+	found := false
 	for _, r := range releases {
-		versions = append(versions, r.Version)
-	}
-	newest := Newest(versions)
-	for _, r := range releases {
-		if r.Version == newest {
-			return r, nil
+		if !found || Compare(r.Version, newest.Version) > 0 {
+			newest, found = r, true
 		}
 	}
-	return db.VirtioWinRelease{}, ErrNoTarget
+	return newest, found
 }
 
 // EnsureCatalog populates the release catalog when it is empty.
