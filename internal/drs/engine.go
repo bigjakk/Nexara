@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
@@ -493,28 +492,7 @@ func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmo
 			"cluster_id", clusterID, "error", err)
 	}
 
-	cluster, err := e.queries.GetCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
-	}
-
-	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, e.encryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt token: %w", err)
-	}
-
-	client, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    tokenSecret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        60 * time.Second,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
-	}
-
-	return client, nil
+	return proxmox.NewClientForCluster(ctx, e.queries, e.encryptionKey, clusterID, 60*time.Second)
 }
 
 // importHARules fetches HA rules from Proxmox. It first tries the PVE 9+ rules API

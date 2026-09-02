@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 	"github.com/bigjakk/nexara/internal/virtiowin"
@@ -766,23 +765,5 @@ func (e *Engine) CreateClient(ctx context.Context, clusterID uuid.UUID) (*proxmo
 		e.logger.Warn("guest tools: proxmox cache get failed, building per-call",
 			"cluster_id", clusterID, "error", err)
 	}
-	cluster, err := e.queries.GetCluster(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
-	}
-	secret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, e.encryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt token: %w", err)
-	}
-	client, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    secret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        60 * time.Second,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
-	}
-	return client, nil
+	return proxmox.NewClientForCluster(ctx, e.queries, e.encryptionKey, clusterID, 60*time.Second)
 }

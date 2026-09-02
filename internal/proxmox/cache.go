@@ -72,6 +72,42 @@ type CacheQueries interface {
 	GetPBSServer(ctx context.Context, id uuid.UUID) (db.PbsServer, error)
 }
 
+// NewClientForCluster builds a client from a cluster's stored credentials:
+// read the row, decrypt the token secret, construct the client.
+//
+// This is the uncached path. Callers holding a ClientCache should prefer
+// ClientCache.Get, which layers a TTL and singleflight over the same build —
+// NewClientForCluster is what they fall back to when the cache is unset or a
+// lookup fails, and it is the whole of what the engines used to hand-roll.
+func NewClientForCluster(ctx context.Context, q CacheQueries, encryptionKey string, clusterID uuid.UUID, timeout time.Duration) (*Client, error) {
+	cluster, err := q.GetCluster(ctx, clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
+	}
+	return newClientForClusterRow(cluster, encryptionKey, timeout)
+}
+
+// newClientForClusterRow is NewClientForCluster's second half, split out so
+// ClientCache.Get can reuse it while keeping the db.Cluster row it needs for
+// the credential signature.
+func newClientForClusterRow(cluster db.Cluster, encryptionKey string, timeout time.Duration) (*Client, error) {
+	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt cluster %s credentials: %w", cluster.ID, err)
+	}
+	client, err := NewClient(ClientConfig{
+		BaseURL:        cluster.ApiUrl,
+		TokenID:        cluster.TokenID,
+		TokenSecret:    tokenSecret,
+		TLSFingerprint: cluster.TlsFingerprint,
+		Timeout:        timeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create proxmox client for cluster %s: %w", cluster.ID, err)
+	}
+	return client, nil
+}
+
 // pveEntry is a cached PVE client with the credential signature we built
 // it from and the build timestamp (for TTL checks).
 type pveEntry struct {
@@ -211,19 +247,9 @@ func (c *ClientCache) Get(ctx context.Context, clusterID uuid.UUID) (*Client, er
 		if err != nil {
 			return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
 		}
-		tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, c.encKey)
+		client, err := newClientForClusterRow(cluster, c.encKey, CachedClientTimeout)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt cluster %s credentials: %w", clusterID, err)
-		}
-		client, err := NewClient(ClientConfig{
-			BaseURL:        cluster.ApiUrl,
-			TokenID:        cluster.TokenID,
-			TokenSecret:    tokenSecret,
-			TLSFingerprint: cluster.TlsFingerprint,
-			Timeout:        CachedClientTimeout,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create proxmox client for cluster %s: %w", clusterID, err)
+			return nil, err
 		}
 
 		newEntry := &pveEntry{
