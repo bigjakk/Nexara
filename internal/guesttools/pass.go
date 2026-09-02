@@ -32,17 +32,17 @@ const stagedUpdateMaxAge = 30 * 24 * time.Hour
 // installer takes minutes; a few hours means it is not coming back.
 const runningUpdateMaxAge = 6 * time.Hour
 
-// stageWorstCase is the longest a legitimate Stage can spend between writing the
+// stageWorstCase is the longest a legitimate stage() can spend between writing the
 // 'staging' marker and replacing it, derived from the timeouts that actually
 // bound it rather than estimated.
 //
 // Derived, because the estimate was wrong. Engines reach Proxmox through the
 // shared client cache, whose per-call bound is proxmox.CachedClientTimeout (5
-// min) — not the 60s timeout on the uncached fallback that Engine.CreateClient
+// min) — not the 60s timeout on the uncached fallback that Engine.createClient
 // only uses when the cache misses. Budgeting the fallback number made this three
 // times too small.
 //
-// After the marker, Stage does three guest execs and two further HTTP calls —
+// After the marker, stage() does three guest execs and two further HTTP calls —
 // the media attach and the script write. An exec costs guestExecTimeout plus up
 // to two client timeouts on top, because runScript sets
 // its deadline only after the initial exec call returns and re-checks it only at
@@ -53,14 +53,14 @@ const runningUpdateMaxAge = 6 * time.Hour
 // is taken BEFORE the marker is written, so it is deliberately not counted here.
 const stageWorstCase = 3*(guestExecTimeout+2*proxmox.CachedClientTimeout) + 2*proxmox.CachedClientTimeout
 
-// stagingUpdateMaxAge bounds a row still mid-Stage.
+// stagingUpdateMaxAge bounds a row still inside stage().
 //
-// Minutes, not days, because 'staging' is a marker Stage writes on its way
+// Minutes, not days, because 'staging' is a marker stage() writes on its way
 // through and overwrites seconds later — it is never a resting state. A row
 // still wearing it long afterwards was stranded by a restart, or by an error
 // that never reached markFailed.
 //
-// Comfortably above stageWorstCase so no live Stage is ever expired out from
+// Comfortably above stageWorstCase so no live stage() is ever expired out from
 // under itself; TestStaleCeilingFor holds that relationship, so raising a
 // timeout it depends on fails the build rather than silently narrowing it.
 //
@@ -93,7 +93,7 @@ func (e *Engine) RunPass(ctx context.Context) error {
 }
 
 func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) error {
-	client, err := e.CreateClient(ctx, cfg.ClusterID)
+	client, err := e.createClient(ctx, cfg.ClusterID)
 	if err != nil {
 		return fmt.Errorf("proxmox client: %w", err)
 	}
@@ -162,7 +162,7 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 		}
 		vmid := int(guest.Vmid)
 
-		detection, err := e.Detect(ctx, client, cfg.ClusterID, guest.NodeName, vmid, guest.Uptime)
+		detection, err := e.detect(ctx, client, cfg.ClusterID, guest.NodeName, vmid, guest.Uptime)
 		if err != nil {
 			// An agent-less or busy guest is expected, not exceptional.
 			e.logger.Debug("guest tools: detection failed", "vmid", vmid, "error", err)
@@ -215,7 +215,7 @@ func (e *Engine) runClusterPass(ctx context.Context, cfg db.GuestToolsConfig) er
 			continue
 		}
 
-		if _, err := e.Stage(ctx, client, cfg, guest.NodeName, vmid, target, storage, false); err != nil {
+		if _, err := e.stage(ctx, client, cfg, guest.NodeName, vmid, target, storage, false); err != nil {
 			// A target whose ISO has not been downloaded yet is "not yet", not
 			// "this guest failed". The catalog flips to a new stable release
 			// the moment upstream publishes one, while the ~840 MiB fetch that
@@ -353,7 +353,7 @@ func (e *Engine) retryPendingCDROMRestores(ctx context.Context) {
 			e.logger.Debug("guest tools: pending restore could not load node", "vmid", vmid, "error", err)
 			continue
 		}
-		client, err := e.CreateClient(ctx, state.ClusterID)
+		client, err := e.createClient(ctx, state.ClusterID)
 		if err != nil {
 			e.logger.Debug("guest tools: pending restore could not build a client", "vmid", vmid, "error", err)
 			continue
@@ -377,7 +377,7 @@ func (e *Engine) retryPendingCDROMRestores(ctx context.Context) {
 		// And act on what the re-read said, not on the snapshot. A drive that
 		// changed rather than emptied would otherwise be restored to the old
 		// key, which is the one thing the re-read exists to prevent.
-		if err := e.RestoreCDROM(ctx, client, node.Name, vmid, fresh.PriorCdromKey, fresh.PriorCdromValue); err != nil {
+		if err := e.restoreCDROM(ctx, client, node.Name, vmid, fresh.PriorCdromKey, fresh.PriorCdromValue); err != nil {
 			e.logger.Warn("guest tools: retry of CD-ROM restore failed", "vmid", vmid, "error", err)
 			continue
 		}
@@ -419,7 +419,7 @@ func (e *Engine) reconcileOne(ctx context.Context, state db.GuestToolsState) {
 		return
 	}
 
-	client, err := e.CreateClient(ctx, state.ClusterID)
+	client, err := e.createClient(ctx, state.ClusterID)
 	if err != nil {
 		e.logger.Warn("guest tools: reconcile client build failed", "vmid", vmid, "error", err)
 		return
@@ -440,13 +440,13 @@ func (e *Engine) reconcileOne(ctx context.Context, state db.GuestToolsState) {
 	// So it fires exactly once and removes itself. That result is never
 	// mistaken for a real outcome because ListGuestToolsInFlight selects only
 	// staging/staged/running — this row is idle by then, so the reconciler
-	// never looks at it — and the file itself is cleared by the next Stage().
+	// never looks at it — and the file itself is cleared by the next stage().
 	if !strings.EqualFold(vm.Status, "running") {
 		e.withdrawSuperseded(ctx, client, node.Name, state, false, vm.Uptime)
 		return // nothing else to read from a stopped guest
 	}
 
-	result, err := e.ReadResult(ctx, client, node.Name, vmid)
+	result, err := e.readResult(ctx, client, node.Name, vmid)
 	if err != nil {
 		e.logger.Debug("guest tools: reading updater result failed", "vmid", vmid, "error", err)
 		return
@@ -487,7 +487,7 @@ func (e *Engine) reconcileOne(ctx context.Context, state db.GuestToolsState) {
 	// sweep will never look at it again, so losing the record would strand the
 	// ISO on the guest forever. retryPendingCDROMRestores picks it up instead.
 	cdromRestored := true
-	if err := e.RestoreCDROM(ctx, client, node.Name, vmid, state.PriorCdromKey, state.PriorCdromValue); err != nil {
+	if err := e.restoreCDROM(ctx, client, node.Name, vmid, state.PriorCdromKey, state.PriorCdromValue); err != nil {
 		cdromRestored = false
 		e.logger.Warn("guest tools: could not restore CD-ROM after update, will retry",
 			"vmid", vmid, "error", err)
@@ -527,7 +527,7 @@ func (e *Engine) reconcileOne(ctx context.Context, state db.GuestToolsState) {
 
 	// Re-read the guest so the recorded version reflects what is actually
 	// installed, rather than what the installer claimed.
-	if _, err := e.Detect(ctx, client, state.ClusterID, node.Name, vmid, vm.Uptime); err != nil {
+	if _, err := e.detect(ctx, client, state.ClusterID, node.Name, vmid, vm.Uptime); err != nil {
 		e.logger.Debug("guest tools: post-update detection failed", "vmid", vmid, "error", err)
 	}
 
@@ -617,7 +617,7 @@ func (e *Engine) withdrawSuperseded(ctx context.Context, client *proxmox.Client,
 	// A boot-triggered install spends its ENTIRE runtime in stage 'staged' —
 	// nothing moves it to 'running', which only the operator's run-now path
 	// ever sets. So the stage tells us nothing about whether the installer is
-	// going right now, and ReadResult returning nil covers both "has not
+	// going right now, and readResult returning nil covers both "has not
 	// started" and "is running and has not written its result yet".
 	//
 	// Ask the guest instead. Pulling the ISO out from under a live installer
@@ -644,7 +644,7 @@ func (e *Engine) withdrawSuperseded(ctx context.Context, client *proxmox.Client,
 		}
 	}
 
-	// CancelStaged's own task delete is best-effort and it returns nil even when
+	// cancelStaged's own task delete is best-effort and it returns nil even when
 	// nothing was removed, so the deletion is done and VERIFIED here first. A
 	// row marked withdrawn while its task is still armed is the exact failure
 	// this whole function exists to prevent, and the audit row would assert the
@@ -659,8 +659,8 @@ func (e *Engine) withdrawSuperseded(ctx context.Context, client *proxmox.Client,
 		taskRemoved = true
 	}
 
-	// finishCancel, not CancelStaged: the task is already gone and verified, or
-	// there is no agent to reach one through, so CancelStaged's own best-effort
+	// finishCancel, not cancelStaged: the task is already gone and verified, or
+	// there is no agent to reach one through, so cancelStaged's own best-effort
 	// delete would be a guest round trip that cannot accomplish anything.
 	if err := e.finishCancel(ctx, client, state.ClusterID, node, vmid, state); err != nil {
 		// Leave the row staged and try again next tick. Returning false matters:
@@ -706,7 +706,7 @@ func (e *Engine) resolveTargetForState(ctx context.Context, state db.GuestToolsS
 // or a Proxmox client, because every clause is one somebody will get wrong
 // later:
 //
-//   - Only 'staged'. 'staging' is Stage() still mid-flight writing this very
+//   - Only 'staged'. 'staging' is stage() still mid-flight writing this very
 //     row, and 'running' is an operator-started install already underway. Note
 //     that 'staged' does NOT imply the installer is idle — a boot-triggered
 //     install never leaves that stage — so the caller has to ask the guest
@@ -762,7 +762,7 @@ func (e *Engine) auditSupersededCancel(ctx context.Context, state db.GuestToolsS
 // Three ceilings, because the three in-flight stages are waiting on completely
 // different things and lumping them together is what stranded rows for a month:
 //
-//   - staging: Stage itself is still running. Bounded work, so minutes.
+//   - staging: stage() itself is still running. Bounded work, so minutes.
 //   - staged:  waiting for somebody to reboot the guest. A server that reboots
 //     monthly is doing nothing wrong, so this one is deliberately generous.
 //   - running: the installer was actually started. It takes minutes; hours mean
@@ -800,7 +800,7 @@ func (e *Engine) expireIfStale(ctx context.Context, state db.GuestToolsState) bo
 	// pass, and every guest reconciled ahead of this one can have spent minutes in
 	// its own guest execs — so the snapshot's age can exceed the very ceiling
 	// being applied. In that window an operator can have re-staged this guest:
-	// Stage would then be running, or finished, against a row this function still
+	// stage() would then be running, or finished, against a row this function still
 	// remembers as abandoned.
 	//
 	// That used to be survivable because markFailed cleared prior_cdrom_key, which
@@ -905,9 +905,9 @@ func (e *Engine) StageOne(ctx context.Context, clusterID uuid.UUID, vmid int, ru
 	if err != nil {
 		return out, err
 	}
-	result, err := e.Stage(ctx, client, cfg, node, vmid, target, vwCfg.Storage, runNow)
+	result, err := e.stage(ctx, client, cfg, node, vmid, target, vwCfg.Storage, runNow)
 	if err != nil {
-		// Do not leave the row wearing the 'staging' marker Stage wrote on its
+		// Do not leave the row wearing the 'staging' marker stage() wrote on its
 		// way in. Nothing else on this path records a failure — markFailed is
 		// reached only from the scheduled pass and from expiry — so a row
 		// stranded here used to sit in flight until something swept it up much
@@ -945,7 +945,7 @@ func (e *Engine) CancelOne(ctx context.Context, clusterID uuid.UUID, vmid int) e
 	if err != nil {
 		return err
 	}
-	return e.CancelStaged(ctx, client, clusterID, node, vmid, state)
+	return e.cancelStaged(ctx, client, clusterID, node, vmid, state)
 }
 
 // DetectOne probes a single guest on demand.
@@ -963,7 +963,7 @@ func (e *Engine) DetectOne(ctx context.Context, clusterID uuid.UUID, vmid int) (
 	if err != nil {
 		return Detection{}, err
 	}
-	detection, err := e.Detect(ctx, client, clusterID, node, vmid, vm.Uptime)
+	detection, err := e.detect(ctx, client, clusterID, node, vmid, vm.Uptime)
 	if err != nil {
 		if errors.Is(err, proxmox.ErrGuestAgentUnavailable) {
 			return Detection{}, fmt.Errorf("%w: the QEMU guest agent is not responding in guest %d", ErrNotEligible, vmid)

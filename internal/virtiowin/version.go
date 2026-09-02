@@ -10,10 +10,11 @@
 //
 // Note the last line: the directory carries a release suffix ("-1") that the
 // ISO filename does not. Getting that wrong 404s every download, so it lives in
-// one place — SplitVersion / BuildISOURLFrom — and is covered by tests.
+// one place — ISOVersion / BuildISOURLFrom — and is covered by tests.
 package virtiowin
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -50,14 +51,13 @@ func ValidVersion(v string) bool {
 	return versionPattern.MatchString(v)
 }
 
-// SplitVersion separates an upstream version into the part used in directory
-// names and the part used in the ISO filename.
+// ISOVersion is the version as it appears in the ISO filename: the upstream
+// version with its release suffix dropped.
 //
-// The ISO drops the release suffix: directory "virtio-win-0.1.302-1" holds
-// "virtio-win-0.1.302.iso". A version with no suffix returns the same string
-// twice.
-func SplitVersion(version string) (dirVersion, isoVersion string) {
-	return version, strings.SplitN(version, "-", 2)[0]
+// Directory "virtio-win-0.1.302-1" holds "virtio-win-0.1.302.iso". The
+// directory keeps the whole version, so only the filename form is derived.
+func ISOVersion(version string) string {
+	return strings.SplitN(version, "-", 2)[0]
 }
 
 // ISOPrefix leads the virtio-win ISO filenames upstream publishes.
@@ -66,8 +66,7 @@ const ISOPrefix = "virtio-win-"
 // ISOFilename returns the ISO basename for an upstream version, e.g.
 // "virtio-win-0.1.302.iso" for "0.1.302-1".
 func ISOFilename(version string) string {
-	_, isoVersion := SplitVersion(version)
-	return ISOPrefix + isoVersion + ".iso"
+	return ISOPrefix + ISOVersion(version) + ".iso"
 }
 
 // BuildISOURLFrom returns the full URL of the ISO for an upstream version,
@@ -87,9 +86,8 @@ func BuildISOURLFrom(base, version string) (string, error) {
 	if base == "" {
 		base = BaseURL
 	}
-	dirVersion, isoVersion := SplitVersion(version)
 	return fmt.Sprintf("%s%svirtio-win-%s/virtio-win-%s.iso",
-		strings.TrimSuffix(base, "/"), archiveSuffix, dirVersion, isoVersion), nil
+		strings.TrimSuffix(base, "/"), archiveSuffix, version, ISOVersion(version)), nil
 }
 
 // ParseVersionFromPath pulls a version out of an upstream directory name or a
@@ -137,11 +135,8 @@ func compareNumericParts(a, b string) int {
 		if i < len(bParts) {
 			bv, _ = strconv.Atoi(bParts[i])
 		}
-		if av != bv {
-			if av < bv {
-				return -1
-			}
-			return 1
+		if c := cmp.Compare(av, bv); c != 0 {
+			return c
 		}
 	}
 	return 0

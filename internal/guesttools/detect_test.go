@@ -293,7 +293,7 @@ func TestSupersededStaging(t *testing.T) {
 
 		// Withdrawing means deleting the in-guest task and taking the ISO back
 		// off. Neither means anything once the installer is running, and
-		// 'staging' is Stage() still writing this very row.
+		// 'staging' is stage() still writing this very row.
 		{"running is past withdrawal", "running", "0.1.302-1", "0.1.285-1", false},
 		{"staging is mid-flight", "staging", "0.1.302-1", "0.1.285-1", false},
 		{"idle has nothing staged", "idle", "0.1.302-1", "0.1.285-1", false},
@@ -317,7 +317,7 @@ func TestSupersededStaging(t *testing.T) {
 }
 
 // The three in-flight stages wait on entirely different things, and giving them
-// one ceiling is what let a row stranded mid-Stage sit for thirty days holding a
+// one ceiling is what let a row stranded inside stage() sit for thirty days holding a
 // concurrency slot.
 func TestStaleCeilingFor(t *testing.T) {
 	tests := []struct {
@@ -325,7 +325,7 @@ func TestStaleCeilingFor(t *testing.T) {
 		stage string
 		want  time.Duration
 	}{
-		// Stage writes this on its way past and overwrites it seconds later, so
+		// stage() writes this on its way past and overwrites it seconds later, so
 		// a row still wearing it is stuck, not working.
 		{"staging is bounded work", "staging", stagingUpdateMaxAge},
 		// Waiting on a human to reboot. A monthly reboot cycle is not a fault.
@@ -364,16 +364,16 @@ func TestStaleCeilingFor(t *testing.T) {
 		t.Errorf("ceilings out of order: staging=%v running=%v staged=%v",
 			stagingUpdateMaxAge, runningUpdateMaxAge, stagedUpdateMaxAge)
 	}
-	// A live Stage must never be expired out from under itself.
+	// A live stage() must never be expired out from under itself.
 	//
 	// Asserted against stageWorstCase rather than a hand-rolled estimate,
 	// because the estimate is what went wrong the first time: budgeting guest
 	// execs alone, at the uncached 60s client timeout, produced a ceiling three
-	// times smaller than a legitimate Stage can take. stageWorstCase is built
+	// times smaller than a legitimate stage() can take. stageWorstCase is built
 	// from proxmox.CachedClientTimeout, so raising that timeout now fails this
 	// test instead of silently shrinking the margin.
 	if stagingUpdateMaxAge <= stageWorstCase {
-		t.Errorf("staging ceiling %v is inside Stage's own worst case %v — a live Stage could be expired mid-flight",
+		t.Errorf("staging ceiling %v is inside stage()'s own worst case %v — a live stage() could be expired mid-flight",
 			stagingUpdateMaxAge, stageWorstCase)
 	}
 }
@@ -617,7 +617,7 @@ func TestNoPathClaimsARestoreItDidNotPerform(t *testing.T) {
 			checked++
 			if lit, ok := kv.Value.(*ast.Ident); ok && lit.Name == "true" {
 				t.Errorf("%s:%d passes CdromRestored: true — that clears prior_cdrom_key, so it is "+
-					"only correct where RestoreCDROM actually ran, and those paths pass a variable",
+					"only correct where restoreCDROM actually ran, and those paths pass a variable",
 					name, fset.Position(kv.Pos()).Line)
 			}
 			return true

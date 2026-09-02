@@ -241,10 +241,9 @@ func (c *Client) releaseFor(version string) (Release, error) {
 	if err != nil {
 		return Release{}, err
 	}
-	dirVersion, isoVersion := SplitVersion(version)
 	return Release{
-		Version:     dirVersion,
-		ISOVersion:  isoVersion,
+		Version:     version,
+		ISOVersion:  ISOVersion(version),
 		ISOFilename: ISOFilename(version),
 		ISOURL:      isoURL,
 	}, nil

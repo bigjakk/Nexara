@@ -2,23 +2,20 @@ package virtiowin
 
 import "testing"
 
-func TestSplitVersion(t *testing.T) {
+func TestISOVersion(t *testing.T) {
 	tests := []struct {
 		name    string
 		version string
-		wantDir string
-		wantISO string
+		want    string
 	}{
-		{"release suffix is dropped from the ISO half", "0.1.302-1", "0.1.302-1", "0.1.302"},
-		{"second respin", "0.1.262-2", "0.1.262-2", "0.1.262"},
-		{"no suffix repeats the version", "0.1.96", "0.1.96", "0.1.96"},
+		{"release suffix is dropped", "0.1.302-1", "0.1.302"},
+		{"second respin", "0.1.262-2", "0.1.262"},
+		{"no suffix is left as-is", "0.1.96", "0.1.96"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotDir, gotISO := SplitVersion(tt.version)
-			if gotDir != tt.wantDir || gotISO != tt.wantISO {
-				t.Errorf("SplitVersion(%q) = (%q, %q), want (%q, %q)",
-					tt.version, gotDir, gotISO, tt.wantDir, tt.wantISO)
+			if got := ISOVersion(tt.version); got != tt.want {
+				t.Errorf("ISOVersion(%q) = %q, want %q", tt.version, got, tt.want)
 			}
 		})
 	}

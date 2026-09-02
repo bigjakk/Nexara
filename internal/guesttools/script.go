@@ -168,7 +168,7 @@ func psEscape(s string) string {
 // at boot as SYSTEM.
 //
 // GuestScriptPath is baked in rather than taken as an argument: it has to be
-// the same path Stage writes the script to, and a parameter here is a way for
+// the same path stage() writes the script to, and a parameter here is a way for
 // the two to drift into a task that points at nothing.
 //
 // Register-ScheduledTask rather than schtasks.exe, because the settings that
@@ -311,9 +311,7 @@ try {
 // against one that is still armed.
 func parseTaskPresence(out string) taskPresence {
 	switch strings.ToLower(strings.TrimSpace(out)) {
-	case "":
-		return taskUnknown
-	case "unknown":
+	case "", "unknown":
 		return taskUnknown
 	case "absent":
 		return taskAbsent

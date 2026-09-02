@@ -108,11 +108,11 @@ func (e *Engine) ResolveTarget(ctx context.Context, cfg db.GuestToolsConfig, pol
 	return Target{Version: release.Version, ISOVersion: release.IsoVersion, ISOFilename: release.IsoFilename}, nil
 }
 
-// Detect probes one guest for its installed guest tools and records the result.
+// detect probes one guest for its installed guest tools and records the result.
 //
 // Returns the detection, or a zero Detection when the agent is unreachable —
 // that is a normal state for a stopped or agent-less guest, not an error.
-func (e *Engine) Detect(ctx context.Context, client *proxmox.Client, clusterID uuid.UUID, node string, vmid int, uptime int64) (Detection, error) {
+func (e *Engine) detect(ctx context.Context, client *proxmox.Client, clusterID uuid.UUID, node string, vmid int, uptime int64) (Detection, error) {
 	out, err := runScript(ctx, client, node, vmid, detectScript)
 	if err != nil {
 		return Detection{}, err
@@ -124,7 +124,7 @@ func (e *Engine) Detect(ctx context.Context, client *proxmox.Client, clusterID u
 
 	if err := e.queries.UpsertGuestToolsDetection(ctx, db.UpsertGuestToolsDetectionParams{
 		ClusterID:        clusterID,
-		Vmid:             int32(vmid), //nolint:gosec // vmid is bounded by Proxmox at 999999999
+		Vmid:             safeconv.Int32(vmid),
 		InstalledVersion: detection.InstalledVersion(),
 		AgentVersion:     detection.Agent,
 		AgentRunning:     detection.AgentRunning(),
@@ -252,13 +252,13 @@ type StageResult struct {
 	SnapshotUPID string
 }
 
-// Stage prepares a guest to install the target version: attaches the ISO,
+// stage prepares a guest to install the target version: attaches the ISO,
 // writes the updater, and registers it to run at next boot.
 //
 // runNow additionally starts the task immediately. The task is started through
 // the Task Scheduler rather than executed here on purpose — the installer
 // restarts QEMU-GA, which would kill anything running as a child of the agent.
-func (e *Engine) Stage(
+func (e *Engine) stage(
 	ctx context.Context,
 	client *proxmox.Client,
 	cfg db.GuestToolsConfig,
@@ -328,7 +328,7 @@ func (e *Engine) Stage(
 	// The same row is written again at the end of this function with the
 	// terminal stage; only Stage differs between the two, so it is one value
 	// carried down rather than two literals that have to be kept in step.
-	stage := db.SetGuestToolsStageParams{
+	stageParams := db.SetGuestToolsStageParams{
 		ClusterID:       cfg.ClusterID,
 		Vmid:            safeconv.Int32(vmid),
 		Stage:           "staging",
@@ -336,7 +336,7 @@ func (e *Engine) Stage(
 		PriorCdromKey:   placement.Key,
 		PriorCdromValue: restoreActionFor(placement, config),
 	}
-	if err := e.queries.SetGuestToolsStage(ctx, stage); err != nil {
+	if err := e.queries.SetGuestToolsStage(ctx, stageParams); err != nil {
 		return result, fmt.Errorf("record staging state: %w", err)
 	}
 	// From here on this call owns the row's 'staging' marker, and is the only
@@ -381,16 +381,16 @@ func (e *Engine) Stage(
 		return result, fmt.Errorf("register scheduled task in guest %d: %w", vmid, err)
 	}
 
-	stage.Stage = "staged"
+	stageParams.Stage = "staged"
 	if runNow {
 		if err := runArgv(ctx, client, node, vmid, buildRunTaskCommand()); err != nil {
 			return result, fmt.Errorf("start scheduled task in guest %d: %w", vmid, err)
 		}
-		stage.Stage = "running"
+		stageParams.Stage = "running"
 		result.RanNow = true
 	}
 
-	if err := e.queries.SetGuestToolsStage(ctx, stage); err != nil {
+	if err := e.queries.SetGuestToolsStage(ctx, stageParams); err != nil {
 		return result, fmt.Errorf("record staged state: %w", err)
 	}
 	return result, nil
@@ -502,15 +502,16 @@ func (e *Engine) deleteUpdaterTask(ctx context.Context, client *proxmox.Client, 
 	return nil
 }
 
-// ReadResult fetches and parses the updater's result file from a guest.
+// readResult fetches and parses the updater's result file from a guest.
 // Returns (nil, nil) when the file is not there yet.
-func (e *Engine) ReadResult(ctx context.Context, client *proxmox.Client, node string, vmid int) (*GuestUpdateResult, error) {
+func (e *Engine) readResult(ctx context.Context, client *proxmox.Client, node string, vmid int) (*GuestUpdateResult, error) {
 	raw, err := client.GuestAgentFileRead(ctx, node, vmid, GuestResultPath)
 	if err != nil {
 		// Not-yet-written reads as a Proxmox error; treat it as "no result".
-		if strings.Contains(strings.ToLower(err.Error()), "no such file") ||
-			strings.Contains(strings.ToLower(err.Error()), "cannot find") ||
-			strings.Contains(strings.ToLower(err.Error()), "failed to open") {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "no such file") ||
+			strings.Contains(msg, "cannot find") ||
+			strings.Contains(msg, "failed to open") {
 			return nil, nil
 		}
 		return nil, err
@@ -525,9 +526,9 @@ func (e *Engine) ReadResult(ctx context.Context, client *proxmox.Client, node st
 	return &result, nil
 }
 
-// RestoreCDROM returns the borrowed drive to the state the guest had before,
+// restoreCDROM returns the borrowed drive to the state the guest had before,
 // which always means the virtio-win ISO comes back off.
-func (e *Engine) RestoreCDROM(ctx context.Context, client *proxmox.Client, node string, vmid int, key, priorValue string) error {
+func (e *Engine) restoreCDROM(ctx context.Context, client *proxmox.Client, node string, vmid int, key, priorValue string) error {
 	if key == "" || priorValue == "" {
 		return nil // nothing recorded, nothing to undo
 	}
@@ -550,8 +551,8 @@ func (e *Engine) RestoreCDROM(ctx context.Context, client *proxmox.Client, node 
 	return nil
 }
 
-// CancelStaged removes a staged update from a guest that has not run it yet.
-func (e *Engine) CancelStaged(ctx context.Context, client *proxmox.Client, clusterID uuid.UUID, node string, vmid int, state db.GuestToolsState) error {
+// cancelStaged removes a staged update from a guest that has not run it yet.
+func (e *Engine) cancelStaged(ctx context.Context, client *proxmox.Client, clusterID uuid.UUID, node string, vmid int, state db.GuestToolsState) error {
 	// Best-effort: a guest that has already rebooted and run the task no longer
 	// has one to delete, and that is not a failure to cancel.
 	if err := runArgv(ctx, client, node, vmid, buildDeleteTaskCommand()); err != nil {
@@ -565,7 +566,7 @@ func (e *Engine) CancelStaged(ctx context.Context, client *proxmox.Client, clust
 // without touching the in-guest task.
 //
 // Split out for the automatic withdrawal path, which has already removed the
-// task AND verified it is gone — something CancelStaged's best-effort delete
+// task AND verified it is gone — something cancelStaged's best-effort delete
 // deliberately does not do — or which is working against a stopped guest with
 // no agent to reach a task through. Either way, running that delete again would
 // be a guest round trip that cannot accomplish anything.
@@ -574,14 +575,14 @@ func (e *Engine) finishCancel(ctx context.Context, client *proxmox.Client, clust
 	// it has actually been put back, so a failure here leaves a record for
 	// retryPendingCDROMRestores instead of stranding the ISO on the guest.
 	cdromRestored := true
-	if err := e.RestoreCDROM(ctx, client, node, vmid, state.PriorCdromKey, state.PriorCdromValue); err != nil {
+	if err := e.restoreCDROM(ctx, client, node, vmid, state.PriorCdromKey, state.PriorCdromValue); err != nil {
 		cdromRestored = false
 		e.logger.Warn("guest tools: could not restore CD-ROM during cancel, will retry",
 			"vmid", vmid, "error", err)
 	}
 	return e.queries.FinishGuestToolsUpdate(ctx, db.FinishGuestToolsUpdateParams{
 		ClusterID:      clusterID,
-		Vmid:           int32(vmid), //nolint:gosec // bounded by Proxmox
+		Vmid:           safeconv.Int32(vmid),
 		Stage:          "idle",
 		LastError:      "",
 		RebootRequired: false,
@@ -623,15 +624,15 @@ func (e *Engine) nodeAndClient(ctx context.Context, clusterID uuid.UUID, vm db.V
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve node for guest %d: %w", vm.Vmid, err)
 	}
-	client, err := e.CreateClient(ctx, clusterID)
+	client, err := e.createClient(ctx, clusterID)
 	if err != nil {
 		return "", nil, fmt.Errorf("proxmox client: %w", err)
 	}
 	return node.Name, client, nil
 }
 
-// CreateClient returns a Proxmox client for a cluster.
-func (e *Engine) CreateClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
+// createClient returns a Proxmox client for a cluster.
+func (e *Engine) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
 	if e.cache != nil {
 		client, err := e.cache.Get(ctx, clusterID)
 		if err == nil {

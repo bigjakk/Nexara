@@ -152,9 +152,7 @@ func NeedsUpdate(installed, target string) bool {
 	if installed == "" || target == "" {
 		return false
 	}
-	_, installedISO := virtiowin.SplitVersion(installed)
-	_, targetISO := virtiowin.SplitVersion(target)
-	return virtiowin.Compare(installedISO, targetISO) < 0
+	return virtiowin.Compare(virtiowin.ISOVersion(installed), virtiowin.ISOVersion(target)) < 0
 }
 
 // UpToDate reports whether a guest is at or ahead of the target. Distinct from
@@ -163,7 +161,5 @@ func UpToDate(installed, target string) bool {
 	if installed == "" || target == "" {
 		return false
 	}
-	_, installedISO := virtiowin.SplitVersion(installed)
-	_, targetISO := virtiowin.SplitVersion(target)
-	return virtiowin.Compare(installedISO, targetISO) >= 0
+	return virtiowin.Compare(virtiowin.ISOVersion(installed), virtiowin.ISOVersion(target)) >= 0
 }

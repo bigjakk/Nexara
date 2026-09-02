@@ -39,7 +39,7 @@ func TestVersionFromISOFilename(t *testing.T) {
 // "virtio-win-0.1.285.iso".
 func TestKeepSetMatchesISOFilenames(t *testing.T) {
 	pinned := "0.1.285-1"
-	_, isoVersion := SplitVersion(pinned)
+	isoVersion := ISOVersion(pinned)
 
 	onDisk := VersionFromISOFilename("virtio-win-0.1.285.iso")
 	if onDisk != isoVersion {

@@ -604,7 +604,7 @@ func (e *Engine) pruneCluster(ctx context.Context, client *proxmox.Client, cfg d
 // able to fire. An empty string matches no ISO filename yet still makes
 // len(keep) non-zero, so admitting one turns that refusal into a no-op and
 // prunes the storage bare. The pinned loop is not guarding only against a
-// stored ""; SplitVersion("-1") yields one too.
+// stored ""; ISOVersion("-1") yields one too.
 func (e *Engine) keepSet(ctx context.Context, target db.VirtioWinRelease) (map[string]struct{}, error) {
 	keep := make(map[string]struct{})
 	if target.IsoVersion != "" {
@@ -615,8 +615,7 @@ func (e *Engine) keepSet(ctx context.Context, target db.VirtioWinRelease) (map[s
 		return nil, err
 	}
 	for _, v := range pinned {
-		_, isoVersion := SplitVersion(v)
-		if isoVersion != "" {
+		if isoVersion := ISOVersion(v); isoVersion != "" {
 			keep[isoVersion] = struct{}{}
 		}
 	}
