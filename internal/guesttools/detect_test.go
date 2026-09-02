@@ -1,8 +1,13 @@
 package guesttools
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsWindowsOSType(t *testing.T) {
@@ -302,6 +307,68 @@ func TestSupersededStaging(t *testing.T) {
 	}
 }
 
+// The three in-flight stages wait on entirely different things, and giving them
+// one ceiling is what let a row stranded mid-Stage sit for thirty days holding a
+// concurrency slot.
+func TestStaleCeilingFor(t *testing.T) {
+	tests := []struct {
+		name  string
+		stage string
+		want  time.Duration
+	}{
+		// Stage writes this on its way past and overwrites it seconds later, so
+		// a row still wearing it is stuck, not working.
+		{"staging is bounded work", "staging", stagingUpdateMaxAge},
+		// Waiting on a human to reboot. A monthly reboot cycle is not a fault.
+		{"staged waits for a reboot", "staged", stagedUpdateMaxAge},
+		// The installer was actually started; it takes minutes.
+		{"running was started", "running", runningUpdateMaxAge},
+
+		// Nothing else reaches expireIfStale today, but a stage added later
+		// must fail safe by waiting too long rather than tearing down an
+		// update somebody is relying on.
+		{"unknown stage falls back to the longest", "somethingelse", stagedUpdateMaxAge},
+		{"empty stage falls back to the longest", "", stagedUpdateMaxAge},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, reason := staleCeilingFor(tt.stage)
+			if got != tt.want {
+				t.Errorf("staleCeilingFor(%q) = %v, want %v", tt.stage, got, tt.want)
+			}
+			// The reason lands in last_error and is the only explanation an
+			// operator gets for a row that vanished out from under them.
+			if reason == "" {
+				t.Errorf("staleCeilingFor(%q) returned no reason", tt.stage)
+			}
+			if !strings.Contains(reason, tt.want.String()) {
+				t.Errorf("staleCeilingFor(%q) reason %q does not name its own ceiling %v",
+					tt.stage, reason, tt.want)
+			}
+		})
+	}
+
+	// Ordering is the property that matters, not the exact values: staging is
+	// bounded work, running is an install in progress, staged is waiting on a
+	// person. Inverting any of these silently restores the original bug.
+	if stagingUpdateMaxAge >= runningUpdateMaxAge || runningUpdateMaxAge >= stagedUpdateMaxAge {
+		t.Errorf("ceilings out of order: staging=%v running=%v staged=%v",
+			stagingUpdateMaxAge, runningUpdateMaxAge, stagedUpdateMaxAge)
+	}
+	// A live Stage must never be expired out from under itself.
+	//
+	// Asserted against stageWorstCase rather than a hand-rolled estimate,
+	// because the estimate is what went wrong the first time: budgeting guest
+	// execs alone, at the uncached 60s client timeout, produced a ceiling three
+	// times smaller than a legitimate Stage can take. stageWorstCase is built
+	// from proxmox.CachedClientTimeout, so raising that timeout now fails this
+	// test instead of silently shrinking the margin.
+	if stagingUpdateMaxAge <= stageWorstCase {
+		t.Errorf("staging ceiling %v is inside Stage's own worst case %v — a live Stage could be expired mid-flight",
+			stagingUpdateMaxAge, stageWorstCase)
+	}
+}
+
 // A boot-triggered install spends its whole runtime in stage 'staged' and has
 // not written its result file yet, so the database cannot tell "waiting for a
 // reboot" from "installing right now". Asking the guest is the only way, and
@@ -492,7 +559,76 @@ func TestRestoreActionAlwaysRemovesTheISO(t *testing.T) {
 // put back. Clearing unconditionally stranded the virtio-win ISO on the guest
 // forever after one transient Proxmox error: the row goes terminal, the
 // in-flight sweep never revisits it, and the record is gone.
+// CdromRestored tells FinishGuestToolsUpdate whether the borrowed drive has
+// actually been put back; a true CLEARS prior_cdrom_key, and
+// ListGuestToolsPendingCDROMRestore selects on that column being non-empty. So a
+// path that claims a restore it never performed does not just mislabel the row —
+// it deletes the record the retry sweep needs, and the virtio-win ISO stays
+// mounted on the guest for good, re-pinned against pruning.
+//
+// markFailed did exactly that. It is reached from a staging error and from an
+// expiry, neither of which touches the guest, and it passed true.
+//
+// A literal true is therefore always wrong here: the two paths that really do
+// restore (finishCancel, reconcileOne) pass a variable tracking what happened.
+//
+// Parsed rather than string-matched, and that distinction is not pedantry — the
+// first version of this test searched for "CdromRestored: true" with one space,
+// while gofmt aligns the two multi-line literals with two, so it silently
+// covered only one of the three call sites. It passed a reintroduction check
+// purely because the bug was reinstated at the site that happened to match.
+// Following the AST precedent in internal/api/handlers/tracktask_guard_test.go.
+func TestNoPathClaimsARestoreItDidNotPerform(t *testing.T) {
+	// Every non-test file in the package, so a fourth call site added later is
+	// covered on the day it appears rather than the day someone remembers.
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	checked := 0
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			kv, ok := n.(*ast.KeyValueExpr)
+			if !ok {
+				return true
+			}
+			key, ok := kv.Key.(*ast.Ident)
+			if !ok || key.Name != "CdromRestored" {
+				return true
+			}
+			checked++
+			if lit, ok := kv.Value.(*ast.Ident); ok && lit.Name == "true" {
+				t.Errorf("%s:%d passes CdromRestored: true — that clears prior_cdrom_key, so it is "+
+					"only correct where RestoreCDROM actually ran, and those paths pass a variable",
+					name, fset.Position(kv.Pos()).Line)
+			}
+			return true
+		})
+	}
+
+	// A guard that stops finding its subject stops guarding. If the field is
+	// renamed or the calls move, this fails rather than passing vacuously.
+	if checked == 0 {
+		t.Error("found no CdromRestored fields to check — has the field been renamed?")
+	}
+}
+
 func TestPendingRestoreIsRetryable(t *testing.T) {
+	// NOTE: this covers only isInFlightStage, which mirrors the sweep's SQL
+	// predicate rather than being it. It cannot catch a caller that clears
+	// prior_cdrom_key on the way to a terminal stage — the row then never
+	// reaches the sweep at all, whatever this says.
+	// TestNoPathClaimsARestoreItDidNotPerform covers that half.
+	//
 	// The retry sweep looks for terminal rows that still name a drive, so the
 	// two conditions have to be able to coexist.
 	for _, stage := range []string{"succeeded", "failed", "idle"} {

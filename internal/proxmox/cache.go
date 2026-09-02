@@ -35,13 +35,19 @@ const CacheChannel = "nexara:cache:invalidate"
 // from drifting indefinitely from authoritative state.
 const cacheTTL = 10 * time.Minute
 
-// cachedClientTimeout is the http.Client.Timeout used by every cached
+// CachedClientTimeout is the http.Client.Timeout used by every cached
 // PVE/PBS client. The per-call ctx deadline is the primary cancellation
 // signal in this codebase; this is a safety floor for callers that
 // neglected to set one. Generous enough to cover routine API calls
 // (storage migration polls, rolling-update upgrades) without being so
 // long that a wedged peer holds a pool slot indefinitely.
-const cachedClientTimeout = 5 * time.Minute
+//
+// Exported because it is the real per-call bound for anything reaching Proxmox
+// through the cache, which is every scheduler-driven engine. Callers that time
+// their own work out against it must say so in terms of this constant rather
+// than a copied number: guesttools' staging ceiling was once derived from the
+// 60s fallback timeout instead, which made it three times too small.
+const CachedClientTimeout = 5 * time.Minute
 
 // CacheKind identifies which sub-cache an invalidation message targets.
 type CacheKind string
@@ -214,7 +220,7 @@ func (c *ClientCache) Get(ctx context.Context, clusterID uuid.UUID) (*Client, er
 			TokenID:        cluster.TokenID,
 			TokenSecret:    tokenSecret,
 			TLSFingerprint: cluster.TlsFingerprint,
-			Timeout:        cachedClientTimeout,
+			Timeout:        CachedClientTimeout,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create proxmox client for cluster %s: %w", clusterID, err)
@@ -280,7 +286,7 @@ func (c *ClientCache) GetPBS(ctx context.Context, pbsID uuid.UUID) (*PBSClient, 
 			TokenID:        server.TokenID,
 			TokenSecret:    tokenSecret,
 			TLSFingerprint: server.TlsFingerprint,
-			Timeout:        cachedClientTimeout,
+			Timeout:        CachedClientTimeout,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create pbs client for server %s: %w", pbsID, err)

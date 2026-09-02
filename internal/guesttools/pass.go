@@ -32,6 +32,43 @@ const stagedUpdateMaxAge = 30 * 24 * time.Hour
 // installer takes minutes; a few hours means it is not coming back.
 const runningUpdateMaxAge = 6 * time.Hour
 
+// stageWorstCase is the longest a legitimate Stage can spend between writing the
+// 'staging' marker and replacing it, derived from the timeouts that actually
+// bound it rather than estimated.
+//
+// Derived, because the estimate was wrong. Engines reach Proxmox through the
+// shared client cache, whose per-call bound is proxmox.CachedClientTimeout (5
+// min) — not the 60s timeout on the uncached fallback that Engine.CreateClient
+// only uses when the cache misses. Budgeting the fallback number made this three
+// times too small.
+//
+// After the marker, Stage does three guest execs and two further HTTP calls —
+// the media attach and the script write. An exec costs guestExecTimeout plus up
+// to two client timeouts on top, because runScript sets
+// its deadline only after the initial exec call returns and re-checks it only at
+// the top of each poll, so a final in-flight status call can start just under the
+// deadline and still run its full timeout.
+//
+// The snapshot — the one genuinely slow step, bounded by snapshotWaitTimeout —
+// is taken BEFORE the marker is written, so it is deliberately not counted here.
+const stageWorstCase = 3*(guestExecTimeout+2*proxmox.CachedClientTimeout) + 2*proxmox.CachedClientTimeout
+
+// stagingUpdateMaxAge bounds a row still mid-Stage.
+//
+// Minutes, not days, because 'staging' is a marker Stage writes on its way
+// through and overwrites seconds later — it is never a resting state. A row
+// still wearing it long afterwards was stranded by a restart, or by an error
+// that never reached markFailed.
+//
+// Comfortably above stageWorstCase so no live Stage is ever expired out from
+// under itself; TestStaleCeilingFor holds that relationship, so raising a
+// timeout it depends on fails the build rather than silently narrowing it.
+//
+// Without any of this such a row waited out stagedUpdateMaxAge — thirty days
+// holding a max_concurrent slot, keeping its guest out of every pass, and
+// blocking the vanished-guest sweep for its whole cluster.
+const stagingUpdateMaxAge = 90 * time.Minute
+
 // bootInstallGrace is how long after a boot a guest is left out of the
 // automatic-withdrawal path, in seconds to match the uptime Proxmox reports.
 //
@@ -194,10 +231,22 @@ func (e *Engine) policyFor(ctx context.Context, clusterID uuid.UUID, vmid int32)
 	return &policy
 }
 
+// markFailed records a terminal failure, leaving the borrowed-CD-ROM record
+// standing so the media can still be put back.
+//
+// CdromRestored is false here and that is the whole point. Nothing on this path
+// restores anything — it is reached from a staging error and from an expiry,
+// neither of which touches the guest — so claiming otherwise cleared
+// prior_cdrom_key on the way past, and ListGuestToolsPendingCDROMRestore
+// selects on that column being non-empty. The record the retry sweep needed was
+// destroyed by the same write that made the sweep responsible for it, and the
+// virtio-win ISO stayed mounted on the guest for good, re-pinning itself
+// against pruning. Leaving the record intact hands the row straight to
+// retryPendingCDROMRestores, which runs at the end of this same pass.
 func (e *Engine) markFailed(ctx context.Context, clusterID uuid.UUID, vmid int32, msg string) {
 	if err := e.queries.FinishGuestToolsUpdate(ctx, db.FinishGuestToolsUpdateParams{
 		ClusterID: clusterID, Vmid: vmid, Stage: "failed", LastError: msg,
-		RebootRequired: false, CdromRestored: true,
+		RebootRequired: false, CdromRestored: false,
 	}); err != nil {
 		e.logger.Warn("guest tools: record failure", "vmid", vmid, "error", err)
 	}
@@ -249,19 +298,42 @@ func (e *Engine) retryPendingCDROMRestores(ctx context.Context) {
 		}
 		node, err := e.queries.GetNode(ctx, vm.NodeID)
 		if err != nil {
+			// Logged, not silent: a row wedged here retries every 60s forever,
+			// and Debug at least leaves a trail saying which one and why.
+			e.logger.Debug("guest tools: pending restore could not load node", "vmid", vmid, "error", err)
 			continue
 		}
 		client, err := e.CreateClient(ctx, state.ClusterID)
 		if err != nil {
+			e.logger.Debug("guest tools: pending restore could not build a client", "vmid", vmid, "error", err)
 			continue
 		}
-		if err := e.RestoreCDROM(ctx, client, node.Name, vmid, state.PriorCdromKey, state.PriorCdromValue); err != nil {
+
+		// Re-read immediately before touching the guest. This list was taken
+		// once, and each row above this one costs up to four network round
+		// trips, so a guest re-staged in the meantime would otherwise have the
+		// ISO pulled straight back off an update that now needs it.
+		fresh, err := e.queries.GetGuestToolsState(ctx, db.GetGuestToolsStateParams{
+			ClusterID: state.ClusterID, Vmid: state.Vmid,
+		})
+		if err != nil {
+			e.logger.Debug("guest tools: could not re-read state before a pending restore",
+				"vmid", vmid, "error", err)
+			continue
+		}
+		if isInFlightStage(fresh.Stage) || fresh.PriorCdromKey == "" {
+			continue
+		}
+		// And act on what the re-read said, not on the snapshot. A drive that
+		// changed rather than emptied would otherwise be restored to the old
+		// key, which is the one thing the re-read exists to prevent.
+		if err := e.RestoreCDROM(ctx, client, node.Name, vmid, fresh.PriorCdromKey, fresh.PriorCdromValue); err != nil {
 			e.logger.Warn("guest tools: retry of CD-ROM restore failed", "vmid", vmid, "error", err)
 			continue
 		}
 		e.logger.Info("guest tools: CD-ROM restored on retry",
-			"cluster_id", state.ClusterID, "vmid", vmid, "device", state.PriorCdromKey)
-		e.clearCDROMRestore(ctx, state)
+			"cluster_id", fresh.ClusterID, "vmid", vmid, "device", fresh.PriorCdromKey)
+		e.clearCDROMRestore(ctx, fresh)
 	}
 }
 
@@ -650,22 +722,77 @@ func (e *Engine) auditSupersededCancel(ctx context.Context, state db.GuestToolsS
 	}
 }
 
+// staleCeilingFor returns how long a row in a given stage may go without
+// progress, and how to describe having exceeded it.
+//
+// Three ceilings, because the three in-flight stages are waiting on completely
+// different things and lumping them together is what stranded rows for a month:
+//
+//   - staging: Stage itself is still running. Bounded work, so minutes.
+//   - staged:  waiting for somebody to reboot the guest. A server that reboots
+//     monthly is doing nothing wrong, so this one is deliberately generous.
+//   - running: the installer was actually started. It takes minutes; hours mean
+//     it is not coming back.
+//
+// Anything else gets the staged ceiling. Nothing else reaches here today — the
+// in-flight query selects exactly these three — but defaulting to the longest
+// ceiling means a stage added later fails safe, waiting too long rather than
+// tearing down an update somebody is relying on.
+func staleCeilingFor(stage string) (limit time.Duration, reason string) {
+	switch stage {
+	case "staging":
+		return stagingUpdateMaxAge, fmt.Sprintf("staging did not finish within %s", stagingUpdateMaxAge)
+	case "running":
+		return runningUpdateMaxAge, fmt.Sprintf("the updater did not report a result within %s of starting", runningUpdateMaxAge)
+	default:
+		return stagedUpdateMaxAge, fmt.Sprintf("no reboot within %s of staging", stagedUpdateMaxAge)
+	}
+}
+
 // expireIfStale abandons an update that has waited past its ceiling, freeing
 // the concurrency slot it holds. Returns true when the row was expired.
 func (e *Engine) expireIfStale(ctx context.Context, state db.GuestToolsState) bool {
 	if !state.StagedAt.Valid {
 		return false
 	}
-	age := time.Since(state.StagedAt.Time)
-	limit := stagedUpdateMaxAge
-	reason := fmt.Sprintf("no reboot within %s of staging", stagedUpdateMaxAge)
-	if state.Stage == "running" {
-		limit = runningUpdateMaxAge
-		reason = fmt.Sprintf("the updater did not report a result within %s of starting", runningUpdateMaxAge)
-	}
-	if age <= limit {
+	limit, reason := staleCeilingFor(state.Stage)
+	if time.Since(state.StagedAt.Time) <= limit {
 		return false
 	}
+
+	// Re-read before acting on a verdict this old.
+	//
+	// state comes from the snapshot ListGuestToolsInFlight took at the top of the
+	// pass, and every guest reconciled ahead of this one can have spent minutes in
+	// its own guest execs — so the snapshot's age can exceed the very ceiling
+	// being applied. In that window an operator can have re-staged this guest:
+	// Stage would then be running, or finished, against a row this function still
+	// remembers as abandoned.
+	//
+	// That used to be survivable because markFailed cleared prior_cdrom_key, which
+	// kept the mislabelled row out of the restore sweep entirely — the damage was
+	// a wrong badge. Now that the record is deliberately preserved, the sweep acts
+	// on it in the same pass and would pull the ISO off a guest whose update was
+	// just staged, or is being installed. TestPendingRestoreIsRetryable states the
+	// invariant this protects: an in-flight row must never be swept.
+	fresh, err := e.queries.GetGuestToolsState(ctx, db.GetGuestToolsStateParams{
+		ClusterID: state.ClusterID, Vmid: state.Vmid,
+	})
+	if err != nil {
+		e.logger.Debug("guest tools: could not re-read state before expiring",
+			"vmid", state.Vmid, "error", err)
+		return false
+	}
+	//
+	// Identity, not freshness: staged_at is written only by SetGuestToolsStage,
+	// which always sets stage in the same statement, so an unchanged pair means
+	// this is still the row that looked abandoned. No second age check is
+	// needed after it — the age was taken above and time only moves forward.
+	if fresh.Stage != state.Stage || !fresh.StagedAt.Valid ||
+		!fresh.StagedAt.Time.Equal(state.StagedAt.Time) {
+		return false
+	}
+	state = fresh
 	e.markFailed(ctx, state.ClusterID, state.Vmid, reason)
 	e.logger.Warn("guest tools: abandoning a stale update",
 		"cluster_id", state.ClusterID, "vmid", state.Vmid, "stage", state.Stage, "reason", reason)
@@ -734,7 +861,26 @@ func (e *Engine) StageOne(ctx context.Context, clusterID uuid.UUID, vmid int, ru
 	if err != nil {
 		return out, fmt.Errorf("proxmox client: %w", err)
 	}
-	return e.Stage(ctx, client, clusterID, cfg, node.Name, vmid, target, vwCfg.Storage, runNow)
+	result, err := e.Stage(ctx, client, clusterID, cfg, node.Name, vmid, target, vwCfg.Storage, runNow)
+	if err != nil {
+		// Do not leave the row wearing the 'staging' marker Stage wrote on its
+		// way in. Nothing else on this path records a failure — markFailed is
+		// reached only from the scheduled pass and from expiry — so a row
+		// stranded here used to sit in flight until something swept it up much
+		// later with a generic reason, holding a max_concurrent slot and keeping
+		// the guest out of every pass in between. Recorded here, the operator
+		// gets the real error, and the borrowed drive reaches the restore sweep.
+		//
+		// Gated on this call having written the marker, not on the row merely
+		// reading 'staging'. Nothing serialises two stagings of one guest, and
+		// both would see that stage — so a double-click whose second request
+		// failed early would otherwise mark the first one's live row failed,
+		// and the same-tick restore sweep would then take its media away.
+		if result.MarkerWritten {
+			e.markFailed(ctx, clusterID, safeconv.Int32(vmid), err.Error())
+		}
+	}
+	return result, err
 }
 
 // CancelOne clears a staged update for a single guest.

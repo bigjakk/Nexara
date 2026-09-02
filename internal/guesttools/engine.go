@@ -353,6 +353,10 @@ type StageResult struct {
 	Target   Target
 	CDROMKey string
 	RanNow   bool
+	// MarkerWritten reports that this call wrote the row's 'staging' marker, so
+	// a caller handling an error knows the row is its to clean up. Set even on
+	// the error returns after that write — that is the case it exists for.
+	MarkerWritten bool
 	// SnapshotName and SnapshotUPID are set only when a snapshot was taken,
 	// which happens on the immediate path only. The UPID is returned rather
 	// than recorded here so the calling handler can TrackTask it, keeping task
@@ -447,6 +451,12 @@ func (e *Engine) Stage(
 	}); err != nil {
 		return result, fmt.Errorf("record staging state: %w", err)
 	}
+	// From here on this call owns the row's 'staging' marker, and is the only
+	// caller entitled to clean it up if the rest of this fails. Reported rather
+	// than inferred from a later re-read: two concurrent stagings of one guest
+	// both see 'staging', so a loser failing early would otherwise record the
+	// winner's live row as failed.
+	result.MarkerWritten = true
 
 	// POST, not PUT: the sync variant hot-plugs the media change so the guest
 	// sees the disc without a reboot. Skipped when the drive already holds the
