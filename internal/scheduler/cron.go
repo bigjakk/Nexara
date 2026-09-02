@@ -41,28 +41,45 @@ func NextRunTime(schedule string, from time.Time) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("parse cron %q: %w", schedule, err)
 	}
 	next := sched.Next(from)
-	// IsZero is the case robfig actually produces; the After check is the
-	// general form of the same property, so no caller can be handed a
-	// timestamp that would make its row due the moment it is written.
-	if next.IsZero() || !next.After(from) {
+	// robfig answers an unsatisfiable expression with the zero time, which is
+	// never after from — so this covers that case and every other answer that
+	// would make a row due the moment it is written.
+	if !next.After(from) {
 		return time.Time{}, fmt.Errorf("%w: %q", ErrUnsatisfiableSchedule, schedule)
 	}
 	return next, nil
 }
 
-// ValidateCron checks that a cron expression is well-formed AND that it can
-// actually fire. Parsing alone is not validation — see ErrUnsatisfiableSchedule.
+// NextValidRun is NextRunTime with an operator-facing message on failure. The
+// message replaces the error rather than wrapping it, so ErrUnsatisfiableSchedule
+// does NOT survive this call — callers that branch on the sentinel want
+// NextRunTime, which still wraps it.
 //
 // This is the gate every write path goes through, so it is what keeps a new
 // bad schedule out of the database; the guards in the scheduler are the safety
-// net for rows written before this existed, or edited by hand.
-func ValidateCron(schedule string) error {
-	if _, err := NextRunTime(schedule, time.Now()); err != nil {
-		if errors.Is(err, ErrUnsatisfiableSchedule) {
-			return fmt.Errorf("cron expression %q never comes round — check the day of month against the month "+
-				"(April, June, September and November have no 31st; February has no 30th)", schedule)
-		}
-		return fmt.Errorf("invalid cron expression %q: %w", schedule, err)
+// net for rows written before this existed, or edited by hand. Callers that
+// need the value as well as the verdict take it from here rather than
+// validating and then parsing again — on scheduled_tasks the two must agree,
+// because a next_run_at the row cannot use reads as "due now".
+func NextValidRun(schedule string, from time.Time) (time.Time, error) {
+	next, err := NextRunTime(schedule, from)
+	switch {
+	case err == nil:
+		return next, nil
+	case errors.Is(err, ErrUnsatisfiableSchedule):
+		return time.Time{}, fmt.Errorf("cron expression %q never comes round — check the day of month against the month "+
+			"(April, June, September and November have no 31st; February has no 30th)", schedule)
+	default:
+		// Returned as-is: NextRunTime already names the expression and carries
+		// robfig's own field text, so wrapping it again put the expression in
+		// a single 400 three times over.
+		return time.Time{}, err
 	}
-	return nil
+}
+
+// ValidateCron checks that a cron expression is well-formed AND that it can
+// actually fire. Parsing alone is not validation — see ErrUnsatisfiableSchedule.
+func ValidateCron(schedule string) error {
+	_, err := NextValidRun(schedule, time.Now())
+	return err
 }

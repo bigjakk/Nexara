@@ -115,24 +115,18 @@ func (h *ScheduleHandler) Create(c fiber.Ctx) error {
 	if !validScheduleActions[req.Action] {
 		return fiber.NewError(fiber.StatusBadRequest, "action must be one of: snapshot, reboot")
 	}
-	if err := scheduler.ValidateCron(req.Schedule); err != nil {
+	// One call, so the next run stored is the one the validation computed.
+	// It matters on this table: an invalid next_run_at reads as "due now", so
+	// a schedule that can never fire would be claimed and run on every tick.
+	nextRun, err := scheduler.NextValidRun(req.Schedule, time.Now())
+	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
+	nextRunAt := pgtype.Timestamptz{Time: nextRun, Valid: true}
 
 	if req.Params == nil {
 		req.Params = json.RawMessage(`{}`)
 	}
-
-	// ValidateCron above has already rejected anything NextRunTime could fail
-	// on, including an expression that parses but names a date that never
-	// occurs. The check stays because the alternative on this table is not
-	// harmless: an invalid next_run_at reads as "due now", so a schedule that
-	// can never fire would be claimed and run on every tick.
-	nextRun, cronErr := scheduler.NextRunTime(req.Schedule, time.Now())
-	if cronErr != nil {
-		return fiber.NewError(fiber.StatusBadRequest, cronErr.Error())
-	}
-	nextRunAt := pgtype.Timestamptz{Time: nextRun, Valid: true}
 
 	task, err := h.queries.InsertScheduledTask(c.Context(), db.InsertScheduledTaskParams{
 		ClusterID:    clusterID,
