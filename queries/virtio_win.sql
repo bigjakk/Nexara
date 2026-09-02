@@ -1,13 +1,7 @@
--- name: UpsertVirtioWinRelease :one
---
--- checksum/checksum_algorithm are operator-supplied and are deliberately NOT
--- overwritten by the upstream refresh. The refresh knows the URL and the size;
--- it never learns a hash, because upstream publishes none for the ISO. Letting
--- EXCLUDED win here would silently erase a checksum an operator had pasted in
--- the moment the next 6-hourly catalog refresh ran.
+-- name: UpsertVirtioWinRelease :exec
 INSERT INTO virtio_win_releases (
-    version, iso_version, iso_filename, iso_url, iso_size, is_stable, published_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    version, iso_version, iso_filename, iso_url, iso_size, is_stable
+) VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (version) DO UPDATE SET
     iso_version  = EXCLUDED.iso_version,
     iso_filename = EXCLUDED.iso_filename,
@@ -19,9 +13,7 @@ ON CONFLICT (version) DO UPDATE SET
     iso_size     = CASE WHEN EXCLUDED.iso_size > 0
                         THEN EXCLUDED.iso_size
                         ELSE virtio_win_releases.iso_size END,
-    is_stable    = EXCLUDED.is_stable,
-    published_at = COALESCE(EXCLUDED.published_at, virtio_win_releases.published_at)
-RETURNING *;
+    is_stable    = EXCLUDED.is_stable;
 
 -- name: GetVirtioWinRelease :one
 SELECT * FROM virtio_win_releases WHERE version = $1;
@@ -40,11 +32,6 @@ SELECT * FROM virtio_win_releases WHERE is_stable ORDER BY version DESC LIMIT 1;
 -- copy. No version string is empty, so the <> holds nothing back.
 -- name: ClearVirtioWinStableFlag :exec
 UPDATE virtio_win_releases SET is_stable = false WHERE is_stable AND version <> $1;
-
--- name: SetVirtioWinReleaseChecksum :exec
-UPDATE virtio_win_releases
-SET checksum = $2, checksum_algorithm = $3
-WHERE version = $1;
 
 -- name: GetVirtioWinConfig :one
 SELECT * FROM virtio_win_configs WHERE cluster_id = $1;
@@ -102,7 +89,7 @@ ON CONFLICT (cluster_id) DO UPDATE SET
         WHEN virtio_win_configs.next_check_at IS NULL THEN NULL
         WHEN virtio_win_configs.check_schedule IS DISTINCT FROM EXCLUDED.check_schedule
              OR virtio_win_configs.check_timezone IS DISTINCT FROM EXCLUDED.check_timezone
-            THEN sqlc.narg('next_check_at')::timestamptz
+            THEN sqlc.arg('next_check_at')::timestamptz
         ELSE virtio_win_configs.next_check_at
     END
 RETURNING *;
@@ -124,11 +111,8 @@ WHERE enabled
 UPDATE virtio_win_configs
 SET last_check_at = now(),
     last_error    = $2,
-    next_check_at = sqlc.narg('next_check_at')::timestamptz
+    next_check_at = sqlc.arg('next_check_at')::timestamptz
 WHERE cluster_id = $1;
-
--- name: DeleteVirtioWinConfig :exec
-DELETE FROM virtio_win_configs WHERE cluster_id = $1;
 
 -- ListPinnedVirtioWinVersions returns every version any cluster has pinned.
 -- The prune keep-set is built from this plus the newest release, so a pin held
@@ -136,10 +120,13 @@ DELETE FROM virtio_win_configs WHERE cluster_id = $1;
 -- name: ListPinnedVirtioWinVersions :many
 SELECT DISTINCT target_version FROM virtio_win_configs WHERE target_version <> '';
 
+-- InsertVirtioWinDownload records the intent to fetch, before the node is asked
+-- to. status and upid are left to their column defaults ('pending' and empty):
+-- the row exists precisely because the download has not started yet.
 -- name: InsertVirtioWinDownload :one
 INSERT INTO virtio_win_downloads (
-    cluster_id, node, storage, version, filename, status, upid, triggered_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    cluster_id, node, storage, version, filename, triggered_by
+) VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- SetVirtioWinDownloadUPID records the Proxmox task once the node has accepted

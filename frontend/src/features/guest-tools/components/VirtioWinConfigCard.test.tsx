@@ -65,9 +65,6 @@ const releases: VirtioWinRelease[] = [
     iso_url: "https://example.invalid/virtio-win-0.1.302.iso",
     iso_size: 877373440,
     is_stable: true,
-    checksum: "",
-    checksum_algorithm: "",
-    published_at: null,
     discovered_at: "2026-08-31T00:00:00Z",
   },
   {
@@ -77,9 +74,6 @@ const releases: VirtioWinRelease[] = [
     iso_url: "https://example.invalid/virtio-win-0.1.285.iso",
     iso_size: 0,
     is_stable: false,
-    checksum: "",
-    checksum_algorithm: "",
-    published_at: null,
     discovered_at: "2026-05-01T00:00:00Z",
   },
 ];

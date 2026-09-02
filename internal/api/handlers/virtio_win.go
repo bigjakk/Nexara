@@ -85,16 +85,13 @@ type virtioWinConfigResponse struct {
 }
 
 type virtioWinReleaseResponse struct {
-	Version           string  `json:"version"`
-	ISOVersion        string  `json:"iso_version"`
-	ISOFilename       string  `json:"iso_filename"`
-	ISOURL            string  `json:"iso_url"`
-	ISOSize           int64   `json:"iso_size"`
-	IsStable          bool    `json:"is_stable"`
-	Checksum          string  `json:"checksum"`
-	ChecksumAlgorithm string  `json:"checksum_algorithm"`
-	PublishedAt       *string `json:"published_at"`
-	DiscoveredAt      string  `json:"discovered_at"`
+	Version      string `json:"version"`
+	ISOVersion   string `json:"iso_version"`
+	ISOFilename  string `json:"iso_filename"`
+	ISOURL       string `json:"iso_url"`
+	ISOSize      int64  `json:"iso_size"`
+	IsStable     bool   `json:"is_stable"`
+	DiscoveredAt string `json:"discovered_at"`
 }
 
 type virtioWinDownloadResponse struct {
@@ -113,22 +110,15 @@ type virtioWinDownloadResponse struct {
 }
 
 func toVirtioWinReleaseResponse(r db.VirtioWinRelease) virtioWinReleaseResponse {
-	resp := virtioWinReleaseResponse{
-		Version:           r.Version,
-		ISOVersion:        r.IsoVersion,
-		ISOFilename:       r.IsoFilename,
-		ISOURL:            r.IsoUrl,
-		ISOSize:           r.IsoSize,
-		IsStable:          r.IsStable,
-		Checksum:          r.Checksum,
-		ChecksumAlgorithm: r.ChecksumAlgorithm,
-		DiscoveredAt:      r.DiscoveredAt.Format(time.RFC3339),
+	return virtioWinReleaseResponse{
+		Version:      r.Version,
+		ISOVersion:   r.IsoVersion,
+		ISOFilename:  r.IsoFilename,
+		ISOURL:       r.IsoUrl,
+		ISOSize:      r.IsoSize,
+		IsStable:     r.IsStable,
+		DiscoveredAt: r.DiscoveredAt.Format(time.RFC3339),
 	}
-	if r.PublishedAt.Valid {
-		s := r.PublishedAt.Time.Format(time.RFC3339)
-		resp.PublishedAt = &s
-	}
-	return resp
 }
 
 func toVirtioWinDownloadResponse(d db.VirtioWinDownload) virtioWinDownloadResponse {
@@ -270,10 +260,7 @@ func (h *VirtioWinHandler) UpdateConfig(c fiber.Ctx) error {
 		// Only applied when the schedule or its zone actually changed; the
 		// statement decides, so a save that touches neither cannot push the
 		// pending check out. See UpsertVirtioWinConfig.
-		NextCheckAt: pgtype.Timestamptz{
-			Time:  virtiowin.NextCheck(req.CheckSchedule, req.CheckTimezone, time.Now()),
-			Valid: true,
-		},
+		NextCheckAt: virtiowin.NextCheck(req.CheckSchedule, req.CheckTimezone, time.Now()),
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "failed to save virtio-win config")
@@ -616,7 +603,8 @@ func (h *VirtioWinHandler) SetMirror(c fiber.Ctx) error {
 		// Plain http is allowed but never by accident. The ISO it points at is
 		// installed as kernel-mode drivers inside Windows guests, and upstream
 		// publishes no checksum to fall back on, so an unauthenticated fetch is
-		// worth one deliberate click. Per-release checksums remain available.
+		// worth one deliberate click. There is no second line of defence: the
+		// transport is the only thing authenticating that ISO.
 		if strings.HasPrefix(base, "http://") && !req.AllowInsecure {
 			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 				"error": "insecure_source_confirm_required",

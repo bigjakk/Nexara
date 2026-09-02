@@ -112,7 +112,7 @@ func (e *Engine) RefreshCatalog(ctx context.Context) (Release, error) {
 }
 
 func (e *Engine) storeRelease(ctx context.Context, rel Release) error {
-	_, err := e.queries.UpsertVirtioWinRelease(ctx, db.UpsertVirtioWinReleaseParams{
+	return e.queries.UpsertVirtioWinRelease(ctx, db.UpsertVirtioWinReleaseParams{
 		Version:     rel.Version,
 		IsoVersion:  rel.ISOVersion,
 		IsoFilename: rel.ISOFilename,
@@ -120,7 +120,6 @@ func (e *Engine) storeRelease(ctx context.Context, rel Release) error {
 		IsoSize:     rel.ISOSize,
 		IsStable:    rel.IsStable,
 	})
-	return err
 }
 
 // ErrNoTarget reports that a cluster's effective target version could not be
@@ -294,8 +293,6 @@ func (e *Engine) dispatch(
 		Storage:     cfg.Storage,
 		Version:     target.Version,
 		Filename:    target.IsoFilename,
-		Status:      "pending",
-		Upid:        "",
 		TriggeredBy: triggeredBy,
 	})
 	if err != nil {
@@ -317,8 +314,6 @@ func (e *Engine) dispatch(
 		URL:                isoURL,
 		Content:            "iso",
 		Filename:           target.IsoFilename,
-		Checksum:           target.Checksum,
-		ChecksumAlgorithm:  target.ChecksumAlgorithm,
 		VerifyCertificates: &verify,
 	}
 	upid, err := client.DownloadURLToStorage(ctx, node, cfg.Storage, params)
@@ -749,7 +744,7 @@ func (e *Engine) MarkChecked(ctx context.Context, cfg db.VirtioWinConfig, syncEr
 	if err := e.queries.MarkVirtioWinConfigChecked(ctx, db.MarkVirtioWinConfigCheckedParams{
 		ClusterID:   cfg.ClusterID,
 		LastError:   msg,
-		NextCheckAt: pgtype.Timestamptz{Time: next, Valid: true},
+		NextCheckAt: next,
 	}); err != nil {
 		e.logger.Warn("virtio-win: record check outcome failed", "cluster_id", cfg.ClusterID, "error", err)
 	}

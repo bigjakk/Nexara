@@ -10,13 +10,6 @@ export interface VirtioWinRelease {
   iso_size: number;
   /** True for the one version upstream currently marks stable. */
   is_stable: boolean;
-  /**
-   * Operator-supplied. Upstream publishes no ISO checksum — its CHECKSUM file
-   * covers only the RPMs — so this is empty unless somebody pasted one in.
-   */
-  checksum: string;
-  checksum_algorithm: string;
-  published_at: string | null;
   discovered_at: string;
 }
 

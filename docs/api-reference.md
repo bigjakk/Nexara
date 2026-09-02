@@ -682,10 +682,9 @@ downloading writes into a Proxmox storage.
 
 The release catalogue is global — every cluster sees the same upstream list.
 Upstream publishes **no ISO checksum** (its `CHECKSUM` file covers only the
-RPMs), so the field is empty unless an operator supplies one, in which case it is
-passed through to Proxmox's `download-url` call. Downloads are dispatched
-asynchronously and reconciled from their UPID, so a pass survives a Nexara
-restart.
+RPMs), so a downloaded ISO is not hash-verified — which is why the source base
+URL should be HTTPS. Downloads are dispatched asynchronously and reconciled from
+their UPID, so a pass survives a Nexara restart.
 
 **Check schedule.** The config carries `check_schedule` (a five-field cron
 expression; empty means every six hours, counted from the last check) and

@@ -30,16 +30,12 @@ CREATE TABLE IF NOT EXISTS virtio_win_releases (
     iso_url            TEXT NOT NULL,
     iso_size           BIGINT NOT NULL DEFAULT 0,
     is_stable          BOOLEAN NOT NULL DEFAULT false,
-    checksum           TEXT NOT NULL DEFAULT '',
-    checksum_algorithm TEXT NOT NULL DEFAULT '',
-    published_at       TIMESTAMPTZ,
     discovered_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 COMMENT ON COLUMN virtio_win_releases.version IS 'Upstream directory version including the release suffix, e.g. "0.1.302-1"';
 COMMENT ON COLUMN virtio_win_releases.iso_version IS 'Version as it appears in the ISO filename, i.e. version without the release suffix ("0.1.302")';
 COMMENT ON COLUMN virtio_win_releases.is_stable IS 'True for the single version the upstream stable-virtio/ redirect currently points at';
-COMMENT ON COLUMN virtio_win_releases.checksum IS 'Empty by default: upstream publishes no ISO checksum (its CHECKSUM file covers only the RPMs). Operator-supplied when set, and passed through to the Proxmox download-url call';
 
 CREATE INDEX IF NOT EXISTS idx_virtio_win_releases_stable
     ON virtio_win_releases (is_stable) WHERE is_stable;
@@ -89,15 +85,15 @@ COMMENT ON COLUMN virtio_win_downloads.upid IS 'Proxmox task UPID returned by do
 CREATE INDEX IF NOT EXISTS idx_virtio_win_downloads_cluster
     ON virtio_win_downloads (cluster_id, started_at DESC);
 
--- The reconcile loop scans for unfinished work on every tick; keep that scan
--- off the full history.
-CREATE INDEX IF NOT EXISTS idx_virtio_win_downloads_active
-    ON virtio_win_downloads (status) WHERE status IN ('pending', 'running');
-
 -- One in-flight download per (cluster, storage, version). The scheduler already
 -- checks storage content before dispatching, but that check and the insert are
 -- not atomic: two ticks racing (or a manual download racing a tick) would
 -- otherwise queue the same 837 MiB fetch twice.
+--
+-- It doubles as the reconcile loop's index: that loop scans for unfinished work
+-- on every tick, and this partial index holds exactly the unfinished rows, so
+-- the scan stays off the full history without a second index over the same
+-- predicate.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_virtio_win_downloads_inflight
     ON virtio_win_downloads (cluster_id, storage, version)
     WHERE status IN ('pending', 'running');

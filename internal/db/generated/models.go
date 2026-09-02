@@ -1287,12 +1287,8 @@ type VirtioWinRelease struct {
 	IsoUrl      string `json:"iso_url"`
 	IsoSize     int64  `json:"iso_size"`
 	// True for the single version the upstream stable-virtio/ redirect currently points at
-	IsStable bool `json:"is_stable"`
-	// Empty by default: upstream publishes no ISO checksum (its CHECKSUM file covers only the RPMs). Operator-supplied when set, and passed through to the Proxmox download-url call
-	Checksum          string             `json:"checksum"`
-	ChecksumAlgorithm string             `json:"checksum_algorithm"`
-	PublishedAt       pgtype.Timestamptz `json:"published_at"`
-	DiscoveredAt      time.Time          `json:"discovered_at"`
+	IsStable     bool      `json:"is_stable"`
+	DiscoveredAt time.Time `json:"discovered_at"`
 }
 
 type Vm struct {

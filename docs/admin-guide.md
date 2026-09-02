@@ -806,7 +806,7 @@ An update needs an ISO to install from, and Nexara can keep one in Proxmox stora
 
 These actions are gated on the **storage** permissions (`view:storage` / `manage:storage`), not the guest-tools ones, because downloading writes into a Proxmox storage.
 
-> Upstream publishes **no ISO checksum** — its `CHECKSUM` file covers only the RPMs — so the field is empty unless you supply one, in which case Proxmox verifies it. Downloads are dispatched asynchronously and reconciled from their Proxmox task ID, so a download finishes correctly even if Nexara restarts.
+> Upstream publishes **no ISO checksum** — its `CHECKSUM` file covers only the RPMs — so a downloaded ISO is not hash-verified, which is why the source should be HTTPS. Downloads are dispatched asynchronously and reconciled from their Proxmox task ID, so a download finishes correctly even if Nexara restarts.
 
 #### When it checks
 
@@ -842,7 +842,7 @@ wget -m -np https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/arc
 
 Serve the resulting directory over HTTP and set the base URL to its root. The `stable-virtio/` redirect is not needed — without one, Nexara uses the newest version in the archive index instead.
 
-> Two confirmations you may be asked for, both once, both deliberate: a base that resolves to a **private address** (which an internal mirror always does), and a **plain-HTTP** base. HTTP means the driver media a Windows guest installs arrives with no integrity or authenticity protection, and upstream publishes no checksum to fall back on — so prefer HTTPS on the mirror, or set a per-release checksum. Cloud metadata and other never-routable addresses are refused outright and cannot be confirmed through.
+> Two confirmations you may be asked for, both once, both deliberate: a base that resolves to a **private address** (which an internal mirror always does), and a **plain-HTTP** base. HTTP means the driver media a Windows guest installs arrives with no integrity or authenticity protection, and upstream publishes no checksum to fall back on — so serve the mirror over HTTPS. Cloud metadata and other never-routable addresses are refused outright and cannot be confirmed through.
 
 After changing the source, run **Check now** to rebuild the release list from it; the versions listed until then were discovered against the previous source.
 

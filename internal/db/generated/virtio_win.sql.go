@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -50,15 +51,6 @@ func (q *Queries) DeleteOldVirtioWinDownloads(ctx context.Context, finishedAt pg
 	return err
 }
 
-const deleteVirtioWinConfig = `-- name: DeleteVirtioWinConfig :exec
-DELETE FROM virtio_win_configs WHERE cluster_id = $1
-`
-
-func (q *Queries) DeleteVirtioWinConfig(ctx context.Context, clusterID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteVirtioWinConfig, clusterID)
-	return err
-}
-
 const finishVirtioWinDownload = `-- name: FinishVirtioWinDownload :exec
 UPDATE virtio_win_downloads
 SET status = $2, error = $3, finished_at = now()
@@ -77,7 +69,7 @@ func (q *Queries) FinishVirtioWinDownload(ctx context.Context, arg FinishVirtioW
 }
 
 const getStableVirtioWinRelease = `-- name: GetStableVirtioWinRelease :one
-SELECT version, iso_version, iso_filename, iso_url, iso_size, is_stable, checksum, checksum_algorithm, published_at, discovered_at FROM virtio_win_releases WHERE is_stable ORDER BY version DESC LIMIT 1
+SELECT version, iso_version, iso_filename, iso_url, iso_size, is_stable, discovered_at FROM virtio_win_releases WHERE is_stable ORDER BY version DESC LIMIT 1
 `
 
 func (q *Queries) GetStableVirtioWinRelease(ctx context.Context) (VirtioWinRelease, error) {
@@ -90,9 +82,6 @@ func (q *Queries) GetStableVirtioWinRelease(ctx context.Context) (VirtioWinRelea
 		&i.IsoUrl,
 		&i.IsoSize,
 		&i.IsStable,
-		&i.Checksum,
-		&i.ChecksumAlgorithm,
-		&i.PublishedAt,
 		&i.DiscoveredAt,
 	)
 	return i, err
@@ -124,7 +113,7 @@ func (q *Queries) GetVirtioWinConfig(ctx context.Context, clusterID uuid.UUID) (
 }
 
 const getVirtioWinRelease = `-- name: GetVirtioWinRelease :one
-SELECT version, iso_version, iso_filename, iso_url, iso_size, is_stable, checksum, checksum_algorithm, published_at, discovered_at FROM virtio_win_releases WHERE version = $1
+SELECT version, iso_version, iso_filename, iso_url, iso_size, is_stable, discovered_at FROM virtio_win_releases WHERE version = $1
 `
 
 func (q *Queries) GetVirtioWinRelease(ctx context.Context, version string) (VirtioWinRelease, error) {
@@ -137,9 +126,6 @@ func (q *Queries) GetVirtioWinRelease(ctx context.Context, version string) (Virt
 		&i.IsoUrl,
 		&i.IsoSize,
 		&i.IsStable,
-		&i.Checksum,
-		&i.ChecksumAlgorithm,
-		&i.PublishedAt,
 		&i.DiscoveredAt,
 	)
 	return i, err
@@ -147,8 +133,8 @@ func (q *Queries) GetVirtioWinRelease(ctx context.Context, version string) (Virt
 
 const insertVirtioWinDownload = `-- name: InsertVirtioWinDownload :one
 INSERT INTO virtio_win_downloads (
-    cluster_id, node, storage, version, filename, status, upid, triggered_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    cluster_id, node, storage, version, filename, triggered_by
+) VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, cluster_id, node, storage, version, filename, status, upid, error, triggered_by, started_at, finished_at
 `
 
@@ -158,11 +144,12 @@ type InsertVirtioWinDownloadParams struct {
 	Storage     string    `json:"storage"`
 	Version     string    `json:"version"`
 	Filename    string    `json:"filename"`
-	Status      string    `json:"status"`
-	Upid        string    `json:"upid"`
 	TriggeredBy string    `json:"triggered_by"`
 }
 
+// InsertVirtioWinDownload records the intent to fetch, before the node is asked
+// to. status and upid are left to their column defaults ('pending' and empty):
+// the row exists precisely because the download has not started yet.
 func (q *Queries) InsertVirtioWinDownload(ctx context.Context, arg InsertVirtioWinDownloadParams) (VirtioWinDownload, error) {
 	row := q.db.QueryRow(ctx, insertVirtioWinDownload,
 		arg.ClusterID,
@@ -170,8 +157,6 @@ func (q *Queries) InsertVirtioWinDownload(ctx context.Context, arg InsertVirtioW
 		arg.Storage,
 		arg.Version,
 		arg.Filename,
-		arg.Status,
-		arg.Upid,
 		arg.TriggeredBy,
 	)
 	var i VirtioWinDownload
@@ -392,7 +377,7 @@ func (q *Queries) ListVirtioWinDownloadsByCluster(ctx context.Context, arg ListV
 }
 
 const listVirtioWinReleases = `-- name: ListVirtioWinReleases :many
-SELECT version, iso_version, iso_filename, iso_url, iso_size, is_stable, checksum, checksum_algorithm, published_at, discovered_at FROM virtio_win_releases ORDER BY discovered_at DESC, version DESC
+SELECT version, iso_version, iso_filename, iso_url, iso_size, is_stable, discovered_at FROM virtio_win_releases ORDER BY discovered_at DESC, version DESC
 `
 
 func (q *Queries) ListVirtioWinReleases(ctx context.Context) ([]VirtioWinRelease, error) {
@@ -411,9 +396,6 @@ func (q *Queries) ListVirtioWinReleases(ctx context.Context) ([]VirtioWinRelease
 			&i.IsoUrl,
 			&i.IsoSize,
 			&i.IsStable,
-			&i.Checksum,
-			&i.ChecksumAlgorithm,
-			&i.PublishedAt,
 			&i.DiscoveredAt,
 		); err != nil {
 			return nil, err
@@ -435,9 +417,9 @@ WHERE cluster_id = $1
 `
 
 type MarkVirtioWinConfigCheckedParams struct {
-	ClusterID   uuid.UUID          `json:"cluster_id"`
-	LastError   string             `json:"last_error"`
-	NextCheckAt pgtype.Timestamptz `json:"next_check_at"`
+	ClusterID   uuid.UUID `json:"cluster_id"`
+	LastError   string    `json:"last_error"`
+	NextCheckAt time.Time `json:"next_check_at"`
 }
 
 // MarkVirtioWinConfigChecked records the outcome and arms the next check in one
@@ -465,23 +447,6 @@ type SetVirtioWinDownloadUPIDParams struct {
 // duplicate; the UPID only exists after that call returns.
 func (q *Queries) SetVirtioWinDownloadUPID(ctx context.Context, arg SetVirtioWinDownloadUPIDParams) error {
 	_, err := q.db.Exec(ctx, setVirtioWinDownloadUPID, arg.ID, arg.Upid)
-	return err
-}
-
-const setVirtioWinReleaseChecksum = `-- name: SetVirtioWinReleaseChecksum :exec
-UPDATE virtio_win_releases
-SET checksum = $2, checksum_algorithm = $3
-WHERE version = $1
-`
-
-type SetVirtioWinReleaseChecksumParams struct {
-	Version           string `json:"version"`
-	Checksum          string `json:"checksum"`
-	ChecksumAlgorithm string `json:"checksum_algorithm"`
-}
-
-func (q *Queries) SetVirtioWinReleaseChecksum(ctx context.Context, arg SetVirtioWinReleaseChecksumParams) error {
-	_, err := q.db.Exec(ctx, setVirtioWinReleaseChecksum, arg.Version, arg.Checksum, arg.ChecksumAlgorithm)
 	return err
 }
 
@@ -518,15 +483,15 @@ RETURNING cluster_id, enabled, storage, node, target_version, prune_enabled, las
 `
 
 type UpsertVirtioWinConfigParams struct {
-	ClusterID     uuid.UUID          `json:"cluster_id"`
-	Enabled       bool               `json:"enabled"`
-	Storage       string             `json:"storage"`
-	Node          string             `json:"node"`
-	TargetVersion string             `json:"target_version"`
-	PruneEnabled  pgtype.Bool        `json:"prune_enabled"`
-	CheckSchedule string             `json:"check_schedule"`
-	CheckTimezone string             `json:"check_timezone"`
-	NextCheckAt   pgtype.Timestamptz `json:"next_check_at"`
+	ClusterID     uuid.UUID   `json:"cluster_id"`
+	Enabled       bool        `json:"enabled"`
+	Storage       string      `json:"storage"`
+	Node          string      `json:"node"`
+	TargetVersion string      `json:"target_version"`
+	PruneEnabled  pgtype.Bool `json:"prune_enabled"`
+	CheckSchedule string      `json:"check_schedule"`
+	CheckTimezone string      `json:"check_timezone"`
+	NextCheckAt   time.Time   `json:"next_check_at"`
 }
 
 // prune_enabled follows the omit-vs-assert idiom from UpsertDRSConfig: it is a
@@ -586,10 +551,10 @@ func (q *Queries) UpsertVirtioWinConfig(ctx context.Context, arg UpsertVirtioWin
 	return i, err
 }
 
-const upsertVirtioWinRelease = `-- name: UpsertVirtioWinRelease :one
+const upsertVirtioWinRelease = `-- name: UpsertVirtioWinRelease :exec
 INSERT INTO virtio_win_releases (
-    version, iso_version, iso_filename, iso_url, iso_size, is_stable, published_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    version, iso_version, iso_filename, iso_url, iso_size, is_stable
+) VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (version) DO UPDATE SET
     iso_version  = EXCLUDED.iso_version,
     iso_filename = EXCLUDED.iso_filename,
@@ -601,48 +566,26 @@ ON CONFLICT (version) DO UPDATE SET
     iso_size     = CASE WHEN EXCLUDED.iso_size > 0
                         THEN EXCLUDED.iso_size
                         ELSE virtio_win_releases.iso_size END,
-    is_stable    = EXCLUDED.is_stable,
-    published_at = COALESCE(EXCLUDED.published_at, virtio_win_releases.published_at)
-RETURNING version, iso_version, iso_filename, iso_url, iso_size, is_stable, checksum, checksum_algorithm, published_at, discovered_at
+    is_stable    = EXCLUDED.is_stable
 `
 
 type UpsertVirtioWinReleaseParams struct {
-	Version     string             `json:"version"`
-	IsoVersion  string             `json:"iso_version"`
-	IsoFilename string             `json:"iso_filename"`
-	IsoUrl      string             `json:"iso_url"`
-	IsoSize     int64              `json:"iso_size"`
-	IsStable    bool               `json:"is_stable"`
-	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	Version     string `json:"version"`
+	IsoVersion  string `json:"iso_version"`
+	IsoFilename string `json:"iso_filename"`
+	IsoUrl      string `json:"iso_url"`
+	IsoSize     int64  `json:"iso_size"`
+	IsStable    bool   `json:"is_stable"`
 }
 
-// checksum/checksum_algorithm are operator-supplied and are deliberately NOT
-// overwritten by the upstream refresh. The refresh knows the URL and the size;
-// it never learns a hash, because upstream publishes none for the ISO. Letting
-// EXCLUDED win here would silently erase a checksum an operator had pasted in
-// the moment the next 6-hourly catalog refresh ran.
-func (q *Queries) UpsertVirtioWinRelease(ctx context.Context, arg UpsertVirtioWinReleaseParams) (VirtioWinRelease, error) {
-	row := q.db.QueryRow(ctx, upsertVirtioWinRelease,
+func (q *Queries) UpsertVirtioWinRelease(ctx context.Context, arg UpsertVirtioWinReleaseParams) error {
+	_, err := q.db.Exec(ctx, upsertVirtioWinRelease,
 		arg.Version,
 		arg.IsoVersion,
 		arg.IsoFilename,
 		arg.IsoUrl,
 		arg.IsoSize,
 		arg.IsStable,
-		arg.PublishedAt,
 	)
-	var i VirtioWinRelease
-	err := row.Scan(
-		&i.Version,
-		&i.IsoVersion,
-		&i.IsoFilename,
-		&i.IsoUrl,
-		&i.IsoSize,
-		&i.IsStable,
-		&i.Checksum,
-		&i.ChecksumAlgorithm,
-		&i.PublishedAt,
-		&i.DiscoveredAt,
-	)
-	return i, err
+	return err
 }

@@ -373,7 +373,6 @@ type Querier interface {
 	// Nothing references veeam_sessions by foreign key; veeam_jobs.last_session_id
 	// and veeam_restore_points.session_id carry Veeam's own UUID, not a row id.
 	DeleteVeeamSession(ctx context.Context, arg DeleteVeeamSessionParams) error
-	DeleteVirtioWinConfig(ctx context.Context, clusterID uuid.UUID) error
 	// Job states carry no platformId; sessions are the only bridge. STICKY by
 	// construction — the WHERE clause only touches rows that have none yet, so a
 	// pruned session cannot un-attribute a job that was already resolved.
@@ -723,6 +722,9 @@ type Querier interface {
 	InsertTaskHistory(ctx context.Context, arg InsertTaskHistoryParams) (TaskHistory, error)
 	InsertVMImportJob(ctx context.Context, arg InsertVMImportJobParams) (VmImportJob, error)
 	InsertVeeamRepositoryMetric(ctx context.Context, arg InsertVeeamRepositoryMetricParams) error
+	// InsertVirtioWinDownload records the intent to fetch, before the node is asked
+	// to. status and upid are left to their column defaults ('pending' and empty):
+	// the row exists precisely because the download has not started yet.
 	InsertVirtioWinDownload(ctx context.Context, arg InsertVirtioWinDownloadParams) (VirtioWinDownload, error)
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ListAPIKeysByUserRow, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
@@ -1315,7 +1317,6 @@ type Querier interface {
 	// index on unfinished (cluster, storage, version) can reject a concurrent
 	// duplicate; the UPID only exists after that call returns.
 	SetVirtioWinDownloadUPID(ctx context.Context, arg SetVirtioWinDownloadUPIDParams) error
-	SetVirtioWinReleaseChecksum(ctx context.Context, arg SetVirtioWinReleaseChecksumParams) error
 	SkipRollingUpdateNode(ctx context.Context, arg SkipRollingUpdateNodeParams) (int64, error)
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
@@ -1512,13 +1513,7 @@ type Querier interface {
 	// without it the second would push the first one's pending check out to 03:00
 	// — so the sync the operator just asked for would silently not happen.
 	UpsertVirtioWinConfig(ctx context.Context, arg UpsertVirtioWinConfigParams) (VirtioWinConfig, error)
-	//
-	// checksum/checksum_algorithm are operator-supplied and are deliberately NOT
-	// overwritten by the upstream refresh. The refresh knows the URL and the size;
-	// it never learns a hash, because upstream publishes none for the ISO. Letting
-	// EXCLUDED win here would silently erase a checksum an operator had pasted in
-	// the moment the next 6-hourly catalog refresh ran.
-	UpsertVirtioWinRelease(ctx context.Context, arg UpsertVirtioWinReleaseParams) (VirtioWinRelease, error)
+	UpsertVirtioWinRelease(ctx context.Context, arg UpsertVirtioWinReleaseParams) error
 }
 
 var _ Querier = (*Queries)(nil)
