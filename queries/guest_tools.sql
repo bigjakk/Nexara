@@ -20,9 +20,6 @@ RETURNING *;
 -- name: ListActiveGuestToolsConfigs :many
 SELECT * FROM guest_tools_configs WHERE mode <> 'disabled';
 
--- name: DeleteGuestToolsConfig :exec
-DELETE FROM guest_tools_configs WHERE cluster_id = $1;
-
 -- name: GetGuestToolsPolicy :one
 SELECT * FROM guest_tools_policies WHERE cluster_id = $1 AND vmid = $2;
 
@@ -42,9 +39,6 @@ ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     note           = EXCLUDED.note
 RETURNING *;
 
--- name: DeleteGuestToolsPolicy :exec
-DELETE FROM guest_tools_policies WHERE cluster_id = $1 AND vmid = $2;
-
 -- name: GetGuestToolsState :one
 SELECT * FROM guest_tools_state WHERE cluster_id = $1 AND vmid = $2;
 
@@ -60,10 +54,7 @@ SELECT * FROM guest_tools_state WHERE cluster_id = $1 AND vmid = $2;
 SELECT
     v.vmid,
     v.name,
-    v.node_id,
     v.status,
-    v.config_ostype,
-    v.ostype,
     v.template,
     v.uptime,
     n.name AS node_name,
@@ -116,9 +107,6 @@ ON CONFLICT (cluster_id, vmid) DO UPDATE SET
     prior_cdrom_key   = EXCLUDED.prior_cdrom_key,
     prior_cdrom_value = EXCLUDED.prior_cdrom_value,
     last_error        = '';
-
--- name: SetGuestToolsRunning :exec
-UPDATE guest_tools_state SET stage = 'running' WHERE cluster_id = $1 AND vmid = $2;
 
 -- FinishGuestToolsUpdate records a terminal outcome and clears the borrowed
 -- CD-ROM bookkeeping, which the reconciler has restored by this point.

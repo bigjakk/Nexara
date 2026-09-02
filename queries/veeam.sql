@@ -311,12 +311,6 @@ SELECT * FROM veeam_restore_points
 WHERE backup_object_id = $1
 ORDER BY creation_time DESC;
 
--- name: ListVeeamRestorePointsByServer :many
-SELECT * FROM veeam_restore_points
-WHERE veeam_server_id = $1
-ORDER BY creation_time DESC
-LIMIT $2;
-
 -- name: PruneVeeamRestorePoints :exec
 -- Prunes on last_seen_at, NEVER on creation_time: a restore point Veeam still
 -- holds must not disappear from Nexara because it is old, or every RPO and
@@ -445,9 +439,6 @@ WHERE veeam_server_id = $1 AND creation_time < $2;
 -- ---------------------------------------------------------------------------
 -- Phase 3: platform mapping and guest correlation.
 -- ---------------------------------------------------------------------------
-
--- name: GetVeeamPlatform :one
-SELECT * FROM veeam_platforms WHERE veeam_server_id = $1 AND platform_id = $2;
 
 -- ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
 -- the server has been seen protecting, with the Nexara cluster (if any) an

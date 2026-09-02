@@ -242,8 +242,6 @@ type Querier interface {
 	// but it must be a non-nil empty slice. pgx encodes a nil slice as SQL NULL,
 	// and NOT (x = ANY(NULL)) is NULL, so a nil list silently deletes nothing.
 	DeleteGuestSnapshotsNotInSet(ctx context.Context, arg DeleteGuestSnapshotsNotInSetParams) (int64, error)
-	DeleteGuestToolsConfig(ctx context.Context, clusterID uuid.UUID) error
-	DeleteGuestToolsPolicy(ctx context.Context, arg DeleteGuestToolsPolicyParams) error
 	// DeleteGuestToolsStateForVanishedGuests drops rows for guests that no longer
 	// exist in the cluster.
 	//
@@ -626,10 +624,6 @@ type Querier interface {
 	// unattributable job is global-only — the same fail-closed posture the read
 	// endpoints take.
 	GetVeeamJobByVeeamID(ctx context.Context, arg GetVeeamJobByVeeamIDParams) (VeeamJob, error)
-	// ---------------------------------------------------------------------------
-	// Phase 3: platform mapping and guest correlation.
-	// ---------------------------------------------------------------------------
-	GetVeeamPlatform(ctx context.Context, arg GetVeeamPlatformParams) (VeeamPlatform, error)
 	GetVeeamRepositoryMetrics(ctx context.Context, arg GetVeeamRepositoryMetricsParams) ([]GetVeeamRepositoryMetricsRow, error)
 	// GetVeeamRepositoryUsageStats reports the fullest repository across every
 	// Veeam server.
@@ -765,7 +759,6 @@ type Querier interface {
 	// churn (or gone) still render; vm_id/vm_name/vm_status are NULL then and the
 	// frontend disables the guest link. Unknown ages (snap_time = 0) sort last.
 	ListAllGuestSnapshots(ctx context.Context) ([]ListAllGuestSnapshotsRow, error)
-	ListAllTaskHistory(ctx context.Context, limit int32) ([]TaskHistory, error)
 	ListAllVMs(ctx context.Context) ([]ListAllVMsRow, error)
 	// ListAuditLogAdvanced backs the audit log page and the CSV/JSON/syslog export:
 	// the optional cluster/type/user/action/source/time filters plus offset
@@ -973,8 +966,6 @@ type Querier interface {
 	ListStorageNearFull(ctx context.Context) ([]ListStorageNearFullRow, error)
 	ListStoragePoolsByCluster(ctx context.Context, clusterID uuid.UUID) ([]StoragePool, error)
 	ListStoragePoolsByNode(ctx context.Context, nodeID uuid.UUID) ([]StoragePool, error)
-	ListTaskHistory(ctx context.Context, arg ListTaskHistoryParams) ([]TaskHistory, error)
-	ListTaskHistoryByCluster(ctx context.Context, arg ListTaskHistoryByClusterParams) ([]TaskHistory, error)
 	// ListTaskHistoryFiltered backs the Tasks page: optional cluster_id + status +
 	// vmids filters with offset pagination. Mirrors ListAuditLogAdvanced. NULL
 	// narg = no filter on that column. vmids matches the guest VMID parsed from
@@ -1112,6 +1103,9 @@ type Querier interface {
 	// typically returns, on every page load.
 	ListVeeamOrphanedObjects(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamOrphanedObjectsRow, error)
 	ListVeeamPlatformsByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamPlatform, error)
+	// ---------------------------------------------------------------------------
+	// Phase 3: platform mapping and guest correlation.
+	// ---------------------------------------------------------------------------
 	// ListVeeamPlatformsWithCluster feeds the mapping UI: every Proxmox connection
 	// the server has been seen protecting, with the Nexara cluster (if any) an
 	// operator has attached it to. object_count is what makes an unmapped platform
@@ -1119,7 +1113,6 @@ type Querier interface {
 	ListVeeamPlatformsWithCluster(ctx context.Context, veeamServerID uuid.UUID) ([]ListVeeamPlatformsWithClusterRow, error)
 	ListVeeamRepositoriesByServer(ctx context.Context, veeamServerID uuid.UUID) ([]VeeamRepository, error)
 	ListVeeamRestorePointsByObject(ctx context.Context, backupObjectID uuid.UUID) ([]VeeamRestorePoint, error)
-	ListVeeamRestorePointsByServer(ctx context.Context, arg ListVeeamRestorePointsByServerParams) ([]VeeamRestorePoint, error)
 	// ListVeeamRestorePointsForGuest is the guest's recovery history across every
 	// backup it appears in, newest first.
 	ListVeeamRestorePointsForGuest(ctx context.Context, arg ListVeeamRestorePointsForGuestParams) ([]ListVeeamRestorePointsForGuestRow, error)
@@ -1240,7 +1233,6 @@ type Querier interface {
 	RevokeSession(ctx context.Context, id uuid.UUID) error
 	RevokeUserRole(ctx context.Context, arg RevokeUserRoleParams) error
 	SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error
-	SetGuestToolsRunning(ctx context.Context, arg SetGuestToolsRunningParams) error
 	// SetGuestToolsStage moves the staging state machine and records what the
 	// guest's CD-ROM looked like before we borrowed it.
 	SetGuestToolsStage(ctx context.Context, arg SetGuestToolsStageParams) error

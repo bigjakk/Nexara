@@ -40,29 +40,6 @@ func (q *Queries) CountGuestToolsInFlightForCluster(ctx context.Context, cluster
 	return count, err
 }
 
-const deleteGuestToolsConfig = `-- name: DeleteGuestToolsConfig :exec
-DELETE FROM guest_tools_configs WHERE cluster_id = $1
-`
-
-func (q *Queries) DeleteGuestToolsConfig(ctx context.Context, clusterID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteGuestToolsConfig, clusterID)
-	return err
-}
-
-const deleteGuestToolsPolicy = `-- name: DeleteGuestToolsPolicy :exec
-DELETE FROM guest_tools_policies WHERE cluster_id = $1 AND vmid = $2
-`
-
-type DeleteGuestToolsPolicyParams struct {
-	ClusterID uuid.UUID `json:"cluster_id"`
-	Vmid      int32     `json:"vmid"`
-}
-
-func (q *Queries) DeleteGuestToolsPolicy(ctx context.Context, arg DeleteGuestToolsPolicyParams) error {
-	_, err := q.db.Exec(ctx, deleteGuestToolsPolicy, arg.ClusterID, arg.Vmid)
-	return err
-}
-
 const deleteGuestToolsStateForVanishedGuests = `-- name: DeleteGuestToolsStateForVanishedGuests :exec
 DELETE FROM guest_tools_state
 WHERE cluster_id = $1 AND NOT (vmid = ANY($2::int[]))
@@ -238,10 +215,7 @@ const listGuestToolsFleet = `-- name: ListGuestToolsFleet :many
 SELECT
     v.vmid,
     v.name,
-    v.node_id,
     v.status,
-    v.config_ostype,
-    v.ostype,
     v.template,
     v.uptime,
     n.name AS node_name,
@@ -276,10 +250,7 @@ ORDER BY v.vmid
 type ListGuestToolsFleetRow struct {
 	Vmid                int32              `json:"vmid"`
 	Name                string             `json:"name"`
-	NodeID              uuid.UUID          `json:"node_id"`
 	Status              string             `json:"status"`
-	ConfigOstype        string             `json:"config_ostype"`
-	Ostype              string             `json:"ostype"`
 	Template            bool               `json:"template"`
 	Uptime              int64              `json:"uptime"`
 	NodeName            string             `json:"node_name"`
@@ -318,10 +289,7 @@ func (q *Queries) ListGuestToolsFleet(ctx context.Context, clusterID uuid.UUID) 
 		if err := rows.Scan(
 			&i.Vmid,
 			&i.Name,
-			&i.NodeID,
 			&i.Status,
-			&i.ConfigOstype,
-			&i.Ostype,
 			&i.Template,
 			&i.Uptime,
 			&i.NodeName,
@@ -470,20 +438,6 @@ func (q *Queries) ListGuestToolsPolicies(ctx context.Context, clusterID uuid.UUI
 		return nil, err
 	}
 	return items, nil
-}
-
-const setGuestToolsRunning = `-- name: SetGuestToolsRunning :exec
-UPDATE guest_tools_state SET stage = 'running' WHERE cluster_id = $1 AND vmid = $2
-`
-
-type SetGuestToolsRunningParams struct {
-	ClusterID uuid.UUID `json:"cluster_id"`
-	Vmid      int32     `json:"vmid"`
-}
-
-func (q *Queries) SetGuestToolsRunning(ctx context.Context, arg SetGuestToolsRunningParams) error {
-	_, err := q.db.Exec(ctx, setGuestToolsRunning, arg.ClusterID, arg.Vmid)
-	return err
 }
 
 const setGuestToolsStage = `-- name: SetGuestToolsStage :exec

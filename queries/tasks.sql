@@ -32,23 +32,6 @@ UPDATE task_history
 SET status = $2, exit_status = $3, progress = $4, finished_at = $5
 WHERE upid = $1;
 
--- name: ListTaskHistory :many
-SELECT * FROM task_history
-WHERE user_id = $1
-ORDER BY started_at DESC
-LIMIT $2;
-
--- name: ListAllTaskHistory :many
-SELECT * FROM task_history
-ORDER BY started_at DESC
-LIMIT $1;
-
--- name: ListTaskHistoryByCluster :many
-SELECT * FROM task_history
-WHERE cluster_id = $1
-ORDER BY started_at DESC
-LIMIT $2;
-
 -- name: GetTaskByUpid :one
 SELECT * FROM task_history
 WHERE upid = $1
