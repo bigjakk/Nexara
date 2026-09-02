@@ -287,6 +287,16 @@ func (e *Engine) dispatch(
 	target db.VirtioWinRelease,
 	triggeredBy string,
 ) (*db.VirtioWinDownload, error) {
+	// Build the URL from the base in effect NOW rather than trusting the one
+	// recorded when the version was discovered. A release the catalog learned
+	// before a mirror was configured still carries the fedorapeople URL, which
+	// is exactly the URL an air-gapped node cannot reach. Before the insert, so
+	// an unbuildable URL does not strand a pending row.
+	isoURL, err := BuildISOURLFrom(e.ResolveBase(ctx), target.Version)
+	if err != nil {
+		return nil, fmt.Errorf("build ISO URL for %s: %w", target.Version, err)
+	}
+
 	row, err := e.queries.InsertVirtioWinDownload(ctx, db.InsertVirtioWinDownloadParams{
 		ClusterID:   cfg.ClusterID,
 		Node:        node,
@@ -309,15 +319,8 @@ func (e *Engine) dispatch(
 		return nil, fmt.Errorf("record download of %s: %w", target.Version, err)
 	}
 
-	// Build the URL from the base in effect NOW rather than trusting the one
-	// recorded when the version was discovered. A release the catalog learned
-	// before a mirror was configured still carries the fedorapeople URL, which
-	// is exactly the URL an air-gapped node cannot reach.
-	isoURL := target.IsoUrl
-	if built, buildErr := BuildISOURLFrom(e.ResolveBase(ctx), target.Version); buildErr == nil {
-		isoURL = built
-	}
-
+	// Explicit rather than left nil: nil means "omit the parameter" and lets
+	// the node's own default decide whether TLS is verified.
 	verify := true
 	params := proxmox.URLDownloadParams{
 		URL:                isoURL,

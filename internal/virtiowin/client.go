@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -68,12 +67,18 @@ func NewClient(logger *slog.Logger) *Client {
 // WithBase returns a shallow copy of the client pointed at a different
 // download root, sharing the underlying HTTP client so the mirror override
 // does not cost a fresh TLS handshake per check. An empty base means upstream.
+//
+// Normalising here rather than trusting the caller is what lets releaseFor
+// build URLs without re-validating them: every URL this client hands a Proxmox
+// node to dial is base + a path made of digits, so base having a host is the
+// whole guarantee. Anything NormalizeBase rejects falls back to upstream.
 func (c *Client) WithBase(base string) *Client {
-	if base == "" {
-		base = BaseURL
+	normalized, err := NormalizeBase(base)
+	if err != nil || normalized == "" {
+		normalized = BaseURL
 	}
 	clone := *c
-	clone.base = strings.TrimSuffix(base, "/")
+	clone.base = normalized
 	return &clone
 }
 
@@ -94,8 +99,9 @@ func (c *Client) get(ctx context.Context, rawURL string) (*http.Response, error)
 //
 // stable-virtio/ is a 301 whose Location names the current version directory,
 // which makes discovery a single cheap request with no HTML parsing. Upstream
-// answers with an http:// Location; the version is extracted from it and the
-// URL rebuilt over https rather than the header being trusted as a URL.
+// answers with an http:// Location; only the version is extracted from it and
+// the URL rebuilt under the configured base, so the header is never trusted as
+// a URL and its scheme is never inherited.
 func (c *Client) CheckStable(ctx context.Context) (Release, error) {
 	resp, err := c.get(ctx, strings.TrimSuffix(c.base, "/")+"/stable-virtio/")
 	if err != nil {
@@ -155,7 +161,7 @@ func (c *Client) ListArchive(ctx context.Context) ([]Release, error) {
 			continue
 		}
 		version := ParseVersionFromPath(href)
-		if version == "" || !ValidVersion(version) {
+		if version == "" {
 			continue
 		}
 		if _, dup := seen[version]; dup {
@@ -190,21 +196,17 @@ func (c *Client) CheckLatest(ctx context.Context) (Release, error) {
 	if archiveErr != nil {
 		return Release{}, fmt.Errorf("virtiowin: stable redirect failed (%w) and archive fallback failed: %w", stableErr, archiveErr)
 	}
-	versions := make([]string, 0, len(archive))
-	for _, r := range archive {
-		versions = append(versions, r.Version)
+	// ListArchive never returns an empty slice without an error, so there is
+	// always one to pick — and it already holds the built Release, so there is
+	// nothing to rebuild. Deliberately not flagged stable: this is a best guess
+	// from directory names, not upstream's own statement of what stable is.
+	newest := archive[0]
+	for _, r := range archive[1:] {
+		if Compare(r.Version, newest.Version) > 0 {
+			newest = r
+		}
 	}
-	newest := Newest(versions)
-	if newest == "" {
-		return Release{}, fmt.Errorf("virtiowin: stable redirect failed (%w) and archive index yielded no version", stableErr)
-	}
-	rel, err = c.releaseFor(newest)
-	if err != nil {
-		return Release{}, err
-	}
-	// Deliberately not flagged stable: this is a best guess from directory
-	// names, not upstream's own statement of what stable is.
-	return rel, nil
+	return newest, nil
 }
 
 // ProbeSize issues a HEAD for the ISO to learn its size, for display and for a
@@ -231,28 +233,17 @@ func (c *Client) ProbeSize(ctx context.Context, isoURL string) (int64, error) {
 	return size, nil
 }
 
-// releaseFor builds a Release from a version string, validating that the
-// resulting URL is well-formed https before it can reach a Proxmox node.
+// releaseFor builds a Release from a version string.
+//
+// The version is validated in BuildISOURLFrom, which rejects anything that is
+// not a well-formed upstream version before it can reach a Proxmox node. The
+// resulting URL needs no second check: it is always c.base + a path built from
+// that validated version, and WithBase admits no base that NormalizeBase has
+// not already required to be http(s) with a host.
 func (c *Client) releaseFor(version string) (Release, error) {
-	if !ValidVersion(version) {
-		return Release{}, fmt.Errorf("virtiowin: invalid version %q", version)
-	}
 	isoURL, err := c.buildISOURL(version)
 	if err != nil {
 		return Release{}, err
-	}
-	parsed, err := url.Parse(isoURL)
-	if err != nil || parsed.Host == "" {
-		return Release{}, fmt.Errorf("virtiowin: built an unparseable ISO URL for %q", version)
-	}
-	// Enforce https only against the real upstream. The guard exists to stop
-	// the upstream's http:// redirect Location leaking into a production URL,
-	// which a base that is not the upstream root cannot be the source of: a
-	// mirror's scheme comes from the operator's own configured base (validated
-	// on write, with plain http requiring an explicit confirmation), and a test
-	// points base at an httptest server, which is plain http by construction.
-	if c.base == BaseURL && parsed.Scheme != "https" {
-		return Release{}, fmt.Errorf("virtiowin: built a non-https ISO URL for %q", version)
 	}
 	dirVersion, isoVersion := SplitVersion(version)
 	return Release{
