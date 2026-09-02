@@ -693,19 +693,61 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 	})
 
 	runWithLeaderRetry(ctx, application.Pool, "scheduler", logger, func(ctx context.Context) {
-		logger.Info("scheduler started",
-			"task_interval", "60s",
-			"drs_interval", "60s",
-			"cve_interval", "6h",
-			"kev_interval", "1h",
-			"alert_interval", "60s",
-			"report_interval", "60s",
-			"report_retention_interval", "24h",
-			"task_retention_interval", "1h",
-			"rolling_update_interval", "15s",
-			"virtio_win_interval", "60s (per-cluster schedule, default 6h)",
-			"guest_tools_interval", "1h",
-		)
+		// One row per engine: the name its in-flight guard logs, how often it
+		// ticks, and what it runs. This replaced four lists that had to be
+		// edited together — a constructor, an initial-pass call, a ticker and a
+		// select arm — plus a hand-written startup log beside them. The log is
+		// derived from these rows now, which is what stops it drifting: it had
+		// gone to naming eleven intervals for fourteen engines, silently
+		// missing all three reconcile loops.
+		engines := []struct {
+			name  string
+			every time.Duration
+			run   func(context.Context)
+			// note annotates the startup log where the interval alone is
+			// misleading.
+			note string
+		}{
+			{name: "scheduled_tasks", every: 60 * time.Second, run: sched.Run},
+			{name: "drs", every: 60 * time.Second, run: sched.RunDRS},
+			{name: "cve_scanning", every: 6 * time.Hour, run: sched.RunCVEScanning},
+			{name: "kev_refresh", every: 1 * time.Hour, run: sched.RunKEVRefresh},
+			{name: "alert_evaluation", every: 60 * time.Second, run: sched.RunAlertEvaluation},
+			{name: "report_generation", every: 60 * time.Second, run: sched.RunReportGeneration},
+			{name: "report_retention", every: 24 * time.Hour, run: sched.RunReportRetention},
+			{name: "task_retention", every: 1 * time.Hour, run: sched.RunTaskRetention},
+			{name: "rolling_updates", every: 15 * time.Second, run: sched.RunRollingUpdates},
+			{name: "vm_import_reconcile", every: 15 * time.Second, run: sched.RunVMImportReconcile},
+
+			// Minutely, but not a minutely upstream fetch: each cluster carries
+			// its own next_check_at (default six-hourly, or a cron an operator
+			// aimed at a maintenance window), so a tick with nothing due is one
+			// indexed query. The poll has to be this fine-grained for "daily at
+			// 03:00" to mean 03:00.
+			{
+				name: "virtio_win_check", every: 1 * time.Minute, run: sched.RunVirtioWinCheck,
+				note: "per-cluster schedule, default 6h",
+			},
+			// The reconcile half runs on its own faster tick: an 837 MiB fetch
+			// needs following minute by minute, not once every six hours.
+			{name: "virtio_win_reconcile", every: 30 * time.Second, run: sched.RunVirtioWinReconcile},
+			// Detection reaches into every running Windows guest, so it runs on
+			// a human timescale rather than a machine one.
+			{name: "guest_tools_pass", every: 1 * time.Hour, run: sched.RunGuestToolsPass},
+			// The reconcile half is frequent: a staged install fires on the
+			// guest's own reboot, which nothing here triggers or observes.
+			{name: "guest_tools_reconcile", every: 60 * time.Second, run: sched.RunGuestToolsReconcile},
+		}
+
+		intervals := make([]any, 0, 2*len(engines))
+		for _, e := range engines {
+			interval := e.every.String()
+			if e.note != "" {
+				interval += " (" + e.note + ")"
+			}
+			intervals = append(intervals, e.name+"_interval", interval)
+		}
+		logger.Info("scheduler started", intervals...)
 
 		// Clean up stale DRS history entries from previous interrupted runs.
 		if err := queries.CleanupStaleDRSHistory(ctx); err != nil {
@@ -732,124 +774,27 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			}
 		}
 
-		runTasks := engine("scheduled_tasks", sched.Run)
-		runDRS := engine("drs", sched.RunDRS)
-		runKEV := engine("kev_refresh", sched.RunKEVRefresh)
-		runCVE := engine("cve_scanning", sched.RunCVEScanning)
-		runAlerts := engine("alert_evaluation", sched.RunAlertEvaluation)
-		runReports := engine("report_generation", sched.RunReportGeneration)
-		runReportRetention := engine("report_retention", sched.RunReportRetention)
-		runTaskRetention := engine("task_retention", sched.RunTaskRetention)
-		runRolling := engine("rolling_updates", sched.RunRollingUpdates)
-		runImports := engine("vm_import_reconcile", sched.RunVMImportReconcile)
-		runVirtioWin := engine("virtio_win_check", sched.RunVirtioWinCheck)
-		runVirtioWinReconcile := engine("virtio_win_reconcile", sched.RunVirtioWinReconcile)
-		runGuestTools := engine("guest_tools_pass", sched.RunGuestToolsPass)
-		runGuestToolsReconcile := engine("guest_tools_reconcile", sched.RunGuestToolsReconcile)
-
-		// Run initial checks immediately.
-		runTasks()
-		runDRS()
-		runKEV()
-		runCVE()
-		runAlerts()
-		runReports()
-		runReportRetention()
-		runTaskRetention()
-		runRolling()
-		runImports()
-		runVirtioWin()
-		runVirtioWinReconcile()
-		runGuestTools()
-		runGuestToolsReconcile()
-
-		taskTicker := time.NewTicker(60 * time.Second)
-		defer taskTicker.Stop()
-
-		drsTicker := time.NewTicker(60 * time.Second)
-		defer drsTicker.Stop()
-
-		cveTicker := time.NewTicker(6 * time.Hour)
-		defer cveTicker.Stop()
-
-		kevTicker := time.NewTicker(1 * time.Hour)
-		defer kevTicker.Stop()
-
-		alertTicker := time.NewTicker(60 * time.Second)
-		defer alertTicker.Stop()
-
-		reportTicker := time.NewTicker(60 * time.Second)
-		defer reportTicker.Stop()
-
-		reportRetentionTicker := time.NewTicker(24 * time.Hour)
-		defer reportRetentionTicker.Stop()
-
-		taskRetentionTicker := time.NewTicker(1 * time.Hour)
-		defer taskRetentionTicker.Stop()
-
-		rollingTicker := time.NewTicker(15 * time.Second)
-		defer rollingTicker.Stop()
-
-		importTicker := time.NewTicker(15 * time.Second)
-		defer importTicker.Stop()
-
-		// Minutely, but not a minutely upstream fetch: each cluster carries its
-		// own next_check_at (default six-hourly, or a cron an operator aimed at
-		// a maintenance window), so a tick with nothing due is one indexed
-		// query. The poll has to be this fine-grained for "daily at 03:00" to
-		// mean 03:00.
-		virtioWinTicker := time.NewTicker(1 * time.Minute)
-		defer virtioWinTicker.Stop()
-
-		// The reconcile half runs on its own faster tick: an 837 MiB fetch needs
-		// following minute by minute, not once every six hours.
-		virtioWinReconcileTicker := time.NewTicker(30 * time.Second)
-		defer virtioWinReconcileTicker.Stop()
-
-		// Detection reaches into every running Windows guest, so it runs on a
-		// human timescale rather than a machine one.
-		guestToolsTicker := time.NewTicker(1 * time.Hour)
-		defer guestToolsTicker.Stop()
-
-		// The reconcile half is frequent: a staged install fires on the guest's
-		// own reboot, which nothing here triggers or observes.
-		guestToolsReconcileTicker := time.NewTicker(60 * time.Second)
-		defer guestToolsReconcileTicker.Stop()
-
-		for {
-			select {
-			case <-taskTicker.C:
-				runTasks()
-			case <-drsTicker.C:
-				runDRS()
-			case <-cveTicker.C:
-				runCVE()
-			case <-kevTicker.C:
-				runKEV()
-			case <-alertTicker.C:
-				runAlerts()
-			case <-reportTicker.C:
-				runReports()
-			case <-reportRetentionTicker.C:
-				runReportRetention()
-			case <-taskRetentionTicker.C:
-				runTaskRetention()
-			case <-rollingTicker.C:
-				runRolling()
-			case <-importTicker.C:
-				runImports()
-			case <-virtioWinTicker.C:
-				runVirtioWin()
-			case <-virtioWinReconcileTicker.C:
-				runVirtioWinReconcile()
-			case <-guestToolsTicker.C:
-				runGuestTools()
-			case <-guestToolsReconcileTicker.C:
-				runGuestToolsReconcile()
-			case <-ctx.Done():
-				logger.Info("scheduler stopped")
-				return
-			}
+		for _, e := range engines {
+			run := engine(e.name, e.run)
+			run() // initial pass, before the first tick comes round
+			go func() {
+				ticker := time.NewTicker(e.every)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						run()
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
 		}
+
+		// ctx is leadership-scoped (see runWithLeaderRetry), so this returns
+		// both on shutdown and when the heartbeat loses the role — and every
+		// engine goroutine above is watching the same ctx.
+		<-ctx.Done()
+		logger.Info("scheduler stopped")
 	})
 }
