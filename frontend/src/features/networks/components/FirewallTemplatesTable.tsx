@@ -76,6 +76,7 @@ export function FirewallTemplatesTable({
                         template={tmpl}
                       />
                       <Button
+                        aria-label={`Delete template ${tmpl.name}`}
                         variant="ghost"
                         size="icon"
                         onClick={() => {

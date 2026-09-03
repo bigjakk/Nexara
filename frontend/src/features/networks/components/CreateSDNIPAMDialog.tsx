@@ -99,7 +99,11 @@ export function CreateSDNIPAMDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {isEdit ? (
-          <Button variant="ghost" size="icon">
+          <Button
+            aria-label={`Edit IPAM ${initialData.ipam}`}
+            variant="ghost"
+            size="icon"
+          >
             <Pencil className="h-4 w-4" />
           </Button>
         ) : (

@@ -59,6 +59,7 @@ export function NetworkInterfaceTable({
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Filter by node:</span>
           <select
+            aria-label="Filter by node"
             className="rounded-md border bg-background px-3 py-1.5 text-sm"
             value={selectedNode}
             onChange={(e) => {
@@ -169,6 +170,7 @@ function InterfaceRow({
       <TableCell>
         <div className="flex gap-1">
           <Button
+            aria-label={`Edit ${iface.iface} on ${nodeName}`}
             variant="ghost"
             size="icon"
             onClick={() => {
@@ -178,6 +180,7 @@ function InterfaceRow({
             <Pencil className="h-4 w-4" />
           </Button>
           <Button
+            aria-label={`Delete ${iface.iface} on ${nodeName}`}
             variant="ghost"
             size="icon"
             onClick={() => {

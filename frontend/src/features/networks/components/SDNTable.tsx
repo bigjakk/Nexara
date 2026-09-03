@@ -63,6 +63,7 @@ function DeleteConfirmButton({
   return (
     <>
       <Button
+        aria-label={`Delete ${kind} ${name}`}
         variant="ghost"
         size="icon"
         onClick={() => {
@@ -206,6 +207,7 @@ function VNetSubnetsRow({
                                 initialData={s}
                               />
                               <Button
+                                aria-label={`Delete Subnet ${s.subnet}`}
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => {

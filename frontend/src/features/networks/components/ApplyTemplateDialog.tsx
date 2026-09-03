@@ -35,7 +35,12 @@ export function ApplyTemplateDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" disabled={clusterId.length === 0}>
+        <Button
+          aria-label={`Apply template ${template.name}`}
+          variant="ghost"
+          size="icon"
+          disabled={clusterId.length === 0}
+        >
           <Play className="h-4 w-4" />
         </Button>
       </DialogTrigger>

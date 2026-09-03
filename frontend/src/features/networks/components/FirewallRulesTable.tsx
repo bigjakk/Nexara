@@ -92,6 +92,7 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
                   </TableCell>
                   <TableCell>
                     <Button
+                      aria-label={`Delete rule ${String(rule.pos)}`}
                       variant="ghost"
                       size="icon"
                       onClick={() => {

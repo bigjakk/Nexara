@@ -165,6 +165,7 @@ export function CreateTemplateDialog() {
                       }}
                     />
                     <Button
+                      aria-label={`Remove rule ${String(i + 1)}`}
                       variant="ghost"
                       size="icon"
                       onClick={() => {
