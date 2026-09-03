@@ -11,12 +11,11 @@ import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { TaskLogSection } from "@/components/TaskLogSection";
-import { useTableSort } from "@/hooks/useTableSort";
-import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
+import { useDataTable } from "@/hooks/useDataTable";
+import type { ColumnLayout } from "@/hooks/useColumnLayout";
 import { formatDateTime } from "@/lib/format";
 import { parseDetails } from "./task-status";
 import {
-  ACTIVITY_ACCESSORS,
   DEFAULT_ACTIVITY_SORT,
   activityRowKey,
   decorateActivity,
@@ -247,16 +246,17 @@ export function TaskLogPanel() {
   );
 
   const {
+    layout,
     rows: sortedRows,
     toggle,
     directionFor,
-  } = useTableSort(
+  } = useDataTable(
+    "activity",
+    ACTIVITY_COLUMN_DEFS,
     rows,
-    ACTIVITY_ACCESSORS,
     activityRowKey,
     DEFAULT_ACTIVITY_SORT,
   );
-  const layout = useColumnLayout("activity", ACTIVITY_COLUMN_DEFS);
 
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 

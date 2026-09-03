@@ -36,8 +36,8 @@ interface TaskListParams {
    * Sorting is server-side because the table pages 50 rows out of a history
    * that runs to thousands; ordering the delivered page would only reshuffle
    * what is already on screen. */
-  sort?: TaskSortKey | undefined;
-  order?: SortDirection | undefined;
+  sort: TaskSortKey;
+  order: SortDirection;
   /** Server-side guest filter (task_history.vmid). Never pass an empty array —
    * the server treats an absent param as "no filter"; gate with `enabled`. */
   vmids?: number[] | undefined;
@@ -70,8 +70,8 @@ export function useTasks({
   if (clusterId) params.set("cluster_id", clusterId);
   if (status) params.set("status", status);
   if (vmidsKey) params.set("vmids", vmidsKey);
-  if (sort) params.set("sort", sort);
-  if (order) params.set("order", order);
+  params.set("sort", sort);
+  params.set("order", order);
 
   return useQuery({
     queryKey: [

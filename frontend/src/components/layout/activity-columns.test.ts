@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
-  ACTIVITY_ACCESSORS,
   DEFAULT_ACTIVITY_SORT,
   decorateActivity,
   type LiveTaskStatus,
 } from "./activity-columns";
 import { ACTIVITY_COLUMN_DEFS } from "./activity-column-defs";
+import { sortAccessorsFrom } from "@/hooks/useColumnLayout";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 
 function entry(over: Partial<AuditLogEntry>): AuditLogEntry {
@@ -29,6 +29,10 @@ function entry(over: Partial<AuditLogEntry>): AuditLogEntry {
 }
 
 const noLive: Record<string, LiveTaskStatus> = {};
+
+/** What the table actually sorts on — derived from the columns, the same way
+ *  useDataTable does it for the panel. */
+const ACCESSORS = sortAccessorsFrom(ACTIVITY_COLUMN_DEFS);
 
 describe("ACTIVITY_COLUMN_DEFS", () => {
   it("hides Cluster and Progress below md, where the drawer has no room", () => {
@@ -65,12 +69,6 @@ describe("ACTIVITY_COLUMN_DEFS", () => {
 
   it("opens newest-first, as the panel always has", () => {
     expect(DEFAULT_ACTIVITY_SORT).toEqual({ key: "time", direction: "desc" });
-  });
-
-  it("has an accessor for every column", () => {
-    for (const col of ACTIVITY_COLUMN_DEFS) {
-      expect(ACTIVITY_ACCESSORS[col.key]).toBeTypeOf("function");
-    }
   });
 });
 
@@ -132,10 +130,10 @@ describe("decorateActivity", () => {
   });
 });
 
-describe("ACTIVITY_ACCESSORS", () => {
+describe("activity sort accessors", () => {
   it("ranks status worst-first so an ascending click surfaces failures", () => {
     const rank = (task_status: string) =>
-      ACTIVITY_ACCESSORS.status(
+      ACCESSORS.status(
         decorateActivity(
           entry({ details: JSON.stringify({ upid: "U" }), task_status }),
           noLive,
@@ -147,16 +145,14 @@ describe("ACTIVITY_ACCESSORS", () => {
 
   it("ranks a non-task entry as null so it never leads either direction", () => {
     expect(
-      ACTIVITY_ACCESSORS.status(
-        decorateActivity(entry({ action: "login" }), noLive),
-      ),
+      ACCESSORS.status(decorateActivity(entry({ action: "login" }), noLive)),
     ).toBeNull();
   });
 
   it("ranks level by severity, not alphabetically", () => {
     // Alphabetically "error" < "info" < "warn" would bury warnings below info.
     const rank = (action: string) =>
-      ACTIVITY_ACCESSORS.level(decorateActivity(entry({ action }), noLive));
+      ACCESSORS.level(decorateActivity(entry({ action }), noLive));
     expect(rank("vm_delete_failed")).toBeLessThan(rank("vm_delete") as number);
     expect(rank("vm_delete")).toBeLessThan(rank("vm_start") as number);
   });
@@ -166,20 +162,18 @@ describe("ACTIVITY_ACCESSORS", () => {
       entry({ action: "vm_start", resource_name: "web01", resource_vmid: 101 }),
       noLive,
     );
-    expect(ACTIVITY_ACCESSORS.action(row)).toBe("Vm Start — web01 (101)");
+    expect(ACCESSORS.action(row)).toBe("Vm Start — web01 (101)");
   });
 
   it("treats a blank cluster as absent, matching the em dash the cell shows", () => {
     expect(
-      ACTIVITY_ACCESSORS.cluster(
-        decorateActivity(entry({ cluster_name: "" }), noLive),
-      ),
+      ACCESSORS.cluster(decorateActivity(entry({ cluster_name: "" }), noLive)),
     ).toBeNull();
   });
 
   it("sorts Time as epoch, not rendered text", () => {
     expect(
-      ACTIVITY_ACCESSORS.time(
+      ACCESSORS.time(
         decorateActivity(entry({ created_at: "2026-09-01T10:00:00Z" }), noLive),
       ),
     ).toBe(Date.parse("2026-09-01T10:00:00Z"));

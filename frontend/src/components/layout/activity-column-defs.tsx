@@ -1,9 +1,11 @@
 /**
- * How each Activity column renders.
+ * How each Activity column renders, and what it sorts on.
  *
- * Split from activity-columns.ts so that module stays JSX-free: these are the
- * only exports needing a renderer, and keeping the decorator and accessors out
- * of a .tsx keeps fast refresh working for both halves.
+ * Split from activity-columns.ts so that module stays JSX-free: this is the
+ * only export needing a renderer, and keeping the decorator out of a .tsx keeps
+ * fast refresh working for both halves. The `sortValue`s live here rather than
+ * in a parallel accessor map so a column's heading, width, cell and sort key
+ * are one declaration — useDataTable derives the accessors from them.
  */
 import {
   Activity,
@@ -17,9 +19,10 @@ import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { formatRelativeTime } from "@/lib/format";
 import {
-  ACTIVITY_ACCESSORS,
   SEVERITY_LABELS,
+  SEVERITY_RANK,
   SEVERITY_STYLES,
+  STATUS_RANK,
   type ActivityRowData,
   type ActivitySortKey,
 } from "./activity-columns";
@@ -45,7 +48,7 @@ const ALL_COLUMNS: ColumnDef<
     key: "status",
     label: "Status",
     width: 84,
-    sortValue: ACTIVITY_ACCESSORS.status,
+    sortValue: (row) => STATUS_RANK[row.status],
     cell: (row, ctx) => (
       <div className="flex items-center gap-1.5">
         <ChevronRight
@@ -82,7 +85,7 @@ const ALL_COLUMNS: ColumnDef<
     key: "level",
     label: "Level",
     width: 70,
-    sortValue: ACTIVITY_ACCESSORS.level,
+    sortValue: (row) => SEVERITY_RANK[row.severity],
     cell: (row) => (
       <span
         className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium ${SEVERITY_STYLES[row.severity]}`}
@@ -95,7 +98,13 @@ const ALL_COLUMNS: ColumnDef<
     key: "action",
     label: "Action",
     width: 460,
-    sortValue: ACTIVITY_ACCESSORS.action,
+    // Sorted on the whole visible string: the cell renders the action and the
+    // resource together, so ordering on the action alone would look arbitrary
+    // within a run of identically-named actions.
+    sortValue: (row) =>
+      row.resourceLabel
+        ? `${row.actionLabel} — ${row.resourceLabel}`
+        : row.actionLabel,
     cell: (row) => (
       <div className="flex items-center gap-x-2 overflow-hidden">
         <PVESourceBadge source={row.entry.source} />
@@ -120,7 +129,7 @@ const ALL_COLUMNS: ColumnDef<
     key: "cluster",
     label: "Cluster",
     width: 160,
-    sortValue: ACTIVITY_ACCESSORS.cluster,
+    sortValue: (row) => row.entry.cluster_name || null,
     hideBelowMd: true,
     cell: (row) => (
       <span className="text-muted-foreground">
@@ -132,7 +141,7 @@ const ALL_COLUMNS: ColumnDef<
     key: "progress",
     label: "Progress",
     width: 120,
-    sortValue: ACTIVITY_ACCESSORS.progress,
+    sortValue: (row) => row.progress,
     hideBelowMd: true,
     cell: (row) => (
       <TaskProgressCell
@@ -145,7 +154,7 @@ const ALL_COLUMNS: ColumnDef<
     key: "time",
     label: "Time",
     width: 104,
-    sortValue: ACTIVITY_ACCESSORS.time,
+    sortValue: (row) => new Date(row.entry.created_at).getTime(),
     align: "right",
     cell: (row) => (
       <span className="font-mono text-[11px] tabular-nums text-muted-foreground">

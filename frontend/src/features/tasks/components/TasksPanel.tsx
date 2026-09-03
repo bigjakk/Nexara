@@ -7,6 +7,7 @@ import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { TaskLogSection } from "@/components/TaskLogSection";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
+import type { SortDirection } from "@/hooks/useTableSort";
 import { formatDateTime } from "@/lib/format";
 import { displayProgress } from "@/components/layout/task-status";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
@@ -34,7 +35,7 @@ function TaskTableHeader({
   onSort,
 }: {
   layout: TaskLayout;
-  directionFor: (key: TaskSortKey) => "asc" | "desc" | null;
+  directionFor: (key: TaskSortKey) => SortDirection | null;
   onSort: (key: TaskSortKey) => void;
 }) {
   return (
@@ -239,7 +240,7 @@ export function TaskHistoryTable({
   emptyMessage,
 }: {
   layout: TaskLayout;
-  directionFor: (key: TaskSortKey) => "asc" | "desc" | null;
+  directionFor: (key: TaskSortKey) => SortDirection | null;
   onSort: (key: TaskSortKey) => void;
   items: TaskRecord[];
   total: number;

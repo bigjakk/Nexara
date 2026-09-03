@@ -1,13 +1,13 @@
 /**
- * The Activity panel's column definitions, sort accessors, and the per-row
- * derivations the cells render.
+ * The Activity panel's row decoration, severity rules and sort ranks.
  *
  * Separate from TaskLogPanel.tsx so the pure logic is unit-testable and fast
  * refresh keeps working — the same split as features/tasks/lib/task-columns.ts,
- * which does this job for the Tasks tables.
+ * which does this job for the Tasks tables. How each column renders, and what
+ * it sorts on, is next door in activity-column-defs.tsx.
  */
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
-import type { SortAccessors, SortState } from "@/hooks/useTableSort";
+import type { SortState } from "@/hooks/useTableSort";
 import {
   deriveTaskStatus,
   displayProgress,
@@ -182,6 +182,9 @@ export type ActivitySortKey =
  * "none" ranks as null — a login is not a task with an unknown outcome, it has
  * no outcome, and useTableSort floats nulls to the bottom in both directions
  * so a screenful of them never buries the tasks.
+ *
+ * Read by the `sortValue`s in activity-column-defs.tsx; they live here, with
+ * the types they rank, so the JSX file holds only what needs a renderer.
  */
 export const STATUS_RANK: Record<DerivedTaskStatus, number | null> = {
   failed: 0,
@@ -193,22 +196,6 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   error: 0,
   warning: 1,
   info: 2,
-};
-
-export const ACTIVITY_ACCESSORS: SortAccessors<
-  ActivityRowData,
-  ActivitySortKey
-> = {
-  status: (r) => STATUS_RANK[r.status],
-  level: (r) => SEVERITY_RANK[r.severity],
-  // The whole visible string: the cell renders the action and the resource
-  // together, so ordering on the action alone would look arbitrary within a
-  // run of identically-named actions.
-  action: (r) =>
-    r.resourceLabel ? `${r.actionLabel} — ${r.resourceLabel}` : r.actionLabel,
-  cluster: (r) => r.entry.cluster_name || null,
-  progress: (r) => r.progress,
-  time: (r) => new Date(r.entry.created_at).getTime(),
 };
 
 export const activityRowKey = (r: ActivityRowData) => r.entry.id;

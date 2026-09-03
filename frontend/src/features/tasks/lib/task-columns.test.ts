@@ -89,6 +89,21 @@ describe("deriveDisplayStatus", () => {
     ).toBe("ok");
   });
 
+  it("classifies an unrecognised status by its exit status, not as a non-task", () => {
+    // deriveTaskStatus answers "none" here — it also serves non-task audit
+    // entries. Every task_history row is a task, so this falls back to the
+    // exit status, the same rule sort_status applies in queries/tasks.sql.
+    expect(
+      deriveDisplayStatus(task({ status: "", exit_status: "OK" }), undefined),
+    ).toBe("ok");
+    expect(
+      deriveDisplayStatus(
+        task({ status: "", exit_status: "got timeout" }),
+        undefined,
+      ),
+    ).toBe("failed");
+  });
+
   it("never lets a stale live poll reopen a terminal row", () => {
     // The d86b7df fix: a poller cache still saying "running" must not override
     // a server status that has already gone terminal.
