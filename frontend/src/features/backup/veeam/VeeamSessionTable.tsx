@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatDateTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -13,6 +13,11 @@ import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { veeamDurationSeconds } from "./veeam-duration";
+import {
+  bottleneckLabel,
+  processingRateLabel,
+  resultVariant,
+} from "./veeam-format";
 import { VeeamSessionActions } from "./VeeamSessionActions";
 import { VeeamSessionLog } from "./VeeamSessionLog";
 import { VeeamTaskTable } from "./VeeamTaskTable";
@@ -22,13 +27,6 @@ interface VeeamSessionTableProps {
   sessions: VeeamSession[];
   /** The server these runs belong to. Stopping one posts against it. */
   serverId: string;
-}
-
-function formatTime(value: string | null): string {
-  if (value == null || value === "") return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
 }
 
 /** Epoch ms, so date columns order chronologically rather than by their text. */
@@ -65,21 +63,6 @@ function sessionResultLabel(session: VeeamSession): string | null {
   if (session.result === "") return null;
   if (session.result !== "Failed") return session.result;
   return session.nexara_stopped ? "Stopped from Nexara" : "Failed or cancelled";
-}
-
-function resultVariant(
-  result: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  switch (result) {
-    case "Success":
-      return "default";
-    case "Warning":
-      return "outline";
-    case "Failed":
-      return "destructive";
-    default:
-      return "secondary";
-  }
 }
 
 type SessionSortKey =
@@ -155,7 +138,7 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
     width: 180,
     sortValue: (session) => toEpoch(session.creation_time),
     cell: (session) => (
-      <span className="text-sm">{formatTime(session.creation_time)}</span>
+      <span className="text-sm">{formatDateTime(session.creation_time)}</span>
     ),
   },
   {
@@ -251,19 +234,13 @@ export function VeeamSessionTable({
                   <ExpandedDetailRow colSpan={layout.columns.length}>
                     <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                       <DetailField label="Finished">
-                        {formatTime(session.end_time)}
+                        {formatDateTime(session.end_time)}
                       </DetailField>
                       <DetailField label="Bottleneck">
-                        {session.bottleneck === "" ||
-                        session.bottleneck === "NotDefined"
-                          ? "—"
-                          : session.bottleneck}
+                        {bottleneckLabel(session.bottleneck)}
                       </DetailField>
                       <DetailField label="Processing rate" variant="mono">
-                        {session.processing_rate === "" ||
-                        session.processing_rate === "N/A"
-                          ? "—"
-                          : session.processing_rate}
+                        {processingRateLabel(session.processing_rate)}
                       </DetailField>
                       <DetailField label="Initiated by">
                         {session.initiated_by || "—"}

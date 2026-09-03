@@ -10,16 +10,16 @@ import {
   CheckCircle2,
   ChevronRight,
   Loader2,
-  Monitor,
   XCircle,
 } from "lucide-react";
+import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { formatRelativeTime } from "@/lib/format";
 import {
   ACTIVITY_ACCESSORS,
   SEVERITY_LABELS,
   SEVERITY_STYLES,
-  formatRelativeTime,
   type ActivityRowData,
   type ActivitySortKey,
 } from "./activity-columns";
@@ -98,12 +98,7 @@ const ALL_COLUMNS: ColumnDef<
     sortValue: ACTIVITY_ACCESSORS.action,
     cell: (row) => (
       <div className="flex items-center gap-x-2 overflow-hidden">
-        {row.entry.source === "proxmox" && (
-          <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] leading-none font-medium text-orange-600 dark:text-orange-400">
-            <Monitor className="h-2.5 w-2.5" />
-            PVE
-          </span>
-        )}
+        <PVESourceBadge source={row.entry.source} />
         <span className="shrink-0 font-medium">{row.actionLabel}</span>
         {row.resourceLabel && (
           <span className="truncate text-muted-foreground">

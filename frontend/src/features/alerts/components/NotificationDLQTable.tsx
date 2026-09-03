@@ -25,6 +25,7 @@ import {
   useDeleteNotificationDLQ,
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
+import { formatRelativeTime } from "@/lib/format";
 import type { DLQState, NotificationDLQEntry } from "@/types/api";
 
 const STATE_VARIANTS: Record<
@@ -45,15 +46,6 @@ const STATE_LABELS: Record<DLQState, string> = {
   resolved: "Resolved",
   dismissed: "Dismissed",
 };
-
-function formatRelativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  const seconds = Math.floor((Date.now() - then) / 1000);
-  if (seconds < 60) return `${String(seconds)}s ago`;
-  if (seconds < 3600) return `${String(Math.floor(seconds / 60))}m ago`;
-  if (seconds < 86400) return `${String(Math.floor(seconds / 3600))}h ago`;
-  return `${String(Math.floor(seconds / 86400))}d ago`;
-}
 
 export function NotificationDLQTable() {
   const { hasPermission } = useAuth();

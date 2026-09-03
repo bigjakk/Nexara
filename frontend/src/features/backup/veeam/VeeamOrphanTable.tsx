@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChevronDown, ChevronRight, Ghost } from "lucide-react";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatDateTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -38,12 +38,6 @@ type OrphanSortKey =
 /** Which row is open, for the chevron cell. */
 interface OrphanCtx {
   expandedId: string | null;
-}
-
-function formatTime(value: string | null): string {
-  if (value == null || value === "") return "Never";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "Unknown" : parsed.toLocaleString();
 }
 
 /** Each column sorts on what its cell SHOWS, not on the underlying field. */
@@ -107,7 +101,9 @@ const COLUMNS: ColumnDef<VeeamOrphanedObject, OrphanSortKey, OrphanCtx>[] = [
     width: 190,
     sortValue: (object) => toEpoch(object.latest_restore_point),
     cell: (object) => (
-      <span className="text-sm">{formatTime(object.latest_restore_point)}</span>
+      <span className="text-sm">
+        {formatDateTime(object.latest_restore_point, "Never")}
+      </span>
     ),
   },
 ];
@@ -258,7 +254,7 @@ function OrphanDetail({
         </div>
         <div className="flex gap-2">
           <dt className="text-muted-foreground">Last seen</dt>
-          <dd>{formatTime(object.last_seen_at)}</dd>
+          <dd>{formatDateTime(object.last_seen_at, "Never")}</dd>
         </div>
         {object.last_run_failed && (
           <div className="flex gap-2">

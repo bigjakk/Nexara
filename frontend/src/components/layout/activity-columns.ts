@@ -23,34 +23,29 @@ export interface LiveTaskStatus {
   progress?: number;
 }
 
-export function formatRelativeTime(iso: string): string {
-  const ago = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (ago < 60) return `${String(ago)}s ago`;
-  if (ago < 3600) return `${String(Math.floor(ago / 60))}m ago`;
-  if (ago < 86400) return `${String(Math.floor(ago / 3600))}h ago`;
-  return `${String(Math.floor(ago / 86400))}d ago`;
-}
-
-export function formatTimestamp(iso: string): string {
-  return new Date(iso).toLocaleString();
-}
-
 export function formatAction(action: string): string {
   return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export type Severity = "info" | "warning" | "error";
 
-export function deriveSeverity(action: string, details: string): Severity {
-  if (details && details !== "{}" && details !== "null") {
-    try {
-      const d = JSON.parse(details) as Record<string, unknown>;
-      if (typeof d["error"] === "string" && d["error"] !== "") return "error";
-      if (d["status"] === "failed" || d["status"] === "error") return "error";
-    } catch {
-      // ignore
-    }
-  }
+/**
+ * How loudly an audit entry should read.
+ *
+ * Takes the details already parsed rather than the raw JSON. The Activity
+ * panel parses them anyway to derive the row, so the raw form had it parsing
+ * the same string twice per row; the audit table parses at the call instead.
+ * `parseDetails` yields `{}` for the empty / "{}" / "null" / unparseable
+ * cases, so the absent-details guard the raw form needed is the empty object.
+ */
+export function deriveSeverity(
+  action: string,
+  details: ParsedDetails,
+): Severity {
+  if (typeof details["error"] === "string" && details["error"] !== "")
+    return "error";
+  if (details["status"] === "failed" || details["status"] === "error")
+    return "error";
   const a = action.toLowerCase();
   if (a.includes("error") || a.includes("failed") || a.includes("fail"))
     return "error";
@@ -120,7 +115,7 @@ export function decorateActivity(
 
   // A failed task outranks whatever the action name suggests.
   const severity: Severity =
-    status === "failed" ? "error" : deriveSeverity(entry.action, entry.details);
+    status === "failed" ? "error" : deriveSeverity(entry.action, details);
 
   // Non-task entries (a login, a token mint) have no progress to draw at all —
   // distinct from a task whose progress Proxmox never reported.

@@ -12,13 +12,13 @@ import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useTableSort } from "@/hooks/useTableSort";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
+import { formatDateTime } from "@/lib/format";
 import { parseDetails } from "./task-status";
 import {
   ACTIVITY_ACCESSORS,
   DEFAULT_ACTIVITY_SORT,
   activityRowKey,
   decorateActivity,
-  formatTimestamp,
   type ActivityRowData,
   type ActivitySortKey,
   type LiveTaskStatus,
@@ -130,7 +130,7 @@ function ActivityRow({
               <span className="text-muted-foreground">User</span>
               <span>{entry.user_display_name || entry.user_email}</span>
               <span className="text-muted-foreground">Time</span>
-              <span>{formatTimestamp(entry.created_at)}</span>
+              <span>{formatDateTime(entry.created_at)}</span>
               {isFailed && row.exitStatusText !== "" && (
                 <>
                   <span className="text-muted-foreground">Exit Status</span>

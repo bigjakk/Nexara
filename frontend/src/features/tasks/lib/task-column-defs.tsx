@@ -5,16 +5,12 @@
  * exports that need a renderer, and keeping the hooks and derivations out of a
  * .tsx keeps fast refresh working for both halves.
  */
-import {
-  CheckCircle2,
-  ChevronDown,
-  Loader2,
-  Monitor,
-  XCircle,
-} from "lucide-react";
+import { CheckCircle2, ChevronDown, Loader2, XCircle } from "lucide-react";
 import type { DisplayStatus } from "@/components/layout/task-status";
+import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { formatDateTime } from "@/lib/format";
 import type { TaskRecord } from "../api/tasks-queries";
 import type { TaskCellCtx, TaskSortKey } from "./task-columns";
 
@@ -39,10 +35,6 @@ const STATUS_LABEL: Record<DisplayStatus, string> = {
   failed: "Failed",
 };
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString();
-}
-
 /**
  * Every column both task tables can render.
  *
@@ -65,7 +57,7 @@ const ALL_COLUMNS: ColumnDef<TaskRecord, TaskSortKey, TaskCellCtx>[] = [
           className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${ctx.expanded ? "" : "-rotate-90"}`}
         />
         {statusIcon(ctx.display)}
-        {formatTime(task.started_at)}
+        {formatDateTime(task.started_at)}
       </div>
     ),
   },
@@ -92,12 +84,7 @@ const ALL_COLUMNS: ColumnDef<TaskRecord, TaskSortKey, TaskCellCtx>[] = [
     sortable: true,
     cell: (task) => (
       <div className="flex items-center gap-2">
-        {task.source === "proxmox" && (
-          <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] leading-none font-medium text-orange-600 dark:text-orange-400">
-            <Monitor className="h-2.5 w-2.5" />
-            PVE
-          </span>
-        )}
+        <PVESourceBadge source={task.source} />
         <span className="truncate">{task.description || task.upid}</span>
       </div>
     ),

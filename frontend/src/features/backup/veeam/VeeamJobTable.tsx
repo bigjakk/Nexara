@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatDateTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -12,6 +12,11 @@ import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
+import {
+  bottleneckLabel,
+  processingRateLabel,
+  resultVariant,
+} from "./veeam-format";
 import { VeeamJobActions } from "./VeeamJobActions";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamJob } from "../types/backup";
@@ -34,21 +39,6 @@ function resultLabel(result: string): string {
   return result === "Failed" ? "Failed or cancelled" : result;
 }
 
-function resultVariant(
-  result: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  switch (result) {
-    case "Success":
-      return "default";
-    case "Warning":
-      return "outline";
-    case "Failed":
-      return "destructive";
-    default:
-      return "secondary";
-  }
-}
-
 /**
  * Whether the job is running, by the same rule the Status cell paints.
  *
@@ -66,13 +56,6 @@ function toEpoch(value: string | null): number | null {
   if (value == null || value === "") return null;
   const parsed = new Date(value).getTime();
   return Number.isNaN(parsed) ? null : parsed;
-}
-
-function formatTime(value: string | null): string {
-  if (value == null || value === "") return "Never";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
 }
 
 type JobSortKey =
@@ -190,14 +173,18 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
     label: "Last Run",
     width: 180,
     sortValue: (job) => toEpoch(job.last_run),
-    cell: (job) => <span className="text-sm">{formatTime(job.last_run)}</span>,
+    cell: (job) => (
+      <span className="text-sm">{formatDateTime(job.last_run, "Never")}</span>
+    ),
   },
   {
     key: "nextRun",
     label: "Next Run",
     width: 180,
     sortValue: (job) => toEpoch(job.next_run),
-    cell: (job) => <span className="text-sm">{formatTime(job.next_run)}</span>,
+    cell: (job) => (
+      <span className="text-sm">{formatDateTime(job.next_run, "Never")}</span>
+    ),
   },
   {
     key: "repository",
@@ -287,19 +274,13 @@ export function VeeamJobTable({ jobs, serverId }: VeeamJobTableProps) {
                     )}
                     <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                       <DetailField label="Bottleneck">
-                        {job.bottleneck === "" ||
-                        job.bottleneck === "NotDefined"
-                          ? "—"
-                          : job.bottleneck}
+                        {bottleneckLabel(job.bottleneck)}
                       </DetailField>
                       <DetailField label="Duration" variant="mono">
                         {job.duration || "—"}
                       </DetailField>
                       <DetailField label="Processing rate" variant="mono">
-                        {job.processing_rate === "" ||
-                        job.processing_rate === "N/A"
-                          ? "—"
-                          : job.processing_rate}
+                        {processingRateLabel(job.processing_rate)}
                       </DetailField>
                       <DetailField label="Schedule">
                         {job.next_run_policy || "—"}

@@ -3,6 +3,7 @@ import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pencil, PlugZap, Trash2 } from "lucide-react";
+import { formatDateTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -171,13 +172,6 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
   },
 ];
 
-function formatTimestamp(value: string | null): string {
-  if (value == null || value === "") return "Never";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
-}
-
 export function VeeamServerTable({
   servers,
   onEdit,
@@ -294,10 +288,10 @@ export function VeeamServerTable({
                             : "Not verified"}
                       </DetailField>
                       <DetailField label="Last sync">
-                        {formatTimestamp(server.last_sync_at)}
+                        {formatDateTime(server.last_sync_at, "Never")}
                       </DetailField>
                       <DetailField label="Added">
-                        {formatTimestamp(server.created_at)}
+                        {formatDateTime(server.created_at, "Never")}
                       </DetailField>
                     </dl>
 

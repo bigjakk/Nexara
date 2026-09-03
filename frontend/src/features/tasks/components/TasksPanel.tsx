@@ -6,6 +6,7 @@ import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
+import { formatDateTime } from "@/lib/format";
 import { displayProgress } from "@/components/layout/task-status";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
@@ -48,10 +49,6 @@ export function TaskTableHeader({
       </tr>
     </thead>
   );
-}
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString();
 }
 
 function formatDuration(start: string, end: string | null): string {
@@ -142,13 +139,13 @@ export function TaskRow({
               <span className="font-mono">{task.task_type || "—"}</span>
 
               <span className="text-muted-foreground">Started</span>
-              <span>{formatTime(task.started_at)}</span>
+              <span>{formatDateTime(task.started_at)}</span>
 
               <span className="text-muted-foreground">
                 {task.finished_at ? "Finished" : "Elapsed"}
               </span>
               <span>
-                {task.finished_at ? `${formatTime(task.finished_at)} ` : ""}
+                {task.finished_at ? `${formatDateTime(task.finished_at)} ` : ""}
                 <span className="text-muted-foreground">
                   ({formatDuration(task.started_at, task.finished_at)})
                 </span>

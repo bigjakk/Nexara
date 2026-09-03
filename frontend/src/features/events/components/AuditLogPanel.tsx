@@ -9,6 +9,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getValidAccessToken } from "@/lib/api-client";
+import {
+  SEVERITY_STYLES,
+  deriveSeverity,
+  formatAction,
+  type Severity,
+} from "@/components/layout/activity-columns";
+import { parseDetails } from "@/components/layout/task-status";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import {
   useEvents,
@@ -53,58 +60,22 @@ const resourceTypes = [
   { value: "setting", label: "Setting" },
 ] as const;
 
-type Severity = "info" | "warning" | "error" | "all";
+/** The severity dropdown's value: a severity, or no filter at all. */
+type SeverityFilter = Severity | "all";
 
-function deriveSeverity(
-  action: string,
-  details: string,
-): "info" | "warning" | "error" {
-  // Check for error indicators in details
-  if (details && details !== "{}" && details !== "null") {
-    try {
-      const d = JSON.parse(details) as Record<string, unknown>;
-      if (typeof d["error"] === "string" && d["error"] !== "") return "error";
-      if (d["status"] === "failed" || d["status"] === "error") return "error";
-    } catch {
-      // ignore
-    }
-  }
-
-  const a = action.toLowerCase();
-  if (a.includes("error") || a.includes("failed") || a.includes("fail"))
-    return "error";
-  if (
-    a.includes("delete") ||
-    a.includes("destroy") ||
-    a.includes("disable") ||
-    a.includes("revoke") ||
-    a.includes("reset") ||
-    a.includes("stop") ||
-    a.includes("shutdown") ||
-    a.includes("suspend") ||
-    a.includes("cancel")
-  )
-    return "warning";
-  return "info";
+/** This table's severity of `entry`, from the same rule the Activity panel uses. */
+function entrySeverity(entry: AuditLogEntry): Severity {
+  return deriveSeverity(entry.action, parseDetails(entry.details));
 }
 
-function severityBadge(severity: "info" | "warning" | "error") {
-  const colors = {
-    info: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-    warning: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-    error: "bg-red-500/10 text-red-600 dark:text-red-400",
-  };
+function severityBadge(severity: Severity) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colors[severity]}`}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEVERITY_STYLES[severity]}`}
     >
       {severity}
     </span>
   );
-}
-
-function formatAction(action: string): string {
-  return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function resourceTypeLabel(type: string): string {
@@ -171,7 +142,7 @@ function detailValue(val: unknown): string {
   return JSON.stringify(val);
 }
 
-function parseDetails(entry: AuditLogEntry): Array<[string, string]> | null {
+function detailPairs(entry: AuditLogEntry): Array<[string, string]> | null {
   if (!entry.details || entry.details === "{}" || entry.details === "null")
     return null;
   try {
@@ -265,8 +236,8 @@ function EventRow({
   onToggle: () => void;
 }) {
   const summary = formatDetailsSummary(entry);
-  const details = expanded ? parseDetails(entry) : null;
-  const severity = deriveSeverity(entry.action, entry.details);
+  const details = expanded ? detailPairs(entry) : null;
+  const severity = entrySeverity(entry);
 
   return (
     <>
@@ -413,7 +384,7 @@ export function AuditLogPanel() {
   const [userFilter, setUserFilter] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
-  const [severityFilter, setSeverityFilter] = useState<Severity>("all");
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -443,9 +414,7 @@ export function AuditLogPanel() {
   const filteredItems =
     severityFilter === "all"
       ? data?.items
-      : data?.items.filter(
-          (e) => deriveSeverity(e.action, e.details) === severityFilter,
-        );
+      : data?.items.filter((e) => entrySeverity(e) === severityFilter);
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
 
@@ -644,7 +613,7 @@ export function AuditLogPanel() {
             className={selectClass}
             value={severityFilter}
             onChange={(e) => {
-              setSeverityFilter(e.target.value as Severity);
+              setSeverityFilter(e.target.value as SeverityFilter);
               setPage(0);
             }}
           >

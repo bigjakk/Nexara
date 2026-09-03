@@ -64,3 +64,31 @@ export function formatTimestampLong(ts: number): string {
   const m = String(date.getMinutes()).padStart(2, "0");
   return `${mon}/${day} ${h}:${m}`;
 }
+
+/**
+ * An ISO-8601 timestamp in the viewer's locale.
+ *
+ * `fallback` covers the missing case — call sites disagree on what "no value
+ * yet" should read as ("Never" for a sync that has not run, an em dash for a
+ * run still in flight), so it is a parameter rather than a constant.
+ *
+ * A value that will not parse is returned verbatim: if the server sent
+ * something we cannot read, showing it beats hiding it behind "Invalid Date".
+ */
+export function formatDateTime(
+  value: string | null | undefined,
+  fallback = "—",
+): string {
+  if (value == null || value === "") return fallback;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+/** How long ago an ISO-8601 timestamp was, to one unit ("3m ago", "2d ago"). */
+export function formatRelativeTime(iso: string): string {
+  const ago = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (ago < 60) return `${String(ago)}s ago`;
+  if (ago < 3600) return `${String(Math.floor(ago / 60))}m ago`;
+  if (ago < 86400) return `${String(Math.floor(ago / 3600))}h ago`;
+  return `${String(Math.floor(ago / 86400))}d ago`;
+}
