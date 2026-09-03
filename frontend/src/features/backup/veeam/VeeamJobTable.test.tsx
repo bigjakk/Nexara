@@ -182,6 +182,39 @@ describe("VeeamJobTable", () => {
     renderWithProviders(<VeeamJobTable serverId="srv-1" jobs={[]} />);
     expect(screen.getByText(/No Proxmox backup jobs/i)).toBeInTheDocument();
   });
+
+  // The expansion Set is keyed by row id, and row ids belong to one server.
+  // Switching servers keeps this component mounted whenever the new server's
+  // jobs are already cached, so without the reset the Set only ever grows and
+  // a row expanded on server A silently reopens on the return trip.
+  it("forgets which rows were expanded when the server changes", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <VeeamJobTable serverId="srv-1" jobs={[job()]} />,
+    );
+    await user.click(screen.getByText("Onsite_Daily"));
+    expect(screen.getByText("00:18:27")).toBeInTheDocument();
+
+    // Server B, whose one job happens to carry the same row id.
+    rerender(<VeeamJobTable serverId="srv-2" jobs={[job()]} />);
+    expect(screen.queryByText("00:18:27")).not.toBeInTheDocument();
+  });
+
+  // The reset sits above the empty-state return for this reason: a server with
+  // no jobs still renders, and if it bailed out before recording the switch,
+  // expandedFor would still name A when A came back.
+  it("forgets them across a server that has no jobs at all", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(
+      <VeeamJobTable serverId="srv-1" jobs={[job()]} />,
+    );
+    await user.click(screen.getByText("Onsite_Daily"));
+    expect(screen.getByText("00:18:27")).toBeInTheDocument();
+
+    rerender(<VeeamJobTable serverId="srv-2" jobs={[]} />);
+    rerender(<VeeamJobTable serverId="srv-1" jobs={[job()]} />);
+    expect(screen.queryByText("00:18:27")).not.toBeInTheDocument();
+  });
 });
 
 describe("VeeamSessionTable", () => {

@@ -25,8 +25,6 @@ interface VeeamSessionTableProps {
   sessions: VeeamSession[];
   /** The server these runs belong to. Stopping one posts against it. */
   serverId: string;
-  /** Identifies which server these rows belong to, so expansion state resets. */
-  scopeKey?: string;
 }
 
 function formatTime(value: string | null): string {
@@ -213,7 +211,6 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
 export function VeeamSessionTable({
   sessions,
   serverId,
-  scopeKey = "",
 }: VeeamSessionTableProps) {
   const {
     layout,
@@ -226,9 +223,14 @@ export function VeeamSessionTable({
   // Row ids are server-scoped, so switching servers must not carry a stale
   // expansion set forward — it only grows, and rows silently re-expand on
   // return.
-  const [expandedFor, setExpandedFor] = useState(scopeKey);
-  if (expandedFor !== scopeKey) {
-    setExpandedFor(scopeKey);
+  //
+  // This has to stay ABOVE the empty-state return below. A server with no rows
+  // still renders this component, and if it returned before updating
+  // expandedFor, switching A → (empty) B → A would compare A against A, skip
+  // the reset, and re-expand A's old rows.
+  const [expandedFor, setExpandedFor] = useState(serverId);
+  if (expandedFor !== serverId) {
+    setExpandedFor(serverId);
     setExpanded(new Set());
   }
 
