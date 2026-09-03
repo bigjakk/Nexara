@@ -146,6 +146,7 @@ export function ClusterReplicationTab({
                         variant="ghost"
                         size="sm"
                         aria-label={`Edit replication job ${job.id}`}
+                        title="Edit job"
                         onClick={() => {
                           setEditJob(job);
                         }}
@@ -163,6 +164,7 @@ export function ClusterReplicationTab({
                             });
                           }}
                           aria-label={`Trigger sync for replication job ${job.id}`}
+                          title="Trigger sync now"
                         >
                           <Play className="h-4 w-4" />
                         </Button>
