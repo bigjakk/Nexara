@@ -2,11 +2,9 @@ package db
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
 	"github.com/google/uuid"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
@@ -62,9 +60,7 @@ func TestNodeInventoryUpdatedAt_MovesOnlyOnContentChange(t *testing.T) {
 
 	ctx, pool, m := env.Ctx, env.Pool, env.Migrate
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
-	}
+	migrateUp(t, m)
 
 	purge := func() {
 		pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)

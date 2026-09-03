@@ -11,15 +11,16 @@ import (
 )
 
 // newRouteStubServer builds a Server whose handler fields are all
-// non-nil zero values so setupRoutes registers every route the real
-// binary can serve. No handler is ever invoked — route registration
-// only stores bound method values — so zero-value handlers are safe.
+// non-nil zero values, checks none was missed, and registers the routes —
+// the three steps every caller needs before it can walk app.GetRoutes. No
+// handler is ever invoked — route registration only stores bound method
+// values — so zero-value handlers are safe.
 //
-// If a new handler field is added to Server, add it here too;
-// TestEndpointMetaMatchesRegisteredRoutes fails with an explicit
-// message when a handler field is left nil.
-func newRouteStubServer() *Server {
-	return &Server{
+// If a new handler field is added to Server, add it here too; the stub
+// check fails with an explicit message when a handler field is left nil.
+func newRouteStubServer(t *testing.T) *Server {
+	t.Helper()
+	s := &Server{
 		app:                    fiber.New(),
 		authHandler:            &handlers.AuthHandler{},
 		clusterHandler:         &handlers.ClusterHandler{},
@@ -67,6 +68,9 @@ func newRouteStubServer() *Server {
 		apiDocsHandler:         &handlers.APIDocsHandler{},
 		changelogHandler:       &handlers.ChangelogHandler{},
 	}
+	requireAllHandlersStubbed(t, s)
+	s.setupRoutes()
+	return s
 }
 
 // requireAllHandlersStubbed fails the test if any *handlers.X field of
@@ -112,9 +116,7 @@ func requireAllHandlersStubbed(t *testing.T, s *Server) {
 // intentionally NOT enforced: routes without an entry get auto-derived
 // metadata by design (see the endpointMeta doc comment).
 func TestEndpointMetaMatchesRegisteredRoutes(t *testing.T) {
-	s := newRouteStubServer()
-	requireAllHandlersStubbed(t, s)
-	s.setupRoutes()
+	s := newRouteStubServer(t)
 
 	registered := make(map[string]bool)
 	for _, r := range s.app.GetRoutes(true) {

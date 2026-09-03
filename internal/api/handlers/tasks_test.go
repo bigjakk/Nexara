@@ -297,8 +297,17 @@ func TestParseTaskSort(t *testing.T) {
 // gates: a key accepted here but absent from queries/tasks.sql would return
 // 200 with silently unsorted rows, which is worse than the 400 the whitelist
 // exists to produce.
+//
+// That the defaults themselves are valid is proven by TestParseTaskSort, not
+// here: parseTaskSort applies each default and then validates it, so a default
+// the whitelist rejects makes those rows error. The two rows that leave sortBy
+// empty ("defaults when both empty", "sort defaults alone") pin defaultTaskSort;
+// the two that leave order empty ("defaults when both empty", "order defaults
+// alone") pin defaultTaskOrder to "desc" — stricter than the assertion this test
+// used to carry, which accepted either direction. Keep them if you trim that
+// table.
 func TestTaskSortColumnsMatchSQL(t *testing.T) {
-	query, err := os.ReadFile(filepath.Join("..", "..", "..", "queries", "tasks.sql"))
+	query, err := os.ReadFile(filepath.Join(repoRoot, "queries", "tasks.sql"))
 	if err != nil {
 		t.Fatalf("read queries/tasks.sql: %v", err)
 	}
@@ -307,11 +316,5 @@ func TestTaskSortColumnsMatchSQL(t *testing.T) {
 		if !strings.Contains(sql, "'"+col+"'") {
 			t.Errorf("sort column %q is accepted by the handler but never matched in queries/tasks.sql", col)
 		}
-	}
-	if !taskSortColumns[defaultTaskSort] {
-		t.Errorf("defaultTaskSort %q is not in taskSortColumns", defaultTaskSort)
-	}
-	if defaultTaskOrder != "asc" && defaultTaskOrder != "desc" {
-		t.Errorf("defaultTaskOrder %q is not a valid direction", defaultTaskOrder)
 	}
 }

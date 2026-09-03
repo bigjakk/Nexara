@@ -415,6 +415,19 @@ func newVeeamTestSyncer(t *testing.T, q *fakeVeeamQueries, c *fakeVeeamClient) *
 	return s
 }
 
+// newReReadQueries stubs what a session re-read pass reads: one Veeam server,
+// and the unfinished session ids it will re-read, in the newest-first order
+// ListVeeamUnfinishedSessions returns them. Tests that assert on the server
+// itself reach it as q.servers[0]. Not for the tests that need a server with
+// a watermark of their own — those build the struct directly.
+func newReReadQueries(t *testing.T, unfinished ...uuid.UUID) *fakeVeeamQueries {
+	t.Helper()
+	return &fakeVeeamQueries{
+		servers:    []db.VeeamServer{testVeeamServer(t)},
+		unfinished: unfinished,
+	}
+}
+
 func testVeeamServer(t *testing.T) db.VeeamServer {
 	t.Helper()
 	encrypted, err := crypto.Encrypt("correct-horse", testVeeamKey)
@@ -1096,12 +1109,8 @@ func TestVeeamSync_ReReadsAnInFlightSessionThePollHasPassed(t *testing.T) {
 // session to learn that would make every pass cost one call per running job
 // for nothing.
 func TestVeeamSync_DoesNotReReadASessionThePollJustStored(t *testing.T) {
-	server := testVeeamServer(t)
 	live := uuid.New()
-	q := &fakeVeeamQueries{
-		servers:    []db.VeeamServer{server},
-		unfinished: []uuid.UUID{live},
-	}
+	q := newReReadQueries(t, live)
 	c := &fakeVeeamClient{
 		sessions: []veeam.Session{{
 			ID: live.String(), SessionType: veeam.PlatformBackupSessionType,
@@ -1125,12 +1134,8 @@ func TestVeeamSync_DoesNotReReadASessionThePollJustStored(t *testing.T) {
 // state now, so leaving the row is precisely what pins its job to "Running"
 // forever — the mirror drops it, as the sweeps do for every other object.
 func TestVeeamSync_DropsAnUnfinishedSessionVeeamNoLongerHas(t *testing.T) {
-	server := testVeeamServer(t)
 	gone := uuid.New()
-	q := &fakeVeeamQueries{
-		servers:    []db.VeeamServer{server},
-		unfinished: []uuid.UUID{gone},
-	}
+	q := newReReadQueries(t, gone)
 	// byID is empty, so the fake answers 404.
 	c := &fakeVeeamClient{}
 	syncer := newVeeamTestSyncer(t, q, c)
@@ -1140,73 +1145,54 @@ func TestVeeamSync_DropsAnUnfinishedSessionVeeamNoLongerHas(t *testing.T) {
 	if len(q.deletedSess) != 1 || q.deletedSess[0].VeeamID != gone {
 		t.Fatalf("deleted %v, want the vanished session (%s)", q.deletedSess, gone)
 	}
-	if q.deletedSess[0].VeeamServerID != server.ID {
+	if want := q.servers[0].ID; q.deletedSess[0].VeeamServerID != want {
 		t.Errorf("deleted scoped to server %s, want %s — an unscoped delete reaches another server's rows",
-			q.deletedSess[0].VeeamServerID, server.ID)
+			q.deletedSess[0].VeeamServerID, want)
 	}
 }
 
-// Every failure that is NOT a definite 404 is transient. Deleting a run's
-// history over a momentary error is not recoverable, so the row waits for the
-// next pass.
+// Every failure that is NOT veeam.ErrSessionNotFound is transient. Deleting a
+// run's history over a momentary error is not recoverable, so the row waits
+// for the next pass — and the pass itself still has to succeed, or the
+// watermark it advances stalls behind one unreadable session.
+//
+// The 404 row is the near-miss this fix nearly shipped: a 404 does NOT reach
+// the collector only from the session endpoint. A failed token grant surfaces
+// the token endpoint's own *APIError verbatim, so a restarting VBR answering
+// 404 on /oauth2/token used to look byte-identical to "this run is gone" —
+// and, because a failed grant leaves the cached token untouched, every
+// remaining id in the batch failed the same way. One restart would have
+// deleted up to fifty rows, including runs in flight at that moment, taking
+// the nexara_stopped provenance that suppresses a false veeam_job_failed with
+// them.
 func TestVeeamSync_KeepsAnUnfinishedSessionWhenTheReReadFails(t *testing.T) {
-	server := testVeeamServer(t)
-	unreadable := uuid.New()
-	q := &fakeVeeamQueries{
-		servers:    []db.VeeamServer{server},
-		unfinished: []uuid.UUID{unreadable},
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"a transient 500", &veeam.APIError{StatusCode: http.StatusInternalServerError, Message: "boom"}},
+		{"a 404 the session endpoint never sent", &veeam.APIError{
+			StatusCode: http.StatusNotFound, ErrorCode: "NotFound", Message: "Not Found",
+		}},
 	}
-	c := &fakeVeeamClient{
-		sessionErrByID: map[string]error{
-			unreadable.String(): &veeam.APIError{StatusCode: http.StatusInternalServerError, Message: "boom"},
-		},
-	}
-	syncer := newVeeamTestSyncer(t, q, c)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unreadable := uuid.New()
+			q := newReReadQueries(t, unreadable)
+			c := &fakeVeeamClient{
+				sessionErrByID: map[string]error{unreadable.String(): tt.err},
+			}
+			syncer := newVeeamTestSyncer(t, q, c)
 
-	syncer.SyncSessions(context.Background())
+			syncer.SyncSessions(context.Background())
 
-	if len(q.deletedSess) != 0 {
-		t.Errorf("deleted %v on a transient failure — the run's history is gone for good", q.deletedSess)
-	}
-	// The pass itself still succeeded: the poll worked, and losing its
-	// watermark advance would re-fetch the whole window every pass for as long
-	// as this one session stayed unreadable.
-	if !q.sessionsSynced {
-		t.Error("an unreadable session failed the whole pass, which stalls the watermark")
-	}
-}
-
-// The near-miss this fix nearly shipped: a 404 does NOT reach the collector
-// only from the session endpoint. A failed token grant surfaces the token
-// endpoint's own *APIError verbatim, so a restarting VBR answering 404 on
-// /oauth2/token used to look byte-identical to "this run is gone" — and,
-// because a failed grant leaves the cached token untouched, every remaining id
-// in the batch failed the same way. One restart would have deleted up to fifty
-// rows, including runs in flight at that moment, taking the nexara_stopped
-// provenance that suppresses a false veeam_job_failed with them.
-func TestVeeamSync_A404FromElsewhereDoesNotDeleteSessions(t *testing.T) {
-	server := testVeeamServer(t)
-	live := uuid.New()
-	q := &fakeVeeamQueries{
-		servers:    []db.VeeamServer{server},
-		unfinished: []uuid.UUID{live},
-	}
-	// A 404 *APIError that did NOT come from GET /sessions/{id} — exactly what
-	// the token endpoint hands back through a failed re-grant.
-	c := &fakeVeeamClient{
-		sessionErrByID: map[string]error{
-			live.String(): &veeam.APIError{
-				StatusCode: http.StatusNotFound, ErrorCode: "NotFound", Message: "Not Found",
-			},
-		},
-	}
-	syncer := newVeeamTestSyncer(t, q, c)
-
-	syncer.SyncSessions(context.Background())
-
-	if len(q.deletedSess) != 0 {
-		t.Errorf("deleted %v on a 404 the session endpoint never sent — only veeam.ErrSessionNotFound may delete a run",
-			q.deletedSess)
+			if len(q.deletedSess) != 0 {
+				t.Errorf("deleted %v — only veeam.ErrSessionNotFound may delete a run", q.deletedSess)
+			}
+			if !q.sessionsSynced {
+				t.Error("an unreadable session failed the whole pass, which stalls the watermark")
+			}
+		})
 	}
 }
 
@@ -1214,14 +1200,8 @@ func TestVeeamSync_A404FromElsewhereDoesNotDeleteSessions(t *testing.T) {
 // remaining id would fail identically, so the batch is abandoned rather than
 // spending fifty doomed round-trips on it.
 func TestVeeamSync_AbandonsTheBatchOnAClientWideFailure(t *testing.T) {
-	server := testVeeamServer(t)
 	first, second := uuid.New(), uuid.New()
-	q := &fakeVeeamQueries{
-		servers: []db.VeeamServer{server},
-		// ListVeeamUnfinishedSessions orders newest first; the fake preserves
-		// the order it is given.
-		unfinished: []uuid.UUID{first, second},
-	}
+	q := newReReadQueries(t, first, second)
 	c := &fakeVeeamClient{
 		sessionErrByID: map[string]error{first.String(): veeam.ErrAuthFailed},
 	}
@@ -1242,12 +1222,8 @@ func TestVeeamSync_AbandonsTheBatchOnAClientWideFailure(t *testing.T) {
 // rows behind it. Newest-first ordering means one permanently-failing run
 // would otherwise starve every older one forever.
 func TestVeeamSync_APerSessionFailureDoesNotBlockTheRest(t *testing.T) {
-	server := testVeeamServer(t)
 	broken, healthy := uuid.New(), uuid.New()
-	q := &fakeVeeamQueries{
-		servers:    []db.VeeamServer{server},
-		unfinished: []uuid.UUID{broken, healthy},
-	}
+	q := newReReadQueries(t, broken, healthy)
 	c := &fakeVeeamClient{
 		sessionErrByID: map[string]error{
 			broken.String(): &veeam.APIError{StatusCode: http.StatusInternalServerError, Message: "boom"},
@@ -1273,12 +1249,8 @@ func TestVeeamSync_APerSessionFailureDoesNotBlockTheRest(t *testing.T) {
 // NULL, feeds the watermark, and a zero value would be pruned on this very
 // pass. A list envelope decoded as a single session yields exactly this.
 func TestVeeamSync_SkipsAReReadSessionWithNoParseableTime(t *testing.T) {
-	server := testVeeamServer(t)
 	empty := uuid.New()
-	q := &fakeVeeamQueries{
-		servers:    []db.VeeamServer{server},
-		unfinished: []uuid.UUID{empty},
-	}
+	q := newReReadQueries(t, empty)
 	c := &fakeVeeamClient{
 		byID: map[string]veeam.Session{
 			empty.String(): {ID: empty.String(), Name: "no-timestamp", State: "Working"},

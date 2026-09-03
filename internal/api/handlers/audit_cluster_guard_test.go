@@ -151,20 +151,16 @@ func nullClusterInsert(lit *ast.CompositeLit) bool {
 	return true // omitted entirely — the zero pgtype.UUID is SQL NULL
 }
 
-// auditParamsType returns the params type name if lit is one of the audit
-// insert structs, qualified or not.
-func auditParamsType(lit *ast.CompositeLit) string {
+// isAuditParams reports whether lit is one of the audit insert structs,
+// qualified or not.
+func isAuditParams(lit *ast.CompositeLit) bool {
 	switch t := lit.Type.(type) {
 	case *ast.SelectorExpr:
-		if auditInsertParams[t.Sel.Name] {
-			return t.Sel.Name
-		}
+		return auditInsertParams[t.Sel.Name]
 	case *ast.Ident:
-		if auditInsertParams[t.Name] {
-			return t.Name
-		}
+		return auditInsertParams[t.Name]
 	}
-	return ""
+	return false
 }
 
 // nullClusterArg reports whether expr is a pgtype.UUID composite literal that
@@ -287,7 +283,7 @@ func TestGuard_AuditCallsCarryResourceCluster(t *testing.T) {
 					pos = node.Pos()
 
 				case *ast.CompositeLit:
-					if auditParamsType(node) == "" || !nullClusterInsert(node) {
+					if !isAuditParams(node) || !nullClusterInsert(node) {
 						return true
 					}
 					pos = node.Pos()

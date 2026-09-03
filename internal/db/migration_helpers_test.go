@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -88,6 +89,17 @@ func assertThrowawayDB(dbURL string) error {
 		}
 	}
 	return fmt.Errorf("database %q does not look like a throwaway test database", dbName)
+}
+
+// migrateUp brings the schema to head, treating "no change" as success. The
+// preamble for tests that assert against the current schema rather than
+// driving the migration themselves — the ones that do (migration_chain,
+// migration_084's restore) keep their own call so their failure names the step.
+func migrateUp(t *testing.T, m *migrate.Migrate) {
+	t.Helper()
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate up: %v", err)
+	}
 }
 
 // migrationTestEnv is the shared scaffolding every migration round-trip

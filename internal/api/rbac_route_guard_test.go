@@ -493,9 +493,7 @@ func normalizeRoutePath(path string) string {
 // handler — do not add the route to an exemption list unless it is genuinely
 // unauthenticated or acts solely on the caller's own identity.
 func TestGuard_EveryRouteEnforcesPermission(t *testing.T) {
-	s := newRouteStubServer()
-	requireAllHandlersStubbed(t, s)
-	s.setupRoutes()
+	s := newRouteStubServer(t)
 
 	graph := buildCallGraph(t)
 
@@ -543,9 +541,7 @@ func TestGuard_EveryRouteEnforcesPermission(t *testing.T) {
 // nothing would notice. This makes that a build failure, and makes going
 // public a deliberate edit to publicRoutes with a stated reason.
 func TestGuard_PublicRoutesAreExpected(t *testing.T) {
-	s := newRouteStubServer()
-	requireAllHandlersStubbed(t, s)
-	s.setupRoutes()
+	s := newRouteStubServer(t)
 
 	registered := map[string]bool{}
 	for _, r := range s.app.GetRoutes(true) {
@@ -585,9 +581,7 @@ func TestGuard_PublicRoutesAreExpected(t *testing.T) {
 // unguarded route is passing for an unrelated reason. Same guarantee
 // TestEndpointMetaMatchesRegisteredRoutes gives the docs overlay.
 func TestGuard_ExemptionKeysMatchRegisteredRoutes(t *testing.T) {
-	s := newRouteStubServer()
-	requireAllHandlersStubbed(t, s)
-	s.setupRoutes()
+	s := newRouteStubServer(t)
 
 	registered := map[string]bool{}
 	for _, r := range s.app.GetRoutes(true) {
@@ -627,9 +621,7 @@ func TestGuard_ExemptionKeysMatchRegisteredRoutes(t *testing.T) {
 // endpoint picks node/vm/container from the request), whereas the action is
 // almost always a literal.
 func TestGuard_DocumentedPermissionMatchesEnforcement(t *testing.T) {
-	s := newRouteStubServer()
-	requireAllHandlersStubbed(t, s)
-	s.setupRoutes()
+	s := newRouteStubServer(t)
 
 	graph := buildCallGraph(t)
 	meta := handlers.EndpointMetaPermissions()

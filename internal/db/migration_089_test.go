@@ -2,11 +2,9 @@ package db
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
 	"github.com/google/uuid"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
@@ -53,9 +51,7 @@ func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 	purge()
 	defer purge()
 
-	if err := env.Migrate.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
-	}
+	migrateUp(t, env.Migrate)
 
 	seedCluster := func(id uuid.UUID, name string) {
 		t.Helper()
@@ -380,9 +376,7 @@ func TestVeeamPlatform_AutoMapsOnDiscoveryOnly(t *testing.T) {
 	purge()
 	defer purge()
 
-	if err := env.Migrate.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
-	}
+	migrateUp(t, env.Migrate)
 
 	// Any cluster left active by another test would make this install
 	// multi-cluster and the convenience would correctly decline to fire, so

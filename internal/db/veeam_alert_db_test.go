@@ -2,11 +2,9 @@ package db
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	"github.com/golang-migrate/migrate/v4"
 	"github.com/google/uuid"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
@@ -39,9 +37,7 @@ func TestVeeamAlertStats(t *testing.T) {
 	purge()
 	defer purge()
 
-	if err := env.Migrate.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		t.Fatalf("migrate up: %v", err)
-	}
+	migrateUp(t, env.Migrate)
 
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO clusters (id, name, api_url, token_id, token_secret_encrypted)
