@@ -1,0 +1,10 @@
+# Revisions to skip when running `git blame`.
+#
+# Only ever add commits that changed formatting and nothing else. Anything with
+# a real change in it belongs in blame output.
+#
+# Locally:  git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub and Gitea read this file on their own.
+
+# chore: prettier the frontend — 378 files, formatting only
+bf970a70da7c8b0447d9d96ca74d0bf852155987
