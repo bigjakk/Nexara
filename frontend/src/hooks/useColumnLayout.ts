@@ -1,12 +1,6 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SortAccessors } from "@/hooks/useTableSort";
 import {
   clampWidth,
@@ -80,6 +74,12 @@ export interface ColumnDef<Row, K extends string, Ctx = void> {
   cell: (row: Row, ctx: Ctx) => ReactNode;
 }
 
+/** Where a reorder drag would drop the column if it were released now. */
+export interface DropTarget<K extends string> {
+  key: K;
+  side: "before" | "after";
+}
+
 export interface ColumnLayout<Row, K extends string, Ctx> {
   /** The table's columns in the user's order. Render header AND cells from
    *  this, in this order. */
@@ -103,7 +103,7 @@ export interface ColumnLayout<Row, K extends string, Ctx> {
   ) => void;
   /** The column a reorder drag is currently over, and which edge — for the
    *  drop indicator. Null when no drag is in flight. */
-  dropTarget: { key: K; side: "before" | "after" } | null;
+  dropTarget: DropTarget<K> | null;
   /** The column being dragged, for dimming it. */
   draggingKey: K | null;
   resizingKey: K | null;
@@ -113,34 +113,21 @@ export interface ColumnLayout<Row, K extends string, Ctx> {
   reset: () => void;
 }
 
-/** Tailwind's `md`. Kept in one place so the JS test and the CSS agree. */
-const MD_QUERY = "(min-width: 768px)";
-
 /**
- * Whether the viewport is at least `md`, as a subscription.
- *
- * `hideBelowMd` columns are dropped from the layout rather than hidden with a
- * class, so the width they would have taken goes with them — which is the only
- * version of "hide this column on a phone" that actually narrows the table.
+ * Each column's width: the stored one where the user has dragged it, the
+ * declared one otherwise. Written once so the initial state and the Reset
+ * control cannot disagree about what a default width is.
  */
-function useIsAtLeastMd(): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      // matchMedia is absent in some test environments; assume desktop and
-      // never subscribe rather than throwing during render.
-      if (typeof window.matchMedia !== "function") return () => undefined;
-      const mql = window.matchMedia(MD_QUERY);
-      mql.addEventListener("change", onChange);
-      return () => {
-        mql.removeEventListener("change", onChange);
-      };
-    },
-    () =>
-      typeof window.matchMedia === "function"
-        ? window.matchMedia(MD_QUERY).matches
-        : true,
-    () => true,
-  );
+function widthsFrom<Row, K extends string, Ctx>(
+  columns: readonly ColumnDef<Row, K, Ctx>[],
+  stored?: Partial<Record<string, number>>,
+): Record<K, number> {
+  const widths = {} as Record<K, number>;
+  for (const col of columns) {
+    const saved = stored?.[col.key];
+    widths[col.key] = typeof saved === "number" ? clampWidth(saved) : col.width;
+  }
+  return widths;
 }
 
 /** How far the pointer must travel before a press on a heading becomes a drag
@@ -162,7 +149,9 @@ export function useColumnLayout<Row, K extends string, Ctx = void>(
   tableId: string,
   columns: readonly ColumnDef<Row, K, Ctx>[],
 ): ColumnLayout<Row, K, Ctx> {
-  const atLeastMd = useIsAtLeastMd();
+  // The same subscription the app shell switches layouts on, so a table and
+  // the chrome around it can never disagree about which viewport this is.
+  const atLeastMd = !useIsMobile();
   // The columns this viewport shows at all. Everything below works from this,
   // so a hidden column contributes neither an order slot nor a width.
   const visibleColumns = useMemo(
@@ -197,29 +186,13 @@ export function useColumnLayout<Row, K extends string, Ctx = void>(
     // array itself would re-run on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [declaredKey]);
-  const [widths, setWidths] = useState<Record<K, number>>(() => {
-    const initial = {} as Record<K, number>;
-    for (const col of columns) {
-      const saved = stored.widths?.[col.key];
-      initial[col.key] =
-        typeof saved === "number" ? clampWidth(saved) : col.width;
-    }
-    return initial;
-  });
+  const [widths, setWidths] = useState<Record<K, number>>(() =>
+    widthsFrom(columns, stored.widths),
+  );
 
-  const [dropTarget, setDropTarget] = useState<{
-    key: K;
-    side: "before" | "after";
-  } | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget<K> | null>(null);
   const [draggingKey, setDraggingKey] = useState<K | null>(null);
   const [resizingKey, setResizingKey] = useState<K | null>(null);
-
-  // Written by the pointermove handlers and read on pointerup. Refs, not
-  // state: a resize drag fires dozens of moves a second and each one would
-  // otherwise be a render, and the pointerup handler needs the latest value
-  // rather than the one captured when the listener was attached.
-  const liveWidth = useRef<number | null>(null);
-  const liveDrop = useRef<{ key: K; side: "before" | "after" } | null>(null);
 
   const persist = useCallback(
     (nextOrder: K[], nextWidths: Record<K, number>) => {
@@ -247,27 +220,26 @@ export function useColumnLayout<Row, K extends string, Ctx = void>(
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       el.setPointerCapture?.(event.pointerId);
       setResizingKey(key);
-      liveWidth.current = startWidth;
+
+      // Not state, and not a ref either: a resize fires dozens of moves a
+      // second and each render would be wasted, and the two handlers below are
+      // closures over this one gesture — nothing outside it ever reads this.
+      let liveWidth = startWidth;
 
       const onMove = (moveEvent: PointerEvent) => {
-        const next = clampWidth(startWidth + (moveEvent.clientX - startX));
-        liveWidth.current = next;
-        setWidths((prev) => ({ ...prev, [key]: next }));
+        liveWidth = clampWidth(startWidth + (moveEvent.clientX - startX));
+        setWidths((prev) => ({ ...prev, [key]: liveWidth }));
       };
       const onUp = () => {
         el.removeEventListener("pointermove", onMove);
         el.removeEventListener("pointerup", onUp);
         el.removeEventListener("pointercancel", onUp);
         setResizingKey(null);
-        const settled = liveWidth.current;
-        liveWidth.current = null;
-        if (settled !== null) {
-          setWidths((prev) => {
-            const next = { ...prev, [key]: settled };
-            persist(order, next);
-            return next;
-          });
-        }
+        setWidths((prev) => {
+          const next = { ...prev, [key]: liveWidth };
+          persist(order, next);
+          return next;
+        });
       };
       el.addEventListener("pointermove", onMove);
       el.addEventListener("pointerup", onUp);
@@ -295,7 +267,8 @@ export function useColumnLayout<Row, K extends string, Ctx = void>(
       // See the note in startResize: jsdom lacks setPointerCapture.
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       el.setPointerCapture?.(event.pointerId);
-      liveDrop.current = null;
+      // See startResize: a per-gesture local, not a ref.
+      let liveDrop: DropTarget<K> | null = null;
 
       const onMove = (moveEvent: PointerEvent) => {
         if (!dragging) {
@@ -314,7 +287,7 @@ export function useColumnLayout<Row, K extends string, Ctx = void>(
           setDraggingKey(key);
         }
         if (!headerRow) return;
-        let found: { key: K; side: "before" | "after" } | null = null;
+        let found: DropTarget<K> | null = null;
         for (const cell of headerRow.children) {
           const cellKey = (cell as HTMLElement).dataset["columnKey"] as
             | K
@@ -337,22 +310,22 @@ export function useColumnLayout<Row, K extends string, Ctx = void>(
             break;
           }
         }
-        liveDrop.current = found;
+        liveDrop = found;
         setDropTarget(found);
       };
 
-      const detach = () => {
+      // Every way this gesture can end runs the same teardown.
+      const finish = () => {
         el.removeEventListener("pointermove", onMove);
         el.removeEventListener("pointerup", onUp);
         el.removeEventListener("pointercancel", onCancel);
+        setDropTarget(null);
+        setDraggingKey(null);
       };
 
       const onUp = () => {
-        detach();
-        const drop = liveDrop.current;
-        liveDrop.current = null;
-        setDropTarget(null);
-        setDraggingKey(null);
+        const drop = liveDrop;
+        finish();
         if (!dragging) {
           // Only a press that stayed put counts as a click.
           if (!movedFar) onClick();
@@ -372,12 +345,7 @@ export function useColumnLayout<Row, K extends string, Ctx = void>(
       // measures horizontal travel, so such a gesture never sets `dragging`,
       // and routing cancel through onUp would sort the table out from under
       // someone who was only trying to scroll it.
-      const onCancel = () => {
-        detach();
-        liveDrop.current = null;
-        setDropTarget(null);
-        setDraggingKey(null);
-      };
+      const onCancel = finish;
 
       el.addEventListener("pointermove", onMove);
       el.addEventListener("pointerup", onUp);
@@ -389,9 +357,7 @@ export function useColumnLayout<Row, K extends string, Ctx = void>(
   const reset = useCallback(() => {
     clearColumnLayout(tableId);
     setOrder([...declaredKeys]);
-    const defaults = {} as Record<K, number>;
-    for (const col of columns) defaults[col.key] = col.width;
-    setWidths(defaults);
+    setWidths(widthsFrom(columns));
   }, [columns, declaredKeys, tableId]);
 
   const orderedColumns = useMemo(() => {

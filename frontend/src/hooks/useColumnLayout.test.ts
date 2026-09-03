@@ -16,12 +16,18 @@ const COLUMNS: ColumnDef<Row, Key>[] = [
   { key: "narrow", label: "Narrow", width: 40, cell: () => null },
 ];
 
-/** Drive the md breakpoint the hook subscribes to. */
+/**
+ * Drive the md breakpoint the hook subscribes to.
+ *
+ * The hook asks useIsMobile, whose query is `(max-width: 767px)` — so
+ * `matches` is the NEGATION of the argument. Get this backwards and every
+ * assertion below still runs, against the opposite viewport.
+ */
 function mockViewport(atLeastMd: boolean) {
   vi.stubGlobal(
     "matchMedia",
     vi.fn().mockImplementation((query: string) => ({
-      matches: atLeastMd,
+      matches: !atLeastMd,
       media: query,
       addEventListener: () => undefined,
       removeEventListener: () => undefined,

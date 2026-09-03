@@ -113,8 +113,13 @@ export function clampWidth(width: number): number {
 /**
  * Move `key` to sit immediately before or after `target`.
  *
- * Returns the input unchanged when the move is a no-op, so a caller can drop a
- * header back where it started without writing to storage.
+ * Always returns a new array, including for a move that changes nothing — a
+ * header dropped back where it started still costs one storage write. There is
+ * no identity-return shortcut because the caller does not check for one.
+ *
+ * A `target` the order does not contain is a no-op, and that covers `key`
+ * itself: the dragged key is filtered out before the target is located, so a
+ * column dropped onto itself finds nothing to insert beside.
  */
 export function moveColumn<K extends string>(
   order: readonly K[],
@@ -122,7 +127,6 @@ export function moveColumn<K extends string>(
   target: K,
   side: "before" | "after",
 ): K[] {
-  if (key === target) return [...order];
   const without = order.filter((k) => k !== key);
   const at = without.indexOf(target);
   if (at === -1) return [...order];

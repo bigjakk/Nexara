@@ -8,7 +8,7 @@ interface Row {
   id: string;
   name: string;
 }
-type Key = "name" | "actions";
+type Key = "name" | "narrow" | "actions";
 
 const COLUMNS: ColumnDef<Row, Key>[] = [
   {
@@ -17,6 +17,16 @@ const COLUMNS: ColumnDef<Row, Key>[] = [
     width: 200,
     sortValue: (r) => r.name,
     cell: (r) => r.name,
+  },
+  // Present only at desktop. Nothing else here can tell the two viewports
+  // apart, which is what let the matchMedia stub below sit at the wrong
+  // polarity unnoticed once the query it answers flipped.
+  {
+    key: "narrow",
+    label: "Narrow",
+    width: 60,
+    hideBelowMd: true,
+    cell: () => null,
   },
   { key: "actions", label: "", width: 80, fixed: true, cell: () => null },
 ];
@@ -28,10 +38,13 @@ const ROWS: Row[] = [
 
 beforeEach(() => {
   localStorage.clear();
+  // Desktop. useColumnLayout reads useIsMobile, whose query is
+  // `(max-width: 767px)`, so `matches: false` is the wide viewport — the
+  // negation of what it would have been when the hook asked `min-width`.
   vi.stubGlobal(
     "matchMedia",
     vi.fn().mockImplementation((query: string) => ({
-      matches: true,
+      matches: false,
       media: query,
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
@@ -44,16 +57,16 @@ afterEach(() => {
 
 describe("useDataTable", () => {
   it("sorts on the accessors derived from the column declarations", () => {
-    const { result } = renderHook(() =>
-      useDataTable("t", COLUMNS, ROWS, byId),
-    );
+    const { result } = renderHook(() => useDataTable("t", COLUMNS, ROWS, byId));
     expect(result.current.rows.map((r) => r.id)).toEqual(["2", "1"]);
     act(() => {
       result.current.toggle("name");
     });
     expect(result.current.rows.map((r) => r.id)).toEqual(["1", "2"]);
     expect(result.current.directionFor("name")).toBe("asc");
-    expect(result.current.layout.totalWidth).toBe(280);
+    // 200 + 60 + 80: the hideBelowMd column is in, so this also pins the
+    // matchMedia stub above to the desktop viewport it claims to be.
+    expect(result.current.layout.totalWidth).toBe(340);
   });
 
   // The whole reason the per-table `const X_SORT = sortAccessorsFrom(COLUMNS)`
