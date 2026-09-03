@@ -184,6 +184,9 @@ function FolderBranch({
             )}
           >
             <button
+              aria-label={`${expanded ? "Collapse" : "Expand"} folder ${node.folder.name}`}
+              aria-expanded={hasChildren ? expanded : undefined}
+              disabled={!hasChildren}
               onClick={(e) => {
                 e.stopPropagation();
                 if (hasChildren) toggleNode(key);
@@ -338,8 +341,11 @@ function UnassignedBranch({ vms, clusterId }: UnassignedBranchProps) {
         )}
       >
         <button
+          aria-label={`${expanded ? "Collapse" : "Expand"} Discovered`}
+          aria-expanded={vms.length > 0 ? expanded : undefined}
+          disabled={vms.length === 0}
           onClick={() => {
-            toggleNode(key);
+            if (vms.length > 0) toggleNode(key);
           }}
           className="shrink-0"
         >
@@ -460,6 +466,8 @@ function VMClusterBranch({
             )}
           >
             <button
+              aria-label={`${isExpanded ? "Collapse" : "Expand"} cluster ${cluster.name}`}
+              aria-expanded={isExpanded}
               onClick={() => {
                 toggleNode(clusterKey);
               }}

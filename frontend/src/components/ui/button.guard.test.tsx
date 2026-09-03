@@ -109,3 +109,45 @@ describe("icon-only Button accessible names", () => {
     expect(unnamed).toEqual([]);
   });
 });
+
+/**
+ * The disclosure half of the same problem.
+ *
+ * The sidebar trees expand and collapse with a lowercase `<button>` holding a
+ * bare chevron, which the rule above deliberately does not cover — a static
+ * label is the wrong shape for a control whose state changes, and failing that
+ * test would be a misleading way to ask for aria-expanded.
+ *
+ * So police it on its own terms instead: anything that declares itself a
+ * disclosure has to say what it discloses. There are no render tests for the
+ * three tree files, so without this nothing catches a toggle losing its name.
+ */
+describe("disclosure button accessible names", () => {
+  const disclosures = Object.entries(sources).flatMap(([file, source]) =>
+    [...source.matchAll(/<button\b/g)]
+      .map((m) => {
+        const tag = readOpeningTag(source, m.index);
+        const start = m.index + tag.length;
+        const end = source.indexOf("</button>", start);
+        // Everything left once the nested tags are stripped. A chevron-only
+        // button leaves nothing; one wrapping a `<span>{label}</span>` leaves
+        // `{label}`, which renders its own name and needs no attribute.
+        const body =
+          end === -1 ? "" : source.slice(start, end).replace(/<[^>]*>/g, "");
+        return { file, tag, hasText: body.trim() !== "" };
+      })
+      .filter((b) => b.tag.includes("aria-expanded") && !b.hasText),
+  );
+
+  it("finds the disclosure buttons it is meant to police", () => {
+    expect(disclosures.length).toBeGreaterThan(5);
+  });
+
+  it("names every button that declares aria-expanded", () => {
+    const unnamed = disclosures
+      .filter((b) => !NAME_ATTRS.some((a) => b.tag.includes(a)))
+      .map((b) => b.file);
+
+    expect(unnamed).toEqual([]);
+  });
+});

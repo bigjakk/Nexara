@@ -125,6 +125,9 @@ function NodeBranch({ node, vms, clusterId }: NodeBranchProps) {
             )}
           >
             <button
+              aria-label={`${isExpanded ? "Collapse" : "Expand"} node ${node.name}`}
+              aria-expanded={nodeVMs.length > 0 ? isExpanded : undefined}
+              disabled={nodeVMs.length === 0}
               onClick={(e) => {
                 e.stopPropagation();
                 if (nodeVMs.length > 0) toggleNode(nodeKey);
@@ -312,6 +315,8 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
               )}
             >
               <button
+                aria-label={`${isExpanded ? "Collapse" : "Expand"} cluster ${cluster.name}`}
+                aria-expanded={isExpanded}
                 onClick={() => {
                   toggleNode(clusterKey);
                 }}

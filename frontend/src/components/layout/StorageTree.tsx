@@ -82,6 +82,8 @@ function PoolGroup({
     <div className="border-l border-border pl-3 ml-3">
       <div className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors">
         <button
+          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${icon === "node" ? `node ${label}` : label}`}
+          aria-expanded={isExpanded}
           onClick={(e) => {
             e.stopPropagation();
             toggleNode(groupKey);
@@ -96,6 +98,7 @@ function PoolGroup({
           />
         </button>
         <button
+          aria-expanded={isExpanded}
           onClick={() => {
             toggleNode(groupKey);
           }}
@@ -191,6 +194,8 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
             )}
           >
             <button
+              aria-label={`${isExpanded ? "Collapse" : "Expand"} cluster ${cluster.name}`}
+              aria-expanded={isExpanded}
               onClick={() => {
                 toggleNode(clusterKey);
               }}

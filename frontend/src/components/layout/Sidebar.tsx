@@ -247,6 +247,7 @@ export function Sidebar({ drawer = false }: SidebarProps) {
           {!drawer && (
             <button
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!collapsed}
               onClick={toggleCollapsed}
               className={cn(
                 "rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors",
@@ -345,6 +346,7 @@ export function Sidebar({ drawer = false }: SidebarProps) {
                                 ? "Hide inventory tree"
                                 : "Show inventory tree"
                             }
+                            aria-expanded={showTree}
                             onClick={() => {
                               setTreeVisible(!treeVisible);
                             }}
