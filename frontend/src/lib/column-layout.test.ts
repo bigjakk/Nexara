@@ -198,23 +198,3 @@ describe("storage", () => {
     setItem.mockRestore();
   });
 });
-
-describe("column declarations across the adopted tables", () => {
-  it("never hides a column with a CSS class", async () => {
-    // `hidden md:table-cell` removes a column's content but keeps its width,
-    // so the table stays as wide as if it were shown. hideBelowMd drops the
-    // column from the layout instead, taking its width with it. A class-based
-    // hide would silently reintroduce the mobile overflow.
-    const modules = await Promise.all([
-      import("@/components/layout/activity-column-defs"),
-      import("@/features/tasks/lib/task-column-defs"),
-    ]);
-    const columns = [
-      ...modules[0].ACTIVITY_COLUMN_DEFS,
-      ...modules[1].TASK_COLUMNS_WITH_VM,
-    ];
-    for (const col of columns) {
-      expect(col.className ?? "").not.toContain("hidden");
-    }
-  });
-});

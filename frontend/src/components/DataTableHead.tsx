@@ -71,7 +71,6 @@ export function DataTableHead<Row, K extends string, Ctx>({
         isDragging && "opacity-40",
         drop === "before" && "shadow-[inset_2px_0_0_0_hsl(var(--primary))]",
         drop === "after" && "shadow-[inset_-2px_0_0_0_hsl(var(--primary))]",
-        column.className,
       )}
     >
       <button

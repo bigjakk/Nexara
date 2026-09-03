@@ -37,9 +37,7 @@ export interface ColumnDef<Row, K extends string, Ctx = void> {
   /** Default width in px, used until the user drags this column. */
   width: number;
   /** Right-aligned, for numeric columns. Applied to header and cell alike. */
-  align?: "left" | "right";
-  /** Classes applied to BOTH the header and the cell. */
-  className?: string;
+  align?: "right";
   /**
    * Let this cell wrap instead of truncating to one line.
    *
@@ -53,10 +51,13 @@ export interface ColumnDef<Row, K extends string, Ctx = void> {
   /**
    * Drop this column entirely below the `md` breakpoint.
    *
-   * Not a CSS class: a `hidden md:table-cell` column still contributes its
-   * width to the table, so the table stays as wide as if it were shown and the
-   * narrow viewport scrolls sideways anyway. Removing the column from the
-   * layout removes its width with it.
+   * This is the only way to hide a column, and deliberately so — there is no
+   * free-form class hook on ColumnDef to hide one with. `totalWidth` is summed
+   * over the columns the layout is holding and set as the table's own width,
+   * so a column hidden with `hidden md:table-cell` would still be in that sum:
+   * the table stays exactly as wide as if it were shown, and the narrow
+   * viewport scrolls sideways anyway. Dropping the column from the layout
+   * takes its width out of the sum with it.
    */
   hideBelowMd?: boolean;
   /**

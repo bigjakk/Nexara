@@ -35,7 +35,6 @@ export function DataTableCells<Row, K extends string, Ctx>({
           className={cn(
             col.wrap ? "align-top break-words whitespace-normal" : "truncate",
             col.align === "right" && "text-right",
-            col.className,
           )}
         >
           {col.cell(row, ctx)}

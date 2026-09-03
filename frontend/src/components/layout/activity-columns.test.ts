@@ -32,17 +32,15 @@ const noLive: Record<string, LiveTaskStatus> = {};
 
 describe("ACTIVITY_COLUMN_DEFS", () => {
   it("hides Cluster and Progress below md, where the drawer has no room", () => {
-    // hideBelowMd, not a CSS class: the column leaves the layout entirely, so
-    // its width goes with it. A `hidden md:table-cell` column still counts
-    // toward the table's width, which would leave the drawer scrolling
-    // sideways on a phone despite the column being invisible.
+    // Which two, specifically. The drawer is the narrowest table in the app,
+    // so something has to go on a phone, and these are the columns whose loss
+    // costs least: the cluster is usually one repeated value, and progress is
+    // already in the row's status. Identity and time are what the drawer is
+    // for and stay at every width.
     const hidden = ACTIVITY_COLUMN_DEFS.filter((c) => c.hideBelowMd).map(
       (c) => c.key,
     );
     expect(hidden).toEqual(["cluster", "progress"]);
-    expect(
-      ACTIVITY_COLUMN_DEFS.every((c) => !c.className?.includes("hidden")),
-    ).toBe(true);
   });
 
   it("gives every column a width, so table-fixed has one to use", () => {
