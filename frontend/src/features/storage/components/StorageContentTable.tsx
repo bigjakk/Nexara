@@ -242,6 +242,7 @@ export function StorageContentTable({
               <TableCell>
                 <div className="flex items-center justify-end">
                   <Button
+                    aria-label={`Delete ${item.volid}`}
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"

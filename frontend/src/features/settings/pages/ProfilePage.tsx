@@ -337,6 +337,9 @@ export function ProfilePage() {
                   autoComplete="current-password"
                 />
                 <Button
+                  aria-label={
+                    showOld ? "Hide current password" : "Show current password"
+                  }
                   type="button"
                   variant="ghost"
                   size="icon"
@@ -366,6 +369,9 @@ export function ProfilePage() {
                   autoComplete="new-password"
                 />
                 <Button
+                  aria-label={
+                    showNew ? "Hide new password" : "Show new password"
+                  }
                   type="button"
                   variant="ghost"
                   size="icon"

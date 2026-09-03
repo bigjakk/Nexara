@@ -141,6 +141,7 @@ export function DRSRulesTable({ clusterId }: DRSRulesTableProps) {
                   </TableCell>
                   <TableCell>
                     <Button
+                      aria-label={`Delete ${rule.rule_type} rule for ${rule.ha_rule_name ?? (rule.vm_ids ?? []).join(", ")}`}
                       variant="ghost"
                       size="icon"
                       onClick={() => {

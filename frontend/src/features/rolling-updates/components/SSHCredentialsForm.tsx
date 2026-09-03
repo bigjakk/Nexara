@@ -242,6 +242,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
               Edit
             </Button>
             <Button
+              aria-label="Delete SSH credentials"
               variant="ghost"
               size="sm"
               onClick={handleDelete}

@@ -274,6 +274,7 @@ export function CreateRollingUpdateWizard({
                           </span>
                           <div className="flex items-center gap-1">
                             <Button
+                              aria-label={`Move ${name} earlier`}
                               variant="ghost"
                               size="icon"
                               className="h-6 w-6"
@@ -285,6 +286,7 @@ export function CreateRollingUpdateWizard({
                               <ArrowUp className="h-3 w-3" />
                             </Button>
                             <Button
+                              aria-label={`Move ${name} later`}
                               variant="ghost"
                               size="icon"
                               className="h-6 w-6"
@@ -296,6 +298,7 @@ export function CreateRollingUpdateWizard({
                               <ArrowDown className="h-3 w-3" />
                             </Button>
                             <Button
+                              aria-label={`Remove ${name}`}
                               variant="ghost"
                               size="icon"
                               className="h-6 w-6 text-muted-foreground hover:text-destructive"

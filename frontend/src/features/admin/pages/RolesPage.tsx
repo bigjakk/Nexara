@@ -153,6 +153,7 @@ export function RolesPage() {
                   {!role.is_builtin && (
                     <div className="flex items-center gap-1">
                       <Button
+                        aria-label={`Edit ${role.name}`}
                         variant="ghost"
                         size="icon"
                         onClick={() => {
@@ -162,6 +163,7 @@ export function RolesPage() {
                         <Pencil className="h-4 w-4" />
                       </Button>
                       <Button
+                        aria-label={`Delete ${role.name}`}
                         variant="ghost"
                         size="icon"
                         className="text-destructive hover:text-destructive"

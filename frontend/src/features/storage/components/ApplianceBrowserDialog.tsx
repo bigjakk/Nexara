@@ -140,6 +140,7 @@ export function ApplianceBrowserDialog({
               />
             </div>
             <Button
+              aria-label="Refresh appliance list"
               size="sm"
               variant="outline"
               onClick={() => {

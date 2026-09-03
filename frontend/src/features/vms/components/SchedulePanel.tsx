@@ -158,6 +158,7 @@ export function SchedulePanel({
                   </td>
                   <td className="px-4 py-2 text-right">
                     <Button
+                      aria-label={`Delete ${s.action} schedule ${s.schedule}`}
                       variant="ghost"
                       size="sm"
                       onClick={() => {

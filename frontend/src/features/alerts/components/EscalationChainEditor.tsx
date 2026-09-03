@@ -88,6 +88,7 @@ export function EscalationChainEditor({
             </span>
           </div>
           <Button
+            aria-label={`Remove escalation step ${String(index + 1)}`}
             type="button"
             variant="ghost"
             size="sm"

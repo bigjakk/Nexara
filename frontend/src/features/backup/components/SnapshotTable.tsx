@@ -335,6 +335,7 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                                   autoFocus
                                 />
                                 <Button
+                                  aria-label={`Save comment for ${snap.backup_type}/${snap.backup_id}`}
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => {
@@ -345,6 +346,7 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                                   <Check className="h-3.5 w-3.5" />
                                 </Button>
                                 <Button
+                                  aria-label="Cancel editing comment"
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => {
@@ -363,6 +365,7 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                               >
                                 <span>{snap.comment || "-"}</span>
                                 <Button
+                                  aria-label={`Edit comment for ${snapKey(snap)}`}
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => {

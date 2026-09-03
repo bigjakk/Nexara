@@ -350,7 +350,10 @@ function ClusterBranch({ cluster }: ClusterBranchProps) {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="shrink-0 rounded p-0.5 opacity-0 hover:bg-accent group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100">
+                  <button
+                    aria-label={`Actions for ${cluster.name}`}
+                    className="shrink-0 rounded p-0.5 opacity-0 hover:bg-accent group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
+                  >
                     <MoreVertical className="h-3 w-3" />
                   </button>
                 </DropdownMenuTrigger>
@@ -446,7 +449,12 @@ export function InventoryTree() {
         </span>
         <AddClusterDialog
           trigger={
-            <Button variant="ghost" size="icon" className="h-5 w-5">
+            <Button
+              aria-label="Add cluster"
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+            >
               <Plus className="h-3 w-3" />
             </Button>
           }

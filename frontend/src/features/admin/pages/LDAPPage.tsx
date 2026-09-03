@@ -409,6 +409,7 @@ export function LDAPPage() {
                     Edit
                   </Button>
                   <Button
+                    aria-label={`Delete ${cfg.name}`}
                     variant="ghost"
                     size="icon"
                     className="text-destructive"
@@ -741,6 +742,7 @@ export function LDAPPage() {
                       </SelectContent>
                     </Select>
                     <Button
+                      aria-label={`Remove group mapping ${row.groupDN || String(idx + 1)}`}
                       variant="ghost"
                       size="icon"
                       className="text-destructive"

@@ -90,6 +90,7 @@ export function RoleAssignDialog({
                       )}
                     </div>
                     <Button
+                      aria-label={`Revoke ${ur.role_name} at ${ur.scope_type} scope`}
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-destructive hover:text-destructive"

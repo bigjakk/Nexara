@@ -246,6 +246,7 @@ export function Sidebar({ drawer = false }: SidebarProps) {
           )}
           {!drawer && (
             <button
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               onClick={toggleCollapsed}
               className={cn(
                 "rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors",
@@ -339,6 +340,11 @@ export function Sidebar({ drawer = false }: SidebarProps) {
                         </NavLink>
                         {isInventoryItem && (
                           <button
+                            aria-label={
+                              showTree
+                                ? "Hide inventory tree"
+                                : "Show inventory tree"
+                            }
                             onClick={() => {
                               setTreeVisible(!treeVisible);
                             }}

@@ -80,6 +80,7 @@ export function DashboardPresetSelector({
                 {preset.name}
               </span>
               <button
+                aria-label={`Delete preset ${preset.name}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete(preset.name);

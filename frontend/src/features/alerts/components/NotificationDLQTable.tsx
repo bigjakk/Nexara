@@ -321,7 +321,12 @@ function DLQRow({
                   </Button>
                 </>
               )}
-              <Button variant="ghost" size="sm" onClick={onDelete}>
+              <Button
+                aria-label={`Delete failed notification to ${entry.channel_name} from ${formatRelativeTime(entry.created_at)}`}
+                variant="ghost"
+                size="sm"
+                onClick={onDelete}
+              >
                 <Trash2 className="h-4 w-4 text-destructive" />
               </Button>
             </div>

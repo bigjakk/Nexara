@@ -1556,6 +1556,7 @@ export function HardwarePanel({
                         #{String(idx + 1)}
                       </span>
                       <Button
+                        aria-label={`Move ${info.label} earlier in the boot order`}
                         variant="ghost"
                         size="sm"
                         className="h-5 w-5 p-0"
@@ -1576,6 +1577,7 @@ export function HardwarePanel({
                         <ArrowUp className="h-3 w-3" />
                       </Button>
                       <Button
+                        aria-label={`Move ${info.label} later in the boot order`}
                         variant="ghost"
                         size="sm"
                         className="h-5 w-5 p-0"

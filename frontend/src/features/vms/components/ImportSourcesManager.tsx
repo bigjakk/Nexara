@@ -130,6 +130,7 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
                   <td className="px-3 py-2 text-right">
                     {canManageImport && (
                       <Button
+                        aria-label={`Delete ${g.storage}`}
                         variant="ghost"
                         size="sm"
                         onClick={() => {

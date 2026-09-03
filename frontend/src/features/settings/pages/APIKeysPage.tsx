@@ -429,6 +429,7 @@ export function APIKeysPage() {
                 {createdKey}
               </code>
               <Button
+                aria-label="Copy API key"
                 variant="outline"
                 size="icon"
                 className="shrink-0"

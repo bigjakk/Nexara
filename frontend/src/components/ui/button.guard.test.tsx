@@ -11,12 +11,16 @@ import { describe, expect, it } from "vitest";
  * and a screen reader announces a bare "button". For a pager that means two
  * adjacent controls that are announced identically and cannot be told apart.
  *
- * Scoped to the shadcn `<Button>` wrapping a pagination chevron, because that
- * is exactly the shape of a pager in this codebase and the one a new paginated
- * table will copy. Deliberately NOT every icon-only button: the sidebar trees
- * use lowercase `<button>` for their expand toggles, and those want the node's
- * name plus aria-expanded rather than a static label — a different fix, and
- * failing this test would be the wrong way to ask for it.
+ * Scoped to the shadcn `<Button>`, which is what every table row action and
+ * toolbar control in this codebase uses. Deliberately NOT the lowercase
+ * `<button>`: the sidebar trees use it for their expand toggles, and those want
+ * the node's name plus aria-expanded rather than a static label — a different
+ * fix, and failing this test would be the wrong way to ask for it.
+ *
+ * `title` counts. It is a weaker name than aria-label — announced
+ * inconsistently, and invisible on touch — but the accessible-name algorithm
+ * does fall back to it, so a button carrying one is named. Converting those
+ * remains worthwhile; failing this test is not how to ask for it either.
  */
 
 // A leading-slash glob resolves against Vite's root (frontend/), so it can
@@ -28,7 +32,8 @@ const sources: Record<string, string> = import.meta.glob("/src/**/*.tsx", {
   import: "default",
 });
 
-const PAGER_ICONS = /^Chevrons?(?:Left|Right)$/;
+/** Attributes the accessible-name algorithm will fall back to. */
+const NAME_ATTRS = ["aria-label", "aria-labelledby", "title"];
 
 /**
  * Read the whole `<Button …>` opening tag starting at `start`.
@@ -89,14 +94,16 @@ describe("icon-only Button accessible names", () => {
   // If this ever finds nothing, the parser has drifted and every assertion
   // below is passing on an empty set.
   it("finds the icon-only buttons it is meant to police", () => {
-    expect(all.length).toBeGreaterThan(10);
-    expect(all.some((b) => PAGER_ICONS.test(b.icon))).toBe(true);
+    expect(all.length).toBeGreaterThan(100);
+    expect(all.some((b) => /^Chevrons?(?:Left|Right)$/.test(b.icon))).toBe(
+      true,
+    );
+    expect(all.some((b) => b.icon === "Trash2")).toBe(true);
   });
 
-  it("gives every paginating Button an aria-label", () => {
+  it("gives every icon-only Button an accessible name", () => {
     const unnamed = all
-      .filter((b) => PAGER_ICONS.test(b.icon))
-      .filter((b) => !b.tag.includes("aria-label"))
+      .filter((b) => !NAME_ATTRS.some((a) => b.tag.includes(a)))
       .map((b) => `${b.file} <Button><${b.icon} /></Button>`);
 
     expect(unnamed).toEqual([]);

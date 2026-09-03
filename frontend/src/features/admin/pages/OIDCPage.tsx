@@ -419,6 +419,7 @@ export function OIDCPage() {
                     Edit
                   </Button>
                   <Button
+                    aria-label={`Delete ${cfg.name}`}
                     variant="ghost"
                     size="icon"
                     className="text-destructive"
@@ -717,6 +718,7 @@ export function OIDCPage() {
                       </SelectContent>
                     </Select>
                     <Button
+                      aria-label={`Remove group mapping ${row.group || String(idx + 1)}`}
                       variant="ghost"
                       size="icon"
                       className="text-destructive"

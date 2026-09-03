@@ -262,6 +262,7 @@ function WidgetOverlay({
       </CardHeader>
       <CardContent className="p-0">
         <button
+          aria-label={`Remove ${label}`}
           onClick={onRemove}
           className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         >

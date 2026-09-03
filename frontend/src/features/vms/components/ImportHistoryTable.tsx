@@ -210,6 +210,7 @@ function RowGroup({
         <td className="px-3 py-2 text-right">
           {cancellable && (
             <Button
+              aria-label={`Cancel import of ${job.name || `VM ${String(job.target_vmid)}`}`}
               variant="ghost"
               size="sm"
               onClick={(e) => {
