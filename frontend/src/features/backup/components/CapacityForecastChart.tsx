@@ -14,9 +14,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePBSDatastoreMetrics } from "../api/backup-queries";
 import { formatBytes } from "@/lib/format";
 
-
 function formatDate(ts: number): string {
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(ts).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 interface ForecastPoint {
@@ -26,11 +28,16 @@ interface ForecastPoint {
   total: number | null;
 }
 
-function linearRegression(points: { x: number; y: number }[]): { slope: number; intercept: number } | null {
+function linearRegression(
+  points: { x: number; y: number }[],
+): { slope: number; intercept: number } | null {
   const n = points.length;
   if (n < 2) return null;
 
-  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  let sumX = 0,
+    sumY = 0,
+    sumXY = 0,
+    sumXX = 0;
   for (const p of points) {
     sumX += p.x;
     sumY += p.y;
@@ -52,7 +59,10 @@ interface CapacityForecastChartProps {
   store: string;
 }
 
-export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartProps) {
+export function CapacityForecastChart({
+  pbsId,
+  store,
+}: CapacityForecastChartProps) {
   const { data: metrics } = usePBSDatastoreMetrics(pbsId, "7d");
 
   const { chartData, fullDate, totalCapacity } = useMemo(() => {
@@ -60,7 +70,11 @@ export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartPro
     const storeMetrics = metricsList.filter((m) => m.datastore === store);
 
     if (storeMetrics.length < 3) {
-      return { chartData: [] as ForecastPoint[], fullDate: null, totalCapacity: 0 };
+      return {
+        chartData: [] as ForecastPoint[],
+        fullDate: null,
+        totalCapacity: 0,
+      };
     }
 
     // Get total capacity from latest metric
@@ -154,11 +168,23 @@ export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartPro
         <ResponsiveContainer width="100%" height={200}>
           <ComposedChart data={chartData}>
             <defs>
-              <linearGradient id={`fg-used-${store}`} x1="0" y1="0" x2="0" y2="1">
+              <linearGradient
+                id={`fg-used-${store}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
                 <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.3} />
                 <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
               </linearGradient>
-              <linearGradient id={`fg-forecast-${store}`} x1="0" y1="0" x2="0" y2="1">
+              <linearGradient
+                id={`fg-forecast-${store}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
                 <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.2} />
                 <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
               </linearGradient>
@@ -175,10 +201,18 @@ export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartPro
               width={60}
             />
             <Tooltip
-              labelFormatter={(label) => new Date(Number(label)).toLocaleString()}
+              labelFormatter={(label) =>
+                new Date(Number(label)).toLocaleString()
+              }
               formatter={(value: unknown, name: unknown) => [
-                formatBytes(typeof value === "number" ? value : Number(value ?? 0)),
-                name === "used" ? "Used" : name === "forecast" ? "Forecast" : "Total",
+                formatBytes(
+                  typeof value === "number" ? value : Number(value ?? 0),
+                ),
+                name === "used"
+                  ? "Used"
+                  : name === "forecast"
+                    ? "Forecast"
+                    : "Total",
               ]}
               contentStyle={{
                 backgroundColor: "hsl(var(--popover))",
@@ -192,7 +226,12 @@ export function CapacityForecastChart({ pbsId, store }: CapacityForecastChartPro
                 y={totalCapacity}
                 stroke="#ef4444"
                 strokeDasharray="4 4"
-                label={{ value: "Capacity", position: "right", fontSize: 10, fill: "#ef4444" }}
+                label={{
+                  value: "Capacity",
+                  position: "right",
+                  fontSize: 10,
+                  fill: "#ef4444",
+                }}
               />
             )}
             <Area

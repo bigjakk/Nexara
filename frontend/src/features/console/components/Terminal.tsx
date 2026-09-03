@@ -47,7 +47,9 @@ export function Terminal({ tab, visible }: TerminalProps) {
   const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
   const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
   const retryCountRef = useRef(0);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
 
   // Reuses a still-valid scoped token across this tab's reconnect cycle
   // rather than minting — and auditing — one per attempt. Created once via
@@ -100,7 +102,8 @@ export function Terminal({ tab, visible }: TerminalProps) {
     const term = new XTerminal({
       cursorBlink: true,
       fontSize: 14,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      fontFamily:
+        "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       theme: {
         background: "#1a1b26",
         foreground: "#a9b1d6",
@@ -156,7 +159,9 @@ export function Terminal({ tab, visible }: TerminalProps) {
       // connection that's known to fail; useGuestPowerSync resumes the tab
       // when the guest powers on.
       if (tabIsParked()) {
-        term.writeln("[Guest is powered off — the console will connect when it powers on]");
+        term.writeln(
+          "[Guest is powered off — the console will connect when it powers on]",
+        );
         return;
       }
 
@@ -324,7 +329,18 @@ export function Terminal({ tab, visible }: TerminalProps) {
       wsRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [tabId, clusterID, node, type, vmid, reconnectKey, activated, mintToken, updateTabStatus, resolveAndReconnect]);
+  }, [
+    tabId,
+    clusterID,
+    node,
+    type,
+    vmid,
+    reconnectKey,
+    activated,
+    mintToken,
+    updateTabStatus,
+    resolveAndReconnect,
+  ]);
 
   // A terminal that goes away (console closed, tab removed) leaves no socket
   // behind, so the tab must not stay marked live. Reset it to the same

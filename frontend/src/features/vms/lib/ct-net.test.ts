@@ -67,9 +67,7 @@ describe("CT NIC round-trip", () => {
       ip: "dhcp",
       firewall: true,
     });
-    expect(buildCTNet(nic)).toBe(
-      "name=eth1,bridge=vmbr0,ip=dhcp,firewall=1",
-    );
+    expect(buildCTNet(nic)).toBe("name=eth1,bridge=vmbr0,ip=dhcp,firewall=1");
   });
 
   it("round-trips an empty string", () => {

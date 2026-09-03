@@ -1,4 +1,9 @@
-export type ConsoleType = "node_shell" | "vm_serial" | "ct_attach" | "vm_vnc" | "ct_vnc";
+export type ConsoleType =
+  | "node_shell"
+  | "vm_serial"
+  | "ct_attach"
+  | "vm_vnc"
+  | "ct_vnc";
 
 /**
  * Auto-reconnect budget for transient console drops. Live migrations need

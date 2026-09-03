@@ -9,7 +9,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Pencil, ToggleLeft, ToggleRight } from "lucide-react";
-import { useReportSchedules, useUpdateReportSchedule, useDeleteReportSchedule } from "../api/report-queries";
+import {
+  useReportSchedules,
+  useUpdateReportSchedule,
+  useDeleteReportSchedule,
+} from "../api/report-queries";
 import { useAuth } from "@/hooks/useAuth";
 import type { ReportSchedule } from "@/types/api";
 
@@ -34,9 +38,23 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
   const { hasPermission } = useAuth();
   const canManage = hasPermission("manage", "report");
 
-  if (isLoading) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
-  if (error) return <div className="py-8 text-center text-destructive">Failed to load schedules: {error instanceof Error ? error.message : "Unknown error"}</div>;
-  if (!schedules?.length) return <div className="py-8 text-center text-muted-foreground">No report schedules configured.</div>;
+  if (isLoading)
+    return (
+      <div className="py-8 text-center text-muted-foreground">Loading...</div>
+    );
+  if (error)
+    return (
+      <div className="py-8 text-center text-destructive">
+        Failed to load schedules:{" "}
+        {error instanceof Error ? error.message : "Unknown error"}
+      </div>
+    );
+  if (!schedules?.length)
+    return (
+      <div className="py-8 text-center text-muted-foreground">
+        No report schedules configured.
+      </div>
+    );
 
   const handleToggle = (s: ReportSchedule) => {
     updateSchedule.mutate({ id: s.id, enabled: !s.enabled });
@@ -67,9 +85,15 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
         {schedules.map((s) => (
           <TableRow key={s.id}>
             <TableCell className="font-medium">{s.name}</TableCell>
-            <TableCell>{REPORT_TYPE_LABELS[s.report_type] ?? s.report_type}</TableCell>
-            <TableCell className="font-mono text-xs">{s.schedule || "Manual"}</TableCell>
-            <TableCell><Badge variant="outline">{s.format.toUpperCase()}</Badge></TableCell>
+            <TableCell>
+              {REPORT_TYPE_LABELS[s.report_type] ?? s.report_type}
+            </TableCell>
+            <TableCell className="font-mono text-xs">
+              {s.schedule || "Manual"}
+            </TableCell>
+            <TableCell>
+              <Badge variant="outline">{s.format.toUpperCase()}</Badge>
+            </TableCell>
             <TableCell>{s.email_enabled ? "Yes" : "No"}</TableCell>
             <TableCell>
               <Badge variant={s.enabled ? "default" : "secondary"}>
@@ -88,10 +112,16 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => { handleToggle(s); }}
+                    onClick={() => {
+                      handleToggle(s);
+                    }}
                     title={s.enabled ? "Disable" : "Enable"}
                   >
-                    {s.enabled ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                    {s.enabled ? (
+                      <ToggleRight className="h-4 w-4" />
+                    ) : (
+                      <ToggleLeft className="h-4 w-4" />
+                    )}
                   </Button>
                   <Button
                     variant="ghost"
@@ -104,7 +134,9 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => { handleDelete(s); }}
+                    onClick={() => {
+                      handleDelete(s);
+                    }}
                     title="Delete"
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />

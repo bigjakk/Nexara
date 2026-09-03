@@ -12,7 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertTriangle } from "lucide-react";
-import { useClusterNodes, useClusterStorage } from "@/features/clusters/api/cluster-queries";
+import {
+  useClusterNodes,
+  useClusterStorage,
+} from "@/features/clusters/api/cluster-queries";
 import { useCloneToTemplate, useClusterVMIDs } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
@@ -40,10 +43,15 @@ export function CloneToTemplateDialog({
   const cloneToTemplateMutation = useCloneToTemplate();
 
   const storageOptions = storageList
-    ? [...new Set(storageList
-        .filter((s) => s.active && s.enabled && s.content.includes("images"))
-        .map((s) => s.storage))]
-        .sort()
+    ? [
+        ...new Set(
+          storageList
+            .filter(
+              (s) => s.active && s.enabled && s.content.includes("images"),
+            )
+            .map((s) => s.storage),
+        ),
+      ].sort()
     : [];
 
   const nextAvailableId = useMemo(() => {
@@ -115,7 +123,8 @@ export function CloneToTemplateDialog({
         <DialogHeader>
           <DialogTitle>Clone to Template</DialogTitle>
           <DialogDescription>
-            Clone <strong>{sourceName}</strong> and convert the clone into a template.
+            Clone <strong>{sourceName}</strong> and convert the clone into a
+            template.
           </DialogDescription>
         </DialogHeader>
 
@@ -124,11 +133,14 @@ export function CloneToTemplateDialog({
             <TaskProgressBanner
               clusterId={clusterId}
               upid={upid}
-              onComplete={() => { handleClose(); }}
+              onComplete={() => {
+                handleClose();
+              }}
               description={`Clone ${sourceName} to template`}
             />
             <p className="text-xs text-muted-foreground">
-              After cloning completes, the clone will be automatically converted to a template.
+              After cloning completes, the clone will be automatically converted
+              to a template.
             </p>
           </div>
         ) : (
@@ -137,8 +149,9 @@ export function CloneToTemplateDialog({
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                 <p className="text-sm text-blue-700 dark:text-blue-300">
-                  This will create a clone of your {typeLabel} and convert it to a read-only template.
-                  The original {typeLabel} will not be modified.
+                  This will create a clone of your {typeLabel} and convert it to
+                  a read-only template. The original {typeLabel} will not be
+                  modified.
                 </p>
               </div>
             </div>
@@ -151,7 +164,9 @@ export function CloneToTemplateDialog({
                   type="number"
                   min={1}
                   value={newId}
-                  onChange={(e) => { setNewId(e.target.value); }}
+                  onChange={(e) => {
+                    setNewId(e.target.value);
+                  }}
                   placeholder="e.g. 200"
                   required
                 />
@@ -166,7 +181,9 @@ export function CloneToTemplateDialog({
                 <Input
                   id="ctt-name"
                   value={name}
-                  onChange={(e) => { setName(e.target.value); }}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                  }}
                   placeholder="Optional"
                 />
               </div>
@@ -175,7 +192,9 @@ export function CloneToTemplateDialog({
                 <select
                   id="ctt-target"
                   value={target}
-                  onChange={(e) => { setTarget(e.target.value); }}
+                  onChange={(e) => {
+                    setTarget(e.target.value);
+                  }}
                   className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <option value="">Same node</option>
@@ -192,7 +211,9 @@ export function CloneToTemplateDialog({
                   <select
                     id="ctt-storage"
                     value={storage}
-                    onChange={(e) => { setStorage(e.target.value); }}
+                    onChange={(e) => {
+                      setStorage(e.target.value);
+                    }}
                     className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                   >
                     <option value="">Same as source</option>
@@ -210,7 +231,9 @@ export function CloneToTemplateDialog({
               <Checkbox
                 id="ctt-full"
                 checked={full}
-                onCheckedChange={(checked) => { setFull(Boolean(checked)); }}
+                onCheckedChange={(checked) => {
+                  setFull(Boolean(checked));
+                }}
               />
               <Label htmlFor="ctt-full" className="text-sm">
                 Full clone (independent copy)
@@ -231,7 +254,9 @@ export function CloneToTemplateDialog({
                 type="submit"
                 disabled={!isValid || cloneToTemplateMutation.isPending}
               >
-                {cloneToTemplateMutation.isPending ? "Cloning..." : "Clone to Template"}
+                {cloneToTemplateMutation.isPending
+                  ? "Cloning..."
+                  : "Clone to Template"}
               </Button>
             </DialogFooter>
           </form>

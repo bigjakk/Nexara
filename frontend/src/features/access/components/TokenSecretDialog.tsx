@@ -32,14 +32,22 @@ interface TokenSecretDialogProps {
  * The secret is held in local state and cleared on close. It is never written
  * to localStorage, never put in the URL, and never sent anywhere else.
  */
-export function TokenSecretDialog({ fullTokenId, secret, onClose }: TokenSecretDialogProps) {
+export function TokenSecretDialog({
+  fullTokenId,
+  secret,
+  onClose,
+}: TokenSecretDialogProps) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
 
   useEffect(() => {
     if (!copied) return;
-    const timer = setTimeout(() => { setCopied(false); }, 2000);
-    return () => { clearTimeout(timer); };
+    const timer = setTimeout(() => {
+      setCopied(false);
+    }, 2000);
+    return () => {
+      clearTimeout(timer);
+    };
   }, [copied]);
 
   const handleCopy = () => {
@@ -53,13 +61,16 @@ export function TokenSecretDialog({ fullTokenId, secret, onClose }: TokenSecretD
   return (
     <Dialog
       open
-      onOpenChange={(open) => { if (!open) onClose(); }}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
     >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>API Token Created</DialogTitle>
           <DialogDescription>
-            <code className="font-mono text-xs">{fullTokenId}</code> is ready to use.
+            <code className="font-mono text-xs">{fullTokenId}</code> is ready to
+            use.
           </DialogDescription>
         </DialogHeader>
 
@@ -67,8 +78,9 @@ export function TokenSecretDialog({ fullTokenId, secret, onClose }: TokenSecretD
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/20">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <p className="text-sm text-amber-800 dark:text-amber-200">
-              Copy this secret now. Proxmox shows it only once — there is no way to retrieve
-              it later, and recovering from a lost secret means regenerating the token.
+              Copy this secret now. Proxmox shows it only once — there is no way
+              to retrieve it later, and recovering from a lost secret means
+              regenerating the token.
             </p>
           </div>
 
@@ -83,13 +95,18 @@ export function TokenSecretDialog({ fullTokenId, secret, onClose }: TokenSecretD
               onClick={handleCopy}
               aria-label="Copy token secret"
             >
-              {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+              {copied ? (
+                <Check className="h-4 w-4 text-emerald-600" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
             </Button>
           </div>
 
           {copyFailed && (
             <p className="text-sm text-destructive">
-              Copy failed. Select the secret above and copy it manually (Ctrl+C).
+              Copy failed. Select the secret above and copy it manually
+              (Ctrl+C).
             </p>
           )}
         </div>

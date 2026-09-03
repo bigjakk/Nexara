@@ -52,7 +52,11 @@ function cellsOf(columns: ColumnDef<Row, Key>[]) {
 describe("DataTableCells", () => {
   it("renders one cell per column, in the layout's order", () => {
     const cells = cellsOf(COLUMNS);
-    expect(cells.map((c) => c.textContent)).toEqual(["web-01", "it broke", "7"]);
+    expect(cells.map((c) => c.textContent)).toEqual([
+      "web-01",
+      "it broke",
+      "7",
+    ]);
   });
 
   it("follows a reordered layout, taking each value with its column", () => {

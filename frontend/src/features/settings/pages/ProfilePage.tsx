@@ -83,11 +83,15 @@ export function ProfilePage() {
       {
         onSuccess: () => {
           setProfileSaved(true);
-          setTimeout(() => { setProfileSaved(false); }, 3000);
+          setTimeout(() => {
+            setProfileSaved(false);
+          }, 3000);
         },
         onError: (err) => {
           setProfileError(
-            err instanceof ApiClientError ? err.message : "Failed to update profile",
+            err instanceof ApiClientError
+              ? err.message
+              : "Failed to update profile",
           );
         },
       },
@@ -115,7 +119,9 @@ export function ProfilePage() {
         },
         onError: (err) => {
           setPasswordError(
-            err instanceof ApiClientError ? err.message : "Failed to change password",
+            err instanceof ApiClientError
+              ? err.message
+              : "Failed to change password",
           );
         },
       },
@@ -173,7 +179,9 @@ export function ProfilePage() {
               <Input
                 id="display-name"
                 value={displayName}
-                onChange={(e) => { setDisplayName(e.target.value); }}
+                onChange={(e) => {
+                  setDisplayName(e.target.value);
+                }}
                 maxLength={200}
               />
             ) : (
@@ -205,7 +213,8 @@ export function ProfilePage() {
               <Label>Auth Source</Label>
               <div>
                 <Badge variant="secondary">
-                  {AUTH_SOURCE_LABELS[profile.auth_source] ?? profile.auth_source}
+                  {AUTH_SOURCE_LABELS[profile.auth_source] ??
+                    profile.auth_source}
                 </Badge>
               </div>
             </div>
@@ -215,7 +224,9 @@ export function ProfilePage() {
             <Label>Two-Factor Authentication</Label>
             <div>
               {profile.totp_enabled ? (
-                <Badge className="bg-emerald-600 hover:bg-emerald-700">Enabled</Badge>
+                <Badge className="bg-emerald-600 hover:bg-emerald-700">
+                  Enabled
+                </Badge>
               ) : (
                 <Badge variant="outline">Not configured</Badge>
               )}
@@ -260,7 +271,9 @@ export function ProfilePage() {
                   </span>
                 )}
                 {profileError && (
-                  <span className="text-sm text-destructive">{profileError}</span>
+                  <span className="text-sm text-destructive">
+                    {profileError}
+                  </span>
                 )}
               </div>
             </>
@@ -296,10 +309,13 @@ export function ProfilePage() {
       )}
 
       {/* Change Password Dialog */}
-      <Dialog open={passwordDialogOpen} onOpenChange={(open) => {
-        if (!open) resetPasswordDialog();
-        setPasswordDialogOpen(open);
-      }}>
+      <Dialog
+        open={passwordDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) resetPasswordDialog();
+          setPasswordDialogOpen(open);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Change Password</DialogTitle>
@@ -315,7 +331,9 @@ export function ProfilePage() {
                   id="old-password"
                   type={showOld ? "text" : "password"}
                   value={oldPassword}
-                  onChange={(e) => { setOldPassword(e.target.value); }}
+                  onChange={(e) => {
+                    setOldPassword(e.target.value);
+                  }}
                   autoComplete="current-password"
                 />
                 <Button
@@ -323,9 +341,15 @@ export function ProfilePage() {
                   variant="ghost"
                   size="icon"
                   className="absolute right-0 top-0 h-full px-3"
-                  onClick={() => { setShowOld(!showOld); }}
+                  onClick={() => {
+                    setShowOld(!showOld);
+                  }}
                 >
-                  {showOld ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showOld ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
                 </Button>
               </div>
             </div>
@@ -336,7 +360,9 @@ export function ProfilePage() {
                   id="new-password"
                   type={showNew ? "text" : "password"}
                   value={newPassword}
-                  onChange={(e) => { setNewPassword(e.target.value); }}
+                  onChange={(e) => {
+                    setNewPassword(e.target.value);
+                  }}
                   autoComplete="new-password"
                 />
                 <Button
@@ -344,9 +370,15 @@ export function ProfilePage() {
                   variant="ghost"
                   size="icon"
                   className="absolute right-0 top-0 h-full px-3"
-                  onClick={() => { setShowNew(!showNew); }}
+                  onClick={() => {
+                    setShowNew(!showNew);
+                  }}
                 >
-                  {showNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showNew ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
                 </Button>
               </div>
             </div>
@@ -356,7 +388,9 @@ export function ProfilePage() {
                 id="confirm-password"
                 type="password"
                 value={confirmPassword}
-                onChange={(e) => { setConfirmPassword(e.target.value); }}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                }}
                 autoComplete="new-password"
               />
             </div>
@@ -373,7 +407,9 @@ export function ProfilePage() {
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => { setPasswordDialogOpen(false); }}
+              onClick={() => {
+                setPasswordDialogOpen(false);
+              }}
             >
               Cancel
             </Button>

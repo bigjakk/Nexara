@@ -21,14 +21,17 @@ export const TopologyControls = memo(function TopologyControls({
     <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-3 text-sm">
       {/* Cluster filter */}
       <div className="flex items-center gap-2">
-        <label className="text-xs font-medium text-muted-foreground">Cluster</label>
+        <label className="text-xs font-medium text-muted-foreground">
+          Cluster
+        </label>
         <select
           className="rounded border bg-background px-2 py-1 text-xs"
           value={filters.selectedClusterId ?? "all"}
           onChange={(e) => {
             onFiltersChange({
               ...filters,
-              selectedClusterId: e.target.value === "all" ? null : e.target.value,
+              selectedClusterId:
+                e.target.value === "all" ? null : e.target.value,
             });
           }}
         >
@@ -73,7 +76,9 @@ export const TopologyControls = memo(function TopologyControls({
 
       {/* Layout direction */}
       <div className="flex items-center gap-2">
-        <label className="text-xs font-medium text-muted-foreground">Layout</label>
+        <label className="text-xs font-medium text-muted-foreground">
+          Layout
+        </label>
         <select
           className="rounded border bg-background px-2 py-1 text-xs"
           value={direction}

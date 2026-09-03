@@ -57,7 +57,10 @@ export function ClusterAccessTab({ clusterId }: ClusterAccessTabProps) {
         <AccessUsersSection clusterId={clusterId} capabilities={capabilities} />
       </TabsContent>
       <TabsContent value="groups" className="mt-4">
-        <AccessGroupsSection clusterId={clusterId} capabilities={capabilities} />
+        <AccessGroupsSection
+          clusterId={clusterId}
+          capabilities={capabilities}
+        />
       </TabsContent>
       <TabsContent value="roles" className="mt-4">
         <AccessRolesSection clusterId={clusterId} capabilities={capabilities} />

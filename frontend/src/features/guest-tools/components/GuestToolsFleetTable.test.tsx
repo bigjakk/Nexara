@@ -94,7 +94,11 @@ describe("GuestToolsFleetTable stage action", () => {
   });
 
   it("still offers a plain update when the guest is behind", () => {
-    mount({ installed_version: "0.1.285", up_to_date: false, needs_update: true });
+    mount({
+      installed_version: "0.1.285",
+      up_to_date: false,
+      needs_update: true,
+    });
     expect(screen.getByTitle(/Stage an update/i)).not.toBeDisabled();
   });
 
@@ -117,6 +121,8 @@ describe("GuestToolsFleetTable stage action", () => {
   // that is the button you reach for precisely when the display looks wrong.
   it("always allows re-reading the version on a running guest", () => {
     mount({ up_to_date: true, needs_update: false });
-    expect(screen.getByTitle(/Re-read the installed version/i)).not.toBeDisabled();
+    expect(
+      screen.getByTitle(/Re-read the installed version/i),
+    ).not.toBeDisabled();
   });
 });

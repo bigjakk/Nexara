@@ -101,10 +101,13 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
           <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <div className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
-              <p className="font-medium">No virtio-win ISO storage configured</p>
+              <p className="font-medium">
+                No virtio-win ISO storage configured
+              </p>
               <p>
-                Set a target storage under <strong>virtio-win ISO</strong> above.
-                Detection still works, but nothing can be staged without the ISO.
+                Set a target storage under <strong>virtio-win ISO</strong>{" "}
+                above. Detection still works, but nothing can be staged without
+                the ISO.
               </p>
             </div>
           </div>
@@ -186,8 +189,8 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
               Snapshot before an immediate update
             </Label>
             <p className="text-xs text-muted-foreground">
-              The full bundle replaces storage and network drivers, and a bad one
-              can leave a guest unbootable. Applies to{" "}
+              The full bundle replaces storage and network drivers, and a bad
+              one can leave a guest unbootable. Applies to{" "}
               <strong>Update now</strong> only: a snapshot taken when an update
               is staged would be stale by the time the guest actually reboots.
             </p>
@@ -211,8 +214,8 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
             }}
           />
           <p className="text-xs text-muted-foreground">
-            Swapping boot-disk drivers across a whole fleet at once turns one bad
-            release into an outage.
+            Swapping boot-disk drivers across a whole fleet at once turns one
+            bad release into an outage.
           </p>
         </div>
 

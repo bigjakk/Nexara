@@ -40,9 +40,7 @@ export function ReportGenerateDialog() {
   const [successMessage, setSuccessMessage] = useState("");
   const generateReport = useGenerateReport();
   const errorMessage =
-    generateReport.error instanceof Error
-      ? generateReport.error.message
-      : "";
+    generateReport.error instanceof Error ? generateReport.error.message : "";
 
   const { data: clusters } = useQuery({
     queryKey: ["clusters"],
@@ -69,7 +67,9 @@ export function ReportGenerateDialog() {
       },
       {
         onSuccess: () => {
-          setSuccessMessage("Report generated successfully! Check the Report History tab.");
+          setSuccessMessage(
+            "Report generated successfully! Check the Report History tab.",
+          );
         },
       },
     );
@@ -127,7 +127,9 @@ export function ReportGenerateDialog() {
               min={1}
               max={8760}
               value={timeRangeHours}
-              onChange={(e) => { setTimeRangeHours(Number(e.target.value)); }}
+              onChange={(e) => {
+                setTimeRangeHours(Number(e.target.value));
+              }}
             />
           </div>
 
@@ -139,10 +141,16 @@ export function ReportGenerateDialog() {
           )}
           <Button
             onClick={handleGenerate}
-            disabled={!clusterId || generateReport.isPending || !!successMessage}
+            disabled={
+              !clusterId || generateReport.isPending || !!successMessage
+            }
             className="w-full"
           >
-            {generateReport.isPending ? "Generating..." : successMessage ? "Done" : "Generate"}
+            {generateReport.isPending
+              ? "Generating..."
+              : successMessage
+                ? "Done"
+                : "Generate"}
           </Button>
         </div>
       </DialogContent>

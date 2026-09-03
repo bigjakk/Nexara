@@ -2,11 +2,7 @@ import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import type {
-  NodeResponse,
-  VMResponse,
-  StorageResponse,
-} from "@/types/api";
+import type { NodeResponse, VMResponse, StorageResponse } from "@/types/api";
 import type { TopologyInput } from "../lib/topology-transform";
 
 export interface TopologyData {
@@ -27,9 +23,7 @@ export function useTopologyData(): TopologyData {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.list<NodeResponse>(
-          `/api/v1/clusters/${cluster.id}/nodes`,
-        ),
+        apiClient.list<NodeResponse>(`/api/v1/clusters/${cluster.id}/nodes`),
       enabled: clusters.length > 0,
     })),
   });
@@ -38,9 +32,7 @@ export function useTopologyData(): TopologyData {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "vms"],
       queryFn: () =>
-        apiClient.list<VMResponse>(
-          `/api/v1/clusters/${cluster.id}/vms`,
-        ),
+        apiClient.list<VMResponse>(`/api/v1/clusters/${cluster.id}/vms`),
       enabled: clusters.length > 0,
     })),
   });

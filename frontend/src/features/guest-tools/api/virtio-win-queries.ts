@@ -176,7 +176,9 @@ export function useCheckVirtioWinNow(clusterId: string) {
       void queryClient.invalidateQueries({
         queryKey: virtioWinKeys.downloads(clusterId),
       });
-      void queryClient.invalidateQueries({ queryKey: virtioWinKeys.releases() });
+      void queryClient.invalidateQueries({
+        queryKey: virtioWinKeys.releases(),
+      });
     },
   });
 }

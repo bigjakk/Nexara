@@ -8,7 +8,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Play, Square, RotateCw, LogIn, LogOut } from "lucide-react";
+import {
+  MoreHorizontal,
+  Play,
+  Square,
+  RotateCw,
+  LogIn,
+  LogOut,
+} from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { OSDActionDialog } from "./OSDActionDialog";
 import type { CephOSD, CephOSDAction } from "../types/ceph";
@@ -117,7 +124,9 @@ function OSDActionsMenu({
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="h-8 w-8">
           <MoreHorizontal className="h-4 w-4" />
-          <span className="sr-only">Actions for {osd.name || `osd.${String(osd.id)}`}</span>
+          <span className="sr-only">
+            Actions for {osd.name || `osd.${String(osd.id)}`}
+          </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

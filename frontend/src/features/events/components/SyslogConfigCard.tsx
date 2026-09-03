@@ -74,7 +74,9 @@ export function SyslogConfigCard() {
     <div className="rounded-md border">
       <button
         className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted/20"
-        onClick={() => { setExpanded(!expanded); }}
+        onClick={() => {
+          setExpanded(!expanded);
+        }}
       >
         <div className="flex items-center gap-2">
           <Settings2 className="h-4 w-4 text-muted-foreground" />
@@ -97,7 +99,9 @@ export function SyslogConfigCard() {
             <input
               type="checkbox"
               checked={config.enabled}
-              onChange={(e) => { update({ enabled: e.target.checked }); }}
+              onChange={(e) => {
+                update({ enabled: e.target.checked });
+              }}
               className="h-4 w-4 rounded border-input"
             />
             <span className="text-sm">Enable syslog forwarding</span>
@@ -105,34 +109,46 @@ export function SyslogConfigCard() {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">Host</label>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Host
+              </label>
               <input
                 type="text"
                 className={inputClass}
                 placeholder="syslog.example.com"
                 value={config.host}
-                onChange={(e) => { update({ host: e.target.value }); }}
+                onChange={(e) => {
+                  update({ host: e.target.value });
+                }}
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">Port</label>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Port
+              </label>
               <input
                 type="number"
                 className={inputClass}
                 value={config.port}
                 min={1}
                 max={65535}
-                onChange={(e) => { update({ port: parseInt(e.target.value, 10) || 514 }); }}
+                onChange={(e) => {
+                  update({ port: parseInt(e.target.value, 10) || 514 });
+                }}
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">Protocol</label>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Protocol
+              </label>
               <select
                 className={selectClass}
                 value={config.protocol}
-                onChange={(e) => { update({ protocol: e.target.value }); }}
+                onChange={(e) => {
+                  update({ protocol: e.target.value });
+                }}
               >
                 <option value="udp">UDP</option>
                 <option value="tcp">TCP</option>
@@ -141,11 +157,15 @@ export function SyslogConfigCard() {
             </div>
 
             <div>
-              <label className="mb-1 block text-xs text-muted-foreground">Facility</label>
+              <label className="mb-1 block text-xs text-muted-foreground">
+                Facility
+              </label>
               <select
                 className={selectClass}
                 value={config.facility}
-                onChange={(e) => { update({ facility: parseInt(e.target.value, 10) }); }}
+                onChange={(e) => {
+                  update({ facility: parseInt(e.target.value, 10) });
+                }}
               >
                 {facilities.map((f) => (
                   <option key={f.value} value={f.value}>
@@ -161,7 +181,9 @@ export function SyslogConfigCard() {
               <input
                 type="checkbox"
                 checked={config.tls_skip_verify}
-                onChange={(e) => { update({ tls_skip_verify: e.target.checked }); }}
+                onChange={(e) => {
+                  update({ tls_skip_verify: e.target.checked });
+                }}
                 className="h-4 w-4 rounded border-input"
               />
               <span className="text-sm">Skip TLS certificate verification</span>
@@ -170,8 +192,14 @@ export function SyslogConfigCard() {
 
           {/* Actions */}
           <div className="flex items-center gap-3">
-            <Button size="sm" onClick={handleSave} disabled={saveMutation.isPending}>
-              {saveMutation.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending && (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              )}
               Save
             </Button>
 
@@ -181,7 +209,9 @@ export function SyslogConfigCard() {
               onClick={handleTest}
               disabled={testMutation.isPending || !config.host}
             >
-              {testMutation.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+              {testMutation.isPending && (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              )}
               Test Connection
             </Button>
 
@@ -195,7 +225,9 @@ export function SyslogConfigCard() {
             {saveMutation.isError && (
               <span className="flex items-center gap-1 text-xs text-red-500">
                 <XCircle className="h-3 w-3" />
-                {saveMutation.error instanceof Error ? saveMutation.error.message : "Failed to save"}
+                {saveMutation.error instanceof Error
+                  ? saveMutation.error.message
+                  : "Failed to save"}
               </span>
             )}
             {testMutation.isSuccess && (
@@ -207,14 +239,17 @@ export function SyslogConfigCard() {
             {testMutation.isError && (
               <span className="flex items-center gap-1 text-xs text-red-500">
                 <XCircle className="h-3 w-3" />
-                {testMutation.error instanceof Error ? testMutation.error.message : "Test failed"}
+                {testMutation.error instanceof Error
+                  ? testMutation.error.message
+                  : "Test failed"}
               </span>
             )}
           </div>
 
           <p className="text-xs text-muted-foreground">
-            When enabled, all audit events are forwarded in real-time to the configured syslog server
-            using RFC 5424 format. Severity is derived from the action type.
+            When enabled, all audit events are forwarded in real-time to the
+            configured syslog server using RFC 5424 format. Severity is derived
+            from the action type.
           </p>
         </div>
       )}

@@ -182,9 +182,7 @@ export function TopologyCanvas({
           void navigate(`/clusters/${data.clusterId}`);
           break;
         case "host":
-          void navigate(
-            `/clusters/${data.clusterId}/nodes/${data.nodeId}`,
-          );
+          void navigate(`/clusters/${data.clusterId}/nodes/${data.nodeId}`);
           break;
         case "guest":
           void navigate(

@@ -33,7 +33,11 @@ vi.mock("@/hooks/usePermissions", () => ({
 // Render a stand-in banner whose button reports task completion, so the
 // post-delete resync hand-off can be exercised without task polling.
 vi.mock("@/features/vms/components/TaskProgressBanner", () => ({
-  TaskProgressBanner: ({ onComplete }: { onComplete?: (ok: boolean) => void }) => (
+  TaskProgressBanner: ({
+    onComplete,
+  }: {
+    onComplete?: (ok: boolean) => void;
+  }) => (
     <button
       type="button"
       data-testid="task-banner"

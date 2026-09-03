@@ -20,7 +20,10 @@ interface OSDActionDialogProps {
   onClose: () => void;
 }
 
-const actionCopy: Record<CephOSDAction, { title: string; verb: string; description: string }> = {
+const actionCopy: Record<
+  CephOSDAction,
+  { title: string; verb: string; description: string }
+> = {
   in: {
     title: "Mark %s in",
     verb: "Mark In",
@@ -36,7 +39,8 @@ const actionCopy: Record<CephOSDAction, { title: string; verb: string; descripti
   start: {
     title: "Start %s",
     verb: "Start",
-    description: "Starts the OSD daemon. Ceph marks it up once it finishes booting and peering.",
+    description:
+      "Starts the OSD daemon. Ceph marks it up once it finishes booting and peering.",
   },
   stop: {
     title: "Stop %s",
@@ -47,7 +51,8 @@ const actionCopy: Record<CephOSDAction, { title: string; verb: string; descripti
   restart: {
     title: "Restart %s",
     verb: "Restart",
-    description: "Restarts the OSD daemon. It will be down for the duration of the restart.",
+    description:
+      "Restarts the OSD daemon. It will be down for the duration of the restart.",
   },
 };
 
@@ -127,8 +132,8 @@ function OSDActionDialogContent({
                 Safety check unavailable
               </div>
               <p className="mt-1 text-muted-foreground">
-                Could not read the cluster&apos;s current redundancy state, so the
-                impact of this action is unknown. {preflight.error.message}
+                Could not read the cluster&apos;s current redundancy state, so
+                the impact of this action is unknown. {preflight.error.message}
               </p>
             </div>
           )}
@@ -136,7 +141,9 @@ function OSDActionDialogContent({
           {assessment && <PreflightSummary assessment={assessment} />}
 
           {osdAction.isError && (
-            <p className="text-sm text-destructive">{osdAction.error.message}</p>
+            <p className="text-sm text-destructive">
+              {osdAction.error.message}
+            </p>
           )}
         </div>
 
@@ -149,7 +156,9 @@ function OSDActionDialogContent({
             Cancel
           </Button>
           <Button
-            variant={assessment?.disruptive ?? true ? "destructive" : "default"}
+            variant={
+              (assessment?.disruptive ?? true) ? "destructive" : "default"
+            }
             onClick={handleConfirm}
             disabled={osdAction.isPending}
           >
@@ -188,7 +197,10 @@ function PreflightSummary({ assessment }: { assessment: CephOSDPreflight }) {
             <div className="text-xs text-muted-foreground">Pool redundancy</div>
             <div className="mt-1 space-y-0.5">
               {assessment.pools.map((pool) => (
-                <div key={pool.pool_name} className="flex justify-between font-mono text-xs">
+                <div
+                  key={pool.pool_name}
+                  className="flex justify-between font-mono text-xs"
+                >
                   <span>{pool.pool_name}</span>
                   <span className="text-muted-foreground">
                     size {pool.size} / min_size {pool.min_size}
@@ -222,7 +234,9 @@ function PreflightSummary({ assessment }: { assessment: CephOSDPreflight }) {
             ) : (
               <AlertTriangle className="h-4 w-4" />
             )}
-            {critical ? "This can stall guest I/O" : "Redundancy will be reduced"}
+            {critical
+              ? "This can stall guest I/O"
+              : "Redundancy will be reduced"}
           </div>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
             {assessment.warnings.map((text) => (
@@ -231,8 +245,8 @@ function PreflightSummary({ assessment }: { assessment: CephOSDPreflight }) {
           </ul>
           {(critical || warning) && (
             <p className="mt-2 text-xs text-muted-foreground">
-              Assumes Ceph&apos;s default host-level failure domain. Clusters using
-              an OSD-level or rack-level domain may differ.
+              Assumes Ceph&apos;s default host-level failure domain. Clusters
+              using an OSD-level or rack-level domain may differ.
             </p>
           )}
         </div>
@@ -260,7 +274,11 @@ function Projection({
       <div className="mt-0.5 font-mono">
         <span>{before}</span>
         <span className="mx-1 text-muted-foreground">&rarr;</span>
-        <span className={cn(drops && "font-semibold text-amber-600 dark:text-amber-500")}>
+        <span
+          className={cn(
+            drops && "font-semibold text-amber-600 dark:text-amber-500",
+          )}
+        >
           {after}
         </span>
         {total !== undefined && (

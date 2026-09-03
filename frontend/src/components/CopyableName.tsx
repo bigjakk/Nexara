@@ -5,7 +5,6 @@ import { copyText } from "@/lib/clipboard";
 
 type CopyState = "idle" | "copied" | "failed";
 
-
 interface CopyableNameProps {
   name: string;
   className?: string;
@@ -83,11 +82,20 @@ export function CopyableName({ name, className }: CopyableNameProps) {
       >
         <span ref={textRef}>{name}</span>
         {copyState === "copied" ? (
-          <Check aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+          <Check
+            aria-hidden="true"
+            className="h-3.5 w-3.5 shrink-0 text-emerald-500"
+          />
         ) : copyState === "failed" ? (
-          <X aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-destructive" />
+          <X
+            aria-hidden="true"
+            className="h-3.5 w-3.5 shrink-0 text-destructive"
+          />
         ) : (
-          <Copy aria-hidden="true" className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <Copy
+            aria-hidden="true"
+            className="h-3 w-3 shrink-0 text-muted-foreground"
+          />
         )}
       </span>
       <span aria-live="polite" className="sr-only">

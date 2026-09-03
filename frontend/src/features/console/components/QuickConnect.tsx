@@ -39,9 +39,7 @@ export function QuickConnect() {
     queries: (clusters ?? []).map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.list<NodeResponse>(
-          `/api/v1/clusters/${cluster.id}/nodes`,
-        ),
+        apiClient.list<NodeResponse>(`/api/v1/clusters/${cluster.id}/nodes`),
       enabled: open,
     })),
   });
@@ -94,10 +92,10 @@ export function QuickConnect() {
   function openConsole(vm: VMEntry, consoleType: "vnc" | "serial" | "attach") {
     const type =
       consoleType === "vnc"
-        ? "vm_vnc" as const
+        ? ("vm_vnc" as const)
         : consoleType === "attach"
-          ? "ct_vnc" as const
-          : "vm_serial" as const;
+          ? ("ct_vnc" as const)
+          : ("vm_serial" as const);
 
     const labelPrefix =
       consoleType === "vnc"
@@ -125,7 +123,9 @@ export function QuickConnect() {
         variant="outline"
         size="sm"
         className="gap-1.5"
-        onClick={() => { setOpen(true); }}
+        onClick={() => {
+          setOpen(true);
+        }}
       >
         <Plus className="h-4 w-4" />
         New Console
@@ -181,7 +181,9 @@ export function QuickConnect() {
                             className="h-7 gap-1 px-2 text-xs"
                             disabled={!isRunning}
                             title="VNC Console"
-                            onClick={() => { openConsole(vm, "vnc"); }}
+                            onClick={() => {
+                              openConsole(vm, "vnc");
+                            }}
                           >
                             <Monitor className="h-3.5 w-3.5" />
                             VNC
@@ -193,7 +195,9 @@ export function QuickConnect() {
                             className="h-7 gap-1 px-2 text-xs"
                             disabled={!isRunning}
                             title="Container Attach"
-                            onClick={() => { openConsole(vm, "attach"); }}
+                            onClick={() => {
+                              openConsole(vm, "attach");
+                            }}
                           >
                             <TerminalSquare className="h-3.5 w-3.5" />
                             Attach

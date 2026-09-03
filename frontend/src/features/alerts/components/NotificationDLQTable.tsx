@@ -102,28 +102,36 @@ export function NotificationDLQTable() {
           label="Failed"
           count={summary?.pending ?? 0}
           variant="destructive"
-          onClick={() => { setStateFilter("pending"); }}
+          onClick={() => {
+            setStateFilter("pending");
+          }}
           active={stateFilter === "pending"}
         />
         <SummaryTile
           label="Rate-limited"
           count={summary?.rate_limited ?? 0}
           variant="secondary"
-          onClick={() => { setStateFilter("rate_limited"); }}
+          onClick={() => {
+            setStateFilter("rate_limited");
+          }}
           active={stateFilter === "rate_limited"}
         />
         <SummaryTile
           label="Retrying"
           count={summary?.retrying ?? 0}
           variant="outline"
-          onClick={() => { setStateFilter("retrying"); }}
+          onClick={() => {
+            setStateFilter("retrying");
+          }}
           active={stateFilter === "retrying"}
         />
         <SummaryTile
           label="Resolved"
           count={summary?.resolved ?? 0}
           variant="default"
-          onClick={() => { setStateFilter("resolved"); }}
+          onClick={() => {
+            setStateFilter("resolved");
+          }}
           active={stateFilter === "resolved"}
         />
         <SummaryTile
@@ -136,7 +144,9 @@ export function NotificationDLQTable() {
             (summary?.dismissed ?? 0)
           }
           variant="outline"
-          onClick={() => { setStateFilter(""); }}
+          onClick={() => {
+            setStateFilter("");
+          }}
           active={stateFilter === ""}
         />
       </div>

@@ -250,7 +250,11 @@ describe("VMDetailPage", () => {
 
   it("shows action buttons for running VM", () => {
     renderPage();
-    expect(screen.getByRole("button", { name: /shutdown/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Clone$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /shutdown/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Clone$/i }),
+    ).toBeInTheDocument();
   });
 });

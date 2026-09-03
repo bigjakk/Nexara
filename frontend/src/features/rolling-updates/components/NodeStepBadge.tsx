@@ -3,7 +3,10 @@ import type { RollingUpdateNode } from "@/types/api";
 
 const stepConfig: Record<
   RollingUpdateNode["step"],
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
+  {
+    label: string;
+    variant: "default" | "secondary" | "destructive" | "outline";
+  }
 > = {
   pending: { label: "Pending", variant: "outline" },
   draining: { label: "Draining", variant: "default" },

@@ -22,7 +22,11 @@ import {
   useCPUModels,
 } from "@/features/clusters/api/cluster-queries";
 import { useStorageContent } from "@/features/storage/api/storage-queries";
-import { useClusterVMIDs, useCreateVM, useResourcePools } from "../api/vm-queries";
+import {
+  useClusterVMIDs,
+  useCreateVM,
+  useResourcePools,
+} from "../api/vm-queries";
 import { apiClient } from "@/lib/api-client";
 import type { NodeResponse, VMResponse } from "@/types/api";
 import { TaskProgressBanner } from "./TaskProgressBanner";
@@ -94,7 +98,6 @@ const stepLabels: Record<Step, string> = {
   confirm: "Confirm",
 };
 
-
 export function CreateVMDialog({
   open,
   onOpenChange,
@@ -118,8 +121,7 @@ export function CreateVMDialog({
             ...new Set(
               storageList
                 .filter(
-                  (s) =>
-                    s.active && s.enabled && s.content.includes("images"),
+                  (s) => s.active && s.enabled && s.content.includes("images"),
                 )
                 .map((s) => s.storage),
             ),
@@ -129,21 +131,18 @@ export function CreateVMDialog({
   );
 
   // Storage pools filtered for ISO images — track id+name for API calls
-  const isoStoragePools = useMemo(
-    () => {
-      if (!storageList) return [];
-      const seen = new Set<string>();
-      return storageList
-        .filter((s) => {
-          if (!s.active || !s.enabled || !s.content.includes("iso")) return false;
-          if (seen.has(s.storage)) return false;
-          seen.add(s.storage);
-          return true;
-        })
-        .sort((a, b) => a.storage.localeCompare(b.storage));
-    },
-    [storageList],
-  );
+  const isoStoragePools = useMemo(() => {
+    if (!storageList) return [];
+    const seen = new Set<string>();
+    return storageList
+      .filter((s) => {
+        if (!s.active || !s.enabled || !s.content.includes("iso")) return false;
+        if (seen.has(s.storage)) return false;
+        seen.add(s.storage);
+        return true;
+      })
+      .sort((a, b) => a.storage.localeCompare(b.storage));
+  }, [storageList]);
 
   // Best available node: sort by available resources (total - allocated)
   const bestNode = useMemo(() => {
@@ -168,8 +167,10 @@ export function CreateVMDialog({
     for (const n of nodes) {
       if (n.status !== "online") continue;
       const alloc = allocated.get(n.name) ?? { cpu: 0, mem: 0 };
-      const cpuFree = n.cpu_count > 0 ? (n.cpu_count - alloc.cpu) / n.cpu_count : 0;
-      const memFree = n.mem_total > 0 ? (n.mem_total - alloc.mem) / n.mem_total : 0;
+      const cpuFree =
+        n.cpu_count > 0 ? (n.cpu_count - alloc.cpu) / n.cpu_count : 0;
+      const memFree =
+        n.mem_total > 0 ? (n.mem_total - alloc.mem) / n.mem_total : 0;
       const score = cpuFree * 0.5 + memFree * 0.5;
       if (score > bestScore) {
         bestScore = score;
@@ -216,7 +217,17 @@ export function CreateVMDialog({
 
   // Disks — array of disk entries
   const [disks, setDisks] = useState<DiskEntry[]>([
-    { id: 1, bus: "scsi", size: "32", storage: "", format: "qcow2", cache: "none", discard: true, ssd: true, iothread: true },
+    {
+      id: 1,
+      bus: "scsi",
+      size: "32",
+      storage: "",
+      format: "qcow2",
+      cache: "none",
+      discard: true,
+      ssd: true,
+      iothread: true,
+    },
   ]);
   const [nextDiskId, setNextDiskId] = useState(2);
 
@@ -262,14 +273,15 @@ export function CreateVMDialog({
   const { data: isoContent } = useStorageContent(clusterId, isoStorageId);
   const isoList = useMemo(
     () =>
-      isoContent
-        ? isoContent.filter((item) => item.content === "iso")
-        : [],
+      isoContent ? isoContent.filter((item) => item.content === "iso") : [],
     [isoContent],
   );
 
   // Fetch VirtIO drivers ISO content
-  const { data: virtioIsoContent } = useStorageContent(clusterId, virtioIsoStorageId);
+  const { data: virtioIsoContent } = useStorageContent(
+    clusterId,
+    virtioIsoStorageId,
+  );
   const virtioIsoList = useMemo(
     () =>
       virtioIsoContent
@@ -313,7 +325,8 @@ export function CreateVMDialog({
     // Add the latest +pve q35 and i440fx as recommended options
     const q35pve = pveTypes.find((mt) => mt.id.includes("q35"));
     const i440pve = pveTypes.find((mt) => mt.id.includes("i440fx"));
-    if (q35pve) result.push({ value: q35pve.id, label: `${q35pve.id} (Recommended)` });
+    if (q35pve)
+      result.push({ value: q35pve.id, label: `${q35pve.id} (Recommended)` });
     if (i440pve) result.push({ value: i440pve.id, label: i440pve.id });
     // Add all +pve variants
     for (const mt of pveTypes) {
@@ -351,7 +364,11 @@ export function CreateVMDialog({
   useEffect(() => {
     if (machineOptions.length > 0 && (machine === "pc" || machine === "q35")) {
       const recommended = machineOptions[0];
-      if (recommended && recommended.value !== "pc" && recommended.value !== "q35") {
+      if (
+        recommended &&
+        recommended.value !== "pc" &&
+        recommended.value !== "q35"
+      ) {
         setMachine(recommended.value);
       }
     }
@@ -457,7 +474,12 @@ export function CreateVMDialog({
 
   // Assign device names (e.g. scsi0, scsi1, ide0) — skipping IDE slots used by ISOs
   function assignDiskDeviceNames(): { name: string; disk: DiskEntry }[] {
-    const counters: Record<string, number> = { scsi: 0, ide: 0, sata: 0, virtio: 0 };
+    const counters: Record<string, number> = {
+      scsi: 0,
+      ide: 0,
+      sata: 0,
+      virtio: 0,
+    };
     const result: { name: string; disk: DiskEntry }[] = [];
     for (const disk of disks) {
       let idx = counters[disk.bus] ?? 0;
@@ -621,7 +643,19 @@ export function CreateVMDialog({
     setEfiStorage("");
     setTpmEnabled(false);
     setTpmStorage("");
-    setDisks([{ id: 1, bus: "scsi", size: "32", storage: "", format: "qcow2", cache: "none", discard: true, ssd: true, iothread: true }]);
+    setDisks([
+      {
+        id: 1,
+        bus: "scsi",
+        size: "32",
+        storage: "",
+        format: "qcow2",
+        cache: "none",
+        discard: true,
+        ssd: true,
+        iothread: true,
+      },
+    ]);
     setNextDiskId(2);
     setVirtioDrivers(false);
     setVirtioIsoStorageId("");
@@ -668,8 +702,7 @@ export function CreateVMDialog({
         <DialogHeader>
           <DialogTitle>Create Virtual Machine</DialogTitle>
           <DialogDescription>
-            Step {stepIdx + 1} of {steps.length}:{" "}
-            {stepLabels[step]}
+            Step {stepIdx + 1} of {steps.length}: {stepLabels[step]}
           </DialogDescription>
         </DialogHeader>
 
@@ -704,7 +737,9 @@ export function CreateVMDialog({
               const createdVmid = Number(vmid);
               const pollForVM = () => {
                 void queryClient
-                  .invalidateQueries({ queryKey: ["clusters", clusterId, "vms"] })
+                  .invalidateQueries({
+                    queryKey: ["clusters", clusterId, "vms"],
+                  })
                   .then(() =>
                     apiClient.list<VMResponse>(
                       `/api/v1/clusters/${clusterId}/vms`,
@@ -713,7 +748,8 @@ export function CreateVMDialog({
                   .then((vms) => {
                     const found = vms.find((v) => v.vmid === createdVmid);
                     if (found) {
-                      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+                      if (pollTimerRef.current)
+                        clearInterval(pollTimerRef.current);
                       pollTimerRef.current = null;
                       // Reset dialog state without closing
                       createMutation.reset();
@@ -802,7 +838,8 @@ export function CreateVMDialog({
                     <option value="">None</option>
                     {resourcePools?.map((p) => (
                       <option key={p.poolid} value={p.poolid}>
-                        {p.poolid}{p.comment ? ` — ${p.comment}` : ""}
+                        {p.poolid}
+                        {p.comment ? ` — ${p.comment}` : ""}
                       </option>
                     ))}
                   </select>
@@ -911,17 +948,24 @@ export function CreateVMDialog({
                             setDisks((prev) => {
                               const first = prev[0];
                               if (!first) return prev;
-                              return [{ ...first, bus: "scsi" as const }, ...prev.slice(1)];
+                              return [
+                                { ...first, bus: "scsi" as const },
+                                ...prev.slice(1),
+                              ];
                             });
                             setNetModel("virtio");
                           } else {
                             // Restore OS defaults for bus and NIC
-                            const defaults = osDefaults[ostype] ?? osDefaults["other"];
+                            const defaults =
+                              osDefaults[ostype] ?? osDefaults["other"];
                             if (defaults) {
                               setDisks((prev) => {
                                 const first = prev[0];
                                 if (!first) return prev;
-                                return [{ ...first, bus: defaults.diskBus }, ...prev.slice(1)];
+                                return [
+                                  { ...first, bus: defaults.diskBus },
+                                  ...prev.slice(1),
+                                ];
                               });
                               setNetModel(defaults.netModel);
                             }
@@ -930,7 +974,10 @@ export function CreateVMDialog({
                           }
                         }}
                       />
-                      <Label htmlFor="virtio-drivers" className="text-sm font-normal">
+                      <Label
+                        htmlFor="virtio-drivers"
+                        className="text-sm font-normal"
+                      >
                         Add additional drive for VirtIO drivers
                       </Label>
                     </div>
@@ -979,7 +1026,8 @@ export function CreateVMDialog({
                           </select>
                         </div>
                         <p className="text-xs text-muted-foreground sm:col-span-2">
-                          Enabling VirtIO drivers sets disk bus to SCSI and network to VirtIO for best Windows performance.
+                          Enabling VirtIO drivers sets disk bus to SCSI and
+                          network to VirtIO for best Windows performance.
                         </p>
                       </>
                     )}
@@ -1000,7 +1048,11 @@ export function CreateVMDialog({
                       if (e.target.value === "ovmf") {
                         setEfiDisk(true);
                         // Pick the best q35+pve variant, fall back to generic q35
-                        const q35pve = machineOptions.find((mt) => mt.value.includes("q35") && mt.value.includes("+pve"));
+                        const q35pve = machineOptions.find(
+                          (mt) =>
+                            mt.value.includes("q35") &&
+                            mt.value.includes("+pve"),
+                        );
                         setMachine(q35pve?.value ?? "q35");
                       } else {
                         setEfiDisk(false);
@@ -1055,7 +1107,10 @@ export function CreateVMDialog({
                           setAgentEnabled(Boolean(c));
                         }}
                       />
-                      <Label htmlFor="agent-enabled" className="text-sm font-normal">
+                      <Label
+                        htmlFor="agent-enabled"
+                        className="text-sm font-normal"
+                      >
                         Enable
                       </Label>
                     </div>
@@ -1068,7 +1123,10 @@ export function CreateVMDialog({
                             setAgentFstrim(Boolean(c));
                           }}
                         />
-                        <Label htmlFor="agent-fstrim" className="text-sm font-normal">
+                        <Label
+                          htmlFor="agent-fstrim"
+                          className="text-sm font-normal"
+                        >
                           TRIM on clone
                         </Label>
                       </div>
@@ -1131,7 +1189,10 @@ export function CreateVMDialog({
             {step === "disks" && (
               <div className="space-y-4">
                 {disks.map((disk, idx) => (
-                  <div key={disk.id} className="rounded-lg border p-3 space-y-3">
+                  <div
+                    key={disk.id}
+                    className="rounded-lg border p-3 space-y-3"
+                  >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">
                         Disk {idx + 1}
@@ -1142,7 +1203,9 @@ export function CreateVMDialog({
                           variant="ghost"
                           size="sm"
                           className="h-7 text-xs text-destructive hover:text-destructive"
-                          onClick={() => { removeDisk(disk.id); }}
+                          onClick={() => {
+                            removeDisk(disk.id);
+                          }}
                         >
                           Remove
                         </Button>
@@ -1153,11 +1216,17 @@ export function CreateVMDialog({
                         <Label className="text-xs">Bus Type</Label>
                         <select
                           value={disk.bus}
-                          onChange={(e) => { updateDisk(disk.id, { bus: e.target.value as DiskEntry["bus"] }); }}
+                          onChange={(e) => {
+                            updateDisk(disk.id, {
+                              bus: e.target.value as DiskEntry["bus"],
+                            });
+                          }}
                           className={selectClass}
                         >
                           {diskBusTypes.map((bt) => (
-                            <option key={bt.value} value={bt.value}>{bt.label}</option>
+                            <option key={bt.value} value={bt.value}>
+                              {bt.label}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -1165,12 +1234,16 @@ export function CreateVMDialog({
                         <Label className="text-xs">Storage</Label>
                         <select
                           value={disk.storage}
-                          onChange={(e) => { updateDisk(disk.id, { storage: e.target.value }); }}
+                          onChange={(e) => {
+                            updateDisk(disk.id, { storage: e.target.value });
+                          }}
                           className={selectClass}
                         >
                           <option value="">Default</option>
                           {imageStorageOptions.map((s) => (
-                            <option key={s} value={s}>{s}</option>
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -1180,18 +1253,24 @@ export function CreateVMDialog({
                           type="number"
                           min={1}
                           value={disk.size}
-                          onChange={(e) => { updateDisk(disk.id, { size: e.target.value }); }}
+                          onChange={(e) => {
+                            updateDisk(disk.id, { size: e.target.value });
+                          }}
                         />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Format</Label>
                         <select
                           value={disk.format}
-                          onChange={(e) => { updateDisk(disk.id, { format: e.target.value }); }}
+                          onChange={(e) => {
+                            updateDisk(disk.id, { format: e.target.value });
+                          }}
                           className={selectClass}
                         >
                           {diskFormats.map((f) => (
-                            <option key={f.value} value={f.value}>{f.label}</option>
+                            <option key={f.value} value={f.value}>
+                              {f.label}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -1199,11 +1278,15 @@ export function CreateVMDialog({
                         <Label className="text-xs">Cache</Label>
                         <select
                           value={disk.cache}
-                          onChange={(e) => { updateDisk(disk.id, { cache: e.target.value }); }}
+                          onChange={(e) => {
+                            updateDisk(disk.id, { cache: e.target.value });
+                          }}
                           className={selectClass}
                         >
                           {cacheModes.map((cm) => (
-                            <option key={cm.value} value={cm.value}>{cm.label}</option>
+                            <option key={cm.value} value={cm.value}>
+                              {cm.label}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -1212,25 +1295,46 @@ export function CreateVMDialog({
                           <Checkbox
                             id={`discard-${String(disk.id)}`}
                             checked={disk.discard}
-                            onCheckedChange={(c) => { updateDisk(disk.id, { discard: Boolean(c) }); }}
+                            onCheckedChange={(c) => {
+                              updateDisk(disk.id, { discard: Boolean(c) });
+                            }}
                           />
-                          <Label htmlFor={`discard-${String(disk.id)}`} className="text-xs font-normal">TRIM</Label>
+                          <Label
+                            htmlFor={`discard-${String(disk.id)}`}
+                            className="text-xs font-normal"
+                          >
+                            TRIM
+                          </Label>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <Checkbox
                             id={`ssd-${String(disk.id)}`}
                             checked={disk.ssd}
-                            onCheckedChange={(c) => { updateDisk(disk.id, { ssd: Boolean(c) }); }}
+                            onCheckedChange={(c) => {
+                              updateDisk(disk.id, { ssd: Boolean(c) });
+                            }}
                           />
-                          <Label htmlFor={`ssd-${String(disk.id)}`} className="text-xs font-normal">SSD</Label>
+                          <Label
+                            htmlFor={`ssd-${String(disk.id)}`}
+                            className="text-xs font-normal"
+                          >
+                            SSD
+                          </Label>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <Checkbox
                             id={`io-${String(disk.id)}`}
                             checked={disk.iothread}
-                            onCheckedChange={(c) => { updateDisk(disk.id, { iothread: Boolean(c) }); }}
+                            onCheckedChange={(c) => {
+                              updateDisk(disk.id, { iothread: Boolean(c) });
+                            }}
                           />
-                          <Label htmlFor={`io-${String(disk.id)}`} className="text-xs font-normal">IO Thread</Label>
+                          <Label
+                            htmlFor={`io-${String(disk.id)}`}
+                            className="text-xs font-normal"
+                          >
+                            IO Thread
+                          </Label>
                         </div>
                       </div>
                     </div>
@@ -1388,7 +1492,9 @@ export function CreateVMDialog({
                     {bridges && bridges.length > 0 ? (
                       bridges.map((b) => (
                         <option key={b.iface} value={b.iface}>
-                          {b.iface}{b.cidr ? ` (${b.cidr})` : ""}{!b.active ? " [inactive]" : ""}
+                          {b.iface}
+                          {b.cidr ? ` (${b.cidr})` : ""}
+                          {!b.active ? " [inactive]" : ""}
                         </option>
                       ))
                     ) : (
@@ -1570,13 +1676,17 @@ export function CreateVMDialog({
                   {isoImage && (
                     <>
                       <span className="text-muted-foreground">ISO</span>
-                      <span className="truncate">{isoImage.split("/").pop()}</span>
+                      <span className="truncate">
+                        {isoImage.split("/").pop()}
+                      </span>
                     </>
                   )}
                   <span className="text-muted-foreground">BIOS</span>
                   <span>
                     {bios === "ovmf" ? "OVMF (UEFI)" : "SeaBIOS"}
-                    {" / "}{machineOptions.find((mt) => mt.value === machine)?.label ?? machine}
+                    {" / "}
+                    {machineOptions.find((mt) => mt.value === machine)?.label ??
+                      machine}
                   </span>
                   <span className="text-muted-foreground">SCSI HW</span>
                   <span>
@@ -1606,9 +1716,9 @@ export function CreateVMDialog({
                           {devName.toUpperCase()}
                         </span>
                         <span>
-                          {disk.size} GB{disk.storage ? ` on ${disk.storage}` : ""}
-                          {" "}({disk.format})
-                          {disk.discard ? " +discard" : ""}
+                          {disk.size} GB
+                          {disk.storage ? ` on ${disk.storage}` : ""} (
+                          {disk.format}){disk.discard ? " +discard" : ""}
                           {disk.ssd ? " +ssd" : ""}
                           {disk.iothread ? " +iothread" : ""}
                         </span>
@@ -1618,7 +1728,9 @@ export function CreateVMDialog({
                   {virtioDrivers && virtioIsoImage && (
                     <>
                       <span className="text-muted-foreground">VirtIO ISO</span>
-                      <span className="truncate">{virtioIsoImage.split("/").pop()}</span>
+                      <span className="truncate">
+                        {virtioIsoImage.split("/").pop()}
+                      </span>
                     </>
                   )}
                   <span className="text-muted-foreground">Network</span>
@@ -1633,9 +1745,7 @@ export function CreateVMDialog({
                   {agentEnabled && (
                     <>
                       <span className="text-muted-foreground">Agent</span>
-                      <span>
-                        Enabled{agentFstrim ? " +fstrim" : ""}
-                      </span>
+                      <span>Enabled{agentFstrim ? " +fstrim" : ""}</span>
                     </>
                   )}
                   {efiDisk && efiStorage && (
@@ -1671,7 +1781,10 @@ export function CreateVMDialog({
                         setStartAfter(Boolean(c));
                       }}
                     />
-                    <Label htmlFor="start-after" className="text-sm font-normal">
+                    <Label
+                      htmlFor="start-after"
+                      className="text-sm font-normal"
+                    >
                       Start after creation
                     </Label>
                   </div>

@@ -1,4 +1,13 @@
-import { X, Terminal, Loader2, AlertCircle, Unplug, RotateCcw, PowerOff, Circle } from "lucide-react";
+import {
+  X,
+  Terminal,
+  Loader2,
+  AlertCircle,
+  Unplug,
+  RotateCcw,
+  PowerOff,
+  Circle,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useConsoleStore } from "@/stores/console-store";
 import type { ConsoleStatus } from "../types/console";
@@ -45,7 +54,9 @@ export function ConsoleTabBar() {
               ? "bg-background text-foreground"
               : "bg-muted/50 text-muted-foreground hover:bg-muted",
           )}
-          onClick={() => { setActiveTab(tab.id); }}
+          onClick={() => {
+            setActiveTab(tab.id);
+          }}
           role="tab"
           aria-selected={tab.id === activeTabId}
           tabIndex={0}

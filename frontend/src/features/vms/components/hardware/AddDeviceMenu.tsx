@@ -1,5 +1,18 @@
 import { useState } from "react";
-import { Plus, Network, Usb, Cpu, Monitor, HardDrive, Key, Shield, Dice1, FolderOpen, Terminal, Disc } from "lucide-react";
+import {
+  Plus,
+  Network,
+  Usb,
+  Cpu,
+  Monitor,
+  HardDrive,
+  Key,
+  Shield,
+  Dice1,
+  FolderOpen,
+  Terminal,
+  Disc,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -108,37 +121,80 @@ export function AddDeviceMenu({
           <DropdownMenuItem onClick={onAddDisk}>
             <HardDrive className="mr-2 h-4 w-4" /> Hard Disk
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { setDialog("cdrom"); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("cdrom");
+            }}
+          >
             <Disc className="mr-2 h-4 w-4" /> CD/DVD Drive
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { setDialog("nic"); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("nic");
+            }}
+          >
             <Network className="mr-2 h-4 w-4" /> Network Device
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => { setDialog("usb"); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("usb");
+            }}
+          >
             <Usb className="mr-2 h-4 w-4" /> USB Device
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { setDialog("pci"); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("pci");
+            }}
+          >
             <Cpu className="mr-2 h-4 w-4" /> PCI Device
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { setDialog("serial"); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("serial");
+            }}
+          >
             <Terminal className="mr-2 h-4 w-4" /> Serial Port
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => { setDialog("cloudinit"); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("cloudinit");
+            }}
+          >
             <Monitor className="mr-2 h-4 w-4" /> Cloud-Init Drive
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { setDialog("rng"); }} disabled={hasRng}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("rng");
+            }}
+            disabled={hasRng}
+          >
             <Dice1 className="mr-2 h-4 w-4" /> VirtIO RNG {hasRng && "(exists)"}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { setDialog("virtiofs"); }}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("virtiofs");
+            }}
+          >
             <FolderOpen className="mr-2 h-4 w-4" /> VirtioFS Share
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => { setDialog("efi"); }} disabled={hasEfi}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("efi");
+            }}
+            disabled={hasEfi}
+          >
             <Key className="mr-2 h-4 w-4" /> EFI Disk {hasEfi && "(exists)"}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { setDialog("tpm"); }} disabled={hasTpm}>
+          <DropdownMenuItem
+            onClick={() => {
+              setDialog("tpm");
+            }}
+            disabled={hasTpm}
+          >
             <Shield className="mr-2 h-4 w-4" /> TPM State {hasTpm && "(exists)"}
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -149,7 +205,9 @@ export function AddDeviceMenu({
           config={config}
           bridges={bridges}
           onAdd={onAddDevice}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
       {dialog === "usb" && (
@@ -157,7 +215,9 @@ export function AddDeviceMenu({
           config={config}
           devices={usbDevices}
           onAdd={onAddDevice}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
       {dialog === "pci" && (
@@ -165,41 +225,53 @@ export function AddDeviceMenu({
           config={config}
           devices={pciDevices}
           onAdd={onAddDevice}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
       {dialog === "serial" && (
         <AddSerialDialog
           config={config}
           onAdd={onAddDevice}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
       {dialog === "rng" && (
         <AddRNGDialog
           onAdd={onAddDevice}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
       {dialog === "virtiofs" && (
         <AddVirtioFSDialog
           config={config}
           onAdd={onAddDevice}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
       {dialog === "efi" && (
         <AddEFIDialog
           diskStorages={diskStorages}
           onAdd={onAddDevice}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
       {dialog === "tpm" && (
         <AddTPMDialog
           diskStorages={diskStorages}
           onAdd={onAddDevice}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
       {dialog === "cloudinit" && (
@@ -207,7 +279,9 @@ export function AddDeviceMenu({
           config={config}
           diskStorages={diskStorages}
           onAdd={onAddDevice}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
       {dialog === "cdrom" && (
@@ -215,7 +289,9 @@ export function AddDeviceMenu({
           config={config}
           isoFiles={isoFiles}
           onAdd={onAddCDROM}
-          onClose={() => { setDialog(null); }}
+          onClose={() => {
+            setDialog(null);
+          }}
         />
       )}
     </>
@@ -274,43 +350,106 @@ function AddNICDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label className="text-xs">Model</Label>
-              <select className={selectClass} value={model} onChange={(e) => { setModel(e.target.value); }}>
-                {netModels.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
+              <select
+                className={selectClass}
+                value={model}
+                onChange={(e) => {
+                  setModel(e.target.value);
+                }}
+              >
+                {netModels.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Bridge</Label>
               {bridges.length > 0 ? (
-                <select className={selectClass} value={bridge} onChange={(e) => { setBridge(e.target.value); }}>
-                  {bridges.map((b) => (<option key={b} value={b}>{b}</option>))}
+                <select
+                  className={selectClass}
+                  value={bridge}
+                  onChange={(e) => {
+                    setBridge(e.target.value);
+                  }}
+                >
+                  {bridges.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
                 </select>
               ) : (
-                <Input value={bridge} onChange={(e) => { setBridge(e.target.value); }} placeholder="vmbr0" />
+                <Input
+                  value={bridge}
+                  onChange={(e) => {
+                    setBridge(e.target.value);
+                  }}
+                  placeholder="vmbr0"
+                />
               )}
             </div>
             <div className="space-y-1">
               <Label className="text-xs">VLAN Tag</Label>
-              <Input type="number" min={1} max={4094} value={vlan} onChange={(e) => { setVlan(e.target.value); }} placeholder="None" />
+              <Input
+                type="number"
+                min={1}
+                max={4094}
+                value={vlan}
+                onChange={(e) => {
+                  setVlan(e.target.value);
+                }}
+                placeholder="None"
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Rate (MB/s)</Label>
-              <Input type="number" min={0} value={rate} onChange={(e) => { setRate(e.target.value); }} placeholder="Unlimited" />
+              <Input
+                type="number"
+                min={0}
+                value={rate}
+                onChange={(e) => {
+                  setRate(e.target.value);
+                }}
+                placeholder="Unlimited"
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">MTU</Label>
-              <Input type="number" min={0} value={mtu} onChange={(e) => { setMtu(e.target.value); }} placeholder="Default" />
+              <Input
+                type="number"
+                min={0}
+                value={mtu}
+                onChange={(e) => {
+                  setMtu(e.target.value);
+                }}
+                placeholder="Default"
+              />
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5">
-              <Checkbox id="add-nic-fw" checked={firewall} onCheckedChange={(v) => { setFirewall(v === true); }} />
-              <Label htmlFor="add-nic-fw" className="cursor-pointer text-xs">Firewall</Label>
+              <Checkbox
+                id="add-nic-fw"
+                checked={firewall}
+                onCheckedChange={(v) => {
+                  setFirewall(v === true);
+                }}
+              />
+              <Label htmlFor="add-nic-fw" className="cursor-pointer text-xs">
+                Firewall
+              </Label>
             </div>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={!canAdd}>Add</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdd} disabled={!canAdd}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -361,14 +500,18 @@ function AddUSBDialog({
             <Button
               variant={mode === "host" ? "default" : "outline"}
               size="sm"
-              onClick={() => { setMode("host"); }}
+              onClick={() => {
+                setMode("host");
+              }}
             >
               Host Device
             </Button>
             <Button
               variant={mode === "spice" ? "default" : "outline"}
               size="sm"
-              onClick={() => { setMode("spice"); }}
+              onClick={() => {
+                setMode("spice");
+              }}
             >
               SPICE Redirect
             </Button>
@@ -378,7 +521,13 @@ function AddUSBDialog({
             <div className="space-y-1">
               <Label className="text-xs">Device</Label>
               {devices && devices.length > 0 ? (
-                <select className={selectClass} value={selectedDevice} onChange={(e) => { setSelectedDevice(e.target.value); }}>
+                <select
+                  className={selectClass}
+                  value={selectedDevice}
+                  onChange={(e) => {
+                    setSelectedDevice(e.target.value);
+                  }}
+                >
                   <option value="">Select a device...</option>
                   {devices
                     .filter((d) => d.class !== 9) // exclude hubs
@@ -386,7 +535,10 @@ function AddUSBDialog({
                       const id = `${d.vendid}:${d.prodid}`;
                       const label = d.product || d.manufacturer || id;
                       return (
-                        <option key={`${id}-${String(d.busnum)}-${String(d.devnum)}`} value={id}>
+                        <option
+                          key={`${id}-${String(d.busnum)}-${String(d.devnum)}`}
+                          value={id}
+                        >
                           {label} ({id})
                         </option>
                       );
@@ -395,7 +547,9 @@ function AddUSBDialog({
               ) : (
                 <Input
                   value={selectedDevice}
-                  onChange={(e) => { setSelectedDevice(e.target.value); }}
+                  onChange={(e) => {
+                    setSelectedDevice(e.target.value);
+                  }}
                   placeholder="vendor:product (e.g. 058f:6387)"
                 />
               )}
@@ -404,18 +558,31 @@ function AddUSBDialog({
 
           {mode === "spice" && (
             <p className="text-xs text-muted-foreground">
-              SPICE USB redirection allows passing host USB devices through the SPICE client.
+              SPICE USB redirection allows passing host USB devices through the
+              SPICE client.
             </p>
           )}
 
           <div className="flex items-center gap-1.5">
-            <Checkbox id="add-usb-usb3" checked={usb3} onCheckedChange={(v) => { setUsb3(v === true); }} />
-            <Label htmlFor="add-usb-usb3" className="cursor-pointer text-xs">USB 3.0</Label>
+            <Checkbox
+              id="add-usb-usb3"
+              checked={usb3}
+              onCheckedChange={(v) => {
+                setUsb3(v === true);
+              }}
+            />
+            <Label htmlFor="add-usb-usb3" className="cursor-pointer text-xs">
+              USB 3.0
+            </Label>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={!canAdd}>Add</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdd} disabled={!canAdd}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -447,7 +614,13 @@ function AddPCIDialog({
 
   function handleAdd() {
     if (!canAdd) return;
-    const val = buildPCI({ host: selectedDevice, pcie, rombar, xvga, mdev: "" });
+    const val = buildPCI({
+      host: selectedDevice,
+      pcie,
+      rombar,
+      xvga,
+      mdev: "",
+    });
     onAdd(`hostpci${String(idx)}`, val);
     onClose();
   }
@@ -476,12 +649,21 @@ function AddPCIDialog({
           <div className="space-y-1">
             <Label className="text-xs">Device</Label>
             {devices && devices.length > 0 ? (
-              <select className={selectClass} value={selectedDevice} onChange={(e) => { setSelectedDevice(e.target.value); }}>
+              <select
+                className={selectClass}
+                value={selectedDevice}
+                onChange={(e) => {
+                  setSelectedDevice(e.target.value);
+                }}
+              >
                 <option value="">Select a device...</option>
                 {Array.from(grouped.entries())
                   .sort(([a], [b]) => a - b)
                   .map(([group, devs]) => (
-                    <optgroup key={group} label={`IOMMU Group ${String(group)}`}>
+                    <optgroup
+                      key={group}
+                      label={`IOMMU Group ${String(group)}`}
+                    >
                       {devs.map((d) => (
                         <option key={d.id} value={d.id}>
                           {d.id} — {d.device_name || d.vendor_name || "Unknown"}
@@ -493,29 +675,62 @@ function AddPCIDialog({
             ) : (
               <Input
                 value={selectedDevice}
-                onChange={(e) => { setSelectedDevice(e.target.value); }}
+                onChange={(e) => {
+                  setSelectedDevice(e.target.value);
+                }}
                 placeholder="PCI address (e.g. 02:00.0)"
               />
             )}
           </div>
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-1.5">
-              <Checkbox id="add-pci-pcie" checked={pcie} onCheckedChange={(v) => { setPcie(v === true); }} />
-              <Label htmlFor="add-pci-pcie" className="cursor-pointer text-xs">PCIe</Label>
+              <Checkbox
+                id="add-pci-pcie"
+                checked={pcie}
+                onCheckedChange={(v) => {
+                  setPcie(v === true);
+                }}
+              />
+              <Label htmlFor="add-pci-pcie" className="cursor-pointer text-xs">
+                PCIe
+              </Label>
             </div>
             <div className="flex items-center gap-1.5">
-              <Checkbox id="add-pci-rombar" checked={rombar} onCheckedChange={(v) => { setRombar(v === true); }} />
-              <Label htmlFor="add-pci-rombar" className="cursor-pointer text-xs">ROM-BAR</Label>
+              <Checkbox
+                id="add-pci-rombar"
+                checked={rombar}
+                onCheckedChange={(v) => {
+                  setRombar(v === true);
+                }}
+              />
+              <Label
+                htmlFor="add-pci-rombar"
+                className="cursor-pointer text-xs"
+              >
+                ROM-BAR
+              </Label>
             </div>
             <div className="flex items-center gap-1.5">
-              <Checkbox id="add-pci-xvga" checked={xvga} onCheckedChange={(v) => { setXvga(v === true); }} />
-              <Label htmlFor="add-pci-xvga" className="cursor-pointer text-xs">Primary GPU (x-vga)</Label>
+              <Checkbox
+                id="add-pci-xvga"
+                checked={xvga}
+                onCheckedChange={(v) => {
+                  setXvga(v === true);
+                }}
+              />
+              <Label htmlFor="add-pci-xvga" className="cursor-pointer text-xs">
+                Primary GPU (x-vga)
+              </Label>
             </div>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={!canAdd}>Add</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdd} disabled={!canAdd}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -554,13 +769,27 @@ function AddSerialDialog({
         </DialogHeader>
         <div className="space-y-1">
           <Label className="text-xs">Type</Label>
-          <select className={selectClass} value={value} onChange={(e) => { setValue(e.target.value); }}>
-            {serialOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+          <select
+            className={selectClass}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+            }}
+          >
+            {serialOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </select>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={!canAdd}>Add</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdd} disabled={!canAdd}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -596,23 +825,49 @@ function AddRNGDialog({
         <div className="grid gap-3">
           <div className="space-y-1">
             <Label className="text-xs">Source</Label>
-            <select className={selectClass} value={source} onChange={(e) => { setSource(e.target.value); }}>
-              {rngSources.map((s) => (<option key={s.value} value={s.value}>{s.label}</option>))}
+            <select
+              className={selectClass}
+              value={source}
+              onChange={(e) => {
+                setSource(e.target.value);
+              }}
+            >
+              {rngSources.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label className="text-xs">Max Bytes</Label>
-              <Input type="number" min={0} value={maxBytes} onChange={(e) => { setMaxBytes(e.target.value); }} />
+              <Input
+                type="number"
+                min={0}
+                value={maxBytes}
+                onChange={(e) => {
+                  setMaxBytes(e.target.value);
+                }}
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Period (ms)</Label>
-              <Input type="number" min={0} value={period} onChange={(e) => { setPeriod(e.target.value); }} />
+              <Input
+                type="number"
+                min={0}
+                value={period}
+                onChange={(e) => {
+                  setPeriod(e.target.value);
+                }}
+              />
             </div>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
           <Button onClick={handleAdd}>Add</Button>
         </DialogFooter>
       </DialogContent>
@@ -655,22 +910,50 @@ function AddVirtioFSDialog({
         <div className="grid gap-3">
           <div className="space-y-1">
             <Label className="text-xs">Directory ID</Label>
-            <Input value={dirid} onChange={(e) => { setDirid(e.target.value); }} placeholder="share-name" />
+            <Input
+              value={dirid}
+              onChange={(e) => {
+                setDirid(e.target.value);
+              }}
+              placeholder="share-name"
+            />
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Cache Mode</Label>
-            <select className={selectClass} value={cache} onChange={(e) => { setCache(e.target.value); }}>
-              {virtiofsCacheModes.map((c) => (<option key={c.value} value={c.value}>{c.label}</option>))}
+            <select
+              className={selectClass}
+              value={cache}
+              onChange={(e) => {
+                setCache(e.target.value);
+              }}
+            >
+              {virtiofsCacheModes.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex items-center gap-1.5">
-            <Checkbox id="add-vfs-dio" checked={directIo} onCheckedChange={(v) => { setDirectIo(v === true); }} />
-            <Label htmlFor="add-vfs-dio" className="cursor-pointer text-xs">Direct I/O</Label>
+            <Checkbox
+              id="add-vfs-dio"
+              checked={directIo}
+              onCheckedChange={(v) => {
+                setDirectIo(v === true);
+              }}
+            />
+            <Label htmlFor="add-vfs-dio" className="cursor-pointer text-xs">
+              Direct I/O
+            </Label>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={!canAdd}>Add</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdd} disabled={!canAdd}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -696,7 +979,15 @@ function AddEFIDialog({
 
   function handleAdd() {
     if (!storage) return;
-    onAdd("efidisk0", buildEFIDisk({ volume: `${storage}:1`, storage, efitype, preEnrolledKeys }));
+    onAdd(
+      "efidisk0",
+      buildEFIDisk({
+        volume: `${storage}:1`,
+        storage,
+        efitype,
+        preEnrolledKeys,
+      }),
+    );
     onClose();
   }
 
@@ -709,28 +1000,60 @@ function AddEFIDialog({
         <div className="grid gap-3">
           <div className="space-y-1">
             <Label className="text-xs">Storage</Label>
-            <select className={selectClass} value={storage} onChange={(e) => { setStorage(e.target.value); }}>
+            <select
+              className={selectClass}
+              value={storage}
+              onChange={(e) => {
+                setStorage(e.target.value);
+              }}
+            >
               <option value="">Select...</option>
-              {diskStorages.map((s) => (<option key={s.storage} value={s.storage}>{s.storage} ({s.type})</option>))}
+              {diskStorages.map((s) => (
+                <option key={s.storage} value={s.storage}>
+                  {s.storage} ({s.type})
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">EFI Type</Label>
-            <select className={selectClass} value={efitype} onChange={(e) => { setEfitype(e.target.value); }}>
-              {efiTypes.map((t) => (<option key={t.value} value={t.value}>{t.label}</option>))}
+            <select
+              className={selectClass}
+              value={efitype}
+              onChange={(e) => {
+                setEfitype(e.target.value);
+              }}
+            >
+              {efiTypes.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex items-center gap-1.5">
-            <Checkbox id="add-efi-keys" checked={preEnrolledKeys} onCheckedChange={(v) => { setPreEnrolledKeys(v === true); }} />
-            <Label htmlFor="add-efi-keys" className="cursor-pointer text-xs">Pre-enrolled Keys (Secure Boot)</Label>
+            <Checkbox
+              id="add-efi-keys"
+              checked={preEnrolledKeys}
+              onCheckedChange={(v) => {
+                setPreEnrolledKeys(v === true);
+              }}
+            />
+            <Label htmlFor="add-efi-keys" className="cursor-pointer text-xs">
+              Pre-enrolled Keys (Secure Boot)
+            </Label>
           </div>
           <p className="text-xs text-muted-foreground">
             BIOS will be set to OVMF (UEFI) when an EFI disk is added.
           </p>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={!storage}>Add</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdd} disabled={!storage}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -755,7 +1078,10 @@ function AddTPMDialog({
 
   function handleAdd() {
     if (!storage) return;
-    onAdd("tpmstate0", buildTPMState({ volume: `${storage}:1`, storage, version }));
+    onAdd(
+      "tpmstate0",
+      buildTPMState({ volume: `${storage}:1`, storage, version }),
+    );
     onClose();
   }
 
@@ -768,21 +1094,45 @@ function AddTPMDialog({
         <div className="grid gap-3">
           <div className="space-y-1">
             <Label className="text-xs">Storage</Label>
-            <select className={selectClass} value={storage} onChange={(e) => { setStorage(e.target.value); }}>
+            <select
+              className={selectClass}
+              value={storage}
+              onChange={(e) => {
+                setStorage(e.target.value);
+              }}
+            >
               <option value="">Select...</option>
-              {diskStorages.map((s) => (<option key={s.storage} value={s.storage}>{s.storage} ({s.type})</option>))}
+              {diskStorages.map((s) => (
+                <option key={s.storage} value={s.storage}>
+                  {s.storage} ({s.type})
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Version</Label>
-            <select className={selectClass} value={version} onChange={(e) => { setVersion(e.target.value); }}>
-              {tpmVersions.map((v) => (<option key={v.value} value={v.value}>{v.label}</option>))}
+            <select
+              className={selectClass}
+              value={version}
+              onChange={(e) => {
+                setVersion(e.target.value);
+              }}
+            >
+              {tpmVersions.map((v) => (
+                <option key={v.value} value={v.value}>
+                  {v.label}
+                </option>
+              ))}
             </select>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={!storage}>Add</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdd} disabled={!storage}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -813,7 +1163,8 @@ function AddCloudInitDialog({
 }) {
   const [storage, setStorage] = useState(diskStorages[0]?.storage ?? "");
   // Find first available slot
-  const availableSlot = cloudInitBuses.find((b) => config[b.value] == null)?.value ?? "ide2";
+  const availableSlot =
+    cloudInitBuses.find((b) => config[b.value] == null)?.value ?? "ide2";
   const [slot, setSlot] = useState(availableSlot);
 
   function handleAdd() {
@@ -831,25 +1182,50 @@ function AddCloudInitDialog({
         <div className="grid gap-3">
           <div className="space-y-1">
             <Label className="text-xs">Storage</Label>
-            <select className={selectClass} value={storage} onChange={(e) => { setStorage(e.target.value); }}>
+            <select
+              className={selectClass}
+              value={storage}
+              onChange={(e) => {
+                setStorage(e.target.value);
+              }}
+            >
               <option value="">Select...</option>
-              {diskStorages.map((s) => (<option key={s.storage} value={s.storage}>{s.storage} ({s.type})</option>))}
+              {diskStorages.map((s) => (
+                <option key={s.storage} value={s.storage}>
+                  {s.storage} ({s.type})
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Disk Slot</Label>
-            <select className={selectClass} value={slot} onChange={(e) => { setSlot(e.target.value); }}>
+            <select
+              className={selectClass}
+              value={slot}
+              onChange={(e) => {
+                setSlot(e.target.value);
+              }}
+            >
               {cloudInitBuses.map((b) => (
-                <option key={b.value} value={b.value} disabled={config[b.value] != null}>
-                  {b.label}{config[b.value] != null ? " (in use)" : ""}
+                <option
+                  key={b.value}
+                  value={b.value}
+                  disabled={config[b.value] != null}
+                >
+                  {b.label}
+                  {config[b.value] != null ? " (in use)" : ""}
                 </option>
               ))}
             </select>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={!storage}>Add</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdd} disabled={!storage}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -884,7 +1260,8 @@ function AddCDROMDialog({
   onAdd: (key: string, isoVolid: string) => void;
   onClose: () => void;
 }) {
-  const availableSlot = cdromBusSlots.find((b) => config[b.value] == null)?.value ?? "ide2";
+  const availableSlot =
+    cdromBusSlots.find((b) => config[b.value] == null)?.value ?? "ide2";
   const [slot, setSlot] = useState(availableSlot);
   const [iso, setIso] = useState("none");
 
@@ -905,27 +1282,50 @@ function AddCDROMDialog({
         <div className="grid gap-3">
           <div className="space-y-1">
             <Label className="text-xs">Bus/Slot</Label>
-            <select className={selectClass} value={slot} onChange={(e) => { setSlot(e.target.value); }}>
+            <select
+              className={selectClass}
+              value={slot}
+              onChange={(e) => {
+                setSlot(e.target.value);
+              }}
+            >
               {cdromBusSlots.map((b) => (
-                <option key={b.value} value={b.value} disabled={config[b.value] != null}>
-                  {b.label}{config[b.value] != null ? " (in use)" : ""}
+                <option
+                  key={b.value}
+                  value={b.value}
+                  disabled={config[b.value] != null}
+                >
+                  {b.label}
+                  {config[b.value] != null ? " (in use)" : ""}
                 </option>
               ))}
             </select>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">ISO Image</Label>
-            <select className={selectClass} value={iso} onChange={(e) => { setIso(e.target.value); }}>
+            <select
+              className={selectClass}
+              value={iso}
+              onChange={(e) => {
+                setIso(e.target.value);
+              }}
+            >
               <option value="none">No media (empty drive)</option>
               {isoFiles.map((f) => (
-                <option key={f.volid} value={f.volid}>{f.volid}</option>
+                <option key={f.volid} value={f.volid}>
+                  {f.volid}
+                </option>
               ))}
             </select>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleAdd} disabled={!slotFree}>Add</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleAdd} disabled={!slotFree}>
+            Add
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

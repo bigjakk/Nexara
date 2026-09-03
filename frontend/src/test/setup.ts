@@ -10,7 +10,9 @@ class ResizeObserverStub {
   unobserve() {}
   disconnect() {}
 }
-(globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver = ResizeObserverStub;
+(
+  globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }
+).ResizeObserver = ResizeObserverStub;
 
 window.matchMedia = (query: string) => ({
   matches: false,

@@ -7,7 +7,10 @@ import { EditPBSServerDialog } from "./EditPBSServerDialog";
 import type { PBSServer } from "../types/backup";
 
 vi.mock("@/lib/api-client", () => ({
-  apiClient: { put: vi.fn(), get: vi.fn().mockResolvedValue({ items: [], total: 0 }) },
+  apiClient: {
+    put: vi.fn(),
+    get: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+  },
 }));
 
 const mockedPut = vi.mocked(apiClient.put);
@@ -82,7 +85,10 @@ describe("EditPBSServerDialog", () => {
     const apiUrl = screen.getByLabelText(/api url/i);
     await user.clear(apiUrl);
     await user.type(apiUrl, "https://pbs2.example.com:8007");
-    await user.type(screen.getByLabelText(/api token secret/i), "re-typed-secret");
+    await user.type(
+      screen.getByLabelText(/api token secret/i),
+      "re-typed-secret",
+    );
     await user.click(screen.getByRole("button", { name: /save changes/i }));
 
     expect(mockedPut).toHaveBeenCalledTimes(1);

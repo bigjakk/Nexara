@@ -204,7 +204,9 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
     label: "Repository",
     width: 180,
     sortValue: (job) => job.repository_name || null,
-    cell: (job) => <span className="text-sm">{job.repository_name || "-"}</span>,
+    cell: (job) => (
+      <span className="text-sm">{job.repository_name || "-"}</span>
+    ),
   },
   {
     key: "guests",
@@ -224,9 +226,7 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
     // beside the buttons; truncating this cell would clip the only feedback a
     // failed start/stop ever gives.
     wrap: true,
-    cell: (job, ctx) => (
-      <VeeamJobActions serverId={ctx.serverId} job={job} />
-    ),
+    cell: (job, ctx) => <VeeamJobActions serverId={ctx.serverId} job={job} />,
   },
 ];
 

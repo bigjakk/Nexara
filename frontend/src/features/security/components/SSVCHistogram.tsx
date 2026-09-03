@@ -110,7 +110,12 @@ export function SSVCHistogram({
                   {cfg.label}
                 </span>
               </div>
-              <span className={cn("text-2xl font-bold tracking-tight", cfg.countClass)}>
+              <span
+                className={cn(
+                  "text-2xl font-bold tracking-tight",
+                  cfg.countClass,
+                )}
+              >
                 {count}
               </span>
               <span className="text-[11px] text-muted-foreground">

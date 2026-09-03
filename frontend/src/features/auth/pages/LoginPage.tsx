@@ -19,7 +19,11 @@ import {
 } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { apiClient, ApiClientError } from "@/lib/api-client";
-import type { SetupStatus, SSOStatus, OIDCAuthorizeResponse } from "@/types/api";
+import type {
+  SetupStatus,
+  SSOStatus,
+  OIDCAuthorizeResponse,
+} from "@/types/api";
 import { InsecureConnectionBanner } from "../components/InsecureConnectionBanner";
 
 function sanitizeReturnTo(value: string | null): string {
@@ -193,7 +197,9 @@ export function LoginPage() {
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary">
               <ShieldCheck className="h-6 w-6 text-primary-foreground" />
             </div>
-            <CardTitle className="text-2xl">{t("twoFactorAuthentication")}</CardTitle>
+            <CardTitle className="text-2xl">
+              {t("twoFactorAuthentication")}
+            </CardTitle>
             <CardDescription>
               {useRecoveryCode
                 ? t("enterRecoveryCodes")
@@ -217,7 +223,9 @@ export function LoginPage() {
                     autoComplete="off"
                     autoFocus
                     value={recoveryCode}
-                    onChange={(e) => { setRecoveryCode(e.target.value); }}
+                    onChange={(e) => {
+                      setRecoveryCode(e.target.value);
+                    }}
                   />
                 </div>
               ) : (
@@ -233,7 +241,9 @@ export function LoginPage() {
                     autoComplete="one-time-code"
                     autoFocus
                     value={totpCode}
-                    onChange={(e) => { setTotpCode(e.target.value.replace(/\D/g, "")); }}
+                    onChange={(e) => {
+                      setTotpCode(e.target.value.replace(/\D/g, ""));
+                    }}
                   />
                 </div>
               )}
@@ -242,7 +252,10 @@ export function LoginPage() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={isLoading || (useRecoveryCode ? !recoveryCode : totpCode.length !== 6)}
+                disabled={
+                  isLoading ||
+                  (useRecoveryCode ? !recoveryCode : totpCode.length !== 6)
+                }
               >
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {t("verify")}
@@ -286,9 +299,7 @@ export function LoginPage() {
             <Server className="h-6 w-6 text-primary-foreground" />
           </div>
           <CardTitle className="text-2xl">{t("welcomeToNexara")}</CardTitle>
-          <CardDescription>
-            {t("signInToManage")}
-          </CardDescription>
+          <CardDescription>{t("signInToManage")}</CardDescription>
         </CardHeader>
         <form onSubmit={(e) => void handleSubmit(onSubmit)(e)}>
           <CardContent className="space-y-4">
@@ -336,7 +347,9 @@ export function LoginPage() {
               <>
                 <div className="flex w-full items-center gap-3">
                   <div className="h-px flex-1 bg-border" />
-                  <span className="text-xs text-muted-foreground">{t("or")}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("or")}
+                  </span>
                   <div className="h-px flex-1 bg-border" />
                 </div>
                 <Button
@@ -346,8 +359,12 @@ export function LoginPage() {
                   disabled={ssoLoading}
                   onClick={() => void handleSSOLogin()}
                 >
-                  {ssoLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {t("signInWith", { provider: ssoStatus.oidc_provider_name || "SSO" })}
+                  {ssoLoading && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  {t("signInWith", {
+                    provider: ssoStatus.oidc_provider_name || "SSO",
+                  })}
                 </Button>
               </>
             )}

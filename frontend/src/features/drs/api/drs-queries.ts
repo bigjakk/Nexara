@@ -14,9 +14,7 @@ export function useDRSConfig(clusterId: string) {
   return useQuery({
     queryKey: ["drs", "config", clusterId],
     queryFn: () =>
-      apiClient.get<DRSConfig>(
-        `/api/v1/clusters/${clusterId}/drs/config`,
-      ),
+      apiClient.get<DRSConfig>(`/api/v1/clusters/${clusterId}/drs/config`),
     enabled: clusterId.length > 0,
   });
 }
@@ -41,9 +39,7 @@ export function useDRSRules(clusterId: string) {
   return useQuery({
     queryKey: ["drs", "rules", clusterId],
     queryFn: () =>
-      apiClient.list<DRSRule>(
-        `/api/v1/clusters/${clusterId}/drs/rules`,
-      ),
+      apiClient.list<DRSRule>(`/api/v1/clusters/${clusterId}/drs/rules`),
     enabled: clusterId.length > 0,
   });
 }
@@ -52,10 +48,7 @@ export function useCreateDRSRule(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (rule: CreateRuleRequest) =>
-      apiClient.post<DRSRule>(
-        `/api/v1/clusters/${clusterId}/drs/rules`,
-        rule,
-      ),
+      apiClient.post<DRSRule>(`/api/v1/clusters/${clusterId}/drs/rules`, rule),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: ["drs", "rules", clusterId],
@@ -83,9 +76,7 @@ export function useHARules(clusterId: string) {
   return useQuery({
     queryKey: ["drs", "ha-rules", clusterId],
     queryFn: () =>
-      apiClient.list<DRSRule>(
-        `/api/v1/clusters/${clusterId}/drs/ha-rules`,
-      ),
+      apiClient.list<DRSRule>(`/api/v1/clusters/${clusterId}/drs/ha-rules`),
     enabled: clusterId.length > 0,
   });
 }

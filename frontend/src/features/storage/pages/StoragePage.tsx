@@ -1,6 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { HardDrive, ChevronDown, ChevronRight, Server, Share2 } from "lucide-react";
+import {
+  HardDrive,
+  ChevronDown,
+  ChevronRight,
+  Server,
+  Share2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -87,7 +93,8 @@ export function StoragePage() {
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
   const clusterParam = searchParams.get("cluster") ?? "";
-  const [selectedClusterId, setSelectedClusterId] = useState<string>(clusterParam);
+  const [selectedClusterId, setSelectedClusterId] =
+    useState<string>(clusterParam);
 
   // Sync with URL query param when it changes (e.g. navigating from search)
   useEffect(() => {
@@ -97,7 +104,7 @@ export function StoragePage() {
   }, [clusterParam]);
 
   const activeClusterId =
-    selectedClusterId || (clusters.length > 0 ? clusters[0]?.id ?? "" : "");
+    selectedClusterId || (clusters.length > 0 ? (clusters[0]?.id ?? "") : "");
 
   const storageQuery = useClusterStorage(activeClusterId);
   const nodesQuery = useClusterNodes(activeClusterId);
@@ -117,9 +124,7 @@ export function StoragePage() {
           <HardDrive className="h-6 w-6 text-primary" />
           <h1 className="text-2xl font-semibold">Storage</h1>
         </div>
-        {activeClusterId && (
-          <AddStorageDialog clusterId={activeClusterId} />
-        )}
+        {activeClusterId && <AddStorageDialog clusterId={activeClusterId} />}
       </div>
 
       {clusters.length > 1 && (
@@ -159,8 +164,8 @@ export function StoragePage() {
               onSelectPool={openPool}
             />
           ))}
-          {pools.length === 0 && (
-            clusters.length === 0 ? (
+          {pools.length === 0 &&
+            (clusters.length === 0 ? (
               <EmptyState
                 icon={HardDrive}
                 title={td("noClustersRegistered")}
@@ -173,8 +178,7 @@ export function StoragePage() {
                 title="No storage pools yet"
                 description="This cluster has no storage pools configured. Add one in the Proxmox UI to see it here."
               />
-            )
-          )}
+            ))}
         </>
       )}
     </div>
@@ -188,13 +192,18 @@ interface StorageGroupSectionProps {
   onSelectPool: (pool: StorageResponse) => void;
 }
 
-function StorageGroupSection({ group, onSelectPool }: StorageGroupSectionProps) {
+function StorageGroupSection({
+  group,
+  onSelectPool,
+}: StorageGroupSectionProps) {
   const [expanded, setExpanded] = useState(true);
 
   return (
     <div className="space-y-3">
       <button
-        onClick={() => { setExpanded(!expanded); }}
+        onClick={() => {
+          setExpanded(!expanded);
+        }}
         className="flex w-full items-center gap-2 text-left"
       >
         {expanded ? (
@@ -219,7 +228,9 @@ function StorageGroupSection({ group, onSelectPool }: StorageGroupSectionProps) 
             <Card
               key={pool.id}
               className="cursor-pointer transition-shadow hover:shadow-md"
-              onClick={() => { onSelectPool(pool); }}
+              onClick={() => {
+                onSelectPool(pool);
+              }}
             >
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
@@ -233,11 +244,7 @@ function StorageGroupSection({ group, onSelectPool }: StorageGroupSectionProps) 
                 <StorageCapacityBar used={pool.used} total={pool.total} />
                 <div className="flex flex-wrap gap-1">
                   {pool.content.split(",").map((ct) => (
-                    <Badge
-                      key={ct}
-                      variant="outline"
-                      className="text-xs"
-                    >
+                    <Badge key={ct} variant="outline" className="text-xs">
                       {ct.trim()}
                     </Badge>
                   ))}

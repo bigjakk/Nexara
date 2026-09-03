@@ -22,9 +22,7 @@ export function useClusterNodes(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes"],
     queryFn: () =>
-      apiClient.list<NodeResponse>(
-        `/api/v1/clusters/${clusterId}/nodes`,
-      ),
+      apiClient.list<NodeResponse>(`/api/v1/clusters/${clusterId}/nodes`),
     enabled: clusterId.length > 0,
   });
 }
@@ -33,9 +31,7 @@ export function useClusterStorage(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "storage"],
     queryFn: () =>
-      apiClient.list<StorageResponse>(
-        `/api/v1/clusters/${clusterId}/storage`,
-      ),
+      apiClient.list<StorageResponse>(`/api/v1/clusters/${clusterId}/storage`),
     enabled: clusterId.length > 0,
   });
 }
@@ -196,9 +192,21 @@ export function useLiveDisks(clusterId: string, nodeName: string) {
   });
 }
 
-export function useDiskSMART(clusterId: string, nodeName: string, disk: string) {
+export function useDiskSMART(
+  clusterId: string,
+  nodeName: string,
+  disk: string,
+) {
   return useQuery({
-    queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "smart", disk],
+    queryKey: [
+      "clusters",
+      clusterId,
+      "nodes",
+      nodeName,
+      "disks",
+      "smart",
+      disk,
+    ],
     queryFn: () =>
       apiClient.get<DiskSMARTResponse>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/smart?disk=${encodeURIComponent(disk)}`,
@@ -221,7 +229,13 @@ export function useNodeZFSPools(clusterId: string, nodeName: string) {
 export function useCreateZFSPool(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { name: string; raidlevel: string; devices: string; compression?: string; ashift?: number }) =>
+    mutationFn: (params: {
+      name: string;
+      raidlevel: string;
+      devices: string;
+      compression?: string;
+      ashift?: number;
+    }) =>
       apiClient.post<{ status: string; upid: string }>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/zfs`,
         params,
@@ -237,7 +251,11 @@ export function useCreateZFSPool(clusterId: string, nodeName: string) {
 export function useDeleteZFSPool(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { poolName: string; cleanupDisks?: boolean; cleanupConfig?: boolean }) => {
+    mutationFn: (params: {
+      poolName: string;
+      cleanupDisks?: boolean;
+      cleanupConfig?: boolean;
+    }) => {
       const qp = new URLSearchParams();
       if (params.cleanupDisks) qp.set("cleanup-disks", "true");
       if (params.cleanupConfig) qp.set("cleanup-config", "true");
@@ -268,7 +286,11 @@ export function useNodeLVM(clusterId: string, nodeName: string) {
 export function useCreateLVM(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { name: string; device: string; add_storage?: boolean }) =>
+    mutationFn: (params: {
+      name: string;
+      device: string;
+      add_storage?: boolean;
+    }) =>
       apiClient.post<{ status: string; upid: string }>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvm`,
         params,
@@ -284,7 +306,11 @@ export function useCreateLVM(clusterId: string, nodeName: string) {
 export function useDeleteLVM(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { name: string; cleanupDisks?: boolean; cleanupConfig?: boolean }) => {
+    mutationFn: (params: {
+      name: string;
+      cleanupDisks?: boolean;
+      cleanupConfig?: boolean;
+    }) => {
       const qp = new URLSearchParams();
       if (params.cleanupDisks) qp.set("cleanup-disks", "true");
       if (params.cleanupConfig) qp.set("cleanup-config", "true");
@@ -315,14 +341,25 @@ export function useNodeLVMThin(clusterId: string, nodeName: string) {
 export function useCreateLVMThin(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { name: string; device: string; add_storage?: boolean }) =>
+    mutationFn: (params: {
+      name: string;
+      device: string;
+      add_storage?: boolean;
+    }) =>
       apiClient.post<{ status: string; upid: string }>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/lvmthin`,
         params,
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvmthin"],
+        queryKey: [
+          "clusters",
+          clusterId,
+          "nodes",
+          nodeName,
+          "disks",
+          "lvmthin",
+        ],
       });
     },
   });
@@ -331,7 +368,12 @@ export function useCreateLVMThin(clusterId: string, nodeName: string) {
 export function useDeleteLVMThin(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { lv: string; vg: string; cleanupDisks?: boolean; cleanupConfig?: boolean }) => {
+    mutationFn: (params: {
+      lv: string;
+      vg: string;
+      cleanupDisks?: boolean;
+      cleanupConfig?: boolean;
+    }) => {
       const qp = new URLSearchParams();
       qp.set("volume-group", params.vg);
       if (params.cleanupDisks) qp.set("cleanup-disks", "true");
@@ -342,7 +384,14 @@ export function useDeleteLVMThin(clusterId: string, nodeName: string) {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", clusterId, "nodes", nodeName, "disks", "lvmthin"],
+        queryKey: [
+          "clusters",
+          clusterId,
+          "nodes",
+          nodeName,
+          "disks",
+          "lvmthin",
+        ],
       });
     },
   });
@@ -370,7 +419,12 @@ export function useNodeDirectories(clusterId: string, nodeName: string) {
 export function useCreateDirectory(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { name: string; device: string; filesystem: string; add_storage?: boolean | undefined }) =>
+    mutationFn: (params: {
+      name: string;
+      device: string;
+      filesystem: string;
+      add_storage?: boolean | undefined;
+    }) =>
       apiClient.post<{ status: string; upid: string }>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/disks/directory`,
         params,
@@ -492,7 +546,14 @@ export function useCreateNodeFirewallRule(clusterId: string, nodeName: string) {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", clusterId, "nodes", nodeName, "firewall", "rules"],
+        queryKey: [
+          "clusters",
+          clusterId,
+          "nodes",
+          nodeName,
+          "firewall",
+          "rules",
+        ],
       });
     },
   });
@@ -507,7 +568,14 @@ export function useDeleteNodeFirewallRule(clusterId: string, nodeName: string) {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", clusterId, "nodes", nodeName, "firewall", "rules"],
+        queryKey: [
+          "clusters",
+          clusterId,
+          "nodes",
+          nodeName,
+          "firewall",
+          "rules",
+        ],
       });
     },
   });
@@ -566,11 +634,22 @@ export interface SyslogEntryResponse {
   t: string;
 }
 
-
-export function useNodeSyslog(clusterId: string, nodeName: string, params?: { start?: number | undefined; limit?: number | undefined; service?: string | undefined; since?: string | undefined; until?: string | undefined }) {
+export function useNodeSyslog(
+  clusterId: string,
+  nodeName: string,
+  params?: {
+    start?: number | undefined;
+    limit?: number | undefined;
+    service?: string | undefined;
+    since?: string | undefined;
+    until?: string | undefined;
+  },
+) {
   const searchParams = new URLSearchParams();
-  if (params?.start !== undefined) searchParams.set("start", String(params.start));
-  if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
+  if (params?.start !== undefined)
+    searchParams.set("start", String(params.start));
+  if (params?.limit !== undefined)
+    searchParams.set("limit", String(params.limit));
   if (params?.service) searchParams.set("service", params.service);
   if (params?.since) searchParams.set("since", params.since);
   if (params?.until) searchParams.set("until", params.until);
@@ -618,7 +697,12 @@ export function useNodeDNS(clusterId: string, nodeName: string) {
 export function useSetNodeDNS(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { search: string; dns1: string; dns2: string; dns3: string }) =>
+    mutationFn: (params: {
+      search: string;
+      dns1: string;
+      dns2: string;
+      dns3: string;
+    }) =>
       apiClient.put<{ status: string }>(
         `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(nodeName)}/dns`,
         params,
@@ -715,9 +799,7 @@ export function useClusterVMs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "vms"],
     queryFn: () =>
-      apiClient.list<VMResponse>(
-        `/api/v1/clusters/${clusterId}/vms`,
-      ),
+      apiClient.list<VMResponse>(`/api/v1/clusters/${clusterId}/vms`),
     enabled: clusterId.length > 0,
     refetchInterval: 60_000, // WS events handle immediate updates
   });

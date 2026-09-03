@@ -13,7 +13,9 @@ describe("upidVmid", () => {
 
   it("returns null for non-guest tasks with empty or non-numeric ids", () => {
     expect(
-      upidVmid("UPID:pve1:0004F9DE:1A2B3C4D:65F1A2B3:srvreload:networking:root@pam:"),
+      upidVmid(
+        "UPID:pve1:0004F9DE:1A2B3C4D:65F1A2B3:srvreload:networking:root@pam:",
+      ),
     ).toBeNull();
     expect(
       upidVmid("UPID:pve1:0004F9DE:1A2B3C4D:65F1A2B3:aptupdate::root@pam:"),

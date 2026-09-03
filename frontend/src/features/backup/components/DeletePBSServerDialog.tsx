@@ -47,8 +47,8 @@ export function DeletePBSServerDialog({
         <DialogHeader>
           <DialogTitle>Delete PBS Server</DialogTitle>
           <DialogDescription>
-            This will permanently remove <CopyableName name={server.name} />{" "}
-            and all associated backup data (snapshots, sync jobs, verify jobs,
+            This will permanently remove <CopyableName name={server.name} /> and
+            all associated backup data (snapshots, sync jobs, verify jobs,
             metrics). Type the server name to confirm.
           </DialogDescription>
         </DialogHeader>
@@ -79,9 +79,7 @@ export function DeletePBSServerDialog({
           </Button>
           <Button
             variant="destructive"
-            disabled={
-              confirmName !== server.name || deleteMutation.isPending
-            }
+            disabled={confirmName !== server.name || deleteMutation.isPending}
             onClick={handleDelete}
           >
             {deleteMutation.isPending ? "Deleting..." : "Delete Server"}

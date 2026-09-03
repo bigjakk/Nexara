@@ -16,12 +16,18 @@ interface VMConsolePreviewProps {
 
 type PreviewStatus = "connecting" | "connected" | "paused" | "error";
 
-export function VMConsolePreview({ clusterId, node, vmid, onOpen }: VMConsolePreviewProps) {
+export function VMConsolePreview({
+  clusterId,
+  node,
+  vmid,
+  onOpen,
+}: VMConsolePreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const [status, setStatus] = useState<PreviewStatus>("connecting");
   const [visible, setVisible] = useState(
-    () => typeof document === "undefined" || document.visibilityState === "visible",
+    () =>
+      typeof document === "undefined" || document.visibilityState === "visible",
   );
 
   // Pause the stream when the tab is hidden so we don't burn a Proxmox VNC slot
@@ -82,25 +88,36 @@ export function VMConsolePreview({ clusterId, node, vmid, onOpen }: VMConsolePre
       localWs.onmessage = (event: MessageEvent) => {
         if (typeof event.data === "string") {
           try {
-            const msg = JSON.parse(event.data) as { type: string; password?: string };
+            const msg = JSON.parse(event.data) as {
+              type: string;
+              password?: string;
+            };
             if (msg.type === "connected") {
               if (!containerRef.current) return;
               const options: Record<string, unknown> = {};
               if (msg.password) {
                 options["credentials"] = { password: msg.password };
               }
-              const rfbInstance = new RFB(containerRef.current, localWs, options);
+              const rfbInstance = new RFB(
+                containerRef.current,
+                localWs,
+                options,
+              );
               rfbInstance.scaleViewport = true;
               rfbInstance.resizeSession = false;
               rfbInstance.viewOnly = true;
               rfbInstance.focusOnClick = false;
 
-              rfbInstance.addEventListener("connect", () => { setStatus("connected"); });
+              rfbInstance.addEventListener("connect", () => {
+                setStatus("connected");
+              });
               rfbInstance.addEventListener("disconnect", () => {
                 setStatus("error");
                 rfbRef.current = null;
               });
-              rfbInstance.addEventListener("securityfailure", () => { setStatus("error"); });
+              rfbInstance.addEventListener("securityfailure", () => {
+                setStatus("error");
+              });
 
               rfbRef.current = rfbInstance;
               return;
@@ -117,7 +134,9 @@ export function VMConsolePreview({ clusterId, node, vmid, onOpen }: VMConsolePre
       localWs.onclose = () => {
         if (!rfbRef.current) setStatus("error");
       };
-      localWs.onerror = () => { setStatus("error"); };
+      localWs.onerror = () => {
+        setStatus("error");
+      };
     };
 
     void connect();

@@ -85,7 +85,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
     useState<ConnectivityResult | null>(null);
 
   // Fingerprint step
-  const [fingerprint, setFingerprint] = useState<FingerprintResponse | null>(null);
+  const [fingerprint, setFingerprint] = useState<FingerprintResponse | null>(
+    null,
+  );
   const [fingerprintAccepted, setFingerprintAccepted] = useState(false);
   const [fetchingFingerprint, setFetchingFingerprint] = useState(false);
   const [fingerprintError, setFingerprintError] = useState<string | null>(null);
@@ -151,7 +153,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
         setPrivateWarning(warn);
       } else {
         setFingerprintError(
-          err instanceof Error ? err.message : "Failed to fetch TLS certificate",
+          err instanceof Error
+            ? err.message
+            : "Failed to fetch TLS certificate",
         );
       }
     } finally {
@@ -302,8 +306,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
               </div>
               <p className="text-sm text-muted-foreground">
                 Nexara authenticates to this cluster as{" "}
-                <code className="font-mono text-xs">{summary.token_id}</code>. The
-                secret is stored encrypted and was never sent to this browser.
+                <code className="font-mono text-xs">{summary.token_id}</code>.
+                The secret is stored encrypted and was never sent to this
+                browser.
               </p>
               <ul className="space-y-1">
                 {summary.steps.map((step) => (
@@ -354,7 +359,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                 id="cluster-name"
                 placeholder="Production Cluster"
                 value={name}
-                onChange={(e) => { setName(e.target.value); }}
+                onChange={(e) => {
+                  setName(e.target.value);
+                }}
                 required
               />
             </div>
@@ -364,7 +371,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                 id="api-url"
                 placeholder="https://pve.example.com:8006"
                 value={apiUrl}
-                onChange={(e) => { setApiUrl(e.target.value); }}
+                onChange={(e) => {
+                  setApiUrl(e.target.value);
+                }}
                 required
               />
             </div>
@@ -374,7 +383,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                 ip={privateWarning.ip}
                 url={apiUrl}
                 onConfirm={handleConfirmPrivate}
-                onCancel={() => { setPrivateWarning(null); }}
+                onCancel={() => {
+                  setPrivateWarning(null);
+                }}
                 pending={fetchingFingerprint}
               />
             )}
@@ -387,7 +398,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => { handleOpenChange(false); }}
+                onClick={() => {
+                  handleOpenChange(false);
+                }}
               >
                 Cancel
               </Button>
@@ -405,11 +418,14 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                   <span className="font-medium">Self-Signed Certificate</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  The server at <strong>{apiUrl}</strong> uses a self-signed certificate.
-                  Verify this fingerprint matches your Proxmox host before accepting.
+                  The server at <strong>{apiUrl}</strong> uses a self-signed
+                  certificate. Verify this fingerprint matches your Proxmox host
+                  before accepting.
                 </p>
                 <div className="rounded-md bg-muted p-3">
-                  <p className="text-xs text-muted-foreground mb-1">SHA-256 Fingerprint</p>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    SHA-256 Fingerprint
+                  </p>
                   <code className="text-xs font-mono break-all select-all">
                     {fingerprint.fingerprint}
                   </code>
@@ -418,7 +434,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                   <Checkbox
                     id="accept-fingerprint"
                     checked={fingerprintAccepted}
-                    onCheckedChange={(checked) => { setFingerprintAccepted(Boolean(checked)); }}
+                    onCheckedChange={(checked) => {
+                      setFingerprintAccepted(Boolean(checked));
+                    }}
                   />
                   <Label htmlFor="accept-fingerprint" className="text-sm">
                     I have verified this fingerprint and trust this certificate
@@ -432,7 +450,8 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                   <span className="font-medium">Trusted Certificate</span>
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  The server at <strong>{apiUrl}</strong> has a valid certificate signed by a trusted CA.
+                  The server at <strong>{apiUrl}</strong> has a valid
+                  certificate signed by a trusted CA.
                 </p>
               </div>
             )}
@@ -445,7 +464,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
               }}
             >
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="bootstrap">Create a token for me</TabsTrigger>
+                <TabsTrigger value="bootstrap">
+                  Create a token for me
+                </TabsTrigger>
                 <TabsTrigger value="token">I have a token</TabsTrigger>
               </TabsList>
             </Tabs>
@@ -454,29 +475,33 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
                   Nexara signs in once with a privileged account, creates a
-                  dedicated <code className="font-mono text-xs">{`nexara@pve`}</code>{" "}
-                  user with the Administrator role, and issues itself an API
-                  token. The password is used for that one request and never
-                  stored.
+                  dedicated{" "}
+                  <code className="font-mono text-xs">{`nexara@pve`}</code> user
+                  with the Administrator role, and issues itself an API token.
+                  The password is used for that one request and never stored.
                 </p>
 
                 {!secure && (
                   <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 space-y-3">
                     <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
                       <ShieldAlert className="h-5 w-5 shrink-0" />
-                      <span className="font-medium">This page is not on HTTPS</span>
+                      <span className="font-medium">
+                        This page is not on HTTPS
+                      </span>
                     </div>
                     <p className="text-sm text-muted-foreground">
                       A Proxmox password typed here would travel in the clear.
-                      Serve Nexara over HTTPS, or paste an API token instead —
-                      a token is scoped to this cluster and can be revoked on
-                      its own.
+                      Serve Nexara over HTTPS, or paste an API token instead — a
+                      token is scoped to this cluster and can be revoked on its
+                      own.
                     </p>
                     <div className="flex items-center gap-2">
                       <Checkbox
                         id="accept-insecure"
                         checked={insecureAccepted}
-                        onCheckedChange={(checked) => { setInsecureAccepted(Boolean(checked)); }}
+                        onCheckedChange={(checked) => {
+                          setInsecureAccepted(Boolean(checked));
+                        }}
                       />
                       <Label htmlFor="accept-insecure" className="text-sm">
                         I trust this network and want to continue anyway
@@ -494,7 +519,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                     data-1p-ignore
                     data-lpignore="true"
                     value={bootstrapUser}
-                    onChange={(e) => { setBootstrapUser(e.target.value); }}
+                    onChange={(e) => {
+                      setBootstrapUser(e.target.value);
+                    }}
                     disabled={bootstrapBlocked}
                   />
                 </div>
@@ -508,7 +535,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                     autoComplete="new-password"
                     placeholder="Used once, never stored"
                     value={bootstrapPassword}
-                    onChange={(e) => { setBootstrapPassword(e.target.value); }}
+                    onChange={(e) => {
+                      setBootstrapPassword(e.target.value);
+                    }}
                     disabled={bootstrapBlocked}
                   />
                 </div>
@@ -522,7 +551,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                       autoComplete="one-time-code"
                       placeholder="123456"
                       value={otp}
-                      onChange={(e) => { setOtp(e.target.value); }}
+                      onChange={(e) => {
+                        setOtp(e.target.value);
+                      }}
                     />
                   </div>
                 )}
@@ -533,7 +564,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                     id="bootstrap-token-name"
                     placeholder="nexara"
                     value={tokenName}
-                    onChange={(e) => { setTokenName(e.target.value); }}
+                    onChange={(e) => {
+                      setTokenName(e.target.value);
+                    }}
                     disabled={bootstrapBlocked}
                   />
                   {tokenConflict && (
@@ -548,15 +581,15 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
             ) : (
               <div className="space-y-4">
                 {/*
-                  * autoComplete matters on this pair, and "off" alone is not
-                  * enough. Chrome anchors a saved-login fill on an adjacent
-                  * type="password" field and then fills the text input above it
-                  * as the username — which put the operator's own email and
-                  * saved password into these boxes, ready to be POSTed to the
-                  * server as a Proxmox token. Marking the secret
-                  * "new-password" breaks that pairing, which is what already
-                  * keeps the bootstrap username field clean.
-                  */}
+                 * autoComplete matters on this pair, and "off" alone is not
+                 * enough. Chrome anchors a saved-login fill on an adjacent
+                 * type="password" field and then fills the text input above it
+                 * as the username — which put the operator's own email and
+                 * saved password into these boxes, ready to be POSTed to the
+                 * server as a Proxmox token. Marking the secret
+                 * "new-password" breaks that pairing, which is what already
+                 * keeps the bootstrap username field clean.
+                 */}
                 <div className="space-y-2">
                   <Label htmlFor="token-id">API Token ID</Label>
                   <Input
@@ -566,7 +599,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                     data-1p-ignore
                     data-lpignore="true"
                     value={tokenId}
-                    onChange={(e) => { setTokenId(e.target.value); }}
+                    onChange={(e) => {
+                      setTokenId(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -579,7 +614,9 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                     data-1p-ignore
                     data-lpignore="true"
                     value={tokenSecret}
-                    onChange={(e) => { setTokenSecret(e.target.value); }}
+                    onChange={(e) => {
+                      setTokenSecret(e.target.value);
+                    }}
                   />
                 </div>
               </div>

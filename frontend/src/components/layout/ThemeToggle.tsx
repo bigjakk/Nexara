@@ -35,7 +35,9 @@ export function ThemeToggle() {
         {options.map(({ value, labelKey, icon: Icon }) => (
           <DropdownMenuItem
             key={value}
-            onClick={() => { setMode(value); }}
+            onClick={() => {
+              setMode(value);
+            }}
             className={mode === value ? "font-medium" : ""}
           >
             <Icon className="mr-2 h-4 w-4" />

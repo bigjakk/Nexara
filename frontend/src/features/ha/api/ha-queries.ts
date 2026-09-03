@@ -84,7 +84,8 @@ export interface UpdateHARuleRequest {
 export function useHAResources(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "resources"],
-    queryFn: () => apiClient.list<HAResource>(`/api/v1/clusters/${clusterId}/ha/resources`),
+    queryFn: () =>
+      apiClient.list<HAResource>(`/api/v1/clusters/${clusterId}/ha/resources`),
     enabled: clusterId.length > 0,
   });
 }
@@ -94,7 +95,9 @@ export function useCreateHAResource(clusterId: string) {
   return useMutation({
     mutationFn: (data: CreateHAResourceRequest) =>
       apiClient.post(`/api/v1/clusters/${clusterId}/ha/resources`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
@@ -102,8 +105,13 @@ export function useUpdateHAResource(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ sid, ...data }: UpdateHAResourceRequest & { sid: string }) =>
-      apiClient.put(`/api/v1/clusters/${clusterId}/ha/resources/${encodeURIComponent(sid)}`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+      apiClient.put(
+        `/api/v1/clusters/${clusterId}/ha/resources/${encodeURIComponent(sid)}`,
+        data,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
@@ -111,15 +119,20 @@ export function useDeleteHAResource(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (sid: string) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/ha/resources/${encodeURIComponent(sid)}`),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+      apiClient.delete(
+        `/api/v1/clusters/${clusterId}/ha/resources/${encodeURIComponent(sid)}`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
 export function useHAGroups(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "groups"],
-    queryFn: () => apiClient.list<HAGroup>(`/api/v1/clusters/${clusterId}/ha/groups`),
+    queryFn: () =>
+      apiClient.list<HAGroup>(`/api/v1/clusters/${clusterId}/ha/groups`),
     enabled: clusterId.length > 0,
   });
 }
@@ -129,16 +142,26 @@ export function useCreateHAGroup(clusterId: string) {
   return useMutation({
     mutationFn: (data: CreateHAGroupRequest) =>
       apiClient.post(`/api/v1/clusters/${clusterId}/ha/groups`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
 export function useUpdateHAGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ group, ...data }: UpdateHAGroupRequest & { group: string }) =>
-      apiClient.put(`/api/v1/clusters/${clusterId}/ha/groups/${encodeURIComponent(group)}`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+    mutationFn: ({
+      group,
+      ...data
+    }: UpdateHAGroupRequest & { group: string }) =>
+      apiClient.put(
+        `/api/v1/clusters/${clusterId}/ha/groups/${encodeURIComponent(group)}`,
+        data,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
@@ -146,8 +169,12 @@ export function useDeleteHAGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (group: string) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/ha/groups/${encodeURIComponent(group)}`),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+      apiClient.delete(
+        `/api/v1/clusters/${clusterId}/ha/groups/${encodeURIComponent(group)}`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
@@ -176,7 +203,8 @@ export interface CreateHARuleRequest {
 export function useHARules(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "rules"],
-    queryFn: () => apiClient.list<HARuleEntry>(`/api/v1/clusters/${clusterId}/ha/rules`),
+    queryFn: () =>
+      apiClient.list<HARuleEntry>(`/api/v1/clusters/${clusterId}/ha/rules`),
     enabled: clusterId.length > 0,
   });
 }
@@ -186,7 +214,9 @@ export function useCreateHARule(clusterId: string) {
   return useMutation({
     mutationFn: (data: CreateHARuleRequest) =>
       apiClient.post(`/api/v1/clusters/${clusterId}/ha/rules`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
@@ -194,8 +224,12 @@ export function useDeleteHARule(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (rule: string) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/ha/rules/${encodeURIComponent(rule)}`),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+      apiClient.delete(
+        `/api/v1/clusters/${clusterId}/ha/rules/${encodeURIComponent(rule)}`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
@@ -203,15 +237,23 @@ export function useUpdateHARule(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ rule, ...data }: UpdateHARuleRequest & { rule: string }) =>
-      apiClient.put(`/api/v1/clusters/${clusterId}/ha/rules/${encodeURIComponent(rule)}`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+      apiClient.put(
+        `/api/v1/clusters/${clusterId}/ha/rules/${encodeURIComponent(rule)}`,
+        data,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
 export function useHAManagerStatus(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "manager-status"],
-    queryFn: () => apiClient.get<Record<string, unknown>>(`/api/v1/clusters/${clusterId}/ha/manager-status`),
+    queryFn: () =>
+      apiClient.get<Record<string, unknown>>(
+        `/api/v1/clusters/${clusterId}/ha/manager-status`,
+      ),
     enabled: clusterId.length > 0,
     refetchInterval: 30_000,
   });
@@ -220,7 +262,8 @@ export function useHAManagerStatus(clusterId: string) {
 export function useHAStatus(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "status"],
-    queryFn: () => apiClient.list<HAStatusEntry>(`/api/v1/clusters/${clusterId}/ha/status`),
+    queryFn: () =>
+      apiClient.list<HAStatusEntry>(`/api/v1/clusters/${clusterId}/ha/status`),
     enabled: clusterId.length > 0,
     refetchInterval: 30_000,
   });
@@ -230,8 +273,11 @@ export function useHAStatus(clusterId: string) {
 export function useArmHA(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiClient.post(`/api/v1/clusters/${clusterId}/ha/arm`, {}),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+    mutationFn: () =>
+      apiClient.post(`/api/v1/clusters/${clusterId}/ha/arm`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }
 
@@ -240,7 +286,11 @@ export function useDisarmHA(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (resourceMode: "freeze" | "ignore") =>
-      apiClient.post(`/api/v1/clusters/${clusterId}/ha/disarm`, { resource_mode: resourceMode }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] }); },
+      apiClient.post(`/api/v1/clusters/${clusterId}/ha/disarm`, {
+        resource_mode: resourceMode,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "ha"] });
+    },
   });
 }

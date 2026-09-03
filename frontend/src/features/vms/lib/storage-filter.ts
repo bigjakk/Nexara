@@ -40,7 +40,12 @@ export function filterStorageByContent(
   return storageList
     .filter((s) => {
       if (!s.active || !s.enabled) return false;
-      if (!s.content.split(",").map((c) => c.trim()).includes(contentType)) {
+      if (
+        !s.content
+          .split(",")
+          .map((c) => c.trim())
+          .includes(contentType)
+      ) {
         return false;
       }
       // Restrict to storages reachable from the target node. Shared storages

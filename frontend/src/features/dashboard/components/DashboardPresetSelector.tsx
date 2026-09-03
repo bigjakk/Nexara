@@ -62,9 +62,7 @@ export function DashboardPresetSelector({
           <DropdownMenuLabel>Dashboard Presets</DropdownMenuLabel>
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem onClick={onReset}>
-            Default
-          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onReset}>Default</DropdownMenuItem>
 
           {savedPresets.length > 0 && <DropdownMenuSeparator />}
 
@@ -75,7 +73,9 @@ export function DashboardPresetSelector({
             >
               <span
                 className="flex-1 cursor-pointer"
-                onClick={() => { onSelect(preset); }}
+                onClick={() => {
+                  onSelect(preset);
+                }}
               >
                 {preset.name}
               </span>
@@ -94,7 +94,9 @@ export function DashboardPresetSelector({
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
-              setPresetName(activePreset.name === "Default" ? "" : activePreset.name);
+              setPresetName(
+                activePreset.name === "Default" ? "" : activePreset.name,
+              );
               setSaveDialogOpen(true);
             }}
           >
@@ -115,19 +117,23 @@ export function DashboardPresetSelector({
           <Input
             placeholder="Preset name"
             value={presetName}
-            onChange={(e) => { setPresetName(e.target.value); }}
+            onChange={(e) => {
+              setPresetName(e.target.value);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter") handleSave();
             }}
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setSaveDialogOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSaveDialogOpen(false);
+              }}
+            >
               Cancel
             </Button>
-            <Button
-              onClick={handleSave}
-              disabled={!presetName.trim()}
-            >
+            <Button onClick={handleSave} disabled={!presetName.trim()}>
               Save
             </Button>
           </DialogFooter>

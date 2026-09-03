@@ -22,9 +22,7 @@ export function useCephStatus(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "status"],
     queryFn: () =>
-      apiClient.get<CephStatus>(
-        `/api/v1/clusters/${clusterId}/ceph/status`,
-      ),
+      apiClient.get<CephStatus>(`/api/v1/clusters/${clusterId}/ceph/status`),
     enabled: clusterId.length > 0,
     refetchInterval: 60_000,
   });
@@ -34,9 +32,7 @@ export function useCephOSDs(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "osds"],
     queryFn: () =>
-      apiClient.list<CephOSD>(
-        `/api/v1/clusters/${clusterId}/ceph/osds`,
-      ),
+      apiClient.list<CephOSD>(`/api/v1/clusters/${clusterId}/ceph/osds`),
     enabled: clusterId.length > 0,
     refetchInterval: 60_000,
   });
@@ -46,9 +42,7 @@ export function useCephPools(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "pools"],
     queryFn: () =>
-      apiClient.list<CephPool>(
-        `/api/v1/clusters/${clusterId}/ceph/pools`,
-      ),
+      apiClient.list<CephPool>(`/api/v1/clusters/${clusterId}/ceph/pools`),
     enabled: clusterId.length > 0,
     refetchInterval: 60_000,
   });
@@ -58,9 +52,7 @@ export function useCephMonitors(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "monitors"],
     queryFn: () =>
-      apiClient.list<CephMon>(
-        `/api/v1/clusters/${clusterId}/ceph/monitors`,
-      ),
+      apiClient.list<CephMon>(`/api/v1/clusters/${clusterId}/ceph/monitors`),
     enabled: clusterId.length > 0,
   });
 }
@@ -69,9 +61,7 @@ export function useCephFS(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "fs"],
     queryFn: () =>
-      apiClient.list<CephFS>(
-        `/api/v1/clusters/${clusterId}/ceph/fs`,
-      ),
+      apiClient.list<CephFS>(`/api/v1/clusters/${clusterId}/ceph/fs`),
     enabled: clusterId.length > 0,
   });
 }
@@ -80,9 +70,7 @@ export function useCephCrushRules(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "rules"],
     queryFn: () =>
-      apiClient.list<CephCrushRule>(
-        `/api/v1/clusters/${clusterId}/ceph/rules`,
-      ),
+      apiClient.list<CephCrushRule>(`/api/v1/clusters/${clusterId}/ceph/rules`),
     enabled: clusterId.length > 0,
   });
 }
@@ -158,7 +146,15 @@ export function useCephOSDPreflight(
   action: CephOSDAction,
 ) {
   return useQuery({
-    queryKey: ["clusters", clusterId, "ceph", "osds", osdId, "preflight", action],
+    queryKey: [
+      "clusters",
+      clusterId,
+      "ceph",
+      "osds",
+      osdId,
+      "preflight",
+      action,
+    ],
     queryFn: () =>
       apiClient.get<CephOSDPreflight>(
         `/api/v1/clusters/${clusterId}/ceph/osds/${String(osdId)}/preflight?action=${action}`,

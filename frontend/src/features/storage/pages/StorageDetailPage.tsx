@@ -6,7 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
-import { useCluster, useClusterNodes } from "@/features/clusters/api/cluster-queries";
+import {
+  useCluster,
+  useClusterNodes,
+} from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage, useStorageContent } from "../api/storage-queries";
 import { StorageCapacityBar } from "../components/StorageCapacityBar";
 import { StorageContentTable } from "../components/StorageContentTable";
@@ -46,7 +49,11 @@ export function StorageDetailPage() {
   }, [nodesQuery.data, pool]);
 
   const contentTypes = useMemo(
-    () => (pool?.content ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    () =>
+      (pool?.content ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     [pool],
   );
   const hasImages = contentTypes.includes("images");
@@ -56,7 +63,10 @@ export function StorageDetailPage() {
   const hasIso = contentTypes.includes("iso");
   const hasImport = contentTypes.includes("import");
   // OCI requires a file-based storage with vztmpl + PVE 9.1+.
-  const pveSupportsOCI = isPVEAtLeast(clusterQuery.data?.pve_version ?? "", "9.1");
+  const pveSupportsOCI = isPVEAtLeast(
+    clusterQuery.data?.pve_version ?? "",
+    "9.1",
+  );
   const filterableTypes = contentTypes.filter(
     (t) =>
       t === "iso" ||
@@ -149,7 +159,9 @@ export function StorageDetailPage() {
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/10">
             <Database className="h-6 w-6 text-amber-500" />
           </div>
-          <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">{pool.storage}</h1>
+          <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">
+            {pool.storage}
+          </h1>
           <Badge variant="outline">{pool.type}</Badge>
           {pool.shared ? (
             <Badge variant="secondary">shared</Badge>
@@ -180,10 +192,7 @@ export function StorageDetailPage() {
             />
           )}
           {hasVztmpl && pveSupportsOCI && (
-            <OCIPullDialog
-              clusterId={clusterId}
-              storageId={pool.id}
-            />
+            <OCIPullDialog clusterId={clusterId} storageId={pool.id} />
           )}
           {hasVztmpl && (
             <ApplianceBrowserDialog
@@ -287,8 +296,9 @@ export function StorageDetailPage() {
               Failed to load storage content.
             </p>
           )}
-          {!contentQuery.isLoading && !contentQuery.isError && (
-            filterableTypes.length > 1 ? (
+          {!contentQuery.isLoading &&
+            !contentQuery.isError &&
+            (filterableTypes.length > 1 ? (
               <Tabs defaultValue={filterableTypes[0] ?? "all"}>
                 <TabsList>
                   {filterableTypes.map((t) => (
@@ -296,9 +306,7 @@ export function StorageDetailPage() {
                       {t} ({filterByType(t).length})
                     </TabsTrigger>
                   ))}
-                  <TabsTrigger value="all">
-                    All ({items.length})
-                  </TabsTrigger>
+                  <TabsTrigger value="all">All ({items.length})</TabsTrigger>
                 </TabsList>
                 {filterableTypes.map((t) => (
                   <TabsContent key={t} value={t}>
@@ -323,8 +331,7 @@ export function StorageDetailPage() {
                 clusterId={clusterId}
                 storageId={pool.id}
               />
-            )
-          )}
+            ))}
         </TabsContent>
 
         {hasGuestVolumes && (

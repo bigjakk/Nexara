@@ -28,9 +28,7 @@ function orphan(over: Partial<VeeamOrphanedObject> = {}): VeeamOrphanedObject {
 describe("VeeamOrphanTable", () => {
   it("says nothing is orphaned rather than rendering an empty table", () => {
     renderWithProviders(<VeeamOrphanTable serverId="srv-1" objects={[]} />);
-    expect(
-      screen.getByText(/matches a guest/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/matches a guest/i)).toBeInTheDocument();
   });
 
   it("shows the SMBIOS uuid that failed to match, which is the whole point", async () => {
@@ -52,7 +50,10 @@ describe("VeeamOrphanTable", () => {
   it("says so when Veeam recorded no identity at all", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <VeeamOrphanTable serverId="srv-1" objects={[orphan({ smbios_uuid: "" })]} />,
+      <VeeamOrphanTable
+        serverId="srv-1"
+        objects={[orphan({ smbios_uuid: "" })]}
+      />,
     );
 
     await user.click(screen.getByText("docker03"));

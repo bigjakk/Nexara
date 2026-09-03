@@ -65,7 +65,12 @@ export function CreateSDNSubnetDialog({
     if (dhcpDnsServer) params["dhcp-dns-server"] = dhcpDnsServer;
 
     if (isEdit) {
-      const updateParams: { gateway?: string; snat?: number; "dhcp-range"?: string; "dhcp-dns-server"?: string } = {
+      const updateParams: {
+        gateway?: string;
+        snat?: number;
+        "dhcp-range"?: string;
+        "dhcp-dns-server"?: string;
+      } = {
         snat: snat ? 1 : 0,
       };
       if (gateway) updateParams.gateway = gateway;
@@ -73,10 +78,18 @@ export function CreateSDNSubnetDialog({
       if (dhcpDnsServer) updateParams["dhcp-dns-server"] = dhcpDnsServer;
       update.mutate(
         { subnet: initialData.subnet, params: updateParams },
-        { onSuccess: () => { setOpen(false); } },
+        {
+          onSuccess: () => {
+            setOpen(false);
+          },
+        },
       );
     } else {
-      create.mutate(params, { onSuccess: () => { setOpen(false); } });
+      create.mutate(params, {
+        onSuccess: () => {
+          setOpen(false);
+        },
+      });
     }
   };
 
@@ -106,7 +119,9 @@ export function CreateSDNSubnetDialog({
             <Input
               placeholder="10.0.0.0/24"
               value={subnet}
-              onChange={(e) => { setSubnet(e.target.value); }}
+              onChange={(e) => {
+                setSubnet(e.target.value);
+              }}
               disabled={isEdit}
             />
           </div>
@@ -115,14 +130,18 @@ export function CreateSDNSubnetDialog({
             <Input
               placeholder="10.0.0.1"
               value={gateway}
-              onChange={(e) => { setGateway(e.target.value); }}
+              onChange={(e) => {
+                setGateway(e.target.value);
+              }}
             />
           </div>
           <div className="flex items-center gap-2">
             <Checkbox
               id="snat"
               checked={snat}
-              onCheckedChange={(checked) => { setSnat(checked === true); }}
+              onCheckedChange={(checked) => {
+                setSnat(checked === true);
+              }}
             />
             <Label htmlFor="snat">Enable SNAT</Label>
           </div>
@@ -131,7 +150,9 @@ export function CreateSDNSubnetDialog({
             <Input
               placeholder="start-address=10.0.0.50,end-address=10.0.0.200"
               value={dhcpRange}
-              onChange={(e) => { setDhcpRange(e.target.value); }}
+              onChange={(e) => {
+                setDhcpRange(e.target.value);
+              }}
             />
           </div>
           <div className="space-y-2">
@@ -139,14 +160,21 @@ export function CreateSDNSubnetDialog({
             <Input
               placeholder="8.8.8.8"
               value={dhcpDnsServer}
-              onChange={(e) => { setDhcpDnsServer(e.target.value); }}
+              onChange={(e) => {
+                setDhcpDnsServer(e.target.value);
+              }}
             />
           </div>
           {errorMessage && (
             <p className="text-sm text-destructive">{errorMessage}</p>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button

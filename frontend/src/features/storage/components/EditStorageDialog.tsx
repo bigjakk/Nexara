@@ -67,8 +67,12 @@ export function EditStorageDialog({
 }: EditStorageDialogProps) {
   const [open, setOpen] = useState(false);
   const [params, setParams] = useState<Record<string, string>>({});
-  const [initialParams, setInitialParams] = useState<Record<string, string>>({});
-  const [selectedContent, setSelectedContent] = useState<Set<StorageContentType>>(new Set());
+  const [initialParams, setInitialParams] = useState<Record<string, string>>(
+    {},
+  );
+  const [selectedContent, setSelectedContent] = useState<
+    Set<StorageContentType>
+  >(new Set());
   const [nodes, setNodes] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [useLuns, setUseLuns] = useState(true);
@@ -152,7 +156,11 @@ export function EditStorageDialog({
     for (const field of typeFields) {
       if (field.fixed) continue;
       const v = params[field.key];
-      if (v !== undefined && v !== "" && v !== (initialParams[field.key] ?? "")) {
+      if (
+        v !== undefined &&
+        v !== "" &&
+        v !== (initialParams[field.key] ?? "")
+      ) {
         submitParams[field.key] = v;
       }
     }
@@ -209,7 +217,9 @@ export function EditStorageDialog({
           setInitialized(false);
         },
         onError: (err) => {
-          setError(err instanceof Error ? err.message : "Failed to update storage");
+          setError(
+            err instanceof Error ? err.message : "Failed to update storage",
+          );
         },
       },
     );
@@ -274,13 +284,20 @@ export function EditStorageDialog({
               <div key={field.key} className="space-y-1.5">
                 <Label htmlFor={`edit-${field.key}`}>
                   {field.label}
-                  {field.required && <span className="ml-1 text-destructive">*</span>}
+                  {field.required && (
+                    <span className="ml-1 text-destructive">*</span>
+                  )}
                 </Label>
                 {field.fixed ? (
                   <>
-                    <Input id={`edit-${field.key}`} value={params[field.key] ?? ""} disabled />
+                    <Input
+                      id={`edit-${field.key}`}
+                      value={params[field.key] ?? ""}
+                      disabled
+                    />
                     <p className="text-xs text-muted-foreground">
-                      Set when the storage was created — Proxmox does not allow changing it.
+                      Set when the storage was created — Proxmox does not allow
+                      changing it.
                     </p>
                   </>
                 ) : field.scan === "iscsi" ? (
@@ -289,20 +306,27 @@ export function EditStorageDialog({
                     clusterId={clusterId}
                     portal={params[field.scanFrom ?? "portal"] ?? ""}
                     value={params[field.key] ?? ""}
-                    onChange={(v) => { handleParamChange(field.key, v); }}
+                    onChange={(v) => {
+                      handleParamChange(field.key, v);
+                    }}
                     placeholder={field.placeholder}
                   />
                 ) : field.type === "select" && field.options ? (
                   <Select
                     value={params[field.key] ?? ""}
-                    onValueChange={(v) => { handleParamChange(field.key, v === "_empty" ? "" : v); }}
+                    onValueChange={(v) => {
+                      handleParamChange(field.key, v === "_empty" ? "" : v);
+                    }}
                   >
                     <SelectTrigger id={`edit-${field.key}`}>
                       <SelectValue placeholder="Select..." />
                     </SelectTrigger>
                     <SelectContent>
                       {field.options.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value || "_empty"}>
+                        <SelectItem
+                          key={opt.value}
+                          value={opt.value || "_empty"}
+                        >
                           {opt.label}
                         </SelectItem>
                       ))}
@@ -317,16 +341,27 @@ export function EditStorageDialog({
                         handleParamChange(field.key, checked ? "1" : "0");
                       }}
                     />
-                    <Label htmlFor={`edit-${field.key}`} className="text-sm font-normal">
+                    <Label
+                      htmlFor={`edit-${field.key}`}
+                      className="text-sm font-normal"
+                    >
                       {field.help ?? "Enable"}
                     </Label>
                   </div>
                 ) : (
                   <Input
                     id={`edit-${field.key}`}
-                    type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"}
+                    type={
+                      field.type === "password"
+                        ? "password"
+                        : field.type === "number"
+                          ? "number"
+                          : "text"
+                    }
                     value={params[field.key] ?? ""}
-                    onChange={(e) => { handleParamChange(field.key, e.target.value); }}
+                    onChange={(e) => {
+                      handleParamChange(field.key, e.target.value);
+                    }}
                     placeholder={field.placeholder}
                   />
                 )}
@@ -340,15 +375,20 @@ export function EditStorageDialog({
                   <Checkbox
                     id="edit-storage-luns"
                     checked={useLuns}
-                    onCheckedChange={(checked) => { setUseLuns(checked === true); }}
+                    onCheckedChange={(checked) => {
+                      setUseLuns(checked === true);
+                    }}
                   />
-                  <Label htmlFor="edit-storage-luns" className="text-sm font-normal">
+                  <Label
+                    htmlFor="edit-storage-luns"
+                    className="text-sm font-normal"
+                  >
                     Use LUNs directly
                   </Label>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Attach the target&apos;s LUNs to guests as disks. Turn off to use the target
-                  only as a base for LVM on top of it.
+                  Attach the target&apos;s LUNs to guests as disks. Turn off to
+                  use the target only as a base for LVM on top of it.
                 </p>
               </div>
             ) : (
@@ -360,9 +400,13 @@ export function EditStorageDialog({
                   ).map((ct) => (
                     <Badge
                       key={ct.value}
-                      variant={selectedContent.has(ct.value) ? "default" : "outline"}
+                      variant={
+                        selectedContent.has(ct.value) ? "default" : "outline"
+                      }
                       className="cursor-pointer select-none"
-                      onClick={() => { toggleContent(ct.value); }}
+                      onClick={() => {
+                        toggleContent(ct.value);
+                      }}
                     >
                       {ct.label}
                     </Badge>
@@ -391,25 +435,31 @@ export function EditStorageDialog({
                 <Checkbox
                   id="edit-storage-enabled"
                   checked={enabled}
-                  onCheckedChange={(checked) => { setEnabled(checked === true); }}
+                  onCheckedChange={(checked) => {
+                    setEnabled(checked === true);
+                  }}
                 />
-                <Label htmlFor="edit-storage-enabled" className="text-sm font-normal">
+                <Label
+                  htmlFor="edit-storage-enabled"
+                  className="text-sm font-normal"
+                >
                   Enable
                 </Label>
               </div>
               <p className="text-xs text-muted-foreground">
-                Disabled storage stays configured but is not mounted or used by any node.
+                Disabled storage stays configured but is not mounted or used by
+                any node.
               </p>
             </div>
 
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button
                 variant="outline"
-                onClick={() => { setOpen(false); }}
+                onClick={() => {
+                  setOpen(false);
+                }}
                 disabled={updateMutation.isPending}
               >
                 Cancel

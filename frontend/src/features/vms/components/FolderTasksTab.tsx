@@ -56,10 +56,7 @@ export function FolderTasksTab({
   });
   const layout = useColumnLayout("folder-tasks", TASK_COLUMNS_WITH_VM);
 
-  const vmidList = useMemo(
-    () => [...vmids].sort((a, b) => a - b),
-    [vmids],
-  );
+  const vmidList = useMemo(() => [...vmids].sort((a, b) => a - b), [vmids]);
 
   // An empty folder must not fetch: absent vmids means "no filter" server-side
   // and would return the whole cluster's history. A folder over the server's
@@ -117,20 +114,20 @@ export function FolderTasksTab({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-      <select
-        className={selectClass}
-        value={statusFilter}
-        onChange={(e) => {
-          setStatusFilter(e.target.value);
-          setPage(0);
-        }}
-      >
-        {statusFilters.map((s) => (
-          <option key={s.value || "all"} value={s.value}>
-            {s.label}
-          </option>
-        ))}
-      </select>
+        <select
+          className={selectClass}
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setPage(0);
+          }}
+        >
+          {statusFilters.map((s) => (
+            <option key={s.value || "all"} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
         <span className="flex-1" />
         <ResetColumnsButton layout={layout} />
       </div>

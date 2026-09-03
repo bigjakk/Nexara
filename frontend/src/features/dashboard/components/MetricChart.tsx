@@ -9,11 +9,23 @@ import {
   Tooltip,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatTimestamp, formatTimestampShort, formatTimestampLong, formatPercent, formatBytesPerSecond } from "@/lib/format";
+import {
+  formatTimestamp,
+  formatTimestampShort,
+  formatTimestampLong,
+  formatPercent,
+  formatBytesPerSecond,
+} from "@/lib/format";
 import type { MetricDataPoint } from "@/types/ws";
 import type { TimeRange } from "@/types/api";
 
-type MetricField = "cpuPercent" | "memPercent" | "diskReadBps" | "diskWriteBps" | "netInBps" | "netOutBps";
+type MetricField =
+  | "cpuPercent"
+  | "memPercent"
+  | "diskReadBps"
+  | "diskWriteBps"
+  | "netInBps"
+  | "netOutBps";
 
 interface MetricChartProps {
   title: string;
@@ -28,7 +40,8 @@ interface MetricChartProps {
 
 function getTimestampFormatter(timeRange?: TimeRange): (ts: number) => string {
   if (timeRange === "7d") return formatTimestampLong;
-  if (timeRange === "1h" || timeRange === "6h" || timeRange === "24h") return formatTimestampShort;
+  if (timeRange === "1h" || timeRange === "6h" || timeRange === "24h")
+    return formatTimestampShort;
   return formatTimestamp;
 }
 
@@ -79,12 +92,14 @@ export function MetricChart({
   timeRange,
   headerDetail,
 }: MetricChartProps) {
-  const formatter = formatValue ?? ((v: number) => {
-    if (dataKey === "cpuPercent" || dataKey === "memPercent") {
-      return formatPercent(v);
-    }
-    return formatBytesPerSecond(v);
-  });
+  const formatter =
+    formatValue ??
+    ((v: number) => {
+      if (dataKey === "cpuPercent" || dataKey === "memPercent") {
+        return formatPercent(v);
+      }
+      return formatBytesPerSecond(v);
+    });
 
   const tsFormatter = getTimestampFormatter(timeRange);
   const tooltipLabelFormatter = (label: ReactNode): ReactNode => {
@@ -92,7 +107,10 @@ export function MetricChart({
   };
 
   const tooltipValueFormatter = (value: unknown): [string, string] => {
-    return [formatter(typeof value === "number" ? value : Number(value ?? 0)), title];
+    return [
+      formatter(typeof value === "number" ? value : Number(value ?? 0)),
+      title,
+    ];
   };
 
   if (data.length === 0) {
@@ -122,9 +140,18 @@ export function MetricChart({
       />
       <CardContent className="min-h-0 flex-1 p-2 pt-0">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <AreaChart
+            data={data}
+            margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+          >
             <defs>
-              <linearGradient id={`gradient-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+              <linearGradient
+                id={`gradient-${dataKey}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
                 <stop offset="5%" stopColor={color} stopOpacity={0.25} />
                 <stop offset="95%" stopColor={color} stopOpacity={0} />
               </linearGradient>
@@ -153,7 +180,10 @@ export function MetricChart({
             <Tooltip
               labelFormatter={tooltipLabelFormatter}
               formatter={tooltipValueFormatter}
-              cursor={{ stroke: "hsl(var(--muted-foreground))", strokeOpacity: 0.4 }}
+              cursor={{
+                stroke: "hsl(var(--muted-foreground))",
+                strokeOpacity: 0.4,
+              }}
               contentStyle={{
                 backgroundColor: "hsl(var(--popover))",
                 border: "1px solid hsl(var(--border))",

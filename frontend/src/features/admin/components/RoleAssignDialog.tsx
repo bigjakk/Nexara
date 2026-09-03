@@ -49,7 +49,9 @@ export function RoleAssignDialog({
         scope_type: "global",
       },
       {
-        onSuccess: () => { setSelectedRoleId(""); },
+        onSuccess: () => {
+          setSelectedRoleId("");
+        },
       },
     );
   };

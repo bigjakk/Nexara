@@ -8,7 +8,10 @@ interface DatastoreConfigCardProps {
   store: string;
 }
 
-export function DatastoreConfigCard({ pbsId, store }: DatastoreConfigCardProps) {
+export function DatastoreConfigCard({
+  pbsId,
+  store,
+}: DatastoreConfigCardProps) {
   const { data: config, isLoading } = useDatastoreConfig(pbsId, store);
   // Prune lives outside datastore.cfg on PBS >= 2.2, so the datastore's own
   // config cannot answer "is this pruned?" on its own.
@@ -68,7 +71,9 @@ export function DatastoreConfigCard({ pbsId, store }: DatastoreConfigCardProps) 
           {config["maintenance-mode"] && (
             <div>
               <span className="text-muted-foreground">Maintenance:</span>{" "}
-              <span className="text-amber-600">{config["maintenance-mode"]}</span>
+              <span className="text-amber-600">
+                {config["maintenance-mode"]}
+              </span>
             </div>
           )}
           {prune.lastRun && (
@@ -94,7 +99,9 @@ export function DatastoreConfigCard({ pbsId, store }: DatastoreConfigCardProps) 
           {pruneDefaults.length > 0 && (
             <div className="sm:col-span-2 lg:col-span-3">
               <span className="text-muted-foreground">Prune Defaults:</span>{" "}
-              {pruneDefaults.map((d) => `${d.label}: ${String(d.value)}`).join(", ")}
+              {pruneDefaults
+                .map((d) => `${d.label}: ${String(d.value)}`)
+                .join(", ")}
             </div>
           )}
           {prune.retentionNote && (

@@ -3,7 +3,13 @@ import { snapshotNameError } from "./snapshot-name";
 
 describe("snapshotNameError", () => {
   it("accepts valid Proxmox snapshot names", () => {
-    const valid = ["ab", "before-upgrade", "Snap_2026-07-30", "a1", "a".repeat(40)];
+    const valid = [
+      "ab",
+      "before-upgrade",
+      "Snap_2026-07-30",
+      "a1",
+      "a".repeat(40),
+    ];
     for (const name of valid) {
       expect(snapshotNameError(name)).toBeNull();
     }

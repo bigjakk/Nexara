@@ -61,7 +61,10 @@ export interface NodeCertificate {
 export function useACMEAccounts(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "accounts"],
-    queryFn: () => apiClient.list<ACMEAccount>(`/api/v1/clusters/${clusterId}/acme/accounts`),
+    queryFn: () =>
+      apiClient.list<ACMEAccount>(
+        `/api/v1/clusters/${clusterId}/acme/accounts`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -69,9 +72,19 @@ export function useACMEAccounts(clusterId: string) {
 export function useCreateACMEAccount(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name?: string; contact: string; directory?: string; tos_url?: string }) =>
-      apiClient.post<{ upid: string }>(`/api/v1/clusters/${clusterId}/acme/accounts`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] }); },
+    mutationFn: (data: {
+      name?: string;
+      contact: string;
+      directory?: string;
+      tos_url?: string;
+    }) =>
+      apiClient.post<{ upid: string }>(
+        `/api/v1/clusters/${clusterId}/acme/accounts`,
+        data,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] });
+    },
   });
 }
 
@@ -79,15 +92,20 @@ export function useDeleteACMEAccount(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (name: string) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/acme/accounts/${encodeURIComponent(name)}`),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] }); },
+      apiClient.delete(
+        `/api/v1/clusters/${clusterId}/acme/accounts/${encodeURIComponent(name)}`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] });
+    },
   });
 }
 
 export function useACMEPlugins(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "plugins"],
-    queryFn: () => apiClient.list<ACMEPlugin>(`/api/v1/clusters/${clusterId}/acme/plugins`),
+    queryFn: () =>
+      apiClient.list<ACMEPlugin>(`/api/v1/clusters/${clusterId}/acme/plugins`),
     enabled: clusterId.length > 0,
   });
 }
@@ -95,9 +113,16 @@ export function useACMEPlugins(clusterId: string) {
 export function useCreateACMEPlugin(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { id: string; type: string; api?: string; data?: string; "validation-delay"?: number }) =>
-      apiClient.post(`/api/v1/clusters/${clusterId}/acme/plugins`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] }); },
+    mutationFn: (data: {
+      id: string;
+      type: string;
+      api?: string;
+      data?: string;
+      "validation-delay"?: number;
+    }) => apiClient.post(`/api/v1/clusters/${clusterId}/acme/plugins`, data),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] });
+    },
   });
 }
 
@@ -105,15 +130,22 @@ export function useDeleteACMEPlugin(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/acme/plugins/${encodeURIComponent(id)}`),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] }); },
+      apiClient.delete(
+        `/api/v1/clusters/${clusterId}/acme/plugins/${encodeURIComponent(id)}`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "acme"] });
+    },
   });
 }
 
 export function useACMEChallengeSchema(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "challenge-schema"],
-    queryFn: () => apiClient.list<ACMEChallengeSchema>(`/api/v1/clusters/${clusterId}/acme/challenge-schema`),
+    queryFn: () =>
+      apiClient.list<ACMEChallengeSchema>(
+        `/api/v1/clusters/${clusterId}/acme/challenge-schema`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -121,7 +153,8 @@ export function useACMEChallengeSchema(clusterId: string) {
 export function useACMETOS(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "tos"],
-    queryFn: () => apiClient.get<{ url: string }>(`/api/v1/clusters/${clusterId}/acme/tos`),
+    queryFn: () =>
+      apiClient.get<{ url: string }>(`/api/v1/clusters/${clusterId}/acme/tos`),
     enabled: clusterId.length > 0,
   });
 }
@@ -129,7 +162,10 @@ export function useACMETOS(clusterId: string) {
 export function useACMEDirectories(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "acme", "directories"],
-    queryFn: () => apiClient.list<ACMEDirectory>(`/api/v1/clusters/${clusterId}/acme/directories`),
+    queryFn: () =>
+      apiClient.list<ACMEDirectory>(
+        `/api/v1/clusters/${clusterId}/acme/directories`,
+      ),
     enabled: clusterId.length > 0,
   });
 }
@@ -148,7 +184,10 @@ export interface NodeACMEConfig {
 export function useNodeACMEConfig(clusterId: string, node: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", node, "acme-config"],
-    queryFn: () => apiClient.get<NodeACMEConfig>(`/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/acme-config`),
+    queryFn: () =>
+      apiClient.get<NodeACMEConfig>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/acme-config`,
+      ),
     enabled: clusterId.length > 0 && node.length > 0,
   });
 }
@@ -157,9 +196,14 @@ export function useSetNodeACMEConfig(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ node, config }: { node: string; config: NodeACMEConfig }) =>
-      apiClient.put(`/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/acme-config`, config),
+      apiClient.put(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/acme-config`,
+        config,
+      ),
     onSuccess: (_data, vars) => {
-      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "nodes", vars.node] });
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "nodes", vars.node],
+      });
     },
   });
 }
@@ -167,7 +211,10 @@ export function useSetNodeACMEConfig(clusterId: string) {
 export function useNodeCertificates(clusterId: string, node: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", node, "certificates"],
-    queryFn: () => apiClient.list<NodeCertificate>(`/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates`),
+    queryFn: () =>
+      apiClient.list<NodeCertificate>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates`,
+      ),
     enabled: clusterId.length > 0 && node.length > 0,
   });
 }
@@ -176,8 +223,13 @@ export function useOrderNodeCertificate(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ node, force }: { node: string; force?: boolean }) =>
-      apiClient.post<{ upid: string }>(`/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates/order`, { force }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId] }); },
+      apiClient.post<{ upid: string }>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates/order`,
+        { force },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId] });
+    },
   });
 }
 
@@ -185,7 +237,12 @@ export function useRenewNodeCertificate(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ node, force }: { node: string; force?: boolean }) =>
-      apiClient.put<{ upid: string }>(`/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates/renew`, { force }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId] }); },
+      apiClient.put<{ upid: string }>(
+        `/api/v1/clusters/${clusterId}/nodes/${encodeURIComponent(node)}/certificates/renew`,
+        { force },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId] });
+    },
   });
 }

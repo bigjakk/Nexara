@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { useColumnLayout, sortAccessorsFrom, type ColumnDef } from "./useColumnLayout";
+import {
+  useColumnLayout,
+  sortAccessorsFrom,
+  type ColumnDef,
+} from "./useColumnLayout";
 import { saveColumnLayout } from "@/lib/column-layout";
 
 interface Row {
@@ -12,7 +16,13 @@ type Key = "a" | "b" | "wide" | "narrow";
 const COLUMNS: ColumnDef<Row, Key>[] = [
   { key: "a", label: "A", width: 100, sortValue: (r) => r.a, cell: (r) => r.a },
   { key: "b", label: "B", width: 200, cell: () => null },
-  { key: "wide", label: "Wide", width: 160, hideBelowMd: true, cell: () => null },
+  {
+    key: "wide",
+    label: "Wide",
+    width: 160,
+    hideBelowMd: true,
+    cell: () => null,
+  },
   { key: "narrow", label: "Narrow", width: 40, cell: () => null },
 ];
 
@@ -58,7 +68,10 @@ describe("useColumnLayout", () => {
 
   it("restores a stored order and widths", () => {
     mockViewport(true);
-    saveColumnLayout("t", { order: ["b", "a", "narrow", "wide"], widths: { a: 250 } });
+    saveColumnLayout("t", {
+      order: ["b", "a", "narrow", "wide"],
+      widths: { a: 250 },
+    });
     const { result } = renderHook(() => useColumnLayout("t", COLUMNS));
     expect(result.current.columns.map((c) => c.key)).toEqual([
       "b",
@@ -78,7 +91,11 @@ describe("useColumnLayout", () => {
     // were shown and a phone scrolls sideways anyway.
     mockViewport(false);
     const { result } = renderHook(() => useColumnLayout("t", COLUMNS));
-    expect(result.current.columns.map((c) => c.key)).toEqual(["a", "b", "narrow"]);
+    expect(result.current.columns.map((c) => c.key)).toEqual([
+      "a",
+      "b",
+      "narrow",
+    ]);
     expect(result.current.totalWidth).toBe(340);
   });
 
@@ -109,7 +126,10 @@ describe("useColumnLayout", () => {
 
   it("reset restores the defaults and clears storage", () => {
     mockViewport(true);
-    saveColumnLayout("t", { order: ["narrow", "a", "b", "wide"], widths: { a: 300 } });
+    saveColumnLayout("t", {
+      order: ["narrow", "a", "b", "wide"],
+      widths: { a: 300 },
+    });
     const { result } = renderHook(() => useColumnLayout("t", COLUMNS));
     expect(result.current.isCustomized).toBe(true);
     act(() => {

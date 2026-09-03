@@ -115,9 +115,7 @@ describe("CreateSnapshotDialog", () => {
     expect(
       screen.getByText(/cannot take snapshots in its current configuration/i),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/tpmstate0 on proxmox-ssd/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/tpmstate0 on proxmox-ssd/i)).toBeInTheDocument();
 
     // Warning, not a block: a valid name still enables Create.
     await user.type(screen.getByLabelText("Name"), "before-upgrade");
@@ -128,9 +126,7 @@ describe("CreateSnapshotDialog", () => {
 
   it("shows no warning when the guest supports snapshots", () => {
     renderWithProviders(<CreateSnapshotDialog {...defaultProps} />);
-    expect(
-      screen.queryByText(/cannot take snapshots/i),
-    ).toBeNull();
+    expect(screen.queryByText(/cannot take snapshots/i)).toBeNull();
   });
 
   it("keeps the dialog open with the error when the task fails", async () => {

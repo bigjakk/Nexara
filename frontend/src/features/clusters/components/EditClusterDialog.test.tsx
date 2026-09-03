@@ -7,9 +7,10 @@ import { EditClusterDialog } from "./EditClusterDialog";
 import type { ClusterResponse } from "@/types/api";
 
 vi.mock("@/lib/api-client", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/api-client")>(
-    "@/lib/api-client",
-  );
+  const actual =
+    await vi.importActual<typeof import("@/lib/api-client")>(
+      "@/lib/api-client",
+    );
   return {
     ...actual,
     apiClient: { put: vi.fn(), post: vi.fn(), get: vi.fn() },

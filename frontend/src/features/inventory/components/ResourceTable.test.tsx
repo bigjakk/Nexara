@@ -23,7 +23,9 @@ const localStorageMock = (() => {
 })();
 Object.defineProperty(window, "localStorage", { value: localStorageMock });
 
-function makeRow(overrides: Partial<InventoryRow> & { key: string }): InventoryRow {
+function makeRow(
+  overrides: Partial<InventoryRow> & { key: string },
+): InventoryRow {
   return {
     id: "id-1",
     type: "vm",
@@ -108,7 +110,8 @@ describe("ResourceTable", () => {
     // Find the forward navigation button by checking all buttons
     const buttons = screen.getAllByRole("button");
     const navButtons = buttons.filter(
-      (b) => !b.hasAttribute("disabled") && b.closest(".flex.items-center.gap-2"),
+      (b) =>
+        !b.hasAttribute("disabled") && b.closest(".flex.items-center.gap-2"),
     );
     if (navButtons.length >= 2 && navButtons[1]) {
       await user.click(navButtons[1]);

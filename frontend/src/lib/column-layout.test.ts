@@ -64,12 +64,7 @@ describe("moveColumn", () => {
   const order = ["a", "b", "c", "d"] as const;
 
   it("moves a column before a target", () => {
-    expect(moveColumn(order, "d", "b", "before")).toEqual([
-      "a",
-      "d",
-      "b",
-      "c",
-    ]);
+    expect(moveColumn(order, "d", "b", "before")).toEqual(["a", "d", "b", "c"]);
   });
 
   it("moves a column after a target", () => {
@@ -79,12 +74,7 @@ describe("moveColumn", () => {
   it("handles a leftward move without an off-by-one", () => {
     // Removing the dragged key first shifts every later index; the insert
     // point has to be computed after that removal, not before.
-    expect(moveColumn(order, "c", "a", "before")).toEqual([
-      "c",
-      "a",
-      "b",
-      "d",
-    ]);
+    expect(moveColumn(order, "c", "a", "before")).toEqual(["c", "a", "b", "d"]);
   });
 
   it("is a no-op when dropped on itself", () => {

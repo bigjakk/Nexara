@@ -28,7 +28,8 @@ export interface ResourcePoolDetail {
 export function useResourcePools(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "pools"],
-    queryFn: () => apiClient.list<ResourcePool>(`/api/v1/clusters/${clusterId}/pools`),
+    queryFn: () =>
+      apiClient.list<ResourcePool>(`/api/v1/clusters/${clusterId}/pools`),
     enabled: clusterId.length > 0,
   });
 }
@@ -36,7 +37,10 @@ export function useResourcePools(clusterId: string) {
 export function useResourcePool(clusterId: string, poolId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "pools", poolId],
-    queryFn: () => apiClient.get<ResourcePoolDetail>(`/api/v1/clusters/${clusterId}/pools/${encodeURIComponent(poolId)}`),
+    queryFn: () =>
+      apiClient.get<ResourcePoolDetail>(
+        `/api/v1/clusters/${clusterId}/pools/${encodeURIComponent(poolId)}`,
+      ),
     enabled: clusterId.length > 0 && poolId.length > 0,
   });
 }
@@ -46,16 +50,32 @@ export function useCreatePool(clusterId: string) {
   return useMutation({
     mutationFn: (data: { poolid: string; comment?: string }) =>
       apiClient.post(`/api/v1/clusters/${clusterId}/pools`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] }); },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] });
+    },
   });
 }
 
 export function useUpdatePool(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ poolid, ...data }: { poolid: string; comment?: string; vms?: string; storage?: string; delete?: string }) =>
-      apiClient.put(`/api/v1/clusters/${clusterId}/pools/${encodeURIComponent(poolid)}`, data),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] }); },
+    mutationFn: ({
+      poolid,
+      ...data
+    }: {
+      poolid: string;
+      comment?: string;
+      vms?: string;
+      storage?: string;
+      delete?: string;
+    }) =>
+      apiClient.put(
+        `/api/v1/clusters/${clusterId}/pools/${encodeURIComponent(poolid)}`,
+        data,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] });
+    },
   });
 }
 
@@ -63,7 +83,11 @@ export function useDeletePool(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (poolId: string) =>
-      apiClient.delete(`/api/v1/clusters/${clusterId}/pools/${encodeURIComponent(poolId)}`),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] }); },
+      apiClient.delete(
+        `/api/v1/clusters/${clusterId}/pools/${encodeURIComponent(poolId)}`,
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "pools"] });
+    },
   });
 }

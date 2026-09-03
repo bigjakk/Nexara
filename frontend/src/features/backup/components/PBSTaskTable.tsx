@@ -10,12 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  ChevronRight,
-  ChevronDown,
-  ChevronLeft,
-  Search,
-} from "lucide-react";
+import { ChevronRight, ChevronDown, ChevronLeft, Search } from "lucide-react";
 import type { PBSTask } from "../types/backup";
 import { usePBSTaskLog } from "../api/backup-queries";
 
@@ -39,9 +34,7 @@ function TaskLogPanel({ pbsId, upid }: { pbsId: string; upid: string }) {
   const { data: entries, isLoading } = usePBSTaskLog(pbsId, upid);
 
   if (isLoading) {
-    return (
-      <p className="py-2 text-xs text-muted-foreground">Loading log...</p>
-    );
+    return <p className="py-2 text-xs text-muted-foreground">Loading log...</p>;
   }
 
   if (!entries || entries.length === 0) {
@@ -105,11 +98,33 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
-  const paged = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const paged = filtered.slice(
+    safePage * PAGE_SIZE,
+    (safePage + 1) * PAGE_SIZE,
+  );
 
-  // Reset page when filters change
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => { setPage(0); }, [typeFilter, statusFilter, search]);
+  // Reset page when filters change. The deps are the trigger, not inputs the
+  // callback reads, which is what exhaustive-deps objects to — so the
+  // suppression has to sit on the dependency array itself. It used to ride on
+  // the whole call while that fitted one line; a reformat then moved the line
+  // the rule reports out from under it.
+  //
+  // Do not delete this comment or inline the argument: without it prettier
+  // hugs the call, which puts the deps back on the closing line and moves the
+  // reported line out from under the directive again. The layout is load
+  // bearing, not decoration.
+  //
+  // TODO: this should be a useEffect. React treats useMemo as a hint and may
+  // re-run the factory with unchanged deps, which would bounce the operator
+  // back to page 1 mid-browse. Fixing that is a behaviour change and wants its
+  // own commit.
+  useMemo(
+    () => {
+      setPage(0);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [typeFilter, statusFilter, search],
+  );
 
   if (tasks.length === 0) {
     return (
@@ -140,24 +155,32 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
           <Input
             placeholder="Search tasks..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+            }}
             className="pl-8 h-9"
           />
         </div>
         <select
           className="rounded-md border bg-background px-3 py-2 text-sm h-9"
           value={typeFilter}
-          onChange={(e) => { setTypeFilter(e.target.value); }}
+          onChange={(e) => {
+            setTypeFilter(e.target.value);
+          }}
         >
           <option value="all">All Types</option>
           {taskTypes.map((t) => (
-            <option key={t} value={t}>{t}</option>
+            <option key={t} value={t}>
+              {t}
+            </option>
           ))}
         </select>
         <select
           className="rounded-md border bg-background px-3 py-2 text-sm h-9"
           value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); }}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+          }}
         >
           <option value="all">All Statuses</option>
           <option value="running">Running</option>
@@ -184,7 +207,10 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
           <TableBody>
             {paged.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell
+                  colSpan={6}
+                  className="py-8 text-center text-sm text-muted-foreground"
+                >
                   No matching tasks.
                 </TableCell>
               </TableRow>
@@ -294,7 +320,9 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
               variant="outline"
               size="sm"
               disabled={safePage === 0}
-              onClick={() => { setPage(safePage - 1); }}
+              onClick={() => {
+                setPage(safePage - 1);
+              }}
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -302,7 +330,9 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
               variant="outline"
               size="sm"
               disabled={safePage >= totalPages - 1}
-              onClick={() => { setPage(safePage + 1); }}
+              onClick={() => {
+                setPage(safePage + 1);
+              }}
             >
               <ChevronRight className="h-4 w-4" />
             </Button>

@@ -64,7 +64,10 @@ function TitleBar({
             "flex items-center justify-center rounded hover:bg-accent",
             isMobile ? "h-8 w-8" : "h-6 w-6",
           )}
-          onClick={(e) => { e.stopPropagation(); setWindowMode("minimized"); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setWindowMode("minimized");
+          }}
           title="Minimize"
         >
           <Minus className="h-3.5 w-3.5" />
@@ -74,7 +77,9 @@ function TitleBar({
             className="flex h-6 w-6 items-center justify-center rounded hover:bg-accent"
             onClick={(e) => {
               e.stopPropagation();
-              setWindowMode(windowMode === "maximized" ? "floating" : "maximized");
+              setWindowMode(
+                windowMode === "maximized" ? "floating" : "maximized",
+              );
             }}
             title={windowMode === "maximized" ? "Restore" : "Maximize"}
           >
@@ -90,7 +95,10 @@ function TitleBar({
             "flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive",
             isMobile ? "h-8 w-8" : "h-6 w-6",
           )}
-          onClick={(e) => { e.stopPropagation(); setWindowMode("hidden"); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setWindowMode("hidden");
+          }}
           title="Close"
         >
           <X className="h-3.5 w-3.5" />
@@ -106,7 +114,10 @@ const resizeCorners: { dir: ResizeDir; className: string }[] = [
   { dir: "nw", className: "absolute left-0 top-0 h-3 w-3 cursor-nw-resize" },
   { dir: "ne", className: "absolute right-0 top-0 h-3 w-3 cursor-ne-resize" },
   { dir: "sw", className: "absolute bottom-0 left-0 h-3 w-3 cursor-sw-resize" },
-  { dir: "se", className: "absolute bottom-0 right-0 h-3 w-3 cursor-se-resize" },
+  {
+    dir: "se",
+    className: "absolute bottom-0 right-0 h-3 w-3 cursor-se-resize",
+  },
 ];
 
 /**
@@ -128,7 +139,11 @@ export function FloatingConsole() {
   const isMaximized = windowMode === "maximized";
 
   // Drag state
-  const dragRef = useRef<{ startX: number; startY: number; startPos: { x: number; y: number } } | null>(null);
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    startPos: { x: number; y: number };
+  } | null>(null);
 
   const handleDragDown = useCallback(
     (e: React.PointerEvent) => {
@@ -150,8 +165,14 @@ export function FloatingConsole() {
       if (!dragRef.current) return;
       const dx = e.clientX - dragRef.current.startX;
       const dy = e.clientY - dragRef.current.startY;
-      const newX = Math.max(-windowSize.width + 100, Math.min(window.innerWidth - 100, dragRef.current.startPos.x + dx));
-      const newY = Math.max(0, Math.min(window.innerHeight - 50, dragRef.current.startPos.y + dy));
+      const newX = Math.max(
+        -windowSize.width + 100,
+        Math.min(window.innerWidth - 100, dragRef.current.startPos.x + dx),
+      );
+      const newY = Math.max(
+        0,
+        Math.min(window.innerHeight - 50, dragRef.current.startPos.y + dy),
+      );
       setWindowPosition({ x: newX, y: newY });
     },
     [windowSize.width, setWindowPosition],
@@ -249,7 +270,9 @@ export function FloatingConsole() {
       }
     }
     window.addEventListener("resize", handleWindowResize);
-    return () => { window.removeEventListener("resize", handleWindowResize); };
+    return () => {
+      window.removeEventListener("resize", handleWindowResize);
+    };
   }, [setWindowPosition]);
 
   if (windowMode === "hidden") return null;
@@ -386,7 +409,9 @@ export function FloatingConsole() {
               </button>
               <button
                 className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-red-500/70 hover:text-white"
-                onClick={() => { useConsoleStore.getState().setWindowMode("hidden"); }}
+                onClick={() => {
+                  useConsoleStore.getState().setWindowMode("hidden");
+                }}
                 title="Close"
               >
                 <X className="h-4 w-4" />
@@ -410,15 +435,20 @@ export function FloatingConsole() {
       </div>
 
       {/* Resize handles on all 4 corners (desktop floating mode only) */}
-      {!isMinimized && !isMobile && !isMaximized && resizeCorners.map((corner) => (
-        <div
-          key={corner.dir}
-          className={corner.className}
-          onPointerDown={(e) => { handleResizeDown(corner.dir, e); }}
-          onPointerMove={handleResizeMove}
-          onPointerUp={handleResizeUp}
-        />
-      ))}
+      {!isMinimized &&
+        !isMobile &&
+        !isMaximized &&
+        resizeCorners.map((corner) => (
+          <div
+            key={corner.dir}
+            className={corner.className}
+            onPointerDown={(e) => {
+              handleResizeDown(corner.dir, e);
+            }}
+            onPointerMove={handleResizeMove}
+            onPointerUp={handleResizeUp}
+          />
+        ))}
     </div>,
     document.body,
   );

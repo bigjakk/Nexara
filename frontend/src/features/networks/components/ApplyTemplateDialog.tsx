@@ -26,7 +26,9 @@ export function ApplyTemplateDialog({
 
   const handleApply = () => {
     apply.mutate(template.id, {
-      onSuccess: () => { setOpen(false); },
+      onSuccess: () => {
+        setOpen(false);
+      },
     });
   };
 
@@ -50,22 +52,15 @@ export function ApplyTemplateDialog({
 
           <div className="space-y-2">
             {template.rules.map((rule, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2 text-sm"
-              >
+              <div key={i} className="flex items-center gap-2 text-sm">
                 <Badge variant="outline">{rule.type}</Badge>
                 <Badge
-                  variant={
-                    rule.action === "ACCEPT" ? "default" : "destructive"
-                  }
+                  variant={rule.action === "ACCEPT" ? "default" : "destructive"}
                 >
                   {rule.action}
                 </Badge>
                 <span>{rule.proto || "any"}</span>
-                {rule.dport && (
-                  <span className="font-mono">:{rule.dport}</span>
-                )}
+                {rule.dport && <span className="font-mono">:{rule.dport}</span>}
                 {rule.comment && (
                   <span className="text-muted-foreground">
                     ({rule.comment})
@@ -83,7 +78,12 @@ export function ApplyTemplateDialog({
           )}
 
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={handleApply} disabled={apply.isPending}>

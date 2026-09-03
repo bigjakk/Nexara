@@ -10,7 +10,13 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ShieldCheck, ShieldAlert, ShieldOff, ShieldQuestion, Search } from "lucide-react";
+import {
+  ShieldCheck,
+  ShieldAlert,
+  ShieldOff,
+  ShieldQuestion,
+  Search,
+} from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBackupCoverage } from "../api/backup-queries";
 import type { BackupCoverageEntry, BackupEligibility } from "../types/backup";
@@ -63,10 +69,14 @@ function ProtectionCell({ entry }: { entry: BackupCoverageEntry }) {
   return (
     <div className="flex flex-wrap items-center gap-1">
       {(entry.protection === "pbs" || entry.protection === "both") && (
-        <Badge variant="outline" className="text-xs">PBS</Badge>
+        <Badge variant="outline" className="text-xs">
+          PBS
+        </Badge>
       )}
       {(entry.protection === "veeam" || entry.protection === "both") && (
-        <Badge variant="outline" className="text-xs">Veeam</Badge>
+        <Badge variant="outline" className="text-xs">
+          Veeam
+        </Badge>
       )}
       {/*
         A name match is a guess: a rebuilt host reuses its name, so the
@@ -74,7 +84,11 @@ function ProtectionCell({ entry }: { entry: BackupCoverageEntry }) {
         entire reason match_method is carried through to the UI.
       */}
       {entry.veeam?.match_method === "name" && (
-        <Badge variant="secondary" className="text-xs" title="Matched by name, not by SMBIOS UUID — verify before relying on it">
+        <Badge
+          variant="secondary"
+          className="text-xs"
+          title="Matched by name, not by SMBIOS UUID — verify before relying on it"
+        >
           name match
         </Badge>
       )}
@@ -82,7 +96,11 @@ function ProtectionCell({ entry }: { entry: BackupCoverageEntry }) {
   );
 }
 
-function CoverageBadge({ status }: { status: BackupCoverageEntry["coverage_status"] }) {
+function CoverageBadge({
+  status,
+}: {
+  status: BackupCoverageEntry["coverage_status"];
+}) {
   switch (status) {
     case "recent":
       return (
@@ -139,8 +157,11 @@ export function BackupCoverageReport() {
   }, [entries, search, filterStatus]);
 
   const stats = useMemo(() => {
-    if (!entries) return { total: 0, recent: 0, stale: 0, none: 0, notEligible: 0 };
-    const notEligible = entries.filter((e) => e.coverage_status === "not_eligible").length;
+    if (!entries)
+      return { total: 0, recent: 0, stale: 0, none: 0, notEligible: 0 };
+    const notEligible = entries.filter(
+      (e) => e.coverage_status === "not_eligible",
+    ).length;
     return {
       // Backup TARGETS, not rows. Counting Veeam's own appliances here would
       // make the tiles disagree with each other and overstate the estate.
@@ -170,7 +191,9 @@ export function BackupCoverageReport() {
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-muted-foreground">Backup targets</CardTitle>
+            <CardTitle className="text-xs text-muted-foreground">
+              Backup targets
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold tracking-tight">{stats.total}</p>
@@ -183,26 +206,38 @@ export function BackupCoverageReport() {
         </Card>
         <Card>
           <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-emerald-600">Protected (&lt;24h)</CardTitle>
+            <CardTitle className="text-xs text-emerald-600">
+              Protected (&lt;24h)
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold tracking-tight text-emerald-600">{stats.recent}</p>
+            <p className="text-2xl font-bold tracking-tight text-emerald-600">
+              {stats.recent}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-amber-600">Stale (&gt;24h)</CardTitle>
+            <CardTitle className="text-xs text-amber-600">
+              Stale (&gt;24h)
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold tracking-tight text-amber-600">{stats.stale}</p>
+            <p className="text-2xl font-bold tracking-tight text-amber-600">
+              {stats.stale}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-1">
-            <CardTitle className="text-xs text-destructive">No Backup</CardTitle>
+            <CardTitle className="text-xs text-destructive">
+              No Backup
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold tracking-tight text-destructive">{stats.none}</p>
+            <p className="text-2xl font-bold tracking-tight text-destructive">
+              {stats.none}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -213,14 +248,18 @@ export function BackupCoverageReport() {
           <Input
             placeholder="Search VMs..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); }}
+            onChange={(e) => {
+              setSearch(e.target.value);
+            }}
             className="pl-8"
           />
         </div>
         <select
           className="rounded-md border bg-background px-3 py-2 text-sm"
           value={filterStatus}
-          onChange={(e) => { setFilterStatus(e.target.value); }}
+          onChange={(e) => {
+            setFilterStatus(e.target.value);
+          }}
         >
           <option value="all">All</option>
           <option value="recent">Protected</option>
@@ -248,7 +287,10 @@ export function BackupCoverageReport() {
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell
+                  colSpan={9}
+                  className="py-8 text-center text-sm text-muted-foreground"
+                >
                   {entries?.length === 0 ? "No VMs found." : "No matching VMs."}
                 </TableCell>
               </TableRow>
@@ -266,8 +308,12 @@ export function BackupCoverageReport() {
                         : ""
                 }
               >
-                <TableCell className="font-mono text-xs">{entry.vmid}</TableCell>
-                <TableCell className="font-medium">{entry.name || `VM ${String(entry.vmid)}`}</TableCell>
+                <TableCell className="font-mono text-xs">
+                  {entry.vmid}
+                </TableCell>
+                <TableCell className="font-medium">
+                  {entry.name || `VM ${String(entry.vmid)}`}
+                </TableCell>
                 <TableCell>
                   <Badge variant="outline" className="text-xs">
                     {entry.type === "qemu" ? "VM" : "CT"}
@@ -276,8 +322,12 @@ export function BackupCoverageReport() {
                 <TableCell className="text-sm">{entry.cluster_name}</TableCell>
                 <TableCell>
                   <Badge
-                    variant={entry.status === "running" ? "default" : "secondary"}
-                    className={entry.status === "running" ? "bg-emerald-600" : ""}
+                    variant={
+                      entry.status === "running" ? "default" : "secondary"
+                    }
+                    className={
+                      entry.status === "running" ? "bg-emerald-600" : ""
+                    }
                   >
                     {entry.status}
                   </Badge>

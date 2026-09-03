@@ -13,9 +13,7 @@ vi.mock("@/hooks/useAuth", () => ({
 
 vi.mock("@/features/dashboard/api/dashboard-queries", () => ({
   useClusters: () => ({
-    data: [
-      { id: "c1", name: "Test Cluster", api_url: "https://test:8006" },
-    ],
+    data: [{ id: "c1", name: "Test Cluster", api_url: "https://test:8006" }],
     isLoading: false,
     error: null,
   }),
@@ -61,8 +59,6 @@ describe("MigrationsPage", () => {
 
   it("shows empty state when no jobs", () => {
     renderPage();
-    expect(
-      screen.getByText(/No migration jobs yet/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/No migration jobs yet/)).toBeInTheDocument();
   });
 });

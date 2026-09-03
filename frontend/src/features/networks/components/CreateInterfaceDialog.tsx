@@ -17,7 +17,12 @@ export function CreateInterfaceDialog({
 
   return (
     <>
-      <Button size="sm" onClick={() => { setOpen(true); }}>
+      <Button
+        size="sm"
+        onClick={() => {
+          setOpen(true);
+        }}
+      >
         <Plus className="mr-1 h-4 w-4" />
         Create Interface
       </Button>

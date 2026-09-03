@@ -61,7 +61,9 @@ export function NetworkInterfaceTable({
           <select
             className="rounded-md border bg-background px-3 py-1.5 text-sm"
             value={selectedNode}
-            onChange={(e) => { setSelectedNode(e.target.value); }}
+            onChange={(e) => {
+              setSelectedNode(e.target.value);
+            }}
           >
             <option value="">All nodes</option>
             {nodes.map((node) => (
@@ -153,9 +155,15 @@ function InterfaceRow({
         </Badge>
       </TableCell>
       <TableCell className="text-sm">
-        {iface.type === "bridge" ? (iface.bridge_vlan_aware ? "Yes" : "No") : "--"}
+        {iface.type === "bridge"
+          ? iface.bridge_vlan_aware
+            ? "Yes"
+            : "No"
+          : "--"}
       </TableCell>
-      <TableCell className="font-mono text-sm">{interfacePorts(iface)}</TableCell>
+      <TableCell className="font-mono text-sm">
+        {interfacePorts(iface)}
+      </TableCell>
       <TableCell className="text-sm">{iface.bond_mode ?? "--"}</TableCell>
       <TableCell className="text-sm">{iface.comments ?? "--"}</TableCell>
       <TableCell>
@@ -163,14 +171,18 @@ function InterfaceRow({
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => { setEditing(true); }}
+            onClick={() => {
+              setEditing(true);
+            }}
           >
             <Pencil className="h-4 w-4" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => { deleteIface.mutate(iface.iface); }}
+            onClick={() => {
+              deleteIface.mutate(iface.iface);
+            }}
             disabled={deleteIface.isPending}
           >
             <Trash2 className="h-4 w-4 text-destructive" />
@@ -182,7 +194,9 @@ function InterfaceRow({
             nodeName={nodeName}
             existing={iface}
             open
-            onOpenChange={(open) => { if (!open) setEditing(false); }}
+            onOpenChange={(open) => {
+              if (!open) setEditing(false);
+            }}
           />
         )}
       </TableCell>
@@ -205,7 +219,9 @@ function ApplyRevertButtons({
       <Button
         variant="outline"
         size="sm"
-        onClick={() => { revert.mutate(); }}
+        onClick={() => {
+          revert.mutate();
+        }}
         disabled={revert.isPending}
       >
         <RotateCcw className="mr-1 h-4 w-4" />
@@ -213,7 +229,9 @@ function ApplyRevertButtons({
       </Button>
       <Button
         size="sm"
-        onClick={() => { apply.mutate(); }}
+        onClick={() => {
+          apply.mutate();
+        }}
         disabled={apply.isPending}
       >
         <Check className="mr-1 h-4 w-4" />

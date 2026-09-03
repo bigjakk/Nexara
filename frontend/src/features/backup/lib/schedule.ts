@@ -126,7 +126,12 @@ export function parseSchedule(raw: string | undefined | null): ScheduleSpec {
   // systemd shorthands PVE accepts verbatim.
   switch (value) {
     case "hourly":
-      return { ...DEFAULT_SCHEDULE, frequency: "hourly", everyHours: 1, minute: 0 };
+      return {
+        ...DEFAULT_SCHEDULE,
+        frequency: "hourly",
+        everyHours: 1,
+        minute: 0,
+      };
     case "daily":
       return { ...DEFAULT_SCHEDULE, frequency: "daily", hour: 0, minute: 0 };
     case "weekly":
@@ -211,7 +216,9 @@ function joinLabels(labels: string[]): string {
  * Plain-English rendering of a calendar string, or null when the string is
  * beyond the builder's vocabulary (callers show the raw string instead).
  */
-export function describeSchedule(raw: string | undefined | null): string | null {
+export function describeSchedule(
+  raw: string | undefined | null,
+): string | null {
   if (!raw || raw.trim() === "") return null;
   const spec = parseSchedule(raw);
   const time = `${pad(spec.hour)}:${pad(spec.minute)}`;

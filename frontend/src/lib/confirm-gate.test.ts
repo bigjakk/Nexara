@@ -56,7 +56,11 @@ describe("confirmRequiredFromError", () => {
   });
 
   it("tolerates a missing or non-object details blob", () => {
-    const confirm = confirmRequiredFromError(gate422("x", undefined), ["x"], null);
+    const confirm = confirmRequiredFromError(
+      gate422("x", undefined),
+      ["x"],
+      null,
+    );
     if (confirm === null) throw new Error("expected the gate to be recognised");
     expect(confirmDetailString(confirm, "anything")).toBeNull();
   });
@@ -66,7 +70,11 @@ describe("confirmRequiredFromError", () => {
   // would otherwise submit THAT config with an acknowledgement given for
   // another one.
   it("carries the target it was given so callers can match it", () => {
-    expect(confirmRequiredFromError(gate422("x"), ["x"], "cfg-a")?.target).toBe("cfg-a");
-    expect(confirmRequiredFromError(gate422("x"), ["x"], null)?.target).toBeNull();
+    expect(confirmRequiredFromError(gate422("x"), ["x"], "cfg-a")?.target).toBe(
+      "cfg-a",
+    );
+    expect(
+      confirmRequiredFromError(gate422("x"), ["x"], null)?.target,
+    ).toBeNull();
   });
 });

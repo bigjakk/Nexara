@@ -84,7 +84,9 @@ export function RollingUpdateJobsTable({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => { onSelect(job); }}
+                  onClick={() => {
+                    onSelect(job);
+                  }}
                 >
                   <Eye className="mr-1 h-3 w-3" />
                   View
@@ -93,7 +95,9 @@ export function RollingUpdateJobsTable({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => { onStart(job.id); }}
+                    onClick={() => {
+                      onStart(job.id);
+                    }}
                   >
                     <Play className="mr-1 h-3 w-3" />
                     Start
@@ -106,7 +110,9 @@ export function RollingUpdateJobsTable({
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => { onCancel(job.id); }}
+                      onClick={() => {
+                        onCancel(job.id);
+                      }}
                     >
                       <XCircle className="mr-1 h-3 w-3" />
                       Cancel

@@ -94,10 +94,7 @@ export function StatsOverview({
   const [cpuSeries, memSeries] = useMemo(() => {
     // Seeded 1h history + live ticks per cluster, then averaged point-wise
     // across clusters (aligned from the newest point backwards).
-    const ids = new Set([
-      ...(metrics?.keys() ?? []),
-      ...(seeds?.keys() ?? []),
-    ]);
+    const ids = new Set([...(metrics?.keys() ?? []), ...(seeds?.keys() ?? [])]);
     const hists: MetricDataPoint[][] = [];
     for (const id of ids) {
       const live = metrics?.get(id)?.history ?? [];
@@ -195,7 +192,10 @@ export function StatsOverview({
             : t("statAcrossClusters", { count: clusterMetrics.length })}
         </div>
         <div className="mt-auto pt-2">
-          <Sparkline points={cpuSeries} className="h-7 w-full text-violet-500" />
+          <Sparkline
+            points={cpuSeries}
+            className="h-7 w-full text-violet-500"
+          />
         </div>
       </StatCard>
 

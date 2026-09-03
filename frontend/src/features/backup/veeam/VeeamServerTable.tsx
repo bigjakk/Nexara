@@ -105,7 +105,9 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
       ) : (
         <Badge
           variant={
-            server.license_edition === REQUIRED_EDITION ? "default" : "secondary"
+            server.license_edition === REQUIRED_EDITION
+              ? "default"
+              : "secondary"
           }
         >
           {server.license_edition}

@@ -163,31 +163,28 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
 
   const handleDownloadNow = () => {
     setDownloadNote("");
-    download.mutate(
-      targetVersion ? { version: targetVersion } : {},
-      {
-        onSuccess: (result) => {
-          if (isAlreadyPresent(result)) {
-            setDownloadNote(
-              `virtio-win ${result.version} is already on ${storage}.`,
-            );
-          } else if (isAlreadyRunning(result)) {
-            setDownloadNote(
-              `A download of virtio-win ${result.version} is already in progress.`,
-            );
-          } else {
-            setDownloadNote(
-              `Download of virtio-win ${result.version} started on ${result.node}.`,
-            );
-          }
-        },
-        onError: (err: unknown) => {
+    download.mutate(targetVersion ? { version: targetVersion } : {}, {
+      onSuccess: (result) => {
+        if (isAlreadyPresent(result)) {
           setDownloadNote(
-            err instanceof Error ? err.message : "Download failed.",
+            `virtio-win ${result.version} is already on ${storage}.`,
           );
-        },
+        } else if (isAlreadyRunning(result)) {
+          setDownloadNote(
+            `A download of virtio-win ${result.version} is already in progress.`,
+          );
+        } else {
+          setDownloadNote(
+            `Download of virtio-win ${result.version} started on ${result.node}.`,
+          );
+        }
       },
-    );
+      onError: (err: unknown) => {
+        setDownloadNote(
+          err instanceof Error ? err.message : "Download failed.",
+        );
+      },
+    });
   };
 
   const handleCheckNow = () => {
@@ -220,9 +217,9 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
       </CardHeader>
       <CardContent className="space-y-6">
         <p className="text-sm text-muted-foreground">
-          Keeps a virtio-win ISO on this cluster&apos;s storage so Windows guests
-          have drivers and the QEMU guest agent available. The Proxmox node
-          fetches it directly &mdash; roughly 840&nbsp;MB per release.
+          Keeps a virtio-win ISO on this cluster&apos;s storage so Windows
+          guests have drivers and the QEMU guest agent available. The Proxmox
+          node fetches it directly &mdash; roughly 840&nbsp;MB per release.
         </p>
 
         {config?.last_error ? (

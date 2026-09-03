@@ -217,7 +217,11 @@
         hsl(var(--primary) / 0.09),
         transparent 70%
       ),
-      radial-gradient(circle, hsl(var(--foreground) / 0.038) 1px, transparent 1px);
+      radial-gradient(
+        circle,
+        hsl(var(--foreground) / 0.038) 1px,
+        transparent 1px
+      );
     background-size:
       100% 100%,
       22px 22px;
@@ -229,7 +233,11 @@
         hsl(var(--primary) / 0.17),
         transparent 70%
       ),
-      radial-gradient(circle, hsl(var(--foreground) / 0.045) 1px, transparent 1px);
+      radial-gradient(
+        circle,
+        hsl(var(--foreground) / 0.045) 1px,
+        transparent 1px
+      );
   }
 }
 

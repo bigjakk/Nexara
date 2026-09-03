@@ -118,8 +118,16 @@ export function MigrateBatchDialog({
 
         const body =
           job.guestKind === "ct"
-            ? { volume: configKey, storage: targetStorage, delete: deleteOriginal }
-            : { disk: configKey, storage: targetStorage, delete: deleteOriginal };
+            ? {
+                volume: configKey,
+                storage: targetStorage,
+                delete: deleteOriginal,
+              }
+            : {
+                disk: configKey,
+                storage: targetStorage,
+                delete: deleteOriginal,
+              };
 
         const resp = await apiClient.post<VMActionResponse>(path, body);
 
@@ -174,7 +182,9 @@ export function MigrateBatchDialog({
               id="batch-target-storage"
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
               value={targetStorage}
-              onChange={(e) => { setTargetStorage(e.target.value); }}
+              onChange={(e) => {
+                setTargetStorage(e.target.value);
+              }}
               disabled={running || finished}
             >
               <option value="">Select storage…</option>
@@ -190,7 +200,9 @@ export function MigrateBatchDialog({
               type="checkbox"
               id="batch-delete-original"
               checked={deleteOriginal}
-              onChange={(e) => { setDeleteOriginal(e.target.checked); }}
+              onChange={(e) => {
+                setDeleteOriginal(e.target.checked);
+              }}
               disabled={running || finished}
               className="h-4 w-4 rounded border-gray-300"
             />
@@ -211,11 +223,10 @@ export function MigrateBatchDialog({
                     {s.label}
                   </span>
                   {s.error && (
-                    <span
-                      className="text-xs text-destructive"
-                      title={s.error}
-                    >
-                      {s.error.length > 40 ? `${s.error.slice(0, 40)}…` : s.error}
+                    <span className="text-xs text-destructive" title={s.error}>
+                      {s.error.length > 40
+                        ? `${s.error.slice(0, 40)}…`
+                        : s.error}
                     </span>
                   )}
                 </div>
@@ -233,14 +244,18 @@ export function MigrateBatchDialog({
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => { handleOpenChange(false); }}
+            onClick={() => {
+              handleOpenChange(false);
+            }}
             disabled={running}
           >
             {finished ? "Close" : "Cancel"}
           </Button>
           {!finished && (
             <Button
-              onClick={() => { void handleMigrate(); }}
+              onClick={() => {
+                void handleMigrate();
+              }}
               disabled={!targetStorage || running || jobs.length === 0}
             >
               {running ? "Migrating…" : "Migrate"}

@@ -2,13 +2,13 @@ import { useQueries } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useDashboardMetrics } from "@/hooks/useMetrics";
-import type {
-  ClusterResponse,
-  NodeResponse,
-  VMResponse,
-} from "@/types/api";
+import type { ClusterResponse, NodeResponse, VMResponse } from "@/types/api";
 import type { AggregatedMetrics, VmLiveMetric } from "@/types/ws";
-import type { InventoryRow, ResourceStatus, ResourceType } from "../types/inventory";
+import type {
+  InventoryRow,
+  ResourceStatus,
+  ResourceType,
+} from "../types/inventory";
 
 function normalizeStatus(raw: string): ResourceStatus {
   const map: Record<string, ResourceStatus> = {
@@ -135,7 +135,8 @@ export function buildInventoryRows(
     const nodeMap = buildNodeMap(nodes);
     const clusterMetrics = metricsMap.get(cluster.id);
     const vmLive = clusterMetrics?.vmMetrics ?? new Map<string, VmLiveMetric>();
-    const nodeLive = clusterMetrics?.nodeMetrics ?? new Map<string, VmLiveMetric>();
+    const nodeLive =
+      clusterMetrics?.nodeMetrics ?? new Map<string, VmLiveMetric>();
 
     for (const vm of vms) rows.push(vmToRow(vm, cluster, nodeMap, vmLive));
     for (const node of nodes) rows.push(nodeToRow(node, cluster, nodeLive));
@@ -156,9 +157,7 @@ export function useInventoryData() {
     queries: clusters.map((cluster) => ({
       queryKey: ["clusters", cluster.id, "nodes"],
       queryFn: () =>
-        apiClient.list<NodeResponse>(
-          `/api/v1/clusters/${cluster.id}/nodes`,
-        ),
+        apiClient.list<NodeResponse>(`/api/v1/clusters/${cluster.id}/nodes`),
       enabled: clusters.length > 0,
     })),
   });

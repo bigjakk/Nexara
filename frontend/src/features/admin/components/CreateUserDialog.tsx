@@ -16,7 +16,10 @@ interface CreateUserDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function CreateUserDialog({ open, onOpenChange }: CreateUserDialogProps) {
+export function CreateUserDialog({
+  open,
+  onOpenChange,
+}: CreateUserDialogProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -32,30 +35,28 @@ export function CreateUserDialog({ open, onOpenChange }: CreateUserDialogProps) 
       return;
     }
 
-    const payload: { email: string; password: string; display_name?: string } = {
-      email,
-      password,
-    };
+    const payload: { email: string; password: string; display_name?: string } =
+      {
+        email,
+        password,
+      };
     if (displayName) {
       payload.display_name = displayName;
     }
 
-    createUser.mutate(
-      payload,
-      {
-        onSuccess: () => {
-          setEmail("");
-          setPassword("");
-          setDisplayName("");
-          onOpenChange(false);
-        },
-        onError: (err: unknown) => {
-          const msg =
-            err instanceof Error ? err.message : "Failed to create user";
-          setError(msg);
-        },
+    createUser.mutate(payload, {
+      onSuccess: () => {
+        setEmail("");
+        setPassword("");
+        setDisplayName("");
+        onOpenChange(false);
       },
-    );
+      onError: (err: unknown) => {
+        const msg =
+          err instanceof Error ? err.message : "Failed to create user";
+        setError(msg);
+      },
+    });
   };
 
   return (
@@ -71,7 +72,9 @@ export function CreateUserDialog({ open, onOpenChange }: CreateUserDialogProps) 
               id="email"
               type="email"
               value={email}
-              onChange={(e) => { setEmail(e.target.value); }}
+              onChange={(e) => {
+                setEmail(e.target.value);
+              }}
               placeholder="user@example.com"
               required
             />
@@ -81,7 +84,9 @@ export function CreateUserDialog({ open, onOpenChange }: CreateUserDialogProps) 
             <Input
               id="display-name"
               value={displayName}
-              onChange={(e) => { setDisplayName(e.target.value); }}
+              onChange={(e) => {
+                setDisplayName(e.target.value);
+              }}
               placeholder="Optional"
             />
           </div>
@@ -91,19 +96,21 @@ export function CreateUserDialog({ open, onOpenChange }: CreateUserDialogProps) 
               id="password"
               type="password"
               value={password}
-              onChange={(e) => { setPassword(e.target.value); }}
+              onChange={(e) => {
+                setPassword(e.target.value);
+              }}
               placeholder="Minimum 8 characters"
               required
             />
           </div>
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
             <Button
               type="button"
               variant="outline"
-              onClick={() => { onOpenChange(false); }}
+              onClick={() => {
+                onOpenChange(false);
+              }}
             >
               Cancel
             </Button>

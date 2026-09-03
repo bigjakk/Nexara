@@ -28,7 +28,9 @@ export function TopConsumers({ consumers, vmNames }: TopConsumersProps) {
             variant={sortBy === "cpu" ? "default" : "ghost"}
             size="sm"
             className="h-6 px-2 text-xs"
-            onClick={() => { setSortBy("cpu"); }}
+            onClick={() => {
+              setSortBy("cpu");
+            }}
             data-testid="sort-cpu"
           >
             CPU
@@ -37,7 +39,9 @@ export function TopConsumers({ consumers, vmNames }: TopConsumersProps) {
             variant={sortBy === "memory" ? "default" : "ghost"}
             size="sm"
             className="h-6 px-2 text-xs"
-            onClick={() => { setSortBy("memory"); }}
+            onClick={() => {
+              setSortBy("memory");
+            }}
             data-testid="sort-memory"
           >
             Memory
@@ -46,7 +50,10 @@ export function TopConsumers({ consumers, vmNames }: TopConsumersProps) {
       </CardHeader>
       <CardContent>
         {sorted.length === 0 ? (
-          <p className="text-sm text-muted-foreground" data-testid="empty-consumers">
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="empty-consumers"
+          >
             No VMs running
           </p>
         ) : (
@@ -56,7 +63,9 @@ export function TopConsumers({ consumers, vmNames }: TopConsumersProps) {
               return (
                 <div key={vm.vmId} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="truncate">{vmNames.get(vm.vmId) ?? vm.vmId.slice(0, 8)}</span>
+                    <span className="truncate">
+                      {vmNames.get(vm.vmId) ?? vm.vmId.slice(0, 8)}
+                    </span>
                     <span className="text-muted-foreground">
                       {formatPercent(value)}
                     </span>

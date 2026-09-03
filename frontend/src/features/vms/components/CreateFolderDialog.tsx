@@ -53,7 +53,9 @@ export function CreateFolderDialog({
           onOpenChange(false);
         },
         onError: (err: unknown) => {
-          setError(err instanceof Error ? err.message : "Failed to create folder");
+          setError(
+            err instanceof Error ? err.message : "Failed to create folder",
+          );
         },
       },
     );
@@ -76,7 +78,9 @@ export function CreateFolderDialog({
           <Input
             id="folder-name"
             value={name}
-            onChange={(e) => { setName(e.target.value); }}
+            onChange={(e) => {
+              setName(e.target.value);
+            }}
             placeholder="e.g. Production"
             maxLength={128}
             autoFocus
@@ -94,7 +98,9 @@ export function CreateFolderDialog({
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => { onOpenChange(false); }}
+            onClick={() => {
+              onOpenChange(false);
+            }}
             disabled={create.isPending}
           >
             Cancel

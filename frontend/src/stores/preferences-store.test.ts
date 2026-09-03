@@ -144,9 +144,7 @@ describe("preferences-store — loadFromJSON", () => {
   });
 
   it("sets loaded flag to true after loading", () => {
-    usePreferencesStore
-      .getState()
-      .loadFromJSON({ byteUnit: "decimal" });
+    usePreferencesStore.getState().loadFromJSON({ byteUnit: "decimal" });
     expect(usePreferencesStore.getState().loaded).toBe(true);
   });
 

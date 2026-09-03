@@ -61,8 +61,7 @@ export function GuestMultiSelect({
   }, [nodesQuery.data]);
 
   const guests = useMemo(
-    () =>
-      [...(vmsQuery.data ?? [])].sort((a, b) => a.vmid - b.vmid),
+    () => [...(vmsQuery.data ?? [])].sort((a, b) => a.vmid - b.vmid),
     [vmsQuery.data],
   );
 
@@ -85,7 +84,9 @@ export function GuestMultiSelect({
       <Input
         id={id}
         value={value}
-        onChange={(e) => { onChange(e.target.value); }}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
         placeholder="100,101,102"
       />
     );
@@ -129,7 +130,9 @@ export function GuestMultiSelect({
                     <CommandItem
                       key={guest.id}
                       value={`${vmid} ${guest.name}`}
-                      onSelect={() => { toggle(vmid); }}
+                      onSelect={() => {
+                        toggle(vmid);
+                      }}
                     >
                       <Check
                         className={cn(
@@ -172,7 +175,9 @@ export function GuestMultiSelect({
               <button
                 type="button"
                 aria-label={`Remove ${vmid}`}
-                onClick={() => { toggle(vmid); }}
+                onClick={() => {
+                  toggle(vmid);
+                }}
                 className="rounded-sm hover:text-destructive"
               >
                 <X className="h-3 w-3" />

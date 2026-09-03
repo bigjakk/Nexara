@@ -11,7 +11,6 @@ interface PoolTableProps {
   clusterId: string;
 }
 
-
 export function PoolTable({ pools, clusterId }: PoolTableProps) {
   const [deletePool, setDeletePool] = useState<string | null>(null);
 

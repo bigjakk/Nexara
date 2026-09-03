@@ -14,8 +14,15 @@ export function useAuth() {
   const verifyTotp = useAuthStore((s) => s.verifyTotp);
   const verifyTotpRecovery = useAuthStore((s) => s.verifyTotpRecovery);
   const clearTotpPending = useAuthStore((s) => s.clearTotpPending);
-  const { isAdmin, hasPermission, canView, canManage, canExecute, canDelete, canConsole } =
-    usePermissions();
+  const {
+    isAdmin,
+    hasPermission,
+    canView,
+    canManage,
+    canExecute,
+    canDelete,
+    canConsole,
+  } = usePermissions();
 
   return {
     user,

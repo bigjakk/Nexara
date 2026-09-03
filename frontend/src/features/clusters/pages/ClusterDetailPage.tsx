@@ -136,7 +136,9 @@ export function ClusterDetailPage() {
                     <DetailChip>PVE {cluster.pve_version}</DetailChip>
                   )}
                   {cluster != null && (
-                    <DetailChip className="font-mono">{cluster.api_url}</DetailChip>
+                    <DetailChip className="font-mono">
+                      {cluster.api_url}
+                    </DetailChip>
                   )}
                 </div>
               </div>
@@ -146,7 +148,9 @@ export function ClusterDetailPage() {
           <Tabs value={tabParam || "overview"} onValueChange={setTab}>
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="vms">VMs ({clusterVmRows.length})</TabsTrigger>
+              <TabsTrigger value="vms">
+                VMs ({clusterVmRows.length})
+              </TabsTrigger>
               <TabsTrigger value="options">Options</TabsTrigger>
               <TabsTrigger value="ha">HA</TabsTrigger>
               <TabsTrigger value="pools">Pools</TabsTrigger>
@@ -231,32 +235,43 @@ export function ClusterDetailPage() {
                             </TableCell>
                             <TableCell>
                               <MetricMiniBar
-                                value={clusterMetrics?.nodeMetrics.get(node.id)?.cpuPercent ?? null}
+                                value={
+                                  clusterMetrics?.nodeMetrics.get(node.id)
+                                    ?.cpuPercent ?? null
+                                }
                               />
                             </TableCell>
                             <TableCell>
                               <MetricMiniBar
-                                value={clusterMetrics?.nodeMetrics.get(node.id)?.memPercent ?? null}
+                                value={
+                                  clusterMetrics?.nodeMetrics.get(node.id)
+                                    ?.memPercent ?? null
+                                }
                               />
                             </TableCell>
                             <TableCell>{node.cpu_count}</TableCell>
                             <TableCell>{formatBytes(node.mem_total)}</TableCell>
-                            <TableCell>{formatBytes(node.disk_total)}</TableCell>
+                            <TableCell>
+                              {formatBytes(node.disk_total)}
+                            </TableCell>
                             <TableCell>{node.pve_version}</TableCell>
                             <TableCell>{formatUptime(node.uptime)}</TableCell>
                             <TableCell>
-                              {node.status === "online" && canConsole("node") && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 gap-1 px-2 text-xs"
-                                  title="Open Shell"
-                                  onClick={() => { openNodeShell(node.name); }}
-                                >
-                                  <Terminal className="h-3.5 w-3.5" />
-                                  Shell
-                                </Button>
-                              )}
+                              {node.status === "online" &&
+                                canConsole("node") && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 gap-1 px-2 text-xs"
+                                    title="Open Shell"
+                                    onClick={() => {
+                                      openNodeShell(node.name);
+                                    }}
+                                  >
+                                    <Terminal className="h-3.5 w-3.5" />
+                                    Shell
+                                  </Button>
+                                )}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -280,9 +295,10 @@ export function ClusterDetailPage() {
             </TabsContent>
 
             <TabsContent value="vms">
-              {clusterId !== undefined && failedClusterIds.includes(clusterId) && (
-                <InventoryUnavailableNote />
-              )}
+              {clusterId !== undefined &&
+                failedClusterIds.includes(clusterId) && (
+                  <InventoryUnavailableNote />
+                )}
               <ResourceTable data={clusterVmRows} />
             </TabsContent>
 

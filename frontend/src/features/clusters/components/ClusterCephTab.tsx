@@ -92,17 +92,13 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
             Monitors ({status.monmap.num_mons})
           </TabsTrigger>
           {filesystems.length > 0 && (
-            <TabsTrigger value="fs">
-              CephFS ({filesystems.length})
-            </TabsTrigger>
+            <TabsTrigger value="fs">CephFS ({filesystems.length})</TabsTrigger>
           )}
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
           <CephMetricsChart clusterId={clusterId} status={status} />
-          {osds.length > 0 && (
-            <CrushTree osds={osds} crushRules={crushRules} />
-          )}
+          {osds.length > 0 && <CrushTree osds={osds} crushRules={crushRules} />}
         </TabsContent>
 
         <TabsContent value="osds" className="space-y-4">
@@ -131,16 +127,24 @@ export function ClusterCephTab({ clusterId }: ClusterCephTabProps) {
                 <thead>
                   <tr className="border-b bg-muted/30">
                     <th className="px-4 py-2 text-left font-medium">Name</th>
-                    <th className="px-4 py-2 text-left font-medium">Metadata Pool</th>
-                    <th className="px-4 py-2 text-left font-medium">Data Pool</th>
+                    <th className="px-4 py-2 text-left font-medium">
+                      Metadata Pool
+                    </th>
+                    <th className="px-4 py-2 text-left font-medium">
+                      Data Pool
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {filesystems.map((fs) => (
                     <tr key={fs.name} className="border-b">
                       <td className="px-4 py-2 font-medium">{fs.name}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{fs.metadata_pool}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{fs.data_pool}</td>
+                      <td className="px-4 py-2 text-muted-foreground">
+                        {fs.metadata_pool}
+                      </td>
+                      <td className="px-4 py-2 text-muted-foreground">
+                        {fs.data_pool}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

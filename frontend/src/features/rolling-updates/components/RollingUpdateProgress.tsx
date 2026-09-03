@@ -12,7 +12,12 @@ import {
   useResumeRollingUpdateJob,
   useCancelRollingUpdateJob,
 } from "../api/rolling-update-queries";
-import type { RollingUpdateNode, AptPackage, GuestSnapshot, HAConflict } from "@/types/api";
+import type {
+  RollingUpdateNode,
+  AptPackage,
+  GuestSnapshot,
+  HAConflict,
+} from "@/types/api";
 import {
   Loader2,
   ArrowLeft,
@@ -110,7 +115,9 @@ function NodeRow({
     <div className="rounded-md border">
       <div
         className="flex cursor-pointer items-center gap-3 p-3"
-        onClick={() => { setExpanded(!expanded); }}
+        onClick={() => {
+          setExpanded(!expanded);
+        }}
       >
         {expanded ? (
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -163,7 +170,9 @@ function NodeRow({
             <p className="text-sm text-destructive">{node.failure_reason}</p>
           )}
           {node.skip_reason && (
-            <p className="text-sm text-muted-foreground">Skipped: {node.skip_reason}</p>
+            <p className="text-sm text-muted-foreground">
+              Skipped: {node.skip_reason}
+            </p>
           )}
 
           {guests.length > 0 && (
@@ -172,7 +181,8 @@ function NodeRow({
                 Guests ({guests.length})
                 {guests.some((g) => g.passthrough) && (
                   <span className="ml-2 text-amber-500">
-                    {guests.filter((g) => g.passthrough).length} with passthrough
+                    {guests.filter((g) => g.passthrough).length} with
+                    passthrough
                   </span>
                 )}
               </p>
@@ -289,7 +299,9 @@ function HAWarningsCard({
     <Card>
       <div
         className="flex cursor-pointer items-center gap-2 px-4 py-3"
-        onClick={() => { setExpanded(!expanded); }}
+        onClick={() => {
+          setExpanded(!expanded);
+        }}
       >
         <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
         <span className="text-sm font-medium">
@@ -304,7 +316,10 @@ function HAWarningsCard({
           </Badge>
         )}
         {warnCount > 0 && (
-          <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-500">
+          <Badge
+            variant="outline"
+            className="border-amber-500/50 text-xs text-amber-500"
+          >
             {warnCount} warning{warnCount > 1 ? "s" : ""}
           </Badge>
         )}
@@ -415,7 +430,9 @@ export function RollingUpdateProgress({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => { pauseJob.mutate({ clusterId, jobId }); }}
+              onClick={() => {
+                pauseJob.mutate({ clusterId, jobId });
+              }}
               disabled={pauseJob.isPending}
             >
               <Pause className="mr-1 h-3 w-3" />
@@ -426,7 +443,9 @@ export function RollingUpdateProgress({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => { resumeJob.mutate({ clusterId, jobId }); }}
+              onClick={() => {
+                resumeJob.mutate({ clusterId, jobId });
+              }}
               disabled={resumeJob.isPending}
             >
               <Play className="mr-1 h-3 w-3" />
@@ -438,7 +457,9 @@ export function RollingUpdateProgress({
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => { cancelJob.mutate({ clusterId, jobId }); }}
+                onClick={() => {
+                  cancelJob.mutate({ clusterId, jobId });
+                }}
                 disabled={cancelJob.isPending}
               >
                 <XCircle className="mr-1 h-3 w-3" />

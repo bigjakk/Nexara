@@ -192,7 +192,9 @@ export function buildTopologyGraph(
           position: { x: 0, y: 0 },
           data: {
             kind: "guest",
-            label: vm.name || `${vm.type === "qemu" ? "VM" : "CT"} ${String(vm.vmid)}`,
+            label:
+              vm.name ||
+              `${vm.type === "qemu" ? "VM" : "CT"} ${String(vm.vmid)}`,
             vmid: vm.vmid,
             type: vm.type as "qemu" | "lxc",
             status: vm.status,
@@ -254,7 +256,10 @@ export function buildTopologyGraph(
             source: clusterNodeId,
             target: storageNodeId,
             type: "smoothstep",
-            style: { stroke: sp.active ? "#10b981" : "#6b7280", strokeDasharray: "5,5" },
+            style: {
+              stroke: sp.active ? "#10b981" : "#6b7280",
+              strokeDasharray: "5,5",
+            },
           });
         } else {
           // Connect local storage to its host node
@@ -264,7 +269,10 @@ export function buildTopologyGraph(
             source: parentHostId,
             target: storageNodeId,
             type: "smoothstep",
-            style: { stroke: sp.active ? "#10b981" : "#6b7280", strokeDasharray: "5,5" },
+            style: {
+              stroke: sp.active ? "#10b981" : "#6b7280",
+              strokeDasharray: "5,5",
+            },
           });
         }
       }

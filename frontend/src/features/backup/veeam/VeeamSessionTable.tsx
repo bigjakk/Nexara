@@ -145,7 +145,9 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
     label: "Mode",
     width: 130,
     sortValue: (session) => session.algorithm || null,
-    cell: (session) => <span className="text-sm">{session.algorithm || "—"}</span>,
+    cell: (session) => (
+      <span className="text-sm">{session.algorithm || "—"}</span>
+    ),
   },
   {
     key: "started",

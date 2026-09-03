@@ -115,31 +115,47 @@ describe("VMGuestToolsCard", () => {
   // Forcing must stay available on a current guest, for repairing a broken
   // driver install.
   it("offers a reinstall when the guest is already up to date", () => {
-    mount({ installed_version: "0.1.302", up_to_date: true, needs_update: false });
-    expect(screen.getByRole("button", { name: /Reinstall at next boot/i })).toBeEnabled();
+    mount({
+      installed_version: "0.1.302",
+      up_to_date: true,
+      needs_update: false,
+    });
+    expect(
+      screen.getByRole("button", { name: /Reinstall at next boot/i }),
+    ).toBeEnabled();
   });
 
   it("offers an install when the guest has no tools at all", () => {
     mount({ installed_version: "", up_to_date: false, needs_update: false });
-    expect(screen.getByRole("button", { name: /Install at next boot/i })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: /Install at next boot/i }),
+    ).toBeEnabled();
   });
 
   it("swaps to cancel while an update is staged", () => {
     mount({ stage: "staged", staged_version: "0.1.302-1" });
-    expect(screen.getByRole("button", { name: /Cancel staged update/i })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: /at next boot/i })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Cancel staged update/i }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: /at next boot/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("disables actions on a stopped guest but still shows its last known state", () => {
     mount({ status: "stopped" });
     expect(screen.getByText("0.1.285")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Re-check/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /at next boot/i })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /at next boot/i }),
+    ).toBeDisabled();
   });
 
   it("disables actions without permission", () => {
     mount({}, { canDo: false });
-    expect(screen.getByRole("button", { name: /at next boot/i })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /at next boot/i }),
+    ).toBeDisabled();
   });
 
   // A reboot-required note is not a failure and must not read as one.

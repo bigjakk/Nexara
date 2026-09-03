@@ -44,7 +44,10 @@ function ExpandedScanRow({
   if (!data) {
     return (
       <tr>
-        <td colSpan={7} className="px-4 py-3 text-center text-sm text-muted-foreground">
+        <td
+          colSpan={7}
+          className="px-4 py-3 text-center text-sm text-muted-foreground"
+        >
           <Loader2 className="mx-auto h-4 w-4 animate-spin" />
         </td>
       </tr>
@@ -132,7 +135,9 @@ export function ScanHistoryTable({
             <tbody key={scan.id}>
               <tr
                 className="cursor-pointer border-b transition-colors hover:bg-muted/50"
-                onClick={() => { setExpandedId(isExpanded ? null : scan.id); }}
+                onClick={() => {
+                  setExpandedId(isExpanded ? null : scan.id);
+                }}
               >
                 <td className="px-4 py-3">
                   {isExpanded ? (
@@ -154,13 +159,19 @@ export function ScanHistoryTable({
                 <td className="px-4 py-3">
                   <div className="flex gap-1">
                     {scan.critical_count > 0 && (
-                      <SeverityBadge severity="critical" count={scan.critical_count} />
+                      <SeverityBadge
+                        severity="critical"
+                        count={scan.critical_count}
+                      />
                     )}
                     {scan.high_count > 0 && (
                       <SeverityBadge severity="high" count={scan.high_count} />
                     )}
                     {scan.medium_count > 0 && (
-                      <SeverityBadge severity="medium" count={scan.medium_count} />
+                      <SeverityBadge
+                        severity="medium"
+                        count={scan.medium_count}
+                      />
                     )}
                     {scan.low_count > 0 && (
                       <SeverityBadge severity="low" count={scan.low_count} />

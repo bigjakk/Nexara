@@ -34,9 +34,7 @@ export function EditPBSServerDialog({
   const [apiUrl, setApiUrl] = useState(server.api_url);
   const [tokenId, setTokenId] = useState(server.token_id);
   const [tokenSecret, setTokenSecret] = useState("");
-  const [tlsFingerprint, setTlsFingerprint] = useState(
-    server.tls_fingerprint,
-  );
+  const [tlsFingerprint, setTlsFingerprint] = useState(server.tls_fingerprint);
   const [clusterId, setClusterId] = useState(server.cluster_id ?? "");
 
   const [privateWarning, setPrivateWarning] =
@@ -120,8 +118,7 @@ export function EditPBSServerDialog({
         <DialogHeader>
           <DialogTitle>Edit PBS Server</DialogTitle>
           <DialogDescription>
-            Update the connection settings for{" "}
-            <strong>{server.name}</strong>.
+            Update the connection settings for <strong>{server.name}</strong>.
           </DialogDescription>
         </DialogHeader>
 
@@ -230,7 +227,9 @@ export function EditPBSServerDialog({
               ip={privateWarning.ip}
               url={apiUrl}
               onConfirm={handleConfirmPrivate}
-              onCancel={() => { setPrivateWarning(null); }}
+              onCancel={() => {
+                setPrivateWarning(null);
+              }}
               pending={updatePBS.isPending}
             />
           )}

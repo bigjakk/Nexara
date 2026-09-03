@@ -50,9 +50,7 @@ export function NodeAptRepositories({ clusterId, nodeName }: Props) {
           <Package className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-lg font-semibold">APT Repositories</h2>
         </div>
-        <p className="text-sm text-destructive">
-          Failed to load repositories
-        </p>
+        <p className="text-sm text-destructive">Failed to load repositories</p>
       </div>
     );
   }
@@ -168,9 +166,7 @@ function RepositoryFileCard({
             repo={repo}
             filePath={file.path}
             index={index}
-            info={infos.find(
-              (i) => i.path === file.path && i.index === index,
-            )}
+            info={infos.find((i) => i.path === file.path && i.index === index)}
             canEdit={canEdit}
             onToggle={onToggle}
             isToggling={isToggling}
@@ -235,9 +231,7 @@ function RepositoryRow({
           )}
         </div>
         {repo.Comment && (
-          <p className="text-xs italic text-muted-foreground">
-            {repo.Comment}
-          </p>
+          <p className="text-xs italic text-muted-foreground">{repo.Comment}</p>
         )}
         {info && (
           <p className="text-xs text-muted-foreground">{info.message}</p>

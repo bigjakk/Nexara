@@ -105,7 +105,10 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
         // (disconnect()+connect() during a slow mint). Opening a socket in
         // either case would orphan a duplicate connection whose callbacks
         // then fight the live one's state.
-        if (get().status === "disconnected" || get().pendingConnect !== pending) {
+        if (
+          get().status === "disconnected" ||
+          get().pendingConnect !== pending
+        ) {
           return;
         }
 
@@ -206,7 +209,10 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
         // disconnect() between `new WebSocket()` and here would have only
         // seen socket: null; the freshly-created `ws` would orphan with no
         // close path. Re-check and clean up if anything flipped underneath.
-        if (get().status === "disconnected" || get().pendingConnect !== pending) {
+        if (
+          get().status === "disconnected" ||
+          get().pendingConnect !== pending
+        ) {
           ws.close();
           return;
         }

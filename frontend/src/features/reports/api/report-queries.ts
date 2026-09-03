@@ -7,8 +7,7 @@ import type { ReportSchedule, ReportRun } from "@/types/api";
 export function useReportSchedules() {
   return useQuery({
     queryKey: ["report-schedules"],
-    queryFn: () =>
-      apiClient.list<ReportSchedule>("/api/v1/reports/schedules"),
+    queryFn: () => apiClient.list<ReportSchedule>("/api/v1/reports/schedules"),
   });
 }
 

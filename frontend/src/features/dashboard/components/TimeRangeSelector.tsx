@@ -25,7 +25,9 @@ export function TimeRangeSelector({ value, onChange }: TimeRangeSelectorProps) {
             variant={range === value ? "default" : "ghost"}
             size="sm"
             className="h-7 px-2 text-xs"
-            onClick={() => { onChange(range); }}
+            onClick={() => {
+              onChange(range);
+            }}
             data-testid={`range-${range}`}
           >
             {range === "live" && (

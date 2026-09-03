@@ -60,8 +60,7 @@ export function useUpdateRole() {
 export function useDeleteRole() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/rbac/roles/${id}`),
+    mutationFn: (id: string) => apiClient.delete(`/api/v1/rbac/roles/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["rbac", "roles"] });
     },
@@ -73,8 +72,7 @@ export function useDeleteRole() {
 export function usePermissionCatalog() {
   return useQuery({
     queryKey: ["rbac", "permissions"],
-    queryFn: () =>
-      apiClient.list<RBACPermission>("/api/v1/rbac/permissions"),
+    queryFn: () => apiClient.list<RBACPermission>("/api/v1/rbac/permissions"),
   });
 }
 
@@ -100,8 +98,7 @@ export function useAssignRole() {
       role_id: string;
       scope_type: string;
       scope_id?: string;
-    }) =>
-      apiClient.post(`/api/v1/rbac/users/${userId}/roles`, data),
+    }) => apiClient.post(`/api/v1/rbac/users/${userId}/roles`, data),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
         queryKey: ["rbac", "user-roles", vars.userId],
@@ -121,9 +118,7 @@ export function useRevokeRole() {
       userId: string;
       assignmentId: string;
     }) =>
-      apiClient.delete(
-        `/api/v1/rbac/users/${userId}/roles/${assignmentId}`,
-      ),
+      apiClient.delete(`/api/v1/rbac/users/${userId}/roles/${assignmentId}`),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
         queryKey: ["rbac", "user-roles", vars.userId],
@@ -187,8 +182,7 @@ export function useUpdateUser() {
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      apiClient.delete(`/api/v1/users/${id}`),
+    mutationFn: (id: string) => apiClient.delete(`/api/v1/users/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["admin", "users"] });
     },

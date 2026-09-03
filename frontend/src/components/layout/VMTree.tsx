@@ -25,7 +25,10 @@ import { StatusIcon } from "@/components/StatusIcon";
 import { OSIcon } from "@/components/OSIcon";
 import { classifyOS } from "@/lib/os-classify";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { useClusterVMs, useClusterNodes } from "@/features/clusters/api/cluster-queries";
+import {
+  useClusterVMs,
+  useClusterNodes,
+} from "@/features/clusters/api/cluster-queries";
 import {
   useVMFolders,
   useDeleteVMFolder,
@@ -46,7 +49,9 @@ import type { ClusterResponse, VMFolder, VMResponse } from "@/types/api";
 
 function VMIcon({ type, template }: { type: string; template?: boolean }) {
   if (template) {
-    return <FileBox className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
+    return (
+      <FileBox className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+    );
   }
   if (type === "lxc") {
     return <Container className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
@@ -85,7 +90,9 @@ function VMLeaf({ vm, clusterId }: VMLeafProps) {
       }}
     >
       <button
-        onClick={() => { void navigate(path); }}
+        onClick={() => {
+          void navigate(path);
+        }}
         className={cn(
           "flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-accent/50 transition-colors",
           active && "bg-primary/10 text-foreground",
@@ -212,17 +219,27 @@ function FolderBranch({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-44">
-          <ContextMenuItem onClick={() => { onNewSubfolder(node.folder); }}>
+          <ContextMenuItem
+            onClick={() => {
+              onNewSubfolder(node.folder);
+            }}
+          >
             <FolderPlus className="mr-2 h-3.5 w-3.5" />
             New subfolder
           </ContextMenuItem>
-          <ContextMenuItem onClick={() => { onRename(node.folder); }}>
+          <ContextMenuItem
+            onClick={() => {
+              onRename(node.folder);
+            }}
+          >
             <Pencil className="mr-2 h-3.5 w-3.5" />
             Rename
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem
-            onClick={() => { onDelete(node.folder); }}
+            onClick={() => {
+              onDelete(node.folder);
+            }}
             className="text-destructive focus:text-destructive"
           >
             <Trash2 className="mr-2 h-3.5 w-3.5" />
@@ -321,7 +338,9 @@ function UnassignedBranch({ vms, clusterId }: UnassignedBranchProps) {
         )}
       >
         <button
-          onClick={() => { toggleNode(key); }}
+          onClick={() => {
+            toggleNode(key);
+          }}
           className="shrink-0"
         >
           <ChevronRight
@@ -344,7 +363,9 @@ function UnassignedBranch({ vms, clusterId }: UnassignedBranchProps) {
           className="flex min-w-0 flex-1 items-center gap-1.5"
         >
           <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-          <span className="truncate italic text-muted-foreground">Discovered</span>
+          <span className="truncate italic text-muted-foreground">
+            Discovered
+          </span>
           <span className="ml-auto text-[10px] text-muted-foreground/70">
             {vms.length}
           </span>
@@ -367,7 +388,11 @@ function UnassignedBranch({ vms, clusterId }: UnassignedBranchProps) {
 
 interface VMClusterBranchProps {
   cluster: ClusterResponse;
-  openCreateAt: (parentId: string | null, label: string, clusterId: string) => void;
+  openCreateAt: (
+    parentId: string | null,
+    label: string,
+    clusterId: string,
+  ) => void;
   openRename: (folder: VMFolder, clusterId: string) => void;
   openDelete: (folder: VMFolder, clusterId: string) => void;
 }
@@ -391,7 +416,9 @@ function VMClusterBranch({
   useEffect(() => {
     if (
       location.pathname.startsWith(`/clusters/${cluster.id}/`) ||
-      location.pathname.match(new RegExp(`^/inventory/(qemu|lxc)/${cluster.id}/`))
+      location.pathname.match(
+        new RegExp(`^/inventory/(qemu|lxc)/${cluster.id}/`),
+      )
     ) {
       expandNode(clusterKey);
     }
@@ -433,7 +460,9 @@ function VMClusterBranch({
             )}
           >
             <button
-              onClick={() => { toggleNode(clusterKey); }}
+              onClick={() => {
+                toggleNode(clusterKey);
+              }}
               className="shrink-0"
             >
               <ChevronRight
@@ -444,11 +473,15 @@ function VMClusterBranch({
               />
             </button>
             <button
-              onClick={() => { void navigate(`/clusters/${cluster.id}`); }}
+              onClick={() => {
+                void navigate(`/clusters/${cluster.id}`);
+              }}
               className="flex min-w-0 flex-1 items-center gap-1.5"
             >
               <StatusIcon
-                status={cluster.status === "degraded" ? "degraded" : cluster.status}
+                status={
+                  cluster.status === "degraded" ? "degraded" : cluster.status
+                }
               />
               <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
               <span className="truncate font-medium">{cluster.name}</span>
@@ -466,8 +499,12 @@ function VMClusterBranch({
                   onNewSubfolder={(parent) => {
                     openCreateAt(parent.id, parent.name, cluster.id);
                   }}
-                  onRename={(folder) => { openRename(folder, cluster.id); }}
-                  onDelete={(folder) => { openDelete(folder, cluster.id); }}
+                  onRename={(folder) => {
+                    openRename(folder, cluster.id);
+                  }}
+                  onDelete={(folder) => {
+                    openDelete(folder, cluster.id);
+                  }}
                 />
               ))}
               <UnassignedBranch vms={unassigned} clusterId={cluster.id} />
@@ -477,7 +514,9 @@ function VMClusterBranch({
       </ContextMenuTrigger>
       <ContextMenuContent className="w-44">
         <ContextMenuItem
-          onClick={() => { openCreateAt(null, cluster.name, cluster.id); }}
+          onClick={() => {
+            openCreateAt(null, cluster.name, cluster.id);
+          }}
         >
           <FolderPlus className="mr-2 h-3.5 w-3.5" />
           New folder
@@ -511,7 +550,11 @@ export function VMTree() {
     clusterId: string;
   } | null>(null);
 
-  function openCreateAt(parentId: string | null, label: string, clusterId: string) {
+  function openCreateAt(
+    parentId: string | null,
+    label: string,
+    clusterId: string,
+  ) {
     setCreateCtx({ parentId, label, clusterId });
     setCreateOpen(true);
   }
@@ -559,7 +602,6 @@ export function VMTree() {
           openDelete={openDelete}
         />
       ))}
-
 
       {createCtx && (
         <CreateFolderDialog

@@ -3,7 +3,11 @@ import { Check, ChevronsUpDown, Loader2, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Command,
   CommandEmpty,
@@ -56,8 +60,12 @@ export function ISCSITargetField({
   // Debounced so scanning follows a typed-out portal, not each keystroke of one.
   useEffect(() => {
     const trimmed = portal.trim();
-    const timer = setTimeout(() => { setDebouncedPortal(trimmed); }, SCAN_DEBOUNCE_MS);
-    return () => { clearTimeout(timer); };
+    const timer = setTimeout(() => {
+      setDebouncedPortal(trimmed);
+    }, SCAN_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+    };
   }, [portal]);
 
   const scan = useISCSITargets(clusterId, debouncedPortal);
@@ -113,13 +121,23 @@ export function ISCSITargetField({
               aria-expanded={open}
               className="min-w-0 flex-1 justify-between font-normal"
             >
-              <span className={cn("truncate", value === "" && "text-muted-foreground")}>
-                {value === "" ? (placeholder ?? "Select or enter a target IQN") : value}
+              <span
+                className={cn(
+                  "truncate",
+                  value === "" && "text-muted-foreground",
+                )}
+              >
+                {value === ""
+                  ? (placeholder ?? "Select or enter a target IQN")
+                  : value}
               </span>
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
+          <PopoverContent
+            className="w-(--radix-popover-trigger-width) p-0"
+            align="start"
+          >
             <Command shouldFilter>
               <CommandInput
                 placeholder="Search or type an IQN..."
@@ -128,7 +146,9 @@ export function ISCSITargetField({
               />
               <CommandList>
                 <CommandEmpty>
-                  {scan.isFetching ? "Scanning portal..." : "No targets discovered"}
+                  {scan.isFetching
+                    ? "Scanning portal..."
+                    : "No targets discovered"}
                 </CommandEmpty>
                 {targets.length > 0 && (
                   <CommandGroup heading="Discovered targets">
@@ -136,7 +156,9 @@ export function ISCSITargetField({
                       <CommandItem
                         key={t.target}
                         value={t.target}
-                        onSelect={() => { select(t.target, true); }}
+                        onSelect={() => {
+                          select(t.target, true);
+                        }}
                       >
                         <Check
                           className={cn(
@@ -144,7 +166,9 @@ export function ISCSITargetField({
                             value === t.target ? "opacity-100" : "opacity-0",
                           )}
                         />
-                        <span className="truncate font-mono text-xs">{t.target}</span>
+                        <span className="truncate font-mono text-xs">
+                          {t.target}
+                        </span>
                       </CommandItem>
                     ))}
                   </CommandGroup>
@@ -153,11 +177,17 @@ export function ISCSITargetField({
                   <CommandGroup heading="Manual entry">
                     <CommandItem
                       value={trimmedSearch}
-                      onSelect={() => { select(trimmedSearch, false); }}
+                      onSelect={() => {
+                        select(trimmedSearch, false);
+                      }}
                     >
                       <Check className="mr-2 h-4 w-4 shrink-0 opacity-0" />
                       <span className="truncate">
-                        Use &quot;<span className="font-mono text-xs">{trimmedSearch}</span>&quot;
+                        Use &quot;
+                        <span className="font-mono text-xs">
+                          {trimmedSearch}
+                        </span>
+                        &quot;
                       </span>
                     </CommandItem>
                   </CommandGroup>
@@ -173,7 +203,9 @@ export function ISCSITargetField({
           title="Rescan portal"
           aria-label="Rescan portal"
           disabled={portal.trim() === "" || scan.isFetching}
-          onClick={() => { void scan.refetch(); }}
+          onClick={() => {
+            void scan.refetch();
+          }}
         >
           {scan.isFetching ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -201,7 +233,13 @@ interface ScanStatusProps {
   hasResult: boolean;
 }
 
-function ScanStatus({ portal, isFetching, error, targetCount, hasResult }: ScanStatusProps) {
+function ScanStatus({
+  portal,
+  isFetching,
+  error,
+  targetCount,
+  hasResult,
+}: ScanStatusProps) {
   if (portal.trim() === "") {
     return (
       <p className="text-xs text-muted-foreground">
@@ -220,8 +258,9 @@ function ScanStatus({ portal, isFetching, error, targetCount, hasResult }: ScanS
   if (error) {
     return (
       <p className="text-xs text-amber-500">
-        Discovery failed ({error instanceof Error ? error.message : "unknown error"}). Enter
-        the target IQN manually.
+        Discovery failed (
+        {error instanceof Error ? error.message : "unknown error"}). Enter the
+        target IQN manually.
       </p>
     );
   }
@@ -235,7 +274,8 @@ function ScanStatus({ portal, isFetching, error, targetCount, hasResult }: ScanS
   if (hasResult) {
     return (
       <p className="text-xs text-muted-foreground">
-        {targetCount} target{targetCount === 1 ? "" : "s"} discovered on this portal.
+        {targetCount} target{targetCount === 1 ? "" : "s"} discovered on this
+        portal.
       </p>
     );
   }
@@ -257,7 +297,12 @@ interface NodeRestrictionFieldProps {
  * Falls back to a text input when the node list can't be loaded, so a cluster
  * that is unreachable at this moment doesn't cost the operator the field.
  */
-export function NodeRestrictionField({ id, clusterId, value, onChange }: NodeRestrictionFieldProps) {
+export function NodeRestrictionField({
+  id,
+  clusterId,
+  value,
+  onChange,
+}: NodeRestrictionFieldProps) {
   const [open, setOpen] = useState(false);
   const nodesQuery = useClusterNodes(clusterId);
 
@@ -280,7 +325,9 @@ export function NodeRestrictionField({ id, clusterId, value, onChange }: NodeRes
       <Input
         id={id}
         value={value}
-        onChange={(e) => { onChange(e.target.value); }}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
         placeholder="node1,node2 (leave empty for all)"
       />
     );
@@ -298,7 +345,9 @@ export function NodeRestrictionField({ id, clusterId, value, onChange }: NodeRes
             disabled={nodesQuery.isLoading}
             className="w-full justify-between font-normal"
           >
-            <span className={cn(selected.length === 0 && "text-muted-foreground")}>
+            <span
+              className={cn(selected.length === 0 && "text-muted-foreground")}
+            >
               {selected.length === 0
                 ? "All (no restrictions)"
                 : `${String(selected.length)} node${selected.length === 1 ? "" : "s"} selected`}
@@ -306,7 +355,10 @@ export function NodeRestrictionField({ id, clusterId, value, onChange }: NodeRes
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-(--radix-popover-trigger-width) p-0" align="start">
+        <PopoverContent
+          className="w-(--radix-popover-trigger-width) p-0"
+          align="start"
+        >
           <Command>
             <CommandInput placeholder="Search nodes..." />
             <CommandList>
@@ -316,12 +368,16 @@ export function NodeRestrictionField({ id, clusterId, value, onChange }: NodeRes
                   <CommandItem
                     key={node.id}
                     value={node.name}
-                    onSelect={() => { toggle(node.name); }}
+                    onSelect={() => {
+                      toggle(node.name);
+                    }}
                   >
                     <Check
                       className={cn(
                         "mr-2 h-4 w-4 shrink-0",
-                        selected.includes(node.name) ? "opacity-100" : "opacity-0",
+                        selected.includes(node.name)
+                          ? "opacity-100"
+                          : "opacity-0",
                       )}
                     />
                     <span className="mr-2 truncate">{node.name}</span>
@@ -346,7 +402,9 @@ export function NodeRestrictionField({ id, clusterId, value, onChange }: NodeRes
               <button
                 type="button"
                 aria-label={`Remove ${name}`}
-                onClick={() => { toggle(name); }}
+                onClick={() => {
+                  toggle(name);
+                }}
                 className="rounded-sm hover:text-destructive"
               >
                 <X className="h-3 w-3" />

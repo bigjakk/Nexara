@@ -30,18 +30,16 @@ function loadPersistedState(): SidebarState {
         const obj = parsed as Record<string, unknown>;
         const persp = obj["perspective"];
         return {
-          collapsed: typeof obj["collapsed"] === "boolean" ? obj["collapsed"] : false,
-          treeVisible: typeof obj["treeVisible"] === "boolean" ? obj["treeVisible"] : true,
+          collapsed:
+            typeof obj["collapsed"] === "boolean" ? obj["collapsed"] : false,
+          treeVisible:
+            typeof obj["treeVisible"] === "boolean" ? obj["treeVisible"] : true,
           expandedNodes: Array.isArray(obj["expandedNodes"])
             ? new Set(obj["expandedNodes"] as string[])
             : new Set<string>(),
           width: typeof obj["width"] === "number" ? obj["width"] : 240,
           perspective:
-            persp === "storage"
-              ? "storage"
-              : persp === "vms"
-                ? "vms"
-                : "hosts",
+            persp === "storage" ? "storage" : persp === "vms" ? "vms" : "hosts",
         };
       }
     }

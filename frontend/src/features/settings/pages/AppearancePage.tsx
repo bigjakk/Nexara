@@ -38,24 +38,77 @@ const themeModes = [
 ] as const;
 
 const accentColors = [
-  { name: "default", labelKey: "colorDefault", hsl: "240 5.9% 10%", darkHsl: "0 0% 98%" },
-  { name: "blue", labelKey: "colorBlue", hsl: "221 83% 53%", darkHsl: "217 91% 60%" },
-  { name: "green", labelKey: "colorGreen", hsl: "142 71% 45%", darkHsl: "142 71% 45%" },
-  { name: "purple", labelKey: "colorPurple", hsl: "262 83% 58%", darkHsl: "262 83% 58%" },
-  { name: "orange", labelKey: "colorOrange", hsl: "25 95% 53%", darkHsl: "25 95% 53%" },
+  {
+    name: "default",
+    labelKey: "colorDefault",
+    hsl: "240 5.9% 10%",
+    darkHsl: "0 0% 98%",
+  },
+  {
+    name: "blue",
+    labelKey: "colorBlue",
+    hsl: "221 83% 53%",
+    darkHsl: "217 91% 60%",
+  },
+  {
+    name: "green",
+    labelKey: "colorGreen",
+    hsl: "142 71% 45%",
+    darkHsl: "142 71% 45%",
+  },
+  {
+    name: "purple",
+    labelKey: "colorPurple",
+    hsl: "262 83% 58%",
+    darkHsl: "262 83% 58%",
+  },
+  {
+    name: "orange",
+    labelKey: "colorOrange",
+    hsl: "25 95% 53%",
+    darkHsl: "25 95% 53%",
+  },
   { name: "red", labelKey: "colorRed", hsl: "0 72% 51%", darkHsl: "0 72% 51%" },
-  { name: "pink", labelKey: "colorPink", hsl: "330 81% 60%", darkHsl: "330 81% 60%" },
-  { name: "teal", labelKey: "colorTeal", hsl: "173 80% 40%", darkHsl: "173 80% 40%" },
-  { name: "cyan", labelKey: "colorCyan", hsl: "189 94% 43%", darkHsl: "189 94% 43%" },
-  { name: "amber", labelKey: "colorAmber", hsl: "38 92% 50%", darkHsl: "38 92% 50%" },
+  {
+    name: "pink",
+    labelKey: "colorPink",
+    hsl: "330 81% 60%",
+    darkHsl: "330 81% 60%",
+  },
+  {
+    name: "teal",
+    labelKey: "colorTeal",
+    hsl: "173 80% 40%",
+    darkHsl: "173 80% 40%",
+  },
+  {
+    name: "cyan",
+    labelKey: "colorCyan",
+    hsl: "189 94% 43%",
+    darkHsl: "189 94% 43%",
+  },
+  {
+    name: "amber",
+    labelKey: "colorAmber",
+    hsl: "38 92% 50%",
+    darkHsl: "38 92% 50%",
+  },
 ] as const;
 
-const byteUnitOptions: { value: ByteUnit; labelKey: string; exampleKey: string }[] = [
+const byteUnitOptions: {
+  value: ByteUnit;
+  labelKey: string;
+  exampleKey: string;
+}[] = [
   { value: "binary", labelKey: "binaryGiB", exampleKey: "binaryExample" },
   { value: "decimal", labelKey: "decimalGB", exampleKey: "decimalExample" },
 ];
 
-const dateFormatOptions: { value: DateFormat; labelKey: string; exampleKey: string }[] = [
+const dateFormatOptions: {
+  value: DateFormat;
+  labelKey: string;
+  exampleKey: string;
+}[] = [
   { value: "relative", labelKey: "relative", exampleKey: "relativeExample" },
   { value: "iso", labelKey: "iso8601", exampleKey: "isoExample" },
   { value: "locale", labelKey: "local", exampleKey: "localeExample" },
@@ -111,9 +164,7 @@ export function AppearancePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">{t("appearance")}</h1>
-        <p className="text-muted-foreground">
-          {t("customizeLookAndFeel")}
-        </p>
+        <p className="text-muted-foreground">{t("customizeLookAndFeel")}</p>
       </div>
 
       {/* Language */}
@@ -123,14 +174,14 @@ export function AppearancePage() {
             <Globe className="h-5 w-5" />
             {t("language")}
           </CardTitle>
-          <CardDescription>
-            {t("selectLanguage")}
-          </CardDescription>
+          <CardDescription>{t("selectLanguage")}</CardDescription>
         </CardHeader>
         <CardContent>
           <Select
             value={preferences.language}
-            onValueChange={(v) => { savePreferences({ language: v }); }}
+            onValueChange={(v) => {
+              savePreferences({ language: v });
+            }}
           >
             <SelectTrigger className="w-64">
               <SelectValue />
@@ -155,9 +206,7 @@ export function AppearancePage() {
       <Card>
         <CardHeader>
           <CardTitle>{t("theme")}</CardTitle>
-          <CardDescription>
-            {t("chooseLightDarkMode")}
-          </CardDescription>
+          <CardDescription>{t("chooseLightDarkMode")}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex gap-3">
@@ -166,7 +215,9 @@ export function AppearancePage() {
                 key={value}
                 variant={themeMode === value ? "default" : "outline"}
                 className="flex-1 gap-2"
-                onClick={() => { setThemeMode(value); }}
+                onClick={() => {
+                  setThemeMode(value);
+                }}
               >
                 <Icon className="h-4 w-4" />
                 {t(labelKey)}
@@ -183,16 +234,16 @@ export function AppearancePage() {
             <Palette className="h-5 w-5" />
             {t("accentColor")}
           </CardTitle>
-          <CardDescription>
-            {t("chooseAccentColor")}
-          </CardDescription>
+          <CardDescription>{t("chooseAccentColor")}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-5 gap-3 sm:grid-cols-10">
             {accentColors.map((color) => (
               <button
                 key={color.name}
-                onClick={() => { handleAccentChange(color.name); }}
+                onClick={() => {
+                  handleAccentChange(color.name);
+                }}
                 className={cn(
                   "group relative flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all hover:scale-110",
                   preferences.accentColor === color.name
@@ -215,9 +266,7 @@ export function AppearancePage() {
       <Card>
         <CardHeader>
           <CardTitle>{t("displayPreferences")}</CardTitle>
-          <CardDescription>
-            {t("configureDataDisplay")}
-          </CardDescription>
+          <CardDescription>{t("configureDataDisplay")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Byte Units */}
@@ -225,7 +274,9 @@ export function AppearancePage() {
             <Label>{t("storageUnits")}</Label>
             <Select
               value={preferences.byteUnit}
-              onValueChange={(v) => { savePreferences({ byteUnit: v as ByteUnit }); }}
+              onValueChange={(v) => {
+                savePreferences({ byteUnit: v as ByteUnit });
+              }}
             >
               <SelectTrigger className="w-64">
                 <SelectValue />
@@ -248,7 +299,9 @@ export function AppearancePage() {
             <Label>{t("dateFormat")}</Label>
             <Select
               value={preferences.dateFormat}
-              onValueChange={(v) => { savePreferences({ dateFormat: v as DateFormat }); }}
+              onValueChange={(v) => {
+                savePreferences({ dateFormat: v as DateFormat });
+              }}
             >
               <SelectTrigger className="w-64">
                 <SelectValue />
@@ -271,7 +324,9 @@ export function AppearancePage() {
             <Label>{t("defaultRefreshInterval")}</Label>
             <Select
               value={String(preferences.refreshInterval)}
-              onValueChange={(v) => { savePreferences({ refreshInterval: Number(v) }); }}
+              onValueChange={(v) => {
+                savePreferences({ refreshInterval: Number(v) });
+              }}
             >
               <SelectTrigger className="w-64">
                 <SelectValue />

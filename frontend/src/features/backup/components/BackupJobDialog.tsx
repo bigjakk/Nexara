@@ -26,10 +26,7 @@ import {
 } from "@/features/clusters/api/cluster-queries";
 import { useResourcePools } from "@/features/pools/api/pool-queries";
 import { formatBytes } from "@/lib/format";
-import {
-  useCreateBackupJob,
-  useUpdateBackupJob,
-} from "../api/backup-queries";
+import { useCreateBackupJob, useUpdateBackupJob } from "../api/backup-queries";
 import type { BackupJob, BackupJobParams } from "../types/backup";
 import { GuestMultiSelect } from "./GuestMultiSelect";
 import { ScheduleBuilder } from "./ScheduleBuilder";
@@ -189,12 +186,20 @@ export function BackupJobDialog({
     if (job) {
       updateMutation.mutate(
         { clusterId, jobId: job.id, body },
-        { onSuccess: () => { onOpenChange(false); } },
+        {
+          onSuccess: () => {
+            onOpenChange(false);
+          },
+        },
       );
     } else {
       createMutation.mutate(
         { clusterId, body },
-        { onSuccess: () => { onOpenChange(false); } },
+        {
+          onSuccess: () => {
+            onOpenChange(false);
+          },
+        },
       );
     }
   };
@@ -272,7 +277,9 @@ export function BackupJobDialog({
               <Label htmlFor="backup-node">Node</Label>
               <Select
                 value={node === "" ? ALL_NODES : node}
-                onValueChange={(v) => { setNode(v === ALL_NODES ? "" : v); }}
+                onValueChange={(v) => {
+                  setNode(v === ALL_NODES ? "" : v);
+                }}
               >
                 <SelectTrigger id="backup-node">
                   <SelectValue />
@@ -294,7 +301,9 @@ export function BackupJobDialog({
               <Label htmlFor="backup-selection">Guests</Label>
               <Select
                 value={selection}
-                onValueChange={(v) => { setSelection(v as GuestSelection); }}
+                onValueChange={(v) => {
+                  setSelection(v as GuestSelection);
+                }}
               >
                 <SelectTrigger id="backup-selection">
                   <SelectValue />
@@ -382,7 +391,9 @@ export function BackupJobDialog({
             <Input
               id="backup-comment"
               value={comment}
-              onChange={(e) => { setComment(e.target.value); }}
+              onChange={(e) => {
+                setComment(e.target.value);
+              }}
               placeholder="Optional description"
             />
           </div>
@@ -391,7 +402,9 @@ export function BackupJobDialog({
             <Checkbox
               id="backup-enabled"
               checked={enabled}
-              onCheckedChange={(checked) => { setEnabled(checked === true); }}
+              onCheckedChange={(checked) => {
+                setEnabled(checked === true);
+              }}
             />
             <Label htmlFor="backup-enabled">Enabled</Label>
           </div>
@@ -405,7 +418,9 @@ export function BackupJobDialog({
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => { onOpenChange(false); }}
+            onClick={() => {
+              onOpenChange(false);
+            }}
           >
             Cancel
           </Button>

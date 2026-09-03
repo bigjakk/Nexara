@@ -65,7 +65,9 @@ function DeleteConfirmButton({
       <Button
         variant="ghost"
         size="icon"
-        onClick={() => { setOpen(true); }}
+        onClick={() => {
+          setOpen(true);
+        }}
       >
         <Trash2 className="h-4 w-4 text-destructive" />
       </Button>
@@ -79,7 +81,12 @@ function DeleteConfirmButton({
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button
@@ -118,7 +125,9 @@ function VNetSubnetsRow({
     <>
       <TableRow
         className="cursor-pointer"
-        onClick={() => { setExpanded(!expanded); }}
+        onClick={() => {
+          setExpanded(!expanded);
+        }}
       >
         <TableCell className="w-8">
           {expanded ? (
@@ -133,14 +142,18 @@ function VNetSubnetsRow({
         <TableCell>{vnet.alias || "-"}</TableCell>
         <TableCell
           className="text-right"
-          onClick={(e) => { e.stopPropagation(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
         >
           <div className="flex justify-end gap-1">
             <CreateSDNVNetDialog clusterId={clusterId} initialData={vnet} />
             <DeleteConfirmButton
               name={vnet.vnet}
               kind="VNet"
-              onConfirm={() => { deleteVNet.mutate(vnet.vnet); }}
+              onConfirm={() => {
+                deleteVNet.mutate(vnet.vnet);
+              }}
               isPending={deleteVNet.isPending}
             />
           </div>
@@ -152,10 +165,7 @@ function VNetSubnetsRow({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Subnets</span>
-                <CreateSDNSubnetDialog
-                  clusterId={clusterId}
-                  vnet={vnet.vnet}
-                />
+                <CreateSDNSubnetDialog clusterId={clusterId} vnet={vnet.vnet} />
               </div>
               {isLoading ? (
                 <p className="text-sm text-muted-foreground">Loading...</p>
@@ -272,7 +282,9 @@ function ControllersTab({ clusterId }: { clusterId: string }) {
                       <DeleteConfirmButton
                         name={ctrl.controller}
                         kind="Controller"
-                        onConfirm={() => { deleteController.mutate(ctrl.controller); }}
+                        onConfirm={() => {
+                          deleteController.mutate(ctrl.controller);
+                        }}
                         isPending={deleteController.isPending}
                       />
                     </div>
@@ -332,7 +344,9 @@ function IPAMTab({ clusterId }: { clusterId: string }) {
                       <DeleteConfirmButton
                         name={ipam.ipam}
                         kind="IPAM"
-                        onConfirm={() => { deleteIPAM.mutate(ipam.ipam); }}
+                        onConfirm={() => {
+                          deleteIPAM.mutate(ipam.ipam);
+                        }}
                         isPending={deleteIPAM.isPending}
                       />
                     </div>
@@ -392,7 +406,9 @@ function DNSTab({ clusterId }: { clusterId: string }) {
                       <DeleteConfirmButton
                         name={dns.dns}
                         kind="DNS"
-                        onConfirm={() => { deleteDNS.mutate(dns.dns); }}
+                        onConfirm={() => {
+                          deleteDNS.mutate(dns.dns);
+                        }}
                         isPending={deleteDNS.isPending}
                       />
                     </div>
@@ -425,7 +441,9 @@ export function SDNTable({ clusterId }: SDNTableProps) {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => { setApplyOpen(true); }}
+          onClick={() => {
+            setApplyOpen(true);
+          }}
           disabled={applySDN.isPending}
         >
           <RefreshCw className="mr-1 h-4 w-4" />
@@ -443,13 +461,20 @@ export function SDNTable({ clusterId }: SDNTableProps) {
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setApplyOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setApplyOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button
               onClick={() => {
                 applySDN.mutate(undefined, {
-                  onSuccess: () => { setApplyOpen(false); },
+                  onSuccess: () => {
+                    setApplyOpen(false);
+                  },
                 });
               }}
               disabled={applySDN.isPending}
@@ -493,9 +518,7 @@ export function SDNTable({ clusterId }: SDNTableProps) {
                 <TableBody>
                   {zones.map((zone) => (
                     <TableRow key={zone.zone}>
-                      <TableCell className="font-medium">
-                        {zone.zone}
-                      </TableCell>
+                      <TableCell className="font-medium">{zone.zone}</TableCell>
                       <TableCell>
                         <Badge variant="outline">{zone.type}</Badge>
                       </TableCell>
@@ -511,7 +534,9 @@ export function SDNTable({ clusterId }: SDNTableProps) {
                           <DeleteConfirmButton
                             name={zone.zone}
                             kind="Zone"
-                            onConfirm={() => { deleteZone.mutate(zone.zone); }}
+                            onConfirm={() => {
+                              deleteZone.mutate(zone.zone);
+                            }}
                             isPending={deleteZone.isPending}
                           />
                         </div>

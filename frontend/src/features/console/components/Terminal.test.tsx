@@ -15,10 +15,7 @@ const { mintSpy } = vi.hoisted(() => ({
 
 vi.mock("../api/console-queries", () => ({
   createConsoleTokenMinter: () => mintSpy,
-  wsAuthProtocols: (token: string) => [
-    "nexara.token",
-    "nexara.token." + token,
-  ],
+  wsAuthProtocols: (token: string) => ["nexara.token", "nexara.token." + token],
 }));
 
 // Mock xterm.js with class implementations
@@ -99,7 +96,11 @@ beforeEach(() => {
   fitSpy.mockClear();
   mintSpy.mockClear();
   vi.spyOn(Storage.prototype, "getItem").mockReturnValue("test-token");
-  useConsoleStore.setState({ tabs: [], activeTabId: null, windowMode: "hidden" });
+  useConsoleStore.setState({
+    tabs: [],
+    activeTabId: null,
+    windowMode: "hidden",
+  });
 });
 
 afterEach(() => {
@@ -118,7 +119,9 @@ const testTab: ConsoleTab = {
 
 describe("Terminal", () => {
   it("renders a terminal container", () => {
-    const { container } = renderWithProviders(<Terminal tab={testTab} visible={true} />);
+    const { container } = renderWithProviders(
+      <Terminal tab={testTab} visible={true} />,
+    );
     expect(container.querySelector("div")).toBeTruthy();
   });
 
@@ -210,9 +213,7 @@ describe("Terminal", () => {
 
     // Manual reconnect: the effect re-runs, closing the first socket and
     // opening a second.
-    rerender(
-      <Terminal tab={{ ...testTab, reconnectKey: 1 }} visible={true} />,
-    );
+    rerender(<Terminal tab={{ ...testTab, reconnectKey: 1 }} visible={true} />);
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(2);
     });
@@ -309,7 +310,11 @@ describe("Terminal", () => {
       lastResizeCallback?.();
     });
     // The callback defers to requestAnimationFrame; give it a frame.
-    await new Promise((r) => requestAnimationFrame(() => { r(null); }));
+    await new Promise((r) =>
+      requestAnimationFrame(() => {
+        r(null);
+      }),
+    );
     expect(fitSpy).not.toHaveBeenCalled();
   });
 
@@ -333,18 +338,26 @@ describe("Terminal", () => {
     act(() => {
       lastResizeCallback?.();
     });
-    await new Promise((r) => requestAnimationFrame(() => { r(null); }));
+    await new Promise((r) =>
+      requestAnimationFrame(() => {
+        r(null);
+      }),
+    );
     expect(fitSpy).toHaveBeenCalled();
   });
 
   it("hides terminal when not visible", () => {
-    const { container } = renderWithProviders(<Terminal tab={testTab} visible={false} />);
+    const { container } = renderWithProviders(
+      <Terminal tab={testTab} visible={false} />,
+    );
     const div = container.firstChild as HTMLElement;
     expect(div.style.display).toBe("none");
   });
 
   it("shows terminal when visible", () => {
-    const { container } = renderWithProviders(<Terminal tab={testTab} visible={true} />);
+    const { container } = renderWithProviders(
+      <Terminal tab={testTab} visible={true} />,
+    );
     const div = container.firstChild as HTMLElement;
     expect(div.style.display).toBe("block");
   });

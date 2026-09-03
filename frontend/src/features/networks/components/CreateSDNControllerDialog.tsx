@@ -104,18 +104,28 @@ export function CreateSDNControllerDialog({
     if (ebgpMultihop) params["ebgp-multihop"] = Number(ebgpMultihop);
 
     if (isEdit) {
-      const updateParams: Omit<CreateSDNControllerRequest, "controller" | "type"> =
-        Object.fromEntries(
-          Object.entries(params).filter(
-            ([k]) => k !== "controller" && k !== "type",
-          ),
-        );
+      const updateParams: Omit<
+        CreateSDNControllerRequest,
+        "controller" | "type"
+      > = Object.fromEntries(
+        Object.entries(params).filter(
+          ([k]) => k !== "controller" && k !== "type",
+        ),
+      );
       update.mutate(
         { controller: initialData.controller, params: updateParams },
-        { onSuccess: () => { setOpen(false); } },
+        {
+          onSuccess: () => {
+            setOpen(false);
+          },
+        },
       );
     } else {
-      create.mutate(params, { onSuccess: () => { setOpen(false); } });
+      create.mutate(params, {
+        onSuccess: () => {
+          setOpen(false);
+        },
+      });
     }
   };
 
@@ -149,7 +159,9 @@ export function CreateSDNControllerDialog({
               <Input
                 placeholder="myctrl"
                 value={controller}
-                onChange={(e) => { setController(e.target.value); }}
+                onChange={(e) => {
+                  setController(e.target.value);
+                }}
                 disabled={isEdit}
               />
             </div>
@@ -178,7 +190,9 @@ export function CreateSDNControllerDialog({
                     type="number"
                     placeholder="65000"
                     value={asn}
-                    onChange={(e) => { setAsn(e.target.value); }}
+                    onChange={(e) => {
+                      setAsn(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -186,7 +200,9 @@ export function CreateSDNControllerDialog({
                   <Input
                     placeholder="10.0.0.1,10.0.0.2"
                     value={peers}
-                    onChange={(e) => { setPeers(e.target.value); }}
+                    onChange={(e) => {
+                      setPeers(e.target.value);
+                    }}
                   />
                 </div>
               </div>
@@ -197,7 +213,9 @@ export function CreateSDNControllerDialog({
                     type="number"
                     placeholder="10"
                     value={ebgpMultihop}
-                    onChange={(e) => { setEbgpMultihop(e.target.value); }}
+                    onChange={(e) => {
+                      setEbgpMultihop(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -205,7 +223,9 @@ export function CreateSDNControllerDialog({
                   <Input
                     placeholder="lo"
                     value={loopback}
-                    onChange={(e) => { setLoopback(e.target.value); }}
+                    onChange={(e) => {
+                      setLoopback(e.target.value);
+                    }}
                   />
                 </div>
               </div>
@@ -219,7 +239,9 @@ export function CreateSDNControllerDialog({
                   <Input
                     placeholder="example.com"
                     value={isisDomain}
-                    onChange={(e) => { setIsisDomain(e.target.value); }}
+                    onChange={(e) => {
+                      setIsisDomain(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -227,7 +249,9 @@ export function CreateSDNControllerDialog({
                   <Input
                     placeholder="eth0,eth1"
                     value={isisIfaces}
-                    onChange={(e) => { setIsisIfaces(e.target.value); }}
+                    onChange={(e) => {
+                      setIsisIfaces(e.target.value);
+                    }}
                   />
                 </div>
               </div>
@@ -236,7 +260,9 @@ export function CreateSDNControllerDialog({
                 <Input
                   placeholder="49.0001.0000.0000.0001.00"
                   value={isisNet}
-                  onChange={(e) => { setIsisNet(e.target.value); }}
+                  onChange={(e) => {
+                    setIsisNet(e.target.value);
+                  }}
                 />
               </div>
             </>
@@ -247,7 +273,9 @@ export function CreateSDNControllerDialog({
               <Input
                 placeholder="node1,node2"
                 value={nodes}
-                onChange={(e) => { setNodes(e.target.value); }}
+                onChange={(e) => {
+                  setNodes(e.target.value);
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -255,7 +283,9 @@ export function CreateSDNControllerDialog({
               <Input
                 placeholder="node1"
                 value={node}
-                onChange={(e) => { setNode(e.target.value); }}
+                onChange={(e) => {
+                  setNode(e.target.value);
+                }}
               />
             </div>
           </div>
@@ -263,7 +293,12 @@ export function CreateSDNControllerDialog({
             <p className="text-sm text-destructive">{errorMessage}</p>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button

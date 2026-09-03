@@ -84,7 +84,9 @@ class MockWebSocket {
 
   /** Deliver the backend's "proxy is connected" control frame. */
   deliverConnected() {
-    this.onmessage?.({ data: JSON.stringify({ type: "connected" }) } as MessageEvent);
+    this.onmessage?.({
+      data: JSON.stringify({ type: "connected" }),
+    } as MessageEvent);
   }
 }
 Object.assign(globalThis, { WebSocket: MockWebSocket });
@@ -116,7 +118,11 @@ beforeEach(() => {
   MockWebSocket.instances = [];
   rfbInstances.length = 0;
   mintSpy.mockClear();
-  useConsoleStore.setState({ tabs: [], activeTabId: null, windowMode: "hidden" });
+  useConsoleStore.setState({
+    tabs: [],
+    activeTabId: null,
+    windowMode: "hidden",
+  });
 });
 
 afterEach(() => {
@@ -166,7 +172,9 @@ describe("VNCViewer", () => {
     expect(tabStatus()).toBe("connected");
 
     // Manual reconnect — the effect re-runs and dials again.
-    rerender(<VNCViewer tab={{ ...testTab, reconnectKey: 1 }} visible={true} />);
+    rerender(
+      <VNCViewer tab={{ ...testTab, reconnectKey: 1 }} visible={true} />,
+    );
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(2);
     });
@@ -234,7 +242,9 @@ describe("VNCViewer", () => {
     });
     const staleWs = MockWebSocket.instances[0];
 
-    rerender(<VNCViewer tab={{ ...testTab, reconnectKey: 1 }} visible={true} />);
+    rerender(
+      <VNCViewer tab={{ ...testTab, reconnectKey: 1 }} visible={true} />,
+    );
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(2);
     });
@@ -275,7 +285,10 @@ describe("VNCViewer", () => {
     // would make the next mount dial a guest known to be off).
     seedStore("guest-stopped");
     const { unmount } = renderWithProviders(
-      <VNCViewer tab={{ ...testTab, status: "guest-stopped" }} visible={true} />,
+      <VNCViewer
+        tab={{ ...testTab, status: "guest-stopped" }}
+        visible={true}
+      />,
     );
     await Promise.resolve();
     unmount();

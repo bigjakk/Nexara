@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { VMResponse } from "@/types/api";
 import type {
@@ -22,7 +28,9 @@ import type {
 
 function invalidateResourceLists(qc: QueryClient, clusterId: string): void {
   void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "vms"] });
-  void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "containers"] });
+  void qc.invalidateQueries({
+    queryKey: ["clusters", clusterId, "containers"],
+  });
   void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "vmids"] });
 }
 
@@ -53,9 +61,7 @@ export function useResourcePools(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "pools"],
     queryFn: () =>
-      apiClient.list<ResourcePool>(
-        `/api/v1/clusters/${clusterId}/pools`,
-      ),
+      apiClient.list<ResourcePool>(`/api/v1/clusters/${clusterId}/pools`),
     enabled: clusterId.length > 0,
     staleTime: 60_000,
   });
@@ -70,7 +76,12 @@ export function useVM(clusterId: string, vmId: string, kind: ResourceKind) {
       : `/api/v1/clusters/${clusterId}/vms/${vmId}`;
 
   return useQuery({
-    queryKey: ["clusters", clusterId, kind === "ct" ? "containers" : "vms", vmId],
+    queryKey: [
+      "clusters",
+      clusterId,
+      kind === "ct" ? "containers" : "vms",
+      vmId,
+    ],
     queryFn: () => apiClient.get<VMResponse>(endpoint),
     enabled: clusterId.length > 0 && vmId.length > 0,
     refetchInterval: 60_000, // WS events handle immediate updates
@@ -140,7 +151,12 @@ export function useCloneToTemplate() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, resourceId, kind, body }: CloneToTemplateParams) => {
+    mutationFn: ({
+      clusterId,
+      resourceId,
+      kind,
+      body,
+    }: CloneToTemplateParams) => {
       const base =
         kind === "ct"
           ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/clone-to-template`
@@ -334,7 +350,12 @@ export function useCreateSnapshot() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, resourceId, kind, body }: CreateSnapshotParams) => {
+    mutationFn: ({
+      clusterId,
+      resourceId,
+      kind,
+      body,
+    }: CreateSnapshotParams) => {
       const base =
         kind === "ct"
           ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/snapshots`
@@ -612,17 +633,26 @@ export function useSetResourceConfig() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, resourceId, kind, fields }: SetResourceConfigParams) => {
-      const path = kind === "ct"
-        ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/config`
-        : `/api/v1/clusters/${clusterId}/vms/${resourceId}/config`;
+    mutationFn: ({
+      clusterId,
+      resourceId,
+      kind,
+      fields,
+    }: SetResourceConfigParams) => {
+      const path =
+        kind === "ct"
+          ? `/api/v1/clusters/${clusterId}/containers/${resourceId}/config`
+          : `/api/v1/clusters/${clusterId}/vms/${resourceId}/config`;
       return apiClient.put<{ status: string }>(path, { fields });
     },
     onSuccess: (_data, variables) => {
       const coll = variables.kind === "ct" ? "containers" : "vms";
       const qk = ["clusters", variables.clusterId, coll, variables.resourceId];
       // Optimistically patch the cached VM/CT with new name if present
-      const nameField = variables.kind === "ct" ? variables.fields["hostname"] : variables.fields["name"];
+      const nameField =
+        variables.kind === "ct"
+          ? variables.fields["hostname"]
+          : variables.fields["name"];
       if (nameField) {
         queryClient.setQueryData<VMResponse>(qk, (old) =>
           old ? { ...old, name: nameField } : old,
@@ -653,8 +683,7 @@ export interface TaskHistoryEntry {
 export function useTaskHistory(): UseQueryResult<TaskHistoryEntry[]> {
   return useQuery({
     queryKey: ["task-history"],
-    queryFn: () =>
-      apiClient.list<TaskHistoryEntry>("/api/v1/tasks"),
+    queryFn: () => apiClient.list<TaskHistoryEntry>("/api/v1/tasks"),
     refetchInterval: 60_000, // WS events handle immediate updates; polling is a safety fallback
   });
 }
@@ -671,7 +700,13 @@ export function useAddTaskHistory() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, upid, description, node, taskType }: AddTaskHistoryParams) =>
+    mutationFn: ({
+      clusterId,
+      upid,
+      description,
+      node,
+      taskType,
+    }: AddTaskHistoryParams) =>
       apiClient.post<TaskHistoryEntry>("/api/v1/tasks", {
         cluster_id: clusterId,
         upid,
@@ -698,7 +733,13 @@ export function useUpdateTaskHistory() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ upid, status, exitStatus, progress, finishedAt }: UpdateTaskHistoryParams) =>
+    mutationFn: ({
+      upid,
+      status,
+      exitStatus,
+      progress,
+      finishedAt,
+    }: UpdateTaskHistoryParams) =>
       apiClient.put<{ status: string }>(
         `/api/v1/tasks/${encodeURIComponent(upid)}`,
         {
@@ -790,14 +831,34 @@ export function useMoveDisk() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, vmId, disk, storage, deleteOriginal, format, bwlimitKib }: MoveDiskParams) =>
+    mutationFn: ({
+      clusterId,
+      vmId,
+      disk,
+      storage,
+      deleteOriginal,
+      format,
+      bwlimitKib,
+    }: MoveDiskParams) =>
       apiClient.post<VMActionResponse>(
         `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/move`,
-        { disk, storage, delete: deleteOriginal, format: format ?? "", bwlimit_kib: bwlimitKib ?? 0 },
+        {
+          disk,
+          storage,
+          delete: deleteOriginal,
+          format: format ?? "",
+          bwlimit_kib: bwlimitKib ?? 0,
+        },
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms", variables.vmId, "config"],
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "vms",
+          variables.vmId,
+          "config",
+        ],
       });
       invalidateResourceLists(queryClient, variables.clusterId);
       void queryClient.invalidateQueries({
@@ -823,14 +884,32 @@ export function useMoveContainerVolume() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, ctId, volume, storage, deleteOriginal, bwlimitKib }: MoveContainerVolumeParams) =>
+    mutationFn: ({
+      clusterId,
+      ctId,
+      volume,
+      storage,
+      deleteOriginal,
+      bwlimitKib,
+    }: MoveContainerVolumeParams) =>
       apiClient.post<VMActionResponse>(
         `/api/v1/clusters/${clusterId}/containers/${ctId}/volumes/move`,
-        { volume, storage, delete: deleteOriginal, bwlimit_kib: bwlimitKib ?? 0 },
+        {
+          volume,
+          storage,
+          delete: deleteOriginal,
+          bwlimit_kib: bwlimitKib ?? 0,
+        },
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "containers", variables.ctId, "config"],
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "containers",
+          variables.ctId,
+          "config",
+        ],
       });
       invalidateResourceLists(queryClient, variables.clusterId);
       void queryClient.invalidateQueries({
@@ -856,14 +935,28 @@ export function useAttachDisk() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ clusterId, vmId, bus, index, storage, size, format }: AttachDiskParams) =>
+    mutationFn: ({
+      clusterId,
+      vmId,
+      bus,
+      index,
+      storage,
+      size,
+      format,
+    }: AttachDiskParams) =>
       apiClient.post<VMActionResponse>(
         `/api/v1/clusters/${clusterId}/vms/${vmId}/disks/attach`,
         { bus, index, storage, size, format },
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms", variables.vmId, "config"],
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "vms",
+          variables.vmId,
+          "config",
+        ],
       });
     },
   });
@@ -886,7 +979,13 @@ export function useDetachDisk() {
       ),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
-        queryKey: ["clusters", variables.clusterId, "vms", variables.vmId, "config"],
+        queryKey: [
+          "clusters",
+          variables.clusterId,
+          "vms",
+          variables.vmId,
+          "config",
+        ],
       });
     },
   });
@@ -916,9 +1015,7 @@ export function useScheduledTasks(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "schedules"],
     queryFn: () =>
-      apiClient.list<ScheduledTask>(
-        `/api/v1/clusters/${clusterId}/schedules`,
-      ),
+      apiClient.list<ScheduledTask>(`/api/v1/clusters/${clusterId}/schedules`),
     enabled: clusterId.length > 0,
   });
 }
@@ -1056,7 +1153,9 @@ export function useSetVMPool(clusterId: string, vmId: string) {
         { pool },
       ),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["clusters", clusterId, "vms", vmId] });
+      void qc.invalidateQueries({
+        queryKey: ["clusters", clusterId, "vms", vmId],
+      });
       invalidateResourceLists(qc, clusterId);
     },
   });

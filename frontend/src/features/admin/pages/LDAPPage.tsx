@@ -43,7 +43,10 @@ const INSECURE_LDAP_TRANSPORT = "insecure_ldap_transport_confirm_required";
 
 type DirectoryType = "openldap" | "ad";
 
-const presets: Record<DirectoryType, { label: string; defaults: Partial<LDAPConfigRequest> }> = {
+const presets: Record<
+  DirectoryType,
+  { label: string; defaults: Partial<LDAPConfigRequest> }
+> = {
   openldap: {
     label: "OpenLDAP",
     defaults: {
@@ -58,7 +61,8 @@ const presets: Record<DirectoryType, { label: string; defaults: Partial<LDAPConf
   ad: {
     label: "Active Directory",
     defaults: {
-      user_filter: "(|(sAMAccountName={{username}})(userPrincipalName={{username}})(mail={{username}}))",
+      user_filter:
+        "(|(sAMAccountName={{username}})(userPrincipalName={{username}})(mail={{username}}))",
       username_attribute: "sAMAccountName",
       email_attribute: "mail",
       display_name_attribute: "displayName",
@@ -90,7 +94,10 @@ const emptyForm: LDAPConfigRequest = {
 };
 
 function detectDirectoryType(cfg: LDAPConfigRequest): DirectoryType {
-  if (cfg.username_attribute === "sAMAccountName" || cfg.user_filter.includes("sAMAccountName")) {
+  if (
+    cfg.username_attribute === "sAMAccountName" ||
+    cfg.user_filter.includes("sAMAccountName")
+  ) {
     return "ad";
   }
   return "openldap";
@@ -251,13 +258,21 @@ export function LDAPPage() {
     };
 
     const onError = (err: unknown) => {
-      const confirm = confirmRequiredFromError(err, [INSECURE_LDAP_TRANSPORT], target);
+      const confirm = confirmRequiredFromError(
+        err,
+        [INSECURE_LDAP_TRANSPORT],
+        target,
+      );
       if (confirm != null) {
         setTransportWarning(confirm);
         return;
       }
       setTransportWarning(null);
-      setSaveError(err instanceof Error ? err.message : "Failed to save LDAP configuration");
+      setSaveError(
+        err instanceof Error
+          ? err.message
+          : "Failed to save LDAP configuration",
+      );
     };
 
     if (isNew) {
@@ -289,21 +304,20 @@ export function LDAPPage() {
   const handleTest = () => {
     if (!editingId) return;
     setTestResult(null);
-    const testPayload: { id: string; test_username?: string } = { id: editingId };
+    const testPayload: { id: string; test_username?: string } = {
+      id: editingId,
+    };
     if (testUsername) {
       testPayload.test_username = testUsername;
     }
-    testConnection.mutate(
-      testPayload,
-      {
-        onSuccess: (result) => {
-          setTestResult(result);
-        },
-        onError: () => {
-          setTestResult({ success: false, message: "Request failed" });
-        },
+    testConnection.mutate(testPayload, {
+      onSuccess: (result) => {
+        setTestResult(result);
       },
-    );
+      onError: () => {
+        setTestResult({ success: false, message: "Request failed" });
+      },
+    });
   };
 
   const handleSync = () => {
@@ -345,7 +359,9 @@ export function LDAPPage() {
       <div className="space-y-6 p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">LDAP / Active Directory</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              LDAP / Active Directory
+            </h1>
             <p className="text-muted-foreground">
               Configure LDAP/AD authentication and group-to-role mapping
             </p>
@@ -386,7 +402,9 @@ export function LDAPPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => { startEdit(cfg); }}
+                    onClick={() => {
+                      startEdit(cfg);
+                    }}
                   >
                     Edit
                   </Button>
@@ -430,7 +448,11 @@ export function LDAPPage() {
             <div>
               <Label className="mb-2 block">Directory Type</Label>
               <div className="flex gap-2">
-                {(Object.entries(presets) as Array<[DirectoryType, typeof presets[DirectoryType]]>).map(([key, preset]) => (
+                {(
+                  Object.entries(presets) as Array<
+                    [DirectoryType, (typeof presets)[DirectoryType]]
+                  >
+                ).map(([key, preset]) => (
                   <Button
                     key={key}
                     variant={directoryType === key ? "default" : "outline"}
@@ -457,14 +479,18 @@ export function LDAPPage() {
                 <Label>Name</Label>
                 <Input
                   value={form.name}
-                  onChange={(e) => { setForm({ ...form, name: e.target.value }); }}
+                  onChange={(e) => {
+                    setForm({ ...form, name: e.target.value });
+                  }}
                   placeholder="Default"
                 />
               </div>
               <div className="flex items-center gap-3 pt-6">
                 <Switch
                   checked={form.enabled}
-                  onCheckedChange={(enabled) => { setForm({ ...form, enabled }); }}
+                  onCheckedChange={(enabled) => {
+                    setForm({ ...form, enabled });
+                  }}
                 />
                 <Label>Enabled</Label>
               </div>
@@ -478,7 +504,9 @@ export function LDAPPage() {
                   <Label>Server URL</Label>
                   <Input
                     value={form.server_url}
-                    onChange={(e) => { setForm({ ...form, server_url: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, server_url: e.target.value });
+                    }}
                     placeholder="ldap://ldap.example.com:389"
                   />
                   {addressChanged && (
@@ -493,14 +521,18 @@ export function LDAPPage() {
                   <div className="flex items-center gap-2">
                     <Switch
                       checked={form.start_tls}
-                      onCheckedChange={(start_tls) => { setForm({ ...form, start_tls }); }}
+                      onCheckedChange={(start_tls) => {
+                        setForm({ ...form, start_tls });
+                      }}
                     />
                     <Label>StartTLS</Label>
                   </div>
                   <div className="flex items-center gap-2">
                     <Switch
                       checked={form.skip_tls_verify}
-                      onCheckedChange={(skip_tls_verify) => { setForm({ ...form, skip_tls_verify }); }}
+                      onCheckedChange={(skip_tls_verify) => {
+                        setForm({ ...form, skip_tls_verify });
+                      }}
                     />
                     <Label>Skip TLS Verify</Label>
                   </div>
@@ -516,7 +548,9 @@ export function LDAPPage() {
                   <Label>Bind DN</Label>
                   <Input
                     value={form.bind_dn}
-                    onChange={(e) => { setForm({ ...form, bind_dn: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, bind_dn: e.target.value });
+                    }}
                     placeholder="cn=admin,dc=example,dc=com"
                   />
                 </div>
@@ -534,7 +568,9 @@ export function LDAPPage() {
                   <Input
                     type="password"
                     value={form.bind_password}
-                    onChange={(e) => { setForm({ ...form, bind_password: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, bind_password: e.target.value });
+                    }}
                     placeholder={
                       addressChanged
                         ? "Re-enter the bind password for the new address"
@@ -556,7 +592,9 @@ export function LDAPPage() {
                   <Label>Search Base DN</Label>
                   <Input
                     value={form.search_base_dn}
-                    onChange={(e) => { setForm({ ...form, search_base_dn: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, search_base_dn: e.target.value });
+                    }}
                     placeholder="dc=example,dc=com"
                   />
                 </div>
@@ -564,7 +602,9 @@ export function LDAPPage() {
                   <Label>User Filter</Label>
                   <Input
                     value={form.user_filter}
-                    onChange={(e) => { setForm({ ...form, user_filter: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, user_filter: e.target.value });
+                    }}
                     placeholder="(|(uid={{username}})(mail={{username}}))"
                   />
                 </div>
@@ -572,7 +612,9 @@ export function LDAPPage() {
                   <Label>Username Attribute</Label>
                   <Input
                     value={form.username_attribute}
-                    onChange={(e) => { setForm({ ...form, username_attribute: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, username_attribute: e.target.value });
+                    }}
                     placeholder="uid"
                   />
                 </div>
@@ -580,7 +622,9 @@ export function LDAPPage() {
                   <Label>Email Attribute</Label>
                   <Input
                     value={form.email_attribute}
-                    onChange={(e) => { setForm({ ...form, email_attribute: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, email_attribute: e.target.value });
+                    }}
                     placeholder="mail"
                   />
                 </div>
@@ -588,7 +632,12 @@ export function LDAPPage() {
                   <Label>Display Name Attribute</Label>
                   <Input
                     value={form.display_name_attribute}
-                    onChange={(e) => { setForm({ ...form, display_name_attribute: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({
+                        ...form,
+                        display_name_attribute: e.target.value,
+                      });
+                    }}
                     placeholder="cn"
                   />
                 </div>
@@ -603,7 +652,12 @@ export function LDAPPage() {
                   <Label>Group Search Base DN</Label>
                   <Input
                     value={form.group_search_base_dn}
-                    onChange={(e) => { setForm({ ...form, group_search_base_dn: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({
+                        ...form,
+                        group_search_base_dn: e.target.value,
+                      });
+                    }}
                     placeholder="ou=groups,dc=example,dc=com"
                   />
                 </div>
@@ -611,7 +665,9 @@ export function LDAPPage() {
                   <Label>Group Filter</Label>
                   <Input
                     value={form.group_filter}
-                    onChange={(e) => { setForm({ ...form, group_filter: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, group_filter: e.target.value });
+                    }}
                     placeholder="(member={{userDN}})"
                   />
                 </div>
@@ -619,7 +675,9 @@ export function LDAPPage() {
                   <Label>Group Attribute</Label>
                   <Input
                     value={form.group_attribute}
-                    onChange={(e) => { setForm({ ...form, group_attribute: e.target.value }); }}
+                    onChange={(e) => {
+                      setForm({ ...form, group_attribute: e.target.value });
+                    }}
                     placeholder="cn"
                   />
                 </div>
@@ -634,7 +692,10 @@ export function LDAPPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    setMappingRows([...mappingRows, { groupDN: "", roleId: "" }]);
+                    setMappingRows([
+                      ...mappingRows,
+                      { groupDN: "", roleId: "" },
+                    ]);
                   }}
                 >
                   <Plus className="mr-1 h-3 w-3" />
@@ -744,7 +805,9 @@ export function LDAPPage() {
                   <Input
                     className="max-w-xs"
                     value={testUsername}
-                    onChange={(e) => { setTestUsername(e.target.value); }}
+                    onChange={(e) => {
+                      setTestUsername(e.target.value);
+                    }}
                     placeholder="Test username (optional)"
                   />
                   <Button
@@ -792,28 +855,31 @@ export function LDAPPage() {
               </div>
             )}
 
-            {transportWarning != null && transportWarning.target === saveTarget && (
-              <ConfirmRequiredWarning
-                title={
-                  confirmDetailString(transportWarning, "transport_kind") === "cleartext"
-                    ? "Passwords would travel in cleartext"
-                    : "Certificate would never be verified"
-                }
-                message={`${transportWarning.message} This is fine for a self-hosted lab directory — confirm to continue, or go back and use ldaps:// or StartTLS.`}
-                confirmLabel={
-                  confirmDetailString(transportWarning, "transport_kind") === "cleartext"
-                    ? "Save without encryption"
-                    : "Save without verification"
-                }
-                onConfirm={() => {
-                  save(true);
-                }}
-                onCancel={() => {
-                  setTransportWarning(null);
-                }}
-                pending={createConfig.isPending || updateConfig.isPending}
-              />
-            )}
+            {transportWarning != null &&
+              transportWarning.target === saveTarget && (
+                <ConfirmRequiredWarning
+                  title={
+                    confirmDetailString(transportWarning, "transport_kind") ===
+                    "cleartext"
+                      ? "Passwords would travel in cleartext"
+                      : "Certificate would never be verified"
+                  }
+                  message={`${transportWarning.message} This is fine for a self-hosted lab directory — confirm to continue, or go back and use ldaps:// or StartTLS.`}
+                  confirmLabel={
+                    confirmDetailString(transportWarning, "transport_kind") ===
+                    "cleartext"
+                      ? "Save without encryption"
+                      : "Save without verification"
+                  }
+                  onConfirm={() => {
+                    save(true);
+                  }}
+                  onCancel={() => {
+                    setTransportWarning(null);
+                  }}
+                  pending={createConfig.isPending || updateConfig.isPending}
+                />
+              )}
 
             {saveError != null && (
               <p className="text-sm text-destructive">{saveError}</p>
@@ -821,7 +887,10 @@ export function LDAPPage() {
 
             {/* Actions */}
             <div className="flex gap-2">
-              <Button onClick={handleSave} disabled={createConfig.isPending || updateConfig.isPending}>
+              <Button
+                onClick={handleSave}
+                disabled={createConfig.isPending || updateConfig.isPending}
+              >
                 {(createConfig.isPending || updateConfig.isPending) && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}

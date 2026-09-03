@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildInventoryRows } from "./inventory-queries";
-import type {
-  ClusterResponse,
-  NodeResponse,
-  VMResponse,
-} from "@/types/api";
+import type { ClusterResponse, NodeResponse, VMResponse } from "@/types/api";
 import type { AggregatedMetrics, VmLiveMetric } from "@/types/ws";
 
 function cluster(id: string, name: string): ClusterResponse {

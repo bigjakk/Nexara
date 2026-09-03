@@ -19,13 +19,16 @@ export function useMigrationJobs(limit = 50, offset = 0) {
 export function useMigrationJob(id: string) {
   return useQuery({
     queryKey: ["migrations", id],
-    queryFn: () =>
-      apiClient.get<MigrationJob>(`/api/v1/migrations/${id}`),
+    queryFn: () => apiClient.get<MigrationJob>(`/api/v1/migrations/${id}`),
     enabled: id.length > 0,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       // Poll for any non-terminal status (pending, checking, migrating).
-      if (status === "completed" || status === "failed" || status === "cancelled") {
+      if (
+        status === "completed" ||
+        status === "failed" ||
+        status === "cancelled"
+      ) {
         return false;
       }
       return 3000;
@@ -88,9 +91,7 @@ export function useCancelMigration() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      apiClient.post<{ status: string }>(
-        `/api/v1/migrations/${id}/cancel`,
-      ),
+      apiClient.post<{ status: string }>(`/api/v1/migrations/${id}/cancel`),
     onSuccess: (_data, id) => {
       void queryClient.invalidateQueries({ queryKey: ["migrations", id] });
       void queryClient.invalidateQueries({ queryKey: ["migrations"] });

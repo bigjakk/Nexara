@@ -45,9 +45,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
   );
   const [fingerprintAccepted, setFingerprintAccepted] = useState(false);
   const [fetchingFingerprint, setFetchingFingerprint] = useState(false);
-  const [fingerprintError, setFingerprintError] = useState<string | null>(
-    null,
-  );
+  const [fingerprintError, setFingerprintError] = useState<string | null>(null);
 
   const [privateWarning, setPrivateWarning] =
     useState<PrivateAddressDetails | null>(null);
@@ -241,7 +239,9 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
                 ip={privateWarning.ip}
                 url={apiUrl}
                 onConfirm={handleConfirmPrivate}
-                onCancel={() => { setPrivateWarning(null); }}
+                onCancel={() => {
+                  setPrivateWarning(null);
+                }}
                 pending={fetchingFingerprint}
               />
             )}
@@ -306,8 +306,8 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
                   <span className="font-medium">Trusted Certificate</span>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  The server at <strong>{apiUrl}</strong> has a valid certificate
-                  signed by a trusted CA.
+                  The server at <strong>{apiUrl}</strong> has a valid
+                  certificate signed by a trusted CA.
                 </p>
               </div>
             )}

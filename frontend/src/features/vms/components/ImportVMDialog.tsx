@@ -18,7 +18,10 @@ import {
   useClusterStorage,
   useNodeBridges,
 } from "@/features/clusters/api/cluster-queries";
-import { useDownloadURL, useUploadFile } from "@/features/storage/api/storage-queries";
+import {
+  useDownloadURL,
+  useUploadFile,
+} from "@/features/storage/api/storage-queries";
 import { useResourcePools } from "@/features/pools/api/pool-queries";
 import { usePermissions } from "@/hooks/usePermissions";
 import { deriveFilenameFromURL } from "@/lib/derive-filename";
@@ -84,7 +87,11 @@ function volidBasename(volid: string): string {
   return volid.split("/").pop() ?? volid;
 }
 
-export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialogProps) {
+export function ImportVMDialog({
+  open,
+  onOpenChange,
+  clusterId,
+}: ImportVMDialogProps) {
   const { data: nodes } = useClusterNodes(clusterId);
   const { data: storageList } = useClusterStorage(clusterId);
   const { data: importSources } = useImportSources(clusterId);
@@ -113,8 +120,12 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
 
   // Source management
   const [showEsxiForm, setShowEsxiForm] = useState(false);
-  const [pendingSelectStorage, setPendingSelectStorage] = useState<string | null>(null);
-  const [pendingSelectFilename, setPendingSelectFilename] = useState<string | null>(null);
+  const [pendingSelectStorage, setPendingSelectStorage] = useState<
+    string | null
+  >(null);
+  const [pendingSelectFilename, setPendingSelectFilename] = useState<
+    string | null
+  >(null);
 
   // Target selection
   const [targetNode, setTargetNode] = useState("");
@@ -160,7 +171,8 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
   const startMutation = useStartImport();
 
   const selectedSource = useMemo(
-    () => (importSources ?? []).find((s) => sourceKeyOf(s) === sourceKey) ?? null,
+    () =>
+      (importSources ?? []).find((s) => sourceKeyOf(s) === sourceKey) ?? null,
     [importSources, sourceKey],
   );
   const sourceStorageName = selectedSource?.storage ?? "";
@@ -173,7 +185,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
   // URL/upload can only target a real file storage — you can't download/upload into ESXi.
   const sourceOptions = useMemo(() => {
     const all = importSources ?? [];
-    return sourceMode === "storage" ? all : all.filter((s) => s.type !== "esxi");
+    return sourceMode === "storage"
+      ? all
+      : all.filter((s) => s.type !== "esxi");
   }, [importSources, sourceMode]);
 
   const { data: sourceContent } = useImportSourceContent(
@@ -245,7 +259,8 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
 
   const targetStorageType = useMemo(() => {
     const pool = (storageList ?? []).find(
-      (s) => s.storage === targetStorage && (s.shared || s.node_id === targetNodeId),
+      (s) =>
+        s.storage === targetStorage && (s.shared || s.node_id === targetNodeId),
     );
     return pool?.type ?? "";
   }, [storageList, targetStorage, targetNodeId]);
@@ -254,7 +269,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
   // file-based working storage is effectively required — warn and preselect one.
   const isOvaSource = selectedVolume.toLowerCase().endsWith(".ova");
   const needsWorkingStorage =
-    isOvaSource && targetStorage !== "" && !fileBasedTypes.has(targetStorageType);
+    isOvaSource &&
+    targetStorage !== "" &&
+    !fileBasedTypes.has(targetStorageType);
 
   const { data: bridges } = useNodeBridges(clusterId, targetNode);
 
@@ -301,7 +318,12 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
       workingAutoSetFor.current = targetStorage;
       setWorkingStorage(workingStorageOptions[0] ?? "");
     }
-  }, [needsWorkingStorage, workingStorage, workingStorageOptions, targetStorage]);
+  }, [
+    needsWorkingStorage,
+    workingStorage,
+    workingStorageOptions,
+    targetStorage,
+  ]);
 
   function resetSourceDownstream() {
     setSelectedVolume("");
@@ -441,7 +463,8 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
       { clusterId, node: sourceNode, url: downloadUrl.trim() },
       {
         onSuccess: (meta) => {
-          if (meta.filename && !downloadFilename) setDownloadFilename(meta.filename);
+          if (meta.filename && !downloadFilename)
+            setDownloadFilename(meta.filename);
           setDownloadSize(meta.size ?? null);
         },
       },
@@ -449,7 +472,8 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
   }
 
   function triggerDownload() {
-    if (!downloadUrlValid || !effectiveDownloadFilename || !sourcePoolId) return;
+    if (!downloadUrlValid || !effectiveDownloadFilename || !sourcePoolId)
+      return;
     setDownloadUpid(null);
     downloadMutation.mutate(
       {
@@ -479,7 +503,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
         storageId: sourcePoolId,
         content: "import",
         file: uploadFile,
-        onProgress: (p) => { setUploadProgress(p); },
+        onProgress: (p) => {
+          setUploadProgress(p);
+        },
       },
       {
         onSuccess: (res) => {
@@ -491,7 +517,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
             onAcquireComplete(uploadFile.name, "upload");
           }
         },
-        onError: () => { setUploadProgress(null); },
+        onError: () => {
+          setUploadProgress(null);
+        },
       },
     );
   }
@@ -568,12 +596,18 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
   const diskEntries = meta ? Object.entries(meta.disks) : [];
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) resetAndClose(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) resetAndClose();
+      }}
+    >
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Import VM</DialogTitle>
           <DialogDescription>
-            Import a virtual machine from an OVA/OVF appliance, a disk image, or an ESXi/vCenter host.
+            Import a virtual machine from an OVA/OVF appliance, a disk image, or
+            an ESXi/vCenter host.
           </DialogDescription>
         </DialogHeader>
 
@@ -610,7 +644,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                     type="button"
                     size="sm"
                     variant={sourceMode === "storage" ? "default" : "outline"}
-                    onClick={() => { setSourceMode("storage"); }}
+                    onClick={() => {
+                      setSourceMode("storage");
+                    }}
                   >
                     From import storage
                   </Button>
@@ -618,7 +654,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                     type="button"
                     size="sm"
                     variant={sourceMode === "url" ? "default" : "outline"}
-                    onClick={() => { setSourceMode("url"); }}
+                    onClick={() => {
+                      setSourceMode("url");
+                    }}
                   >
                     Download OVA from URL
                   </Button>
@@ -626,7 +664,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                     type="button"
                     size="sm"
                     variant={sourceMode === "upload" ? "default" : "outline"}
-                    onClick={() => { setSourceMode("upload"); }}
+                    onClick={() => {
+                      setSourceMode("upload");
+                    }}
                   >
                     Upload OVA
                   </Button>
@@ -650,7 +690,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                         type="button"
                         size="sm"
                         variant="outline"
-                        disabled={!downloadUrlValid || urlMetaMutation.isPending}
+                        disabled={
+                          !downloadUrlValid || urlMetaMutation.isPending
+                        }
                         onClick={checkUrl}
                       >
                         {urlMetaMutation.isPending ? "Checking…" : "Check URL"}
@@ -659,7 +701,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                     <Label>Filename (optional — derived from the URL)</Label>
                     <Input
                       value={downloadFilename}
-                      onChange={(e) => { setDownloadFilename(e.target.value); }}
+                      onChange={(e) => {
+                        setDownloadFilename(e.target.value);
+                      }}
                       placeholder={effectiveDownloadFilename || "appliance.ova"}
                       autoComplete="off"
                       spellCheck={false}
@@ -674,7 +718,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
 
                 <div className="space-y-2">
                   <Label>
-                    {sourceMode === "storage" ? "Import source" : "Download / upload to storage"}
+                    {sourceMode === "storage"
+                      ? "Import source"
+                      : "Download / upload to storage"}
                   </Label>
                   <select
                     className={selectClass}
@@ -699,31 +745,37 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                   {sourceOptions.length === 0 && (
                     <div className="space-y-2 text-xs text-muted-foreground">
                       <p>
-                        No import-capable storage found. Add the &quot;import&quot; content type to a
-                        directory/NFS storage, register an ESXi source, or upload an OVA.
+                        No import-capable storage found. Add the
+                        &quot;import&quot; content type to a directory/NFS
+                        storage, register an ESXi source, or upload an OVA.
                       </p>
-                      {canManage("storage") && enableableStorages.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span>Enable import content on:</span>
-                          {enableableStorages.map((s) => (
-                            <Button
-                              key={s}
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              disabled={enableImportMutation.isPending}
-                              onClick={() => {
-                                enableImportMutation.mutate(
-                                  { clusterId, storage: s },
-                                  { onSuccess: () => { setPendingSelectStorage(s); } },
-                                );
-                              }}
-                            >
-                              {s}
-                            </Button>
-                          ))}
-                        </div>
-                      )}
+                      {canManage("storage") &&
+                        enableableStorages.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span>Enable import content on:</span>
+                            {enableableStorages.map((s) => (
+                              <Button
+                                key={s}
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={enableImportMutation.isPending}
+                                onClick={() => {
+                                  enableImportMutation.mutate(
+                                    { clusterId, storage: s },
+                                    {
+                                      onSuccess: () => {
+                                        setPendingSelectStorage(s);
+                                      },
+                                    },
+                                  );
+                                }}
+                              >
+                                {s}
+                              </Button>
+                            ))}
+                          </div>
+                        )}
                       {enableImportMutation.isError && (
                         <p className="text-destructive">
                           {enableImportMutation.error instanceof Error
@@ -739,15 +791,21 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                 {showEsxiForm ? (
                   <EsxiSourceForm
                     clusterId={clusterId}
-                    onRegistered={(storage) => { setPendingSelectStorage(storage); }}
-                    onCancel={() => { setShowEsxiForm(false); }}
+                    onRegistered={(storage) => {
+                      setPendingSelectStorage(storage);
+                    }}
+                    onCancel={() => {
+                      setShowEsxiForm(false);
+                    }}
                   />
                 ) : (
                   canManage("vm_import") && (
                     <button
                       type="button"
                       className="text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() => { setShowEsxiForm(true); }}
+                      onClick={() => {
+                        setShowEsxiForm(true);
+                      }}
                     >
                       + Add ESXi / vCenter source
                     </button>
@@ -767,7 +825,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                       }
                       onClick={triggerDownload}
                     >
-                      {downloadMutation.isPending ? "Starting…" : "Download to storage"}
+                      {downloadMutation.isPending
+                        ? "Starting…"
+                        : "Download to storage"}
                     </Button>
                     {downloadUpid && (
                       <TaskProgressBanner
@@ -775,7 +835,8 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                         upid={downloadUpid}
                         description="Downloading OVA"
                         onComplete={(ok) => {
-                          if (ok) onAcquireComplete(effectiveDownloadFilename, "url");
+                          if (ok)
+                            onAcquireComplete(effectiveDownloadFilename, "url");
                         }}
                       />
                     )}
@@ -790,7 +851,8 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                 )}
                 {sourceMode === "url" && sourceKey && !sourcePoolId && (
                   <p className="text-xs text-muted-foreground">
-                    This source isn&apos;t in the inventory yet, so a URL download can&apos;t target it.
+                    This source isn&apos;t in the inventory yet, so a URL
+                    download can&apos;t target it.
                   </p>
                 )}
 
@@ -800,12 +862,18 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                     <Input
                       type="file"
                       accept=".ova"
-                      onChange={(e) => { setUploadFile(e.target.files?.[0] ?? null); }}
+                      onChange={(e) => {
+                        setUploadFile(e.target.files?.[0] ?? null);
+                      }}
                     />
                     <Button
                       type="button"
                       size="sm"
-                      disabled={!uploadFile || uploadMutation.isPending || uploadProgress != null}
+                      disabled={
+                        !uploadFile ||
+                        uploadMutation.isPending ||
+                        uploadProgress != null
+                      }
                       onClick={triggerUpload}
                     >
                       {uploadProgress != null
@@ -820,7 +888,8 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                         upid={uploadUpid}
                         description="Processing uploaded OVA"
                         onComplete={(ok) => {
-                          if (ok && uploadFile) onAcquireComplete(uploadFile.name, "upload");
+                          if (ok && uploadFile)
+                            onAcquireComplete(uploadFile.name, "upload");
                         }}
                       />
                     )}
@@ -835,7 +904,8 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                 )}
                 {sourceMode === "upload" && sourceKey && !sourcePoolId && (
                   <p className="text-xs text-muted-foreground">
-                    This source isn&apos;t in the inventory yet, so an upload can&apos;t target it.
+                    This source isn&apos;t in the inventory yet, so an upload
+                    can&apos;t target it.
                   </p>
                 )}
 
@@ -863,7 +933,8 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
 
                 {metadataMutation.isError && (
                   <p className="text-sm text-destructive">
-                    Failed to read import metadata: {metadataMutation.error.message}
+                    Failed to read import metadata:{" "}
+                    {metadataMutation.error.message}
                   </p>
                 )}
               </div>
@@ -872,22 +943,44 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
             {step === "inspect" && meta && (
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div><span className="text-muted-foreground">Name:</span> {meta.name || "—"}</div>
-                  <div><span className="text-muted-foreground">OS type:</span> {meta.ostype || "—"}</div>
-                  <div><span className="text-muted-foreground">Cores:</span> {meta.cores || "—"}</div>
-                  <div><span className="text-muted-foreground">Memory:</span> {meta.memory ? `${String(meta.memory)} MiB` : "—"}</div>
-                  <div><span className="text-muted-foreground">Source:</span> {meta.source || "—"}</div>
+                  <div>
+                    <span className="text-muted-foreground">Name:</span>{" "}
+                    {meta.name || "—"}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">OS type:</span>{" "}
+                    {meta.ostype || "—"}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Cores:</span>{" "}
+                    {meta.cores || "—"}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Memory:</span>{" "}
+                    {meta.memory ? `${String(meta.memory)} MiB` : "—"}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Source:</span>{" "}
+                    {meta.source || "—"}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label>Disks ({diskEntries.length})</Label>
                   <div className="rounded-md border border-border text-sm">
                     {diskEntries.length === 0 && (
-                      <div className="px-3 py-2 text-muted-foreground">No disks detected.</div>
+                      <div className="px-3 py-2 text-muted-foreground">
+                        No disks detected.
+                      </div>
                     )}
                     {diskEntries.map(([slot, disk]) => (
-                      <div key={slot} className="flex justify-between border-b border-border px-3 py-1.5 last:border-b-0">
+                      <div
+                        key={slot}
+                        className="flex justify-between border-b border-border px-3 py-1.5 last:border-b-0"
+                      >
                         <span className="font-mono">{slot}</span>
-                        <span className="truncate text-muted-foreground">{disk.volid}</span>
+                        <span className="truncate text-muted-foreground">
+                          {disk.volid}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -927,12 +1020,15 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                   >
                     <option value="">Select a node…</option>
                     {targetNodeOptions.map((n) => (
-                      <option key={n.id} value={n.name}>{n.name}</option>
+                      <option key={n.id} value={n.name}>
+                        {n.name}
+                      </option>
                     ))}
                   </select>
                   {sourceNode !== "" && !sourceShared && (
                     <p className="text-xs text-muted-foreground">
-                      The source storage is not shared, so the import must run on node {sourceNode}.
+                      The source storage is not shared, so the import must run
+                      on node {sourceNode}.
                     </p>
                   )}
                 </div>
@@ -941,25 +1037,36 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                   <select
                     className={selectClass}
                     value={targetStorage}
-                    onChange={(e) => { setTargetStorage(e.target.value); }}
+                    onChange={(e) => {
+                      setTargetStorage(e.target.value);
+                    }}
                   >
                     <option value="">Select a storage…</option>
                     {imageStorageOptions.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
                     ))}
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label>Working storage {needsWorkingStorage ? "(required)" : "(optional)"}</Label>
+                    <Label>
+                      Working storage{" "}
+                      {needsWorkingStorage ? "(required)" : "(optional)"}
+                    </Label>
                     <select
                       className={selectClass}
                       value={workingStorage}
-                      onChange={(e) => { setWorkingStorage(e.target.value); }}
+                      onChange={(e) => {
+                        setWorkingStorage(e.target.value);
+                      }}
                     >
                       <option value="">Default (target storage)</option>
                       {workingStorageOptions.map((s) => (
-                        <option key={s} value={s}>{s}</option>
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -968,11 +1075,15 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                     <select
                       className={selectClass}
                       value={bridge}
-                      onChange={(e) => { setBridge(e.target.value); }}
+                      onChange={(e) => {
+                        setBridge(e.target.value);
+                      }}
                     >
                       <option value="">No NIC</option>
                       {(bridges ?? []).map((b) => (
-                        <option key={b.iface} value={b.iface}>{b.iface}</option>
+                        <option key={b.iface} value={b.iface}>
+                          {b.iface}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -981,9 +1092,10 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                   <div className="flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-600">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>
-                      The target storage is block-based, but extracting an OVA needs a file-based
-                      working storage. A working storage has been preselected; clear it only if the
-                      target already stores images as files.
+                      The target storage is block-based, but extracting an OVA
+                      needs a file-based working storage. A working storage has
+                      been preselected; clear it only if the target already
+                      stores images as files.
                     </span>
                   </div>
                 )}
@@ -991,7 +1103,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                   <Label>VMID (blank = auto)</Label>
                   <Input
                     value={vmid}
-                    onChange={(e) => { setVmid(e.target.value.replace(/[^0-9]/g, "")); }}
+                    onChange={(e) => {
+                      setVmid(e.target.value.replace(/[^0-9]/g, ""));
+                    }}
                     placeholder="auto"
                   />
                   {!vmidValid && (
@@ -1005,7 +1119,9 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                   <select
                     className={selectClass}
                     value={diskFormat}
-                    onChange={(e) => { setDiskFormat(e.target.value); }}
+                    onChange={(e) => {
+                      setDiskFormat(e.target.value);
+                    }}
                   >
                     <option value="">Storage default</option>
                     <option value="qcow2">qcow2</option>
@@ -1019,75 +1135,158 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
             {step === "customize" && (
               <div className="space-y-4">
                 <p className="text-xs text-muted-foreground">
-                  Adjust the imported guest&apos;s settings. Fields are detected from the source
-                  where possible; leave one as-is to keep the detected value. Adding disks or
-                  extra NICs isn&apos;t supported here — do that after import.
+                  Adjust the imported guest&apos;s settings. Fields are detected
+                  from the source where possible; leave one as-is to keep the
+                  detected value. Adding disks or extra NICs isn&apos;t
+                  supported here — do that after import.
                 </p>
 
                 <div className="space-y-2">
-                  <Label className="text-xs uppercase text-muted-foreground">OS &amp; System</Label>
+                  <Label className="text-xs uppercase text-muted-foreground">
+                    OS &amp; System
+                  </Label>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label>OS type</Label>
-                      <select className={selectClass} value={osType} onChange={(e) => { setOsType(e.target.value); }}>
+                      <select
+                        className={selectClass}
+                        value={osType}
+                        onChange={(e) => {
+                          setOsType(e.target.value);
+                        }}
+                      >
                         <option value="">Detected</option>
-                        {osTypes.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                        {osTypes.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div className="space-y-1">
                       <Label>SCSI controller</Label>
-                      <select className={selectClass} value={scsihw} onChange={(e) => { setScsihw(e.target.value); }}>
+                      <select
+                        className={selectClass}
+                        value={scsihw}
+                        onChange={(e) => {
+                          setScsihw(e.target.value);
+                        }}
+                      >
                         <option value="">Detected / default</option>
-                        {scsiControllers.map((s) => (<option key={s.value} value={s.value}>{s.label}</option>))}
+                        {scsiControllers.map((s) => (
+                          <option key={s.value} value={s.value}>
+                            {s.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div className="space-y-1">
                       <Label>BIOS</Label>
-                      <select className={selectClass} value={bios} onChange={(e) => { setBios(e.target.value); }}>
+                      <select
+                        className={selectClass}
+                        value={bios}
+                        onChange={(e) => {
+                          setBios(e.target.value);
+                        }}
+                      >
                         <option value="">Detected</option>
-                        {biosOptions.map((b) => (<option key={b.value} value={b.value}>{b.label}</option>))}
+                        {biosOptions.map((b) => (
+                          <option key={b.value} value={b.value}>
+                            {b.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div className="space-y-1">
                       <Label>Machine</Label>
-                      <select className={selectClass} value={machine} onChange={(e) => { setMachine(e.target.value); }}>
+                      <select
+                        className={selectClass}
+                        value={machine}
+                        onChange={(e) => {
+                          setMachine(e.target.value);
+                        }}
+                      >
                         <option value="">Detected</option>
-                        {machineTypes.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
+                        {machineTypes.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
                   <label className="flex items-center gap-2 text-sm">
-                    <Checkbox checked={agent} onCheckedChange={(v) => { setAgent(v === true); }} />
+                    <Checkbox
+                      checked={agent}
+                      onCheckedChange={(v) => {
+                        setAgent(v === true);
+                      }}
+                    />
                     <span>Enable QEMU guest agent</span>
                   </label>
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-xs uppercase text-muted-foreground">CPU &amp; Memory</Label>
+                  <Label className="text-xs uppercase text-muted-foreground">
+                    CPU &amp; Memory
+                  </Label>
                   <div className="grid grid-cols-3 gap-3">
                     <div className="space-y-1">
                       <Label>Cores</Label>
-                      <Input value={cores} onChange={(e) => { setCores(e.target.value.replace(/[^0-9]/g, "")); }} placeholder="detected" />
+                      <Input
+                        value={cores}
+                        onChange={(e) => {
+                          setCores(e.target.value.replace(/[^0-9]/g, ""));
+                        }}
+                        placeholder="detected"
+                      />
                     </div>
                     <div className="space-y-1">
                       <Label>Sockets</Label>
-                      <Input value={sockets} onChange={(e) => { setSockets(e.target.value.replace(/[^0-9]/g, "")); }} placeholder="1" />
+                      <Input
+                        value={sockets}
+                        onChange={(e) => {
+                          setSockets(e.target.value.replace(/[^0-9]/g, ""));
+                        }}
+                        placeholder="1"
+                      />
                     </div>
                     <div className="space-y-1">
                       <Label>Memory (MiB)</Label>
-                      <Input value={memory} onChange={(e) => { setMemory(e.target.value.replace(/[^0-9]/g, "")); }} placeholder="detected" />
+                      <Input
+                        value={memory}
+                        onChange={(e) => {
+                          setMemory(e.target.value.replace(/[^0-9]/g, ""));
+                        }}
+                        placeholder="detected"
+                      />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label>CPU type</Label>
-                      <select className={selectClass} value={cpuType} onChange={(e) => { setCpuType(e.target.value); }}>
+                      <select
+                        className={selectClass}
+                        value={cpuType}
+                        onChange={(e) => {
+                          setCpuType(e.target.value);
+                        }}
+                      >
                         <option value="">Default (x86-64-v2-AES)</option>
-                        {cpuTypes.map((cpu) => (<option key={cpu} value={cpu}>{cpu}</option>))}
+                        {cpuTypes.map((cpu) => (
+                          <option key={cpu} value={cpu}>
+                            {cpu}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <label className="mt-6 flex items-center gap-2 text-sm">
-                      <Checkbox checked={numa} onCheckedChange={(v) => { setNuma(v === true); }} />
+                      <Checkbox
+                        checked={numa}
+                        onCheckedChange={(v) => {
+                          setNuma(v === true);
+                        }}
+                      />
                       <span>Enable NUMA</span>
                     </label>
                   </div>
@@ -1095,77 +1294,160 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
 
                 {bridge ? (
                   <div className="space-y-2">
-                    <Label className="text-xs uppercase text-muted-foreground">Network (on {bridge})</Label>
+                    <Label className="text-xs uppercase text-muted-foreground">
+                      Network (on {bridge})
+                    </Label>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <Label>Model</Label>
-                        <select className={selectClass} value={netModel} onChange={(e) => { setNetModel(e.target.value); }}>
+                        <select
+                          className={selectClass}
+                          value={netModel}
+                          onChange={(e) => {
+                            setNetModel(e.target.value);
+                          }}
+                        >
                           <option value="">From source</option>
-                          {netModels.map((n) => (<option key={n.value} value={n.value}>{n.label}</option>))}
+                          {netModels.map((n) => (
+                            <option key={n.value} value={n.value}>
+                              {n.label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div className="space-y-1">
                         <Label>VLAN tag</Label>
-                        <Input value={vlan} onChange={(e) => { setVlan(e.target.value.replace(/[^0-9]/g, "")); }} placeholder="none" />
+                        <Input
+                          value={vlan}
+                          onChange={(e) => {
+                            setVlan(e.target.value.replace(/[^0-9]/g, ""));
+                          }}
+                          placeholder="none"
+                        />
                       </div>
                       <div className="space-y-1">
                         <Label>MAC address</Label>
-                        <Input value={macAddress} onChange={(e) => { setMacAddress(e.target.value); }} placeholder="from source / auto" />
+                        <Input
+                          value={macAddress}
+                          onChange={(e) => {
+                            setMacAddress(e.target.value);
+                          }}
+                          placeholder="from source / auto"
+                        />
                       </div>
                       <div className="space-y-1">
                         <Label>Rate limit (MB/s)</Label>
-                        <Input value={rateLimit} onChange={(e) => { setRateLimit(e.target.value.replace(/[^0-9.]/g, "")); }} placeholder="unlimited" />
+                        <Input
+                          value={rateLimit}
+                          onChange={(e) => {
+                            setRateLimit(
+                              e.target.value.replace(/[^0-9.]/g, ""),
+                            );
+                          }}
+                          placeholder="unlimited"
+                        />
                       </div>
                       <div className="space-y-1">
                         <Label>MTU</Label>
-                        <Input value={mtu} onChange={(e) => { setMtu(e.target.value.replace(/[^0-9]/g, "")); }} placeholder="default" />
+                        <Input
+                          value={mtu}
+                          onChange={(e) => {
+                            setMtu(e.target.value.replace(/[^0-9]/g, ""));
+                          }}
+                          placeholder="default"
+                        />
                       </div>
                       <div className="space-y-1">
                         <Label>Multiqueue</Label>
-                        <Input value={multiqueue} onChange={(e) => { setMultiqueue(e.target.value.replace(/[^0-9]/g, "")); }} placeholder="disabled" />
+                        <Input
+                          value={multiqueue}
+                          onChange={(e) => {
+                            setMultiqueue(
+                              e.target.value.replace(/[^0-9]/g, ""),
+                            );
+                          }}
+                          placeholder="disabled"
+                        />
                       </div>
                     </div>
                     <label className="flex items-center gap-2 text-sm">
-                      <Checkbox checked={firewall} onCheckedChange={(v) => { setFirewall(v === true); }} />
+                      <Checkbox
+                        checked={firewall}
+                        onCheckedChange={(v) => {
+                          setFirewall(v === true);
+                        }}
+                      />
                       <span>Enable firewall on the NIC</span>
                     </label>
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    No network bridge was selected on the Target step, so no NIC will be attached.
-                    Go back to add one if the guest needs networking.
+                    No network bridge was selected on the Target step, so no NIC
+                    will be attached. Go back to add one if the guest needs
+                    networking.
                   </p>
                 )}
 
                 <div className="space-y-2">
-                  <Label className="text-xs uppercase text-muted-foreground">Identity &amp; options</Label>
+                  <Label className="text-xs uppercase text-muted-foreground">
+                    Identity &amp; options
+                  </Label>
                   <div className="space-y-1">
                     <Label>VM name</Label>
                     <Input
                       value={name}
-                      onChange={(e) => { setName(e.target.value); }}
+                      onChange={(e) => {
+                        setName(e.target.value);
+                      }}
                       placeholder="Guest name"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label>Resource pool</Label>
-                      <select className={selectClass} value={pool} onChange={(e) => { setPool(e.target.value); }}>
+                      <select
+                        className={selectClass}
+                        value={pool}
+                        onChange={(e) => {
+                          setPool(e.target.value);
+                        }}
+                      >
                         <option value="">None</option>
-                        {(resourcePools ?? []).map((rp) => (<option key={rp.poolid} value={rp.poolid}>{rp.poolid}</option>))}
+                        {(resourcePools ?? []).map((rp) => (
+                          <option key={rp.poolid} value={rp.poolid}>
+                            {rp.poolid}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div className="space-y-1">
                       <Label>Tags</Label>
-                      <Input value={tags} onChange={(e) => { setTags(e.target.value); }} placeholder="tag1;tag2" />
+                      <Input
+                        value={tags}
+                        onChange={(e) => {
+                          setTags(e.target.value);
+                        }}
+                        placeholder="tag1;tag2"
+                      />
                     </div>
                   </div>
                   <div className="space-y-1">
                     <Label>Description</Label>
-                    <Input value={description} onChange={(e) => { setDescription(e.target.value); }} placeholder="Optional" />
+                    <Input
+                      value={description}
+                      onChange={(e) => {
+                        setDescription(e.target.value);
+                      }}
+                      placeholder="Optional"
+                    />
                   </div>
                   <label className="flex items-center gap-2 text-sm">
-                    <Checkbox checked={onboot} onCheckedChange={(v) => { setOnboot(v === true); }} />
+                    <Checkbox
+                      checked={onboot}
+                      onCheckedChange={(v) => {
+                        setOnboot(v === true);
+                      }}
+                    />
                     <span>Start at boot (onboot)</span>
                   </label>
                 </div>
@@ -1175,22 +1457,63 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
             {step === "review" && (
               <div className="space-y-3 text-sm">
                 <div className="grid grid-cols-2 gap-2">
-                  <div><span className="text-muted-foreground">Name:</span> {name || meta?.name}</div>
-                  <div><span className="text-muted-foreground">VMID:</span> {vmid || "auto"}</div>
-                  <div><span className="text-muted-foreground">Target node:</span> {targetNode}</div>
-                  <div><span className="text-muted-foreground">Target storage:</span> {targetStorage}</div>
-                  <div><span className="text-muted-foreground">Working storage:</span> {workingStorage || "target default"}</div>
-                  <div><span className="text-muted-foreground">Disks:</span> {diskEntries.length}</div>
-                  <div><span className="text-muted-foreground">CPU:</span> {cores || meta?.cores || "?"} core(s){sockets ? ` × ${sockets} socket(s)` : ""}</div>
-                  <div><span className="text-muted-foreground">Memory:</span> {(memory || meta?.memory) ? `${memory || String(meta?.memory)} MiB` : "?"}</div>
-                  <div><span className="text-muted-foreground">Bridge:</span> {bridge ? `${bridge}${vlan ? ` (VLAN ${vlan})` : ""}` : "none"}</div>
-                  <div><span className="text-muted-foreground">Pool:</span> {pool || "none"}</div>
+                  <div>
+                    <span className="text-muted-foreground">Name:</span>{" "}
+                    {name || meta?.name}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">VMID:</span>{" "}
+                    {vmid || "auto"}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Target node:</span>{" "}
+                    {targetNode}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">
+                      Target storage:
+                    </span>{" "}
+                    {targetStorage}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">
+                      Working storage:
+                    </span>{" "}
+                    {workingStorage || "target default"}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Disks:</span>{" "}
+                    {diskEntries.length}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">CPU:</span>{" "}
+                    {cores || meta?.cores || "?"} core(s)
+                    {sockets ? ` × ${sockets} socket(s)` : ""}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Memory:</span>{" "}
+                    {memory || meta?.memory
+                      ? `${memory || String(meta?.memory)} MiB`
+                      : "?"}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Bridge:</span>{" "}
+                    {bridge
+                      ? `${bridge}${vlan ? ` (VLAN ${vlan})` : ""}`
+                      : "none"}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Pool:</span>{" "}
+                    {pool || "none"}
+                  </div>
                 </div>
                 <label className="flex items-center gap-2">
                   <Checkbox
                     checked={startAfter}
                     disabled={liveImport}
-                    onCheckedChange={(v) => { setStartAfter(v === true); }}
+                    onCheckedChange={(v) => {
+                      setStartAfter(v === true);
+                    }}
                   />
                   <span>Start the VM after the import completes</span>
                 </label>
@@ -1206,13 +1529,16 @@ export function ImportVMDialog({ open, onOpenChange, clusterId }: ImportVMDialog
                   <span>
                     Live import (boot while disks stream in)
                     <span className="block text-xs text-amber-600">
-                      If the import fails, all data written since it started is lost. Power off the
-                      source first; test on a throwaway VM before relying on this.
+                      If the import fails, all data written since it started is
+                      lost. Power off the source first; test on a throwaway VM
+                      before relying on this.
                     </span>
                   </span>
                 </label>
                 {startMutation.isError && (
-                  <p className="text-destructive">Import failed: {startMutation.error.message}</p>
+                  <p className="text-destructive">
+                    Import failed: {startMutation.error.message}
+                  </p>
                 )}
               </div>
             )}

@@ -69,7 +69,10 @@ export function PermissionMatrix({
               </div>
             </th>
             {actions.map((a) => (
-              <th key={a} className="px-3 py-2 text-center font-medium capitalize">
+              <th
+                key={a}
+                className="px-3 py-2 text-center font-medium capitalize"
+              >
                 {a}
               </th>
             ))}
@@ -92,7 +95,9 @@ export function PermissionMatrix({
                   <td key={action} className="px-3 py-1.5 text-center">
                     <Checkbox
                       checked={selectedSet.has(id)}
-                      onCheckedChange={() => { toggle(id); }}
+                      onCheckedChange={() => {
+                        toggle(id);
+                      }}
                     />
                   </td>
                 );

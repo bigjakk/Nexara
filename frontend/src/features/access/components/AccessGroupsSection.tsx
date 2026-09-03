@@ -60,7 +60,10 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
   const [comment, setComment] = useState("");
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [editTarget, setEditTarget] = useState<{ groupid: string; comment: string } | null>(null);
+  const [editTarget, setEditTarget] = useState<{
+    groupid: string;
+    comment: string;
+  } | null>(null);
 
   const manageable = canManage("access") && capabilities.canModifyUsers;
   const columns = manageable ? 4 : 3;
@@ -77,7 +80,11 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
           setComment("");
         },
         onError: (err) => {
-          setError(err instanceof ApiClientError ? err.message : "Failed to create group");
+          setError(
+            err instanceof ApiClientError
+              ? err.message
+              : "Failed to create group",
+          );
         },
       },
     );
@@ -111,7 +118,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                   <Input
                     id="group-id"
                     value={groupid}
-                    onChange={(e) => { setGroupid(e.target.value); }}
+                    onChange={(e) => {
+                      setGroupid(e.target.value);
+                    }}
                     required
                   />
                 </div>
@@ -120,11 +129,16 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                   <Input
                     id="group-comment"
                     value={comment}
-                    onChange={(e) => { setComment(e.target.value); }}
+                    onChange={(e) => {
+                      setComment(e.target.value);
+                    }}
                   />
                 </div>
                 {error && <p className="text-sm text-destructive">{error}</p>}
-                <Button type="submit" disabled={!groupid.trim() || createGroup.isPending}>
+                <Button
+                  type="submit"
+                  disabled={!groupid.trim() || createGroup.isPending}
+                >
                   {createGroup.isPending ? "Creating..." : "Create"}
                 </Button>
               </form>
@@ -145,7 +159,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                 <TableHead className="w-8" />
                 <TableHead>Group</TableHead>
                 <TableHead>Comment</TableHead>
-                {manageable && <TableHead className="text-right">Actions</TableHead>}
+                {manageable && (
+                  <TableHead className="text-right">Actions</TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -155,13 +171,23 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                   <Fragment key={group.groupid}>
                     <TableRow
                       className="cursor-pointer"
-                      onClick={() => { setExpanded(isOpen ? null : group.groupid); }}
+                      onClick={() => {
+                        setExpanded(isOpen ? null : group.groupid);
+                      }}
                     >
                       <TableCell>
-                        {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        {isOpen ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
                       </TableCell>
-                      <TableCell className="font-medium">{group.groupid}</TableCell>
-                      <TableCell className="text-muted-foreground">{group.comment || "—"}</TableCell>
+                      <TableCell className="font-medium">
+                        {group.groupid}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {group.comment || "—"}
+                      </TableCell>
                       {manageable && (
                         <TableCell className="text-right">
                           <Button
@@ -170,7 +196,10 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                             aria-label={`Edit ${group.groupid}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              setEditTarget({ groupid: group.groupid, comment: group.comment ?? "" });
+                              setEditTarget({
+                                groupid: group.groupid,
+                                comment: group.comment ?? "",
+                              });
                             }}
                           >
                             <Pencil className="h-4 w-4" />
@@ -192,7 +221,10 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                     {isOpen && (
                       <TableRow>
                         <TableCell colSpan={columns} className="bg-muted/30">
-                          <GroupMembers clusterId={clusterId} groupid={group.groupid} />
+                          <GroupMembers
+                            clusterId={clusterId}
+                            groupid={group.groupid}
+                          />
                         </TableCell>
                       </TableRow>
                     )}
@@ -208,20 +240,24 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
             clusterId={clusterId}
             groupid={editTarget.groupid}
             initialComment={editTarget.comment}
-            onClose={() => { setEditTarget(null); }}
+            onClose={() => {
+              setEditTarget(null);
+            }}
           />
         )}
 
         <AlertDialog
           open={deleteTarget !== null}
-          onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null);
+          }}
         >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete group {deleteTarget}?</AlertDialogTitle>
               <AlertDialogDescription>
-                Members keep their accounts, but lose any permissions granted through this
-                group. This cannot be undone.
+                Members keep their accounts, but lose any permissions granted
+                through this group. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -233,7 +269,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
                   e.preventDefault();
                   if (!deleteTarget) return;
                   deleteGroup.mutate(deleteTarget, {
-                    onSettled: () => { setDeleteTarget(null); },
+                    onSettled: () => {
+                      setDeleteTarget(null);
+                    },
                   });
                 }}
               >
@@ -248,7 +286,13 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
 }
 
 /** Group members, fetched lazily when the row is expanded. */
-function GroupMembers({ clusterId, groupid }: { clusterId: string; groupid: string }) {
+function GroupMembers({
+  clusterId,
+  groupid,
+}: {
+  clusterId: string;
+  groupid: string;
+}) {
   const groupQuery = useAccessGroup(clusterId, groupid);
 
   if (groupQuery.isLoading) return <Skeleton className="h-10 w-full" />;
@@ -263,7 +307,10 @@ function GroupMembers({ clusterId, groupid }: { clusterId: string; groupid: stri
       <p className="mb-2 text-sm font-medium">Members</p>
       <div className="flex flex-wrap gap-1">
         {members.map((m) => (
-          <code key={m} className="rounded bg-background px-2 py-1 font-mono text-xs">
+          <code
+            key={m}
+            className="rounded bg-background px-2 py-1 font-mono text-xs"
+          >
             {m}
           </code>
         ))}
@@ -302,14 +349,23 @@ function EditGroupDialog({
       {
         onSuccess: onClose,
         onError: (err) => {
-          setError(err instanceof ApiClientError ? err.message : "Failed to update group");
+          setError(
+            err instanceof ApiClientError
+              ? err.message
+              : "Failed to update group",
+          );
         },
       },
     );
   };
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Edit {groupid}</DialogTitle>
@@ -320,7 +376,9 @@ function EditGroupDialog({
             <Input
               id="edit-group-comment"
               value={comment}
-              onChange={(e) => { setComment(e.target.value); }}
+              onChange={(e) => {
+                setComment(e.target.value);
+              }}
             />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}

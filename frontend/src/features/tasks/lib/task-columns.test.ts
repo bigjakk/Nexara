@@ -61,7 +61,10 @@ describe("task columns", () => {
 describe("deriveDisplayStatus", () => {
   it("classifies a stopped task by its exit status", () => {
     expect(
-      deriveDisplayStatus(task({ status: "stopped", exit_status: "OK" }), undefined),
+      deriveDisplayStatus(
+        task({ status: "stopped", exit_status: "OK" }),
+        undefined,
+      ),
     ).toBe("ok");
     expect(
       deriveDisplayStatus(

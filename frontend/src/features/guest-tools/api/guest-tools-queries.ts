@@ -62,7 +62,9 @@ export function useGuestToolsFleet(clusterId: string, enabled = true) {
       if (!rows) return false;
       const active = rows.some(
         (g) =>
-          g.stage === "staging" || g.stage === "staged" || g.stage === "running",
+          g.stage === "staging" ||
+          g.stage === "staged" ||
+          g.stage === "running",
       );
       return active ? 15_000 : false;
     },

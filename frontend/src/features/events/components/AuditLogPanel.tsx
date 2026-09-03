@@ -55,7 +55,10 @@ const resourceTypes = [
 
 type Severity = "info" | "warning" | "error" | "all";
 
-function deriveSeverity(action: string, details: string): "info" | "warning" | "error" {
+function deriveSeverity(
+  action: string,
+  details: string,
+): "info" | "warning" | "error" {
   // Check for error indicators in details
   if (details && details !== "{}" && details !== "null") {
     try {
@@ -68,7 +71,8 @@ function deriveSeverity(action: string, details: string): "info" | "warning" | "
   }
 
   const a = action.toLowerCase();
-  if (a.includes("error") || a.includes("failed") || a.includes("fail")) return "error";
+  if (a.includes("error") || a.includes("failed") || a.includes("fail"))
+    return "error";
   if (
     a.includes("delete") ||
     a.includes("destroy") ||
@@ -100,9 +104,7 @@ function severityBadge(severity: "info" | "warning" | "error") {
 }
 
 function formatAction(action: string): string {
-  return action
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function resourceTypeLabel(type: string): string {
@@ -119,13 +121,18 @@ function formatDetailsSummary(entry: AuditLogEntry): string | null {
     const d = JSON.parse(entry.details) as Record<string, unknown>;
     const parts: string[] = [];
     if (typeof d["vm_type"] === "string") parts.push(d["vm_type"]);
-    if (typeof d["source_node"] === "string" && typeof d["target_node"] === "string") {
+    if (
+      typeof d["source_node"] === "string" &&
+      typeof d["target_node"] === "string"
+    ) {
       parts.push(`${d["source_node"]} → ${d["target_node"]}`);
     }
-    if (typeof d["migration_type"] === "string") parts.push(d["migration_type"]);
+    if (typeof d["migration_type"] === "string")
+      parts.push(d["migration_type"]);
     if (d["online"] === true) parts.push("live");
     if (typeof d["error"] === "string") parts.push(`Error: ${d["error"]}`);
-    if (typeof d["status"] === "string" && d["status"] !== "completed") parts.push(d["status"]);
+    if (typeof d["status"] === "string" && d["status"] !== "completed")
+      parts.push(d["status"]);
     return parts.length > 0 ? parts.join(" · ") : null;
   } catch {
     return null;
@@ -150,7 +157,10 @@ function detailKeyLabel(key: string): string {
     name: "Name",
     size: "Size",
   };
-  return labels[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return (
+    labels[key] ??
+    key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
 }
 
 function detailValue(val: unknown): string {
@@ -162,7 +172,8 @@ function detailValue(val: unknown): string {
 }
 
 function parseDetails(entry: AuditLogEntry): Array<[string, string]> | null {
-  if (!entry.details || entry.details === "{}" || entry.details === "null") return null;
+  if (!entry.details || entry.details === "{}" || entry.details === "null")
+    return null;
   try {
     const d = JSON.parse(entry.details) as Record<string, unknown>;
     const pairs: Array<[string, string]> = [];
@@ -180,7 +191,8 @@ function sourceBadge(entry: AuditLogEntry) {
     let proxmoxUser = "";
     try {
       const d = JSON.parse(entry.details) as Record<string, unknown>;
-      if (typeof d["proxmox_user"] === "string") proxmoxUser = d["proxmox_user"];
+      if (typeof d["proxmox_user"] === "string")
+        proxmoxUser = d["proxmox_user"];
     } catch {
       // ignore
     }
@@ -188,7 +200,9 @@ function sourceBadge(entry: AuditLogEntry) {
       <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-600 dark:text-orange-400">
         <Monitor className="h-3 w-3" />
         PVE
-        {proxmoxUser && <span className="text-muted-foreground">({proxmoxUser})</span>}
+        {proxmoxUser && (
+          <span className="text-muted-foreground">({proxmoxUser})</span>
+        )}
       </span>
     );
   }
@@ -203,8 +217,10 @@ function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
   try {
     const d = JSON.parse(entry.details) as Record<string, unknown>;
     // Proxmox-sourced entries store name + VMID in details
-    const resName = typeof d["resource_name"] === "string" ? d["resource_name"] : null;
-    const resId = typeof d["resource_id"] === "string" ? d["resource_id"] : null;
+    const resName =
+      typeof d["resource_name"] === "string" ? d["resource_name"] : null;
+    const resId =
+      typeof d["resource_id"] === "string" ? d["resource_id"] : null;
     if (resName) {
       return (
         <span className="ml-2 text-xs">
@@ -226,9 +242,7 @@ function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
     // Proxmox task with VMID but no name resolved
     if (resId) {
       return (
-        <span className="ml-2 text-xs text-muted-foreground">
-          VMID {resId}
-        </span>
+        <span className="ml-2 text-xs text-muted-foreground">VMID {resId}</span>
       );
     }
   } catch {
@@ -278,22 +292,21 @@ function EventRow({
             <span className="ml-2 text-xs">
               {entry.resource_name}
               {entry.resource_vmid > 0 && (
-                <span className="text-muted-foreground"> ({String(entry.resource_vmid)})</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  ({String(entry.resource_vmid)})
+                </span>
               )}
             </span>
           ) : (
             <ResourceFallback entry={entry} />
           )}
         </td>
-        <td className="px-4 py-2 font-medium">
-          {formatAction(entry.action)}
-        </td>
+        <td className="px-4 py-2 font-medium">{formatAction(entry.action)}</td>
         <td className="px-4 py-2 text-xs text-muted-foreground">
           {summary ?? ""}
         </td>
-        <td className="px-4 py-2">
-          {sourceBadge(entry)}
-        </td>
+        <td className="px-4 py-2">{sourceBadge(entry)}</td>
       </tr>
       {expanded && (
         <tr className="border-b bg-muted/10">
@@ -316,13 +329,16 @@ function EventRow({
                   <span className="text-muted-foreground">Resource Name</span>
                   <span>
                     {entry.resource_name}
-                    {entry.resource_vmid > 0 && ` (VMID ${String(entry.resource_vmid)})`}
+                    {entry.resource_vmid > 0 &&
+                      ` (VMID ${String(entry.resource_vmid)})`}
                   </span>
                 </>
               )}
 
               <span className="text-muted-foreground">Resource ID</span>
-              <span className="break-all font-mono text-[10px]">{entry.resource_id}</span>
+              <span className="break-all font-mono text-[10px]">
+                {entry.resource_id}
+              </span>
 
               <span className="text-muted-foreground">Action</span>
               <span className="font-medium">{formatAction(entry.action)}</span>
@@ -334,17 +350,23 @@ function EventRow({
               <span>
                 {entry.user_display_name || entry.user_email}
                 {entry.user_display_name && entry.user_email && (
-                  <span className="ml-1 text-muted-foreground">({entry.user_email})</span>
+                  <span className="ml-1 text-muted-foreground">
+                    ({entry.user_email})
+                  </span>
                 )}
               </span>
 
               <span className="text-muted-foreground">User ID</span>
-              <span className="break-all font-mono text-[10px]">{entry.user_id}</span>
+              <span className="break-all font-mono text-[10px]">
+                {entry.user_id}
+              </span>
             </div>
 
             {details && details.length > 0 && (
               <div className="mt-2 border-t pt-2">
-                <span className="text-xs font-medium text-muted-foreground">Details</span>
+                <span className="text-xs font-medium text-muted-foreground">
+                  Details
+                </span>
                 <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
                   {details.map(([label, value]) => (
                     <div key={label} className="contents">
@@ -441,7 +463,14 @@ export function AuditLogPanel() {
       const ext = format === "syslog" ? "log" : format;
       void triggerDownload(url, `audit-log.${ext}`);
     },
-    [clusterFilter, resourceFilter, userFilter, actionFilter, startTime, endTime],
+    [
+      clusterFilter,
+      resourceFilter,
+      userFilter,
+      actionFilter,
+      startTime,
+      endTime,
+    ],
   );
 
   const resetFilters = useCallback(() => {
@@ -474,7 +503,9 @@ export function AuditLogPanel() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => { handleExport("csv"); }}
+            onClick={() => {
+              handleExport("csv");
+            }}
           >
             <Download className="mr-1 h-3 w-3" />
             CSV
@@ -482,7 +513,9 @@ export function AuditLogPanel() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => { handleExport("json"); }}
+            onClick={() => {
+              handleExport("json");
+            }}
           >
             <Download className="mr-1 h-3 w-3" />
             JSON
@@ -490,7 +523,9 @@ export function AuditLogPanel() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => { handleExport("syslog"); }}
+            onClick={() => {
+              handleExport("syslog");
+            }}
           >
             <Download className="mr-1 h-3 w-3" />
             Syslog
@@ -501,7 +536,9 @@ export function AuditLogPanel() {
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3">
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">Cluster</label>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Cluster
+          </label>
           <select
             className={selectClass}
             value={clusterFilter}
@@ -520,7 +557,9 @@ export function AuditLogPanel() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">Resource Type</label>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Resource Type
+          </label>
           <select
             className={selectClass}
             value={resourceFilter}
@@ -538,7 +577,9 @@ export function AuditLogPanel() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">User</label>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            User
+          </label>
           <select
             className={selectClass}
             value={userFilter}
@@ -557,7 +598,9 @@ export function AuditLogPanel() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">Action</label>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Action
+          </label>
           <select
             className={selectClass}
             value={actionFilter}
@@ -576,7 +619,9 @@ export function AuditLogPanel() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">Source</label>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Source
+          </label>
           <select
             className={selectClass}
             value={sourceFilter}
@@ -592,7 +637,9 @@ export function AuditLogPanel() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">Severity</label>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Severity
+          </label>
           <select
             className={selectClass}
             value={severityFilter}
@@ -609,7 +656,9 @@ export function AuditLogPanel() {
         </div>
 
         <div>
-          <label className="mb-1 block text-xs text-muted-foreground">From</label>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            From
+          </label>
           <input
             type="date"
             className={inputClass}
@@ -688,7 +737,10 @@ export function AuditLogPanel() {
                 ))}
                 {(!filteredItems || filteredItems.length === 0) && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                    <td
+                      colSpan={7}
+                      className="px-4 py-8 text-center text-muted-foreground"
+                    >
                       No events found.
                     </td>
                   </tr>

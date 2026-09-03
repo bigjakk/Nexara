@@ -27,7 +27,11 @@ export async function resolveVolidToDiskKey(
       `/api/v1/clusters/${clusterId}/vms/${vmUuid}/config`,
     );
     for (const [key, val] of Object.entries(config)) {
-      if (VM_DISK_KEY_RE.test(key) && typeof val === "string" && val.includes(volid)) {
+      if (
+        VM_DISK_KEY_RE.test(key) &&
+        typeof val === "string" &&
+        val.includes(volid)
+      ) {
         return key;
       }
     }
@@ -53,7 +57,11 @@ export async function resolveVolidToCTVolumeKey(
       `/api/v1/clusters/${clusterId}/containers/${ctUuid}/config`,
     );
     for (const [key, val] of Object.entries(config)) {
-      if (CT_VOLUME_KEY_RE.test(key) && typeof val === "string" && val.includes(volid)) {
+      if (
+        CT_VOLUME_KEY_RE.test(key) &&
+        typeof val === "string" &&
+        val.includes(volid)
+      ) {
         return key;
       }
     }

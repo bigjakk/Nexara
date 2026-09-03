@@ -7,10 +7,7 @@
  * rather than being restated (and drifting) in each panel.
  */
 import { useState, type ReactNode } from "react";
-import {
-  isOkExit,
-  type DisplayStatus,
-} from "@/components/layout/task-status";
+import { isOkExit, type DisplayStatus } from "@/components/layout/task-status";
 import type { SortDirection } from "@/hooks/useTableSort";
 import type { TaskRecord } from "../api/tasks-queries";
 

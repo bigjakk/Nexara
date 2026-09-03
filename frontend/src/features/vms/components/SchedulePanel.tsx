@@ -85,7 +85,13 @@ export function SchedulePanel({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Scheduled Tasks</h3>
-        <Button size="sm" className="gap-2" onClick={() => { setDialogOpen(true); }}>
+        <Button
+          size="sm"
+          className="gap-2"
+          onClick={() => {
+            setDialogOpen(true);
+          }}
+        >
           <Plus className="h-4 w-4" />
           Add Schedule
         </Button>
@@ -154,7 +160,9 @@ export function SchedulePanel({
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => { handleDelete(s.id); }}
+                      onClick={() => {
+                        handleDelete(s.id);
+                      }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -178,7 +186,9 @@ export function SchedulePanel({
               <select
                 className={selectClass}
                 value={action}
-                onChange={(e) => { setAction(e.target.value); }}
+                onChange={(e) => {
+                  setAction(e.target.value);
+                }}
               >
                 <option value="snapshot">Snapshot</option>
                 <option value="reboot">Reboot</option>
@@ -188,11 +198,14 @@ export function SchedulePanel({
               <Label>Cron Expression</Label>
               <Input
                 value={cronExpr}
-                onChange={(e) => { setCronExpr(e.target.value); }}
+                onChange={(e) => {
+                  setCronExpr(e.target.value);
+                }}
                 placeholder="0 2 * * *"
               />
               <p className="mt-1 text-xs text-muted-foreground">
-                Format: minute hour day month weekday (e.g. &quot;0 2 * * *&quot; = daily at 2 AM)
+                Format: minute hour day month weekday (e.g. &quot;0 2 * *
+                *&quot; = daily at 2 AM)
               </p>
             </div>
             {action === "snapshot" && (
@@ -200,14 +213,21 @@ export function SchedulePanel({
                 <Label>Snapshot Name Template (optional)</Label>
                 <Input
                   value={snapName}
-                  onChange={(e) => { setSnapName(e.target.value); }}
+                  onChange={(e) => {
+                    setSnapName(e.target.value);
+                  }}
                   placeholder="auto-YYYYMMDD-HHMMSS"
                 />
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setDialogOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDialogOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button

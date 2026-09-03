@@ -50,9 +50,13 @@ export function RenameFolderDialog({
     update.mutate(
       { clusterId, folderId, name: trimmed },
       {
-        onSuccess: () => { onOpenChange(false); },
+        onSuccess: () => {
+          onOpenChange(false);
+        },
         onError: (err: unknown) => {
-          setError(err instanceof Error ? err.message : "Failed to rename folder");
+          setError(
+            err instanceof Error ? err.message : "Failed to rename folder",
+          );
         },
       },
     );
@@ -67,7 +71,9 @@ export function RenameFolderDialog({
 
         <Input
           value={name}
-          onChange={(e) => { setName(e.target.value); }}
+          onChange={(e) => {
+            setName(e.target.value);
+          }}
           maxLength={128}
           autoFocus
           onKeyDown={(e) => {
@@ -83,7 +89,9 @@ export function RenameFolderDialog({
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => { onOpenChange(false); }}
+            onClick={() => {
+              onOpenChange(false);
+            }}
             disabled={update.isPending}
           >
             Cancel

@@ -147,7 +147,9 @@ describe("ACTIVITY_ACCESSORS", () => {
 
   it("ranks a non-task entry as null so it never leads either direction", () => {
     expect(
-      ACTIVITY_ACCESSORS.status(decorateActivity(entry({ action: "login" }), noLive)),
+      ACTIVITY_ACCESSORS.status(
+        decorateActivity(entry({ action: "login" }), noLive),
+      ),
     ).toBeNull();
   });
 
@@ -169,7 +171,9 @@ describe("ACTIVITY_ACCESSORS", () => {
 
   it("treats a blank cluster as absent, matching the em dash the cell shows", () => {
     expect(
-      ACTIVITY_ACCESSORS.cluster(decorateActivity(entry({ cluster_name: "" }), noLive)),
+      ACTIVITY_ACCESSORS.cluster(
+        decorateActivity(entry({ cluster_name: "" }), noLive),
+      ),
     ).toBeNull();
   });
 

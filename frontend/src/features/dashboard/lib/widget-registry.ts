@@ -78,10 +78,16 @@ export const widgetTemplates: WidgetTemplate[] = [
 ];
 
 /** Parse a widget ID like "cpu-chart:abc123" into { type, clusterId } */
-export function parseWidgetId(widgetId: string): { type: string; clusterId: string | null } {
+export function parseWidgetId(widgetId: string): {
+  type: string;
+  clusterId: string | null;
+} {
   const idx = widgetId.indexOf(":");
   if (idx === -1) return { type: widgetId, clusterId: null };
-  return { type: widgetId.substring(0, idx), clusterId: widgetId.substring(idx + 1) };
+  return {
+    type: widgetId.substring(0, idx),
+    clusterId: widgetId.substring(idx + 1),
+  };
 }
 
 /** Build a widget ID from type and optional clusterId */
@@ -96,7 +102,10 @@ export function getTemplate(widgetId: string): WidgetTemplate | undefined {
 }
 
 /** Get the display label for a widget instance */
-export function getWidgetLabel(widgetId: string, clusterNames: Map<string, string>): string {
+export function getWidgetLabel(
+  widgetId: string,
+  clusterNames: Map<string, string>,
+): string {
   const { type, clusterId } = parseWidgetId(widgetId);
   const template = widgetTemplates.find((t) => t.type === type);
   if (!template) return widgetId;
@@ -185,8 +194,18 @@ export function getDefaultLayout(widgetIds: string[]): LayoutItem[] {
 }
 
 /** Get all possible widget instances that could be added, given current clusters */
-export function getAllAvailableWidgets(clusters: ClusterInfo[]): { id: string; label: string; description: string; template: WidgetTemplate }[] {
-  const result: { id: string; label: string; description: string; template: WidgetTemplate }[] = [];
+export function getAllAvailableWidgets(clusters: ClusterInfo[]): {
+  id: string;
+  label: string;
+  description: string;
+  template: WidgetTemplate;
+}[] {
+  const result: {
+    id: string;
+    label: string;
+    description: string;
+    template: WidgetTemplate;
+  }[] = [];
 
   for (const template of widgetTemplates) {
     if (template.perCluster) {

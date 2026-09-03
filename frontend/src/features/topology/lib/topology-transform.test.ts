@@ -12,7 +12,9 @@ import type {
   StorageResponse,
 } from "@/types/api";
 
-function makeCluster(overrides: Partial<ClusterResponse> = {}): ClusterResponse {
+function makeCluster(
+  overrides: Partial<ClusterResponse> = {},
+): ClusterResponse {
   return {
     id: "c1",
     name: "test-cluster",
@@ -92,7 +94,9 @@ function makeVM(overrides: Partial<VMResponse> = {}): VMResponse {
   };
 }
 
-function makeStorage(overrides: Partial<StorageResponse> = {}): StorageResponse {
+function makeStorage(
+  overrides: Partial<StorageResponse> = {},
+): StorageResponse {
   return {
     id: "s1",
     cluster_id: "c1",
@@ -187,8 +191,14 @@ describe("buildTopologyGraph", () => {
         ["c1", [makeNode()]],
         ["c2", [makeNode({ id: "n2", cluster_id: "c2", name: "pve-node-2" })]],
       ]),
-      vmsByCluster: new Map([["c1", []], ["c2", []]]),
-      storageByCluster: new Map([["c1", []], ["c2", []]]),
+      vmsByCluster: new Map([
+        ["c1", []],
+        ["c2", []],
+      ]),
+      storageByCluster: new Map([
+        ["c1", []],
+        ["c2", []],
+      ]),
     });
 
     const graph = buildTopologyGraph(input, {
@@ -208,8 +218,18 @@ describe("buildTopologyGraph", () => {
         [
           "c1",
           [
-            makeStorage({ id: "s1", storage: "ceph-pool", shared: true, node_id: "n1" }),
-            makeStorage({ id: "s2", storage: "ceph-pool", shared: true, node_id: "n2" }),
+            makeStorage({
+              id: "s1",
+              storage: "ceph-pool",
+              shared: true,
+              node_id: "n1",
+            }),
+            makeStorage({
+              id: "s2",
+              storage: "ceph-pool",
+              shared: true,
+              node_id: "n2",
+            }),
           ],
         ],
       ]),
@@ -223,10 +243,7 @@ describe("buildTopologyGraph", () => {
   it("connects shared storage to cluster, not host", () => {
     const input = makeInput({
       storageByCluster: new Map([
-        [
-          "c1",
-          [makeStorage({ storage: "ceph-pool", shared: true })],
-        ],
+        ["c1", [makeStorage({ storage: "ceph-pool", shared: true })]],
       ]),
     });
 

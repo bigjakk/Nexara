@@ -38,7 +38,9 @@ export function loadColumnLayout(tableId: string): StoredColumnLayout {
       // Storage is user-editable and survives releases that rename or drop a
       // column, so nothing read back here is trusted to be a valid key — the
       // reconciler below intersects it with the table's real columns.
-      order: Array.isArray(order) ? order.filter((k) => typeof k === "string") : undefined,
+      order: Array.isArray(order)
+        ? order.filter((k) => typeof k === "string")
+        : undefined,
       widths:
         widths && typeof widths === "object"
           ? Object.fromEntries(
@@ -107,7 +109,10 @@ export function reconcileOrder<K extends string>(
 }
 
 export function clampWidth(width: number): number {
-  return Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, Math.round(width)));
+  return Math.min(
+    MAX_COLUMN_WIDTH,
+    Math.max(MIN_COLUMN_WIDTH, Math.round(width)),
+  );
 }
 
 /**

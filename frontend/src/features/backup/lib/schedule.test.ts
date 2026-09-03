@@ -9,13 +9,28 @@ import {
 describe("formatSchedule", () => {
   it("formats each frequency", () => {
     expect(
-      formatSchedule({ ...DEFAULT_SCHEDULE, frequency: "daily", hour: 2, minute: 30 }),
+      formatSchedule({
+        ...DEFAULT_SCHEDULE,
+        frequency: "daily",
+        hour: 2,
+        minute: 30,
+      }),
     ).toBe("02:30");
     expect(
-      formatSchedule({ ...DEFAULT_SCHEDULE, frequency: "hourly", everyHours: 6, minute: 0 }),
+      formatSchedule({
+        ...DEFAULT_SCHEDULE,
+        frequency: "hourly",
+        everyHours: 6,
+        minute: 0,
+      }),
     ).toBe("*/6:00");
     expect(
-      formatSchedule({ ...DEFAULT_SCHEDULE, frequency: "hourly", everyHours: 1, minute: 15 }),
+      formatSchedule({
+        ...DEFAULT_SCHEDULE,
+        frequency: "hourly",
+        everyHours: 1,
+        minute: 15,
+      }),
     ).toBe("*:15");
     expect(
       formatSchedule({
@@ -39,26 +54,53 @@ describe("formatSchedule", () => {
 
   it("passes custom strings through and rejects an empty weekday set", () => {
     expect(
-      formatSchedule({ ...DEFAULT_SCHEDULE, frequency: "custom", custom: " mon..fri 09:00 " }),
+      formatSchedule({
+        ...DEFAULT_SCHEDULE,
+        frequency: "custom",
+        custom: " mon..fri 09:00 ",
+      }),
     ).toBe("mon..fri 09:00");
     expect(
-      formatSchedule({ ...DEFAULT_SCHEDULE, frequency: "weekly", weekdays: [] }),
+      formatSchedule({
+        ...DEFAULT_SCHEDULE,
+        frequency: "weekly",
+        weekdays: [],
+      }),
     ).toBe("");
   });
 });
 
 describe("parseSchedule", () => {
   it("round-trips the strings the builder emits", () => {
-    for (const raw of ["02:30", "*/6:00", "*:15", "mon,fri 22:00", "*-*-01 04:05"]) {
+    for (const raw of [
+      "02:30",
+      "*/6:00",
+      "*:15",
+      "mon,fri 22:00",
+      "*-*-01 04:05",
+    ]) {
       expect(formatSchedule(parseSchedule(raw))).toBe(raw);
     }
   });
 
   it("reads systemd shorthands", () => {
-    expect(parseSchedule("hourly")).toMatchObject({ frequency: "hourly", everyHours: 1 });
-    expect(parseSchedule("daily")).toMatchObject({ frequency: "daily", hour: 0, minute: 0 });
-    expect(parseSchedule("weekly")).toMatchObject({ frequency: "weekly", weekdays: ["mon"] });
-    expect(parseSchedule("monthly")).toMatchObject({ frequency: "monthly", dayOfMonth: 1 });
+    expect(parseSchedule("hourly")).toMatchObject({
+      frequency: "hourly",
+      everyHours: 1,
+    });
+    expect(parseSchedule("daily")).toMatchObject({
+      frequency: "daily",
+      hour: 0,
+      minute: 0,
+    });
+    expect(parseSchedule("weekly")).toMatchObject({
+      frequency: "weekly",
+      weekdays: ["mon"],
+    });
+    expect(parseSchedule("monthly")).toMatchObject({
+      frequency: "monthly",
+      dayOfMonth: 1,
+    });
   });
 
   it("expands weekday ranges", () => {
@@ -74,8 +116,17 @@ describe("parseSchedule", () => {
   });
 
   it("keeps anything it cannot model as custom", () => {
-    for (const raw of ["*-*-01/2 02:00", "yearly", "mon 25:00", "12:60", "sun..mon 02:00"]) {
-      expect(parseSchedule(raw)).toMatchObject({ frequency: "custom", custom: raw });
+    for (const raw of [
+      "*-*-01/2 02:00",
+      "yearly",
+      "mon 25:00",
+      "12:60",
+      "sun..mon 02:00",
+    ]) {
+      expect(parseSchedule(raw)).toMatchObject({
+        frequency: "custom",
+        custom: raw,
+      });
     }
   });
 
@@ -92,10 +143,16 @@ describe("describeSchedule", () => {
     expect(describeSchedule("*:00")).toBe("Every hour, on the hour");
     expect(describeSchedule("*:30")).toBe("Every hour at :30");
     expect(describeSchedule("sun 03:00")).toBe("Every Sunday at 03:00");
-    expect(describeSchedule("mon,wed,fri 22:00")).toBe("Every Mon, Wed and Fri at 22:00");
+    expect(describeSchedule("mon,wed,fri 22:00")).toBe(
+      "Every Mon, Wed and Fri at 22:00",
+    );
     expect(describeSchedule("mon..sun 01:00")).toBe("Every day at 01:00");
-    expect(describeSchedule("*-*-02 04:05")).toBe("On the 2nd of each month at 04:05");
-    expect(describeSchedule("*-*-21 04:05")).toBe("On the 21st of each month at 04:05");
+    expect(describeSchedule("*-*-02 04:05")).toBe(
+      "On the 2nd of each month at 04:05",
+    );
+    expect(describeSchedule("*-*-21 04:05")).toBe(
+      "On the 21st of each month at 04:05",
+    );
   });
 
   it("returns null when it has nothing better than the raw string", () => {

@@ -41,11 +41,17 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
   const [restoreUpid, setRestoreUpid] = useState<string | null>(null);
 
   const clustersQuery = useClusters();
-  const clusters = useMemo(() => clustersQuery.data ?? [], [clustersQuery.data]);
+  const clusters = useMemo(
+    () => clustersQuery.data ?? [],
+    [clustersQuery.data],
+  );
   const nodesQuery = useClusterNodes(targetClusterId);
   const nodes = useMemo(() => nodesQuery.data ?? [], [nodesQuery.data]);
   const storageQuery = useClusterStorage(targetClusterId);
-  const allStorage = useMemo(() => storageQuery.data ?? [], [storageQuery.data]);
+  const allStorage = useMemo(
+    () => storageQuery.data ?? [],
+    [storageQuery.data],
+  );
   const vmsQuery = useClusterVMs(targetClusterId);
   const clusterVMs = useMemo(() => vmsQuery.data ?? [], [vmsQuery.data]);
 
@@ -157,8 +163,8 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
         <DialogHeader>
           <DialogTitle>Restore Backup</DialogTitle>
           <DialogDescription>
-            Restore {snapshot.backup_type.toUpperCase()}/{snapshot.backup_id} from{" "}
-            {snapshot.datastore} to a PVE node.
+            Restore {snapshot.backup_type.toUpperCase()}/{snapshot.backup_id}{" "}
+            from {snapshot.datastore} to a PVE node.
           </DialogDescription>
         </DialogHeader>
 
@@ -229,8 +235,7 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                   <option value="">Select node...</option>
                   {nodes.map((n) => (
                     <option key={n.id} value={n.name}>
-                      {n.name}{" "}
-                      {n.status === "online" ? "" : `(${n.status})`}
+                      {n.name} {n.status === "online" ? "" : `(${n.status})`}
                     </option>
                   ))}
                 </select>
@@ -320,9 +325,7 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                 </div>
               )}
 
-              {error && (
-                <p className="text-sm text-destructive">{error}</p>
-              )}
+              {error && <p className="text-sm text-destructive">{error}</p>}
             </div>
 
             <DialogFooter>

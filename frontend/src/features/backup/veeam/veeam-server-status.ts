@@ -1,10 +1,6 @@
 import type { VeeamServer } from "../types/backup";
 
-export type VeeamServerStatus =
-  | "Disabled"
-  | "Error"
-  | "Syncing"
-  | "Connected";
+export type VeeamServerStatus = "Disabled" | "Error" | "Syncing" | "Connected";
 
 /**
  * The single source of a registered server's four states.

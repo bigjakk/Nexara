@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { applyHierarchicalLayout } from "./topology-layout";
 import type { Node, Edge } from "@xyflow/react";
-import type { ClusterNodeData, HostNodeData, GuestNodeData } from "./topology-transform";
+import type {
+  ClusterNodeData,
+  HostNodeData,
+  GuestNodeData,
+} from "./topology-transform";
 
 function makeFlowNode(
   id: string,
@@ -68,9 +72,7 @@ describe("applyHierarchicalLayout", () => {
         guests: [],
       } satisfies HostNodeData),
     ];
-    const edges: Edge[] = [
-      { id: "e1", source: "cluster-1", target: "host-1" },
-    ];
+    const edges: Edge[] = [{ id: "e1", source: "cluster-1", target: "host-1" }];
 
     const result = applyHierarchicalLayout(nodes, edges, {
       direction: "TB",
@@ -107,9 +109,7 @@ describe("applyHierarchicalLayout", () => {
         guests: [],
       } satisfies HostNodeData),
     ];
-    const edges: Edge[] = [
-      { id: "e1", source: "cluster-1", target: "host-1" },
-    ];
+    const edges: Edge[] = [{ id: "e1", source: "cluster-1", target: "host-1" }];
 
     const result = applyHierarchicalLayout(nodes, edges, {
       direction: "LR",

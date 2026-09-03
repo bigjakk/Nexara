@@ -3,31 +3,52 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Pencil, Play, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  useReplicationJobs, useCreateReplicationJob, useUpdateReplicationJob,
-  useDeleteReplicationJob, useTriggerReplication,
+  useReplicationJobs,
+  useCreateReplicationJob,
+  useUpdateReplicationJob,
+  useDeleteReplicationJob,
+  useTriggerReplication,
 } from "@/features/replication/api/replication-queries";
 import type { ReplicationJob } from "@/features/replication/api/replication-queries";
-import { useClusterVMs, useClusterNodes } from "@/features/clusters/api/cluster-queries";
+import {
+  useClusterVMs,
+  useClusterNodes,
+} from "@/features/clusters/api/cluster-queries";
 
 interface ClusterReplicationTabProps {
   clusterId: string;
 }
 
-export function ClusterReplicationTab({ clusterId }: ClusterReplicationTabProps) {
+export function ClusterReplicationTab({
+  clusterId,
+}: ClusterReplicationTabProps) {
   const { canManage } = useAuth();
   const jobsQuery = useReplicationJobs(clusterId);
   const deleteJob = useDeleteReplicationJob(clusterId);
@@ -48,19 +69,32 @@ export function ClusterReplicationTab({ clusterId }: ClusterReplicationTabProps)
         {canManage("replication") && (
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
-              <Button size="sm"><Plus className="mr-2 h-4 w-4" />Create Job</Button>
+              <Button size="sm">
+                <Plus className="mr-2 h-4 w-4" />
+                Create Job
+              </Button>
             </DialogTrigger>
             <DialogContent className="max-w-md">
-              <DialogHeader><DialogTitle>Create Replication Job</DialogTitle></DialogHeader>
-              <CreateJobForm clusterId={clusterId} onSuccess={() => { setCreateOpen(false); }} />
+              <DialogHeader>
+                <DialogTitle>Create Replication Job</DialogTitle>
+              </DialogHeader>
+              <CreateJobForm
+                clusterId={clusterId}
+                onSuccess={() => {
+                  setCreateOpen(false);
+                }}
+              />
             </DialogContent>
           </Dialog>
         )}
       </CardHeader>
       <CardContent>
-        {jobsQuery.isLoading ? <Skeleton className="h-20 w-full" /> :
-         !jobsQuery.data || jobsQuery.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No replication jobs configured.</p>
+        {jobsQuery.isLoading ? (
+          <Skeleton className="h-20 w-full" />
+        ) : !jobsQuery.data || jobsQuery.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No replication jobs configured.
+          </p>
         ) : (
           <Table>
             <TableHeader>
@@ -72,7 +106,9 @@ export function ClusterReplicationTab({ clusterId }: ClusterReplicationTabProps)
                 <TableHead>Comment</TableHead>
                 <TableHead>Last Sync</TableHead>
                 <TableHead>Status</TableHead>
-                {canManage("replication") && <TableHead className="text-right">Actions</TableHead>}
+                {canManage("replication") && (
+                  <TableHead className="text-right">Actions</TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -81,14 +117,23 @@ export function ClusterReplicationTab({ clusterId }: ClusterReplicationTabProps)
                   <TableCell className="font-medium">{job.id}</TableCell>
                   <TableCell>{job.guest}</TableCell>
                   <TableCell>{job.target}</TableCell>
-                  <TableCell className="text-xs">{job.schedule ?? "*/15"}</TableCell>
-                  <TableCell className="max-w-[150px] truncate text-xs text-muted-foreground" title={job.comment ?? ""}>
+                  <TableCell className="text-xs">
+                    {job.schedule ?? "*/15"}
+                  </TableCell>
+                  <TableCell
+                    className="max-w-[150px] truncate text-xs text-muted-foreground"
+                    title={job.comment ?? ""}
+                  >
                     {job.comment ?? "—"}
                   </TableCell>
-                  <TableCell className="text-xs">{formatTime(job.last_sync)}</TableCell>
+                  <TableCell className="text-xs">
+                    {formatTime(job.last_sync)}
+                  </TableCell>
                   <TableCell>
                     {job.error ? (
-                      <Badge variant="destructive" title={job.error}>Error ({job.fail_count})</Badge>
+                      <Badge variant="destructive" title={job.error}>
+                        Error ({job.fail_count})
+                      </Badge>
                     ) : job.disable ? (
                       <Badge variant="secondary">Disabled</Badge>
                     ) : (
@@ -97,15 +142,38 @@ export function ClusterReplicationTab({ clusterId }: ClusterReplicationTabProps)
                   </TableCell>
                   {canManage("replication") && (
                     <TableCell className="text-right space-x-1">
-                      <Button variant="ghost" size="sm" onClick={() => { setEditJob(job); }} title="Edit job">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setEditJob(job);
+                        }}
+                        title="Edit job"
+                      >
                         <Pencil className="h-4 w-4" />
                       </Button>
                       {job.source && (
-                        <Button variant="ghost" size="sm" onClick={() => { triggerJob.mutate({ id: job.id, node: job.source ?? "" }); }} title="Trigger sync now">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            triggerJob.mutate({
+                              id: job.id,
+                              node: job.source ?? "",
+                            });
+                          }}
+                          title="Trigger sync now"
+                        >
                           <Play className="h-4 w-4" />
                         </Button>
                       )}
-                      <Button variant="ghost" size="sm" onClick={() => { deleteJob.mutate(job.id); }}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          deleteJob.mutate(job.id);
+                        }}
+                      >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </TableCell>
@@ -118,7 +186,13 @@ export function ClusterReplicationTab({ clusterId }: ClusterReplicationTabProps)
       </CardContent>
 
       {editJob != null && (
-        <EditJobDialog clusterId={clusterId} job={editJob} onClose={() => { setEditJob(null); }} />
+        <EditJobDialog
+          clusterId={clusterId}
+          job={editJob}
+          onClose={() => {
+            setEditJob(null);
+          }}
+        />
       )}
     </Card>
   );
@@ -126,7 +200,13 @@ export function ClusterReplicationTab({ clusterId }: ClusterReplicationTabProps)
 
 // --- Create Job Form ---
 
-function CreateJobForm({ clusterId, onSuccess }: { clusterId: string; onSuccess: () => void }) {
+function CreateJobForm({
+  clusterId,
+  onSuccess,
+}: {
+  clusterId: string;
+  onSuccess: () => void;
+}) {
   const vmsQuery = useClusterVMs(clusterId);
   const nodesQuery = useClusterNodes(clusterId);
   const jobsQuery = useReplicationJobs(clusterId);
@@ -141,7 +221,9 @@ function CreateJobForm({ clusterId, onSuccess }: { clusterId: string; onSuccess:
   // Auto-generate job number for selected guest
   const nextJobNum = useMemo(() => {
     if (!selectedGuest) return 0;
-    const existing = (jobsQuery.data ?? []).filter((j) => String(j.guest) === selectedGuest);
+    const existing = (jobsQuery.data ?? []).filter(
+      (j) => String(j.guest) === selectedGuest,
+    );
     return existing.length;
   }, [jobsQuery.data, selectedGuest]);
 
@@ -198,17 +280,35 @@ function CreateJobForm({ clusterId, onSuccess }: { clusterId: string; onSuccess:
 
       <div className="space-y-2">
         <Label>Schedule (cron)</Label>
-        <Input value={schedule} onChange={(e) => { setSchedule(e.target.value); }} placeholder="*/15" />
+        <Input
+          value={schedule}
+          onChange={(e) => {
+            setSchedule(e.target.value);
+          }}
+          placeholder="*/15"
+        />
       </div>
 
       <div className="space-y-2">
         <Label>Rate Limit (MB/s, optional)</Label>
-        <Input value={rate} onChange={(e) => { setRate(e.target.value); }} placeholder="e.g. 10" />
+        <Input
+          value={rate}
+          onChange={(e) => {
+            setRate(e.target.value);
+          }}
+          placeholder="e.g. 10"
+        />
       </div>
 
       <div className="space-y-2">
         <Label>Comment</Label>
-        <Input value={comment} onChange={(e) => { setComment(e.target.value); }} placeholder="Optional description" />
+        <Input
+          value={comment}
+          onChange={(e) => {
+            setComment(e.target.value);
+          }}
+          placeholder="Optional description"
+        />
       </div>
 
       {selectedGuest && (
@@ -222,10 +322,15 @@ function CreateJobForm({ clusterId, onSuccess }: { clusterId: string; onSuccess:
       )}
 
       {createJob.isSuccess && (
-        <p className="text-sm text-emerald-600">Replication job created successfully.</p>
+        <p className="text-sm text-emerald-600">
+          Replication job created successfully.
+        </p>
       )}
 
-      <Button type="submit" disabled={!selectedGuest || !target || createJob.isPending}>
+      <Button
+        type="submit"
+        disabled={!selectedGuest || !target || createJob.isPending}
+      >
         {createJob.isPending ? "Creating..." : "Create"}
       </Button>
     </form>
@@ -234,7 +339,15 @@ function CreateJobForm({ clusterId, onSuccess }: { clusterId: string; onSuccess:
 
 // --- Edit Job Dialog ---
 
-function EditJobDialog({ clusterId, job, onClose }: { clusterId: string; job: ReplicationJob; onClose: () => void }) {
+function EditJobDialog({
+  clusterId,
+  job,
+  onClose,
+}: {
+  clusterId: string;
+  job: ReplicationJob;
+  onClose: () => void;
+}) {
   const updateJob = useUpdateReplicationJob(clusterId);
 
   const [schedule, setSchedule] = useState(job.schedule ?? "*/15");
@@ -257,9 +370,16 @@ function EditJobDialog({ clusterId, job, onClose }: { clusterId: string; job: Re
   };
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Edit Replication Job: {job.id}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>Edit Replication Job: {job.id}</DialogTitle>
+        </DialogHeader>
         <form onSubmit={handleSave} className="space-y-4">
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
@@ -274,17 +394,35 @@ function EditJobDialog({ clusterId, job, onClose }: { clusterId: string; job: Re
 
           <div className="space-y-2">
             <Label>Schedule (cron)</Label>
-            <Input value={schedule} onChange={(e) => { setSchedule(e.target.value); }} placeholder="*/15" />
+            <Input
+              value={schedule}
+              onChange={(e) => {
+                setSchedule(e.target.value);
+              }}
+              placeholder="*/15"
+            />
           </div>
 
           <div className="space-y-2">
             <Label>Rate Limit (MB/s, optional)</Label>
-            <Input value={rate} onChange={(e) => { setRate(e.target.value); }} placeholder="e.g. 10" />
+            <Input
+              value={rate}
+              onChange={(e) => {
+                setRate(e.target.value);
+              }}
+              placeholder="e.g. 10"
+            />
           </div>
 
           <div className="space-y-2">
             <Label>Comment</Label>
-            <Input value={comment} onChange={(e) => { setComment(e.target.value); }} placeholder="Optional description" />
+            <Input
+              value={comment}
+              onChange={(e) => {
+                setComment(e.target.value);
+              }}
+              placeholder="Optional description"
+            />
           </div>
 
           <div className="space-y-2">
@@ -301,14 +439,18 @@ function EditJobDialog({ clusterId, job, onClose }: { clusterId: string; job: Re
           </div>
 
           {updateJob.isError && (
-            <p className="text-sm text-destructive">{updateJob.error.message}</p>
+            <p className="text-sm text-destructive">
+              {updateJob.error.message}
+            </p>
           )}
 
           <div className="flex gap-2">
             <Button type="submit" disabled={updateJob.isPending}>
               {updateJob.isPending ? "Saving..." : "Save"}
             </Button>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
           </div>
         </form>
       </DialogContent>

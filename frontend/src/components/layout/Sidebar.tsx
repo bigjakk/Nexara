@@ -60,18 +60,48 @@ const navSections: NavSection[] = [
     items: [
       { labelKey: "backup", to: "/backup", icon: Shield },
       { labelKey: "snapshots", to: "/snapshots", icon: Camera },
-      { labelKey: "alerts", to: "/alerts", icon: Bell, requiredPermission: "view:alert" },
-      { labelKey: "reports", to: "/reports", icon: FileText, requiredPermission: "view:report" },
-      { labelKey: "security", to: "/security", icon: ShieldAlert, requiredPermission: "view:cve_scan" },
-      { labelKey: "imports", to: "/imports", icon: Upload, requiredPermission: "view:vm_import" },
-      { labelKey: "events", to: "/events", icon: ScrollText, requiredPermission: "view:audit" },
+      {
+        labelKey: "alerts",
+        to: "/alerts",
+        icon: Bell,
+        requiredPermission: "view:alert",
+      },
+      {
+        labelKey: "reports",
+        to: "/reports",
+        icon: FileText,
+        requiredPermission: "view:report",
+      },
+      {
+        labelKey: "security",
+        to: "/security",
+        icon: ShieldAlert,
+        requiredPermission: "view:cve_scan",
+      },
+      {
+        labelKey: "imports",
+        to: "/imports",
+        icon: Upload,
+        requiredPermission: "view:vm_import",
+      },
+      {
+        labelKey: "events",
+        to: "/events",
+        icon: ScrollText,
+        requiredPermission: "view:audit",
+      },
     ],
   },
   {
     labelKey: "sectionSystem",
     items: [
       { labelKey: "settings", to: "/settings/appearance", icon: Settings },
-      { labelKey: "admin", to: "/admin/users", icon: Users, requiredPermission: "manage:user" },
+      {
+        labelKey: "admin",
+        to: "/admin/users",
+        icon: Users,
+        requiredPermission: "manage:user",
+      },
     ],
   },
 ];
@@ -111,7 +141,9 @@ export function Sidebar({ drawer = false }: SidebarProps) {
   useEffect(() => {
     fetch("/api/v1/version")
       .then((r) => r.json() as Promise<{ version: string }>)
-      .then((data) => { setAppVersion(data.version); })
+      .then((data) => {
+        setAppVersion(data.version);
+      })
       .catch(() => {});
   }, []);
 
@@ -185,20 +217,30 @@ export function Sidebar({ drawer = false }: SidebarProps) {
           collapsed ? "w-12" : "",
           collapsed ? "transition-all duration-200" : "",
         )}
-        style={drawer || collapsed ? undefined : { width: `${String(width)}px` }}
+        style={
+          drawer || collapsed ? undefined : { width: `${String(width)}px` }
+        }
       >
         {/* Header */}
         <div className="flex h-14 shrink-0 items-center border-b px-2">
           {!collapsed && (
             <>
               {logoUrl ? (
-                <img src={logoUrl} alt={appTitle} className="ml-2 h-6 w-6 shrink-0 object-contain" />
+                <img
+                  src={logoUrl}
+                  alt={appTitle}
+                  className="ml-2 h-6 w-6 shrink-0 object-contain"
+                />
               ) : (
                 <Server className="ml-2 h-6 w-6 shrink-0 text-primary" />
               )}
-              <span className="ml-2 text-lg font-semibold tracking-tight">{appTitle}</span>
+              <span className="ml-2 text-lg font-semibold tracking-tight">
+                {appTitle}
+              </span>
               {appVersion && (
-                <span className="ml-2 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">{appVersion}</span>
+                <span className="ml-2 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+                  {appVersion}
+                </span>
               )}
             </>
           )}
@@ -240,7 +282,8 @@ export function Sidebar({ drawer = false }: SidebarProps) {
                   const label = t(item.labelKey);
                   // "Inventory" should be active for both /inventory/* and /clusters/*
                   const isInventoryItem = item.to === "/inventory";
-                  const inventoryActive = isInventoryItem && isInventoryRoute(location.pathname);
+                  const inventoryActive =
+                    isInventoryItem && isInventoryRoute(location.pathname);
 
                   if (collapsed) {
                     return (
@@ -261,9 +304,7 @@ export function Sidebar({ drawer = false }: SidebarProps) {
                             <item.icon className="h-4 w-4" />
                           </NavLink>
                         </TooltipTrigger>
-                        <TooltipContent side="right">
-                          {label}
-                        </TooltipContent>
+                        <TooltipContent side="right">{label}</TooltipContent>
                       </Tooltip>
                     );
                   }
@@ -288,7 +329,8 @@ export function Sidebar({ drawer = false }: SidebarProps) {
                               <item.icon
                                 className={cn(
                                   "h-4 w-4",
-                                  (isActive || inventoryActive) && "text-primary",
+                                  (isActive || inventoryActive) &&
+                                    "text-primary",
                                 )}
                               />
                               {label}
@@ -297,7 +339,9 @@ export function Sidebar({ drawer = false }: SidebarProps) {
                         </NavLink>
                         {isInventoryItem && (
                           <button
-                            onClick={() => { setTreeVisible(!treeVisible); }}
+                            onClick={() => {
+                              setTreeVisible(!treeVisible);
+                            }}
                             className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
                           >
                             {showTree ? (

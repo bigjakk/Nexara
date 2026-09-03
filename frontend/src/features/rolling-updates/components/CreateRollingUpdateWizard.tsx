@@ -142,7 +142,8 @@ export function CreateRollingUpdateWizard({
         package_excludes: excludes,
         ha_policy: haPolicy,
         auto_upgrade: autoUpgrade,
-        notify_channel_id: notifyChannelId !== "none" ? notifyChannelId : undefined,
+        notify_channel_id:
+          notifyChannelId !== "none" ? notifyChannelId : undefined,
       },
       {
         onSuccess: (job) => {
@@ -158,9 +159,7 @@ export function CreateRollingUpdateWizard({
 
   const toggleNode = (name: string) => {
     setSelectedNodes((prev) =>
-      prev.includes(name)
-        ? prev.filter((n) => n !== name)
-        : [...prev, name],
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
     );
   };
 
@@ -189,7 +188,8 @@ export function CreateRollingUpdateWizard({
   }, []);
 
   const canProceedFromReview =
-    haPolicy === "warn" || (preflightReport !== null && !preflightReport.has_errors);
+    haPolicy === "warn" ||
+    (preflightReport !== null && !preflightReport.has_errors);
 
   const stepTitle = {
     nodes: "Select Nodes",
@@ -254,11 +254,10 @@ export function CreateRollingUpdateWizard({
                 {/* Upgrade order — reorderable list */}
                 {selectedNodes.length > 1 && (
                   <div>
-                    <p className="mb-2 text-sm font-medium">
-                      Upgrade Order
-                    </p>
+                    <p className="mb-2 text-sm font-medium">Upgrade Order</p>
                     <p className="mb-2 text-xs text-muted-foreground">
-                      Nodes will be updated top to bottom. Use arrows to reorder.
+                      Nodes will be updated top to bottom. Use arrows to
+                      reorder.
                     </p>
                     <div className="max-h-48 space-y-1 overflow-auto">
                       {selectedNodes.map((name, i) => (
@@ -339,7 +338,9 @@ export function CreateRollingUpdateWizard({
               </div>
             ) : preflight.isError ? (
               <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm">
-                <p>Failed to check HA constraints. You can proceed with caution.</p>
+                <p>
+                  Failed to check HA constraints. You can proceed with caution.
+                </p>
               </div>
             ) : preflightReport !== null &&
               preflightReport.conflicts.length === 0 ? (
@@ -356,7 +357,10 @@ export function CreateRollingUpdateWizard({
                 </p>
                 <div className="max-h-64 space-y-2 overflow-auto">
                   {preflightReport.conflicts.map((c, i) => (
-                    <ConflictCard key={`${String(c.vmid)}-${c.node}-${String(i)}`} conflict={c} />
+                    <ConflictCard
+                      key={`${String(c.vmid)}-${c.node}-${String(i)}`}
+                      conflict={c}
+                    />
                   ))}
                 </div>
               </div>
@@ -467,9 +471,7 @@ export function CreateRollingUpdateWizard({
 
             <div className="flex items-center justify-between">
               <div>
-                <Label htmlFor="auto-upgrade">
-                  Automated upgrade (SSH)
-                </Label>
+                <Label htmlFor="auto-upgrade">Automated upgrade (SSH)</Label>
                 <p className="text-xs text-muted-foreground">
                   {hasSSH
                     ? "Run apt dist-upgrade automatically via SSH"
@@ -512,11 +514,13 @@ export function CreateRollingUpdateWizard({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
-                  {channels?.filter((ch) => ch.enabled).map((ch) => (
-                    <SelectItem key={ch.id} value={ch.id}>
-                      {ch.name} ({ch.channel_type})
-                    </SelectItem>
-                  ))}
+                  {channels
+                    ?.filter((ch) => ch.enabled)
+                    .map((ch) => (
+                      <SelectItem key={ch.id} value={ch.id}>
+                        {ch.name} ({ch.channel_type})
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>

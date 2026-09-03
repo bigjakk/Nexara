@@ -52,8 +52,12 @@ export function URLDownloadDialog({
   const [filename, setFilename] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [checksum, setChecksum] = useState("");
-  const [checksumAlgorithm, setChecksumAlgorithm] = useState<"sha256" | "sha512" | "sha1" | "md5">("sha256");
-  const [decompression, setDecompression] = useState<"" | "gz" | "lzo" | "zst" | "bz2">("");
+  const [checksumAlgorithm, setChecksumAlgorithm] = useState<
+    "sha256" | "sha512" | "sha1" | "md5"
+  >("sha256");
+  const [decompression, setDecompression] = useState<
+    "" | "gz" | "lzo" | "zst" | "bz2"
+  >("");
   const [verifyCerts, setVerifyCerts] = useState(true);
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
   const downloadMutation = useDownloadURL();
@@ -154,7 +158,9 @@ export function URLDownloadDialog({
                 <Button
                   size="sm"
                   variant={content === "iso" ? "default" : "outline"}
-                  onClick={() => { setContent("iso"); }}
+                  onClick={() => {
+                    setContent("iso");
+                  }}
                   disabled={isBusy}
                 >
                   ISO Image
@@ -164,7 +170,9 @@ export function URLDownloadDialog({
                 <Button
                   size="sm"
                   variant={content === "vztmpl" ? "default" : "outline"}
-                  onClick={() => { setContent("vztmpl"); }}
+                  onClick={() => {
+                    setContent("vztmpl");
+                  }}
                   disabled={isBusy}
                 >
                   CT Template
@@ -174,7 +182,9 @@ export function URLDownloadDialog({
                 <Button
                   size="sm"
                   variant={content === "import" ? "default" : "outline"}
-                  onClick={() => { setContent("import"); }}
+                  onClick={() => {
+                    setContent("import");
+                  }}
                   disabled={isBusy}
                 >
                   Import
@@ -189,7 +199,9 @@ export function URLDownloadDialog({
               id="url-input"
               placeholder="https://example.com/file.iso"
               value={url}
-              onChange={(e) => { setUrl(e.target.value); }}
+              onChange={(e) => {
+                setUrl(e.target.value);
+              }}
               onBlur={handleUrlBlur}
               disabled={isBusy}
               autoComplete="off"
@@ -208,21 +220,26 @@ export function URLDownloadDialog({
               id="url-filename"
               placeholder="file.iso"
               value={filename}
-              onChange={(e) => { setFilename(e.target.value); }}
+              onChange={(e) => {
+                setFilename(e.target.value);
+              }}
               disabled={isBusy}
               autoComplete="off"
               spellCheck={false}
             />
             {filename !== "" && !filenameValid && (
               <p className="text-xs text-destructive">
-                Filename must be ≤255 chars; no <code>/</code>, <code>\</code>, or <code>..</code>.
+                Filename must be ≤255 chars; no <code>/</code>, <code>\</code>,
+                or <code>..</code>.
               </p>
             )}
           </div>
 
           <button
             type="button"
-            onClick={() => { setShowAdvanced((v) => !v); }}
+            onClick={() => {
+              setShowAdvanced((v) => !v);
+            }}
             className="text-xs text-muted-foreground hover:text-foreground"
             disabled={isBusy}
           >
@@ -238,7 +255,9 @@ export function URLDownloadDialog({
                     id="checksum"
                     placeholder="hex-encoded digest"
                     value={checksum}
-                    onChange={(e) => { setChecksum(e.target.value); }}
+                    onChange={(e) => {
+                      setChecksum(e.target.value);
+                    }}
                     disabled={isBusy}
                     autoComplete="off"
                     spellCheck={false}
@@ -248,7 +267,9 @@ export function URLDownloadDialog({
                   <Label>Algorithm</Label>
                   <Select
                     value={checksumAlgorithm}
-                    onValueChange={(v) => { setChecksumAlgorithm(v as typeof checksumAlgorithm); }}
+                    onValueChange={(v) => {
+                      setChecksumAlgorithm(v as typeof checksumAlgorithm);
+                    }}
                     disabled={isBusy}
                   >
                     <SelectTrigger>
@@ -268,7 +289,9 @@ export function URLDownloadDialog({
                 <Select
                   value={decompression || "none"}
                   onValueChange={(v) => {
-                    setDecompression(v === "none" ? "" : (v as typeof decompression));
+                    setDecompression(
+                      v === "none" ? "" : (v as typeof decompression),
+                    );
                   }}
                   disabled={isBusy}
                 >
@@ -288,7 +311,9 @@ export function URLDownloadDialog({
                 <Checkbox
                   id="verify-certs"
                   checked={verifyCerts}
-                  onCheckedChange={(v) => { setVerifyCerts(v === true); }}
+                  onCheckedChange={(v) => {
+                    setVerifyCerts(v === true);
+                  }}
                   disabled={isBusy}
                 />
                 <Label htmlFor="verify-certs" className="text-sm font-normal">
@@ -305,7 +330,13 @@ export function URLDownloadDialog({
               description={`Download ${filenameTrimmed}`}
               onComplete={() => {
                 void queryClient.invalidateQueries({
-                  queryKey: ["clusters", clusterId, "storage", storageId, "content"],
+                  queryKey: [
+                    "clusters",
+                    clusterId,
+                    "storage",
+                    storageId,
+                    "content",
+                  ],
                 });
                 setTaskUpid(null);
                 setOpen(false);

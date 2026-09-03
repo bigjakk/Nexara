@@ -68,23 +68,31 @@ describe("deriveTaskStatus precedence", () => {
   it("uses the live poll as a fallback when there is no server status", () => {
     // ingested external task with no task_history row
     expect(
-      deriveTaskStatus({}, { upid: "UPID:x" }, { status: "stopped", exitStatus: "OK" }),
+      deriveTaskStatus(
+        {},
+        { upid: "UPID:x" },
+        { status: "stopped", exitStatus: "OK" },
+      ),
     ).toBe("ok");
     expect(
-      deriveTaskStatus({}, { upid: "UPID:x" }, { status: "running", exitStatus: "" }),
+      deriveTaskStatus(
+        {},
+        { upid: "UPID:x" },
+        { status: "running", exitStatus: "" },
+      ),
     ).toBe("running");
   });
 
   it("falls back to server task_status when not polling", () => {
-    expect(deriveTaskStatus({ task_status: "running" }, noDetails, undefined)).toBe(
-      "running",
-    );
+    expect(
+      deriveTaskStatus({ task_status: "running" }, noDetails, undefined),
+    ).toBe("running");
     expect(
       deriveTaskStatus({ task_status: "completed" }, noDetails, undefined),
     ).toBe("ok");
-    expect(deriveTaskStatus({ task_status: "failed" }, noDetails, undefined)).toBe(
-      "failed",
-    );
+    expect(
+      deriveTaskStatus({ task_status: "failed" }, noDetails, undefined),
+    ).toBe("failed");
   });
 
   it("classifies a raw 'stopped' status by exit status", () => {
@@ -105,9 +113,9 @@ describe("deriveTaskStatus precedence", () => {
   });
 
   it("falls back to external details.status for ingested tasks", () => {
-    expect(deriveTaskStatus({}, { upid: "UPID:x", status: "OK" }, undefined)).toBe(
-      "ok",
-    );
+    expect(
+      deriveTaskStatus({}, { upid: "UPID:x", status: "OK" }, undefined),
+    ).toBe("ok");
     expect(
       deriveTaskStatus({}, { upid: "UPID:x", status: "err: 1" }, undefined),
     ).toBe("failed");

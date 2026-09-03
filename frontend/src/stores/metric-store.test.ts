@@ -43,7 +43,9 @@ function makeVM(overrides: Partial<VmMetricSnapshot>): VmMetricSnapshot {
   };
 }
 
-function createPayload(overrides?: Partial<ClusterMetricSummary>): ClusterMetricSummary {
+function createPayload(
+  overrides?: Partial<ClusterMetricSummary>,
+): ClusterMetricSummary {
   return {
     cluster_id: "test-cluster",
     collected_at: new Date().toISOString(),

@@ -45,14 +45,20 @@ export function AlertRulesTable() {
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={canManage ? 8 : 7} className="text-center text-muted-foreground py-8">
+              <TableCell
+                colSpan={canManage ? 8 : 7}
+                className="text-center text-muted-foreground py-8"
+              >
                 Loading...
               </TableCell>
             </TableRow>
           )}
           {!isLoading && (!rules || rules.length === 0) && (
             <TableRow>
-              <TableCell colSpan={canManage ? 8 : 7} className="text-center text-muted-foreground py-8">
+              <TableCell
+                colSpan={canManage ? 8 : 7}
+                className="text-center text-muted-foreground py-8"
+              >
                 No alert rules configured
               </TableCell>
             </TableRow>
@@ -63,7 +69,9 @@ export function AlertRulesTable() {
                 <div>
                   <div className="font-medium">{rule.name}</div>
                   {rule.description && (
-                    <div className="text-xs text-muted-foreground">{rule.description}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {rule.description}
+                    </div>
                   )}
                 </div>
               </TableCell>
@@ -74,7 +82,9 @@ export function AlertRulesTable() {
               <TableCell className="font-mono text-sm">
                 {rule.operator} {rule.threshold}
               </TableCell>
-              <TableCell className="text-sm capitalize">{rule.scope_type}</TableCell>
+              <TableCell className="text-sm capitalize">
+                {rule.scope_type}
+              </TableCell>
               <TableCell className="text-sm">
                 {rule.duration_seconds >= 60
                   ? `${String(Math.floor(rule.duration_seconds / 60))}m`
@@ -86,7 +96,9 @@ export function AlertRulesTable() {
                     variant="ghost"
                     size="sm"
                     aria-label={rule.enabled ? "Disable rule" : "Enable rule"}
-                    onClick={() => { toggleEnabled(rule.id, rule.enabled); }}
+                    onClick={() => {
+                      toggleEnabled(rule.id, rule.enabled);
+                    }}
                     disabled={updateMutation.isPending}
                   >
                     {rule.enabled ? (
@@ -96,7 +108,13 @@ export function AlertRulesTable() {
                     )}
                   </Button>
                 ) : (
-                  <span className={rule.enabled ? "text-emerald-500" : "text-muted-foreground"}>
+                  <span
+                    className={
+                      rule.enabled
+                        ? "text-emerald-500"
+                        : "text-muted-foreground"
+                    }
+                  >
                     {rule.enabled ? "Yes" : "No"}
                   </span>
                 )}
@@ -107,7 +125,9 @@ export function AlertRulesTable() {
                     variant="ghost"
                     size="sm"
                     aria-label="Delete rule"
-                    onClick={() => { deleteMutation.mutate(rule.id); }}
+                    onClick={() => {
+                      deleteMutation.mutate(rule.id);
+                    }}
                     disabled={deleteMutation.isPending}
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />

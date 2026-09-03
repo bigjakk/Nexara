@@ -68,7 +68,13 @@ interface PoolGroupProps {
   clusterId: string;
 }
 
-function PoolGroup({ groupKey, label, icon, pools, clusterId }: PoolGroupProps) {
+function PoolGroup({
+  groupKey,
+  label,
+  icon,
+  pools,
+  clusterId,
+}: PoolGroupProps) {
   const { expandedNodes, toggleNode } = useSidebarStore();
   const isExpanded = expandedNodes.has(groupKey);
 
@@ -209,7 +215,11 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="w-40">
-          <ContextMenuItem onClick={() => { setAddStorageOpen(true); }}>
+          <ContextMenuItem
+            onClick={() => {
+              setAddStorageOpen(true);
+            }}
+          >
             <Plus className="mr-2 h-3.5 w-3.5" />
             Add storage
           </ContextMenuItem>
@@ -236,7 +246,8 @@ function StorageClusterBranch({ cluster }: StorageClusterBranchProps) {
           {sortedNodeIds.map((nodeId) => {
             const nodePools = byNode.get(nodeId);
             if (!nodePools || nodePools.length === 0) return null;
-            const nodeName = nodes?.find((n) => n.id === nodeId)?.name ?? nodeId;
+            const nodeName =
+              nodes?.find((n) => n.id === nodeId)?.name ?? nodeId;
             return (
               <PoolGroup
                 key={nodeId}

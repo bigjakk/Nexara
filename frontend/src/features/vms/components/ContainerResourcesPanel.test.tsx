@@ -33,13 +33,17 @@ vi.mock("../api/vm-queries", async (importOriginal) => {
 
 vi.mock("@/features/clusters/api/cluster-queries", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@/features/clusters/api/cluster-queries")>();
+    await importOriginal<
+      typeof import("@/features/clusters/api/cluster-queries")
+    >();
   return { ...actual, useNodeBridges: () => ({ data: [] }) };
 });
 
 vi.mock("@/features/storage/api/storage-queries", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@/features/storage/api/storage-queries")>();
+    await importOriginal<
+      typeof import("@/features/storage/api/storage-queries")
+    >();
   return { ...actual, useClusterStorage: () => ({ data: [] }) };
 });
 
@@ -137,7 +141,9 @@ describe("ContainerResourcesPanel change tracking", () => {
     await user.type(cores, "4");
     await user.click(screen.getByRole("button", { name: /save/i }));
 
-    const fields = state.saved?.["fields"] as Record<string, string> | undefined;
+    const fields = state.saved?.["fields"] as
+      | Record<string, string>
+      | undefined;
     expect(fields?.["cores"]).toBe("4");
     // Only the edited field travels — the NIC is untouched, so it is not resent.
     expect(fields).not.toHaveProperty("net0");

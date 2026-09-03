@@ -13,14 +13,25 @@ import {
   CheckCircle,
 } from "lucide-react";
 
-function NodePackageRow({ clusterId, nodeName }: { clusterId: string; nodeName: string }) {
+function NodePackageRow({
+  clusterId,
+  nodeName,
+}: {
+  clusterId: string;
+  nodeName: string;
+}) {
   const [expanded, setExpanded] = useState(false);
-  const { data: packages, isLoading } = useNodePackagePreview(clusterId, nodeName);
+  const { data: packages, isLoading } = useNodePackagePreview(
+    clusterId,
+    nodeName,
+  );
 
   const count = packages?.length ?? 0;
-  const securityCount = packages?.filter(
-    (p: AptPackage) => p.Priority === "important" || p.Origin === "Debian-Security",
-  ).length ?? 0;
+  const securityCount =
+    packages?.filter(
+      (p: AptPackage) =>
+        p.Priority === "important" || p.Origin === "Debian-Security",
+    ).length ?? 0;
 
   return (
     <div className="rounded-md border">

@@ -62,7 +62,8 @@ export function FirewallTemplatesTable({
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">
-                      {tmpl.rules.length} rule{tmpl.rules.length !== 1 ? "s" : ""}
+                      {tmpl.rules.length} rule
+                      {tmpl.rules.length !== 1 ? "s" : ""}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
@@ -77,7 +78,9 @@ export function FirewallTemplatesTable({
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => { deleteTemplate.mutate(tmpl.id); }}
+                        onClick={() => {
+                          deleteTemplate.mutate(tmpl.id);
+                        }}
                         disabled={deleteTemplate.isPending}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />

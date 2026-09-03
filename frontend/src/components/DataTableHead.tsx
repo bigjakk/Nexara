@@ -96,7 +96,9 @@ export function DataTableHead<Row, K extends string, Ctx>({
         className={cn(
           "group inline-flex w-full items-center gap-1 rounded-sm font-medium transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden",
           column.align === "right" && "justify-end",
-          column.fixed ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+          column.fixed
+            ? "cursor-default"
+            : "cursor-grab active:cursor-grabbing",
         )}
       >
         <span className="truncate">{column.label}</span>

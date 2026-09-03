@@ -247,13 +247,21 @@ export interface PBSDatastoreConfig {
 }
 
 /** Which providers actually protect a guest. */
-export type BackupProtection = "both" | "veeam" | "pbs" | "none" | "not_eligible";
+export type BackupProtection =
+  | "both"
+  | "veeam"
+  | "pbs"
+  | "none"
+  | "not_eligible";
 
 /**
  * Why a guest is not a backup target at all. Templates never appear in the
  * coverage report, so they are not represented here.
  */
-export type BackupEligibility = "eligible" | "veeam_worker" | "veeam_backup_server";
+export type BackupEligibility =
+  | "eligible"
+  | "veeam_worker"
+  | "veeam_backup_server";
 
 /** The Veeam side of one guest's protection. Absent when no Veeam data applies. */
 export interface VeeamCoverage {

@@ -43,7 +43,9 @@ export function TaskProgressCell({
         <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
           <div className="h-full w-[30%] animate-task-indeterminate rounded-full bg-blue-500" />
         </div>
-        <span className="text-[10px] tabular-nums text-muted-foreground">—</span>
+        <span className="text-[10px] tabular-nums text-muted-foreground">
+          —
+        </span>
       </div>
     );
   }

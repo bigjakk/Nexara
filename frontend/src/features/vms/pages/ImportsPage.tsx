@@ -22,7 +22,8 @@ export function ImportsPage() {
       <div>
         <h1 className="text-xl font-semibold">VM Imports</h1>
         <p className="text-sm text-muted-foreground">
-          History of guests imported from OVA/OVF appliances, disk images, and ESXi/vCenter hosts.
+          History of guests imported from OVA/OVF appliances, disk images, and
+          ESXi/vCenter hosts.
         </p>
       </div>
 
@@ -32,10 +33,14 @@ export function ImportsPage() {
           <select
             className={selectClass}
             value={clusterId}
-            onChange={(e) => { setClusterId(e.target.value); }}
+            onChange={(e) => {
+              setClusterId(e.target.value);
+            }}
           >
             {clusters.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
             ))}
           </select>
         </div>

@@ -134,8 +134,10 @@ export function CreateCTDialog({
     for (const n of nodes) {
       if (n.status !== "online") continue;
       const alloc = allocated.get(n.name) ?? { cpu: 0, mem: 0 };
-      const cpuFree = n.cpu_count > 0 ? (n.cpu_count - alloc.cpu) / n.cpu_count : 0;
-      const memFree = n.mem_total > 0 ? (n.mem_total - alloc.mem) / n.mem_total : 0;
+      const cpuFree =
+        n.cpu_count > 0 ? (n.cpu_count - alloc.cpu) / n.cpu_count : 0;
+      const memFree =
+        n.mem_total > 0 ? (n.mem_total - alloc.mem) / n.mem_total : 0;
       const score = cpuFree * 0.5 + memFree * 0.5;
       if (score > bestScore) {
         bestScore = score;
@@ -550,8 +552,9 @@ export function CreateCTDialog({
                           OCI image (tech preview)
                         </p>
                         <p className="mt-1 text-muted-foreground">
-                          Layers will be squashed on create. In-place updates aren&apos;t
-                          supported — re-create the container to apply image changes.
+                          Layers will be squashed on create. In-place updates
+                          aren&apos;t supported — re-create the container to
+                          apply image changes.
                         </p>
                       </div>
                     )}
@@ -1050,7 +1053,8 @@ export function CreateCTDialog({
                   <span className="truncate">{selectedTemplate}</span>
                   <span className="text-muted-foreground">Root Disk</span>
                   <span>
-                    {diskSize} GB{rootStorageName ? ` on ${rootStorageName}` : ""}
+                    {diskSize} GB
+                    {rootStorageName ? ` on ${rootStorageName}` : ""}
                   </span>
                 </div>
 

@@ -29,10 +29,7 @@ export function CreateTemplateDialog() {
   const create = useCreateFirewallTemplate();
 
   const addRule = () => {
-    setRules([
-      ...rules,
-      { type: "in", action: "ACCEPT", enable: 1 },
-    ]);
+    setRules([...rules, { type: "in", action: "ACCEPT", enable: 1 }]);
   };
 
   const removeRule = (index: number) => {
@@ -79,7 +76,9 @@ export function CreateTemplateDialog() {
             <Input
               placeholder="e.g. Web Server Rules"
               value={name}
-              onChange={(e) => { setName(e.target.value); }}
+              onChange={(e) => {
+                setName(e.target.value);
+              }}
             />
           </div>
           <div className="space-y-2">
@@ -87,7 +86,9 @@ export function CreateTemplateDialog() {
             <Input
               placeholder="Optional description"
               value={description}
-              onChange={(e) => { setDescription(e.target.value); }}
+              onChange={(e) => {
+                setDescription(e.target.value);
+              }}
             />
           </div>
 
@@ -112,7 +113,9 @@ export function CreateTemplateDialog() {
                   >
                     <Select
                       value={rule.type}
-                      onValueChange={(v) => { updateRule(i, "type", v); }}
+                      onValueChange={(v) => {
+                        updateRule(i, "type", v);
+                      }}
                     >
                       <SelectTrigger className="w-20">
                         <SelectValue />
@@ -124,7 +127,9 @@ export function CreateTemplateDialog() {
                     </Select>
                     <Select
                       value={rule.action}
-                      onValueChange={(v) => { updateRule(i, "action", v); }}
+                      onValueChange={(v) => {
+                        updateRule(i, "action", v);
+                      }}
                     >
                       <SelectTrigger className="w-24">
                         <SelectValue />
@@ -139,24 +144,32 @@ export function CreateTemplateDialog() {
                       className="w-24"
                       placeholder="Proto"
                       value={rule.proto || ""}
-                      onChange={(e) => { updateRule(i, "proto", e.target.value); }}
+                      onChange={(e) => {
+                        updateRule(i, "proto", e.target.value);
+                      }}
                     />
                     <Input
                       className="flex-1"
                       placeholder="D.Port"
                       value={rule.dport || ""}
-                      onChange={(e) => { updateRule(i, "dport", e.target.value); }}
+                      onChange={(e) => {
+                        updateRule(i, "dport", e.target.value);
+                      }}
                     />
                     <Input
                       className="flex-1"
                       placeholder="Comment"
                       value={rule.comment || ""}
-                      onChange={(e) => { updateRule(i, "comment", e.target.value); }}
+                      onChange={(e) => {
+                        updateRule(i, "comment", e.target.value);
+                      }}
                     />
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => { removeRule(i); }}
+                      onClick={() => {
+                        removeRule(i);
+                      }}
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -167,13 +180,15 @@ export function CreateTemplateDialog() {
           </div>
 
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={!name || create.isPending}
-            >
+            <Button onClick={handleSubmit} disabled={!name || create.isPending}>
               Create Template
             </Button>
           </div>

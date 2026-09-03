@@ -6,13 +6,38 @@ import { StatusIcon } from "@/components/StatusIcon";
 // also reports transient QEMU states (prelaunch, postmigrate, shutdown,
 // migrate, io-error, ...) that arrive as arbitrary strings.
 const statusConfig: Record<string, { label: string; className: string }> = {
-  running: { label: "Running", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
-  online: { label: "Online", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
-  stopped: { label: "Stopped", className: "border-muted-foreground/30 bg-muted text-muted-foreground" },
-  offline: { label: "Offline", className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
-  paused: { label: "Paused", className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  suspended: { label: "Suspended", className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  unknown: { label: "Unknown", className: "border-muted-foreground/30 bg-muted text-muted-foreground" },
+  running: {
+    label: "Running",
+    className:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+  online: {
+    label: "Online",
+    className:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+  stopped: {
+    label: "Stopped",
+    className: "border-muted-foreground/30 bg-muted text-muted-foreground",
+  },
+  offline: {
+    label: "Offline",
+    className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
+  },
+  paused: {
+    label: "Paused",
+    className:
+      "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  suspended: {
+    label: "Suspended",
+    className:
+      "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  unknown: {
+    label: "Unknown",
+    className: "border-muted-foreground/30 bg-muted text-muted-foreground",
+  },
 };
 
 interface StatusBadgeProps {
@@ -31,7 +56,10 @@ export function StatusBadge({ status }: StatusBadgeProps) {
       "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
   };
   return (
-    <Badge variant="outline" className={cn("gap-1.5 text-xs font-medium", config.className)}>
+    <Badge
+      variant="outline"
+      className={cn("gap-1.5 text-xs font-medium", config.className)}
+    >
       <StatusIcon status={status} />
       {config.label}
     </Badge>

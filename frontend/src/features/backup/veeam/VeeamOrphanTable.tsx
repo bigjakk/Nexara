@@ -107,9 +107,7 @@ const COLUMNS: ColumnDef<VeeamOrphanedObject, OrphanSortKey, OrphanCtx>[] = [
     width: 190,
     sortValue: (object) => toEpoch(object.latest_restore_point),
     cell: (object) => (
-      <span className="text-sm">
-        {formatTime(object.latest_restore_point)}
-      </span>
+      <span className="text-sm">{formatTime(object.latest_restore_point)}</span>
     ),
   },
 ];

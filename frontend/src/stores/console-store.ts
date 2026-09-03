@@ -44,7 +44,10 @@ function generateTabId(type: ConsoleType, node: string, vmid?: number): string {
 
 function defaultPosition(): { x: number; y: number } {
   if (typeof window === "undefined") return { x: 100, y: 100 };
-  return { x: Math.max(0, window.innerWidth - 820), y: Math.max(0, window.innerHeight - 520) };
+  return {
+    x: Math.max(0, window.innerWidth - 820),
+    y: Math.max(0, window.innerHeight - 520),
+  };
 }
 
 export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
@@ -68,14 +71,25 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
             t.vmid === tab.vmid,
         );
         if (existing) {
-          const newWindowMode = state.windowMode === "hidden" ? "floating" as WindowMode : state.windowMode;
+          const newWindowMode =
+            state.windowMode === "hidden"
+              ? ("floating" as WindowMode)
+              : state.windowMode;
           set({ activeTabId: existing.id, windowMode: newWindowMode });
           return existing.id;
         }
 
         const id = generateTabId(tab.type, tab.node, tab.vmid);
-        const newTab: ConsoleTab = { ...tab, id, status: "connecting", reconnectKey: 0 };
-        const newWindowMode = state.windowMode === "hidden" ? "floating" as WindowMode : state.windowMode;
+        const newTab: ConsoleTab = {
+          ...tab,
+          id,
+          status: "connecting",
+          reconnectKey: 0,
+        };
+        const newWindowMode =
+          state.windowMode === "hidden"
+            ? ("floating" as WindowMode)
+            : state.windowMode;
         set({
           tabs: [...state.tabs, newTab],
           activeTabId: id,
@@ -92,8 +106,13 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
             const lastTab = filtered[filtered.length - 1];
             newActiveId = lastTab !== undefined ? lastTab.id : null;
           }
-          const newWindowMode = filtered.length === 0 ? "hidden" as WindowMode : state.windowMode;
-          return { tabs: filtered, activeTabId: newActiveId, windowMode: newWindowMode };
+          const newWindowMode =
+            filtered.length === 0 ? ("hidden" as WindowMode) : state.windowMode;
+          return {
+            tabs: filtered,
+            activeTabId: newActiveId,
+            windowMode: newWindowMode,
+          };
         });
       },
 
@@ -120,7 +139,11 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
       updateTabNode: (clusterID, vmid, newNode) => {
         set((state) => ({
           tabs: state.tabs.map((t) => {
-            if (t.clusterID !== clusterID || t.vmid !== vmid || t.node === newNode) {
+            if (
+              t.clusterID !== clusterID ||
+              t.vmid !== vmid ||
+              t.node === newNode
+            ) {
               return t;
             }
             // A never-opened tab is retargeted silently. Bumping reconnectKey
@@ -128,7 +151,12 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
             if (t.status === "idle") {
               return { ...t, node: newNode };
             }
-            return { ...t, node: newNode, status: "connecting" as const, reconnectKey: t.reconnectKey + 1 };
+            return {
+              ...t,
+              node: newNode,
+              status: "connecting" as const,
+              reconnectKey: t.reconnectKey + 1,
+            };
           }),
         }));
       },
@@ -146,7 +174,10 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
               tab.kind === "ct"
                 ? `/api/v1/clusters/${tab.clusterID}/containers/${tab.resourceId}`
                 : `/api/v1/clusters/${tab.clusterID}/vms/${tab.resourceId}`;
-            const vm = await apiClient.get<{ node_id: string; status?: string }>(vmEndpoint);
+            const vm = await apiClient.get<{
+              node_id: string;
+              status?: string;
+            }>(vmEndpoint);
 
             // Guest is powered off — park instead of reconnect-looping against
             // a dead guest. useGuestPowerSync resumes the tab when it starts.
@@ -156,7 +187,9 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
             }
 
             const nodesEndpoint = `/api/v1/clusters/${tab.clusterID}/nodes`;
-            const nodes = await apiClient.list<{ id: string; name: string }>(nodesEndpoint);
+            const nodes = await apiClient.list<{ id: string; name: string }>(
+              nodesEndpoint,
+            );
             const resolved = nodes.find((n) => n.id === vm.node_id);
 
             if (resolved && resolved.name !== tab.node) {
@@ -164,7 +197,12 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
               set((s) => ({
                 tabs: s.tabs.map((t) =>
                   t.id === id
-                    ? { ...t, node: resolved.name, status: "connecting", reconnectKey: t.reconnectKey + 1 }
+                    ? {
+                        ...t,
+                        node: resolved.name,
+                        status: "connecting",
+                        reconnectKey: t.reconnectKey + 1,
+                      }
                     : t,
                 ),
               }));
@@ -194,7 +232,12 @@ export const useConsoleStore = create<ConsoleState & ConsoleActions>()(
       },
 
       setWindowSize: (size) => {
-        set({ windowSize: { width: Math.max(400, size.width), height: Math.max(300, size.height) } });
+        set({
+          windowSize: {
+            width: Math.max(400, size.width),
+            height: Math.max(300, size.height),
+          },
+        });
       },
 
       showConsole: () => {

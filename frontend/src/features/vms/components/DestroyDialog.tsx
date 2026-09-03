@@ -67,9 +67,8 @@ export function DestroyDialog({
             Destroy {kind === "ct" ? "Container" : "VM"}
           </DialogTitle>
           <DialogDescription>
-            This will permanently destroy{" "}
-            <CopyableName name={resourceName} /> and all its data. This action
-            cannot be undone.
+            This will permanently destroy <CopyableName name={resourceName} />{" "}
+            and all its data. This action cannot be undone.
           </DialogDescription>
         </DialogHeader>
 
@@ -92,7 +91,9 @@ export function DestroyDialog({
               <Input
                 id="destroy-confirm"
                 value={confirmText}
-                onChange={(e) => { setConfirmText(e.target.value); }}
+                onChange={(e) => {
+                  setConfirmText(e.target.value);
+                }}
                 placeholder={resourceName}
                 autoComplete="off"
               />

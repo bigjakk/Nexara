@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parsePropString, serializePropString, propStringsEqual } from "./prop-string";
+import {
+  parsePropString,
+  serializePropString,
+  propStringsEqual,
+} from "./prop-string";
 
 describe("parsePropString", () => {
   it("returns empty for undefined / null / empty", () => {
@@ -9,13 +13,19 @@ describe("parsePropString", () => {
   });
 
   it("parses comma-separated key=value pairs", () => {
-    expect(parsePropString("clone=10,migration=20,move=0,restore=0"))
-      .toEqual({ clone: "10", migration: "20", move: "0", restore: "0" });
+    expect(parsePropString("clone=10,migration=20,move=0,restore=0")).toEqual({
+      clone: "10",
+      migration: "20",
+      move: "0",
+      restore: "0",
+    });
   });
 
   it("tolerates whitespace around keys, values, and separators", () => {
-    expect(parsePropString(" clone = 10 , migration=20 "))
-      .toEqual({ clone: "10", migration: "20" });
+    expect(parsePropString(" clone = 10 , migration=20 ")).toEqual({
+      clone: "10",
+      migration: "20",
+    });
   });
 
   it("handles bare keys without an equals sign", () => {
@@ -33,7 +43,9 @@ describe("serializePropString", () => {
   });
 
   it("keeps numeric-string zero values", () => {
-    expect(serializePropString({ clone: "0", migration: "20" })).toBe("clone=0,migration=20");
+    expect(serializePropString({ clone: "0", migration: "20" })).toBe(
+      "clone=0,migration=20",
+    );
   });
 
   it("returns empty string for empty map", () => {

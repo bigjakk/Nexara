@@ -6,18 +6,12 @@ import {
   useRecentActivity,
   type AuditLogEntry,
 } from "@/features/audit/api/audit-queries";
-import {
-  useTaskStatus,
-  useTaskLog,
-} from "@/features/vms/api/vm-queries";
+import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
 import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useTableSort } from "@/hooks/useTableSort";
-import {
-  useColumnLayout,
-  type ColumnLayout,
-} from "@/hooks/useColumnLayout";
+import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
 import { parseDetails } from "./task-status";
 import {
   ACTIVITY_ACCESSORS,
@@ -49,7 +43,12 @@ function ActiveTaskPoller({
   onStatus,
 }: {
   entry: AuditLogEntry;
-  onStatus: (upid: string, status: string, exitStatus: string, progress?: number) => void;
+  onStatus: (
+    upid: string,
+    status: string,
+    exitStatus: string,
+    progress?: number,
+  ) => void;
 }) {
   const details = parseDetails(entry.details);
   const clusterId = getClusterIdFromEntry(entry);
@@ -129,17 +128,13 @@ function ActivityRow({
               <span className="text-muted-foreground">Cluster</span>
               <span>{entry.cluster_name || "—"}</span>
               <span className="text-muted-foreground">User</span>
-              <span>
-                {entry.user_display_name || entry.user_email}
-              </span>
+              <span>{entry.user_display_name || entry.user_email}</span>
               <span className="text-muted-foreground">Time</span>
               <span>{formatTimestamp(entry.created_at)}</span>
               {isFailed && row.exitStatusText !== "" && (
                 <>
                   <span className="text-muted-foreground">Exit Status</span>
-                  <span className="text-red-500">
-                    {row.exitStatusText}
-                  </span>
+                  <span className="text-red-500">{row.exitStatusText}</span>
                 </>
               )}
               {details.upid && (
@@ -233,9 +228,10 @@ export function TaskLogPanel() {
         ) {
           return prev;
         }
-        const entry = progress != null
-          ? { status, exitStatus, progress }
-          : { status, exitStatus };
+        const entry =
+          progress != null
+            ? { status, exitStatus, progress }
+            : { status, exitStatus };
         return { ...prev, [upid]: entry };
       });
     },
@@ -281,9 +277,7 @@ export function TaskLogPanel() {
   );
   const layout = useColumnLayout("activity", ACTIVITY_COLUMN_DEFS);
 
-  const dragRef = useRef<{ startY: number; startHeight: number } | null>(
-    null,
-  );
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -312,11 +306,7 @@ export function TaskLogPanel() {
     <div className="flex flex-col border-t bg-card">
       {/* Invisible progress pollers for running tasks */}
       {runningWithUpids.map((e) => (
-        <ActiveTaskPoller
-          key={e.id}
-          entry={e}
-          onStatus={handleTaskStatus}
-        />
+        <ActiveTaskPoller key={e.id} entry={e} onStatus={handleTaskStatus} />
       ))}
 
       {/* Resize handle — only visible when panel is open */}

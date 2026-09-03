@@ -40,7 +40,9 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
   const [rfb, setRfb] = useState<RFB | null>(null);
   const retryCountRef = useRef(0);
   const retryScheduledRef = useRef(false);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
 
   // Reuses a still-valid scoped token across this tab's reconnect cycle
   // rather than minting — and auditing — one per attempt. Created once via
@@ -186,12 +188,16 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       stateLog1Timer = setTimeout(() => {
         console.log(
           "[VNCViewer] WS state @ 1s",
-          "readyState:", localWs.readyState,
+          "readyState:",
+          localWs.readyState,
           "(0=connecting, 1=open, 2=closing, 3=closed)",
         );
       }, 1000);
       stateLog2Timer = setTimeout(() => {
-        console.log("[VNCViewer] WS state @ 5s readyState:", localWs.readyState);
+        console.log(
+          "[VNCViewer] WS state @ 5s readyState:",
+          localWs.readyState,
+        );
       }, 5000);
 
       localWs.onmessage = (event: MessageEvent) => {
@@ -212,9 +218,14 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
             };
             if (msg.type === "connected") {
               // Backend proxy is connected to Proxmox — now initialize noVNC RFB.
-              console.log("[VNCViewer] received connected, container:", !!containerRef.current);
+              console.log(
+                "[VNCViewer] received connected, container:",
+                !!containerRef.current,
+              );
               if (!containerRef.current) {
-                console.error("[VNCViewer] containerRef is null at connected time");
+                console.error(
+                  "[VNCViewer] containerRef is null at connected time",
+                );
                 return;
               }
 
@@ -225,7 +236,11 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
                 options["credentials"] = { password: msg.password };
               }
 
-              const rfbInstance = new RFB(containerRef.current, localWs, options);
+              const rfbInstance = new RFB(
+                containerRef.current,
+                localWs,
+                options,
+              );
               rfbInstance.scaleViewport = true;
               rfbInstance.resizeSession = false;
               rfbInstance.focusOnClick = true;
@@ -275,10 +290,14 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       localWs.onclose = (event) => {
         console.log(
           "[VNCViewer] WS close",
-          "code:", event.code,
-          "reason:", event.reason || "(none)",
-          "wasClean:", event.wasClean,
-          "readyState:", localWs.readyState,
+          "code:",
+          event.code,
+          "reason:",
+          event.reason || "(none)",
+          "wasClean:",
+          event.wasClean,
+          "readyState:",
+          localWs.readyState,
         );
         if (closed) return;
         if (!rfbRef.current) {
@@ -290,8 +309,10 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       localWs.onerror = (event) => {
         console.error(
           "[VNCViewer] WS error event",
-          "type:", event.type,
-          "readyState:", localWs.readyState,
+          "type:",
+          event.type,
+          "readyState:",
+          localWs.readyState,
         );
         if (!closed && !tabIsParked()) {
           applyStatusRef.current("error");
@@ -317,7 +338,17 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       wsRef.current = null;
     };
     // Only re-run when the actual connection parameters change.
-  }, [tabId, tab.type, clusterID, node, vmid, guestType, reconnectKey, activated, mintToken]);
+  }, [
+    tabId,
+    tab.type,
+    clusterID,
+    node,
+    vmid,
+    guestType,
+    reconnectKey,
+    activated,
+    mintToken,
+  ]);
 
   // A viewer that goes away (console closed, tab removed) leaves no socket
   // behind, so the tab must not stay marked live. Reset it to the same

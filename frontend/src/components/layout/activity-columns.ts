@@ -36,9 +36,7 @@ export function formatTimestamp(iso: string): string {
 }
 
 export function formatAction(action: string): string {
-  return action
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export type Severity = "info" | "warning" | "error";
@@ -54,7 +52,8 @@ export function deriveSeverity(action: string, details: string): Severity {
     }
   }
   const a = action.toLowerCase();
-  if (a.includes("error") || a.includes("failed") || a.includes("fail")) return "error";
+  if (a.includes("error") || a.includes("failed") || a.includes("fail"))
+    return "error";
   if (
     a.includes("delete") ||
     a.includes("destroy") ||
@@ -121,9 +120,7 @@ export function decorateActivity(
 
   // A failed task outranks whatever the action name suggests.
   const severity: Severity =
-    status === "failed"
-      ? "error"
-      : deriveSeverity(entry.action, entry.details);
+    status === "failed" ? "error" : deriveSeverity(entry.action, entry.details);
 
   // Non-task entries (a login, a token mint) have no progress to draw at all —
   // distinct from a task whose progress Proxmox never reported.
@@ -203,7 +200,10 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   info: 2,
 };
 
-export const ACTIVITY_ACCESSORS: SortAccessors<ActivityRowData, ActivitySortKey> = {
+export const ACTIVITY_ACCESSORS: SortAccessors<
+  ActivityRowData,
+  ActivitySortKey
+> = {
   status: (r) => STATUS_RANK[r.status],
   level: (r) => SEVERITY_RANK[r.severity],
   // The whole visible string: the cell renders the action and the resource

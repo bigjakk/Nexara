@@ -12,13 +12,21 @@ import type { ConsoleTab } from "../types/console";
 // the same thing you can watch happen to the noVNC <canvas> in a browser.
 vi.mock("./VNCViewer", () => ({
   VNCViewer: ({ tab, visible }: { tab: ConsoleTab; visible: boolean }) => (
-    <div data-testid="content-vnc" data-tab-id={tab.id} data-visible={String(visible)} />
+    <div
+      data-testid="content-vnc"
+      data-tab-id={tab.id}
+      data-visible={String(visible)}
+    />
   ),
 }));
 
 vi.mock("./Terminal", () => ({
   Terminal: ({ tab, visible }: { tab: ConsoleTab; visible: boolean }) => (
-    <div data-testid="content-term" data-tab-id={tab.id} data-visible={String(visible)} />
+    <div
+      data-testid="content-term"
+      data-tab-id={tab.id}
+      data-visible={String(visible)}
+    />
   ),
 }));
 

@@ -45,8 +45,7 @@ function UsageRow({
   /** null hides the bar (metric not applicable, e.g. provisioned storage) */
   percent: number | null;
 }) {
-  const clamped =
-    percent === null ? null : Math.max(0, Math.min(100, percent));
+  const clamped = percent === null ? null : Math.max(0, Math.min(100, percent));
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-2">

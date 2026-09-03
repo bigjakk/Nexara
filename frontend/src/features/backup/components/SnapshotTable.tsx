@@ -30,7 +30,6 @@ import {
 } from "../api/backup-queries";
 import { formatBytes } from "@/lib/format";
 
-
 function formatUnixTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString();
 }
@@ -50,7 +49,9 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
   const [editingComment, setEditingComment] = useState<string | null>(null);
   const [commentValue, setCommentValue] = useState("");
   // Optimistic overrides: snapKey -> protected value
-  const [protectOverrides, setProtectOverrides] = useState<Record<string, boolean>>({});
+  const [protectOverrides, setProtectOverrides] = useState<
+    Record<string, boolean>
+  >({});
   const [protectingKey, setProtectingKey] = useState<string | null>(null);
   const [protectError, setProtectError] = useState<string | null>(null);
 
@@ -108,13 +109,13 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
         onError: () => {
           // Revert optimistic update
           setProtectOverrides((prev) =>
-            Object.fromEntries(
-              Object.entries(prev).filter(([k]) => k !== key),
-            ),
+            Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)),
           );
           setProtectingKey(null);
           setProtectError(key);
-          setTimeout(() => { setProtectError(null); }, 3000);
+          setTimeout(() => {
+            setProtectError(null);
+          }, 3000);
         },
       },
     );
@@ -237,14 +238,14 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                         <Button
                           variant="ghost"
                           size="sm"
-                          title={
-                            isProtected(snap) ? "Unprotect" : "Protect"
-                          }
+                          title={isProtected(snap) ? "Unprotect" : "Protect"}
                           onClick={() => {
                             handleProtect(snap);
                           }}
                           disabled={protectingKey === key}
-                          className={protectError === key ? "text-destructive" : ""}
+                          className={
+                            protectError === key ? "text-destructive" : ""
+                          }
                         >
                           {protectingKey === key ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -292,9 +293,7 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                             {snap.verified ? "Yes" : "No"}
                           </div>
                           <div>
-                            <span className="text-muted-foreground">
-                              Size:
-                            </span>{" "}
+                            <span className="text-muted-foreground">Size:</span>{" "}
                             {formatBytes(snap.size)}
                           </div>
                           <div>

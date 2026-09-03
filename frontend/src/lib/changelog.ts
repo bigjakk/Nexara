@@ -16,7 +16,9 @@ export interface ChangelogEntry {
   more_count?: number;
 }
 
-export function extractBaseVersion(raw: string | null | undefined): string | null {
+export function extractBaseVersion(
+  raw: string | null | undefined,
+): string | null {
   if (!raw) return null;
   const match = /^v?(\d+\.\d+\.\d+)/.exec(raw);
   return match?.[1] ?? null;

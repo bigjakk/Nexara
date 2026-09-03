@@ -37,17 +37,12 @@ export function useNetworkInterfaces(clusterId: string) {
   return useQuery({
     queryKey: ["networks", "interfaces", clusterId],
     queryFn: () =>
-      apiClient.list<NodeInterfaces>(
-        `/api/v1/clusters/${clusterId}/networks`,
-      ),
+      apiClient.list<NodeInterfaces>(`/api/v1/clusters/${clusterId}/networks`),
     enabled: clusterId.length > 0,
   });
 }
 
-export function useNodeNetworkInterfaces(
-  clusterId: string,
-  nodeName: string,
-) {
+export function useNodeNetworkInterfaces(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["networks", "interfaces", clusterId, nodeName],
     queryFn: () =>
@@ -58,10 +53,7 @@ export function useNodeNetworkInterfaces(
   });
 }
 
-export function useCreateNetworkInterface(
-  clusterId: string,
-  nodeName: string,
-) {
+export function useCreateNetworkInterface(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (params: CreateNetworkInterfaceRequest) =>
@@ -77,10 +69,7 @@ export function useCreateNetworkInterface(
   });
 }
 
-export function useUpdateNetworkInterface(
-  clusterId: string,
-  nodeName: string,
-) {
+export function useUpdateNetworkInterface(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -102,10 +91,7 @@ export function useUpdateNetworkInterface(
   });
 }
 
-export function useDeleteNetworkInterface(
-  clusterId: string,
-  nodeName: string,
-) {
+export function useDeleteNetworkInterface(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (iface: string) =>
@@ -289,9 +275,7 @@ export function useSDNZones(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "zones", clusterId],
     queryFn: () =>
-      apiClient.list<SDNZone>(
-        `/api/v1/clusters/${clusterId}/sdn/zones`,
-      ),
+      apiClient.list<SDNZone>(`/api/v1/clusters/${clusterId}/sdn/zones`),
     enabled: clusterId.length > 0,
   });
 }
@@ -300,9 +284,7 @@ export function useSDNVNets(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "vnets", clusterId],
     queryFn: () =>
-      apiClient.list<SDNVNet>(
-        `/api/v1/clusters/${clusterId}/sdn/vnets`,
-      ),
+      apiClient.list<SDNVNet>(`/api/v1/clusters/${clusterId}/sdn/vnets`),
     enabled: clusterId.length > 0,
   });
 }
@@ -564,9 +546,7 @@ export function useSDNIPAMs(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "ipams", clusterId],
     queryFn: () =>
-      apiClient.list<SDNIPAM>(
-        `/api/v1/clusters/${clusterId}/sdn/ipams`,
-      ),
+      apiClient.list<SDNIPAM>(`/api/v1/clusters/${clusterId}/sdn/ipams`),
     enabled: clusterId.length > 0,
   });
 }
@@ -630,9 +610,7 @@ export function useSDNDNSPlugins(clusterId: string) {
   return useQuery({
     queryKey: ["sdn", "dns", clusterId],
     queryFn: () =>
-      apiClient.list<SDNDNS>(
-        `/api/v1/clusters/${clusterId}/sdn/dns`,
-      ),
+      apiClient.list<SDNDNS>(`/api/v1/clusters/${clusterId}/sdn/dns`),
     enabled: clusterId.length > 0,
   });
 }

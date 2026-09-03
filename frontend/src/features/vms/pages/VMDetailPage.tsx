@@ -2,7 +2,16 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { VMGuestToolsCard } from "@/features/guest-tools/components/VMGuestToolsCard";
 import { VMGuestToolsSummary } from "@/features/guest-tools/components/VMGuestToolsSummary";
 import { useParams, useSearchParams, Link } from "react-router-dom";
-import { ArrowLeft, Monitor, Terminal, Pencil, Check, X, Container, Server } from "lucide-react";
+import {
+  ArrowLeft,
+  Monitor,
+  Terminal,
+  Pencil,
+  Check,
+  X,
+  Container,
+  Server,
+} from "lucide-react";
 import { OSIcon } from "@/components/OSIcon";
 import { DetailChip } from "@/components/DetailChip";
 import { classifyOS } from "@/lib/os-classify";
@@ -18,7 +27,13 @@ import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterMetrics } from "@/hooks/useMetrics";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useVM, useSetResourceConfig, useGuestAgentInfo, useResourcePools, useSetVMPool } from "../api/vm-queries";
+import {
+  useVM,
+  useSetResourceConfig,
+  useGuestAgentInfo,
+  useResourcePools,
+  useSetVMPool,
+} from "../api/vm-queries";
 import { VMActions } from "../components/VMActions";
 import { VMConsolePreview } from "../components/VMConsolePreview";
 import { CloneDialog } from "../components/CloneDialog";
@@ -41,25 +56,37 @@ import type { TimeRange } from "@/types/api";
 import type { MetricDataPoint, VmLiveMetric } from "@/types/ws";
 import { formatBytes, formatUptime } from "@/lib/format";
 
-
-
 export function VMDetailPage() {
-  const { clusterId = "", vmId = "", kind: rawKind } = useParams<{
+  const {
+    clusterId = "",
+    vmId = "",
+    kind: rawKind,
+  } = useParams<{
     clusterId: string;
     vmId: string;
     kind: string;
   }>();
-  const kind: ResourceKind = rawKind === "ct" || rawKind === "lxc" ? "ct" : "vm";
+  const kind: ResourceKind =
+    rawKind === "ct" || rawKind === "lxc" ? "ct" : "vm";
   // Read-only ?tab= deep link (e.g. the central Snapshots page links to
   // ?tab=snapshots). Only trusted on mount — AppShell remounts per pathname.
   const [searchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const validTabs =
     kind === "vm"
-      ? ["overview", "hardware", "snapshots", "cloud-init", "backups", "schedules"]
+      ? [
+          "overview",
+          "hardware",
+          "snapshots",
+          "cloud-init",
+          "backups",
+          "schedules",
+        ]
       : ["overview", "resources", "snapshots", "backups", "schedules"];
   const initialTab =
-    requestedTab && validTabs.includes(requestedTab) ? requestedTab : "overview";
+    requestedTab && validTabs.includes(requestedTab)
+      ? requestedTab
+      : "overview";
   const isMobile = useIsMobile();
   const { data: vm, isLoading, error } = useVM(clusterId, vmId, kind);
 
@@ -79,7 +106,12 @@ export function VMDetailPage() {
   // so they reconnect to the new node automatically.
   const prevNodeRef = useRef(nodeName);
   useEffect(() => {
-    if (nodeName && prevNodeRef.current && nodeName !== prevNodeRef.current && vm) {
+    if (
+      nodeName &&
+      prevNodeRef.current &&
+      nodeName !== prevNodeRef.current &&
+      vm
+    ) {
       updateTabNode(clusterId, vm.vmid, nodeName);
     }
     prevNodeRef.current = nodeName;
@@ -157,16 +189,22 @@ export function VMDetailPage() {
       {/* Floating live console preview — absolute so it doesn't stretch the
           header row. Desktop-only: at phone widths it would sit on top of
           the header; the VNC Console button stays as the mobile entry. */}
-      {!isMobile && kind === "vm" && consoleAllowed && normalizedStatus === "running" && nodeName !== "" && (
-        <div className="absolute right-6 top-6 z-10">
-          <VMConsolePreview
-            clusterId={clusterId}
-            node={nodeName}
-            vmid={vm.vmid}
-            onOpen={() => { openConsole("vnc"); }}
-          />
-        </div>
-      )}
+      {!isMobile &&
+        kind === "vm" &&
+        consoleAllowed &&
+        normalizedStatus === "running" &&
+        nodeName !== "" && (
+          <div className="absolute right-6 top-6 z-10">
+            <VMConsolePreview
+              clusterId={clusterId}
+              node={nodeName}
+              vmid={vm.vmid}
+              onOpen={() => {
+                openConsole("vnc");
+              }}
+            />
+          </div>
+        )}
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
@@ -190,59 +228,77 @@ export function VMDetailPage() {
             )}
           </div>
           <div className="min-w-0 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            {renaming ? (
-              <InlineRename
-                inputRef={renameInputRef}
-                value={newName}
-                onChange={setNewName}
-                isPending={setConfig.isPending}
-                onConfirm={() => {
-                  const trimmed = newName.trim();
-                  if (trimmed.length === 0 || trimmed === vm.name) {
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {renaming ? (
+                <InlineRename
+                  inputRef={renameInputRef}
+                  value={newName}
+                  onChange={setNewName}
+                  isPending={setConfig.isPending}
+                  onConfirm={() => {
+                    const trimmed = newName.trim();
+                    if (trimmed.length === 0 || trimmed === vm.name) {
+                      setRenaming(false);
+                      return;
+                    }
+                    const field = kind === "ct" ? "hostname" : "name";
+                    setConfig.mutate(
+                      {
+                        clusterId,
+                        resourceId: vmId,
+                        kind,
+                        fields: { [field]: trimmed },
+                      },
+                      {
+                        onSuccess: () => {
+                          setRenaming(false);
+                        },
+                      },
+                    );
+                  }}
+                  onCancel={() => {
                     setRenaming(false);
-                    return;
-                  }
-                  const field = kind === "ct" ? "hostname" : "name";
-                  setConfig.mutate(
-                    { clusterId, resourceId: vmId, kind, fields: { [field]: trimmed } },
-                    { onSuccess: () => { setRenaming(false); } },
-                  );
-                }}
-                onCancel={() => { setRenaming(false); }}
-              />
-            ) : (
-              <>
-                <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">{vm.name}</h1>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0"
-                  onClick={() => { setNewName(vm.name); setRenaming(true); }}
-                  title="Rename"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-              </>
-            )}
-            <StatusBadge status={normalizedStatus} />
-            {vm.template && (
-              <Badge variant="secondary">Template</Badge>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <DetailChip>{kind === "ct" ? "CT · LXC" : "VM · QEMU"}</DetailChip>
-            <DetailChip>VMID {String(vm.vmid)}</DetailChip>
-            {nodeName !== "" && (
-              <Link to={`/clusters/${clusterId}/nodes/${vm.node_id}`}>
-                <DetailChip className="transition-colors hover:border-muted-foreground/40 hover:text-foreground">
-                  <Server className="h-3 w-3" />
-                  {nodeName}
-                </DetailChip>
-              </Link>
-            )}
-            {vm.ha_state !== "" && <DetailChip>HA · {vm.ha_state}</DetailChip>}
-          </div>
+                  }}
+                />
+              ) : (
+                <>
+                  <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold tracking-tight">
+                    {vm.name}
+                  </h1>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    onClick={() => {
+                      setNewName(vm.name);
+                      setRenaming(true);
+                    }}
+                    title="Rename"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </>
+              )}
+              <StatusBadge status={normalizedStatus} />
+              {vm.template && <Badge variant="secondary">Template</Badge>}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <DetailChip>
+                {kind === "ct" ? "CT · LXC" : "VM · QEMU"}
+              </DetailChip>
+              <DetailChip>VMID {String(vm.vmid)}</DetailChip>
+              {nodeName !== "" && (
+                <Link to={`/clusters/${clusterId}/nodes/${vm.node_id}`}>
+                  <DetailChip className="transition-colors hover:border-muted-foreground/40 hover:text-foreground">
+                    <Server className="h-3 w-3" />
+                    {nodeName}
+                  </DetailChip>
+                </Link>
+              )}
+              {vm.ha_state !== "" && (
+                <DetailChip>HA · {vm.ha_state}</DetailChip>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -258,7 +314,9 @@ export function VMDetailPage() {
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => { openConsole("vnc"); }}
+            onClick={() => {
+              openConsole("vnc");
+            }}
             disabled={vm.template}
           >
             <Monitor className="h-4 w-4" />
@@ -270,7 +328,9 @@ export function VMDetailPage() {
             variant="outline"
             size="sm"
             className="gap-1.5"
-            onClick={() => { openConsole("terminal"); }}
+            onClick={() => {
+              openConsole("terminal");
+            }}
             disabled={vm.template}
           >
             <Terminal className="h-4 w-4" />
@@ -286,13 +346,27 @@ export function VMDetailPage() {
         status={vm.status}
         name={vm.name}
         template={vm.template}
-        onSnapshot={() => { setSnapshotOpen(true); }}
-        onClone={() => { setCloneOpen(true); }}
-        onCloneToTemplate={() => { setCloneToTemplateOpen(true); }}
-        onDeploy={() => { setDeployOpen(true); }}
-        onMigrate={() => { setMigrateOpen(true); }}
-        onDestroy={() => { setDestroyOpen(true); }}
-        onConvertToTemplate={() => { setConvertTemplateOpen(true); }}
+        onSnapshot={() => {
+          setSnapshotOpen(true);
+        }}
+        onClone={() => {
+          setCloneOpen(true);
+        }}
+        onCloneToTemplate={() => {
+          setCloneToTemplateOpen(true);
+        }}
+        onDeploy={() => {
+          setDeployOpen(true);
+        }}
+        onMigrate={() => {
+          setMigrateOpen(true);
+        }}
+        onDestroy={() => {
+          setDestroyOpen(true);
+        }}
+        onConvertToTemplate={() => {
+          setConvertTemplateOpen(true);
+        }}
       />
 
       {/* Tabs */}
@@ -322,13 +396,20 @@ export function VMDetailPage() {
             <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
               <InfoItem label="VMID" value={String(vm.vmid)} />
               <InfoItem label="Node" value={nodeName || "--"} />
-              <InfoItem label="Type" value={vm.type === "lxc" ? "LXC" : "QEMU"} />
+              <InfoItem
+                label="Type"
+                value={vm.type === "lxc" ? "LXC" : "QEMU"}
+              />
               <InfoItem label="CPUs" value={String(vm.cpu_count)} />
               <InfoItem label="Memory" value={formatBytes(vm.mem_total)} />
               <InfoItem label="Disk" value={formatBytes(vm.disk_total)} />
               <InfoItem label="Uptime" value={formatUptime(vm.uptime)} />
               <InfoItem label="HA State" value={vm.ha_state || "--"} />
-              <PoolSelector clusterId={clusterId} vmId={vmId} currentPool={vm.pool} />
+              <PoolSelector
+                clusterId={clusterId}
+                vmId={vmId}
+                currentPool={vm.pool}
+              />
               {vm.tags && <InfoItem label="Tags" value={vm.tags} />}
             </div>
           </div>
@@ -344,7 +425,6 @@ export function VMDetailPage() {
             />
           )}
 
-
           {/* Metrics */}
           <VMMetricsPanel
             clusterId={clusterId}
@@ -356,13 +436,23 @@ export function VMDetailPage() {
 
         {kind === "vm" && (
           <TabsContent value="hardware" className="mt-4">
-            <HardwarePanel clusterId={clusterId} vmId={vmId} vmStatus={vm.status} nodeName={nodeName} />
+            <HardwarePanel
+              clusterId={clusterId}
+              vmId={vmId}
+              vmStatus={vm.status}
+              nodeName={nodeName}
+            />
           </TabsContent>
         )}
 
         {kind === "ct" && (
           <TabsContent value="resources" className="mt-4">
-            <ContainerResourcesPanel clusterId={clusterId} ctId={vmId} ctStatus={vm.status} nodeName={nodeName} />
+            <ContainerResourcesPanel
+              clusterId={clusterId}
+              ctId={vmId}
+              ctStatus={vm.status}
+              nodeName={nodeName}
+            />
           </TabsContent>
         )}
 
@@ -416,7 +506,6 @@ export function VMDetailPage() {
             node={nodeName}
           />
         </TabsContent>
-
       </Tabs>
 
       {/* Dialogs */}
@@ -546,28 +635,38 @@ function GuestAgentSection({
           </div>
           {data.network_interfaces && data.network_interfaces.length > 0 && (
             <div>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">Network Interfaces</p>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">
+                Network Interfaces
+              </p>
               <div className="space-y-2">
                 {data.network_interfaces
                   .filter((iface) => iface.name !== "lo")
                   .slice(0, 1)
                   .map((iface) => (
-                    <div key={iface.name} className="rounded border p-2 text-sm">
+                    <div
+                      key={iface.name}
+                      className="rounded border p-2 text-sm"
+                    >
                       <span className="font-medium">{iface.name}</span>
                       {iface["hardware-address"] && (
                         <span className="ml-2 text-xs text-muted-foreground">
                           ({iface["hardware-address"]})
                         </span>
                       )}
-                      {iface["ip-addresses"] != null && iface["ip-addresses"].length > 0 && (
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          {iface["ip-addresses"].map((ip) => (
-                            <Badge key={`${ip["ip-address"]}/${String(ip.prefix)}`} variant="secondary" className="font-mono text-xs">
-                              {ip["ip-address"]}/{String(ip.prefix)}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
+                      {iface["ip-addresses"] != null &&
+                        iface["ip-addresses"].length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            {iface["ip-addresses"].map((ip) => (
+                              <Badge
+                                key={`${ip["ip-address"]}/${String(ip.prefix)}`}
+                                variant="secondary"
+                                className="font-mono text-xs"
+                              >
+                                {ip["ip-address"]}/{String(ip.prefix)}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                     </div>
                   ))}
               </div>
@@ -658,7 +757,9 @@ function VMMetricsPanel({
     <div className="space-y-4">
       {/* Time range selector */}
       <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground">Range:</span>
+        <span className="text-sm font-medium text-muted-foreground">
+          Range:
+        </span>
         <div className="flex gap-1">
           {TIME_RANGES.map((tr) => (
             <Button
@@ -666,7 +767,9 @@ function VMMetricsPanel({
               size="sm"
               variant={timeRange === tr.value ? "default" : "outline"}
               className="h-7 px-2.5 text-xs"
-              onClick={() => { setTimeRange(tr.value); }}
+              onClick={() => {
+                setTimeRange(tr.value);
+              }}
             >
               {tr.label}
             </Button>
@@ -680,22 +783,59 @@ function VMMetricsPanel({
       {/* Charts (live = seeded 1h + WS ticks) */}
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="h-64">
-          <MetricChart title="CPU Usage" data={chartData} dataKey="cpuPercent" color="hsl(221, 83%, 53%)" timeRange={timeRange} />
+          <MetricChart
+            title="CPU Usage"
+            data={chartData}
+            dataKey="cpuPercent"
+            color="hsl(221, 83%, 53%)"
+            timeRange={timeRange}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Memory Usage" data={chartData} dataKey="memPercent" color="hsl(142, 71%, 45%)" timeRange={timeRange} headerDetail={memDetail} />
+          <MetricChart
+            title="Memory Usage"
+            data={chartData}
+            dataKey="memPercent"
+            color="hsl(142, 71%, 45%)"
+            timeRange={timeRange}
+            headerDetail={memDetail}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Disk Read" data={chartData} dataKey="diskReadBps" color="hsl(38, 92%, 50%)" timeRange={timeRange} />
+          <MetricChart
+            title="Disk Read"
+            data={chartData}
+            dataKey="diskReadBps"
+            color="hsl(38, 92%, 50%)"
+            timeRange={timeRange}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Disk Write" data={chartData} dataKey="diskWriteBps" color="hsl(0, 84%, 60%)" timeRange={timeRange} />
+          <MetricChart
+            title="Disk Write"
+            data={chartData}
+            dataKey="diskWriteBps"
+            color="hsl(0, 84%, 60%)"
+            timeRange={timeRange}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Network In" data={chartData} dataKey="netInBps" color="hsl(262, 83%, 58%)" timeRange={timeRange} />
+          <MetricChart
+            title="Network In"
+            data={chartData}
+            dataKey="netInBps"
+            color="hsl(262, 83%, 58%)"
+            timeRange={timeRange}
+          />
         </div>
         <div className="h-64">
-          <MetricChart title="Network Out" data={chartData} dataKey="netOutBps" color="hsl(330, 81%, 60%)" timeRange={timeRange} />
+          <MetricChart
+            title="Network Out"
+            data={chartData}
+            dataKey="netOutBps"
+            color="hsl(330, 81%, 60%)"
+            timeRange={timeRange}
+          />
         </div>
       </div>
     </div>
@@ -711,14 +851,24 @@ function InfoItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmId: string; currentPool: string }) {
+function PoolSelector({
+  clusterId,
+  vmId,
+  currentPool,
+}: {
+  clusterId: string;
+  vmId: string;
+  currentPool: string;
+}) {
   const { data: pools } = useResourcePools(clusterId);
   const setPool = useSetVMPool(clusterId, vmId);
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState(currentPool);
 
   // Sync local state when prop changes (e.g. after mutation invalidates query).
-  useEffect(() => { setSelected(currentPool); }, [currentPool]);
+  useEffect(() => {
+    setSelected(currentPool);
+  }, [currentPool]);
 
   // Both branches live in a fixed 1fr grid track whose right-hand neighbour is
   // the Tags cell. Without min-w-0 the value keeps its intrinsic width — a
@@ -731,14 +881,19 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
       <div className="min-w-0 py-1">
         <p className="text-xs text-muted-foreground">Pool</p>
         <div className="flex min-w-0 items-center gap-1">
-          <p className="min-w-0 truncate text-sm font-medium" title={currentPool || undefined}>
+          <p
+            className="min-w-0 truncate text-sm font-medium"
+            title={currentPool || undefined}
+          >
             {currentPool || "--"}
           </p>
           <Button
             variant="ghost"
             size="sm"
             className="h-5 w-5 shrink-0 p-0"
-            onClick={() => { setEditing(true); }}
+            onClick={() => {
+              setEditing(true);
+            }}
             title="Change pool"
           >
             <Pencil className="h-3 w-3" />
@@ -755,13 +910,17 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
         <select
           className="h-7 min-w-0 flex-1 rounded-md border bg-transparent px-1.5 text-sm outline-hidden focus:ring-2 focus:ring-ring"
           value={selected}
-          onChange={(e) => { setSelected(e.target.value); }}
+          onChange={(e) => {
+            setSelected(e.target.value);
+          }}
           disabled={setPool.isPending}
           title={selected || "None"}
         >
           <option value="">None</option>
           {pools?.map((p) => (
-            <option key={p.poolid} value={p.poolid}>{p.poolid}</option>
+            <option key={p.poolid} value={p.poolid}>
+              {p.poolid}
+            </option>
           ))}
         </select>
         <Button
@@ -772,7 +931,9 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
           title="Save pool"
           onClick={() => {
             setPool.mutate(selected, {
-              onSuccess: () => { setEditing(false); },
+              onSuccess: () => {
+                setEditing(false);
+              },
             });
           }}
         >
@@ -784,7 +945,10 @@ function PoolSelector({ clusterId, vmId, currentPool }: { clusterId: string; vmI
           className="h-5 w-5 shrink-0 p-0 text-destructive"
           disabled={setPool.isPending}
           title="Cancel"
-          onClick={() => { setSelected(currentPool); setEditing(false); }}
+          onClick={() => {
+            setSelected(currentPool);
+            setEditing(false);
+          }}
         >
           <X className="h-3 w-3" />
         </Button>
@@ -819,7 +983,9 @@ function InlineRename({
         ref={inputRef}
         className="h-9 rounded-md border bg-transparent px-2 text-xl font-bold outline-hidden focus:ring-2 focus:ring-ring"
         value={value}
-        onChange={(e) => { onChange(e.target.value); }}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") onConfirm();
           if (e.key === "Escape") onCancel();

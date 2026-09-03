@@ -2,10 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import type { AptRepositoryResponse } from "@/types/api";
 
-export function useNodeAptRepositories(
-  clusterId: string,
-  nodeName: string,
-) {
+export function useNodeAptRepositories(clusterId: string, nodeName: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "apt-repositories"],
     queryFn: () =>
@@ -16,10 +13,7 @@ export function useNodeAptRepositories(
   });
 }
 
-export function useToggleAptRepository(
-  clusterId: string,
-  nodeName: string,
-) {
+export function useToggleAptRepository(clusterId: string, nodeName: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: {

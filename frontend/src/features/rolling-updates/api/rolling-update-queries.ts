@@ -87,13 +87,7 @@ export function useCreateRollingUpdateJob() {
 export function useStartRollingUpdateJob() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      clusterId,
-      jobId,
-    }: {
-      clusterId: string;
-      jobId: string;
-    }) =>
+    mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post<RollingUpdateJob>(
         `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/start`,
       ),
@@ -111,13 +105,7 @@ export function useStartRollingUpdateJob() {
 export function useCancelRollingUpdateJob() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      clusterId,
-      jobId,
-    }: {
-      clusterId: string;
-      jobId: string;
-    }) =>
+    mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post(
         `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/cancel`,
       ),
@@ -135,13 +123,7 @@ export function useCancelRollingUpdateJob() {
 export function usePauseRollingUpdateJob() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      clusterId,
-      jobId,
-    }: {
-      clusterId: string;
-      jobId: string;
-    }) =>
+    mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post(
         `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/pause`,
       ),
@@ -159,13 +141,7 @@ export function usePauseRollingUpdateJob() {
 export function useResumeRollingUpdateJob() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      clusterId,
-      jobId,
-    }: {
-      clusterId: string;
-      jobId: string;
-    }) =>
+    mutationFn: ({ clusterId, jobId }: { clusterId: string; jobId: string }) =>
       apiClient.post(
         `/api/v1/clusters/${clusterId}/rolling-updates/${jobId}/resume`,
       ),
@@ -371,16 +347,8 @@ export function usePinSSHHostKey() {
 export function useDeleteSSHKnownHost() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      clusterId,
-      id,
-    }: {
-      clusterId: string;
-      id: string;
-    }) =>
-      apiClient.delete(
-        `/api/v1/clusters/${clusterId}/ssh-known-hosts/${id}`,
-      ),
+    mutationFn: ({ clusterId, id }: { clusterId: string; id: string }) =>
+      apiClient.delete(`/api/v1/clusters/${clusterId}/ssh-known-hosts/${id}`),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
         queryKey: ["ssh-known-hosts", vars.clusterId],

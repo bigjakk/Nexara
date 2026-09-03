@@ -9,7 +9,11 @@ import {
 } from "@/components/ui/context-menu";
 import { Monitor, FolderInput } from "lucide-react";
 import { useVMAction } from "../api/vm-queries";
-import { lifecycleActions, managementActions, type ManagementAction } from "../lib/vm-action-defs";
+import {
+  lifecycleActions,
+  managementActions,
+  type ManagementAction,
+} from "../lib/vm-action-defs";
 import {
   useVMContextMenuStore,
   type VMContextTarget,
@@ -27,9 +31,22 @@ interface VMContextMenuProps {
   onAction?: (() => void) | undefined;
 }
 
-export function VMContextMenu({ target, children, onAction }: VMContextMenuProps) {
-  const { openSnapshot, openClone, openCloneToTemplate, openDeploy, openMigrate, openDestroy, openConvertToTemplate, openConfirmAction, openMoveToFolder } =
-    useVMContextMenuStore();
+export function VMContextMenu({
+  target,
+  children,
+  onAction,
+}: VMContextMenuProps) {
+  const {
+    openSnapshot,
+    openClone,
+    openCloneToTemplate,
+    openDeploy,
+    openMigrate,
+    openDestroy,
+    openConvertToTemplate,
+    openConfirmAction,
+    openMoveToFolder,
+  } = useVMContextMenuStore();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const actionMutation = useVMAction();
@@ -48,7 +65,11 @@ export function VMContextMenu({ target, children, onAction }: VMContextMenuProps
     a.showWhen(normalizedStatus, target.kind, target.template),
   );
 
-  function handleLifecycleAction(action: VMAction, needsConfirm: boolean, label: string) {
+  function handleLifecycleAction(
+    action: VMAction,
+    needsConfirm: boolean,
+    label: string,
+  ) {
     onAction?.();
     if (needsConfirm) {
       openConfirmAction(target, action, label);
@@ -87,7 +108,8 @@ export function VMContextMenu({ target, children, onAction }: VMContextMenuProps
 
   function handleOpenConsole() {
     onAction?.();
-    const type = target.kind === "ct" ? "ct_vnc" as const : "vm_vnc" as const;
+    const type =
+      target.kind === "ct" ? ("ct_vnc" as const) : ("vm_vnc" as const);
     const labelPrefix = target.kind === "ct" ? "CT" : "VNC";
     addTab({
       clusterID: target.clusterId,
@@ -103,9 +125,7 @@ export function VMContextMenu({ target, children, onAction }: VMContextMenuProps
 
   return (
     <ContextMenu modal={false}>
-      <ContextMenuTrigger asChild>
-        {children}
-      </ContextMenuTrigger>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-44">
         <ContextMenuLabel className="text-xs text-muted-foreground">
           {String(target.vmid)} {target.name}
@@ -114,7 +134,13 @@ export function VMContextMenu({ target, children, onAction }: VMContextMenuProps
         {visibleLifecycle.map((config) => (
           <ContextMenuItem
             key={config.action}
-            onClick={() => { handleLifecycleAction(config.action, config.needsConfirm, config.label); }}
+            onClick={() => {
+              handleLifecycleAction(
+                config.action,
+                config.needsConfirm,
+                config.label,
+              );
+            }}
           >
             <span className="mr-2">{config.icon}</span>
             {config.label}
@@ -125,15 +151,24 @@ export function VMContextMenu({ target, children, onAction }: VMContextMenuProps
           <>
             <ContextMenuSeparator />
             <ContextMenuItem onClick={handleOpenConsole}>
-              <span className="mr-2"><Monitor className="h-4 w-4" /></span>
+              <span className="mr-2">
+                <Monitor className="h-4 w-4" />
+              </span>
               Console
             </ContextMenuItem>
           </>
         )}
 
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => { onAction?.(); openMoveToFolder(target); }}>
-          <span className="mr-2"><FolderInput className="h-4 w-4" /></span>
+        <ContextMenuItem
+          onClick={() => {
+            onAction?.();
+            openMoveToFolder(target);
+          }}
+        >
+          <span className="mr-2">
+            <FolderInput className="h-4 w-4" />
+          </span>
           Move to folder…
         </ContextMenuItem>
 
@@ -142,8 +177,14 @@ export function VMContextMenu({ target, children, onAction }: VMContextMenuProps
         {visibleManagement.map((config) => (
           <ContextMenuItem
             key={config.action}
-            onClick={() => { handleManagementAction(config.action); }}
-            className={config.variant === "destructive" ? "text-destructive focus:text-destructive" : ""}
+            onClick={() => {
+              handleManagementAction(config.action);
+            }}
+            className={
+              config.variant === "destructive"
+                ? "text-destructive focus:text-destructive"
+                : ""
+            }
           >
             <span className="mr-2">{config.icon}</span>
             {config.label}

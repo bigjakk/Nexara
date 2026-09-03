@@ -124,9 +124,7 @@ describe("ClusterDetailPage", () => {
     });
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter
-          initialEntries={["/clusters/test-cluster-id?tab=nodes"]}
-        >
+        <MemoryRouter initialEntries={["/clusters/test-cluster-id?tab=nodes"]}>
           <ClusterDetailPage />
         </MemoryRouter>
       </QueryClientProvider>,

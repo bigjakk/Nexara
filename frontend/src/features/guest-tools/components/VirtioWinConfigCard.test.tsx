@@ -54,7 +54,8 @@ const baseConfig: VirtioWinConfig = {
   check_timezone: "",
   next_check_at: null,
   effective_version: "0.1.302-1",
-  source_url: "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads",
+  source_url:
+    "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads",
 };
 
 const releases: VirtioWinRelease[] = [

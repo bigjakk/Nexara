@@ -22,24 +22,28 @@ interface CreateResourceActions {
   close: () => void;
 }
 
-export const useCreateResourceStore = create<CreateResourceState & CreateResourceActions>()(
-  (set, get) => ({
-    dialog: null,
-    clusterId: "",
-    pendingType: null,
+export const useCreateResourceStore = create<
+  CreateResourceState & CreateResourceActions
+>()((set, get) => ({
+  dialog: null,
+  clusterId: "",
+  pendingType: null,
 
-    request: (type, clusterId) => {
-      if (clusterId) {
-        set({ dialog: type, clusterId, pendingType: null });
-      } else {
-        set({ pendingType: type });
-      }
-    },
-    pickCluster: (clusterId) => {
-      const pending = get().pendingType;
-      if (pending) set({ dialog: pending, clusterId, pendingType: null });
-    },
-    cancelPending: () => { set({ pendingType: null }); },
-    close: () => { set({ dialog: null }); },
-  }),
-);
+  request: (type, clusterId) => {
+    if (clusterId) {
+      set({ dialog: type, clusterId, pendingType: null });
+    } else {
+      set({ pendingType: type });
+    }
+  },
+  pickCluster: (clusterId) => {
+    const pending = get().pendingType;
+    if (pending) set({ dialog: pending, clusterId, pendingType: null });
+  },
+  cancelPending: () => {
+    set({ pendingType: null });
+  },
+  close: () => {
+    set({ dialog: null });
+  },
+}));

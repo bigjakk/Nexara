@@ -38,7 +38,8 @@ export function CreateFirewallRuleDialog({
   const [enable, setEnable] = useState(true);
 
   const create = useCreateClusterFirewallRule(clusterId);
-  const errorMessage = create.error instanceof Error ? create.error.message : "";
+  const errorMessage =
+    create.error instanceof Error ? create.error.message : "";
 
   const needsProto = dport.length > 0 && proto.length === 0;
 
@@ -54,19 +55,16 @@ export function CreateFirewallRuleDialog({
     if (dest) req.dest = dest;
     if (dport) req.dport = dport;
     if (comment) req.comment = comment;
-    create.mutate(
-      req,
-      {
-        onSuccess: () => {
-          setOpen(false);
-          setProto("");
-          setSource("");
-          setDest("");
-          setDport("");
-          setComment("");
-        },
+    create.mutate(req, {
+      onSuccess: () => {
+        setOpen(false);
+        setProto("");
+        setSource("");
+        setDest("");
+        setDport("");
+        setComment("");
       },
-    );
+    });
   };
 
   return (
@@ -111,9 +109,7 @@ export function CreateFirewallRuleDialog({
             </div>
           </div>
           <div className="space-y-2">
-            <Label>
-              Protocol{dport.length > 0 ? "" : " (optional)"}
-            </Label>
+            <Label>Protocol{dport.length > 0 ? "" : " (optional)"}</Label>
             <Select value={proto} onValueChange={setProto}>
               <SelectTrigger className={needsProto ? "border-destructive" : ""}>
                 <SelectValue placeholder="Any" />
@@ -136,7 +132,9 @@ export function CreateFirewallRuleDialog({
               <Input
                 placeholder="e.g. 10.0.0.0/24"
                 value={source}
-                onChange={(e) => { setSource(e.target.value); }}
+                onChange={(e) => {
+                  setSource(e.target.value);
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -144,7 +142,9 @@ export function CreateFirewallRuleDialog({
               <Input
                 placeholder="e.g. 10.0.1.0/24"
                 value={dest}
-                onChange={(e) => { setDest(e.target.value); }}
+                onChange={(e) => {
+                  setDest(e.target.value);
+                }}
               />
             </div>
           </div>
@@ -153,7 +153,9 @@ export function CreateFirewallRuleDialog({
             <Input
               placeholder="e.g. 80, 443, 8000-9000"
               value={dport}
-              onChange={(e) => { setDport(e.target.value); }}
+              onChange={(e) => {
+                setDport(e.target.value);
+              }}
             />
           </div>
           <div className="space-y-2">
@@ -161,7 +163,9 @@ export function CreateFirewallRuleDialog({
             <Input
               placeholder="Rule description"
               value={comment}
-              onChange={(e) => { setComment(e.target.value); }}
+              onChange={(e) => {
+                setComment(e.target.value);
+              }}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -169,7 +173,9 @@ export function CreateFirewallRuleDialog({
               type="checkbox"
               id="enable-rule"
               checked={enable}
-              onChange={(e) => { setEnable(e.target.checked); }}
+              onChange={(e) => {
+                setEnable(e.target.checked);
+              }}
               className="rounded border"
             />
             <Label htmlFor="enable-rule">Enable rule</Label>
@@ -178,7 +184,12 @@ export function CreateFirewallRuleDialog({
             <p className="text-sm text-destructive">{errorMessage}</p>
           )}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setOpen(false); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={handleSubmit} disabled={create.isPending}>

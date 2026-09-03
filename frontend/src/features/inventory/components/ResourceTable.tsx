@@ -42,7 +42,11 @@ import { MetricMiniBar } from "./MetricMiniBar";
 import { SearchBar } from "./SearchBar";
 import { ColumnToggle } from "./ColumnToggle";
 import { BulkActionToolbar } from "./BulkActionToolbar";
-import { lifecycleActions, managementActions, type ManagementAction } from "@/features/vms/lib/vm-action-defs";
+import {
+  lifecycleActions,
+  managementActions,
+  type ManagementAction,
+} from "@/features/vms/lib/vm-action-defs";
 import { useVMAction } from "@/features/vms/api/vm-queries";
 import {
   useVMContextMenuStore,
@@ -62,7 +66,12 @@ import {
 import type { InventoryRow, ParsedQuery } from "../types/inventory";
 import { formatBytes, formatBytesPerSecond, formatUptime } from "@/lib/format";
 
-function RateCell({ inBps, outBps, inLabel, outLabel }: {
+function RateCell({
+  inBps,
+  outBps,
+  inLabel,
+  outLabel,
+}: {
   inBps: number | null;
   outBps: number | null;
   inLabel: "in" | "read";
@@ -85,8 +94,6 @@ function RateCell({ inBps, outBps, inLabel, outLabel }: {
   );
 }
 
-
-
 function toContextTarget(row: InventoryRow): VMContextTarget | null {
   if (row.type === "node" || row.vmid === null) return null;
   return {
@@ -107,10 +114,24 @@ interface MenuState {
   y: number;
 }
 
-function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
+function RowContextMenu({
+  menu,
+  onClose,
+}: {
+  menu: MenuState;
+  onClose: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
-  const { openSnapshot, openClone, openCloneToTemplate, openDeploy, openMigrate, openDestroy, openConvertToTemplate, openConfirmAction } =
-    useVMContextMenuStore();
+  const {
+    openSnapshot,
+    openClone,
+    openCloneToTemplate,
+    openDeploy,
+    openMigrate,
+    openDestroy,
+    openConvertToTemplate,
+    openConfirmAction,
+  } = useVMContextMenuStore();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const actionMutation = useVMAction();
@@ -148,11 +169,16 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
 
   // Clamp position so menu doesn't overflow viewport
   const menuWidth = 176;
-  const menuHeight = (visibleLifecycle.length + visibleManagement.length + 3) * 32;
+  const menuHeight =
+    (visibleLifecycle.length + visibleManagement.length + 3) * 32;
   const x = Math.min(menu.x, window.innerWidth - menuWidth - 8);
   const y = Math.min(menu.y, window.innerHeight - menuHeight - 8);
 
-  function handleLifecycleAction(action: VMAction, needsConfirm: boolean, label: string) {
+  function handleLifecycleAction(
+    action: VMAction,
+    needsConfirm: boolean,
+    label: string,
+  ) {
     if (needsConfirm) {
       openConfirmAction(target, action, label);
     } else {
@@ -190,7 +216,8 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
   }
 
   function handleOpenConsole() {
-    const type = target.kind === "ct" ? ("ct_vnc" as const) : ("vm_vnc" as const);
+    const type =
+      target.kind === "ct" ? ("ct_vnc" as const) : ("vm_vnc" as const);
     const labelPrefix = target.kind === "ct" ? "CT" : "VNC";
     addTab({
       clusterID: target.clusterId,
@@ -219,7 +246,13 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
         <button
           key={config.action}
           className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground"
-          onClick={() => { handleLifecycleAction(config.action, config.needsConfirm, config.label); }}
+          onClick={() => {
+            handleLifecycleAction(
+              config.action,
+              config.needsConfirm,
+              config.label,
+            );
+          }}
         >
           <span className="mr-2">{config.icon}</span>
           {config.label}
@@ -233,13 +266,17 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
             className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground"
             onClick={handleOpenConsole}
           >
-            <span className="mr-2"><Monitor className="h-4 w-4" /></span>
+            <span className="mr-2">
+              <Monitor className="h-4 w-4" />
+            </span>
             Console
           </button>
         </>
       )}
 
-      {visibleManagement.length > 0 && <div className="-mx-1 my-1 h-px bg-border" />}
+      {visibleManagement.length > 0 && (
+        <div className="-mx-1 my-1 h-px bg-border" />
+      )}
 
       {visibleManagement.map((config) => (
         <button
@@ -247,7 +284,9 @@ function RowContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
           className={`relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground ${
             config.variant === "destructive" ? "text-destructive" : ""
           }`}
-          onClick={() => { handleManagementAction(config.action); }}
+          onClick={() => {
+            handleManagementAction(config.action);
+          }}
         >
           <span className="mr-2">{config.icon}</span>
           {config.label}
@@ -327,11 +366,14 @@ function buildColumns(
         const r = row.original;
         const showOS =
           (r.type === "vm" || r.type === "ct") &&
-          (classifyOS(r.ostype) !== "unknown" || classifyOS(r.configOstype) !== "unknown");
+          (classifyOS(r.ostype) !== "unknown" ||
+            classifyOS(r.configOstype) !== "unknown");
         return (
           <span className="inline-flex items-center gap-1.5">
             <ResourceTypeBadge type={getValue()} template={r.template} />
-            {showOS && <OSIcon ostype={r.ostype} configOstype={r.configOstype} />}
+            {showOS && (
+              <OSIcon ostype={r.ostype} configOstype={r.configOstype} />
+            )}
           </span>
         );
       },
@@ -343,7 +385,9 @@ function buildColumns(
           variant="ghost"
           size="sm"
           className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+          onClick={() => {
+            column.toggleSorting(column.getIsSorted() === "asc");
+          }}
         >
           Name
           <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -378,7 +422,9 @@ function buildColumns(
           variant="ghost"
           size="sm"
           className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+          onClick={() => {
+            column.toggleSorting(column.getIsSorted() === "asc");
+          }}
         >
           Cluster
           <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -392,7 +438,9 @@ function buildColumns(
           variant="ghost"
           size="sm"
           className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+          onClick={() => {
+            column.toggleSorting(column.getIsSorted() === "asc");
+          }}
         >
           Node
           <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -406,7 +454,9 @@ function buildColumns(
           variant="ghost"
           size="sm"
           className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+          onClick={() => {
+            column.toggleSorting(column.getIsSorted() === "asc");
+          }}
         >
           VMID
           <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -438,7 +488,9 @@ function buildColumns(
           variant="ghost"
           size="sm"
           className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+          onClick={() => {
+            column.toggleSorting(column.getIsSorted() === "asc");
+          }}
         >
           CPU %
           <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -454,7 +506,9 @@ function buildColumns(
           variant="ghost"
           size="sm"
           className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+          onClick={() => {
+            column.toggleSorting(column.getIsSorted() === "asc");
+          }}
         >
           Mem %
           <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -464,33 +518,32 @@ function buildColumns(
       sortUndefined: "last",
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
-    columnHelper.accessor(
-      (row) => (row.netInBps ?? 0) + (row.netOutBps ?? 0),
-      {
-        id: "network",
-        header: ({ column }) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-            onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
-          >
-            Network
-            <ArrowUpDown className="ml-1 h-3 w-3" />
-          </Button>
-        ),
-        cell: ({ row }) => (
-          <RateCell
-            inBps={row.original.netInBps}
-            outBps={row.original.netOutBps}
-            inLabel="in"
-            outLabel="out"
-          />
-        ),
-        sortUndefined: "last",
-        enableHiding: true,
-      },
-    ) as ColumnDef<InventoryRow>,
+    columnHelper.accessor((row) => (row.netInBps ?? 0) + (row.netOutBps ?? 0), {
+      id: "network",
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            column.toggleSorting(column.getIsSorted() === "asc");
+          }}
+        >
+          Network
+          <ArrowUpDown className="ml-1 h-3 w-3" />
+        </Button>
+      ),
+      cell: ({ row }) => (
+        <RateCell
+          inBps={row.original.netInBps}
+          outBps={row.original.netOutBps}
+          inLabel="in"
+          outLabel="out"
+        />
+      ),
+      sortUndefined: "last",
+      enableHiding: true,
+    }) as ColumnDef<InventoryRow>,
     columnHelper.accessor(
       (row) => (row.diskReadBps ?? 0) + (row.diskWriteBps ?? 0),
       {
@@ -500,7 +553,9 @@ function buildColumns(
             variant="ghost"
             size="sm"
             className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-            onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+            onClick={() => {
+              column.toggleSorting(column.getIsSorted() === "asc");
+            }}
           >
             Disk
             <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -524,7 +579,9 @@ function buildColumns(
           variant="ghost"
           size="sm"
           className="-ml-3 h-8 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-          onClick={() => { column.toggleSorting(column.getIsSorted() === "asc"); }}
+          onClick={() => {
+            column.toggleSorting(column.getIsSorted() === "asc");
+          }}
         >
           Uptime
           <ArrowUpDown className="ml-1 h-3 w-3" />
@@ -540,9 +597,7 @@ function buildColumns(
       cell: ({ getValue }) => {
         const tags = getValue();
         if (!tags) return null;
-        return (
-          <span className="text-xs text-muted-foreground">{tags}</span>
-        );
+        return <span className="text-xs text-muted-foreground">{tags}</span>;
       },
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
@@ -575,7 +630,10 @@ export function ResourceTable({ data }: ResourceTableProps) {
   const isMobile = useIsMobile();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
-  const [query, setQuery] = useState<ParsedQuery>({ filters: [], freeText: "" });
+  const [query, setQuery] = useState<ParsedQuery>({
+    filters: [],
+    freeText: "",
+  });
   const [contextMenu, setContextMenu] = useState<MenuState | null>(null);
 
   const openRowMenu = useCallback(
@@ -595,7 +653,8 @@ export function ResourceTable({ data }: ResourceTableProps) {
     return { ...defaults, ...saved };
   }, [isMobile]);
 
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(savedVisibility);
+  const [columnVisibility, setColumnVisibility] =
+    useState<VisibilityState>(savedVisibility);
 
   // Swap to the form factor's own column set when crossing the breakpoint —
   // mobile and desktop layouts persist independently.
@@ -616,10 +675,7 @@ export function ResourceTable({ data }: ResourceTableProps) {
     [isMobile],
   );
 
-  const filteredData = useMemo(
-    () => applyFilter(data, query),
-    [data, query],
-  );
+  const filteredData = useMemo(() => applyFilter(data, query), [data, query]);
 
   const handleQueryChange = useCallback((parsed: ParsedQuery) => {
     setQuery(parsed);
@@ -687,10 +743,18 @@ export function ResourceTable({ data }: ResourceTableProps) {
                   <TableRow
                     key={row.id}
                     data-state={row.getIsSelected() ? "selected" : undefined}
-                    onContextMenu={target ? (e) => {
-                      e.preventDefault();
-                      setContextMenu({ target, x: e.clientX, y: e.clientY });
-                    } : undefined}
+                    onContextMenu={
+                      target
+                        ? (e) => {
+                            e.preventDefault();
+                            setContextMenu({
+                              target,
+                              x: e.clientX,
+                              y: e.clientY,
+                            });
+                          }
+                        : undefined
+                    }
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>
@@ -720,8 +784,10 @@ export function ResourceTable({ data }: ResourceTableProps) {
       {/* Pagination */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          {String(filteredData.length)} resource{filteredData.length !== 1 ? "s" : ""} total
-          {data.length !== filteredData.length && ` (${String(data.length)} unfiltered)`}
+          {String(filteredData.length)} resource
+          {filteredData.length !== 1 ? "s" : ""} total
+          {data.length !== filteredData.length &&
+            ` (${String(data.length)} unfiltered)`}
         </p>
         <div className="flex items-center gap-2">
           <p className="text-sm text-muted-foreground">
@@ -731,7 +797,9 @@ export function ResourceTable({ data }: ResourceTableProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => { table.previousPage(); }}
+            onClick={() => {
+              table.previousPage();
+            }}
             disabled={!table.getCanPreviousPage()}
           >
             <ChevronLeft className="h-4 w-4" />
@@ -739,7 +807,9 @@ export function ResourceTable({ data }: ResourceTableProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => { table.nextPage(); }}
+            onClick={() => {
+              table.nextPage();
+            }}
             disabled={!table.getCanNextPage()}
           >
             <ChevronRight className="h-4 w-4" />
@@ -750,7 +820,6 @@ export function ResourceTable({ data }: ResourceTableProps) {
       {contextMenu && (
         <RowContextMenu menu={contextMenu} onClose={handleCloseMenu} />
       )}
-
     </div>
   );
 }

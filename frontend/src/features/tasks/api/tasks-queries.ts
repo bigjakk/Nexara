@@ -62,9 +62,7 @@ export function useTasks({
 }: TaskListParams) {
   // Sorted so semantically-equal sets share a cache entry.
   const vmidsKey =
-    vmids && vmids.length > 0
-      ? [...vmids].sort((a, b) => a - b).join(",")
-      : "";
+    vmids && vmids.length > 0 ? [...vmids].sort((a, b) => a - b).join(",") : "";
 
   const params = new URLSearchParams();
   params.set("limit", String(limit));
@@ -76,7 +74,16 @@ export function useTasks({
   if (order) params.set("order", order);
 
   return useQuery({
-    queryKey: ["tasks", limit, offset, clusterId, status, sort, order, vmidsKey],
+    queryKey: [
+      "tasks",
+      limit,
+      offset,
+      clusterId,
+      status,
+      sort,
+      order,
+      vmidsKey,
+    ],
     queryFn: () =>
       apiClient.page<TaskRecord>(`/api/v1/tasks?${params.toString()}`),
     enabled: enabled ?? true,

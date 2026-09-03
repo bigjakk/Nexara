@@ -82,7 +82,10 @@ export function parseNet0(raw: string): ParsedNet {
     const val = seg.slice(eqIdx + 1).trim();
 
     // First segment may be "virtio=AA:BB:CC:DD:EE:FF"
-    if (MAC_RE.test(val) && !["bridge", "firewall", "tag", "rate", "mtu", "queues"].includes(key)) {
+    if (
+      MAC_RE.test(val) &&
+      !["bridge", "firewall", "tag", "rate", "mtu", "queues"].includes(key)
+    ) {
       result.model = key;
       result.mac = val;
     } else {
@@ -407,9 +410,16 @@ export interface ParsedPCI {
 }
 
 export function parsePCI(raw: string): ParsedPCI {
-  if (!raw) return { host: "", pcie: false, rombar: true, xvga: false, mdev: "" };
+  if (!raw)
+    return { host: "", pcie: false, rombar: true, xvga: false, mdev: "" };
   const segments = raw.split(",");
-  const result: ParsedPCI = { host: "", pcie: false, rombar: true, xvga: false, mdev: "" };
+  const result: ParsedPCI = {
+    host: "",
+    pcie: false,
+    rombar: true,
+    xvga: false,
+    mdev: "",
+  };
   for (const seg of segments) {
     const eqIdx = seg.indexOf("=");
     if (eqIdx === -1) {
@@ -420,11 +430,21 @@ export function parsePCI(raw: string): ParsedPCI {
     const key = seg.slice(0, eqIdx).trim();
     const val = seg.slice(eqIdx + 1).trim();
     switch (key) {
-      case "host": result.host = val; break;
-      case "pcie": result.pcie = val === "1"; break;
-      case "rombar": result.rombar = val !== "0"; break;
-      case "x-vga": result.xvga = val === "1"; break;
-      case "mdev": result.mdev = val; break;
+      case "host":
+        result.host = val;
+        break;
+      case "pcie":
+        result.pcie = val === "1";
+        break;
+      case "rombar":
+        result.rombar = val !== "0";
+        break;
+      case "x-vga":
+        result.xvga = val === "1";
+        break;
+      case "mdev":
+        result.mdev = val;
+        break;
     }
   }
   return result;
@@ -520,7 +540,8 @@ export interface ParsedEFIDisk {
 }
 
 export function parseEFIDisk(raw: string): ParsedEFIDisk {
-  if (!raw) return { volume: "", storage: "", efitype: "4m", preEnrolledKeys: false };
+  if (!raw)
+    return { volume: "", storage: "", efitype: "4m", preEnrolledKeys: false };
   const segments = raw.split(",");
   const first = segments[0] ?? "";
   const colonIdx = first.indexOf(":");
@@ -537,8 +558,12 @@ export function parseEFIDisk(raw: string): ParsedEFIDisk {
     const key = seg.slice(0, eqIdx).trim();
     const val = seg.slice(eqIdx + 1).trim();
     switch (key) {
-      case "efitype": result.efitype = val; break;
-      case "pre-enrolled-keys": result.preEnrolledKeys = val === "1"; break;
+      case "efitype":
+        result.efitype = val;
+        break;
+      case "pre-enrolled-keys":
+        result.preEnrolledKeys = val === "1";
+        break;
     }
   }
   return result;

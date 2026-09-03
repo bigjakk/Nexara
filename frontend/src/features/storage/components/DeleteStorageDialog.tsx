@@ -102,7 +102,9 @@ export function DeleteStorageDialog({
             <Input
               id="confirm-name"
               value={confirmName}
-              onChange={(e) => { setConfirmName(e.target.value); }}
+              onChange={(e) => {
+                setConfirmName(e.target.value);
+              }}
               placeholder={storageName}
               autoFocus
             />
@@ -113,7 +115,9 @@ export function DeleteStorageDialog({
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
-              onClick={() => { setOpen(false); }}
+              onClick={() => {
+                setOpen(false);
+              }}
               disabled={deleteMutation.isPending}
             >
               Cancel
@@ -121,13 +125,9 @@ export function DeleteStorageDialog({
             <Button
               variant="destructive"
               onClick={handleDelete}
-              disabled={
-                confirmName !== storageName || deleteMutation.isPending
-              }
+              disabled={confirmName !== storageName || deleteMutation.isPending}
             >
-              {deleteMutation.isPending
-                ? "Deleting..."
-                : "Delete Storage"}
+              {deleteMutation.isPending ? "Deleting..." : "Delete Storage"}
             </Button>
           </div>
         </div>

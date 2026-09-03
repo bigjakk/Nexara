@@ -10,7 +10,10 @@ interface SecurityPostureCardProps {
   onShowKEV?: (scanId: string) => void;
 }
 
-export function SecurityPostureCard({ posture, onShowKEV }: SecurityPostureCardProps) {
+export function SecurityPostureCard({
+  posture,
+  onShowKEV,
+}: SecurityPostureCardProps) {
   const score = posture.posture_score;
   const hasScans = posture.status !== "no_scans";
 
@@ -37,7 +40,9 @@ export function SecurityPostureCard({ posture, onShowKEV }: SecurityPostureCardP
           <h3 className="text-sm font-medium text-muted-foreground">
             Security Posture
           </h3>
-          <div className={cn("mt-1 flex items-center gap-2", getScoreColor(score))}>
+          <div
+            className={cn("mt-1 flex items-center gap-2", getScoreColor(score))}
+          >
             <ScoreIcon className="h-8 w-8" />
             <span className="text-3xl font-bold">{Math.round(score)}</span>
             <span className="text-sm text-muted-foreground">/100</span>
@@ -46,7 +51,9 @@ export function SecurityPostureCard({ posture, onShowKEV }: SecurityPostureCardP
 
         {hasScans && (
           <div className="text-right text-sm text-muted-foreground">
-            <p>{posture.scanned_nodes}/{posture.total_nodes} nodes scanned</p>
+            <p>
+              {posture.scanned_nodes}/{posture.total_nodes} nodes scanned
+            </p>
             <p>{posture.total_vulns} vulnerabilities found</p>
           </div>
         )}
@@ -72,11 +79,14 @@ export function SecurityPostureCard({ posture, onShowKEV }: SecurityPostureCardP
         </div>
       )}
 
-      {hasScans && posture.kev_count > 0 && (
-        onShowKEV ? (
+      {hasScans &&
+        posture.kev_count > 0 &&
+        (onShowKEV ? (
           <button
             type="button"
-            onClick={() => { onShowKEV(posture.scan_id); }}
+            onClick={() => {
+              onShowKEV(posture.scan_id);
+            }}
             className="mt-4 flex w-full items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-left text-sm transition-colors hover:bg-red-500/20 focus:outline-hidden focus:ring-2 focus:ring-red-500/50"
           >
             <Flame className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
@@ -86,8 +96,8 @@ export function SecurityPostureCard({ posture, onShowKEV }: SecurityPostureCardP
                 {posture.kev_count === 1 ? "vulnerability" : "vulnerabilities"}
               </div>
               <div className="text-xs text-muted-foreground">
-                Listed in CISA's Known Exploited Vulnerabilities catalog —
-                click to review each one.
+                Listed in CISA's Known Exploited Vulnerabilities catalog — click
+                to review each one.
               </div>
             </div>
             <span className="self-center text-xs font-medium text-red-700 dark:text-red-400">
@@ -103,17 +113,17 @@ export function SecurityPostureCard({ posture, onShowKEV }: SecurityPostureCardP
                 {posture.kev_count === 1 ? "vulnerability" : "vulnerabilities"}
               </div>
               <div className="text-xs text-muted-foreground">
-                Listed in CISA's Known Exploited Vulnerabilities catalog —
-                patch immediately.
+                Listed in CISA's Known Exploited Vulnerabilities catalog — patch
+                immediately.
               </div>
             </div>
           </div>
-        )
-      )}
+        ))}
 
       {!hasScans && (
         <p className="mt-2 text-sm text-muted-foreground">
-          No scans have been run yet. Click &quot;Scan Now&quot; to check for vulnerabilities.
+          No scans have been run yet. Click &quot;Scan Now&quot; to check for
+          vulnerabilities.
         </p>
       )}
     </div>
