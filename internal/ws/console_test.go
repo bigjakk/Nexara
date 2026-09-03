@@ -2,10 +2,7 @@ package ws
 
 import (
 	"fmt"
-	"log/slog"
-	"net"
 	"net/http"
-	"os"
 	"testing"
 	"time"
 
@@ -17,7 +14,7 @@ import (
 func TestConsoleEndpointRequiresAuth(t *testing.T) {
 	// Set up a server with console handler set to nil (no DB).
 	// The /ws/console route should still require auth.
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := testLogger()
 	hub := NewHub(logger, 0)
 	hub.Run()
 	defer hub.Stop()
@@ -31,28 +28,8 @@ func TestConsoleEndpointRequiresAuth(t *testing.T) {
 		ConsoleHandler: consoleHandler,
 	})
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-
-	go func() {
-		_ = server.Listen(port)
-	}()
+	port := startTestServer(t, server)
 	defer server.Shutdown()
-
-	// Wait for server to be ready.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, dialErr := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
-		if dialErr == nil {
-			conn.Close()
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 
 	// Test: no token should be rejected.
 	url := fmt.Sprintf("ws://127.0.0.1:%d/ws/console", port)
@@ -83,7 +60,7 @@ func TestConsoleEndpointRequiresAuth(t *testing.T) {
 
 func TestConsoleRouteRegistered(t *testing.T) {
 	// Verify the /ws/console endpoint exists (responds to HTTP GET, even if not a WS upgrade).
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := testLogger()
 	hub := NewHub(logger, 0)
 	hub.Run()
 	defer hub.Stop()
@@ -94,27 +71,8 @@ func TestConsoleRouteRegistered(t *testing.T) {
 		ConsoleHandler: consoleHandler,
 	})
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
-
-	go func() {
-		_ = server.Listen(port)
-	}()
+	port := startTestServer(t, server)
 	defer server.Shutdown()
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, dialErr := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
-		if dialErr == nil {
-			conn.Close()
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 
 	// HTTP GET to /ws/console (not WS upgrade) should return 426 Upgrade Required.
 	url := fmt.Sprintf("http://127.0.0.1:%d/ws/console?token=test", port)

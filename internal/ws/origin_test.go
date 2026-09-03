@@ -2,16 +2,13 @@ package ws
 
 import (
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	gorillaws "github.com/gorilla/websocket"
 
 	"github.com/bigjakk/nexara/internal/auth"
@@ -96,7 +93,7 @@ func TestWSConfigWithSubprotocol_OriginsPropagation(t *testing.T) {
 // default error handler may overwrite with a different status, but the
 // dial fails either way.
 func TestIntegrationOriginRejection(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := testLogger()
 	hub := NewHub(logger, 0)
 	hub.Run()
 	defer hub.Stop()
@@ -110,18 +107,9 @@ func TestIntegrationOriginRejection(t *testing.T) {
 	port := startTestServer(t, server)
 	defer server.Shutdown()
 
-	mintHubToken := func(t *testing.T) string {
-		t.Helper()
-		tok, _, err := jwtSvc.GenerateWSHubToken(uuid.New(), "test@example.com", "admin", 60*time.Second)
-		if err != nil {
-			t.Fatalf("generate hub token: %v", err)
-		}
-		return tok
-	}
-
 	dial := func(t *testing.T, origin string) (*gorillaws.Conn, *http.Response, error) {
 		t.Helper()
-		token := mintHubToken(t)
+		token := mintHubToken(t, jwtSvc)
 		dialer := *gorillaws.DefaultDialer
 		dialer.HandshakeTimeout = 3 * time.Second
 		hdr := http.Header{}
@@ -183,7 +171,7 @@ func TestIntegrationOriginRejection(t *testing.T) {
 // AllowedOrigins (the dev-friendly default), upgrades from any origin
 // continue to succeed — non-breaking for existing self-hosted installs.
 func TestIntegrationOriginPermissiveDefault(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := testLogger()
 	hub := NewHub(logger, 0)
 	hub.Run()
 	defer hub.Stop()
@@ -194,10 +182,7 @@ func TestIntegrationOriginPermissiveDefault(t *testing.T) {
 	port := startTestServer(t, server)
 	defer server.Shutdown()
 
-	tok, _, err := jwtSvc.GenerateWSHubToken(uuid.New(), "test@example.com", "admin", 60*time.Second)
-	if err != nil {
-		t.Fatalf("generate hub token: %v", err)
-	}
+	tok := mintHubToken(t, jwtSvc)
 
 	dialer := *gorillaws.DefaultDialer
 	dialer.HandshakeTimeout = 3 * time.Second
@@ -221,7 +206,9 @@ func TestConsoleSetReadLimitConstant(t *testing.T) {
 }
 
 // startTestServer starts a Server on an ephemeral port and waits for it to
-// become reachable. Returns the bound port. Used by the origin tests above.
+// become reachable, failing the test if it never does. Returns the bound port.
+// Shutting the server down stays with the caller, which owns the hub it was
+// built on and has to stop the two in that order.
 func startTestServer(t *testing.T, s *Server) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
