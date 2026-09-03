@@ -95,35 +95,41 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
     return result;
   }, [tasks, typeFilter, statusFilter, search]);
 
-  // Pagination
+  // A page number only means something against the list it was chosen for:
+  // page 6 of ten pages of tasks is not page 6 of the three that survive a
+  // search. Filtering therefore sends the operator back to the first page,
+  // rather than dropping them at an arbitrary offset into the new results.
+  //
+  // The trigger is the filters, deliberately NOT `filtered` itself: that is
+  // rebuilt whenever `tasks` is refetched, so keying off it would move the
+  // operator on a background timer they cannot see — a worse version of the
+  // bug this is fixing, not a fix for it.
+  //
+  // Adjusted during render rather than from an effect. React discards this
+  // render and re-invokes the component before reconciling children, so the
+  // stale offset never reaches the DOM; an effect would commit it and need a
+  // second pass to correct it. Same shape as useExpandedRows — though there a
+  // stale value is inert and the render phase only saves a commit, whereas
+  // here it would slice the wrong rows.
+  const [pageFor, setPageFor] = useState({ typeFilter, statusFilter, search });
+  if (
+    pageFor.typeFilter !== typeFilter ||
+    pageFor.statusFilter !== statusFilter ||
+    pageFor.search !== search
+  ) {
+    setPageFor({ typeFilter, statusFilter, search });
+    setPage(0);
+  }
+
+  // Pagination. safePage covers the other way the page can fall out of range:
+  // a poll returning fewer tasks shrinks totalPages with no filter change. The
+  // pager buttons below step from safePage, not from page, so a clamped page
+  // still advances by one rather than appearing stuck.
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages - 1);
   const paged = filtered.slice(
     safePage * PAGE_SIZE,
     (safePage + 1) * PAGE_SIZE,
-  );
-
-  // Reset page when filters change. The deps are the trigger, not inputs the
-  // callback reads, which is what exhaustive-deps objects to — so the
-  // suppression has to sit on the dependency array itself. It used to ride on
-  // the whole call while that fitted one line; a reformat then moved the line
-  // the rule reports out from under it.
-  //
-  // Do not delete this comment or inline the argument: without it prettier
-  // hugs the call, which puts the deps back on the closing line and moves the
-  // reported line out from under the directive again. The layout is load
-  // bearing, not decoration.
-  //
-  // TODO: this should be a useEffect. React treats useMemo as a hint and may
-  // re-run the factory with unchanged deps, which would bounce the operator
-  // back to page 1 mid-browse. Fixing that is a behaviour change and wants its
-  // own commit.
-  useMemo(
-    () => {
-      setPage(0);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [typeFilter, statusFilter, search],
   );
 
   if (tasks.length === 0) {
