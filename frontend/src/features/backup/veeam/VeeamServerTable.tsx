@@ -1,26 +1,18 @@
 import { Fragment, useState } from "react";
-import {
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  ChevronDown,
-  ChevronRight,
-  Pencil,
-  PlugZap,
-  Trash2,
-} from "lucide-react";
+import { Pencil, PlugZap, Trash2 } from "lucide-react";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableFrame } from "@/components/DataTableFrame";
 import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
+import { DetailField } from "@/components/DetailField";
+import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { useTestVeeamServer } from "../api/backup-queries";
 import type { VeeamProbeResult, VeeamServer } from "../types/backup";
 import { VeeamProbeSummary } from "./VeeamProbeSummary";
@@ -73,18 +65,7 @@ const STATUS_RANK: Record<VeeamServerStatus, number> = {
 
 /** Each column sorts on what its cell SHOWS, not on the underlying field. */
 const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
-  {
-    key: "expand",
-    label: "",
-    width: 40,
-    fixed: true,
-    cell: (server, ctx) =>
-      ctx.expanded.has(server.id) ? (
-        <ChevronDown className="h-4 w-4" />
-      ) : (
-        <ChevronRight className="h-4 w-4" />
-      ),
-  },
+  expandColumn("expand"),
   {
     key: "name",
     label: "Name",
@@ -207,7 +188,7 @@ export function VeeamServerTable({
     directionFor,
   } = useDataTable("veeam-servers", COLUMNS, servers, byId);
 
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { expanded, toggle: toggleExpand, expand } = useExpandedRows();
   // Per-server test results, keyed by id: one server's probe must not clear
   // another's, and a shared mutation result would do exactly that.
   const [probes, setProbes] = useState<Record<string, VeeamProbeResult>>({});
@@ -215,18 +196,6 @@ export function VeeamServerTable({
   const [testingId, setTestingId] = useState<string | null>(null);
 
   const testServer = useTestVeeamServer();
-
-  function toggleExpand(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }
 
   const cellCtx: ServerCtx = {
     expanded,
@@ -250,7 +219,7 @@ export function VeeamServerTable({
       onSuccess: (result) => {
         setProbes((prev) => ({ ...prev, [server.id]: result }));
         // Show the answer without making the operator hunt for it.
-        setExpanded((prev) => new Set(prev).add(server.id));
+        expand(server.id);
       },
       onError: (err) => {
         setProbeErrors((prev) => ({
@@ -258,7 +227,7 @@ export function VeeamServerTable({
           [server.id]:
             err instanceof Error ? err.message : "Connection test failed",
         }));
-        setExpanded((prev) => new Set(prev).add(server.id));
+        expand(server.id);
       },
       onSettled: () => {
         setTestingId(null);
@@ -297,94 +266,64 @@ export function VeeamServerTable({
                 </TableRow>
 
                 {isExpanded && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={layout.columns.length}
-                      className="bg-muted/30"
-                    >
-                      <div className="space-y-4 px-2 py-3">
-                        <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Username
-                            </dt>
-                            {/* Withheld from read-only callers: it is half
-                                  of a domain administrator credential. */}
-                            <dd
-                              className={
-                                server.username === ""
-                                  ? "text-muted-foreground"
-                                  : "font-mono"
-                              }
-                            >
-                              {server.username === ""
-                                ? "Hidden — requires manage:veeam"
-                                : server.username}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              API revision
-                            </dt>
-                            <dd className="font-mono">
-                              {server.api_revision || "-"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Certificate
-                            </dt>
-                            <dd>
-                              {server.tls_fingerprint !== ""
-                                ? "Pinned (SHA-256)"
-                                : server.verify_tls
-                                  ? "Verified against system CAs"
-                                  : "Not verified"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Last sync
-                            </dt>
-                            <dd>{formatTimestamp(server.last_sync_at)}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Added
-                            </dt>
-                            <dd>{formatTimestamp(server.created_at)}</dd>
-                          </div>
-                        </dl>
+                  <ExpandedDetailRow
+                    colSpan={layout.columns.length}
+                    spacing="space-y-4"
+                  >
+                    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                      {/* Withheld from read-only callers: it is half of a
+                          domain administrator credential. */}
+                      <DetailField
+                        label="Username"
+                        variant={server.username === "" ? "muted" : "mono"}
+                      >
+                        {server.username === ""
+                          ? "Hidden — requires manage:veeam"
+                          : server.username}
+                      </DetailField>
+                      <DetailField label="API revision" variant="mono">
+                        {server.api_revision || "-"}
+                      </DetailField>
+                      <DetailField label="Certificate">
+                        {server.tls_fingerprint !== ""
+                          ? "Pinned (SHA-256)"
+                          : server.verify_tls
+                            ? "Verified against system CAs"
+                            : "Not verified"}
+                      </DetailField>
+                      <DetailField label="Last sync">
+                        {formatTimestamp(server.last_sync_at)}
+                      </DetailField>
+                      <DetailField label="Added">
+                        {formatTimestamp(server.created_at)}
+                      </DetailField>
+                    </dl>
 
-                        {server.tls_fingerprint !== "" && (
-                          <div>
-                            <p className="mb-1 text-xs text-muted-foreground">
-                              Pinned fingerprint
-                            </p>
-                            <code className="select-all break-all font-mono text-xs">
-                              {server.tls_fingerprint}
-                            </code>
-                          </div>
-                        )}
-
-                        {server.last_sync_error !== "" && (
-                          <p className="text-sm text-destructive">
-                            Last sync failed: {server.last_sync_error}
-                          </p>
-                        )}
-
-                        {probeError != null && (
-                          <p className="text-sm text-destructive">
-                            {probeError}
-                          </p>
-                        )}
-
-                        {probe != null && probeError == null && (
-                          <VeeamProbeSummary probe={probe} />
-                        )}
+                    {server.tls_fingerprint !== "" && (
+                      <div>
+                        <p className="mb-1 text-xs text-muted-foreground">
+                          Pinned fingerprint
+                        </p>
+                        <code className="select-all break-all font-mono text-xs">
+                          {server.tls_fingerprint}
+                        </code>
                       </div>
-                    </TableCell>
-                  </TableRow>
+                    )}
+
+                    {server.last_sync_error !== "" && (
+                      <p className="text-sm text-destructive">
+                        Last sync failed: {server.last_sync_error}
+                      </p>
+                    )}
+
+                    {probeError != null && (
+                      <p className="text-sm text-destructive">{probeError}</p>
+                    )}
+
+                    {probe != null && probeError == null && (
+                      <VeeamProbeSummary probe={probe} />
+                    )}
+                  </ExpandedDetailRow>
                 )}
               </Fragment>
             );

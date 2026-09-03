@@ -1,12 +1,6 @@
-import { Fragment, useState } from "react";
-import {
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Fragment } from "react";
+import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
@@ -14,7 +8,10 @@ import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableFrame } from "@/components/DataTableFrame";
 import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
+import { DetailField } from "@/components/DetailField";
+import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { VeeamJobActions } from "./VeeamJobActions";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamJob } from "../types/backup";
@@ -119,20 +116,7 @@ const JOB_RESULT_RANK: Record<string, number> = {
 
 /** Each column sorts on what its cell SHOWS, not on the underlying field. */
 const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
-  {
-    // The expand affordance. Unlabelled and unsortable, and pinned so it
-    // cannot be dragged into the middle of the data.
-    key: "expand",
-    label: "",
-    width: 40,
-    fixed: true,
-    cell: (job, ctx) =>
-      ctx.expanded.has(job.id) ? (
-        <ChevronDown className="h-4 w-4" />
-      ) : (
-        <ChevronRight className="h-4 w-4" />
-      ),
-  },
+  expandColumn("expand"),
   {
     key: "name",
     label: "Job",
@@ -254,20 +238,7 @@ export function VeeamJobTable({ jobs, serverId }: VeeamJobTableProps) {
     directionFor,
   } = useDataTable("veeam-jobs", COLUMNS, jobs, byId);
 
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // Row ids are server-scoped, so switching servers must not carry a stale
-  // expansion set forward — it only grows, and rows silently re-expand on
-  // return.
-  //
-  // This has to stay ABOVE the empty-state return below. A server with no rows
-  // still renders this component, and if it returned before updating
-  // expandedFor, switching A → (empty) B → A would compare A against A, skip
-  // the reset, and re-expand A's old rows.
-  const [expandedFor, setExpandedFor] = useState(serverId);
-  if (expandedFor !== serverId) {
-    setExpandedFor(serverId);
-    setExpanded(new Set());
-  }
+  const { expanded, toggle: toggleExpand } = useExpandedRows(serverId);
 
   if (jobs.length === 0) {
     return (
@@ -275,15 +246,6 @@ export function VeeamJobTable({ jobs, serverId }: VeeamJobTableProps) {
         No Proxmox backup jobs found on this server.
       </p>
     );
-  }
-
-  function toggle(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }
 
   const cellCtx: JobCtx = { serverId, expanded };
@@ -310,121 +272,76 @@ export function VeeamJobTable({ jobs, serverId }: VeeamJobTableProps) {
                 <TableRow
                   className="cursor-pointer"
                   onClick={() => {
-                    toggle(job.id);
+                    toggleExpand(job.id);
                   }}
                 >
                   <DataTableCells row={job} layout={layout} ctx={cellCtx} />
                 </TableRow>
 
                 {isExpanded && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={layout.columns.length}
-                      className="bg-muted/30"
-                    >
-                      <div className="space-y-3 px-2 py-3">
-                        {job.description !== "" && (
-                          <p className="text-sm text-muted-foreground">
-                            {job.description}
-                          </p>
-                        )}
-                        <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Bottleneck
-                            </dt>
-                            <dd>
-                              {job.bottleneck === "" ||
-                              job.bottleneck === "NotDefined"
-                                ? "—"
-                                : job.bottleneck}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Duration
-                            </dt>
-                            <dd className="font-mono">{job.duration || "—"}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Processing rate
-                            </dt>
-                            <dd className="font-mono">
-                              {job.processing_rate === "" ||
-                              job.processing_rate === "N/A"
-                                ? "—"
-                                : job.processing_rate}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Schedule
-                            </dt>
-                            <dd>{job.next_run_policy || "—"}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Processed
-                            </dt>
-                            <dd className="font-mono">
-                              {formatBytes(job.processed_size)}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Read
-                            </dt>
-                            <dd className="font-mono">
-                              {formatBytes(job.read_size)}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Transferred
-                            </dt>
-                            <dd className="font-mono">
-                              {formatBytes(job.transferred_size)}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Job type
-                            </dt>
-                            <dd>{job.job_type}</dd>
-                          </div>
-                        </dl>
-                        {/* Which guests the job's latest run processed, and
-                              which failed — the question a job-level "Failed"
-                              raises and cannot answer.
+                  <ExpandedDetailRow colSpan={layout.columns.length}>
+                    {job.description !== "" && (
+                      <p className="text-sm text-muted-foreground">
+                        {job.description}
+                      </p>
+                    )}
+                    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                      <DetailField label="Bottleneck">
+                        {job.bottleneck === "" ||
+                        job.bottleneck === "NotDefined"
+                          ? "—"
+                          : job.bottleneck}
+                      </DetailField>
+                      <DetailField label="Duration" variant="mono">
+                        {job.duration || "—"}
+                      </DetailField>
+                      <DetailField label="Processing rate" variant="mono">
+                        {job.processing_rate === "" ||
+                        job.processing_rate === "N/A"
+                          ? "—"
+                          : job.processing_rate}
+                      </DetailField>
+                      <DetailField label="Schedule">
+                        {job.next_run_policy || "—"}
+                      </DetailField>
+                      <DetailField label="Processed" variant="mono">
+                        {formatBytes(job.processed_size)}
+                      </DetailField>
+                      <DetailField label="Read" variant="mono">
+                        {formatBytes(job.read_size)}
+                      </DetailField>
+                      <DetailField label="Transferred" variant="mono">
+                        {formatBytes(job.transferred_size)}
+                      </DetailField>
+                      <DetailField label="Job type">{job.job_type}</DetailField>
+                    </dl>
+                    {/* Which guests the job's latest run processed, and
+                        which failed — the question a job-level "Failed" raises
+                        and cannot answer.
 
-                              The live run when there is one, else the last one
-                              Veeam reported. running_session_id is preferred
-                              because last_session_id is refreshed by the
-                              inventory pass and is stale for a job started
-                              since it. */}
-                        <VeeamTaskTable
-                          serverId={serverId}
-                          sessionVeeamId={
-                            job.running_session_id || job.last_session_id
-                          }
-                          enabled={isExpanded}
-                          running={job.running_session_id !== ""}
-                        />
+                        The live run when there is one, else the last one Veeam
+                        reported. running_session_id is preferred because
+                        last_session_id is refreshed by the inventory pass and
+                        is stale for a job started since it. */}
+                    <VeeamTaskTable
+                      serverId={serverId}
+                      sessionVeeamId={
+                        job.running_session_id || job.last_session_id
+                      }
+                      enabled={isExpanded}
+                      running={job.running_session_id !== ""}
+                    />
 
-                        {job.last_result === "Failed" && (
-                          <p className="text-xs text-muted-foreground">
-                            Veeam records a job stopped through its API the same
-                            way it records a genuine failure — same result, no
-                            cancellation flag, empty log — so Nexara cannot tell
-                            the two apart. Stops made from Nexara are the
-                            exception: those are recorded, and the failed-job
-                            alert skips them.
-                          </p>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                    {job.last_result === "Failed" && (
+                      <p className="text-xs text-muted-foreground">
+                        Veeam records a job stopped through its API the same way
+                        it records a genuine failure — same result, no
+                        cancellation flag, empty log — so Nexara cannot tell the
+                        two apart. Stops made from Nexara are the exception:
+                        those are recorded, and the failed-job alert skips them.
+                      </p>
+                    )}
+                  </ExpandedDetailRow>
                 )}
               </Fragment>
             );

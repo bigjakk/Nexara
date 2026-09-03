@@ -1,12 +1,6 @@
-import { Fragment, useState } from "react";
-import {
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Fragment } from "react";
+import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
@@ -14,7 +8,10 @@ import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableFrame } from "@/components/DataTableFrame";
 import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
+import { DetailField } from "@/components/DetailField";
+import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { expandColumn, useExpandedRows } from "@/hooks/useExpandedRows";
 import { veeamDurationSeconds } from "./veeam-duration";
 import { VeeamSessionActions } from "./VeeamSessionActions";
 import { VeeamSessionLog } from "./VeeamSessionLog";
@@ -104,18 +101,7 @@ interface SessionCtx {
 
 /** Each column sorts on what its cell SHOWS, not on the underlying field. */
 const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
-  {
-    key: "expand",
-    label: "",
-    width: 40,
-    fixed: true,
-    cell: (session, ctx) =>
-      ctx.expanded.has(session.id) ? (
-        <ChevronDown className="h-4 w-4" />
-      ) : (
-        <ChevronRight className="h-4 w-4" />
-      ),
-  },
+  expandColumn("expand"),
   {
     key: "name",
     label: "Job",
@@ -219,20 +205,7 @@ export function VeeamSessionTable({
     directionFor,
   } = useDataTable("veeam-sessions", COLUMNS, sessions, byId);
 
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // Row ids are server-scoped, so switching servers must not carry a stale
-  // expansion set forward — it only grows, and rows silently re-expand on
-  // return.
-  //
-  // This has to stay ABOVE the empty-state return below. A server with no rows
-  // still renders this component, and if it returned before updating
-  // expandedFor, switching A → (empty) B → A would compare A against A, skip
-  // the reset, and re-expand A's old rows.
-  const [expandedFor, setExpandedFor] = useState(serverId);
-  if (expandedFor !== serverId) {
-    setExpandedFor(serverId);
-    setExpanded(new Set());
-  }
+  const { expanded, toggle: toggleExpand } = useExpandedRows(serverId);
 
   if (sessions.length === 0) {
     return (
@@ -243,15 +216,6 @@ export function VeeamSessionTable({
   }
 
   const cellCtx: SessionCtx = { serverId, expanded };
-
-  function toggle(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
 
   return (
     <div className="rounded-md border">
@@ -275,119 +239,83 @@ export function VeeamSessionTable({
                 <TableRow
                   className="cursor-pointer"
                   onClick={() => {
-                    toggle(session.id);
+                    toggleExpand(session.id);
                   }}
                 >
                   <DataTableCells row={session} layout={layout} ctx={cellCtx} />
                 </TableRow>
 
                 {isExpanded && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={layout.columns.length}
-                      className="bg-muted/30"
-                    >
-                      <div className="space-y-3 px-2 py-3">
-                        <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Finished
-                            </dt>
-                            <dd>{formatTime(session.end_time)}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Bottleneck
-                            </dt>
-                            <dd>
-                              {session.bottleneck === "" ||
-                              session.bottleneck === "NotDefined"
-                                ? "—"
-                                : session.bottleneck}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Processing rate
-                            </dt>
-                            <dd className="font-mono">
-                              {session.processing_rate === "" ||
-                              session.processing_rate === "N/A"
-                                ? "—"
-                                : session.processing_rate}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Initiated by
-                            </dt>
-                            <dd>{session.initiated_by || "—"}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Processed
-                            </dt>
-                            <dd className="font-mono">
-                              {formatBytes(session.processed_size)}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Read
-                            </dt>
-                            <dd className="font-mono">
-                              {formatBytes(session.read_size)}
-                            </dd>
-                          </div>
-                        </dl>
+                  <ExpandedDetailRow colSpan={layout.columns.length}>
+                    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                      <DetailField label="Finished">
+                        {formatTime(session.end_time)}
+                      </DetailField>
+                      <DetailField label="Bottleneck">
+                        {session.bottleneck === "" ||
+                        session.bottleneck === "NotDefined"
+                          ? "—"
+                          : session.bottleneck}
+                      </DetailField>
+                      <DetailField label="Processing rate" variant="mono">
+                        {session.processing_rate === "" ||
+                        session.processing_rate === "N/A"
+                          ? "—"
+                          : session.processing_rate}
+                      </DetailField>
+                      <DetailField label="Initiated by">
+                        {session.initiated_by || "—"}
+                      </DetailField>
+                      <DetailField label="Processed" variant="mono">
+                        {formatBytes(session.processed_size)}
+                      </DetailField>
+                      <DetailField label="Read" variant="mono">
+                        {formatBytes(session.read_size)}
+                      </DetailField>
+                    </dl>
 
-                        {session.result_message !== "" &&
-                          session.result_message !== "Success" && (
-                            <p className="text-sm text-muted-foreground">
-                              {session.result_message}
-                            </p>
-                          )}
+                    {session.result_message !== "" &&
+                      session.result_message !== "Success" && (
+                        <p className="text-sm text-muted-foreground">
+                          {session.result_message}
+                        </p>
+                      )}
 
-                        {session.result === "Failed" &&
-                          !session.nexara_stopped && (
-                            <p className="text-xs text-muted-foreground">
-                              Veeam records a run stopped through its API the
-                              same way it records a genuine failure, with no
-                              cancellation flag and an empty log — so this may
-                              have been someone stopping the job from the Veeam
-                              console.
-                            </p>
-                          )}
+                    {session.result === "Failed" && !session.nexara_stopped && (
+                      <p className="text-xs text-muted-foreground">
+                        Veeam records a run stopped through its API the same way
+                        it records a genuine failure, with no cancellation flag
+                        and an empty log — so this may have been someone
+                        stopping the job from the Veeam console.
+                      </p>
+                    )}
 
-                        {/* Which guests this run processed, and which
-                              failed. The run's own result cannot say — "Failed"
-                              on a job covering eleven guests names none of
-                              them. */}
-                        <VeeamTaskTable
-                          serverId={serverId}
-                          sessionVeeamId={session.veeam_id}
-                          enabled={isExpanded}
-                          // An empty state is FINISHED, not running —
-                          // matching VeeamSessionActions, which reads the
-                          // same field and already treats it that way.
-                          // Without the first clause a malformed row tells
-                          // the operator to wait for detail on a run that is
-                          // not going anywhere.
-                          running={
-                            session.state !== "" && session.state !== "Stopped"
-                          }
-                        />
+                    {/* Which guests this run processed, and which failed.
+                        The run's own result cannot say — "Failed" on a job
+                        covering eleven guests names none of them. */}
+                    <VeeamTaskTable
+                      serverId={serverId}
+                      sessionVeeamId={session.veeam_id}
+                      enabled={isExpanded}
+                      // An empty state is FINISHED, not running —
+                      // matching VeeamSessionActions, which reads the
+                      // same field and already treats it that way.
+                      // Without the first clause a malformed row tells
+                      // the operator to wait for detail on a run that is
+                      // not going anywhere.
+                      running={
+                        session.state !== "" && session.state !== "Stopped"
+                      }
+                    />
 
-                        {/* Fetched only once the row is open: each read
-                              costs a fresh logon against the Veeam server. */}
-                        <VeeamSessionLog
-                          serverId={serverId}
-                          session={session}
-                          enabled={isExpanded}
-                        />
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                    {/* Fetched only once the row is open: each read costs a
+                        fresh logon against the Veeam server. */}
+                    <VeeamSessionLog
+                      serverId={serverId}
+                      session={session}
+                      enabled={isExpanded}
+                    />
+                  </ExpandedDetailRow>
                 )}
               </Fragment>
             );
