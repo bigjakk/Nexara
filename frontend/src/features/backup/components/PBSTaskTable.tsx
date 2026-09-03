@@ -323,6 +323,7 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
           </span>
           <div className="flex gap-1">
             <Button
+              aria-label="Previous page"
               variant="outline"
               size="sm"
               disabled={safePage === 0}
@@ -333,6 +334,7 @@ export function PBSTaskTable({ tasks, pbsId }: PBSTaskTableProps) {
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <Button
+              aria-label="Next page"
               variant="outline"
               size="sm"
               disabled={safePage >= totalPages - 1}

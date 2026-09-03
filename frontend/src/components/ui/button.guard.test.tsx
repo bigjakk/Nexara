@@ -1,0 +1,104 @@
+/// <reference types="vite/client" />
+import { describe, expect, it } from "vitest";
+
+/**
+ * Guard test, in the spirit of dialog.guard.test.tsx and
+ * internal/api/handlers/tracktask_guard_test.go — encode the invariant so the
+ * next person cannot quietly break it.
+ *
+ * A `<Button>` whose only child is a Lucide icon has NO accessible name.
+ * Lucide renders `<svg aria-hidden="true">`, so the icon contributes nothing,
+ * and a screen reader announces a bare "button". For a pager that means two
+ * adjacent controls that are announced identically and cannot be told apart.
+ *
+ * Scoped to the shadcn `<Button>` wrapping a pagination chevron, because that
+ * is exactly the shape of a pager in this codebase and the one a new paginated
+ * table will copy. Deliberately NOT every icon-only button: the sidebar trees
+ * use lowercase `<button>` for their expand toggles, and those want the node's
+ * name plus aria-expanded rather than a static label — a different fix, and
+ * failing this test would be the wrong way to ask for it.
+ */
+
+// A leading-slash glob resolves against Vite's root (frontend/), so it can
+// never reach the stale copies of the tree in git worktrees under
+// .claude/worktrees/. Same reasoning as dialog.guard.test.tsx.
+const sources: Record<string, string> = import.meta.glob("/src/**/*.tsx", {
+  eager: true,
+  query: "?raw",
+  import: "default",
+});
+
+const PAGER_ICONS = /^Chevrons?(?:Left|Right)$/;
+
+/**
+ * Read the whole `<Button …>` opening tag starting at `start`.
+ *
+ * A plain `/<Button[^>]*>/` stops at the first `>`, which is wrong the moment a
+ * prop holds an arrow function (`onClick={() => …}`) or a string containing an
+ * angle bracket — and it would then drop the rest of the tag, including the
+ * aria-label we came to look for.
+ */
+function readOpeningTag(source: string, start: number): string {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") depth--;
+    else if (ch === ">" && depth === 0) return source.slice(start, i + 1);
+  }
+  return source.slice(start);
+}
+
+interface IconButton {
+  file: string;
+  icon: string;
+  tag: string;
+}
+
+/** Every `<Button>…</Button>` whose body is a single self-closing icon. */
+function iconOnlyButtons(file: string, source: string): IconButton[] {
+  const found: IconButton[] = [];
+  for (const m of source.matchAll(/<Button\b/g)) {
+    const tag = readOpeningTag(source, m.index);
+    if (tag.endsWith("/>")) continue; // self-closing: no children at all
+    const bodyStart = m.index + tag.length;
+    const bodyEnd = source.indexOf("</Button>", bodyStart);
+    if (bodyEnd === -1) continue;
+    const body = source.slice(bodyStart, bodyEnd).trim();
+    // Exactly one self-closing element and nothing else.
+    const single = /^<([A-Z]\w*)\b[^>]*\/>$/.exec(body);
+    if (single?.[1]) found.push({ file, icon: single[1], tag });
+  }
+  return found;
+}
+
+describe("icon-only Button accessible names", () => {
+  const all = Object.entries(sources).flatMap(([file, source]) =>
+    iconOnlyButtons(file, source),
+  );
+
+  // If this ever finds nothing, the parser has drifted and every assertion
+  // below is passing on an empty set.
+  it("finds the icon-only buttons it is meant to police", () => {
+    expect(all.length).toBeGreaterThan(10);
+    expect(all.some((b) => PAGER_ICONS.test(b.icon))).toBe(true);
+  });
+
+  it("gives every paginating Button an aria-label", () => {
+    const unnamed = all
+      .filter((b) => PAGER_ICONS.test(b.icon))
+      .filter((b) => !b.tag.includes("aria-label"))
+      .map((b) => `${b.file} <Button><${b.icon} /></Button>`);
+
+    expect(unnamed).toEqual([]);
+  });
+});

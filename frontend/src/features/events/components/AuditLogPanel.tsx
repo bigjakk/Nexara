@@ -756,6 +756,7 @@ export function AuditLogPanel() {
             </p>
             <div className="flex items-center gap-2">
               <Button
+                aria-label="Previous page"
                 variant="outline"
                 size="sm"
                 disabled={page === 0}
@@ -769,6 +770,7 @@ export function AuditLogPanel() {
                 Page {page + 1} of {Math.max(1, totalPages)}
               </span>
               <Button
+                aria-label="Next page"
                 variant="outline"
                 size="sm"
                 disabled={page + 1 >= totalPages}

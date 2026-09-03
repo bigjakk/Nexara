@@ -2233,6 +2233,7 @@ function SyslogTab({
               </span>
               <div className="flex items-center gap-1">
                 <Button
+                  aria-label="First page"
                   variant="outline"
                   size="icon"
                   className="h-7 w-7"
@@ -2244,6 +2245,7 @@ function SyslogTab({
                   <ChevronsLeft className="h-4 w-4" />
                 </Button>
                 <Button
+                  aria-label="Previous page"
                   variant="outline"
                   size="icon"
                   className="h-7 w-7"
@@ -2259,6 +2261,7 @@ function SyslogTab({
                   {totalPages.toLocaleString()}
                 </span>
                 <Button
+                  aria-label="Next page"
                   variant="outline"
                   size="icon"
                   className="h-7 w-7"
@@ -2270,6 +2273,7 @@ function SyslogTab({
                   <ChevronRight className="h-4 w-4" />
                 </Button>
                 <Button
+                  aria-label="Last page"
                   variant="outline"
                   size="icon"
                   className="h-7 w-7"

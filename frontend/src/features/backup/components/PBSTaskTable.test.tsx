@@ -23,24 +23,24 @@ function tasks(count: number): PBSTask[] {
   }));
 }
 
-const pagerLabel = () => screen.getByText(/^Page \d+ of \d+$/);
-const pager = () => pagerLabel().textContent;
-/** The pager's own buttons, rather than whichever happens to be last. */
-const pagerButton = (which: "prev" | "next"): HTMLButtonElement => {
-  const buttons = [
-    ...(pagerLabel().parentElement?.querySelectorAll("button") ?? []),
-  ];
-  const [prev, nextButton] = buttons;
-  if (buttons.length !== 2 || !prev || !nextButton) {
-    throw new Error(
-      `expected 2 pager buttons, found ${String(buttons.length)}`,
-    );
-  }
-  return which === "prev" ? prev : nextButton;
-};
-const next = () => pagerButton("next");
+const pager = () => screen.getByText(/^Page \d+ of \d+$/).textContent;
+const next = () => screen.getByRole("button", { name: "Next page" });
 
 describe("PBSTaskTable paging", () => {
+  // The pager is two bare chevrons, so its buttons carry their whole
+  // accessible name in an aria-label. Without them a screen reader announces
+  // two unlabelled buttons with nothing to tell them apart.
+  it("gives both pager buttons an accessible name", () => {
+    renderWithProviders(<PBSTaskTable tasks={tasks(60)} pbsId="pbs-1" />);
+
+    expect(
+      screen.getByRole("button", { name: "Previous page" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Next page" }),
+    ).toBeInTheDocument();
+  });
+
   it("pages through a long task list", async () => {
     const user = userEvent.setup();
     renderWithProviders(<PBSTaskTable tasks={tasks(60)} pbsId="pbs-1" />);

@@ -993,6 +993,7 @@ function InlineRename({
         disabled={isPending}
       />
       <Button
+        aria-label="Confirm rename"
         variant="ghost"
         size="sm"
         className="h-7 w-7 p-0 text-emerald-600"
@@ -1002,6 +1003,7 @@ function InlineRename({
         <Check className="h-4 w-4" />
       </Button>
       <Button
+        aria-label="Cancel rename"
         variant="ghost"
         size="sm"
         className="h-7 w-7 p-0 text-destructive"

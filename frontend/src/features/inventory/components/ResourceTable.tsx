@@ -795,6 +795,7 @@ export function ResourceTable({ data }: ResourceTableProps) {
             {String(table.getPageCount() || 1)}
           </p>
           <Button
+            aria-label="Previous page"
             variant="outline"
             size="sm"
             onClick={() => {
@@ -805,6 +806,7 @@ export function ResourceTable({ data }: ResourceTableProps) {
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <Button
+            aria-label="Next page"
             variant="outline"
             size="sm"
             onClick={() => {

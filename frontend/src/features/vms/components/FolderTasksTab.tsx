@@ -197,6 +197,7 @@ export function FolderTasksTab({
         {totalPages > 1 && (
           <div className="flex items-center gap-2">
             <Button
+              aria-label="Previous page"
               variant="outline"
               size="sm"
               disabled={page === 0}
@@ -210,6 +211,7 @@ export function FolderTasksTab({
               Page {page + 1} of {totalPages}
             </span>
             <Button
+              aria-label="Next page"
               variant="outline"
               size="sm"
               disabled={page + 1 >= totalPages}
