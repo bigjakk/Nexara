@@ -179,6 +179,7 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                     {canManage("pool") && (
                       <TableCell className="text-right">
                         <Button
+                          aria-label={`Edit ${pool.poolid}`}
                           variant="ghost"
                           size="sm"
                           onClick={(e) => {
@@ -189,6 +190,7 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button
+                          aria-label={`Delete ${pool.poolid}`}
                           variant="ghost"
                           size="sm"
                           onClick={(e) => {
@@ -422,6 +424,7 @@ function AddVMDialog({
                   <Badge key={vmid} variant="secondary" className="gap-1">
                     {vm ? `${vm.name} (${String(vmid)})` : String(vmid)}
                     <button
+                      aria-label={`Remove ${vm ? `${vm.name} (${String(vmid)})` : String(vmid)}`}
                       type="button"
                       onClick={() => {
                         toggleVM(vmid);
@@ -584,6 +587,7 @@ function AddStorageDialog({
                 <Badge key={name} variant="secondary" className="gap-1">
                   {name}
                   <button
+                    aria-label={`Remove ${name}`}
                     type="button"
                     onClick={() => {
                       toggleStorage(name);
@@ -726,6 +730,7 @@ function PoolMembers({
                   {canManage && (
                     <TableCell>
                       <Button
+                        aria-label={`Remove ${m.name ?? m.storage ?? m.id}`}
                         variant="ghost"
                         size="sm"
                         onClick={() => {

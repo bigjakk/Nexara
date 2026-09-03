@@ -197,6 +197,7 @@ export function ClustersListPage() {
                       <TableCell>
                         <div className="flex gap-1">
                           <Button
+                            aria-label={`Edit ${cluster.name}`}
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7"
@@ -207,6 +208,7 @@ export function ClustersListPage() {
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
                           <Button
+                            aria-label={`Delete ${cluster.name}`}
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7"

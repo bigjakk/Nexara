@@ -197,7 +197,13 @@ export function NodeDetailPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
-          <Button variant="ghost" size="sm" asChild className="-ml-2 mt-1.5">
+          <Button
+            aria-label="Back to cluster"
+            variant="ghost"
+            size="sm"
+            asChild
+            className="-ml-2 mt-1.5"
+          >
             <Link to={`/clusters/${clusterId}`}>
               <ArrowLeft className="h-4 w-4" />
             </Link>
@@ -585,6 +591,7 @@ function NetworkTab({
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
                       <Button
+                        aria-label={`Edit ${iface.iface}`}
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
@@ -595,6 +602,7 @@ function NetworkTab({
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
                       <Button
+                        aria-label={`Delete ${iface.iface}`}
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
@@ -1113,6 +1121,7 @@ function ZFSPoolsSection({
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
+                          aria-label={`Destroy pool ${p.name}`}
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-destructive hover:text-destructive"
@@ -1343,6 +1352,7 @@ function LVMSection({
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
+                          aria-label={`Destroy volume group ${vg.name}`}
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-destructive hover:text-destructive"
@@ -1575,6 +1585,7 @@ function LVMThinSection({
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
+                          aria-label={`Destroy thin pool ${p.vg}/${p.lv}`}
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-destructive hover:text-destructive"
@@ -1947,6 +1958,7 @@ function FirewallTab({
                   <td className="px-3 py-2 text-xs">{rule.comment || "--"}</td>
                   <td className="px-3 py-2">
                     <Button
+                      aria-label={`Delete firewall rule ${String(rule.pos)}`}
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7"

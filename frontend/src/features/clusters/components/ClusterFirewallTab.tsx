@@ -190,6 +190,7 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
+                      aria-label={`Delete alias ${a.name}`}
                       variant="ghost"
                       size="sm"
                       onClick={() => {
@@ -312,6 +313,7 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
                     </TableCell>
                     <TableCell className="text-right">
                       <Button
+                        aria-label={`Delete IPSet ${s.name}`}
                         variant="ghost"
                         size="sm"
                         onClick={(e) => {
@@ -412,6 +414,7 @@ function IPSetEntriesCard({
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
+                      aria-label={`Delete entry ${e.cidr}`}
                       variant="ghost"
                       size="sm"
                       onClick={() => {
@@ -520,6 +523,7 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
+                      aria-label={`Delete security group ${g.group}`}
                       variant="ghost"
                       size="sm"
                       onClick={() => {

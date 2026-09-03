@@ -1292,6 +1292,7 @@ function JoinInfoSection({
                         {buildJoinCommand(data)}
                       </pre>
                       <Button
+                        aria-label="Copy join command"
                         variant="ghost"
                         size="sm"
                         className="absolute right-2 top-2"
@@ -1316,6 +1317,7 @@ function JoinInfoSection({
                           {data.fingerprint}
                         </code>
                         <Button
+                          aria-label="Copy fingerprint"
                           variant="ghost"
                           size="sm"
                           onClick={() => {

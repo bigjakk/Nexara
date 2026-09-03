@@ -555,6 +555,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                         {canManage("ha") && (
                           <TableCell className="text-right space-x-1">
                             <Button
+                              aria-label={`Edit resource ${res.sid}`}
                               variant="ghost"
                               size="sm"
                               onClick={() => {
@@ -564,6 +565,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                               <Pencil className="h-4 w-4" />
                             </Button>
                             <Button
+                              aria-label={`Delete resource ${res.sid}`}
                               variant="ghost"
                               size="sm"
                               disabled={deleteResource.isPending}
@@ -714,6 +716,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                         {canManage("ha") && (
                           <TableCell className="text-right space-x-1">
                             <Button
+                              aria-label={`Edit rule ${r.rule}`}
                               variant="ghost"
                               size="sm"
                               onClick={() => {
@@ -723,6 +726,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                               <Pencil className="h-4 w-4" />
                             </Button>
                             <Button
+                              aria-label={`Delete rule ${r.rule}`}
                               variant="ghost"
                               size="sm"
                               disabled={deleteRule.isPending}
@@ -908,6 +912,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                             <TableCell className="text-right space-x-1">
                               {!groupsDeprecated && (
                                 <Button
+                                  aria-label={`Edit group ${g.group}`}
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => {
@@ -918,6 +923,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                                 </Button>
                               )}
                               <Button
+                                aria-label={`Delete group ${g.group}`}
                                 variant="ghost"
                                 size="sm"
                                 disabled={deleteGroup.isPending}

@@ -210,6 +210,7 @@ function PluginsTab({ clusterId }: { clusterId: string }) {
                   {canManage("certificate") && (
                     <TableCell className="text-right">
                       <Button
+                        aria-label={`Delete plugin ${p.plugin}`}
                         variant="ghost"
                         size="sm"
                         onClick={() => {

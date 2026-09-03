@@ -56,7 +56,12 @@ export function EditDNSDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-6 w-6">
+        <Button
+          aria-label="Edit DNS settings"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+        >
           <Pencil className="h-3 w-3" />
         </Button>
       </DialogTrigger>
@@ -161,7 +166,12 @@ export function EditTimezoneDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-6 w-6">
+        <Button
+          aria-label="Edit timezone"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+        >
           <Pencil className="h-3 w-3" />
         </Button>
       </DialogTrigger>

@@ -167,6 +167,7 @@ export function ClusterMetricServersTab({
                   {canManage("cluster") && (
                     <TableCell className="text-right">
                       <Button
+                        aria-label={`Delete ${s.id}`}
                         variant="ghost"
                         size="sm"
                         onClick={() => {
