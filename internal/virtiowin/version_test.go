@@ -25,6 +25,13 @@ func TestISOFilename(t *testing.T) {
 	if got, want := ISOFilename("0.1.302-1"), "virtio-win-0.1.302.iso"; got != want {
 		t.Errorf("ISOFilename = %q, want %q", got, want)
 	}
+	// prune reads a version back off a filename this wrote, and keeps anything
+	// whose ISO version is pinned. If the two ever disagree, prune deletes a
+	// pinned ISO.
+	const pinned = "0.1.285-1"
+	if got, want := VersionFromISOFilename(ISOFilename(pinned)), ISOVersion(pinned); got != want {
+		t.Errorf("ISO written for pin %q reads back as %q, want %q", pinned, got, want)
+	}
 }
 
 // Lexical ordering gets this wrong: "0.1.96" > "0.1.302" as strings, but 96 is

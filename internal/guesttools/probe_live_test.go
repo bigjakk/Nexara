@@ -24,80 +24,7 @@ import (
 // that Proxmox's array-shaped command parameter reaches the guest as argv, and
 // that reading the uninstall registry actually yields a virtio-win version.
 func TestLiveGuestAgentProbe(t *testing.T) {
-	if os.Getenv("NEXARA_LIVE_PROBE") != "1" {
-		t.Skip("set NEXARA_LIVE_PROBE=1 to run the live guest-agent probe")
-	}
-	dsn, key := os.Getenv("DATABASE_URL"), os.Getenv("ENCRYPTION_KEY")
-	clusterName, vmName := os.Getenv("PROBE_CLUSTER"), os.Getenv("PROBE_VM")
-	if dsn == "" || key == "" || clusterName == "" || vmName == "" {
-		t.Fatal("DATABASE_URL, ENCRYPTION_KEY, PROBE_CLUSTER and PROBE_VM are all required")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer pool.Close()
-	q := db.New(pool)
-
-	clusters, err := q.ListClusters(ctx)
-	if err != nil {
-		t.Fatalf("list clusters: %v", err)
-	}
-	var cluster db.Cluster
-	for _, c := range clusters {
-		if c.Name == clusterName {
-			cluster = c
-			break
-		}
-	}
-	if cluster.Name == "" {
-		t.Fatalf("cluster %q not found", clusterName)
-	}
-
-	secret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, key)
-	if err != nil {
-		t.Fatalf("decrypt token: %v", err)
-	}
-	client, err := proxmox.NewClient(proxmox.ClientConfig{
-		BaseURL:        cluster.ApiUrl,
-		TokenID:        cluster.TokenID,
-		TokenSecret:    secret,
-		TLSFingerprint: cluster.TlsFingerprint,
-		Timeout:        60 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
-
-	vms, err := q.ListVMsByCluster(ctx, cluster.ID)
-	if err != nil {
-		t.Fatalf("list vms: %v", err)
-	}
-	nodes, err := q.ListNodesByCluster(ctx, cluster.ID)
-	if err != nil {
-		t.Fatalf("list nodes: %v", err)
-	}
-	nodeName := map[string]string{}
-	for _, n := range nodes {
-		nodeName[n.ID.String()] = n.Name
-	}
-	var vmid int
-	var node string
-	for _, vm := range vms {
-		if vm.Name == vmName {
-			vmid, node = int(vm.Vmid), nodeName[vm.NodeID.String()]
-			t.Logf("guest %s = vmid %d on %s (config_ostype=%s ostype=%s status=%s)",
-				vm.Name, vm.Vmid, node, vm.ConfigOstype, vm.Ostype, vm.Status)
-			break
-		}
-	}
-	if vmid == 0 {
-		t.Fatalf("vm %q not found in cluster %q", vmName, clusterName)
-	}
+	ctx, client, node, vmid := liveGuest(t, 3*time.Minute)
 
 	// 1. Is the agent answering at all?
 	osInfo, err := client.GetGuestAgentOSInfo(ctx, node, vmid)
@@ -141,15 +68,7 @@ $svc = Get-Service QEMU-GA
 	}
 
 	// 4. Is the virtio-win ISO visible as a CD-ROM, and what is in the config?
-	cfg, err := client.GetVMConfig(ctx, node, vmid)
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	for k, v := range cfg {
-		if s, ok := v.(string); ok && strings.Contains(s, "media=cdrom") {
-			t.Logf("cdrom device: %s = %s", k, s)
-		}
-	}
+	logCDROMs(ctx, t, client, node, vmid, "")
 
 	// 5. Can a detached scheduled task outlive its exec session? This is the
 	// mechanism the whole staged install depends on.
@@ -205,23 +124,8 @@ func runGuestScript(ctx context.Context, t *testing.T, client *proxmox.Client, n
 // update on: the ISO actually attached, the updater on disk, and the scheduled
 // task registered. Same env guard as the probe above.
 func TestLiveVerifyStaged(t *testing.T) {
-	if os.Getenv("NEXARA_LIVE_PROBE") != "1" {
-		t.Skip("set NEXARA_LIVE_PROBE=1 to inspect a staged guest")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	client, node, vmid := liveTarget(ctx, t)
-
-	cfg, err := client.GetVMConfig(ctx, node, vmid)
-	if err != nil {
-		t.Fatalf("get config: %v", err)
-	}
-	for k, v := range cfg {
-		if s, ok := v.(string); ok && strings.Contains(s, "media=cdrom") {
-			t.Logf("cdrom %s = %s", k, s)
-		}
-	}
+	ctx, client, node, vmid := liveGuest(t, 2*time.Minute)
+	logCDROMs(ctx, t, client, node, vmid, "")
 
 	check := `$out = [ordered]@{}
 $out.scriptPresent = Test-Path '` + GuestScriptPath + `'
@@ -237,14 +141,23 @@ $out | ConvertTo-Json -Compress`
 	t.Logf("guest state: %s", runGuestScript(ctx, t, client, node, vmid, check))
 }
 
-// liveTarget builds a Proxmox client and resolves the probe guest from env.
-func liveTarget(ctx context.Context, t *testing.T) (*proxmox.Client, string, int) {
+// liveGuest is the preamble every probe in this file shares: it skips unless
+// NEXARA_LIVE_PROBE=1, then builds a Proxmox client and resolves the guest
+// named by PROBE_CLUSTER/PROBE_VM. The returned context is cancelled, and the
+// pool closed, when the test ends.
+func liveGuest(t *testing.T, timeout time.Duration) (context.Context, *proxmox.Client, string, int) {
 	t.Helper()
+	if os.Getenv("NEXARA_LIVE_PROBE") != "1" {
+		t.Skip("set NEXARA_LIVE_PROBE=1 to run the live guest probes")
+	}
 	dsn, key := os.Getenv("DATABASE_URL"), os.Getenv("ENCRYPTION_KEY")
 	clusterName, vmName := os.Getenv("PROBE_CLUSTER"), os.Getenv("PROBE_VM")
 	if dsn == "" || key == "" || clusterName == "" || vmName == "" {
 		t.Fatal("DATABASE_URL, ENCRYPTION_KEY, PROBE_CLUSTER and PROBE_VM are all required")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	t.Cleanup(cancel)
+
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -290,25 +203,40 @@ func liveTarget(ctx context.Context, t *testing.T) (*proxmox.Client, string, int
 		nodeName[n.ID.String()] = n.Name
 	}
 	for _, vm := range vms {
-		if vm.Name == vmName {
-			return client, nodeName[vm.NodeID.String()], int(vm.Vmid)
+		if vm.Name != vmName {
+			continue
 		}
+		node := nodeName[vm.NodeID.String()]
+		t.Logf("guest %s = vmid %d on %s (config_ostype=%s ostype=%s status=%s)",
+			vm.Name, vm.Vmid, node, vm.ConfigOstype, vm.Ostype, vm.Status)
+		return ctx, client, node, int(vm.Vmid)
 	}
 	t.Fatalf("vm %q not found in cluster %q", vmName, clusterName)
-	return nil, "", 0
+	return nil, nil, "", 0
+}
+
+// logCDROMs logs every CD-ROM device in the guest's config, prefixed by label.
+// A config Nexara cannot read is a failure, not a missing log line: two callers
+// are asserting the ISO is attached, and the reboot probe wants to know if the
+// guest stopped answering. Everything already logged survives the failure.
+func logCDROMs(ctx context.Context, t *testing.T, client *proxmox.Client, node string, vmid int, label string) {
+	t.Helper()
+	cfg, err := client.GetVMConfig(ctx, node, vmid)
+	if err != nil {
+		t.Fatalf("%sget config: %v", label, err)
+	}
+	for k, v := range cfg {
+		if s, ok := v.(string); ok && strings.Contains(s, "media=cdrom") {
+			t.Logf("%scdrom %s = %s", label, k, s)
+		}
+	}
 }
 
 // TestLiveDetectScript runs the REAL detection script (not a hand-written
 // approximation) against a live guest, so a change to it is validated where it
 // actually executes rather than only against a Go string.
 func TestLiveDetectScript(t *testing.T) {
-	if os.Getenv("NEXARA_LIVE_PROBE") != "1" {
-		t.Skip("set NEXARA_LIVE_PROBE=1 to run the live detection script")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	client, node, vmid := liveTarget(ctx, t)
+	ctx, client, node, vmid := liveGuest(t, 2*time.Minute)
 	out := runGuestScript(ctx, t, client, node, vmid, detectScript)
 	t.Logf("raw: %s", out)
 
@@ -330,9 +258,7 @@ func TestLiveRebootAndObserve(t *testing.T) {
 	if os.Getenv("NEXARA_LIVE_PROBE") != "1" || os.Getenv("NEXARA_ALLOW_REBOOT") != "1" {
 		t.Skip("set NEXARA_LIVE_PROBE=1 and NEXARA_ALLOW_REBOOT=1 to reboot the guest")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
-	defer cancel()
-	client, node, vmid := liveTarget(ctx, t)
+	ctx, client, node, vmid := liveGuest(t, 25*time.Minute)
 
 	inspect := `$out = [ordered]@{}
 $out.scriptPresent = Test-Path '` + GuestScriptPath + `'
@@ -348,13 +274,7 @@ $out.uptimeMin = [int]((Get-Date) - (Get-CimInstance Win32_OperatingSystem).Last
 $out | ConvertTo-Json -Compress`
 
 	t.Logf("BEFORE: %s", runGuestScript(ctx, t, client, node, vmid, inspect))
-	if cfg, err := client.GetVMConfig(ctx, node, vmid); err == nil {
-		for k, v := range cfg {
-			if s, ok := v.(string); ok && strings.Contains(s, "media=cdrom") {
-				t.Logf("BEFORE cdrom %s = %s", k, s)
-			}
-		}
-	}
+	logCDROMs(ctx, t, client, node, vmid, "BEFORE ")
 
 	upid, err := client.RebootVM(ctx, node, vmid)
 	if err != nil {
@@ -397,24 +317,13 @@ $out | ConvertTo-Json -Compress`
 		t.Logf("RESULT FILE unreadable: %v", err)
 	}
 	t.Logf("AFTER: %s", lastRaw)
-	if cfg, err := client.GetVMConfig(ctx, node, vmid); err == nil {
-		for k, v := range cfg {
-			if s, ok := v.(string); ok && strings.Contains(s, "media=cdrom") {
-				t.Logf("AFTER cdrom %s = %s", k, s)
-			}
-		}
-	}
+	logCDROMs(ctx, t, client, node, vmid, "AFTER ")
 }
 
 // TestLiveTaskDiagnostic reports whether the scheduled task has run, its last
 // result, and whether an installer process is currently alive.
 func TestLiveTaskDiagnostic(t *testing.T) {
-	if os.Getenv("NEXARA_LIVE_PROBE") != "1" {
-		t.Skip("set NEXARA_LIVE_PROBE=1")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
-	defer cancel()
-	client, node, vmid := liveTarget(ctx, t)
+	ctx, client, node, vmid := liveGuest(t, 4*time.Minute)
 
 	q := `$t = schtasks /Query /TN ` + GuestTaskName + ` /FO LIST /V 2>$null | Out-String
 $fields = ($t -split [Environment]::NewLine) | Where-Object { $_ -match 'Last Run Time|Last Result|Status:' }
@@ -438,12 +347,7 @@ try {
 // TestLiveTaskXML dumps the registered task definition so a trigger that did
 // not fire can be diagnosed from what Windows actually stored.
 func TestLiveTaskXML(t *testing.T) {
-	if os.Getenv("NEXARA_LIVE_PROBE") != "1" {
-		t.Skip("set NEXARA_LIVE_PROBE=1")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	client, node, vmid := liveTarget(ctx, t)
+	ctx, client, node, vmid := liveGuest(t, 3*time.Minute)
 	// No backticks: one would terminate Go's raw string literal.
 	q := `$raw = (schtasks /Query /TN ` + GuestTaskName + ` /XML 2>$null | Out-String)
 $i = $raw.IndexOf('<Task')
@@ -461,12 +365,7 @@ $bat = @(Get-CimInstance Win32_Battery -EA SilentlyContinue).Count
 // TestLiveCleanGuest removes leftovers from probing so a subsequent run starts
 // from a clean guest. Not part of the feature; a tidy-up for the test harness.
 func TestLiveCleanGuest(t *testing.T) {
-	if os.Getenv("NEXARA_LIVE_PROBE") != "1" {
-		t.Skip("set NEXARA_LIVE_PROBE=1")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	client, node, vmid := liveTarget(ctx, t)
+	ctx, client, node, vmid := liveGuest(t, 3*time.Minute)
 	q := `Get-ChildItem 'C:\Windows\Temp\nexara-*' -EA SilentlyContinue | Remove-Item -Force -EA SilentlyContinue
 schtasks /Delete /TN ` + GuestTaskName + ` /F 2>$null | Out-Null
 schtasks /Delete /TN NexaraProbe /F 2>$null | Out-Null

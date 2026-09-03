@@ -807,7 +807,7 @@ func (e *Engine) expireIfStale(ctx context.Context, state db.GuestToolsState) bo
 	// kept the mislabelled row out of the restore sweep entirely — the damage was
 	// a wrong badge. Now that the record is deliberately preserved, the sweep acts
 	// on it in the same pass and would pull the ISO off a guest whose update was
-	// just staged, or is being installed. TestPendingRestoreIsRetryable states the
+	// just staged, or is being installed. TestIsInFlightStage states the
 	// invariant this protects: an in-flight row must never be swept.
 	fresh, err := e.queries.GetGuestToolsState(ctx, db.GetGuestToolsStateParams{
 		ClusterID: state.ClusterID, Vmid: state.Vmid,

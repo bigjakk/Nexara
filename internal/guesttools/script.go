@@ -35,7 +35,7 @@ const (
 //   - The script is STRICTLY ASCII. Proxmox's agent/file-write dies with
 //     "Wide character in subroutine entry" (PVE::API2::Qemu::Agent) on any
 //     non-ASCII byte, so a single em dash in a comment breaks staging on every
-//     guest. TestInstallScriptIsASCII guards this.
+//     guest. TestGeneratedScriptsAreASCII guards this.
 const installScriptTemplate = `# Nexara guest tools updater - generated, do not edit.
 # Runs detached as SYSTEM via a scheduled task, because installing the guest
 # tools restarts QEMU-GA and would kill an exec session driving it.

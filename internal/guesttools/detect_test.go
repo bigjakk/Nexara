@@ -21,7 +21,7 @@ func TestIsWindowsOSType(t *testing.T) {
 		want         bool
 	}{
 		{"agent reports mswindows", "", "mswindows", true},
-		{"agent wins even when config is blank", "", "mswindows", true},
+		{"agent wins over a non-windows config", "l26", "mswindows", true},
 		{"win11", "win11", "win11", true},
 		{"win10", "win10", "", true},
 		{"server via w2k prefix", "w2k19", "", true},
@@ -159,13 +159,22 @@ func TestParseDetectionEdgeCases(t *testing.T) {
 // Proxmox's agent/file-write is a Perl endpoint that dies with "Wide character
 // in subroutine entry" on any non-ASCII byte. A single em dash in a comment is
 // enough to break staging on every guest, and it fails at write time with a
-// message that says nothing about the cause. Learned the hard way.
-func TestInstallScriptIsASCII(t *testing.T) {
-	script := BuildInstallScript("0.1.302-1", ISOVolumeLabel("0.1.302"))
-	if i := NonASCIIAt(script); i != -1 {
-		start := max(0, i-40)
-		t.Errorf("generated script has a non-ASCII byte at offset %d, which Proxmox file-write rejects: ...%q...",
-			i, script[start:min(len(script), i+40)])
+// message that says nothing about the cause. Learned the hard way. guest-exec
+// carries the constraint too, so every script Nexara sends a guest is here.
+func TestGeneratedScriptsAreASCII(t *testing.T) {
+	for _, tt := range []struct{ name, script string }{
+		{"install", BuildInstallScript("0.1.302-1", ISOVolumeLabel("0.1.302"))},
+		{"register task", buildRegisterTaskScript()},
+		{"task state", buildTaskStateScript()},
+		{"detect", detectScript},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if i := NonASCIIAt(tt.script); i != -1 {
+				start := max(0, i-40)
+				t.Errorf("script has a non-ASCII byte at offset %d, which Proxmox file-write rejects: ...%q...",
+					i, tt.script[start:min(len(tt.script), i+40)])
+			}
+		})
 	}
 }
 
@@ -230,9 +239,6 @@ func TestTaskCommandsAreArgv(t *testing.T) {
 			t.Errorf("register script missing %q", want)
 		}
 	}
-	if i := NonASCIIAt(reg); i != -1 {
-		t.Errorf("register script has a non-ASCII byte at %d", i)
-	}
 	if got := buildRunTaskCommand(); got[1] != "/Run" {
 		t.Errorf("run command = %v", got)
 	}
@@ -253,6 +259,15 @@ func TestGuestUpdateResultSucceeded(t *testing.T) {
 // A guest that updates successfully must remain eligible for the NEXT release.
 // Blocking on any non-idle stage silently retired a guest after its first
 // successful update, and parked a guest permanently on one transient failure.
+//
+// The restore retry sweep leans on the same split from the other side: it looks
+// for terminal rows that still name a drive, so terminal and "still holds a
+// prior_cdrom_key" have to be able to coexist — and an in-flight row must stay
+// out of the sweep, or a restore would race a running install for the same
+// drive. That is only half of it: this mirrors the sweep's SQL predicate rather
+// than being it, and cannot catch a caller that clears prior_cdrom_key on the
+// way to a terminal stage, since the row then never reaches the sweep at all.
+// TestNoPathClaimsARestoreItDidNotPerform covers that half.
 func TestIsInFlightStage(t *testing.T) {
 	inFlight := []string{"staging", "staged", "running"}
 	terminal := []string{"idle", "succeeded", "failed", ""}
@@ -426,11 +441,6 @@ func TestParseTaskPresence(t *testing.T) {
 func TestTaskStateScriptProvesItCouldLook(t *testing.T) {
 	script := buildTaskStateScript()
 
-	// Same constraint as the install script: Proxmox's agent/file-write and
-	// exec path die on wide characters.
-	if i := NonASCIIAt(script); i != -1 {
-		t.Errorf("task state script has a non-ASCII byte at offset %d", i)
-	}
 	if !strings.Contains(script, GuestTaskName) {
 		t.Error("task state script does not name the updater task")
 	}
@@ -463,9 +473,6 @@ func TestDetectScriptSortsNumerically(t *testing.T) {
 	}
 	if !strings.Contains(detectScript, "TryParse") {
 		t.Error("detection does not parse version components numerically")
-	}
-	if i := NonASCIIAt(detectScript); i != -1 {
-		t.Errorf("detection script has a non-ASCII byte at %d; guest-exec carries it too", i)
 	}
 }
 
@@ -628,29 +635,6 @@ func TestNoPathClaimsARestoreItDidNotPerform(t *testing.T) {
 	// renamed or the calls move, this fails rather than passing vacuously.
 	if checked == 0 {
 		t.Error("found no CdromRestored fields to check — has the field been renamed?")
-	}
-}
-
-func TestPendingRestoreIsRetryable(t *testing.T) {
-	// NOTE: this covers only isInFlightStage, which mirrors the sweep's SQL
-	// predicate rather than being it. It cannot catch a caller that clears
-	// prior_cdrom_key on the way to a terminal stage — the row then never
-	// reaches the sweep at all, whatever this says.
-	// TestNoPathClaimsARestoreItDidNotPerform covers that half.
-	//
-	// The retry sweep looks for terminal rows that still name a drive, so the
-	// two conditions have to be able to coexist.
-	for _, stage := range []string{"succeeded", "failed", "idle"} {
-		if isInFlightStage(stage) {
-			t.Errorf("stage %q must be terminal for the retry sweep to see it", stage)
-		}
-	}
-	// And an in-flight row must NOT be swept, or a restore would race a running
-	// install for the same drive.
-	for _, stage := range []string{"staging", "staged", "running"} {
-		if !isInFlightStage(stage) {
-			t.Errorf("stage %q must be excluded from the retry sweep", stage)
-		}
 	}
 }
 
