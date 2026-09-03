@@ -11,13 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChevronDown, ChevronRight, Ghost } from "lucide-react";
 import { formatBytes } from "@/lib/format";
-import { byId, useTableSort } from "@/hooks/useTableSort";
-import {
-  sortAccessorsFrom,
-  useColumnLayout,
-  type ColumnDef,
-} from "@/hooks/useColumnLayout";
-import { DataTableHead } from "@/components/DataTableHead";
+import { byId } from "@/hooks/useTableSort";
+import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { useDataTable } from "@/hooks/useDataTable";
+import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useMapVeeamBackupObject } from "../api/backup-queries";
@@ -117,8 +114,6 @@ const COLUMNS: ColumnDef<VeeamOrphanedObject, OrphanSortKey, OrphanCtx>[] = [
   },
 ];
 
-const ORPHAN_SORT = sortAccessorsFrom(COLUMNS);
-
 /**
  * Backup objects whose Veeam platform IS mapped to a cluster but which match
  * no guest on it.
@@ -141,11 +136,11 @@ export function VeeamOrphanTable({
   objects: VeeamOrphanedObject[];
 }) {
   const {
+    layout,
     rows: sortedObjects,
     toggle: toggleSort,
     directionFor,
-  } = useTableSort(objects, ORPHAN_SORT, byId);
-  const layout = useColumnLayout("veeam-orphans", COLUMNS);
+  } = useDataTable("veeam-orphans", COLUMNS, objects, byId);
 
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -182,19 +177,11 @@ export function VeeamOrphanTable({
         </div>
         <Table className="table-fixed" style={{ width: layout.totalWidth }}>
           <TableHeader>
-            <TableRow>
-              {layout.columns.map((col) => (
-                <DataTableHead
-                  key={col.key}
-                  column={col}
-                  layout={layout}
-                  direction={directionFor(col.key)}
-                  onSort={() => {
-                    toggleSort(col.key);
-                  }}
-                />
-              ))}
-            </TableRow>
+            <DataTableHeadRow
+              layout={layout}
+              directionFor={directionFor}
+              onSort={toggleSort}
+            />
           </TableHeader>
           <TableBody>
             {sortedObjects.map((object) => {

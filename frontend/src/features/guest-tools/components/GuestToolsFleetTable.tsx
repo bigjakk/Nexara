@@ -1,17 +1,14 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableHeader, TableRow } from "@/components/ui/table";
+import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MonitorCog, RefreshCw, Download, X } from "lucide-react";
-import { useTableSort } from "@/hooks/useTableSort";
-import {
-  sortAccessorsFrom,
-  useColumnLayout,
-  type ColumnDef,
-} from "@/hooks/useColumnLayout";
-import { DataTableHead } from "@/components/DataTableHead";
+import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { useDataTable } from "@/hooks/useDataTable";
+import { DataTableFrame } from "@/components/DataTableFrame";
+import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -44,8 +41,8 @@ const byVMID = (g: GuestToolsGuest) => String(g.vmid);
  * What each row's action buttons need that the guest itself does not carry.
  *
  * Passed through the column layout rather than closed over, so COLUMNS can
- * stay a module-scope constant — the sort accessors are derived from it, and
- * useTableSort re-sorts on every render if they are rebuilt.
+ * stay a module-scope constant — useDataTable derives the sort accessors from
+ * it, and re-sorts on every render if it is rebuilt.
  */
 interface FleetCtx {
   busyVMID: number | null;
@@ -240,8 +237,6 @@ const COLUMNS: ColumnDef<GuestToolsGuest, FleetSortKey, FleetCtx>[] = [
   },
 ];
 
-const FLEET_SORT = sortAccessorsFrom(COLUMNS);
-
 interface GuestToolsFleetTableProps {
   clusterId: string;
 }
@@ -259,11 +254,11 @@ export function GuestToolsFleetTable({ clusterId }: GuestToolsFleetTableProps) {
   const [note, setNote] = useState("");
 
   const {
+    layout,
     rows: sorted,
     toggle: toggleSort,
     directionFor,
-  } = useTableSort(fleet ?? [], FLEET_SORT, byVMID);
-  const layout = useColumnLayout("guest-tools-fleet", COLUMNS);
+  } = useDataTable("guest-tools-fleet", COLUMNS, fleet ?? [], byVMID);
 
   if (isLoading) {
     return <Skeleton className="h-64 w-full" />;
@@ -327,32 +322,22 @@ export function GuestToolsFleetTable({ clusterId }: GuestToolsFleetTableProps) {
             No Windows guests found on this cluster.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <Table className="table-fixed" style={{ width: layout.totalWidth }}>
-              <TableHeader>
-                <TableRow>
-                  {layout.columns.map((col) => (
-                    <DataTableHead
-                      key={col.key}
-                      column={col}
-                      layout={layout}
-                      direction={directionFor(col.key)}
-                      onSort={() => {
-                        toggleSort(col.key);
-                      }}
-                    />
-                  ))}
+          <DataTableFrame layout={layout}>
+            <TableHeader>
+              <DataTableHeadRow
+                layout={layout}
+                directionFor={directionFor}
+                onSort={toggleSort}
+              />
+            </TableHeader>
+            <TableBody>
+              {sorted.map((g) => (
+                <TableRow key={g.vmid}>
+                  <DataTableCells row={g} layout={layout} ctx={cellCtx} />
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sorted.map((g) => (
-                  <TableRow key={g.vmid}>
-                    <DataTableCells row={g} layout={layout} ctx={cellCtx} />
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </DataTableFrame>
         )}
       </CardContent>
     </Card>

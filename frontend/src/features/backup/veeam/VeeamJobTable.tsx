@@ -1,6 +1,5 @@
 import { Fragment, useState } from "react";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHeader,
@@ -9,13 +8,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatBytes } from "@/lib/format";
-import { byId, useTableSort } from "@/hooks/useTableSort";
-import {
-  sortAccessorsFrom,
-  useColumnLayout,
-  type ColumnDef,
-} from "@/hooks/useColumnLayout";
-import { DataTableHead } from "@/components/DataTableHead";
+import { byId } from "@/hooks/useTableSort";
+import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { useDataTable } from "@/hooks/useDataTable";
+import { DataTableFrame } from "@/components/DataTableFrame";
+import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { VeeamJobActions } from "./VeeamJobActions";
@@ -251,19 +248,17 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
   },
 ];
 
-const JOB_SORT = sortAccessorsFrom(COLUMNS);
-
 export function VeeamJobTable({
   jobs,
   serverId,
   scopeKey = "",
 }: VeeamJobTableProps) {
   const {
+    layout,
     rows: sortedJobs,
     toggle: toggleSort,
     directionFor,
-  } = useTableSort(jobs, JOB_SORT, byId);
-  const layout = useColumnLayout("veeam-jobs", COLUMNS);
+  } = useDataTable("veeam-jobs", COLUMNS, jobs, byId);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Row ids are server-scoped, so switching servers must not carry a stale
@@ -299,119 +294,108 @@ export function VeeamJobTable({
       <div className="flex justify-end px-2 pt-2">
         <ResetColumnsButton layout={layout} />
       </div>
-      <div className="overflow-x-auto">
-        <Table className="table-fixed" style={{ width: layout.totalWidth }}>
-          <TableHeader>
-            <TableRow>
-              {layout.columns.map((col) => (
-                <DataTableHead
-                  key={col.key}
-                  column={col}
-                  layout={layout}
-                  direction={directionFor(col.key)}
-                  onSort={() => {
-                    toggleSort(col.key);
+      <DataTableFrame layout={layout}>
+        <TableHeader>
+          <DataTableHeadRow
+            layout={layout}
+            directionFor={directionFor}
+            onSort={toggleSort}
+          />
+        </TableHeader>
+        <TableBody>
+          {sortedJobs.map((job) => {
+            const isExpanded = expanded.has(job.id);
+
+            return (
+              <Fragment key={job.id}>
+                <TableRow
+                  className="cursor-pointer"
+                  onClick={() => {
+                    toggle(job.id);
                   }}
-                />
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedJobs.map((job) => {
-              const isExpanded = expanded.has(job.id);
+                >
+                  <DataTableCells row={job} layout={layout} ctx={cellCtx} />
+                </TableRow>
 
-              return (
-                <Fragment key={job.id}>
-                  <TableRow
-                    className="cursor-pointer"
-                    onClick={() => {
-                      toggle(job.id);
-                    }}
-                  >
-                    <DataTableCells row={job} layout={layout} ctx={cellCtx} />
-                  </TableRow>
-
-                  {isExpanded && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={layout.columns.length}
-                        className="bg-muted/30"
-                      >
-                        <div className="space-y-3 px-2 py-3">
-                          {job.description !== "" && (
-                            <p className="text-sm text-muted-foreground">
-                              {job.description}
-                            </p>
-                          )}
-                          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Bottleneck
-                              </dt>
-                              <dd>
-                                {job.bottleneck === "" ||
-                                job.bottleneck === "NotDefined"
-                                  ? "—"
-                                  : job.bottleneck}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Duration
-                              </dt>
-                              <dd className="font-mono">
-                                {job.duration || "—"}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Processing rate
-                              </dt>
-                              <dd className="font-mono">
-                                {job.processing_rate === "" ||
-                                job.processing_rate === "N/A"
-                                  ? "—"
-                                  : job.processing_rate}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Schedule
-                              </dt>
-                              <dd>{job.next_run_policy || "—"}</dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Processed
-                              </dt>
-                              <dd className="font-mono">
-                                {formatBytes(job.processed_size)}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Read
-                              </dt>
-                              <dd className="font-mono">
-                                {formatBytes(job.read_size)}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Transferred
-                              </dt>
-                              <dd className="font-mono">
-                                {formatBytes(job.transferred_size)}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Job type
-                              </dt>
-                              <dd>{job.job_type}</dd>
-                            </div>
-                          </dl>
-                          {/* Which guests the job's latest run processed, and
+                {isExpanded && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={layout.columns.length}
+                      className="bg-muted/30"
+                    >
+                      <div className="space-y-3 px-2 py-3">
+                        {job.description !== "" && (
+                          <p className="text-sm text-muted-foreground">
+                            {job.description}
+                          </p>
+                        )}
+                        <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Bottleneck
+                            </dt>
+                            <dd>
+                              {job.bottleneck === "" ||
+                              job.bottleneck === "NotDefined"
+                                ? "—"
+                                : job.bottleneck}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Duration
+                            </dt>
+                            <dd className="font-mono">{job.duration || "—"}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Processing rate
+                            </dt>
+                            <dd className="font-mono">
+                              {job.processing_rate === "" ||
+                              job.processing_rate === "N/A"
+                                ? "—"
+                                : job.processing_rate}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Schedule
+                            </dt>
+                            <dd>{job.next_run_policy || "—"}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Processed
+                            </dt>
+                            <dd className="font-mono">
+                              {formatBytes(job.processed_size)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Read
+                            </dt>
+                            <dd className="font-mono">
+                              {formatBytes(job.read_size)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Transferred
+                            </dt>
+                            <dd className="font-mono">
+                              {formatBytes(job.transferred_size)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Job type
+                            </dt>
+                            <dd>{job.job_type}</dd>
+                          </div>
+                        </dl>
+                        {/* Which guests the job's latest run processed, and
                               which failed — the question a job-level "Failed"
                               raises and cannot answer.
 
@@ -420,35 +404,34 @@ export function VeeamJobTable({
                               because last_session_id is refreshed by the
                               inventory pass and is stale for a job started
                               since it. */}
-                          <VeeamTaskTable
-                            serverId={serverId}
-                            sessionVeeamId={
-                              job.running_session_id || job.last_session_id
-                            }
-                            enabled={isExpanded}
-                            running={job.running_session_id !== ""}
-                          />
+                        <VeeamTaskTable
+                          serverId={serverId}
+                          sessionVeeamId={
+                            job.running_session_id || job.last_session_id
+                          }
+                          enabled={isExpanded}
+                          running={job.running_session_id !== ""}
+                        />
 
-                          {job.last_result === "Failed" && (
-                            <p className="text-xs text-muted-foreground">
-                              Veeam records a job stopped through its API the
-                              same way it records a genuine failure — same
-                              result, no cancellation flag, empty log — so
-                              Nexara cannot tell the two apart. Stops made from
-                              Nexara are the exception: those are recorded, and
-                              the failed-job alert skips them.
-                            </p>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+                        {job.last_result === "Failed" && (
+                          <p className="text-xs text-muted-foreground">
+                            Veeam records a job stopped through its API the same
+                            way it records a genuine failure — same result, no
+                            cancellation flag, empty log — so Nexara cannot tell
+                            the two apart. Stops made from Nexara are the
+                            exception: those are recorded, and the failed-job
+                            alert skips them.
+                          </p>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </DataTableFrame>
     </div>
   );
 }

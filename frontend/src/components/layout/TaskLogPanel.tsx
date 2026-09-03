@@ -10,7 +10,7 @@ import {
   useTaskStatus,
   useTaskLog,
 } from "@/features/vms/api/vm-queries";
-import { DataTableHead } from "@/components/DataTableHead";
+import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useTableSort } from "@/hooks/useTableSort";
@@ -381,17 +381,11 @@ export function TaskLogPanel() {
             >
               <thead>
                 <tr className="border-b">
-                  {layout.columns.map((col) => (
-                    <DataTableHead
-                      key={col.key}
-                      column={col}
-                      layout={layout}
-                      direction={directionFor(col.key)}
-                      onSort={() => {
-                        toggle(col.key);
-                      }}
-                    />
-                  ))}
+                  <DataTableHeadCells
+                    layout={layout}
+                    directionFor={directionFor}
+                    onSort={toggle}
+                  />
                 </tr>
               </thead>
               <tbody>

@@ -85,13 +85,9 @@ export interface ColumnLayout<Row, K extends string, Ctx> {
   columns: ColumnDef<Row, K, Ctx>[];
   widths: Record<K, number>;
   /**
-   * Sum of the column widths.
-   *
-   * Set this as the table's own width alongside `table-fixed`. Without it the
-   * fixed layout spreads any slack across the columns proportionally, so a
-   * column renders wider than the width just dragged for it and the handle
-   * drifts away from the pointer. With it, every column is exactly its width
-   * and the wrapper scrolls when the total outgrows the container.
+   * Sum of the column widths, to be set as the table's own width alongside
+   * `table-fixed`. DataTableFrame does both; see it for why the two have to
+   * travel together.
    */
   totalWidth: number;
   /** Begin a resize drag from a pointerdown on a column's grip. */
@@ -434,11 +430,13 @@ export function useColumnLayout<Row, K extends string, Ctx = void>(
  * heading, width, cell and sort key are written once rather than kept in step
  * across two structures.
  *
- * Call this at module scope, next to the columns themselves: useTableSort
- * memoises on the accessors object, so building it per render would re-sort
- * every time. Columns with no `sortValue` get an accessor that returns null;
- * it is never reached, because DataTableHead only offers a sort control for
- * columns that declare one.
+ * You almost certainly want useDataTable instead — it calls this for you, and
+ * memoises the result, which useTableSort requires. Call it directly only for
+ * a table whose accessors are hand-written rather than derived.
+ *
+ * Columns with no `sortValue` get an accessor that returns null; it is never
+ * reached, because DataTableHead only offers a sort control for columns that
+ * declare one.
  */
 export function sortAccessorsFrom<Row, K extends string, Ctx>(
   columns: readonly ColumnDef<Row, K, Ctx>[],

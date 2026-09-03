@@ -1,20 +1,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { History } from "lucide-react";
-import { useTableSort, byId } from "@/hooks/useTableSort";
-import {
-  sortAccessorsFrom,
-  useColumnLayout,
-  type ColumnDef,
-} from "@/hooks/useColumnLayout";
-import { DataTableHead } from "@/components/DataTableHead";
+import { byId } from "@/hooks/useTableSort";
+import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { useDataTable } from "@/hooks/useDataTable";
+import { DataTableFrame } from "@/components/DataTableFrame";
+import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useVirtioWinDownloads } from "../api/virtio-win-queries";
@@ -108,8 +101,6 @@ const COLUMNS: ColumnDef<VirtioWinDownload, DownloadSortKey>[] = [
   },
 ];
 
-const DOWNLOAD_SORT = sortAccessorsFrom(COLUMNS);
-
 interface VirtioWinDownloadsTableProps {
   clusterId: string;
 }
@@ -119,11 +110,11 @@ export function VirtioWinDownloadsTable({
 }: VirtioWinDownloadsTableProps) {
   const { data: downloads, isLoading } = useVirtioWinDownloads(clusterId);
   const {
+    layout,
     rows: sorted,
     toggle: toggleSort,
     directionFor,
-  } = useTableSort(downloads ?? [], DOWNLOAD_SORT, byId);
-  const layout = useColumnLayout("virtio-win-downloads", COLUMNS);
+  } = useDataTable("virtio-win-downloads", COLUMNS, downloads ?? [], byId);
 
   if (isLoading) {
     return <Skeleton className="h-48 w-full" />;
@@ -145,35 +136,22 @@ export function VirtioWinDownloadsTable({
             No virtio-win downloads yet.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <Table
-              className="table-fixed"
-              style={{ width: layout.totalWidth }}
-            >
-              <TableHeader>
-                <TableRow>
-                  {layout.columns.map((col) => (
-                    <DataTableHead
-                      key={col.key}
-                      column={col}
-                      layout={layout}
-                      direction={directionFor(col.key)}
-                      onSort={() => {
-                        toggleSort(col.key);
-                      }}
-                    />
-                  ))}
+          <DataTableFrame layout={layout}>
+            <TableHeader>
+              <DataTableHeadRow
+                layout={layout}
+                directionFor={directionFor}
+                onSort={toggleSort}
+              />
+            </TableHeader>
+            <TableBody>
+              {sorted.map((d) => (
+                <TableRow key={d.id}>
+                  <DataTableCells row={d} layout={layout} ctx={undefined} />
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sorted.map((d) => (
-                  <TableRow key={d.id}>
-                    <DataTableCells row={d} layout={layout} ctx={undefined} />
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </DataTableFrame>
         )}
       </CardContent>
     </Card>

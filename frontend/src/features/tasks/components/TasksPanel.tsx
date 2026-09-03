@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Loader2, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DataTableHead } from "@/components/DataTableHead";
+import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
@@ -40,17 +40,11 @@ export function TaskTableHeader({
   return (
     <thead>
       <tr className="border-b bg-muted/50">
-        {layout.columns.map((col) => (
-          <DataTableHead
-            key={col.key}
-            column={col}
-            layout={layout}
-            direction={directionFor(col.key)}
-            onSort={() => {
-              onSort(col.key);
-            }}
-          />
-        ))}
+        <DataTableHeadCells
+          layout={layout}
+          directionFor={directionFor}
+          onSort={onSort}
+        />
       </tr>
     </thead>
   );

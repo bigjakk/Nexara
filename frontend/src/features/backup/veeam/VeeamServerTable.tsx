@@ -1,6 +1,5 @@
 import { Fragment, useState } from "react";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHeader,
@@ -15,13 +14,11 @@ import {
   PlugZap,
   Trash2,
 } from "lucide-react";
-import { byId, useTableSort } from "@/hooks/useTableSort";
-import {
-  sortAccessorsFrom,
-  useColumnLayout,
-  type ColumnDef,
-} from "@/hooks/useColumnLayout";
-import { DataTableHead } from "@/components/DataTableHead";
+import { byId } from "@/hooks/useTableSort";
+import type { ColumnDef } from "@/hooks/useColumnLayout";
+import { useDataTable } from "@/hooks/useDataTable";
+import { DataTableFrame } from "@/components/DataTableFrame";
+import { DataTableHeadRow } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { useTestVeeamServer } from "../api/backup-queries";
@@ -191,8 +188,6 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
   },
 ];
 
-const SERVER_SORT = sortAccessorsFrom(COLUMNS);
-
 function formatTimestamp(value: string | null): string {
   if (value == null || value === "") return "Never";
   const parsed = new Date(value);
@@ -206,11 +201,11 @@ export function VeeamServerTable({
   onDelete,
 }: VeeamServerTableProps) {
   const {
+    layout,
     rows: sortedServers,
     toggle: toggleSort,
     directionFor,
-  } = useTableSort(servers, SERVER_SORT, byId);
-  const layout = useColumnLayout("veeam-servers", COLUMNS);
+  } = useDataTable("veeam-servers", COLUMNS, servers, byId);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Per-server test results, keyed by id: one server's probe must not clear
@@ -276,140 +271,126 @@ export function VeeamServerTable({
       <div className="flex justify-end px-2 pt-2">
         <ResetColumnsButton layout={layout} />
       </div>
-      <div className="overflow-x-auto">
-        <Table className="table-fixed" style={{ width: layout.totalWidth }}>
-          <TableHeader>
-            <TableRow>
-              {layout.columns.map((col) => (
-                <DataTableHead
-                  key={col.key}
-                  column={col}
-                  layout={layout}
-                  direction={directionFor(col.key)}
-                  onSort={() => {
-                    toggleSort(col.key);
+      <DataTableFrame layout={layout}>
+        <TableHeader>
+          <DataTableHeadRow
+            layout={layout}
+            directionFor={directionFor}
+            onSort={toggleSort}
+          />
+        </TableHeader>
+        <TableBody>
+          {sortedServers.map((server) => {
+            const isExpanded = expanded.has(server.id);
+            const probe = probes[server.id];
+            const probeError = probeErrors[server.id];
+
+            return (
+              <Fragment key={server.id}>
+                <TableRow
+                  className="cursor-pointer"
+                  onClick={() => {
+                    toggleExpand(server.id);
                   }}
-                />
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedServers.map((server) => {
-              const isExpanded = expanded.has(server.id);
-              const probe = probes[server.id];
-              const probeError = probeErrors[server.id];
+                >
+                  <DataTableCells row={server} layout={layout} ctx={cellCtx} />
+                </TableRow>
 
-              return (
-                <Fragment key={server.id}>
-                  <TableRow
-                    className="cursor-pointer"
-                    onClick={() => {
-                      toggleExpand(server.id);
-                    }}
-                  >
-                    <DataTableCells
-                      row={server}
-                      layout={layout}
-                      ctx={cellCtx}
-                    />
-                  </TableRow>
-
-                  {isExpanded && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={layout.columns.length}
-                        className="bg-muted/30"
-                      >
-                        <div className="space-y-4 px-2 py-3">
-                          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Username
-                              </dt>
-                              {/* Withheld from read-only callers: it is half
+                {isExpanded && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={layout.columns.length}
+                      className="bg-muted/30"
+                    >
+                      <div className="space-y-4 px-2 py-3">
+                        <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Username
+                            </dt>
+                            {/* Withheld from read-only callers: it is half
                                   of a domain administrator credential. */}
-                              <dd
-                                className={
-                                  server.username === ""
-                                    ? "text-muted-foreground"
-                                    : "font-mono"
-                                }
-                              >
-                                {server.username === ""
-                                  ? "Hidden — requires manage:veeam"
-                                  : server.username}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                API revision
-                              </dt>
-                              <dd className="font-mono">
-                                {server.api_revision || "-"}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Certificate
-                              </dt>
-                              <dd>
-                                {server.tls_fingerprint !== ""
-                                  ? "Pinned (SHA-256)"
-                                  : server.verify_tls
-                                    ? "Verified against system CAs"
-                                    : "Not verified"}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Last sync
-                              </dt>
-                              <dd>{formatTimestamp(server.last_sync_at)}</dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                Added
-                              </dt>
-                              <dd>{formatTimestamp(server.created_at)}</dd>
-                            </div>
-                          </dl>
+                            <dd
+                              className={
+                                server.username === ""
+                                  ? "text-muted-foreground"
+                                  : "font-mono"
+                              }
+                            >
+                              {server.username === ""
+                                ? "Hidden — requires manage:veeam"
+                                : server.username}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              API revision
+                            </dt>
+                            <dd className="font-mono">
+                              {server.api_revision || "-"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Certificate
+                            </dt>
+                            <dd>
+                              {server.tls_fingerprint !== ""
+                                ? "Pinned (SHA-256)"
+                                : server.verify_tls
+                                  ? "Verified against system CAs"
+                                  : "Not verified"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Last sync
+                            </dt>
+                            <dd>{formatTimestamp(server.last_sync_at)}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              Added
+                            </dt>
+                            <dd>{formatTimestamp(server.created_at)}</dd>
+                          </div>
+                        </dl>
 
-                          {server.tls_fingerprint !== "" && (
-                            <div>
-                              <p className="mb-1 text-xs text-muted-foreground">
-                                Pinned fingerprint
-                              </p>
-                              <code className="select-all break-all font-mono text-xs">
-                                {server.tls_fingerprint}
-                              </code>
-                            </div>
-                          )}
-
-                          {server.last_sync_error !== "" && (
-                            <p className="text-sm text-destructive">
-                              Last sync failed: {server.last_sync_error}
+                        {server.tls_fingerprint !== "" && (
+                          <div>
+                            <p className="mb-1 text-xs text-muted-foreground">
+                              Pinned fingerprint
                             </p>
-                          )}
+                            <code className="select-all break-all font-mono text-xs">
+                              {server.tls_fingerprint}
+                            </code>
+                          </div>
+                        )}
 
-                          {probeError != null && (
-                            <p className="text-sm text-destructive">
-                              {probeError}
-                            </p>
-                          )}
+                        {server.last_sync_error !== "" && (
+                          <p className="text-sm text-destructive">
+                            Last sync failed: {server.last_sync_error}
+                          </p>
+                        )}
 
-                          {probe != null && probeError == null && (
-                            <VeeamProbeSummary probe={probe} />
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+                        {probeError != null && (
+                          <p className="text-sm text-destructive">
+                            {probeError}
+                          </p>
+                        )}
+
+                        {probe != null && probeError == null && (
+                          <VeeamProbeSummary probe={probe} />
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
+            );
+          })}
+        </TableBody>
+      </DataTableFrame>
     </div>
   );
 }
