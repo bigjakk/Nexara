@@ -1,25 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   MAX_TASK_VMIDS_FILTER,
   useTasks,
   type TaskRecord,
 } from "@/features/tasks/api/tasks-queries";
 import {
-  TaskRow,
-  TaskTableHeader,
+  TaskHistoryTable,
+  TaskStatusFilter,
 } from "@/features/tasks/components/TasksPanel";
-import { selectClass, statusFilters } from "@/features/tasks/lib/task-filters";
 import { useTaskSort } from "@/features/tasks/lib/task-columns";
+import { PAGE_SIZE } from "@/features/tasks/lib/task-filters";
 import { TASK_COLUMNS_WITH_VM } from "@/features/tasks/lib/task-column-defs";
 import { useColumnLayout } from "@/hooks/useColumnLayout";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { upidVmid } from "@/lib/upid";
-
-const PAGE_SIZE = 50;
 
 export interface FolderVMLink {
   name: string;
@@ -49,7 +44,6 @@ export function FolderTasksTab({
 }: FolderTasksTabProps) {
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(0);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { sort, toggle, directionFor } = useTaskSort(() => {
     setPage(0);
@@ -74,18 +68,6 @@ export function FolderTasksTab({
     enabled: hasVMs && !tooManyVMs,
   });
 
-  const total = hasVMs ? (data?.total ?? 0) : 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const items = hasVMs ? (data?.items ?? []) : [];
-
-  // Snap back when a refetch (WS invalidation / 60s poll) shrinks the result
-  // below the current page — otherwise a stale page index strands an empty
-  // table. Safe against transient zeros: placeholderData in useTasks keeps
-  // the previous `total` while the next page loads.
-  useEffect(() => {
-    if (page > totalPages - 1) setPage(totalPages - 1);
-  }, [page, totalPages]);
-
   if (tooManyVMs) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
@@ -98,132 +80,56 @@ export function FolderTasksTab({
       </p>
     );
   }
-  if (hasVMs && isLoading) {
-    return (
-      <div className="space-y-2">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-10 w-full" />
-        ))}
-      </div>
-    );
-  }
-  if (hasVMs && error) {
-    return <p className="text-destructive">{error.message}</p>;
-  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <select
-          className={selectClass}
+        <TaskStatusFilter
           value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
+          onChange={(v) => {
+            setStatusFilter(v);
             setPage(0);
           }}
-        >
-          {statusFilters.map((s) => (
-            <option key={s.value || "all"} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+        />
         <span className="flex-1" />
         <ResetColumnsButton layout={layout} />
       </div>
 
-      <div className="overflow-x-auto rounded-md border">
-        <table
-          className="table-fixed text-sm"
-          style={{ width: layout.totalWidth }}
-        >
-          <TaskTableHeader
-            layout={layout}
-            directionFor={directionFor}
-            onSort={toggle}
-          />
-          <tbody>
-            {items.map((task) => {
-              const vmid = taskVmid(task);
-              const link = vmid !== null ? vmLinkByVmid.get(vmid) : undefined;
-              return (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  clusterName={clusterName}
-                  layout={layout}
-                  vmName={
-                    link ? (
-                      <Link
-                        to={link.path}
-                        className="hover:underline"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                        }}
-                      >
-                        {link.name}
-                      </Link>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        {vmid !== null ? `#${String(vmid)}` : "—"}
-                      </span>
-                    )
-                  }
-                  expanded={expandedId === task.id}
-                  onToggle={() => {
-                    setExpandedId(expandedId === task.id ? null : task.id);
-                  }}
-                />
-              );
-            })}
-            {items.length === 0 && (
-              <tr>
-                <td
-                  colSpan={layout.columns.length}
-                  className="px-4 py-8 text-center text-muted-foreground"
-                >
-                  No tasks for VMs in this folder.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">
-          {String(total)} task{total === 1 ? "" : "s"}
-        </p>
-        {totalPages > 1 && (
-          <div className="flex items-center gap-2">
-            <Button
-              aria-label="Previous page"
-              variant="outline"
-              size="sm"
-              disabled={page === 0}
-              onClick={() => {
-                setPage((p) => Math.max(0, p - 1));
+      <TaskHistoryTable
+        layout={layout}
+        directionFor={directionFor}
+        onSort={toggle}
+        items={hasVMs ? (data?.items ?? []) : []}
+        total={hasVMs ? (data?.total ?? 0) : 0}
+        page={page}
+        onPageChange={setPage}
+        isLoading={hasVMs && isLoading}
+        error={hasVMs ? error : null}
+        clusterName={() => clusterName}
+        vmName={(task) => {
+          const vmid = taskVmid(task);
+          const link = vmid !== null ? vmLinkByVmid.get(vmid) : undefined;
+          if (!link) {
+            return (
+              <span className="text-muted-foreground">
+                {vmid !== null ? `#${String(vmid)}` : "—"}
+              </span>
+            );
+          }
+          return (
+            <Link
+              to={link.path}
+              className="hover:underline"
+              onClick={(e) => {
+                e.stopPropagation();
               }}
             >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm">
-              Page {page + 1} of {totalPages}
-            </span>
-            <Button
-              aria-label="Next page"
-              variant="outline"
-              size="sm"
-              disabled={page + 1 >= totalPages}
-              onClick={() => {
-                setPage((p) => p + 1);
-              }}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
-      </div>
+              {link.name}
+            </Link>
+          );
+        }}
+        emptyMessage="No tasks for VMs in this folder."
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronUp, ChevronDown, Loader2 } from "lucide-react";
+import { ChevronUp, ChevronDown } from "lucide-react";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import {
   useRecentActivity,
@@ -10,6 +10,7 @@ import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
 import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { TaskLogSection } from "@/components/TaskLogSection";
 import { useTableSort } from "@/hooks/useTableSort";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
 import { formatDateTime } from "@/lib/format";
@@ -171,27 +172,7 @@ function ActivityRow({
 
             {/* Task Log Output (for UPID-bearing entries) */}
             {hasUpid && (
-              <div className="mt-2 border-t pt-2">
-                <span className="text-xs font-medium text-muted-foreground">
-                  {t("log")}
-                </span>
-                {logLoading && (
-                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    {t("loadingLog")}
-                  </div>
-                )}
-                {logLines && logLines.length > 0 && (
-                  <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-                    {logLines.map((line) => line.t).join("\n")}
-                  </pre>
-                )}
-                {logLines && logLines.length === 0 && (
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {t("noLogOutput")}
-                  </div>
-                )}
-              </div>
+              <TaskLogSection lines={logLines} isLoading={logLoading} />
             )}
           </td>
         </tr>

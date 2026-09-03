@@ -1,17 +1,18 @@
-import { useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Loader2, Activity } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataTableHeadCells } from "@/components/DataTableHeadCells";
 import { DataTableCells } from "@/components/DataTableCells";
 import { ResetColumnsButton } from "@/components/ResetColumnsButton";
+import { TaskLogSection } from "@/components/TaskLogSection";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
 import { formatDateTime } from "@/lib/format";
 import { displayProgress } from "@/components/layout/task-status";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useTaskStatus, useTaskLog } from "@/features/vms/api/vm-queries";
 import { useTaskLogStore } from "@/stores/task-log-store";
-import { selectClass, statusFilters } from "../lib/task-filters";
+import { PAGE_SIZE, selectClass, statusFilters } from "../lib/task-filters";
 import {
   deriveDisplayStatus,
   useTaskSort,
@@ -21,15 +22,13 @@ import {
 import { TASK_COLUMNS } from "../lib/task-column-defs";
 import { useTasks, type TaskRecord } from "../api/tasks-queries";
 
-const PAGE_SIZE = 50;
-
-/**
- * The shared `<thead>`. Both task tables render the same columns from the same
- * layout, so adding or renaming one is a single edit in task-columns.tsx.
- */
 export type TaskLayout = ColumnLayout<TaskRecord, TaskSortKey, TaskCellCtx>;
 
-export function TaskTableHeader({
+/**
+ * The `<thead>`. Rendered from the same layout the body cells use, so adding or
+ * renaming a column is a single edit in task-column-defs.tsx.
+ */
+function TaskTableHeader({
   layout,
   directionFor,
   onSort,
@@ -61,7 +60,7 @@ function formatDuration(start: string, end: string | null): string {
   return `${String(Math.floor(sec / 3600))}h ${String(Math.floor((sec % 3600) / 60))}m`;
 }
 
-export function TaskRow({
+function TaskRow({
   task,
   clusterName,
   vmName,
@@ -182,31 +181,180 @@ export function TaskRow({
               </Button>
             </div>
 
-            {/* Task log output */}
-            <div className="mt-2 border-t pt-2">
-              <span className="text-xs font-medium text-muted-foreground">
-                Log
-              </span>
-              {logLoading && (
-                <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Loading log…
-                </div>
-              )}
-              {logLines && logLines.length > 0 && (
-                <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-                  {logLines.map((line) => line.t).join("\n")}
-                </pre>
-              )}
-              {logLines && logLines.length === 0 && (
-                <div className="mt-1 text-xs text-muted-foreground">
-                  No log output.
-                </div>
-              )}
-            </div>
+            <TaskLogSection lines={logLines} isLoading={logLoading} />
           </td>
         </tr>
       )}
+    </>
+  );
+}
+
+/** The status dropdown both task views carry. Resetting to page 0 is the
+ *  caller's job — it owns the page state. */
+export function TaskStatusFilter({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      className={selectClass}
+      value={value}
+      onChange={(e) => {
+        onChange(e.target.value);
+      }}
+    >
+      {statusFilters.map((s) => (
+        <option key={s.value || "all"} value={s.value}>
+          {s.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * The task-history table itself: loading, error, rows, empty state and pager.
+ *
+ * Both task views render this one. What differs between them sits above it —
+ * the Events page adds a cluster filter, the folder tab guards on how many VMs
+ * the folder holds — so each owns its query and its filter chrome and hands
+ * the page of results here. `expandedId` lives here because both views want
+ * exactly one row open at a time and neither reads it.
+ */
+export function TaskHistoryTable({
+  layout,
+  directionFor,
+  onSort,
+  items,
+  total,
+  page,
+  onPageChange,
+  isLoading,
+  error,
+  clusterName,
+  vmName,
+  emptyMessage,
+}: {
+  layout: TaskLayout;
+  directionFor: (key: TaskSortKey) => "asc" | "desc" | null;
+  onSort: (key: TaskSortKey) => void;
+  items: TaskRecord[];
+  total: number;
+  page: number;
+  onPageChange: (page: number) => void;
+  isLoading: boolean;
+  error: Error | null;
+  clusterName: (task: TaskRecord) => string;
+  /** The `vm` cell's content, for the layout that includes that column. */
+  vmName?: (task: TaskRecord) => ReactNode;
+  emptyMessage: string;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Snap back when a refetch (WS invalidation / 60s poll) shrinks the result
+  // below the current page — otherwise a stale page index strands an empty
+  // table. Safe against transient zeros: placeholderData in useTasks keeps the
+  // previous `total` while the next page loads.
+  //
+  // Not while the fetch is failing, though — placeholder data is NOT applied in
+  // the error state, so `total` really does collapse to 0 there. Clamping on
+  // that would throw the operator back to page 1 and swap the error message for
+  // page 1's cached rows before they could read it.
+  useEffect(() => {
+    if (!error && page > totalPages - 1) onPageChange(totalPages - 1);
+  }, [error, page, totalPages, onPageChange]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-10 w-full" />
+        ))}
+      </div>
+    );
+  }
+  if (error) {
+    return <p className="text-destructive">{error.message}</p>;
+  }
+
+  return (
+    <>
+      <div className="overflow-x-auto rounded-md border">
+        <table
+          className="table-fixed text-sm"
+          style={{ width: layout.totalWidth }}
+        >
+          <TaskTableHeader
+            layout={layout}
+            directionFor={directionFor}
+            onSort={onSort}
+          />
+          <tbody>
+            {items.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                clusterName={clusterName(task)}
+                layout={layout}
+                vmName={vmName?.(task)}
+                expanded={expandedId === task.id}
+                onToggle={() => {
+                  setExpandedId(expandedId === task.id ? null : task.id);
+                }}
+              />
+            ))}
+            {items.length === 0 && (
+              <tr>
+                <td
+                  colSpan={layout.columns.length}
+                  className="px-4 py-8 text-center text-muted-foreground"
+                >
+                  {emptyMessage}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          {String(total)} task{total === 1 ? "" : "s"}
+        </p>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <Button
+              aria-label="Previous page"
+              variant="outline"
+              size="sm"
+              disabled={page === 0}
+              onClick={() => {
+                onPageChange(Math.max(0, page - 1));
+              }}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm">
+              Page {page + 1} of {totalPages}
+            </span>
+            <Button
+              aria-label="Next page"
+              variant="outline"
+              size="sm"
+              disabled={page + 1 >= totalPages}
+              onClick={() => {
+                onPageChange(page + 1);
+              }}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -217,7 +365,6 @@ export function TasksPanel() {
   const [page, setPage] = useState(0);
   const [clusterFilter, setClusterFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { sort, toggle, directionFor } = useTaskSort(() => {
     setPage(0);
@@ -239,8 +386,6 @@ export function TasksPanel() {
     return match?.name ?? id.slice(0, 8);
   };
 
-  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
-
   return (
     <div className="space-y-4">
       {/* Filters */}
@@ -261,108 +406,31 @@ export function TasksPanel() {
           ))}
         </select>
 
-        <select
-          className={selectClass}
+        <TaskStatusFilter
           value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value);
+          onChange={(v) => {
+            setStatusFilter(v);
             setPage(0);
           }}
-        >
-          {statusFilters.map((s) => (
-            <option key={s.value || "all"} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+        />
 
         <span className="flex-1" />
         <ResetColumnsButton layout={layout} />
       </div>
 
-      {/* Table */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
-          ))}
-        </div>
-      ) : error ? (
-        <p className="text-destructive">{error.message}</p>
-      ) : (
-        <>
-          <div className="overflow-x-auto rounded-md border">
-            <table
-              className="table-fixed text-sm"
-              style={{ width: layout.totalWidth }}
-            >
-              <TaskTableHeader
-                layout={layout}
-                directionFor={directionFor}
-                onSort={toggle}
-              />
-              <tbody>
-                {data?.items.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    clusterName={clusterName(task.cluster_id)}
-                    layout={layout}
-                    expanded={expandedId === task.id}
-                    onToggle={() => {
-                      setExpandedId(expandedId === task.id ? null : task.id);
-                    }}
-                  />
-                ))}
-                {data?.items.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={layout.columns.length}
-                      className="px-4 py-8 text-center text-muted-foreground"
-                    >
-                      No tasks found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {data ? `${String(data.total)} total tasks` : ""}
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                aria-label="Previous page"
-                variant="outline"
-                size="sm"
-                disabled={page === 0}
-                onClick={() => {
-                  setPage((p) => Math.max(0, p - 1));
-                }}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-sm">
-                Page {page + 1} of {Math.max(1, totalPages)}
-              </span>
-              <Button
-                aria-label="Next page"
-                variant="outline"
-                size="sm"
-                disabled={page + 1 >= totalPages}
-                onClick={() => {
-                  setPage((p) => p + 1);
-                }}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </>
-      )}
+      <TaskHistoryTable
+        layout={layout}
+        directionFor={directionFor}
+        onSort={toggle}
+        items={data?.items ?? []}
+        total={data?.total ?? 0}
+        page={page}
+        onPageChange={setPage}
+        isLoading={isLoading}
+        error={error}
+        clusterName={(task) => clusterName(task.cluster_id)}
+        emptyMessage="No tasks found."
+      />
     </div>
   );
 }

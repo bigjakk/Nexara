@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TaskLogSection } from "@/components/TaskLogSection";
 import { DiskMoveOptions } from "@/features/storage/components/DiskMoveOptions";
 import {
   parseBwlimit,
@@ -967,7 +968,7 @@ function MigrationProgress({
 }) {
   const isActive = job.status === "pending" || job.status === "migrating";
   const hasUpid = job.upid.length > 0;
-  const { data: logLines } = useQuery({
+  const { data: logLines, isLoading: logLoading } = useQuery({
     queryKey: ["migration-log", clusterId, job.upid],
     queryFn: () =>
       apiClient.list<TaskLogLine>(
@@ -1050,16 +1051,7 @@ function MigrationProgress({
       )}
 
       {/* Task Log (only for real Proxmox UPIDs) */}
-      {logLines && logLines.length > 0 && (
-        <div className="space-y-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            Task Log
-          </span>
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[11px] leading-relaxed">
-            {logLines.map((line) => line.t).join("\n")}
-          </pre>
-        </div>
-      )}
+      {hasUpid && <TaskLogSection lines={logLines} isLoading={logLoading} />}
 
       <Button variant="outline" onClick={onClose}>
         Close
