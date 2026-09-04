@@ -5,64 +5,7 @@ import { renderWithProviders } from "@/test/test-utils";
 import { useAuthStore } from "@/stores/auth-store";
 import { VeeamJobActions } from "./VeeamJobActions";
 import { VeeamSessionActions } from "./VeeamSessionActions";
-import type { VeeamJob, VeeamSession } from "../types/backup";
-
-function job(over: Partial<VeeamJob> = {}): VeeamJob {
-  return {
-    id: "job-1",
-    veeam_id: "3953c24f-bbe6-41fc-ae2f-a34e25bfd614",
-    name: "Onsite_Daily",
-    job_type: "ProxmoxBackupJob",
-    workload: "Vm",
-    description: "",
-    status: "Stopped",
-    last_result: "Success",
-    last_run: "2026-08-26T22:00:29Z",
-    next_run: "2026-08-27T22:00:00Z",
-    next_run_policy: "8/27/2026 10:00 PM",
-    repository_name: "repo-nas-01",
-    objects_count: 3,
-    progress_percent: 100,
-    bottleneck: "Source",
-    duration: "00:18:27",
-    processing_rate: "268 MB",
-    processed_size: 0,
-    read_size: 0,
-    transferred_size: 0,
-    cluster_id: null,
-    last_seen_at: "2026-08-26T23:00:00Z",
-    running_session_id: "",
-    running_session_state: "",
-    last_session_id: "",
-    ...over,
-  };
-}
-
-function session(over: Partial<VeeamSession> = {}): VeeamSession {
-  return {
-    id: "sess-1",
-    veeam_id: "20ff3c43-65c0-414d-ae03-10cf59fd2faa",
-    name: "Onsite_Daily",
-    state: "Working",
-    result: "",
-    result_message: "",
-    algorithm: "Increment",
-    bottleneck: "",
-    duration: "",
-    processing_rate: "",
-    processed_size: 0,
-    read_size: 0,
-    transferred_size: 0,
-    progress_percent: 20,
-    creation_time: "2026-08-26T19:56:00Z",
-    end_time: null,
-    initiated_by: "SYSTEM",
-    nexara_initiated: false,
-    nexara_stopped: false,
-    cluster_id: null,
-    ...over,
-  };
-}
+import { job, runningSession } from "./veeam.fixtures";
 
 /** The requests the component actually issued, as "METHOD path". */
 let calls: string[] = [];
@@ -254,9 +197,20 @@ describe("VeeamJobActions", () => {
 
 describe("VeeamSessionActions", () => {
   it("renders nothing without execute:veeam", () => {
+    // The positive control comes first on purpose. A terminal run hides the
+    // stop button on its own, so asserting only the empty case would pass for
+    // the wrong reason the moment someone hands this a finished session.
+    const running = runningSession();
+    renderWithProviders(
+      <VeeamSessionActions serverId="srv-1" session={running} />,
+    );
+    expect(
+      screen.getByRole("button", { name: /stop run/i }),
+    ).toBeInTheDocument();
+
     setPermissions(["view:veeam"]);
     const { container } = renderWithProviders(
-      <VeeamSessionActions serverId="srv-1" session={session()} />,
+      <VeeamSessionActions serverId="srv-1" session={running} />,
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -269,7 +223,10 @@ describe("VeeamSessionActions", () => {
     "offers a stop for a run in state %s",
     (state) => {
       renderWithProviders(
-        <VeeamSessionActions serverId="srv-1" session={session({ state })} />,
+        <VeeamSessionActions
+          serverId="srv-1"
+          session={runningSession({ state })}
+        />,
       );
       expect(
         screen.getByRole("button", { name: /stop run/i }),
@@ -281,7 +238,10 @@ describe("VeeamSessionActions", () => {
     "offers no stop for a run in state %s",
     (state) => {
       const { container } = renderWithProviders(
-        <VeeamSessionActions serverId="srv-1" session={session({ state })} />,
+        <VeeamSessionActions
+          serverId="srv-1"
+          session={runningSession({ state })}
+        />,
       );
       expect(container).toBeEmptyDOMElement();
     },
@@ -290,7 +250,7 @@ describe("VeeamSessionActions", () => {
   it("confirms before stopping a run", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <VeeamSessionActions serverId="srv-1" session={session()} />,
+      <VeeamSessionActions serverId="srv-1" session={runningSession()} />,
     );
 
     await user.click(screen.getByRole("button", { name: /stop run/i }));

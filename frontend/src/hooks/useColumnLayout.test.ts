@@ -47,6 +47,13 @@ function mockViewport(atLeastMd: boolean) {
 
 beforeEach(() => {
   localStorage.clear();
+  // Wide by default; the one test that wants the narrow viewport overrides it.
+  // Redundant with the global matchMedia stub in src/test/setup.ts, which also
+  // reports wide (matches:false against a max-width query) — but deliberately
+  // kept, because it is what pins these tests to a viewport of their own. Flip
+  // that global stub to matches:true and five tests here break without this
+  // line and none break with it.
+  mockViewport(true);
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -54,7 +61,6 @@ afterEach(() => {
 
 describe("useColumnLayout", () => {
   it("starts in the declared order at the declared widths", () => {
-    mockViewport(true);
     const { result } = renderHook(() => useColumnLayout("t", COLUMNS));
     expect(result.current.columns.map((c) => c.key)).toEqual([
       "a",
@@ -67,7 +73,6 @@ describe("useColumnLayout", () => {
   });
 
   it("restores a stored order and widths", () => {
-    mockViewport(true);
     saveColumnLayout("t", {
       order: ["b", "a", "narrow", "wide"],
       widths: { a: 250 },
@@ -100,20 +105,17 @@ describe("useColumnLayout", () => {
   });
 
   it("keeps the hidden column when the viewport is wide", () => {
-    mockViewport(true);
     const { result } = renderHook(() => useColumnLayout("t", COLUMNS));
     expect(result.current.columns.map((c) => c.key)).toContain("wide");
   });
 
   it("clamps a stored width that would wedge a column shut", () => {
-    mockViewport(true);
     saveColumnLayout("t", { widths: { a: 2 } });
     const { result } = renderHook(() => useColumnLayout("t", COLUMNS));
     expect(result.current.widths.a).toBe(56);
   });
 
   it("ignores a stored order naming columns this table no longer has", () => {
-    mockViewport(true);
     saveColumnLayout("t", { order: ["gone", "b"] });
     const { result } = renderHook(() => useColumnLayout("t", COLUMNS));
     expect(result.current.columns.map((c) => c.key)).toEqual([
@@ -125,7 +127,6 @@ describe("useColumnLayout", () => {
   });
 
   it("reset restores the defaults and clears storage", () => {
-    mockViewport(true);
     saveColumnLayout("t", {
       order: ["narrow", "a", "b", "wide"],
       widths: { a: 300 },
@@ -147,7 +148,6 @@ describe("useColumnLayout", () => {
   });
 
   it("keeps tables independent", () => {
-    mockViewport(true);
     saveColumnLayout("other", { order: ["narrow", "a", "b", "wide"] });
     const { result } = renderHook(() => useColumnLayout("t", COLUMNS));
     expect(result.current.columns[0]?.key).toBe("a");

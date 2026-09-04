@@ -4,64 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { VeeamJobTable } from "./VeeamJobTable";
 import { VeeamSessionTable } from "./VeeamSessionTable";
-import type { VeeamJob, VeeamSession } from "../types/backup";
-
-function job(over: Partial<VeeamJob> = {}): VeeamJob {
-  return {
-    id: "job-1",
-    veeam_id: "3953c24f-bbe6-41fc-ae2f-a34e25bfd614",
-    name: "Onsite_Daily",
-    job_type: "ProxmoxBackupJob",
-    workload: "Vm",
-    description: "",
-    status: "Stopped",
-    last_result: "Success",
-    last_run: "2026-08-26T22:00:29Z",
-    next_run: "2026-08-27T22:00:00Z",
-    next_run_policy: "8/27/2026 10:00 PM",
-    repository_name: "repo-nas-01",
-    objects_count: 3,
-    progress_percent: 100,
-    bottleneck: "Source",
-    duration: "00:18:27",
-    processing_rate: "268 MB",
-    processed_size: 1046898278400,
-    read_size: 274600034304,
-    transferred_size: 8739400042,
-    cluster_id: null,
-    last_seen_at: "2026-08-26T23:00:00Z",
-    running_session_id: "",
-    running_session_state: "",
-    last_session_id: "",
-    ...over,
-  };
-}
-
-function session(over: Partial<VeeamSession> = {}): VeeamSession {
-  return {
-    id: "sess-1",
-    veeam_id: "20ff3c43-65c0-414d-ae03-10cf59fd2faa",
-    name: "Onsite_Daily",
-    state: "Stopped",
-    result: "Success",
-    result_message: "Success",
-    algorithm: "Increment",
-    bottleneck: "Source",
-    duration: "00:10:00",
-    processing_rate: "33.3 MB",
-    processed_size: 96636764160,
-    read_size: 13931380736,
-    transferred_size: 2628327455,
-    progress_percent: 100,
-    creation_time: "2026-08-26T19:56:00Z",
-    end_time: "2026-08-26T20:06:01Z",
-    initiated_by: "SYSTEM",
-    nexara_initiated: false,
-    nexara_stopped: false,
-    cluster_id: null,
-    ...over,
-  };
-}
+import { job, session } from "./veeam.fixtures";
 
 // The expanded session row reads the run's log live from the Veeam server.
 // Answered with an empty listing here: that is the shape a stopped run really
