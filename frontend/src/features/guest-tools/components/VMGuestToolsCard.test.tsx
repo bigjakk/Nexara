@@ -49,7 +49,7 @@ const guest: GuestToolsGuest = {
 
 function mount(
   overrides: Partial<GuestToolsGuest> = {},
-  opts: { windows?: boolean; canDo?: boolean } = {},
+  opts: { canDo?: boolean } = {},
 ) {
   vi.mocked(useGuestToolsGuest).mockReturnValue({
     guest: { ...guest, ...overrides },
@@ -77,15 +77,7 @@ function mount(
     canManage: () => opts.canDo ?? true,
   } as unknown as ReturnType<typeof usePermissions>);
 
-  const ostype = opts.windows === false ? "l26" : "win11";
-  renderWithProviders(
-    <VMGuestToolsCard
-      clusterId="c1"
-      vmid={100}
-      configOstype={ostype}
-      ostype={ostype}
-    />,
-  );
+  renderWithProviders(<VMGuestToolsCard clusterId="c1" vmid={100} />);
 }
 
 describe("VMGuestToolsCard", () => {
@@ -98,12 +90,6 @@ describe("VMGuestToolsCard", () => {
     expect(screen.getByText("0.1.285")).toBeInTheDocument();
     expect(screen.getByText(/0\.1\.302-1/)).toBeInTheDocument();
     expect(screen.getByText("Update available")).toBeInTheDocument();
-  });
-
-  // Guest tools are a Windows-only concept; the card must not appear elsewhere.
-  it("renders nothing for a non-Windows guest", () => {
-    mount({}, { windows: false });
-    expect(screen.queryByText("Guest Tools")).not.toBeInTheDocument();
   });
 
   it("offers both staging and an immediate update", () => {
@@ -167,14 +153,5 @@ describe("VMGuestToolsCard", () => {
     const note = screen.getByText(/a reboot is needed/i);
     expect(note.className).toContain("text-muted-foreground");
     expect(note.className).not.toContain("text-destructive");
-  });
-
-  // The hook is called before the Windows check (rules of hooks), so it must be
-  // gated: otherwise every Linux VM detail page fires a cluster-wide request,
-  // and 403s it for anyone without view:guest_tools.
-  it("does not query guest tools for a non-Windows guest", () => {
-    mount({}, { windows: false });
-    const call = vi.mocked(useGuestToolsGuest).mock.calls[0];
-    expect(call?.[2]).toBe(false);
   });
 });

@@ -479,12 +479,7 @@ export function VMDetailPage() {
 
         {kind === "vm" && isWindowsGuest && (
           <TabsContent value="guest-tools" className="mt-4">
-            <VMGuestToolsCard
-              clusterId={clusterId}
-              vmid={vm.vmid}
-              configOstype={vm.config_ostype}
-              ostype={vm.ostype}
-            />
+            <VMGuestToolsCard clusterId={clusterId} vmid={vm.vmid} />
           </TabsContent>
         )}
 

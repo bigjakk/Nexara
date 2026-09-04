@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/select";
 import { RefreshCw, Download, Play, X } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
-import { classifyOS } from "@/lib/os-classify";
 import { useVirtioWinReleases } from "../api/virtio-win-queries";
 import {
   useGuestToolsGuest,
@@ -34,10 +33,6 @@ interface VMGuestToolsCardProps {
   clusterId: string;
   /** Proxmox VMID, the stable identity per-guest state is keyed on. */
   vmid: number;
-  /** Proxmox config ostype, the authoritative setting. */
-  configOstype: string;
-  /** Agent-reported ostype ("mswindows" when present). */
-  ostype: string;
 }
 
 /**
@@ -52,17 +47,11 @@ interface VMGuestToolsCardProps {
  * one row per Windows guest, and the target/up-to-date/needs-update judgements
  * are already computed server-side.
  *
- * Renders nothing for non-Windows guests.
+ * Windows-only: the tab and this card are both gated on that by VMDetailPage,
+ * which is the one place the guest's OS is classified. Nothing here re-checks.
  */
-export function VMGuestToolsCard({
-  clusterId,
-  vmid,
-  configOstype,
-  ostype,
-}: VMGuestToolsCardProps) {
-  const isWindows =
-    classifyOS(configOstype) === "windows" || classifyOS(ostype) === "windows";
-  const { guest, isLoading } = useGuestToolsGuest(clusterId, vmid, isWindows);
+export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
+  const { guest, isLoading } = useGuestToolsGuest(clusterId, vmid);
   const { data: releases } = useVirtioWinReleases();
   const detect = useDetectGuestTools(clusterId);
   const stage = useStageGuestToolsUpdate(clusterId);
@@ -71,8 +60,6 @@ export function VMGuestToolsCard({
   const { canExecute, canManage } = usePermissions();
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-
-  if (!isWindows) return null;
 
   if (isLoading || !guest) {
     return (
