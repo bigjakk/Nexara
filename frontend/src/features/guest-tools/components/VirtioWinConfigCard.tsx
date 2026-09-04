@@ -11,7 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Disc3, AlertTriangle, Download, RefreshCw } from "lucide-react";
+import { Disc3, Download, RefreshCw } from "lucide-react";
+import { WarningCallout } from "@/components/WarningCallout";
 import { formatBytes } from "@/lib/format";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import {
@@ -21,7 +22,6 @@ import {
   useDownloadVirtioWin,
   useCheckVirtioWinNow,
 } from "../api/virtio-win-queries";
-import { isAlreadyPresent, isAlreadyRunning } from "../types/virtio-win";
 import type { VirtioWinConfigRequest } from "../types/virtio-win";
 import {
   buildSchedule,
@@ -51,11 +51,6 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
 
   const [enabled, setEnabled] = useState(false);
   const [storage, setStorage] = useState("");
-  // Not editable here: which node performs the download is resolved server-side
-  // to one that actually carries the storage, which is the right answer in every
-  // case this form can express. It is still round-tripped so a node pinned
-  // through the API survives a save from this card.
-  const [node, setNode] = useState("");
   const [targetVersion, setTargetVersion] = useState("");
   const [pruneEnabled, setPruneEnabled] = useState(false);
   const [schedule, setSchedule] = useState<ParsedSchedule>(() =>
@@ -76,10 +71,15 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
   // edit out from under the operator — and re-saving afterwards would quietly
   // write back the OLD schedule. A genuine external change to a field the form
   // shows still re-seeds, because that field is in the dependency list.
+  //
+  // `node` is absent from this list because no control edits it: which node
+  // performs the download is resolved server-side to one that actually carries
+  // the storage, which is the right answer in every case this form can express.
+  // Reading it straight off the config is what carries a node pinned through
+  // the API safely through a save from this card.
   const {
     enabled: cfgEnabled,
     storage: cfgStorage,
-    node: cfgNode,
     target_version: cfgTargetVersion,
     prune_enabled: cfgPruneEnabled,
     check_schedule: cfgCheckSchedule,
@@ -89,7 +89,6 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
     if (cfgEnabled === undefined) return; // no config loaded yet
     setEnabled(cfgEnabled);
     setStorage(cfgStorage ?? "");
-    setNode(cfgNode ?? "");
     setTargetVersion(cfgTargetVersion ?? "");
     setPruneEnabled(cfgPruneEnabled ?? false);
     setSchedule(parseSchedule(cfgCheckSchedule ?? ""));
@@ -104,7 +103,6 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
   }, [
     cfgEnabled,
     cfgStorage,
-    cfgNode,
     cfgTargetVersion,
     cfgPruneEnabled,
     cfgCheckSchedule,
@@ -140,7 +138,7 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
     const request: VirtioWinConfigRequest = {
       enabled,
       storage,
-      node,
+      node: config?.node ?? "",
       target_version: targetVersion,
       prune_enabled: pruneEnabled,
       check_schedule: cron,
@@ -165,11 +163,11 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
     setDownloadNote("");
     download.mutate(targetVersion ? { version: targetVersion } : {}, {
       onSuccess: (result) => {
-        if (isAlreadyPresent(result)) {
+        if (result.status === "already_present") {
           setDownloadNote(
             `virtio-win ${result.version} is already on ${storage}.`,
           );
-        } else if (isAlreadyRunning(result)) {
+        } else if (result.status === "already_running") {
           setDownloadNote(
             `A download of virtio-win ${result.version} is already in progress.`,
           );
@@ -223,13 +221,9 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
         </p>
 
         {config?.last_error ? (
-          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
-              <p className="font-medium">Last check failed</p>
-              <p className="break-words">{config.last_error}</p>
-            </div>
-          </div>
+          <WarningCallout title="Last check failed">
+            <p className="break-words">{config.last_error}</p>
+          </WarningCallout>
         ) : null}
 
         <div className="flex items-start gap-2">

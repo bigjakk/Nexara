@@ -26,7 +26,7 @@ type DownloadSortKey =
 
 function statusVariant(
   status: VirtioWinDownloadStatus,
-): "default" | "secondary" | "destructive" | "outline" {
+): "default" | "secondary" | "destructive" {
   switch (status) {
     case "succeeded":
       return "default";
@@ -35,8 +35,6 @@ function statusVariant(
     case "running":
     case "pending":
       return "secondary";
-    default:
-      return "outline";
   }
 }
 

@@ -4,34 +4,105 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Globe, AlertTriangle, ShieldAlert } from "lucide-react";
-import { ApiClientError } from "@/lib/api-client";
-import { privateAddressWarningFromError } from "@/lib/private-address";
+import {
+  Globe,
+  AlertTriangle,
+  ShieldAlert,
+  type LucideIcon,
+} from "lucide-react";
+import { WarningCallout } from "@/components/WarningCallout";
+import {
+  confirmRequiredFromError,
+  confirmDetailString,
+  type ConfirmRequired,
+} from "@/lib/confirm-gate";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   useVirtioWinMirror,
   useUpdateVirtioWinMirror,
 } from "../api/virtio-win-queries";
+import { MIRROR_CONFIRM_CODES } from "../types/virtio-win";
 import type { VirtioWinMirrorRequest } from "../types/virtio-win";
 
+type Acknowledgement = Omit<VirtioWinMirrorRequest, "base_url">;
+type MirrorCode = (typeof MIRROR_CONFIRM_CODES)[number];
+
+interface MirrorGate {
+  icon: LucideIcon;
+  /** What confirming this gate — and only this gate — waives. */
+  confirm: Acknowledgement;
+  text: (warning: ConfirmRequired) => string;
+}
+
 /**
- * Reads the 422 the API returns for a plain-http source. Same warn-then-confirm
- * shape as the private-address check, and deliberately a separate confirmation:
- * a private address exposes nothing, whereas http means the driver media a
- * Windows guest installs arrives unauthenticated — and upstream publishes no
- * checksum to fall back on.
+ * What each gate is refusing, and what confirming it would acknowledge.
+ *
+ * A Record over MIRROR_CONFIRM_CODES rather than a chain of ifs, so adding a
+ * code there without deciding what it waives is a compile error. Each
+ * acknowledgement waives a different check, and one gate silently inheriting
+ * another's would submit a confirmation the operator was never shown.
  */
-function insecureWarningFromError(err: unknown): string | null {
-  if (
-    !(err instanceof ApiClientError) ||
-    err.status !== 422 ||
-    err.body.error !== "insecure_source_confirm_required"
-  ) {
-    return null;
-  }
-  return err.body.message === ""
-    ? "This source uses plain HTTP."
-    : err.body.message;
+const MIRROR_GATES: Record<MirrorCode, MirrorGate> = {
+  insecure_source_confirm_required: {
+    icon: ShieldAlert,
+    confirm: { allow_insecure: true },
+    text: (warning) =>
+      warning.message === "" ? "This source uses plain HTTP." : warning.message,
+  },
+  private_address_confirm_required: {
+    icon: AlertTriangle,
+    // The http acknowledgement rides along: an internal mirror on plain http
+    // trips the scheme check first and the address check second, and making
+    // the operator click twice for one URL they have already vouched for is
+    // noise.
+    confirm: { allow_private_address: true, allow_insecure: true },
+    text: (warning) => {
+      const ip = confirmDetailString(warning, "ip");
+      const where = ip === null || ip === "" ? "" : ` (${ip})`;
+      return `This source resolves to a private address${where}. That is expected for an internal mirror.`;
+    },
+  },
+};
+
+/** `ConfirmRequired.code` is a plain string; this is the safe way in. */
+function mirrorGate(code: string): MirrorGate | null {
+  return Object.hasOwn(MIRROR_GATES, code)
+    ? MIRROR_GATES[code as MirrorCode]
+    : null;
+}
+
+interface MirrorWarningProps {
+  warning: ConfirmRequired;
+  pending: boolean;
+  onConfirm: (confirmations: Acknowledgement) => void;
+}
+
+/**
+ * The one gate the API is holding this save behind. Deliberately two separate
+ * confirmations rather than one: a private address exposes nothing, whereas
+ * http means the driver media a Windows guest installs arrives unauthenticated
+ * — and upstream publishes no checksum to fall back on.
+ */
+function MirrorWarning({ warning, pending, onConfirm }: MirrorWarningProps) {
+  const gate = mirrorGate(warning.code);
+  if (gate === null) return null;
+  return (
+    <WarningCallout icon={gate.icon}>
+      <p>{gate.text(warning)}</p>
+      <div className="pt-1">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          onClick={() => {
+            onConfirm(gate.confirm);
+          }}
+        >
+          Use it anyway
+        </Button>
+      </div>
+    </WarningCallout>
+  );
 }
 
 /**
@@ -51,8 +122,9 @@ export function VirtioWinSourceCard() {
   const readOnly = !canManage("settings");
 
   const [baseUrl, setBaseUrl] = useState("");
-  const [privateWarning, setPrivateWarning] = useState<string | null>(null);
-  const [insecureWarning, setInsecureWarning] = useState<string | null>(null);
+  // One at a time by construction: the API answers with at most one gate per
+  // attempt, so a second warning can only ever be a stale one left on screen.
+  const [warning, setWarning] = useState<ConfirmRequired | null>(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -66,56 +138,36 @@ export function VirtioWinSourceCard() {
   const upstream = mirror?.upstream_url ?? "";
   const dirty = baseUrl.trim() !== (mirror?.base_url ?? "");
 
-  function save(confirmations: {
-    allowPrivate?: boolean;
-    allowInsecure?: boolean;
-  }) {
+  // Confirmations are the request's own fields rather than a camelCase echo of
+  // them, and are only ever passed by the button under the matching warning —
+  // an acknowledgement must not persist across an edited URL.
+  function save(confirmations: Acknowledgement = {}) {
     setSaved(false);
-    // Only carried when the operator just clicked through the matching
-    // warning — a confirmation must not persist across an edited URL.
-    const body: VirtioWinMirrorRequest = { base_url: baseUrl.trim() };
-    if (confirmations.allowPrivate === true) body.allow_private_address = true;
-    if (confirmations.allowInsecure === true) body.allow_insecure = true;
-
-    updateMirror.mutate(body, {
-      onSuccess: () => {
-        setPrivateWarning(null);
-        setInsecureWarning(null);
-        setSaved(true);
-        setTimeout(() => {
-          setSaved(false);
-        }, 4000);
+    updateMirror.mutate(
+      { base_url: baseUrl.trim(), ...confirmations },
+      {
+        onSuccess: () => {
+          setWarning(null);
+          setSaved(true);
+          setTimeout(() => {
+            setSaved(false);
+          }, 4000);
+        },
+        // A gate is a prompt, not a failure. Anything else is a real error,
+        // already surfaced as a toast by the mutation hook — repeating it
+        // inline would say the same thing twice — and it clears the prompt so
+        // only what applies to THIS attempt is on screen.
+        onError: (err: unknown) => {
+          setWarning(confirmRequiredFromError(err, MIRROR_CONFIRM_CODES, null));
+        },
       },
-      onError: (err: unknown) => {
-        // Clear both first, so only the prompt that applies to THIS attempt is
-        // on screen. An internal mirror on plain http trips the scheme check
-        // and then the address check, and leaving the answered one up would
-        // stack two warnings where one has already been dealt with.
-        setInsecureWarning(null);
-        setPrivateWarning(null);
-
-        const insecure = insecureWarningFromError(err);
-        if (insecure !== null) {
-          setInsecureWarning(insecure);
-          return;
-        }
-        const priv = privateAddressWarningFromError(err);
-        if (priv !== null) {
-          setPrivateWarning(
-            `This source resolves to a private address (${priv.ip}). That is expected for an internal mirror.`,
-          );
-        }
-        // Anything else is a real failure, already surfaced as a toast by the
-        // mutation hook. Repeating it inline would say the same thing twice.
-      },
-    });
+    );
   }
 
   function handleChange(next: string) {
     setBaseUrl(next);
     // An edited URL invalidates whatever the last one was confirmed for.
-    setPrivateWarning(null);
-    setInsecureWarning(null);
+    setWarning(null);
   }
 
   return (
@@ -171,52 +223,18 @@ export function VirtioWinSourceCard() {
           </p>
         </div>
 
-        {insecureWarning !== null && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div className="space-y-2 text-xs text-amber-700 dark:text-amber-300">
-              <p>{insecureWarning}</p>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={updateMirror.isPending}
-                onClick={() => {
-                  save({ allowInsecure: true });
-                }}
-              >
-                Use it anyway
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {privateWarning !== null && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div className="space-y-2 text-xs text-amber-700 dark:text-amber-300">
-              <p>{privateWarning}</p>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={updateMirror.isPending}
-                onClick={() => {
-                  // Both confirmations ride along: an internal mirror on plain
-                  // http trips the scheme check first and the address check
-                  // second, and making the operator click twice for one URL
-                  // they already vouched for is noise.
-                  save({ allowPrivate: true, allowInsecure: true });
-                }}
-              >
-                Use it anyway
-              </Button>
-            </div>
-          </div>
+        {warning !== null && (
+          <MirrorWarning
+            warning={warning}
+            pending={updateMirror.isPending}
+            onConfirm={save}
+          />
         )}
 
         <div className="flex items-center gap-3">
           <Button
             onClick={() => {
-              save({});
+              save();
             }}
             disabled={readOnly || updateMirror.isPending || !dirty}
           >

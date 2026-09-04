@@ -99,24 +99,14 @@ export interface VirtioWinAlreadyRunning {
   version: string;
 }
 
+/**
+ * The members' `status` fields have no overlapping values, so a caller narrows
+ * this by testing `result.status` directly — no type predicate needed.
+ */
 export type VirtioWinDownloadResult =
   | VirtioWinDownload
   | VirtioWinAlreadyPresent
   | VirtioWinAlreadyRunning;
-
-export function isAlreadyPresent(
-  result: VirtioWinDownloadResult,
-): result is VirtioWinAlreadyPresent {
-  // Discriminates on the union directly rather than through a cast: the
-  // members' `status` fields have no overlapping values, so this narrows.
-  return result.status === "already_present";
-}
-
-export function isAlreadyRunning(
-  result: VirtioWinDownloadResult,
-): result is VirtioWinAlreadyRunning {
-  return result.status === "already_running";
-}
 
 /**
  * The instance-wide download source. One value for the whole install, not per

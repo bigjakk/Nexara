@@ -146,10 +146,10 @@ export function useUpdateVirtioWinMirror() {
       );
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: virtioWinKeys.mirror() });
-      // The catalog was discovered against the previous source, and every
-      // cluster config carries the resolved source_url — both are stale the
-      // moment this lands.
+      // Every virtio-win key at once — `all` is the prefix the rest are built
+      // on. The catalog was discovered against the previous source, and every
+      // cluster config carries the resolved source_url, so both are stale the
+      // moment this lands along with the mirror itself.
       void queryClient.invalidateQueries({ queryKey: virtioWinKeys.all });
     },
   });
@@ -167,7 +167,6 @@ export function useCheckVirtioWinNow(clusterId: string) {
     mutationFn: () =>
       apiClient.post<VirtioWinCheckResult>(
         `/api/v1/clusters/${clusterId}/virtio-win/check`,
-        {},
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({

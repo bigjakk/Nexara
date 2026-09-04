@@ -12,7 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Wrench, AlertTriangle } from "lucide-react";
+import { Wrench } from "lucide-react";
+import { WarningCallout } from "@/components/WarningCallout";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useVirtioWinReleases } from "../api/virtio-win-queries";
 import {
@@ -98,19 +99,12 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
         </p>
 
         {noStorage && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
-              <p className="font-medium">
-                No virtio-win ISO storage configured
-              </p>
-              <p>
-                Set a target storage under <strong>virtio-win ISO</strong>{" "}
-                above. Detection still works, but nothing can be staged without
-                the ISO.
-              </p>
-            </div>
-          </div>
+          <WarningCallout title="No virtio-win ISO storage configured">
+            <p>
+              Set a target storage under <strong>virtio-win ISO</strong> above.
+              Detection still works, but nothing can be staged without the ISO.
+            </p>
+          </WarningCallout>
         )}
 
         <div className="space-y-2">

@@ -17,6 +17,7 @@ import { useDRSConfig, useUpdateDRSConfig } from "../api/drs-queries";
 import type { DRSMode, DRSConfigRequest } from "../types/drs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Settings, AlertTriangle } from "lucide-react";
+import { WarningCallout } from "@/components/WarningCallout";
 
 interface DRSConfigCardProps {
   clusterId: string;
@@ -100,28 +101,22 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       </CardHeader>
       <CardContent className="space-y-6">
         {nativeRebalance && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
-              <p className="font-medium">
-                Proxmox native Dynamic Load Balancer is active
-              </p>
-              <p>
-                This cluster&apos;s Proxmox CRS is auto-rebalancing HA-managed
-                guests. Nexara DRS <strong>Automatic</strong> mode is disabled
-                to avoid conflicting migrations &mdash;{" "}
-                <strong>Advisory</strong> still works as a read-only second
-                opinion. Manage the native balancer under{" "}
-                <Link
-                  to={`/clusters/${clusterId}?tab=options`}
-                  className="underline"
-                >
-                  Datacenter &rarr; Options &rarr; CRS
-                </Link>
-                .
-              </p>
-            </div>
-          </div>
+          <WarningCallout title="Proxmox native Dynamic Load Balancer is active">
+            <p>
+              This cluster&apos;s Proxmox CRS is auto-rebalancing HA-managed
+              guests. Nexara DRS <strong>Automatic</strong> mode is disabled to
+              avoid conflicting migrations &mdash; <strong>Advisory</strong>{" "}
+              still works as a read-only second opinion. Manage the native
+              balancer under{" "}
+              <Link
+                to={`/clusters/${clusterId}?tab=options`}
+                className="underline"
+              >
+                Datacenter &rarr; Options &rarr; CRS
+              </Link>
+              .
+            </p>
+          </WarningCallout>
         )}
         <div className="space-y-2">
           <Label>Mode</Label>

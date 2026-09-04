@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { pad2 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   WEEKDAYS,
@@ -33,10 +34,6 @@ const EVERY_HOURS = [2, 3, 4, 6, 8, 12];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const MINUTES = Array.from({ length: 12 }, (_, i) => i * 5);
 const DAYS_OF_MONTH = Array.from({ length: 31 }, (_, i) => i + 1);
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
 
 interface ScheduleBuilderProps {
   /** The PVE calendar string, e.g. "02:00" or "mon,fri 22:30". */
@@ -113,7 +110,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
           <SelectContent>
             {HOURS.map((h) => (
               <SelectItem key={h} value={String(h)}>
-                {pad(h)}
+                {pad2(h)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -131,7 +128,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
           <SelectContent>
             {minutes.map((m) => (
               <SelectItem key={m} value={String(m)}>
-                {pad(m)}
+                {pad2(m)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -203,7 +200,7 @@ export function ScheduleBuilder({ value, onChange }: ScheduleBuilderProps) {
               <SelectContent>
                 {minutes.map((m) => (
                   <SelectItem key={m} value={String(m)}>
-                    :{pad(m)}
+                    :{pad2(m)}
                   </SelectItem>
                 ))}
               </SelectContent>

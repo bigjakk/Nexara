@@ -8,6 +8,8 @@
  * verbatim as a custom expression rather than being silently rewritten.
  */
 
+import { pad2 } from "@/lib/format";
+
 export type ScheduleMode = "interval" | "daily" | "weekly" | "custom";
 
 export interface ParsedSchedule {
@@ -20,14 +22,29 @@ export interface ParsedSchedule {
   cron: string;
 }
 
-/** Default time-of-day offered when switching to a timed mode. */
-const DEFAULT_TIME = "03:00";
+/**
+ * Default time-of-day offered when switching to a timed mode. Held as the
+ * parts `buildSchedule` emits and rendered into the "HH:MM" the field shows,
+ * so 03:00 is written down once.
+ */
+const DEFAULT_FIELDS = { hour: 3, minute: 0 };
+const DEFAULT_TIME = `${pad2(DEFAULT_FIELDS.hour)}:${pad2(DEFAULT_FIELDS.minute)}`;
 
-const DAILY = /^(\d{1,2}) (\d{1,2}) \* \* \*$/;
-const WEEKLY = /^(\d{1,2}) (\d{1,2}) \* \* ([0-6])$/;
+/**
+ * A timed expression: minute, hour, and a day-of-week that is either a literal
+ * day (weekly) or `*` (daily). One pattern rather than two, because those are
+ * the same expression differing in one field.
+ */
+const TIMED = /^(\d{1,2}) (\d{1,2}) \* \* (\*|[0-6])$/;
 
-function pad(n: number): string {
-  return n.toString().padStart(2, "0");
+/** Reads "HH:MM" into its parts, or null when either field is out of range. */
+function readTime(time: string): { hour: number; minute: number } | null {
+  const [rawHour, rawMinute] = time.split(":");
+  const hour = Number(rawHour);
+  const minute = Number(rawMinute);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return null;
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+  return { hour, minute };
 }
 
 /** Reads a stored expression into the fields the card renders. */
@@ -40,34 +57,16 @@ export function parseSchedule(cron: string): ParsedSchedule {
   };
   if (cron.trim() === "") return base;
 
-  const daily = DAILY.exec(cron);
-  if (daily?.[1] !== undefined && daily[2] !== undefined) {
-    const minute = Number(daily[1]);
-    const hour = Number(daily[2]);
-    if (hour <= 23 && minute <= 59) {
-      return { ...base, mode: "daily", time: `${pad(hour)}:${pad(minute)}` };
-    }
-  }
+  const fields = TIMED.exec(cron);
+  const day = fields?.[3];
+  const time =
+    fields === null ? null : readTime(`${fields[2] ?? ""}:${fields[1] ?? ""}`);
+  if (time === null || day === undefined) return { ...base, mode: "custom" };
 
-  const weekly = WEEKLY.exec(cron);
-  if (
-    weekly?.[1] !== undefined &&
-    weekly[2] !== undefined &&
-    weekly[3] !== undefined
-  ) {
-    const minute = Number(weekly[1]);
-    const hour = Number(weekly[2]);
-    if (hour <= 23 && minute <= 59) {
-      return {
-        ...base,
-        mode: "weekly",
-        time: `${pad(hour)}:${pad(minute)}`,
-        weekday: Number(weekly[3]),
-      };
-    }
-  }
-
-  return { ...base, mode: "custom" };
+  const timed = { ...base, time: `${pad2(time.hour)}:${pad2(time.minute)}` };
+  return day === "*"
+    ? { ...timed, mode: "daily" }
+    : { ...timed, mode: "weekly", weekday: Number(day) };
 }
 
 /**
@@ -82,16 +81,10 @@ export function buildSchedule(parsed: ParsedSchedule): string {
   if (parsed.mode === "interval") return "";
   if (parsed.mode === "custom") return parsed.cron;
 
-  const [rawHour, rawMinute] = (parsed.time || DEFAULT_TIME).split(":");
-  const hour = Number(rawHour);
-  const minute = Number(rawMinute);
-  const safeHour = Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : 3;
-  const safeMinute =
-    Number.isInteger(minute) && minute >= 0 && minute <= 59 ? minute : 0;
-
+  const { hour, minute } = readTime(parsed.time) ?? DEFAULT_FIELDS;
   return parsed.mode === "daily"
-    ? `${String(safeMinute)} ${String(safeHour)} * * *`
-    : `${String(safeMinute)} ${String(safeHour)} * * ${String(parsed.weekday)}`;
+    ? `${String(minute)} ${String(hour)} * * *`
+    : `${String(minute)} ${String(hour)} * * ${String(parsed.weekday)}`;
 }
 
 export const WEEKDAY_LABELS = [
@@ -112,12 +105,14 @@ export const WEEKDAY_LABELS = [
  * which is what a container reports when the field is left empty.
  */
 export function listTimezones(): string[] {
-  const local = localTimezone();
+  // Deduped, because the viewer's own zone IS "UTC" inside a container and a
+  // repeated entry would collide on its React key in the picker.
+  const fallback = Array.from(new Set([localTimezone(), "UTC"]));
   try {
     const all = Intl.supportedValuesOf("timeZone");
-    return all.length > 0 ? all : [local, "UTC"];
+    return all.length > 0 ? all : fallback;
   } catch {
-    return Array.from(new Set([local, "UTC"]));
+    return fallback;
   }
 }
 

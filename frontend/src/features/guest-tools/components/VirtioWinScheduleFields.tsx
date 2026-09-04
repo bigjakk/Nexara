@@ -31,6 +31,9 @@ import {
   type ScheduleMode,
 } from "../lib/virtio-win-schedule";
 
+/** How the empty zone reads, in the trigger and in the list alike. */
+const SERVER_TIME = "Server time";
+
 interface TimezoneFieldProps {
   value: string;
   disabled: boolean;
@@ -44,7 +47,9 @@ interface TimezoneFieldProps {
  */
 function TimezoneField({ value, disabled, onChange }: TimezoneFieldProps) {
   const [open, setOpen] = useState(false);
-  const zones = listTimezones();
+  // "Server time" is the empty zone rather than a zone of its own, so it heads
+  // the same list the IANA names render through — one item, one check mark.
+  const zones = ["", ...listTimezones()];
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -57,7 +62,7 @@ function TimezoneField({ value, disabled, onChange }: TimezoneFieldProps) {
           disabled={disabled}
           className="w-full justify-between font-normal"
         >
-          {value === "" ? "Server time" : value}
+          {value === "" ? SERVER_TIME : value}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -67,39 +72,29 @@ function TimezoneField({ value, disabled, onChange }: TimezoneFieldProps) {
           <CommandList>
             <CommandEmpty>No matching time zone</CommandEmpty>
             <CommandGroup>
-              <CommandItem
-                value="Server time"
-                onSelect={() => {
-                  onChange("");
-                  setOpen(false);
-                }}
-              >
-                <Check
-                  className={cn(
-                    "mr-2 h-4 w-4",
-                    value === "" ? "opacity-100" : "opacity-0",
-                  )}
-                />
-                Server time
-              </CommandItem>
-              {zones.map((zone) => (
-                <CommandItem
-                  key={zone}
-                  value={zone}
-                  onSelect={() => {
-                    onChange(zone);
-                    setOpen(false);
-                  }}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4",
-                      value === zone ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                  {zone}
-                </CommandItem>
-              ))}
+              {zones.map((zone) => {
+                // The empty zone is searched and keyed by its label — cmdk
+                // filters on `value`, and "" would match every query.
+                const label = zone === "" ? SERVER_TIME : zone;
+                return (
+                  <CommandItem
+                    key={label}
+                    value={label}
+                    onSelect={() => {
+                      onChange(zone);
+                      setOpen(false);
+                    }}
+                  >
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        value === zone ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                    {label}
+                  </CommandItem>
+                );
+              })}
             </CommandGroup>
           </CommandList>
         </Command>

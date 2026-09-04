@@ -4,6 +4,8 @@
 // spec instead of raw text; these functions convert between the two so an
 // existing job can be reopened in the builder it was created with.
 
+import { pad2 } from "@/lib/format";
+
 export type ScheduleFrequency =
   | "hourly"
   | "daily"
@@ -49,10 +51,6 @@ export const DEFAULT_SCHEDULE: ScheduleSpec = {
   custom: "",
 };
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
 /** Sorts weekdays into Mon..Sun order and drops anything unrecognised. */
 export function sortWeekdays(days: string[]): string[] {
   return WEEKDAY_VALUES.filter((d) => days.includes(d));
@@ -60,12 +58,12 @@ export function sortWeekdays(days: string[]): string[] {
 
 /** Builds the PVE calendar string for a spec. Returns "" when incomplete. */
 export function formatSchedule(spec: ScheduleSpec): string {
-  const time = `${pad(spec.hour)}:${pad(spec.minute)}`;
+  const time = `${pad2(spec.hour)}:${pad2(spec.minute)}`;
   switch (spec.frequency) {
     case "hourly":
       return spec.everyHours > 1
-        ? `*/${String(spec.everyHours)}:${pad(spec.minute)}`
-        : `*:${pad(spec.minute)}`;
+        ? `*/${String(spec.everyHours)}:${pad2(spec.minute)}`
+        : `*:${pad2(spec.minute)}`;
     case "daily":
       return time;
     case "weekly": {
@@ -74,7 +72,7 @@ export function formatSchedule(spec: ScheduleSpec): string {
       return `${days.join(",")} ${time}`;
     }
     case "monthly":
-      return `*-*-${pad(spec.dayOfMonth)} ${time}`;
+      return `*-*-${pad2(spec.dayOfMonth)} ${time}`;
     case "custom":
       return spec.custom.trim();
   }
@@ -221,15 +219,15 @@ export function describeSchedule(
 ): string | null {
   if (!raw || raw.trim() === "") return null;
   const spec = parseSchedule(raw);
-  const time = `${pad(spec.hour)}:${pad(spec.minute)}`;
+  const time = `${pad2(spec.hour)}:${pad2(spec.minute)}`;
   switch (spec.frequency) {
     case "hourly":
       if (spec.everyHours === 1) {
         return spec.minute === 0
           ? "Every hour, on the hour"
-          : `Every hour at :${pad(spec.minute)}`;
+          : `Every hour at :${pad2(spec.minute)}`;
       }
-      return `Every ${String(spec.everyHours)} hours at :${pad(spec.minute)}`;
+      return `Every ${String(spec.everyHours)} hours at :${pad2(spec.minute)}`;
     case "daily":
       return `Every day at ${time}`;
     case "weekly": {

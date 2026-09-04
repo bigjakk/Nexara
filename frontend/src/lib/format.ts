@@ -41,27 +41,32 @@ export function formatBytesPerSecond(bytesPerSec: number): string {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${unit}/s`;
 }
 
+/** Zero-pads to two digits, for the clock and calendar fields below. */
+export function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
 export function formatTimestamp(ts: number): string {
   const date = new Date(ts);
-  const h = String(date.getHours()).padStart(2, "0");
-  const m = String(date.getMinutes()).padStart(2, "0");
-  const s = String(date.getSeconds()).padStart(2, "0");
+  const h = pad2(date.getHours());
+  const m = pad2(date.getMinutes());
+  const s = pad2(date.getSeconds());
   return `${h}:${m}:${s}`;
 }
 
 export function formatTimestampShort(ts: number): string {
   const date = new Date(ts);
-  const h = String(date.getHours()).padStart(2, "0");
-  const m = String(date.getMinutes()).padStart(2, "0");
+  const h = pad2(date.getHours());
+  const m = pad2(date.getMinutes());
   return `${h}:${m}`;
 }
 
 export function formatTimestampLong(ts: number): string {
   const date = new Date(ts);
-  const mon = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const h = String(date.getHours()).padStart(2, "0");
-  const m = String(date.getMinutes()).padStart(2, "0");
+  const mon = pad2(date.getMonth() + 1);
+  const day = pad2(date.getDate());
+  const h = pad2(date.getHours());
+  const m = pad2(date.getMinutes());
   return `${mon}/${day} ${h}:${m}`;
 }
 
