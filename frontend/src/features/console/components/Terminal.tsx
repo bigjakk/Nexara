@@ -42,7 +42,6 @@ export function Terminal({ tab, visible }: TerminalProps) {
   const { id: tabId, clusterID, node, type, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerminal | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
   const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
@@ -192,11 +191,6 @@ export function Terminal({ tab, visible }: TerminalProps) {
       const wsUrl = buildConsoleWsUrl(clusterID, node, type, vmid);
       ws = new WebSocket(wsUrl, wsAuthProtocols(token));
       ws.binaryType = "arraybuffer";
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        // Wait for the "connected" message from server before updating status.
-      };
 
       ws.onmessage = (event: MessageEvent) => {
         // close() is asynchronous, so frames already queued on a superseded
@@ -213,6 +207,9 @@ export function Terminal({ tab, visible }: TerminalProps) {
               message?: string;
             };
             if (parsed.type === "connected") {
+              // The socket opening is not the connection: the backend still has
+              // to reach Proxmox, so the status waits for this message rather
+              // than for ws.onopen.
               retryCountRef.current = 0;
               updateTabStatus(tabId, "connected");
               // Send initial resize.
@@ -326,7 +323,6 @@ export function Terminal({ tab, visible }: TerminalProps) {
       ws?.close();
       term.dispose();
       termRef.current = null;
-      wsRef.current = null;
       fitAddonRef.current = null;
     };
   }, [

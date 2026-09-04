@@ -34,7 +34,6 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
   const { id: tabId, clusterID, node, vmid, reconnectKey } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
   const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
   const [rfb, setRfb] = useState<RFB | null>(null);
@@ -104,8 +103,6 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     let closed = false;
     retryScheduledRef.current = false;
     let ws: WebSocket | null = null;
-    let stateLog1Timer: ReturnType<typeof setTimeout> | null = null;
-    let stateLog2Timer: ReturnType<typeof setTimeout> | null = null;
 
     const tabIsParked = () =>
       useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
@@ -167,38 +164,10 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       if (closed) return;
 
       const wsUrl = buildVncWsUrl(clusterID, node, vmid, guestType);
-      // The wsUrl is now token-free (token rides in subprotocol). Log it.
-      console.log(
-        "[VNCViewer] opening WS",
-        wsUrl,
-        JSON.stringify({ clusterID, node, vmid, guestType }),
-      );
       ws = new WebSocket(wsUrl, wsAuthProtocols(token));
       ws.binaryType = "arraybuffer";
-      wsRef.current = ws;
 
       const localWs = ws; // narrow non-null binding for closures
-
-      localWs.onopen = () => {
-        console.log("[VNCViewer] WS open, readyState:", localWs.readyState);
-      };
-
-      // Diagnostic: log readyState 1 second and 5 seconds after creation in
-      // case onopen / onerror / onclose never fire (silent failure mode).
-      stateLog1Timer = setTimeout(() => {
-        console.log(
-          "[VNCViewer] WS state @ 1s",
-          "readyState:",
-          localWs.readyState,
-          "(0=connecting, 1=open, 2=closing, 3=closed)",
-        );
-      }, 1000);
-      stateLog2Timer = setTimeout(() => {
-        console.log(
-          "[VNCViewer] WS state @ 5s readyState:",
-          localWs.readyState,
-        );
-      }, 5000);
 
       localWs.onmessage = (event: MessageEvent) => {
         // close() is asynchronous, so frames already queued on a superseded
@@ -218,10 +187,6 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
             };
             if (msg.type === "connected") {
               // Backend proxy is connected to Proxmox — now initialize noVNC RFB.
-              console.log(
-                "[VNCViewer] received connected, container:",
-                !!containerRef.current,
-              );
               if (!containerRef.current) {
                 console.error(
                   "[VNCViewer] containerRef is null at connected time",
@@ -246,12 +211,10 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
               rfbInstance.focusOnClick = true;
 
               rfbInstance.addEventListener("connect", () => {
-                console.log("[VNCViewer] RFB connect event fired");
                 applyStatusRef.current("connected");
               });
 
               rfbInstance.addEventListener("disconnect", () => {
-                console.log("[VNCViewer] RFB disconnect event fired");
                 // We closed this one ourselves. Whatever owns the tab now —
                 // a newer connection, or nothing — must not have its rfbRef
                 // cleared or a retry scheduled on its behalf.
@@ -287,18 +250,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
         }
       };
 
-      localWs.onclose = (event) => {
-        console.log(
-          "[VNCViewer] WS close",
-          "code:",
-          event.code,
-          "reason:",
-          event.reason || "(none)",
-          "wasClean:",
-          event.wasClean,
-          "readyState:",
-          localWs.readyState,
-        );
+      localWs.onclose = () => {
         if (closed) return;
         if (!rfbRef.current) {
           // WS closed before RFB was established — auto-reconnect
@@ -326,8 +278,6 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       closed = true;
       clearTimeout(retryTimerRef.current);
       retryScheduledRef.current = false;
-      if (stateLog1Timer) clearTimeout(stateLog1Timer);
-      if (stateLog2Timer) clearTimeout(stateLog2Timer);
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;
@@ -335,7 +285,6 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       } else {
         ws?.close();
       }
-      wsRef.current = null;
     };
     // Only re-run when the actual connection parameters change.
   }, [
