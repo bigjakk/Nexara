@@ -9,15 +9,12 @@ import {
   Unplug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  MAX_CONSOLE_AUTO_RETRIES,
-  type ConsoleStatus,
-  type ConsoleTab,
-} from "../types/console";
+import { MAX_CONSOLE_AUTO_RETRIES, type ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMAction } from "@/features/vms/api/vm-queries";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
+import { useIdleTabOnUnmount } from "../hooks/useIdleTabOnUnmount";
 import { VNCToolbar } from "./VNCToolbar";
 import {
   buildVncWsUrl,
@@ -38,10 +35,6 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
   const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
   const [rfb, setRfb] = useState<RFB | null>(null);
   const retryCountRef = useRef(0);
-  const retryScheduledRef = useRef(false);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
 
   // Reuses a still-valid scoped token across this tab's reconnect cycle
   // rather than minting — and auditing — one per attempt. Created once via
@@ -64,18 +57,6 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
   // Park dead tabs while the guest is off; auto-resume when it powers on.
   useGuestPowerSync(tab);
 
-  // Store latest callbacks in refs so the effect doesn't depend on them.
-  const resolveAndReconnectRef = useRef(resolveAndReconnect);
-  resolveAndReconnectRef.current = resolveAndReconnect;
-  const tabIdRef = useRef(tabId);
-  tabIdRef.current = tabId;
-
-  const applyStatus = (status: ConsoleStatus) => {
-    updateTabStatus(tabId, status);
-  };
-  const applyStatusRef = useRef(applyStatus);
-  applyStatusRef.current = applyStatus;
-
   const guestType = tab.type === "ct_vnc" ? "lxc" : undefined;
 
   useEffect(() => {
@@ -85,10 +66,10 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     // actually dialling. Any other status is left alone — notably the parked
     // "guest-stopped", which connect() below deliberately declines to reopen.
     if (
-      useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
-        ?.status === "idle"
+      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
+      "idle"
     ) {
-      applyStatusRef.current("connecting");
+      updateTabStatus(tabId, "connecting");
     }
 
     // Scoped to THIS run of the effect, deliberately not a ref. When the
@@ -101,33 +82,38 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     // looped forever. A per-run flag stays true for the generation it belongs
     // to, so a superseded connection can never speak for the tab again.
     let closed = false;
-    retryScheduledRef.current = false;
     let ws: WebSocket | null = null;
+    // Per-run for the same reason `closed` is, though these never actually
+    // leaked: as refs they were correct only because the cleanup reset the
+    // flag and cleared the timer, and the effect body reset the flag again on
+    // entry. As locals the scoping is the language's job, not a reader's.
+    let retryScheduled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const tabIsParked = () =>
-      useConsoleStore.getState().tabs.find((t) => t.id === tabIdRef.current)
-        ?.status === "guest-stopped";
+      useConsoleStore.getState().tabs.find((t) => t.id === tabId)?.status ===
+      "guest-stopped";
 
     // Single funnel for auto-reconnects. Both the RFB disconnect event and
     // ws.onclose fire for one drop — without the dedup flag they each
-    // scheduled a timer (and the second overwrote retryTimerRef, leaking the
+    // scheduled a timer (and the second overwrote retryTimer, leaking the
     // first), producing overlapping reconnect cycles.
     const scheduleRetry = () => {
-      if (closed || retryScheduledRef.current) return;
+      if (closed || retryScheduled) return;
       if (tabIsParked()) return; // guest is off — wait for power-on instead
       if (retryCountRef.current < MAX_CONSOLE_AUTO_RETRIES) {
         const delay = Math.min(1000 * 2 ** retryCountRef.current, 10000);
         retryCountRef.current++;
-        retryScheduledRef.current = true;
-        applyStatusRef.current("reconnecting");
-        retryTimerRef.current = setTimeout(() => {
-          retryScheduledRef.current = false;
+        retryScheduled = true;
+        updateTabStatus(tabId, "reconnecting");
+        retryTimer = setTimeout(() => {
+          retryScheduled = false;
           // Safe if the tab was closed in the meantime — resolveAndReconnect
           // returns early for an id that is no longer in the store.
-          void resolveAndReconnectRef.current(tabIdRef.current);
+          void resolveAndReconnect(tabId);
         }, delay);
       } else {
-        applyStatusRef.current("disconnected");
+        updateTabStatus(tabId, "disconnected");
       }
     };
 
@@ -157,7 +143,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
       } catch (err) {
         if (closed) return;
         console.error("[VNCViewer] failed to mint console token", err);
-        applyStatusRef.current("error");
+        updateTabStatus(tabId, "error");
         return;
       }
 
@@ -211,7 +197,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
               rfbInstance.focusOnClick = true;
 
               rfbInstance.addEventListener("connect", () => {
-                applyStatusRef.current("connected");
+                updateTabStatus(tabId, "connected");
               });
 
               rfbInstance.addEventListener("disconnect", () => {
@@ -226,7 +212,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
               });
 
               rfbInstance.addEventListener("securityfailure", () => {
-                applyStatusRef.current("error");
+                updateTabStatus(tabId, "error");
               });
 
               rfbRef.current = rfbInstance;
@@ -238,9 +224,9 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
                 // Backend confirmed the guest is powered off — park with a
                 // fresh retry budget for when it comes back.
                 retryCountRef.current = 0;
-                applyStatusRef.current("guest-stopped");
+                updateTabStatus(tabId, "guest-stopped");
               } else {
-                applyStatusRef.current("error");
+                updateTabStatus(tabId, "error");
               }
               return;
             }
@@ -267,7 +253,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
           localWs.readyState,
         );
         if (!closed && !tabIsParked()) {
-          applyStatusRef.current("error");
+          updateTabStatus(tabId, "error");
         }
       };
     };
@@ -276,8 +262,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
 
     return () => {
       closed = true;
-      clearTimeout(retryTimerRef.current);
-      retryScheduledRef.current = false;
+      clearTimeout(retryTimer);
       if (rfbRef.current) {
         rfbRef.current.disconnect();
         rfbRef.current = null;
@@ -297,30 +282,12 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
     reconnectKey,
     activated,
     mintToken,
+    updateTabStatus,
+    resolveAndReconnect,
   ]);
 
-  // A viewer that goes away (console closed, tab removed) leaves no socket
-  // behind, so the tab must not stay marked live. Reset it to the same
-  // pre-dial state a page reload leaves it in and let whoever mounts next
-  // dial from a clean slate. Settled states — "disconnected", "error" and
-  // the parked "guest-stopped" — remain true with no socket, so they stand.
-  // Runs after the connect effect's cleanup (definition order), and
-  // synchronously before any replacement mounts, so it cannot land on top
-  // of a newer connection's status the way the old teardown write did.
-  useEffect(() => {
-    return () => {
-      const status = useConsoleStore
-        .getState()
-        .tabs.find((t) => t.id === tabIdRef.current)?.status;
-      if (
-        status === "connected" ||
-        status === "connecting" ||
-        status === "reconnecting"
-      ) {
-        applyStatusRef.current("idle");
-      }
-    };
-  }, []);
+  // Declared after the connect effect on purpose — see the hook.
+  useIdleTabOnUnmount(tabId);
 
   const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
 
@@ -340,11 +307,7 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
           className="h-full w-full bg-black"
           data-tab-id={tab.id}
         />
-        <ConsoleStateOverlay
-          tab={tab}
-          status={tab.status}
-          onReconnect={handleManualReconnect}
-        />
+        <ConsoleStateOverlay tab={tab} onReconnect={handleManualReconnect} />
       </div>
     </div>
   );
@@ -359,17 +322,16 @@ export function VNCViewer({ tab, visible }: VNCViewerProps) {
  */
 function ConsoleStateOverlay({
   tab,
-  status,
   onReconnect,
 }: {
   tab: ConsoleTab;
-  status: ConsoleStatus;
   onReconnect: () => void;
 }) {
   const actionMutation = useVMAction();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
+  const status = tab.status;
   if (status === "connected") return null;
 
   const isCt = tab.kind === "ct" || tab.type === "ct_vnc";

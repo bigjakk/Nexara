@@ -23,18 +23,16 @@ function TitleBar({
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  title,
 }: {
   onPointerDown: (e: React.PointerEvent) => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: (e: React.PointerEvent) => void;
+  title: string;
 }) {
   const windowMode = useConsoleStore((s) => s.windowMode);
   const setWindowMode = useConsoleStore((s) => s.setWindowMode);
-  const tabs = useConsoleStore((s) => s.tabs);
-  const activeTabId = useConsoleStore((s) => s.activeTabId);
   const isMobile = useIsMobile();
-
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
 
   function handleDoubleClick() {
     setWindowMode(windowMode === "maximized" ? "floating" : "maximized");
@@ -53,7 +51,7 @@ function TitleBar({
     >
       <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate text-xs font-medium">
-        {activeTab?.label ?? "Console"}
+        {title}
       </span>
 
       {/* Window controls — touch-sized on mobile; maximize is meaningless
@@ -193,7 +191,6 @@ export function FloatingConsole() {
 
   const handleResizeDown = useCallback(
     (dir: ResizeDir, e: React.PointerEvent) => {
-      if (windowMode !== "floating") return;
       e.preventDefault();
       e.stopPropagation();
       resizeRef.current = {
@@ -205,7 +202,7 @@ export function FloatingConsole() {
       };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
-    [windowMode, windowSize, windowPosition],
+    [windowSize, windowPosition],
   );
 
   const handleResizeMove = useCallback(
@@ -278,6 +275,7 @@ export function FloatingConsole() {
   if (windowMode === "hidden") return null;
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+  const activeLabel = activeTab?.label ?? "Console";
 
   // Every window mode renders ONE tree, with the console content always in
   // the same slot. Minimize used to return a separate picture-in-picture
@@ -338,6 +336,7 @@ export function FloatingConsole() {
           onPointerDown={handleDragDown}
           onPointerMove={handleDragMove}
           onPointerUp={handleDragUp}
+          title={activeLabel}
         />
       )}
 
@@ -422,7 +421,7 @@ export function FloatingConsole() {
             <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center gap-1.5 bg-linear-to-t from-black/60 to-transparent px-2 py-1.5">
               <TerminalSquare className="h-3 w-3 text-white/70" />
               <span className="truncate text-[11px] text-white/70">
-                {activeTab?.label ?? "Console"}
+                {activeLabel}
               </span>
               {tabs.length > 1 && (
                 <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[9px] font-medium text-white/80">

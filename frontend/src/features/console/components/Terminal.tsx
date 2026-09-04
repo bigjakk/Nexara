@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { MAX_CONSOLE_AUTO_RETRIES, type ConsoleTab } from "../types/console";
 import { useConsoleStore } from "@/stores/console-store";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
+import { useIdleTabOnUnmount } from "../hooks/useIdleTabOnUnmount";
 import {
   createConsoleTokenMinter,
   wsAuthProtocols,
@@ -46,9 +47,6 @@ export function Terminal({ tab, visible }: TerminalProps) {
   const updateTabStatus = useConsoleStore((s) => s.updateTabStatus);
   const resolveAndReconnect = useConsoleStore((s) => s.resolveAndReconnect);
   const retryCountRef = useRef(0);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
 
   // Reuses a still-valid scoped token across this tab's reconnect cycle
   // rather than minting — and auditing — one per attempt. Created once via
@@ -74,16 +72,6 @@ export function Terminal({ tab, visible }: TerminalProps) {
   // Minimizing must not resize the guest's pty — see the ResizeObserver below.
   const isMinimized = useConsoleStore((s) => s.windowMode) === "minimized";
 
-  const handleResize = useCallback(() => {
-    if (fitAddonRef.current && termRef.current && visible && !isMinimized) {
-      try {
-        fitAddonRef.current.fit();
-      } catch {
-        // Ignore fit errors when container is hidden
-      }
-    }
-  }, [visible, isMinimized]);
-
   useEffect(() => {
     if (!activated) return;
     if (!containerRef.current) return;
@@ -97,6 +85,10 @@ export function Terminal({ tab, visible }: TerminalProps) {
     ) {
       updateTabStatus(tabId, "connecting");
     }
+
+    // Scoped to THIS run. As a ref it was correct only because the cleanup
+    // below cleared it; as a local the scoping is the language's job.
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const term = new XTerminal({
       cursorBlink: true,
@@ -257,7 +249,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
           term.writeln(
             `\r\n[Connection lost \u2014 reconnecting in ${String(delay / 1000)}s...]`,
           );
-          retryTimerRef.current = setTimeout(() => {
+          retryTimer = setTimeout(() => {
             void resolveAndReconnect(tabId);
           }, delay);
         } else {
@@ -316,7 +308,7 @@ export function Terminal({ tab, visible }: TerminalProps) {
 
     return () => {
       closed = true;
-      clearTimeout(retryTimerRef.current);
+      clearTimeout(retryTimer);
       observer?.disconnect();
       dataDisposable?.dispose();
       resizeDisposable?.dispose();
@@ -338,33 +330,20 @@ export function Terminal({ tab, visible }: TerminalProps) {
     resolveAndReconnect,
   ]);
 
-  // A terminal that goes away (console closed, tab removed) leaves no socket
-  // behind, so the tab must not stay marked live. Reset it to the same
-  // pre-dial state a page reload leaves it in and let whoever mounts next
-  // dial from a clean slate. Settled states — "disconnected", "error" and
-  // the parked "guest-stopped" — remain true with no socket, so they stand.
-  useEffect(() => {
-    return () => {
-      const status = useConsoleStore
-        .getState()
-        .tabs.find((t) => t.id === tabId)?.status;
-      if (
-        status === "connected" ||
-        status === "connecting" ||
-        status === "reconnecting"
-      ) {
-        updateTabStatus(tabId, "idle");
-      }
-    };
-  }, [tabId, updateTabStatus]);
+  // Declared after the connect effect on purpose — see the hook.
+  useIdleTabOnUnmount(tabId);
 
   // Re-fit when the tab becomes visible, and again when the window is
-  // restored from the PiP (handleResize's identity tracks isMinimized).
+  // restored from the PiP.
   useEffect(() => {
-    if (visible) {
-      handleResize();
+    if (!visible || isMinimized) return;
+    if (!fitAddonRef.current || !termRef.current) return;
+    try {
+      fitAddonRef.current.fit();
+    } catch {
+      // Ignore fit errors when the container is hidden.
     }
-  }, [visible, handleResize]);
+  }, [visible, isMinimized]);
 
   return (
     <div
