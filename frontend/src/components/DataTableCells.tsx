@@ -20,6 +20,10 @@ export function DataTableCells<Row, K extends string, Ctx>({
   ctx,
 }: {
   row: Row;
+  /** Only `.columns` is read, but the whole layout is required on purpose:
+   *  taking a bare column list would typecheck against the raw module-scope
+   *  declarations, and cells built from those would stop following drags and
+   *  would show the hideBelowMd columns on a phone. */
   layout: ColumnLayout<Row, K, Ctx>;
   ctx: Ctx;
 }) {

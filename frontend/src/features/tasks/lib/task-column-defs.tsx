@@ -36,7 +36,7 @@ const STATUS_LABEL: Record<DisplayStatus, string> = {
 };
 
 /**
- * Every column both task tables can render.
+ * Every column both task tables can render — the guest-scoped set, VM included.
  *
  * Sorting is SERVER-side (see TaskSortKey), so these declare `sortable: true`
  * but no `sortValue`: the ordering is a query parameter, and re-sorting the
@@ -45,7 +45,11 @@ const STATUS_LABEL: Record<DisplayStatus, string> = {
  * body row are generated from one ordered list, which is what lets a dragged
  * column take its values with it.
  */
-const ALL_COLUMNS: ColumnDef<TaskRecord, TaskSortKey, TaskCellCtx>[] = [
+export const TASK_COLUMNS_WITH_VM: ColumnDef<
+  TaskRecord,
+  TaskSortKey,
+  TaskCellCtx
+>[] = [
   {
     key: "started",
     label: "Started",
@@ -130,14 +134,18 @@ const ALL_COLUMNS: ColumnDef<TaskRecord, TaskSortKey, TaskCellCtx>[] = [
 ];
 
 /**
- * The two column sets, as module-scope constants rather than a filter call.
+ * The Events-page set: the same columns without VM, which only a guest-scoped
+ * view can fill.
  *
- * useColumnLayout needs a stable reference — a fresh array each render would
- * reset the layout on every keystroke — and the two tables persist their
- * layouts under different ids, so they are genuinely different tables rather
- * than one with a column hidden.
+ * Filtered once at module scope rather than per render. Not because
+ * useColumnLayout would break — it reconciles on the joined column KEYS, not on
+ * the array's identity, so an equal-but-fresh array costs only a few recomputed
+ * memos. It is useDataTable that needs a stable reference, for the accessors it
+ * memoises on `[columns]`; these two tables sort server-side and use
+ * useColumnLayout directly, so they never hit that. Module scope is simply
+ * where a constant belongs.
+ *
+ * The two tables persist their layouts under different ids, so they are
+ * genuinely different tables rather than one with a column hidden.
  */
-const COLUMNS_WITHOUT_VM = ALL_COLUMNS.filter((c) => c.key !== "vm");
-
-export const TASK_COLUMNS = COLUMNS_WITHOUT_VM;
-export const TASK_COLUMNS_WITH_VM = ALL_COLUMNS;
+export const TASK_COLUMNS = TASK_COLUMNS_WITH_VM.filter((c) => c.key !== "vm");

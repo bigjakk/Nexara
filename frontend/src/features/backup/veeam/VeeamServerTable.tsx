@@ -43,6 +43,9 @@ type ServerSortKey =
 /** What the chevron and action cells need beyond the server row itself. */
 interface ServerCtx {
   expanded: Set<string>;
+  /** The server whose connection test is in flight, if any. `null`, not
+   *  `undefined`: this is compared against a row id, and undefined would match
+   *  a row that arrived without one. */
   testingId: string | null;
   onTest: (server: VeeamServer) => void;
   onEdit: (server: VeeamServer) => void;
@@ -189,22 +192,31 @@ export function VeeamServerTable({
   // another's, and a shared mutation result would do exactly that.
   const [probes, setProbes] = useState<Record<string, VeeamProbeResult>>({});
   const [probeErrors, setProbeErrors] = useState<Record<string, string>>({});
-  const [testingId, setTestingId] = useState<string | null>(null);
 
   const testServer = useTestVeeamServer();
 
   const cellCtx: ServerCtx = {
     expanded,
-    testingId,
+    // The mutation already tracks which server is in flight: TanStack narrows
+    // `variables` to the id handed to mutate() on the pending branch, so this
+    // is that id exactly while the test runs, and null otherwise. A second
+    // piece of state for the same fact could only disagree with it.
+    testingId: testServer.isPending ? testServer.variables : null,
     onTest: handleTest,
     onEdit,
     onDelete,
   };
 
   function handleTest(server: VeeamServer) {
-    setTestingId(server.id);
     // Drop any error from a previous attempt on this server, without
     // disturbing the others.
+    //
+    // This setState is also what disables the Test button in the same commit
+    // as the click. The pending flag now comes from the mutation store, and
+    // query-core notifies through a setTimeout(0); this re-render is what makes
+    // the already-pending snapshot visible immediately. Always returning a new
+    // object is therefore load-bearing — bailing out with `prev` when there is
+    // no error to clear would defer the disable by a tick.
     setProbeErrors((prev) =>
       Object.fromEntries(
         Object.entries(prev).filter(([id]) => id !== server.id),
@@ -224,9 +236,6 @@ export function VeeamServerTable({
             err instanceof Error ? err.message : "Connection test failed",
         }));
         expand(server.id);
-      },
-      onSettled: () => {
-        setTestingId(null);
       },
     });
   }

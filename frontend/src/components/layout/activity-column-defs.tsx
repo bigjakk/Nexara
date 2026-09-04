@@ -40,7 +40,7 @@ export interface ActivityCellCtx {
  * width, so the table would stay as wide as if it were shown and the drawer
  * would scroll sideways on a phone anyway.
  */
-const ALL_COLUMNS: ColumnDef<
+export const ACTIVITY_COLUMN_DEFS: ColumnDef<
   ActivityRowData,
   ActivitySortKey,
   ActivityCellCtx
@@ -161,5 +161,3 @@ const ALL_COLUMNS: ColumnDef<
     ),
   },
 ];
-
-export const ACTIVITY_COLUMN_DEFS = ALL_COLUMNS;

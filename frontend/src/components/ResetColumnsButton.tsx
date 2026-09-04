@@ -1,6 +1,5 @@
 import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ColumnLayout } from "@/hooks/useColumnLayout";
 
 /**
  * Restores a table's default column order and widths.
@@ -14,19 +13,18 @@ import type { ColumnLayout } from "@/hooks/useColumnLayout";
  * Hidden until there is something to undo, so it does not sit on every table
  * offering to reset a layout nobody has touched.
  */
-export function ResetColumnsButton<Row, K extends string, Ctx>({
+export function ResetColumnsButton({
   layout,
-  className,
 }: {
-  layout: ColumnLayout<Row, K, Ctx>;
-  className?: string;
+  /** The two fields this reads. Not generic over the row type: the button
+   *  resets a layout, and never touches a row. A ColumnLayout satisfies it. */
+  layout: { isCustomized: boolean; reset: () => void };
 }) {
   if (!layout.isCustomized) return null;
   return (
     <Button
       variant="ghost"
       size="sm"
-      className={className}
       onClick={layout.reset}
       title="Restore the default column order and widths"
     >

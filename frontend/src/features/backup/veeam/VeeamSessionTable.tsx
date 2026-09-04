@@ -109,19 +109,19 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
       const label = sessionResultLabel(session);
       return label === null ? null : (SESSION_RESULT_RANK[label] ?? 99);
     },
-    cell: (session) =>
-      session.result === "" ? (
-        <span className="text-muted-foreground">—</span>
-      ) : (
-        <Badge variant={resultVariant(session.result)}>
-          {/* Never a bare "Failed": Veeam records an API-cancelled run
-              identically to a real failure. Keyed on nexara_STOPPED, not
-              nexara_initiated — a run Nexara STARTED can fail for a completely
-              real reason, and labelling that "stopped" would tell an operator
-              to ignore a genuine backup failure. */}
-          {sessionResultLabel(session)}
-        </Badge>
-      ),
+    cell: (session) => {
+      // Never a bare "Failed": Veeam records an API-cancelled run identically
+      // to a real failure. Keyed on nexara_STOPPED, not nexara_initiated — a
+      // run Nexara STARTED can fail for a completely real reason, and
+      // labelling that "stopped" would tell an operator to ignore a genuine
+      // backup failure. A null label is the resultless run, which is the same
+      // question the sort above asks.
+      const label = sessionResultLabel(session);
+      if (label === null) {
+        return <span className="text-muted-foreground">—</span>;
+      }
+      return <Badge variant={resultVariant(session.result)}>{label}</Badge>;
+    },
   },
   {
     key: "mode",
@@ -145,8 +145,9 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
     key: "duration",
     label: "Duration",
     width: 120,
-    sortValue: (session) =>
-      session.duration === "" ? null : veeamDurationSeconds(session.duration),
+    // veeamDurationSeconds already answers null for anything it cannot parse,
+    // the empty string included.
+    sortValue: (session) => veeamDurationSeconds(session.duration),
     cell: (session) => (
       <span className="font-mono text-sm">{session.duration || "—"}</span>
     ),

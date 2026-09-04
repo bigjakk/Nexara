@@ -184,6 +184,43 @@ describe("VeeamServerTable", () => {
     expect(screen.queryByText(/Connected to/)).not.toBeInTheDocument();
   });
 
+  it("disables only the tested server's button while its probe is in flight", async () => {
+    // The disabled state is derived from the mutation (isPending + variables)
+    // rather than held in its own state, so this pins both halves: the right
+    // row goes disabled, the other does not, and it comes back afterwards.
+    const user = userEvent.setup();
+    let settle: (result: VeeamProbeResult) => void = () => undefined;
+    mockedPost.mockReturnValue(
+      new Promise<VeeamProbeResult>((resolve) => {
+        settle = resolve;
+      }),
+    );
+
+    renderWithProviders(
+      <VeeamServerTable
+        servers={[server(), server({ id: "veeam-2", name: "Veeam Offsite" })]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    const [first, second] = screen.getAllByTitle("Test connection");
+    if (first === undefined || second === undefined) {
+      throw new Error("expected a test button on each row");
+    }
+
+    await user.click(first);
+    await waitFor(() => {
+      expect(first).toBeDisabled();
+    });
+    expect(second).not.toBeDisabled();
+
+    settle(probe());
+    await waitFor(() => {
+      expect(first).not.toBeDisabled();
+    });
+  });
+
   it("keeps one server's probe result off another's row", async () => {
     const user = userEvent.setup();
     mockedPost.mockResolvedValue(probe({ server_name: "vbr01" }));
