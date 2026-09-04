@@ -9,6 +9,7 @@ import type {
   GuestToolsUpdateRequest,
   GuestToolsUpdateResponse,
 } from "../types/guest-tools";
+import { guestToolsInFlight } from "../lib/guest-tools-state";
 
 export const guestToolsKeys = {
   all: ["guest-tools"] as const,
@@ -60,13 +61,7 @@ export function useGuestToolsFleet(clusterId: string, enabled = true) {
     refetchInterval: (query) => {
       const rows = query.state.data;
       if (!rows) return false;
-      const active = rows.some(
-        (g) =>
-          g.stage === "staging" ||
-          g.stage === "staged" ||
-          g.stage === "running",
-      );
-      return active ? 15_000 : false;
+      return rows.some(guestToolsInFlight) ? 15_000 : false;
     },
   });
 }

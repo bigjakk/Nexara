@@ -1,10 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { classifyOS } from "@/lib/os-classify";
 import { useGuestToolsGuest } from "../api/guest-tools-queries";
-import {
-  guestToolsStateLabel,
-  guestToolsStateVariant,
-} from "../lib/guest-tools-state";
+import { guestToolsState } from "../lib/guest-tools-state";
 
 interface VMGuestToolsSummaryProps {
   clusterId: string;
@@ -37,14 +34,13 @@ export function VMGuestToolsSummary({
   const { guest } = useGuestToolsGuest(clusterId, vmid, isWindows);
   if (!isWindows || !guest) return null;
 
+  const { label, variant } = guestToolsState(guest);
   return (
     <div>
       <p className="text-xs text-muted-foreground">Guest Tools</p>
       <div className="flex items-center gap-2">
         <p className="text-sm">{guest.installed_version || "Not installed"}</p>
-        <Badge variant={guestToolsStateVariant(guest)}>
-          {guestToolsStateLabel(guest)}
-        </Badge>
+        <Badge variant={variant}>{label}</Badge>
       </div>
     </div>
   );

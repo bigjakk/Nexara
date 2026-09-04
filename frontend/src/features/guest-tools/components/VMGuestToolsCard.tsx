@@ -21,9 +21,11 @@ import {
   useSetGuestToolsPolicy,
 } from "../api/guest-tools-queries";
 import {
-  guestToolsStateLabel,
+  guestToolsInFlight,
+  guestToolsPolicy,
   guestToolsStagedMismatch,
-  guestToolsStateVariant,
+  guestToolsStageAction,
+  guestToolsState,
 } from "../lib/guest-tools-state";
 
 /** Sentinel for "follow the cluster's target" — Select cannot hold "". */
@@ -76,10 +78,8 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
   const mayExecute = canExecute("guest_tools");
   const mayManage = canManage("guest_tools");
   const running = guest.status === "running";
-  const inFlight =
-    guest.stage === "staged" ||
-    guest.stage === "running" ||
-    guest.stage === "staging";
+  const inFlight = guestToolsInFlight(guest);
+  const { label, variant, errorTone } = guestToolsState(guest);
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true);
@@ -94,14 +94,11 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
     }
   };
 
-  // Staging is deliberately not gated on the guest being behind: reinstalling
-  // to repair a broken driver install, and installing on a guest that has none,
-  // are both real needs. The backend has never required it either.
-  const stageLabel = guest.needs_update
-    ? "Stage update"
-    : guest.installed_version
-      ? "Reinstall"
-      : "Install";
+  const stageLabel = {
+    stage: "Stage update",
+    reinstall: "Reinstall",
+    install: "Install",
+  }[guestToolsStageAction(guest)];
 
   // Non-null only while what is staged is not what the target names — the
   // window between an operator changing the target and the reconcile loop
@@ -112,9 +109,7 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
     <div className="rounded-lg border p-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold">virtio-win guest tools</h3>
-        <Badge variant={guestToolsStateVariant(guest)}>
-          {guestToolsStateLabel(guest)}
-        </Badge>
+        <Badge variant={variant}>{label}</Badge>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -160,15 +155,7 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
       ) : null}
 
       {guest.last_error ? (
-        <p
-          className={
-            guest.reboot_required
-              ? "mt-3 text-xs text-muted-foreground"
-              : "mt-3 text-xs text-destructive"
-          }
-        >
-          {guest.last_error}
-        </p>
+        <p className={`mt-3 text-xs ${errorTone}`}>{guest.last_error}</p>
       ) : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -250,11 +237,7 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
                 () =>
                   setPolicy.mutateAsync({
                     vmid,
-                    policy: {
-                      excluded: v === true,
-                      target_version: guest.policy_target_version,
-                      note: guest.note,
-                    },
+                    policy: guestToolsPolicy(guest, { excluded: v === true }),
                   }),
                 v === true ? "Guest excluded." : "Guest included.",
               );
@@ -285,11 +268,9 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
                 () =>
                   setPolicy.mutateAsync({
                     vmid,
-                    policy: {
-                      excluded: guest.excluded,
+                    policy: guestToolsPolicy(guest, {
                       target_version: v === FOLLOW_CLUSTER ? "" : v,
-                      note: guest.note,
-                    },
+                    }),
                   }),
                 "Pinned version saved.",
               );

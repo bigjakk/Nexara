@@ -21,9 +21,11 @@ import {
 } from "../api/guest-tools-queries";
 import type { GuestToolsGuest } from "../types/guest-tools";
 import {
-  guestToolsStateLabel,
+  guestToolsInFlight,
+  guestToolsPolicy,
   guestToolsStagedMismatch,
-  guestToolsStateVariant,
+  guestToolsStageAction,
+  guestToolsState,
 } from "../lib/guest-tools-state";
 
 type FleetSortKey =
@@ -52,22 +54,6 @@ interface FleetCtx {
   onStage: (g: GuestToolsGuest) => void;
   onCancel: (g: GuestToolsGuest) => void;
   onTogglePolicy: (g: GuestToolsGuest) => void;
-}
-
-/**
- * What the stage action will do for this guest, which is not always "update".
- *
- * Staging is deliberately NOT gated on the guest being behind. The backend has
- * never required it — only the automatic scheduler pass skips current guests —
- * and two real cases need it: reinstalling to repair a broken driver install,
- * and installing on a Windows guest that has no virtio-win at all. That second
- * one reports needs_update=false (an unknown version is not "behind"), so
- * gating on it made the feature refuse the guest that most needed it.
- */
-function stageActionLabel(g: GuestToolsGuest): string {
-  if (g.needs_update) return "Stage an update for the next boot";
-  if (!g.installed_version) return "Install guest tools at the next boot";
-  return "Reinstall the current version at the next boot";
 }
 
 /** Each column sorts on what its cell SHOWS, not on the underlying field. */
@@ -128,7 +114,7 @@ const COLUMNS: ColumnDef<GuestToolsGuest, FleetSortKey, FleetCtx>[] = [
     key: "state",
     label: "State",
     width: 260,
-    sortValue: (g) => guestToolsStateLabel(g),
+    sortValue: (g) => guestToolsState(g).label,
     // last_error is the only explanation a failed update gives.
     wrap: true,
     cell: (g) => {
@@ -138,26 +124,17 @@ const COLUMNS: ColumnDef<GuestToolsGuest, FleetSortKey, FleetCtx>[] = [
       // change supersedes the whole fleet at once, and one role=status per row
       // would queue an announcement per affected guest.
       const mismatch = guestToolsStagedMismatch(g);
+      const { label, variant, errorTone } = guestToolsState(g);
       return (
         <div className="space-y-1">
-          <Badge variant={guestToolsStateVariant(g)}>
-            {guestToolsStateLabel(g)}
-          </Badge>
+          <Badge variant={variant}>{label}</Badge>
           {mismatch ? (
             <p className="break-words text-xs text-amber-600 dark:text-amber-400">
               {mismatch}
             </p>
           ) : null}
           {g.last_error ? (
-            <p
-              className={
-                g.reboot_required
-                  ? "break-words text-xs text-muted-foreground"
-                  : "break-words text-xs text-destructive"
-              }
-            >
-              {g.last_error}
-            </p>
+            <p className={`break-words text-xs ${errorTone}`}>{g.last_error}</p>
           ) : null}
         </div>
       );
@@ -174,8 +151,7 @@ const COLUMNS: ColumnDef<GuestToolsGuest, FleetSortKey, FleetCtx>[] = [
     fixed: true,
     cell: (g, ctx) => {
       const busy = ctx.busyVMID === g.vmid;
-      const inFlight =
-        g.stage === "staged" || g.stage === "running" || g.stage === "staging";
+      const inFlight = guestToolsInFlight(g);
       return (
         <div className="flex justify-end gap-1">
           <Button
@@ -205,7 +181,13 @@ const COLUMNS: ColumnDef<GuestToolsGuest, FleetSortKey, FleetCtx>[] = [
             <Button
               size="sm"
               variant="ghost"
-              title={stageActionLabel(g)}
+              title={
+                {
+                  stage: "Stage an update for the next boot",
+                  reinstall: "Reinstall the current version at the next boot",
+                  install: "Install guest tools at the next boot",
+                }[guestToolsStageAction(g)]
+              }
               disabled={
                 busy || !ctx.mayExecute || g.excluded || g.status !== "running"
               }
@@ -295,11 +277,7 @@ export function GuestToolsFleetTable({ clusterId }: GuestToolsFleetTableProps) {
       void run(g.vmid, () =>
         setPolicy.mutateAsync({
           vmid: g.vmid,
-          policy: {
-            excluded: !g.excluded,
-            target_version: g.policy_target_version,
-            note: g.note,
-          },
+          policy: guestToolsPolicy(g, { excluded: !g.excluded }),
         }),
       );
     },
