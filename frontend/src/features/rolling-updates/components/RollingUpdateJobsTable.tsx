@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -11,10 +11,7 @@ import {
 import type { RollingUpdateJob } from "@/types/api";
 import { Play, XCircle, Eye } from "lucide-react";
 
-const statusVariant: Record<
-  RollingUpdateJob["status"],
-  "default" | "secondary" | "destructive" | "outline"
-> = {
+const statusVariant: Record<RollingUpdateJob["status"], BadgeVariant> = {
   pending: "outline",
   running: "default",
   paused: "secondary",

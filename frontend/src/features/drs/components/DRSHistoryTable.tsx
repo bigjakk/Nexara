@@ -7,7 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -22,9 +22,7 @@ interface DRSHistoryTableProps {
   clusterId: string;
 }
 
-function statusVariant(
-  status: string,
-): "default" | "secondary" | "destructive" | "outline" {
+function statusVariant(status: string): BadgeVariant {
   switch (status) {
     case "completed":
       return "default";

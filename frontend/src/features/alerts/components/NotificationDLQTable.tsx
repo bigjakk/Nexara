@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -28,10 +28,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { formatRelativeTime } from "@/lib/format";
 import type { DLQState, NotificationDLQEntry } from "@/types/api";
 
-const STATE_VARIANTS: Record<
-  DLQState,
-  "default" | "secondary" | "destructive" | "outline"
-> = {
+const STATE_VARIANTS: Record<DLQState, BadgeVariant> = {
   pending: "destructive",
   rate_limited: "secondary",
   retrying: "outline",
@@ -203,7 +200,7 @@ export function NotificationDLQTable() {
 interface SummaryTileProps {
   label: string;
   count: number;
-  variant: "default" | "secondary" | "destructive" | "outline";
+  variant: BadgeVariant;
   onClick: () => void;
   active: boolean;
 }

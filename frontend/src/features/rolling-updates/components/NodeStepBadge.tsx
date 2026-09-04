@@ -1,11 +1,11 @@
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import type { RollingUpdateNode } from "@/types/api";
 
 const stepConfig: Record<
   RollingUpdateNode["step"],
   {
     label: string;
-    variant: "default" | "secondary" | "destructive" | "outline";
+    variant: BadgeVariant;
   }
 > = {
   pending: { label: "Pending", variant: "outline" },

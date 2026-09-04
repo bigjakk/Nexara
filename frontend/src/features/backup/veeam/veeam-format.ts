@@ -1,7 +1,7 @@
+import type { BadgeVariant } from "@/components/ui/badge";
+
 /** How Veeam's own result strings map onto the Badge palette. */
-export function resultVariant(
-  result: string,
-): "default" | "secondary" | "destructive" | "outline" {
+export function resultVariant(result: string): BadgeVariant {
   switch (result) {
     case "Success":
       return "default";

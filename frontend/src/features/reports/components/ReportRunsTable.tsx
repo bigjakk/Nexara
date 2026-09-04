@@ -7,7 +7,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Eye, Download } from "lucide-react";
 import { useReportRuns } from "../api/report-queries";
 import { getValidAccessToken } from "@/lib/api-client";
@@ -23,10 +23,7 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
   snapshot_inventory: "Snapshot Inventory",
 };
 
-const STATUS_VARIANTS: Record<
-  string,
-  "default" | "secondary" | "destructive" | "outline"
-> = {
+const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   completed: "default",
   running: "outline",
   pending: "secondary",

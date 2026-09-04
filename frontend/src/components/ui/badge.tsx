@@ -23,6 +23,16 @@ const badgeVariants = cva(
   },
 );
 
+/**
+ * The variants `badgeVariants` actually defines, derived rather than restated:
+ * adding one to the cva above widens every consumer instead of leaving a
+ * hand-copied union behind to drift. `NonNullable` drops the `null` and
+ * `undefined` that VariantProps admits for "variant not set".
+ */
+export type BadgeVariant = NonNullable<
+  VariantProps<typeof badgeVariants>["variant"]
+>;
+
 export interface BadgeProps
   extends
     React.HTMLAttributes<HTMLDivElement>,

@@ -1,19 +1,14 @@
+import type { BadgeVariant } from "@/components/ui/badge";
 import type {
   GuestToolsGuest,
   GuestToolsPolicyRequest,
 } from "../types/guest-tools";
 
-export type GuestToolsBadgeVariant =
-  | "default"
-  | "secondary"
-  | "destructive"
-  | "outline";
-
 export interface GuestToolsState {
   /** What the badge reads. */
   label: string;
   /** What the badge looks like. */
-  variant: GuestToolsBadgeVariant;
+  variant: BadgeVariant;
   /**
    * Text colour for last_error, which does not always describe a failure: the
    * installer returning 3010 leaves an explanatory message on a guest that
@@ -37,10 +32,11 @@ export function guestToolsState(g: GuestToolsGuest): GuestToolsState {
   const errorTone = g.reboot_required
     ? "text-muted-foreground"
     : "text-destructive";
-  const state = (
-    label: string,
-    variant: GuestToolsBadgeVariant,
-  ): GuestToolsState => ({ label, variant, errorTone });
+  const state = (label: string, variant: BadgeVariant): GuestToolsState => ({
+    label,
+    variant,
+    errorTone,
+  });
 
   if (g.excluded) return state("Excluded", "outline");
   // Ahead of the stage switch: the install succeeded, so the stage reads
