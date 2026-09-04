@@ -43,13 +43,67 @@ type ServerSortKey =
 /** What the chevron and action cells need beyond the server row itself. */
 interface ServerCtx {
   expanded: Set<string>;
-  /** The server whose connection test is in flight, if any. `null`, not
-   *  `undefined`: this is compared against a row id, and undefined would match
-   *  a row that arrived without one. */
-  testingId: string | null;
-  onTest: (server: VeeamServer) => void;
+  /** Where a row's connection test reports back to. The button owns the
+   *  request; the table owns the per-server maps the expanded row reads. */
+  onTestStart: (id: string) => void;
+  onTestResult: (id: string, result: VeeamProbeResult) => void;
+  onTestError: (id: string, message: string) => void;
   onEdit: (server: VeeamServer) => void;
   onDelete: (server: VeeamServer) => void;
+}
+
+/**
+ * One row's Test button, with its own mutation instance.
+ *
+ * Per row, not per table, and that is the whole point. A MutationObserver
+ * tracks exactly one mutation: `mutate()` overwrites the callbacks it was last
+ * given and detaches the observer from the previous mutation before starting
+ * the new one. Shared across rows, that meant testing server A and then server
+ * B before A answered silently threw A's result away — A's `onSuccess` never
+ * ran, nothing was written under its id, and its row never opened, so the
+ * operator saw the button do nothing at all. It also reported only the most
+ * recent server as pending, re-enabling A's button mid-flight.
+ *
+ * An observer each keeps both facts per row: A's callbacks survive B starting,
+ * and each button disables only for its own request.
+ */
+function VeeamServerTestButton({
+  server,
+  onStart,
+  onResult,
+  onError,
+}: {
+  server: VeeamServer;
+  onStart: (id: string) => void;
+  onResult: (id: string, result: VeeamProbeResult) => void;
+  onError: (id: string, message: string) => void;
+}) {
+  const testServer = useTestVeeamServer();
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      title="Test connection"
+      disabled={testServer.isPending}
+      onClick={() => {
+        onStart(server.id);
+        testServer.mutate(server.id, {
+          onSuccess: (result) => {
+            onResult(server.id, result);
+          },
+          onError: (err) => {
+            onError(
+              server.id,
+              err instanceof Error ? err.message : "Connection test failed",
+            );
+          },
+        });
+      }}
+    >
+      <PlugZap className="h-4 w-4" />
+    </Button>
+  );
 }
 
 /**
@@ -139,17 +193,12 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
           e.stopPropagation();
         }}
       >
-        <Button
-          variant="ghost"
-          size="sm"
-          title="Test connection"
-          disabled={ctx.testingId === server.id}
-          onClick={() => {
-            ctx.onTest(server);
-          }}
-        >
-          <PlugZap className="h-4 w-4" />
-        </Button>
+        <VeeamServerTestButton
+          server={server}
+          onStart={ctx.onTestStart}
+          onResult={ctx.onTestResult}
+          onError={ctx.onTestError}
+        />
         <Button
           variant="ghost"
           size="sm"
@@ -193,51 +242,43 @@ export function VeeamServerTable({
   const [probes, setProbes] = useState<Record<string, VeeamProbeResult>>({});
   const [probeErrors, setProbeErrors] = useState<Record<string, string>>({});
 
-  const testServer = useTestVeeamServer();
-
   const cellCtx: ServerCtx = {
     expanded,
-    // The mutation already tracks which server is in flight: TanStack narrows
-    // `variables` to the id handed to mutate() on the pending branch, so this
-    // is that id exactly while the test runs, and null otherwise. A second
-    // piece of state for the same fact could only disagree with it.
-    testingId: testServer.isPending ? testServer.variables : null,
-    onTest: handleTest,
+    onTestStart: handleTestStart,
+    onTestResult: handleTestResult,
+    onTestError: handleTestError,
     onEdit,
     onDelete,
   };
 
-  function handleTest(server: VeeamServer) {
-    // Drop any error from a previous attempt on this server, without
-    // disturbing the others.
-    //
-    // This setState is also what disables the Test button in the same commit
-    // as the click. The pending flag now comes from the mutation store, and
-    // query-core notifies through a setTimeout(0); this re-render is what makes
-    // the already-pending snapshot visible immediately. Always returning a new
-    // object is therefore load-bearing — bailing out with `prev` when there is
-    // no error to clear would defer the disable by a tick.
+  /**
+   * Drop any error from a previous attempt on this server, without disturbing
+   * the others.
+   *
+   * This is also what disables the Test button in the click's own commit. The
+   * mutation is already pending when `mutate()` returns, but query-core
+   * notifies its listeners through a setTimeout(0); this setState is the only
+   * render in the same tick, and it is what lets the button's
+   * useSyncExternalStore re-read that already-pending snapshot. Always
+   * returning a fresh object is therefore load-bearing — bailing out with
+   * `prev` when there is no error to clear would defer the disable by a
+   * macrotask, and a fast double-click would fire two probes.
+   */
+  function handleTestStart(id: string) {
     setProbeErrors((prev) =>
-      Object.fromEntries(
-        Object.entries(prev).filter(([id]) => id !== server.id),
-      ),
+      Object.fromEntries(Object.entries(prev).filter(([key]) => key !== id)),
     );
+  }
 
-    testServer.mutate(server.id, {
-      onSuccess: (result) => {
-        setProbes((prev) => ({ ...prev, [server.id]: result }));
-        // Show the answer without making the operator hunt for it.
-        expand(server.id);
-      },
-      onError: (err) => {
-        setProbeErrors((prev) => ({
-          ...prev,
-          [server.id]:
-            err instanceof Error ? err.message : "Connection test failed",
-        }));
-        expand(server.id);
-      },
-    });
+  function handleTestResult(id: string, result: VeeamProbeResult) {
+    setProbes((prev) => ({ ...prev, [id]: result }));
+    // Show the answer without making the operator hunt for it.
+    expand(id);
+  }
+
+  function handleTestError(id: string, message: string) {
+    setProbeErrors((prev) => ({ ...prev, [id]: message }));
+    expand(id);
   }
 
   return (

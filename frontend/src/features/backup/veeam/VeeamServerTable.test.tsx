@@ -185,9 +185,10 @@ describe("VeeamServerTable", () => {
   });
 
   it("disables only the tested server's button while its probe is in flight", async () => {
-    // The disabled state is derived from the mutation (isPending + variables)
-    // rather than held in its own state, so this pins both halves: the right
-    // row goes disabled, the other does not, and it comes back afterwards.
+    // Each row's button owns its own mutation and disables on that mutation's
+    // isPending, so this pins all three halves: the right row goes disabled,
+    // the other does not, and it comes back afterwards. Going back to one
+    // shared mutation fails the middle assertion.
     const user = userEvent.setup();
     let settle: (result: VeeamProbeResult) => void = () => undefined;
     mockedPost.mockReturnValue(
@@ -219,6 +220,52 @@ describe("VeeamServerTable", () => {
     await waitFor(() => {
       expect(first).not.toBeDisabled();
     });
+  });
+
+  it("keeps both results when a second test starts before the first settles", async () => {
+    // The regression: every row used to share one mutation instance, and
+    // mutate() detaches the observer from the mutation before it, discarding
+    // the callbacks that were going to record the first server's answer. The
+    // first row's probe completed and then vanished — no result, no error, and
+    // the row never opened.
+    const user = userEvent.setup();
+    const resolvers = new Map<string, (result: VeeamProbeResult) => void>();
+    mockedPost.mockImplementation(
+      (url: string) =>
+        new Promise((resolve) => {
+          resolvers.set(url, resolve);
+        }),
+    );
+
+    renderWithProviders(
+      <VeeamServerTable
+        servers={[server(), server({ id: "veeam-2", name: "Veeam Offsite" })]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    const [first, second] = screen.getAllByTitle("Test connection");
+    if (first === undefined || second === undefined) {
+      throw new Error("expected a test button on each row");
+    }
+
+    // Both in flight at once, which is the whole scenario.
+    await user.click(first);
+    await user.click(second);
+
+    const resolveFirst = resolvers.get("/api/v1/veeam-servers/veeam-1/test");
+    const resolveSecond = resolvers.get("/api/v1/veeam-servers/veeam-2/test");
+    if (resolveFirst === undefined || resolveSecond === undefined) {
+      throw new Error("expected a request per server");
+    }
+
+    resolveFirst(probe({ server_name: "vbr01" }));
+    resolveSecond(probe({ server_name: "vbr02" }));
+
+    // The second one was never in doubt; the first is the regression.
+    expect(await screen.findByText(/Connected to vbr02/)).toBeInTheDocument();
+    expect(await screen.findByText(/Connected to vbr01/)).toBeInTheDocument();
   });
 
   it("keeps one server's probe result off another's row", async () => {
