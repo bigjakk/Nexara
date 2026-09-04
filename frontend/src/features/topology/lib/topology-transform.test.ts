@@ -5,6 +5,7 @@ import {
   getGuestStatusColor,
 } from "./topology-transform";
 import type { TopologyInput, TopologyFilters } from "./topology-transform";
+import { makeStorage as baseStorage } from "@/test/storage.fixtures";
 import type {
   ClusterResponse,
   NodeResponse,
@@ -94,19 +95,19 @@ function makeVM(overrides: Partial<VMResponse> = {}): VMResponse {
   };
 }
 
+/**
+ * A populated LVM-thin pool. Topology renders capacity, so the shared
+ * factory's zeroed defaults would draw every node as empty — but the field
+ * LIST still comes from there, so a new StorageResponse field lands in one
+ * place instead of three.
+ */
 function makeStorage(
   overrides: Partial<StorageResponse> = {},
 ): StorageResponse {
-  return {
-    id: "s1",
-    cluster_id: "c1",
-    node_id: "n1",
+  return baseStorage({
     storage: "local-lvm",
     type: "lvmthin",
     content: "images,rootdir",
-    active: true,
-    enabled: true,
-    shared: false,
     total: 500000000000,
     used: 250000000000,
     avail: 250000000000,
@@ -114,7 +115,7 @@ function makeStorage(
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
     ...overrides,
-  };
+  });
 }
 
 function makeInput(overrides: Partial<TopologyInput> = {}): TopologyInput {

@@ -12,6 +12,12 @@ import type { GuestToolsGuest, GuestToolsStage } from "../types/guest-tools";
  * A base guest with no flag set: not excluded, no reboot pending, and neither
  * up to date nor behind. Every describe below spreads over it and sets only the
  * fields its own rule reads.
+ *
+ * Deliberately NOT the shared `guest()` in guest-tools.fixtures.ts, and not a
+ * dedupe someone missed. These are rules tests, so the flags above are the
+ * INPUTS under test — inheriting them from a fixture tuned for render tests
+ * would let an edit to that fixture's excluded/status/reboot_required silently
+ * rewrite what the assertions below are asserting about.
  */
 function guest(
   stage: GuestToolsStage,

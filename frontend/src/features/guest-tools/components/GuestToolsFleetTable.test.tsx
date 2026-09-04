@@ -2,15 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { GuestToolsFleetTable } from "./GuestToolsFleetTable";
-import {
-  useGuestToolsFleet,
-  useDetectGuestTools,
-  useStageGuestToolsUpdate,
-  useCancelGuestToolsUpdate,
-  useSetGuestToolsPolicy,
-} from "../api/guest-tools-queries";
-import { usePermissions } from "@/hooks/usePermissions";
+import { useGuestToolsFleet } from "../api/guest-tools-queries";
 import type { GuestToolsGuest } from "../types/guest-tools";
+import { guest } from "../guest-tools.fixtures";
+import { mockGuestToolsMutations, mockPermissions } from "../guest-tools.mocks";
 
 vi.mock("../api/guest-tools-queries", () => ({
   useGuestToolsFleet: vi.fn(),
@@ -21,54 +16,13 @@ vi.mock("../api/guest-tools-queries", () => ({
 }));
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: vi.fn() }));
 
-const base: GuestToolsGuest = {
-  vmid: 100,
-  name: "server2022",
-  node: "pve1",
-  status: "running",
-  template: false,
-  installed_version: "0.1.302",
-  agent_version: "110.0.2",
-  agent_running: true,
-  detected_at: "2026-09-01T00:00:00Z",
-  stage: "idle",
-  reboot_required: false,
-  staged_version: "",
-  staged_at: null,
-  last_error: "",
-  last_result_at: null,
-  excluded: false,
-  policy_target_version: "",
-  note: "",
-  target_version: "0.1.302-1",
-  up_to_date: true,
-  needs_update: false,
-};
-
-function mount(guest: Partial<GuestToolsGuest>, canDo = true) {
+function mount(over: Partial<GuestToolsGuest>, canDo = true) {
   vi.mocked(useGuestToolsFleet).mockReturnValue({
-    data: [{ ...base, ...guest }],
+    data: [guest(over)],
     isLoading: false,
   } as unknown as ReturnType<typeof useGuestToolsFleet>);
-  // Mocked one at a time rather than in a loop: the hooks have different
-  // mutation payload types, so a shared loop variable has no single valid type.
-  const idle = { mutateAsync: vi.fn(), isPending: false };
-  vi.mocked(useDetectGuestTools).mockReturnValue(
-    idle as unknown as ReturnType<typeof useDetectGuestTools>,
-  );
-  vi.mocked(useStageGuestToolsUpdate).mockReturnValue(
-    idle as unknown as ReturnType<typeof useStageGuestToolsUpdate>,
-  );
-  vi.mocked(useCancelGuestToolsUpdate).mockReturnValue(
-    idle as unknown as ReturnType<typeof useCancelGuestToolsUpdate>,
-  );
-  vi.mocked(useSetGuestToolsPolicy).mockReturnValue(
-    idle as unknown as ReturnType<typeof useSetGuestToolsPolicy>,
-  );
-  vi.mocked(usePermissions).mockReturnValue({
-    canExecute: () => canDo,
-    canManage: () => canDo,
-  } as unknown as ReturnType<typeof usePermissions>);
+  mockGuestToolsMutations();
+  mockPermissions("guest_tools", canDo);
   renderWithProviders(<GuestToolsFleetTable clusterId="c1" />);
 }
 
@@ -115,6 +69,15 @@ describe("GuestToolsFleetTable stage action", () => {
   it("refuses without execute permission", () => {
     mount({}, false);
     expect(screen.getByTitle(/Reinstall the current version/i)).toBeDisabled();
+  });
+
+  // A positive control on the MANAGE scope specifically — the test above
+  // withholds both scopes at once, so it cannot tell which one the row reads.
+  it("offers the exclude control to a manager", () => {
+    mount({});
+    expect(
+      screen.getByTitle(/Exclude this guest from updates/i),
+    ).not.toBeDisabled();
   });
 
   // Re-reading the installed version must never be gated on being behind:

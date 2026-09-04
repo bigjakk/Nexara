@@ -1,26 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { filterStorageByContent } from "./storage-filter";
-import type { NodeResponse, StorageResponse } from "@/types/api";
-
-function makeStorage(p: Partial<StorageResponse>): StorageResponse {
-  return {
-    id: p.id ?? "s1",
-    cluster_id: "c1",
-    node_id: p.node_id ?? "n1",
-    storage: p.storage ?? "test-pool",
-    type: p.type ?? "dir",
-    content: p.content ?? "",
-    active: p.active ?? true,
-    enabled: p.enabled ?? true,
-    shared: p.shared ?? false,
-    total: 0,
-    used: 0,
-    avail: 0,
-    last_seen_at: "",
-    created_at: "",
-    updated_at: "",
-  };
-}
+import { makeStorage } from "@/test/storage.fixtures";
+import type { NodeResponse } from "@/types/api";
 
 const node1: NodeResponse = {
   id: "n1",

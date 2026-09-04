@@ -2,16 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { VMGuestToolsCard } from "./VMGuestToolsCard";
-import {
-  useGuestToolsGuest,
-  useDetectGuestTools,
-  useStageGuestToolsUpdate,
-  useCancelGuestToolsUpdate,
-  useSetGuestToolsPolicy,
-} from "../api/guest-tools-queries";
+import { useGuestToolsGuest } from "../api/guest-tools-queries";
 import { useVirtioWinReleases } from "../api/virtio-win-queries";
-import { usePermissions } from "@/hooks/usePermissions";
 import type { GuestToolsGuest } from "../types/guest-tools";
+import { outdatedGuest } from "../guest-tools.fixtures";
+import { mockGuestToolsMutations, mockPermissions } from "../guest-tools.mocks";
 
 vi.mock("../api/guest-tools-queries", () => ({
   useGuestToolsGuest: vi.fn(),
@@ -23,59 +18,20 @@ vi.mock("../api/guest-tools-queries", () => ({
 vi.mock("../api/virtio-win-queries", () => ({ useVirtioWinReleases: vi.fn() }));
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: vi.fn() }));
 
-const guest: GuestToolsGuest = {
-  vmid: 100,
-  name: "server2022",
-  node: "pve1",
-  status: "running",
-  template: false,
-  installed_version: "0.1.285",
-  agent_version: "110.0.2",
-  agent_running: true,
-  detected_at: "2026-09-01T00:00:00Z",
-  stage: "idle",
-  reboot_required: false,
-  staged_version: "",
-  staged_at: null,
-  last_error: "",
-  last_result_at: null,
-  excluded: false,
-  policy_target_version: "",
-  note: "",
-  target_version: "0.1.302-1",
-  up_to_date: false,
-  needs_update: true,
-};
-
 function mount(
   overrides: Partial<GuestToolsGuest> = {},
   opts: { canDo?: boolean } = {},
 ) {
   vi.mocked(useGuestToolsGuest).mockReturnValue({
-    guest: { ...guest, ...overrides },
+    guest: outdatedGuest(overrides),
     isLoading: false,
   } as unknown as ReturnType<typeof useGuestToolsGuest>);
   vi.mocked(useVirtioWinReleases).mockReturnValue({
     data: [],
     isLoading: false,
   } as unknown as ReturnType<typeof useVirtioWinReleases>);
-  const idle = { mutateAsync: vi.fn(), isPending: false };
-  vi.mocked(useDetectGuestTools).mockReturnValue(
-    idle as unknown as ReturnType<typeof useDetectGuestTools>,
-  );
-  vi.mocked(useStageGuestToolsUpdate).mockReturnValue(
-    idle as unknown as ReturnType<typeof useStageGuestToolsUpdate>,
-  );
-  vi.mocked(useCancelGuestToolsUpdate).mockReturnValue(
-    idle as unknown as ReturnType<typeof useCancelGuestToolsUpdate>,
-  );
-  vi.mocked(useSetGuestToolsPolicy).mockReturnValue(
-    idle as unknown as ReturnType<typeof useSetGuestToolsPolicy>,
-  );
-  vi.mocked(usePermissions).mockReturnValue({
-    canExecute: () => opts.canDo ?? true,
-    canManage: () => opts.canDo ?? true,
-  } as unknown as ReturnType<typeof usePermissions>);
+  mockGuestToolsMutations();
+  mockPermissions("guest_tools", opts.canDo ?? true);
 
   renderWithProviders(<VMGuestToolsCard clusterId="c1" vmid={100} />);
 }
@@ -142,6 +98,17 @@ describe("VMGuestToolsCard", () => {
     expect(
       screen.getByRole("button", { name: /at next boot/i }),
     ).toBeDisabled();
+  });
+
+  // A positive control on the MANAGE scope specifically. The "without
+  // permission" test above cannot tell the scopes apart — it withholds both —
+  // so without this the card could ask for the wrong permission entirely and
+  // every test here would still pass.
+  it("enables the exclude toggle for a manager", () => {
+    mount();
+    expect(
+      screen.getByLabelText(/Exclude from automatic updates/i),
+    ).toBeEnabled();
   });
 
   // A reboot-required note is not a failure and must not read as one.

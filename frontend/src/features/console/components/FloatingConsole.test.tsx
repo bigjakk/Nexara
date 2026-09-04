@@ -4,6 +4,7 @@ import { renderWithProviders } from "@/test/test-utils";
 import { FloatingConsole } from "./FloatingConsole";
 import { useConsoleStore } from "@/stores/console-store";
 import type { ConsoleTab } from "../types/console";
+import { vncTab } from "../console.fixtures";
 
 // These tests are about the shape of the tree FloatingConsole returns, not
 // about what a viewer does with a socket, so both viewers are stubbed down to
@@ -34,16 +35,7 @@ vi.mock("./Terminal", () => ({
 vi.mock("./ConsoleTabBar", () => ({ ConsoleTabBar: () => null }));
 vi.mock("./QuickConnect", () => ({ QuickConnect: () => null }));
 
-const vncTab: ConsoleTab = {
-  id: "tab-vnc-1",
-  clusterID: "cluster-1",
-  node: "pve1",
-  type: "vm_vnc",
-  vmid: 103,
-  label: "VNC: zorin",
-  status: "connected",
-  reconnectKey: 0,
-};
+const tab = vncTab({ status: "connected" });
 
 function content(): Element | null {
   return document.querySelector("[data-tab-id]");
@@ -51,8 +43,8 @@ function content(): Element | null {
 
 beforeEach(() => {
   useConsoleStore.setState({
-    tabs: [vncTab],
-    activeTabId: vncTab.id,
+    tabs: [tab],
+    activeTabId: tab.id,
     windowMode: "floating",
   });
 });

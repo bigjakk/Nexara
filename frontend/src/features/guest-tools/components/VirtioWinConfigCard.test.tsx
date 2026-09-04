@@ -12,6 +12,8 @@ import {
 } from "../api/virtio-win-queries";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import { usePermissions } from "@/hooks/usePermissions";
+import { makeStorage } from "@/test/storage.fixtures";
+import type { StorageResponse } from "@/types/api";
 import type {
   VirtioWinConfig,
   VirtioWinConfigRequest,
@@ -80,41 +82,27 @@ const releases: VirtioWinRelease[] = [
 ];
 
 const storages = [
-  {
-    id: "s1",
-    cluster_id: "c1",
-    node_id: "n1",
-    storage: "local",
-    type: "dir",
-    content: "iso,vztmpl,backup",
-    active: true,
-    enabled: true,
-    shared: false,
-    total: 0,
-    used: 0,
-    avail: 0,
-    last_seen_at: "",
-    created_at: "",
-    updated_at: "",
-  },
-  {
+  makeStorage({ id: "s1", storage: "local", content: "iso,vztmpl,backup" }),
+  makeStorage({
     id: "s2",
-    cluster_id: "c1",
-    node_id: "n1",
     storage: "vmdata",
     type: "rbd",
     content: "images,rootdir",
-    active: true,
-    enabled: true,
     shared: true,
-    total: 0,
-    used: 0,
-    avail: 0,
-    last_seen_at: "",
-    created_at: "",
-    updated_at: "",
-  },
+  }),
 ];
+
+/**
+ * A mutation hook parked idle.
+ *
+ * Each site still casts to its OWN hook's ReturnType. Returning `never` would
+ * let this drop in without a cast, but `never` is assignable to the query
+ * hooks' slots too — so handing a query hook a mutation stub would compile
+ * clean and fail at render instead of at the keyboard.
+ */
+function idleMutation(mutate: ReturnType<typeof vi.fn> = vi.fn()) {
+  return { mutate, isPending: false, error: null };
+}
 
 function mockHooks(
   config: VirtioWinConfig,
@@ -122,6 +110,7 @@ function mockHooks(
     mutate?: ReturnType<typeof vi.fn>;
     checkMutate?: ReturnType<typeof vi.fn>;
     canManage?: boolean;
+    storages?: StorageResponse[];
   } = {},
 ) {
   const mutate = opts.mutate ?? vi.fn();
@@ -129,31 +118,32 @@ function mockHooks(
     data: config,
     isLoading: false,
   } as unknown as ReturnType<typeof useVirtioWinConfig>);
-  vi.mocked(useUpdateVirtioWinConfig).mockReturnValue({
-    mutate,
-    isPending: false,
-    error: null,
-  } as unknown as ReturnType<typeof useUpdateVirtioWinConfig>);
+  vi.mocked(useUpdateVirtioWinConfig).mockReturnValue(
+    idleMutation(mutate) as unknown as ReturnType<
+      typeof useUpdateVirtioWinConfig
+    >,
+  );
   vi.mocked(useVirtioWinReleases).mockReturnValue({
     data: releases,
     isLoading: false,
   } as unknown as ReturnType<typeof useVirtioWinReleases>);
-  vi.mocked(useDownloadVirtioWin).mockReturnValue({
-    mutate: vi.fn(),
-    isPending: false,
-    error: null,
-  } as unknown as ReturnType<typeof useDownloadVirtioWin>);
-  vi.mocked(useCheckVirtioWinNow).mockReturnValue({
-    mutate: opts.checkMutate ?? vi.fn(),
-    isPending: false,
-    error: null,
-  } as unknown as ReturnType<typeof useCheckVirtioWinNow>);
+  vi.mocked(useDownloadVirtioWin).mockReturnValue(
+    idleMutation() as unknown as ReturnType<typeof useDownloadVirtioWin>,
+  );
+  vi.mocked(useCheckVirtioWinNow).mockReturnValue(
+    idleMutation(opts.checkMutate) as unknown as ReturnType<
+      typeof useCheckVirtioWinNow
+    >,
+  );
   vi.mocked(useClusterStorage).mockReturnValue({
-    data: storages,
+    data: opts.storages ?? storages,
     isLoading: false,
   } as unknown as ReturnType<typeof useClusterStorage>);
+  // Scope-checked: a mock that answers the same for any string lets the card
+  // ask for the wrong permission entirely and still pass its read-only test.
   vi.mocked(usePermissions).mockReturnValue({
-    canManage: () => opts.canManage ?? true,
+    canManage: (asked: string) =>
+      asked === "storage" && (opts.canManage ?? true),
   } as unknown as ReturnType<typeof usePermissions>);
   return mutate;
 }
@@ -181,17 +171,15 @@ describe("VirtioWinConfigCard", () => {
   it("lists a non-shared pool once, not once per node", async () => {
     // storage_pools is keyed (cluster, node, storage), so a `local` dir pool on
     // a three-node cluster arrives as three rows with the same storage name.
-    const perNode = [0, 1, 2].map((i) => ({
-      ...storages[0],
-      id: `s-local-${String(i)}`,
-      node_id: `n${String(i)}`,
-    }));
-    mockHooks(baseConfig);
-    // After mockHooks, which installs the default storage list.
-    vi.mocked(useClusterStorage).mockReturnValue({
-      data: perNode,
-      isLoading: false,
-    } as unknown as ReturnType<typeof useClusterStorage>);
+    const perNode = [0, 1, 2].map((i) =>
+      makeStorage({
+        storage: "local",
+        content: "iso,vztmpl,backup",
+        id: `s-local-${String(i)}`,
+        node_id: `n${String(i)}`,
+      }),
+    );
+    mockHooks(baseConfig, { storages: perNode });
 
     const user = userEvent.setup();
     renderWithProviders(<VirtioWinConfigCard clusterId="c1" />);
