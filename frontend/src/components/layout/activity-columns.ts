@@ -88,7 +88,6 @@ export const SEVERITY_LABELS: Record<Severity, string> = {
 export interface ActivityRowData {
   entry: AuditLogEntry;
   details: ParsedDetails;
-  upid: string | undefined;
   status: DerivedTaskStatus;
   severity: Severity;
   /**
@@ -109,8 +108,7 @@ export function decorateActivity(
   taskStatuses: Record<string, LiveTaskStatus>,
 ): ActivityRowData {
   const details = parseDetails(entry.details);
-  const upid = details.upid;
-  const live = upid ? taskStatuses[upid] : undefined;
+  const live = details.upid ? taskStatuses[details.upid] : undefined;
   const status = deriveTaskStatus(entry, details, live);
 
   // A failed task outranks whatever the action name suggests.
@@ -122,11 +120,7 @@ export function decorateActivity(
   const progress =
     status === "none"
       ? null
-      : displayProgress(
-          status,
-          entry.task_progress ?? null,
-          status === "running" ? live?.progress : undefined,
-        );
+      : displayProgress(status, entry.task_progress ?? null, live?.progress);
 
   // For Proxmox-sourced entries, resolve resource_name from the details JSON.
   let resourceLabel =
@@ -155,7 +149,6 @@ export function decorateActivity(
   return {
     entry,
     details,
-    upid,
     status,
     severity,
     progress,
@@ -163,6 +156,18 @@ export function decorateActivity(
     resourceLabel,
     exitStatusText,
   };
+}
+
+/**
+ * The Action cell as one string — what that column sorts on, and what the
+ * task-progress dialog titles itself with. The cell renders the two halves
+ * separately, so this is the only place the em dash is composed, and the only
+ * place a row with no resource is kept from trailing one.
+ */
+export function activityLabel(row: ActivityRowData): string {
+  return row.resourceLabel
+    ? `${row.actionLabel} — ${row.resourceLabel}`
+    : row.actionLabel;
 }
 
 export type ActivitySortKey =

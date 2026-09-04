@@ -91,11 +91,7 @@ function TaskRow({
   );
 
   const display = deriveDisplayStatus(task, live);
-  const progress = displayProgress(
-    display,
-    task.progress,
-    display === "running" ? live?.progress : undefined,
-  );
+  const progress = displayProgress(display, task.progress, live?.progress);
   const exitText = task.exit_status || live?.exit_status || "";
 
   const { data: logLines, isLoading: logLoading } = useTaskLog(

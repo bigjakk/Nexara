@@ -19,6 +19,7 @@ import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { formatRelativeTime } from "@/lib/format";
 import {
+  activityLabel,
   SEVERITY_LABELS,
   SEVERITY_RANK,
   SEVERITY_STYLES,
@@ -101,10 +102,7 @@ const ALL_COLUMNS: ColumnDef<
     // Sorted on the whole visible string: the cell renders the action and the
     // resource together, so ordering on the action alone would look arbitrary
     // within a run of identically-named actions.
-    sortValue: (row) =>
-      row.resourceLabel
-        ? `${row.actionLabel} — ${row.resourceLabel}`
-        : row.actionLabel,
+    sortValue: activityLabel,
     cell: (row) => (
       <div className="flex items-center gap-x-2 overflow-hidden">
         <PVESourceBadge source={row.entry.source} />

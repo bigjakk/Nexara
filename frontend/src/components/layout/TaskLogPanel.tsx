@@ -14,9 +14,9 @@ import { TaskLogSection } from "@/components/TaskLogSection";
 import { useDataTable } from "@/hooks/useDataTable";
 import type { ColumnLayout } from "@/hooks/useColumnLayout";
 import { formatDateTime } from "@/lib/format";
-import { parseDetails } from "./task-status";
 import {
   DEFAULT_ACTIVITY_SORT,
+  activityLabel,
   activityRowKey,
   decorateActivity,
   type ActivityRowData,
@@ -37,12 +37,18 @@ function getClusterIdFromEntry(entry: AuditLogEntry): string {
  * Mounted only for entries the server reports as running, and useTaskStatus
  * stops polling once the task is stopped — so the working set is tiny and
  * self-emptying. No entry-age gate: status correctness comes from the server.
+ *
+ * Takes the cluster and UPID rather than the entry: decorateActivity has
+ * already parsed the details the caller selected these rows by, so re-parsing
+ * them here would be the second parse of the same JSON per row per render.
  */
 function ActiveTaskPoller({
-  entry,
+  clusterId,
+  upid,
   onStatus,
 }: {
-  entry: AuditLogEntry;
+  clusterId: string;
+  upid: string;
   onStatus: (
     upid: string,
     status: string,
@@ -50,15 +56,11 @@ function ActiveTaskPoller({
     progress?: number,
   ) => void;
 }) {
-  const details = parseDetails(entry.details);
-  const clusterId = getClusterIdFromEntry(entry);
-  const upid = details.upid ?? null;
-
   const { data: task } = useTaskStatus(clusterId, upid);
 
   const prevRef = useRef<string | null>(null);
   useEffect(() => {
-    if (task && upid) {
+    if (task) {
       const key = `${task.status}:${task.exit_status}:${String(task.progress ?? "")}`;
       if (prevRef.current !== key) {
         prevRef.current = key;
@@ -91,7 +93,8 @@ function ActivityRow({
   layout: ActivityLayout;
 }) {
   const { t } = useTranslation("common");
-  const { entry, details, upid, status } = row;
+  const { entry, details, status } = row;
+  const upid = details.upid;
   const hasUpid = !!upid;
   const clusterId = getClusterIdFromEntry(entry);
 
@@ -137,11 +140,11 @@ function ActivityRow({
                   <span className="text-red-500">{row.exitStatusText}</span>
                 </>
               )}
-              {details.upid && (
+              {upid && (
                 <>
                   <span className="text-muted-foreground">UPID</span>
                   <span className="break-all font-mono text-[10px]">
-                    {details.upid}
+                    {upid}
                   </span>
                 </>
               )}
@@ -224,13 +227,6 @@ export function TaskLogPanel() {
   const failedCount =
     entries?.filter((e) => e.task_status === "failed").length ?? 0;
 
-  // Live-poll only tasks the server reports as running — for the progress bar
-  // and to flip to done between reconcile ticks. No entry-age gate.
-  const runningWithUpids =
-    entries?.filter(
-      (e) => e.task_status === "running" && !!parseDetails(e.details).upid,
-    ) ?? [];
-
   // Resolve every cell's value once, then sort on those same values.
   //
   // Sorting is client-side here, unlike the Tasks page. useRecentActivity
@@ -243,6 +239,22 @@ export function TaskLogPanel() {
   const rows = useMemo(
     () => (entries ?? []).map((e) => decorateActivity(e, taskStatuses)),
     [entries, taskStatuses],
+  );
+
+  // Live-poll only tasks the server reports as running — for the progress bar
+  // and to flip to done between reconcile ticks. No entry-age gate. Read off
+  // the decorated rows so the details JSON is parsed once per entry, not again
+  // per poller.
+  const runningPolls = rows.flatMap((r) =>
+    r.entry.task_status === "running" && r.details.upid
+      ? [
+          {
+            id: r.entry.id,
+            clusterId: getClusterIdFromEntry(r.entry),
+            upid: r.details.upid,
+          },
+        ]
+      : [],
   );
 
   const {
@@ -286,8 +298,13 @@ export function TaskLogPanel() {
   return (
     <div className="flex flex-col border-t bg-card">
       {/* Invisible progress pollers for running tasks */}
-      {runningWithUpids.map((e) => (
-        <ActiveTaskPoller key={e.id} entry={e} onStatus={handleTaskStatus} />
+      {runningPolls.map((poll) => (
+        <ActiveTaskPoller
+          key={poll.id}
+          clusterId={poll.clusterId}
+          upid={poll.upid}
+          onStatus={handleTaskStatus}
+        />
       ))}
 
       {/* Resize handle — only visible when panel is open */}
@@ -372,11 +389,11 @@ export function TaskLogPanel() {
                     }}
                     layout={layout}
                     onFocus={() => {
-                      if (row.upid && row.entry.cluster_id) {
+                      if (row.details.upid && row.entry.cluster_id) {
                         setFocusedTask({
                           clusterId: row.entry.cluster_id,
-                          upid: row.upid,
-                          description: `${row.actionLabel} — ${row.resourceLabel}`,
+                          upid: row.details.upid,
+                          description: activityLabel(row),
                         });
                       }
                     }}

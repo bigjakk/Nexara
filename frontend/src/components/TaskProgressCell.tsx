@@ -31,7 +31,10 @@ export function TaskProgressCell({
   display: DisplayStatus | null;
   value: number | null;
 }) {
-  if (value === null) {
+  // A non-task row has no fraction either — decorateActivity passes null for
+  // both — so the two cases collapse: without a status there is no fill colour
+  // to pick, and the drawn bar below can take `display` as non-null.
+  if (display === null || value === null) {
     if (display !== "running") {
       return <span className="text-muted-foreground">—</span>;
     }
@@ -55,13 +58,11 @@ export function TaskProgressCell({
     <div className="flex items-center gap-1.5">
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
         <div
-          className={`h-full rounded-full transition-all duration-500 ${display === null ? "bg-muted-foreground" : FILL[display]}`}
+          className={`h-full rounded-full transition-all duration-500 ${FILL[display]}`}
           style={{ width: `${String(pct)}%` }}
         />
       </div>
-      <span
-        className={`text-[10px] tabular-nums ${display === null ? "text-muted-foreground" : TEXT[display]}`}
-      >
+      <span className={`text-[10px] tabular-nums ${TEXT[display]}`}>
         {pct}%
       </span>
     </div>

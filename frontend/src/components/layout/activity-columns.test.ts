@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_ACTIVITY_SORT,
+  activityLabel,
   decorateActivity,
   type LiveTaskStatus,
 } from "./activity-columns";
@@ -127,6 +128,20 @@ describe("decorateActivity", () => {
       noLive,
     );
     expect(row.severity).toBe("error");
+  });
+});
+
+describe("activityLabel", () => {
+  it("leaves no trailing dash on a row with no resource", () => {
+    // What the task-progress dialog titles itself with. A login has no
+    // resource at all, and the dialog used to compose this string without the
+    // guard the Action column sorts through — so it read "Login — ".
+    const row = decorateActivity(
+      entry({ action: "login", resource_id: "" }),
+      noLive,
+    );
+    expect(row.resourceLabel).toBe("");
+    expect(activityLabel(row)).toBe("Login");
   });
 });
 
