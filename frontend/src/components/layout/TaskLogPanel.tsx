@@ -131,7 +131,7 @@ function ActivityRow({
               <span className="text-muted-foreground">Cluster</span>
               <span>{entry.cluster_name || "—"}</span>
               <span className="text-muted-foreground">User</span>
-              <span>{entry.user_display_name || entry.user_email}</span>
+              <span>{row.actorLabel || "—"}</span>
               <span className="text-muted-foreground">Time</span>
               <span>{formatDateTime(entry.created_at)}</span>
               {isFailed && row.exitStatusText !== "" && (

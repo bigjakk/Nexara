@@ -34,11 +34,12 @@ export interface ActivityCellCtx {
 }
 
 /*
- * Below `md` there is not enough width for six columns, so Cluster and
+ * Below `md` there is not enough width for seven columns, so User, Cluster and
  * Progress yield — via `hideBelowMd`, which drops them from the layout rather
  * than hiding them with a class. A hidden-by-CSS column still contributes its
  * width, so the table would stay as wide as if it were shown and the drawer
- * would scroll sideways on a phone anyway.
+ * would scroll sideways on a phone anyway. All three are still in the expanded
+ * row, which is the phone-width way to read them.
  */
 export const ACTIVITY_COLUMN_DEFS: ColumnDef<
   ActivityRowData,
@@ -98,7 +99,7 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
   {
     key: "action",
     label: "Action",
-    width: 460,
+    width: 400,
     // Sorted on the whole visible string: the cell renders the action and the
     // resource together, so ordering on the action alone would look arbitrary
     // within a run of identically-named actions.
@@ -124,6 +125,21 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
     ),
   },
   {
+    key: "user",
+    label: "User",
+    width: 150,
+    // Sorted on the resolved actor, not entry.user_display_name: a PVE row
+    // shows the Proxmox account and a background row shows "System", and
+    // ordering on the join column would scatter both through the "D"s.
+    sortValue: (row) => row.actorLabel || null,
+    hideBelowMd: true,
+    // The cell's own <td> already truncates (DataTableCells), the same as the
+    // Cluster column next door — no wrapper of its own needed.
+    cell: (row) => (
+      <span className="text-muted-foreground">{row.actorLabel || "—"}</span>
+    ),
+  },
+  {
     key: "cluster",
     label: "Cluster",
     width: 160,
@@ -145,6 +161,7 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
       <TaskProgressCell
         display={row.status === "none" ? null : row.status}
         value={row.progress}
+        completedLabel
       />
     ),
   },

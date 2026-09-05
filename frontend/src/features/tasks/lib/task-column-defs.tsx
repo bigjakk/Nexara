@@ -6,7 +6,10 @@
  * .tsx keeps fast refresh working for both halves.
  */
 import { CheckCircle2, ChevronDown, Loader2, XCircle } from "lucide-react";
-import type { DisplayStatus } from "@/components/layout/task-status";
+import {
+  STATUS_LABEL,
+  type DisplayStatus,
+} from "@/components/layout/task-status";
 import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
@@ -28,11 +31,6 @@ const STATUS_BADGE: Record<DisplayStatus, string> = {
   running: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
   ok: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
   failed: "bg-red-500/15 text-red-600 dark:text-red-400",
-};
-const STATUS_LABEL: Record<DisplayStatus, string> = {
-  running: "Running",
-  ok: "Completed",
-  failed: "Failed",
 };
 
 /**

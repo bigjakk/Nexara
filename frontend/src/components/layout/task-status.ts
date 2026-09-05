@@ -94,6 +94,21 @@ export function deriveTaskStatus(
 export type DisplayStatus = Exclude<DerivedTaskStatus, "none">;
 
 /**
+ * What each outcome is called on screen.
+ *
+ * One map, because two places say these words about the same task and their
+ * agreement is load-bearing: the Tasks tables' Status badge, and the progress
+ * cell's `completedLabel`, which exists precisely BECAUSE the Tasks tables
+ * already say "Completed" next door and must not say it twice. Two spellings
+ * of that string could drift apart without a single test noticing.
+ */
+export const STATUS_LABEL: Record<DisplayStatus, string> = {
+  running: "Running",
+  ok: "Completed",
+  failed: "Failed",
+};
+
+/**
  * The fraction a progress cell draws, or null when there is none to draw.
  *
  * A finished task shows a full bar whatever it stored: Proxmox reports no

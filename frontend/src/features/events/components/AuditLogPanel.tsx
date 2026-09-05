@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -13,6 +13,7 @@ import {
   SEVERITY_STYLES,
   deriveSeverity,
   formatAction,
+  userLabel,
   type Severity,
 } from "@/components/layout/activity-columns";
 import { parseDetails } from "@/components/layout/task-status";
@@ -159,14 +160,11 @@ function detailPairs(entry: AuditLogEntry): Array<[string, string]> | null {
 
 function sourceBadge(entry: AuditLogEntry) {
   if (entry.source === "proxmox") {
-    let proxmoxUser = "";
-    try {
-      const d = JSON.parse(entry.details) as Record<string, unknown>;
-      if (typeof d["proxmox_user"] === "string")
-        proxmoxUser = d["proxmox_user"];
-    } catch {
-      // ignore
-    }
+    const details = parseDetails(entry.details);
+    const proxmoxUser =
+      typeof details["proxmox_user"] === "string"
+        ? details["proxmox_user"]
+        : "";
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-xs font-medium text-orange-600 dark:text-orange-400">
         <Monitor className="h-3 w-3" />
@@ -177,9 +175,14 @@ function sourceBadge(entry: AuditLogEntry) {
       </span>
     );
   }
+  // userLabel, not deriveActor: the Proxmox case is the branch above, so what
+  // is left is the Nexara account, and this must name it the same way the
+  // Activity drawer's User column does — a row cannot read "DRS Scheduler" in
+  // one table and "System" in the other when the drawer sits over this page.
   return (
     <span className="text-sm">
-      {entry.user_display_name || entry.user_email}
+      {userLabel(entry.user_id, entry.user_display_name, entry.user_email) ||
+        "—"}
     </span>
   );
 }
@@ -319,7 +322,15 @@ function EventRow({
 
               <span className="text-muted-foreground">User</span>
               <span>
-                {entry.user_display_name || entry.user_email}
+                {/* The Nexara account that wrote the entry — the Source row
+                    above already carries the PVE account for an ingested
+                    task, so naming that one here would put "root@pam" beside
+                    its own system@ email. */}
+                {userLabel(
+                  entry.user_id,
+                  entry.user_display_name,
+                  entry.user_email,
+                ) || "—"}
                 {entry.user_display_name && entry.user_email && (
                   <span className="ml-1 text-muted-foreground">
                     ({entry.user_email})
@@ -392,6 +403,22 @@ export function AuditLogPanel() {
   const { data: clusters } = useClusters();
   const { data: actions } = useAuditActions();
   const { data: users } = useAuditUsers();
+
+  // Re-sorted on the label, not left in the server's order. ListDistinctAuditUsers
+  // orders by users.display_name, so the seeded system actor arrives filed under
+  // "DRS Scheduler" while the option — and every row it filters — reads "System",
+  // landing it between Dave and Erin. Same rule as the drawer's User column: a
+  // list has to be ordered by what it shows.
+  const userOptions = useMemo(
+    () =>
+      (users ?? [])
+        .map((u) => ({
+          id: u.id,
+          label: userLabel(u.id, u.display_name, u.email),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [users],
+  );
 
   const startTime = startDate ? new Date(startDate).toISOString() : undefined;
   const endTime = endDate
@@ -558,9 +585,9 @@ export function AuditLogPanel() {
             }}
           >
             <option value="">All Users</option>
-            {users?.map((u) => (
+            {userOptions.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.display_name || u.email}
+                {u.label}
               </option>
             ))}
           </select>

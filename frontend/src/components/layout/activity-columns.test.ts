@@ -3,8 +3,11 @@ import {
   DEFAULT_ACTIVITY_SORT,
   activityLabel,
   decorateActivity,
+  deriveActor,
+  userLabel,
   type LiveTaskStatus,
 } from "./activity-columns";
+import { SYSTEM_USER_ID } from "@/lib/constants";
 import { ACTIVITY_COLUMN_DEFS } from "./activity-column-defs";
 import { sortAccessorsFrom } from "@/hooks/useColumnLayout";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
@@ -36,16 +39,17 @@ const noLive: Record<string, LiveTaskStatus> = {};
 const ACCESSORS = sortAccessorsFrom(ACTIVITY_COLUMN_DEFS);
 
 describe("ACTIVITY_COLUMN_DEFS", () => {
-  it("hides Cluster and Progress below md, where the drawer has no room", () => {
-    // Which two, specifically. The drawer is the narrowest table in the app,
+  it("hides User, Cluster and Progress below md, where the drawer has no room", () => {
+    // Which three, specifically. The drawer is the narrowest table in the app,
     // so something has to go on a phone, and these are the columns whose loss
-    // costs least: the cluster is usually one repeated value, and progress is
-    // already in the row's status. Identity and time are what the drawer is
-    // for and stay at every width.
+    // costs least: the cluster is usually one repeated value, progress is
+    // already in the row's status, and the actor is usually the person holding
+    // the phone. All three are still in the expanded row. Identity and time
+    // are what the drawer is for and stay at every width.
     const hidden = ACTIVITY_COLUMN_DEFS.filter((c) => c.hideBelowMd).map(
       (c) => c.key,
     );
-    expect(hidden).toEqual(["cluster", "progress"]);
+    expect(hidden).toEqual(["user", "cluster", "progress"]);
   });
 
   it("gives every column a width, so table-fixed has one to use", () => {
@@ -62,8 +66,10 @@ describe("ACTIVITY_COLUMN_DEFS", () => {
     }
   });
 
-  it("puts Progress between Cluster and Time", () => {
+  it("puts Progress between Cluster and Time, with User after Action", () => {
     const keys = ACTIVITY_COLUMN_DEFS.map((c) => c.key);
+    expect(keys.indexOf("user")).toBe(keys.indexOf("action") + 1);
+    expect(keys.indexOf("cluster")).toBe(keys.indexOf("user") + 1);
     expect(keys.indexOf("progress")).toBe(keys.indexOf("cluster") + 1);
     expect(keys.indexOf("time")).toBe(keys.indexOf("progress") + 1);
   });
@@ -145,6 +151,73 @@ describe("activityLabel", () => {
   });
 });
 
+describe("deriveActor", () => {
+  it("credits an ingested Proxmox task to the PVE account that ran it", () => {
+    // Every ingested row is written under the seeded system actor, so the
+    // users join would credit a root@pam shutdown to "DRS Scheduler".
+    const row = decorateActivity(
+      entry({
+        source: "proxmox",
+        user_id: SYSTEM_USER_ID,
+        user_display_name: "DRS Scheduler",
+        details: JSON.stringify({ upid: "UPID:x", proxmox_user: "root@pam" }),
+      }),
+      noLive,
+    );
+    expect(row.actorLabel).toBe("root@pam");
+  });
+
+  it('calls a background action "System", not by the seeded display name', () => {
+    // 000013 seeds the system user as "DRS Scheduler", which names one of the
+    // four subsystems that write under it; a rolling update is not the DRS.
+    const row = decorateActivity(
+      entry({ user_id: SYSTEM_USER_ID, user_display_name: "DRS Scheduler" }),
+      noLive,
+    );
+    expect(row.actorLabel).toBe("System");
+  });
+
+  it("prefers a signed-in user's display name over their email", () => {
+    const row = decorateActivity(
+      entry({ user_display_name: "Alice", user_email: "a@example.com" }),
+      noLive,
+    );
+    expect(row.actorLabel).toBe("Alice");
+  });
+
+  it("falls back to the email when the display name is blank", () => {
+    const row = decorateActivity(
+      entry({ user_display_name: "", user_email: "a@example.com" }),
+      noLive,
+    );
+    expect(row.actorLabel).toBe("a@example.com");
+  });
+
+  it("resolves to empty when nothing identifies an actor", () => {
+    // A deleted user leaves the LEFT JOIN empty on both columns. The cell
+    // shows an em dash for that rather than inventing one.
+    expect(
+      deriveActor({ user_id: "u1", user_display_name: "", user_email: "" }, {}),
+    ).toBe("");
+  });
+});
+
+describe("userLabel", () => {
+  it("names the system actor for a row that is not an audit entry", () => {
+    // The audit page's User filter lists AuditUserRefs, not entries. It has to
+    // name its options by the same rule the rows are labelled with, or the
+    // dropdown offers "DRS Scheduler" for the rows that read "System".
+    expect(
+      userLabel(SYSTEM_USER_ID, "DRS Scheduler", "system@nexara.local"),
+    ).toBe("System");
+  });
+
+  it("leaves every other account alone", () => {
+    expect(userLabel("u1", "Alice", "a@example.com")).toBe("Alice");
+    expect(userLabel("u1", "", "a@example.com")).toBe("a@example.com");
+  });
+});
+
 describe("activity sort accessors", () => {
   it("ranks status worst-first so an ascending click surfaces failures", () => {
     const rank = (task_status: string) =>
@@ -178,6 +251,32 @@ describe("activity sort accessors", () => {
       noLive,
     );
     expect(ACCESSORS.action(row)).toBe("Vm Start — web01 (101)");
+  });
+
+  it("sorts User on the resolved actor, not the raw join column", () => {
+    // The cell shows the PVE account for an ingested task; ordering on
+    // user_display_name would file that row under the system user instead.
+    const row = decorateActivity(
+      entry({
+        source: "proxmox",
+        user_id: SYSTEM_USER_ID,
+        user_display_name: "DRS Scheduler",
+        details: JSON.stringify({ upid: "UPID:x", proxmox_user: "root@pam" }),
+      }),
+      noLive,
+    );
+    expect(ACCESSORS.user(row)).toBe("root@pam");
+  });
+
+  it("treats an unattributable row as absent, matching its em dash", () => {
+    expect(
+      ACCESSORS.user(
+        decorateActivity(
+          entry({ user_display_name: "", user_email: "" }),
+          noLive,
+        ),
+      ),
+    ).toBeNull();
   });
 
   it("treats a blank cluster as absent, matching the em dash the cell shows", () => {

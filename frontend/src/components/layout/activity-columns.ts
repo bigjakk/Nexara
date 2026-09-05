@@ -8,6 +8,7 @@
  */
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 import type { SortState } from "@/hooks/useTableSort";
+import { SYSTEM_USER_ID } from "@/lib/constants";
 import {
   deriveTaskStatus,
   displayProgress,
@@ -77,6 +78,49 @@ export const SEVERITY_LABELS: Record<Severity, string> = {
 };
 
 /**
+ * A Nexara account's name for display.
+ *
+ * The one thing it adds over `display_name || email` is the seeded system
+ * actor. Migration 000013 gives that row the display name "DRS Scheduler",
+ * but four subsystems write under it — DRS, the scheduler, the rolling-update
+ * orchestrator and the collector — so on a rolling-update row the seeded name
+ * is simply wrong. "System" is true for all four.
+ *
+ * Takes the three fields rather than an entry, so the audit page's user FILTER
+ * can name its options by the same rule the rows are labelled with; it lists
+ * `AuditUserRef`s, not audit entries. Empty when the row identifies no user at
+ * all (a deleted account leaves the LEFT JOIN empty on both columns) — callers
+ * render an em dash rather than inventing one.
+ */
+export function userLabel(
+  id: string,
+  displayName: string,
+  email: string,
+): string {
+  if (id === SYSTEM_USER_ID) return "System";
+  return displayName || email;
+}
+
+/**
+ * Who to credit for an audit row — what the Activity drawer's User column and
+ * the audit page's rows both show.
+ *
+ * A task Nexara ingested from Proxmox was performed by a *PVE* account, and
+ * the collector records it in the details as `proxmox_user`. Every one of
+ * those rows is written under the seeded system actor, so going by the users
+ * join alone would credit a `root@pam` shutdown to Nexara's own background
+ * user. Anything else is the Nexara account that wrote the entry.
+ */
+export function deriveActor(
+  entry: Pick<AuditLogEntry, "user_id" | "user_display_name" | "user_email">,
+  details: ParsedDetails,
+): string {
+  const pveUser = details["proxmox_user"];
+  if (typeof pveUser === "string" && pveUser !== "") return pveUser;
+  return userLabel(entry.user_id, entry.user_display_name, entry.user_email);
+}
+
+/**
  * One activity row with everything the cells render already resolved.
  *
  * Computed once per entry rather than inside the row component, because the
@@ -100,6 +144,8 @@ export interface ActivityRowData {
   progress: number | null;
   actionLabel: string;
   resourceLabel: string;
+  /** Who did it — see deriveActor. Empty when nothing identifies an actor. */
+  actorLabel: string;
   exitStatusText: string;
 }
 
@@ -154,6 +200,7 @@ export function decorateActivity(
     progress,
     actionLabel: formatAction(entry.action),
     resourceLabel,
+    actorLabel: deriveActor(entry, details),
     exitStatusText,
   };
 }
@@ -174,6 +221,7 @@ export type ActivitySortKey =
   | "status"
   | "level"
   | "action"
+  | "user"
   | "cluster"
   | "progress"
   | "time";
