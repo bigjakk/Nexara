@@ -16,7 +16,7 @@ const CEPH = "c0000000-0000-4000-8000-000000000001";
 function platform(over: Partial<VeeamPlatform> = {}): VeeamPlatform {
   return {
     platform_id: "01208ee8-47fe-4ea8-8727-5115874da1ad",
-    display_name: "CRJLAB",
+    display_name: "cluster01",
     cluster_id: null,
     cluster_name: "",
     object_count: 18,
@@ -33,7 +33,7 @@ function guest(
     veeam_ref: "33de6836-c00c-4d7c-bd37-2bdf37743b47",
     role: "worker",
     name: "veeam13-appliance01",
-    host_name: "hv01.example.lan",
+    host_name: "pve-01.example.com",
     is_disabled: false,
     is_online: false,
     cluster_id: CEPH,

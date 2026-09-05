@@ -222,7 +222,7 @@ export function VeeamProtectionCard({
                     {/*
                     No "Backup" column. The collector folds Veeam's listing to
                     one backup object per guest, so the object name is just the
-                    guest's own — a column repeating "docker03" on every row
+                    guest's own — a column repeating "linux03" on every row
                     under a header promising to say which job produced the
                     point. The point's backup id is a bare UUID and no more
                     use. Better to omit it than to imply an answer.

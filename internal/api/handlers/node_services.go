@@ -118,10 +118,10 @@ var relativeUnit = map[string]time.Duration{
 // journalctl, which reads it in the NODE's timezone.
 //
 // Getting this wrong is not cosmetic. Rendering "1h ago" as UTC against a node
-// on America/Los_Angeles (UTC-7) produces a wall clock the node reads as seven
-// hours in its own FUTURE, and journalctl answers with its literal
-// "-- No entries --" — the exact symptom this endpoint was fixed to stop
-// producing. Verified against HV01, which runs America/Los_Angeles.
+// on a UTC-7 zone produces a wall clock the node reads as seven hours in its
+// own FUTURE, and journalctl answers with its literal "-- No entries --" — the
+// exact symptom this endpoint was fixed to stop producing. Verified against a
+// node running a zone behind UTC.
 //
 // DST: nodeOffset is the offset *now*, so a window spanning a transition is off
 // by the DST delta for part of its span. Harmless in the autumn direction (the

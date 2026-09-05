@@ -116,7 +116,7 @@ func TestMigration068_RekeyPreservesAndDecouplesMembership(t *testing.T) {
 		t.Fatalf("seed vm: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO vm_folders (id, cluster_id, name) VALUES ($1, $2, 'CRJLAB')`,
+		`INSERT INTO vm_folders (id, cluster_id, name) VALUES ($1, $2, 'cluster01')`,
 		folderID, clusterID); err != nil {
 		t.Fatalf("seed folder: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestMigration068_RekeyPreservesAndDecouplesMembership(t *testing.T) {
 		t.Fatalf("churn: reinsert vms row with new id: %v", err)
 	}
 	// The List join must resolve the surviving membership to the NEW id — i.e.
-	// the guest stays in CRJLAB instead of falling back to "Discovered".
+	// the guest stays in cluster01 instead of falling back to "Discovered".
 	var joinedVMID, joinedFolder uuid.UUID
 	if err := pool.QueryRow(ctx,
 		`SELECT v.id, m.folder_id

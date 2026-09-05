@@ -95,7 +95,7 @@ describe("FloatingConsole window modes", () => {
 
     expect(getByTitle("Restore")).toBeInTheDocument();
     expect(getByTitle("Close")).toBeInTheDocument();
-    expect(getByText("VNC: zorin")).toBeInTheDocument();
+    expect(getByText("VNC: linux11")).toBeInTheDocument();
     expect(getByTestId("content-vnc")).toBeInTheDocument();
     // The title bar's own controls belong to the restored window only.
     expect(document.querySelector('[title="Minimize"]')).toBeNull();

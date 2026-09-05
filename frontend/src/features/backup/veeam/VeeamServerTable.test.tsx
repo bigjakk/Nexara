@@ -43,7 +43,7 @@ function probe(over: Partial<VeeamProbeResult> = {}): VeeamProbeResult {
     license_type: "NFR",
     licensed_to: "ExampleOrg",
     license_expiration: "2027-04-27T00:00:00Z",
-    proxmox_clusters: [{ name: "SITE-A", vm_count: 14 }],
+    proxmox_clusters: [{ name: "cluster01", vm_count: 14 }],
     warnings: [],
     ...over,
   };
@@ -132,7 +132,7 @@ describe("VeeamServerTable", () => {
     expect(await screen.findByText(/Connected to vbr01/)).toBeInTheDocument();
     // The cluster list is the point of the test: a licensed, reachable server
     // with no Proxmox workloads will never produce a row.
-    expect(screen.getByText(/SITE-A · 14 VMs/)).toBeInTheDocument();
+    expect(screen.getByText(/cluster01 · 14 VMs/)).toBeInTheDocument();
     expect(mockedPost).toHaveBeenCalledWith(
       "/api/v1/veeam-servers/veeam-1/test",
     );

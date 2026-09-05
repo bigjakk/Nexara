@@ -223,7 +223,7 @@ func stubOrchestrator(t *testing.T, handler http.HandlerFunc) (*Orchestrator, *p
 // TestOrchestrator_MigrateWithRetry_RetriesTransientLock verifies a drain
 // migration that hits "VM is locked (migrate)" — a guest still settling from
 // an in-flight HA migration — waits for the lock to clear and retries rather
-// than failing the whole job. This is the exact prod failure (VM 106 on HV02).
+// than failing the whole job. This is the exact prod failure (VM 106 on pve-02).
 func TestOrchestrator_MigrateWithRetry_RetriesTransientLock(t *testing.T) {
 	var migrateCalls atomic.Int32
 	o, client, closeStub := stubOrchestrator(t, func(w http.ResponseWriter, r *http.Request) {
@@ -236,10 +236,10 @@ func TestOrchestrator_MigrateWithRetry_RetriesTransientLock(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"data":"UPID:HV02:0000ABCD:00010000:00000000:qmigrate:106:root@pam:"}`))
+			_, _ = w.Write([]byte(`{"data":"UPID:pve-02:0000ABCD:00010000:00000000:qmigrate:106:root@pam:"}`))
 		case strings.HasSuffix(r.URL.Path, "/cluster/resources"):
 			payload, _ := json.Marshal(map[string]interface{}{
-				"data": []proxmox.ClusterResource{{Type: "qemu", VMID: 106, Node: "HV01", Lock: ""}},
+				"data": []proxmox.ClusterResource{{Type: "qemu", VMID: 106, Node: "pve-01", Lock: ""}},
 			})
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write(payload)
@@ -250,7 +250,7 @@ func TestOrchestrator_MigrateWithRetry_RetriesTransientLock(t *testing.T) {
 	defer closeStub()
 
 	guest := GuestSnapshot{VMID: 106, Name: "test", Type: "qemu", Status: "running"}
-	upid, err := o.migrateWithRetry(context.Background(), client, "HV02", guest, proxmox.MigrateParams{Target: "HV01", Online: true})
+	upid, err := o.migrateWithRetry(context.Background(), client, "pve-02", guest, proxmox.MigrateParams{Target: "pve-01", Online: true})
 	if err != nil {
 		t.Fatalf("migrateWithRetry should have succeeded on retry: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestOrchestrator_MigrateWithRetry_NonLockErrorNoRetry(t *testing.T) {
 	defer closeStub()
 
 	guest := GuestSnapshot{VMID: 106, Name: "test", Type: "qemu", Status: "running"}
-	if _, err := o.migrateWithRetry(context.Background(), client, "HV02", guest, proxmox.MigrateParams{Target: "HV01", Online: true}); err == nil {
+	if _, err := o.migrateWithRetry(context.Background(), client, "pve-02", guest, proxmox.MigrateParams{Target: "pve-01", Online: true}); err == nil {
 		t.Fatal("migrateWithRetry returned nil error for a non-lock failure")
 	}
 	if got := migrateCalls.Load(); got != 1 {
@@ -304,13 +304,13 @@ func TestOrchestrator_WaitForGuestUnlocked_ConfirmsTarget(t *testing.T) {
 		case 1:
 			// Premature gap: unlocked but still on the source node. The old
 			// "first empty lock wins" check would wrongly return here.
-			res = proxmox.ClusterResource{Type: "qemu", VMID: 106, Node: "HV02", Lock: ""}
+			res = proxmox.ClusterResource{Type: "qemu", VMID: 106, Node: "pve-02", Lock: ""}
 		case 2:
 			// HA CRM has now started the qmigrate — lock is set.
-			res = proxmox.ClusterResource{Type: "qemu", VMID: 106, Node: "HV02", Lock: "migrate"}
+			res = proxmox.ClusterResource{Type: "qemu", VMID: 106, Node: "pve-02", Lock: "migrate"}
 		default:
 			// Migration finished: unlocked at the target node.
-			res = proxmox.ClusterResource{Type: "qemu", VMID: 106, Node: "HV01", Lock: ""}
+			res = proxmox.ClusterResource{Type: "qemu", VMID: 106, Node: "pve-01", Lock: ""}
 		}
 		payload, _ := json.Marshal(map[string]interface{}{"data": []proxmox.ClusterResource{res}})
 		w.Header().Set("Content-Type", "application/json")
@@ -320,7 +320,7 @@ func TestOrchestrator_WaitForGuestUnlocked_ConfirmsTarget(t *testing.T) {
 
 	done := make(chan string, 1)
 	go func() {
-		done <- o.waitForGuestUnlocked(context.Background(), client, "qemu", 106, "HV01")
+		done <- o.waitForGuestUnlocked(context.Background(), client, "qemu", 106, "pve-01")
 	}()
 
 	select {

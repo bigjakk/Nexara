@@ -244,7 +244,7 @@ func (h *VMHandler) PerformAction(c fiber.Ctx) error {
 }
 
 // guestActionDesc builds a concise task description for a guest (VM/CT) action,
-// e.g. "clone zorin (103)". Shared by the VM and container handlers.
+// e.g. "clone linux11 (103)". Shared by the VM and container handlers.
 func guestActionDesc(action string, vm db.Vm) string {
 	if vm.Name != "" {
 		return action + " " + vm.Name + " (" + strconv.Itoa(int(vm.Vmid)) + ")"

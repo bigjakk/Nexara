@@ -57,7 +57,7 @@ func TestMigration090_ResolvesVeeamOwnGuests(t *testing.T) {
 	seedCluster(m090ClusterC, "migration-090-unmapped")
 
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'hv01')`,
+		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'pve-01')`,
 		m090Node, m090ClusterA); err != nil {
 		t.Fatalf("seed node: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestMigration090_ResolvesVeeamOwnGuests(t *testing.T) {
 	// On a cluster with no mapped platform.
 	seedGuest(333, "veeam13-appliance03", "qemu", m090ClusterC)
 	// A container that shares the backup server's name.
-	seedGuest(124, "vbr01.example.lan", "lxc", m090ClusterA)
+	seedGuest(124, "vbr01.example.com", "lxc", m090ClusterA)
 	seedGuest(150, "renameme", "qemu", m090ClusterA)
 	// Exactly one unnamed guest, which is the shape that makes a blank
 	// Veeam-side name resolve rather than merely being ambiguous.
@@ -116,7 +116,7 @@ func TestMigration090_ResolvesVeeamOwnGuests(t *testing.T) {
 		{"worker-ambiguous", "worker", "Veeam13-appliance02"},
 		{"worker-unmapped-cluster", "worker", "veeam13-appliance03"},
 		{"worker-absent", "worker", "veeam13-appliance99"},
-		{"vbr-is-a-container", "backup_server", "vbr01.example.lan"},
+		{"vbr-is-a-container", "backup_server", "vbr01.example.com"},
 		{"renamed", "worker", "renameme"},
 		// A blank name. vms.name is NOT NULL DEFAULT '', so without a guard
 		// this matches every unnamed guest — and where exactly one exists,

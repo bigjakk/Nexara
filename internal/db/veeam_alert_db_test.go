@@ -46,7 +46,7 @@ func TestVeeamAlertStats(t *testing.T) {
 		t.Fatalf("seed cluster: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'hv01')`, vaNode, vaCluster); err != nil {
+		`INSERT INTO nodes (id, cluster_id, name) VALUES ($1, $2, 'pve-01')`, vaNode, vaCluster); err != nil {
 		t.Fatalf("seed node: %v", err)
 	}
 	if _, err := pool.Exec(ctx,

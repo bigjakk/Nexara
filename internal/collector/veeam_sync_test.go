@@ -459,7 +459,7 @@ func TestVeeamSync_Inventory(t *testing.T) {
 			{ID: uuid.NewString(), Name: "repo-nas-01", Type: "WinLocal", CapacityGB: 100, FreeGB: 40, UsedSpaceGB: 60, IsOnline: true},
 		},
 		jobs: []veeam.JobState{
-			{ID: testJobID, Name: "Onsite_Daily", Type: veeam.ProxmoxJobType, Status: "Stopped", LastResult: "Success"},
+			{ID: testJobID, Name: "Daily-Backup", Type: veeam.ProxmoxJobType, Status: "Stopped", LastResult: "Success"},
 			// A vSphere job on the same server must not be stored — Nexara
 			// has nothing to say about it.
 			{ID: uuid.NewString(), Name: "VMware_Daily", Type: "BackupJob"},
@@ -493,7 +493,7 @@ func TestVeeamSync_Inventory(t *testing.T) {
 	}
 
 	// Only the Proxmox job and the Proxmox object are stored.
-	if len(q.jobs) != 1 || q.jobs[0].Name != "Onsite_Daily" {
+	if len(q.jobs) != 1 || q.jobs[0].Name != "Daily-Backup" {
 		t.Errorf("jobs = %+v, want only the Proxmox job", q.jobs)
 	}
 	if len(q.objects) != 1 || q.objects[0].Name != "web01" {
@@ -847,7 +847,7 @@ func TestVeeamSync_StoresOnlyProxmoxSessions(t *testing.T) {
 	c := &fakeVeeamClient{
 		sessions: []veeam.Session{
 			{ID: uuid.NewString(), SessionType: veeam.PlatformBackupSessionType, PlatformName: "Proxmox",
-				PlatformID: testPlatformID, JobID: testJobID, Name: "Onsite_Daily",
+				PlatformID: testPlatformID, JobID: testJobID, Name: "Daily-Backup",
 				CreationTime: veeam.Timestamp{Time: time.Now()}},
 			// Same session type, different platform — typeFilter cannot
 			// exclude this, so the client-side platform check must.
@@ -859,7 +859,7 @@ func TestVeeamSync_StoresOnlyProxmoxSessions(t *testing.T) {
 
 	syncer.SyncSessions(context.Background())
 
-	if len(q.sessions) != 1 || q.sessions[0].Name != "Onsite_Daily" {
+	if len(q.sessions) != 1 || q.sessions[0].Name != "Daily-Backup" {
 		t.Errorf("sessions stored = %+v, want only the Proxmox run", q.sessions)
 	}
 	// Sessions are the only bridge from a job to its platform, so derivation
@@ -1073,7 +1073,7 @@ func TestVeeamSync_ReReadsAnInFlightSessionThePollHasPassed(t *testing.T) {
 		byID: map[string]veeam.Session{
 			stuck.String(): {
 				ID: stuck.String(), SessionType: veeam.PlatformBackupSessionType,
-				PlatformName: "Proxmox", Name: "Onsite_Daily_Offsite_Linux",
+				PlatformName: "Proxmox", Name: "Daily-Copy-Linux",
 				State: "Stopped", CreationTime: veeam.Timestamp{Time: started},
 				EndTime: &veeam.Timestamp{Time: ended},
 				Result:  veeam.SessionResult{Result: "Success"},
@@ -1502,14 +1502,14 @@ func TestVeeamSync_RecordsVeeamOwnGuests(t *testing.T) {
 			// which are not guests anywhere, and three Proxmox appliances.
 			{ID: uuid.NewString(), Name: "Backup Proxy", Type: "GeneralPurposeProxy", HostName: "This server", IsOnline: true},
 			{ID: uuid.NewString(), Name: "VMware Backup Proxy", Type: "ViProxy", HostName: "This server", IsOnline: true},
-			{ID: uuid.NewString(), Name: "veeam13-appliance01", Type: veeam.ProxmoxProxyType, HostName: "hv01.example.lan"},
-			{ID: uuid.NewString(), Name: "Veeam13-appliance02", Type: veeam.ProxmoxProxyType, HostName: "hv02.example.lan"},
+			{ID: uuid.NewString(), Name: "veeam13-appliance01", Type: veeam.ProxmoxProxyType, HostName: "pve-01.example.com"},
+			{ID: uuid.NewString(), Name: "Veeam13-appliance02", Type: veeam.ProxmoxProxyType, HostName: "pve-02.example.com"},
 		},
 		managed: []veeam.ManagedServer{
-			{ID: uuid.NewString(), Name: "vbr01.example.lan", Type: "WindowsHost", Status: "Available", IsBackupServer: true},
+			{ID: uuid.NewString(), Name: "vbr01.example.com", Type: "WindowsHost", Status: "Available", IsBackupServer: true},
 			// A repository host is a managed server too, and is not Veeam's
 			// own guest on the protected cluster.
-			{ID: uuid.NewString(), Name: "nas01.example.lan", Type: "LinuxHost", Status: "Available"},
+			{ID: uuid.NewString(), Name: "nas01.example.com", Type: "LinuxHost", Status: "Available"},
 		},
 	}
 	syncer := newVeeamTestSyncer(t, q, c)
@@ -1537,7 +1537,7 @@ func TestVeeamSync_RecordsVeeamOwnGuests(t *testing.T) {
 			t.Errorf("%q role = %q, want %q", name, row.Role, veeamRoleWorker)
 		}
 	}
-	if row, ok := byName["vbr01.example.lan"]; !ok {
+	if row, ok := byName["vbr01.example.com"]; !ok {
 		t.Error("the VBR server was not recorded")
 	} else if row.Role != veeamRoleBackupServer {
 		t.Errorf("backup server role = %q, want %q", row.Role, veeamRoleBackupServer)

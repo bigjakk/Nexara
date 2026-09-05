@@ -7,7 +7,7 @@ describe("CT NIC round-trip", () => {
   // permanently dirty and strips the missing keys on save.
   it.each([
     // What Proxmox actually writes for a container NIC.
-    "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:80:F0:95,ip=dhcp,type=veth",
+    "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:00:00:01,ip=dhcp,type=veth",
     // Unmodelled keys beyond type.
     "name=eth0,bridge=vmbr0,ip=dhcp,type=veth,link_down=1",
     "name=eth0,bridge=vmbr0,type=veth,trunks=10;20;30",

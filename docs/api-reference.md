@@ -405,7 +405,7 @@ leaves provenance intact.
 
 ### Nodes
 
-> `:node` is the Proxmox node *name* (e.g. `HV01`); `:node_id` is Nexara's own
+> `:node` is the Proxmox node *name* (e.g. `pve-01`); `:node_id` is Nexara's own
 > node UUID, as returned in the `id` field of `GET /clusters/:id/nodes`. They
 > are not interchangeable — a route taking `:node_id` rejects a node name with
 > `400 Invalid node ID`.

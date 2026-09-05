@@ -31,7 +31,7 @@ export function vncTab(over: Partial<ConsoleTab> = {}): ConsoleTab {
     node: "pve1",
     type: "vm_vnc",
     vmid: 103,
-    label: "VNC: zorin",
+    label: "VNC: linux11",
     status: "connecting",
     reconnectKey: 0,
     ...over,

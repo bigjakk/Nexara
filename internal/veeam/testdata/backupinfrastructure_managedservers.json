@@ -67,7 +67,7 @@
       "type": "WindowsHost",
       "status": "Available",
       "id": "6745a759-2205-4cd2-b172-8ec8f7e60ef8",
-      "name": "vbr01.example.lan",
+      "name": "vbr01.example.com",
       "description": "EXAMPLE"
     }
   ],

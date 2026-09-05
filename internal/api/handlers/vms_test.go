@@ -75,7 +75,7 @@ func TestValidateSnapshotName(t *testing.T) {
 
 func TestSnapshotBlockingVolumes(t *testing.T) {
 	storageTypes := map[string]string{
-		"synology":    "nfs",
+		"nas":         "nfs",
 		"proxmox-ssd": "nfs",
 		"local":       "dir",
 		"test":        "rbd",
@@ -100,9 +100,9 @@ func TestSnapshotBlockingVolumes(t *testing.T) {
 		{
 			name: "raw disk on nfs flagged",
 			config: proxmox.VMConfig{
-				"scsi0": "synology:121/vm-121-disk-0.raw,discard=on,size=81G",
+				"scsi0": "nas:121/vm-121-disk-0.raw,discard=on,size=81G",
 			},
-			want: []string{"scsi0 on synology"},
+			want: []string{"scsi0 on nas"},
 		},
 		{
 			name: "rbd and lvmthin volumes are fine",
@@ -115,7 +115,7 @@ func TestSnapshotBlockingVolumes(t *testing.T) {
 		{
 			name: "cdrom iso on file storage is ignored",
 			config: proxmox.VMConfig{
-				"ide2":  "synology:iso/WinXPSP3.iso,media=cdrom,size=637568K",
+				"ide2":  "nas:iso/WinXPSP3.iso,media=cdrom,size=637568K",
 				"scsi0": "test:vm-101-disk-0,size=32G",
 			},
 			want: []string{},

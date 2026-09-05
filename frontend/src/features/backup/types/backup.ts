@@ -547,7 +547,7 @@ export interface VeeamBackupObject {
  */
 export interface VeeamPlatform {
   platform_id: string;
-  /** From the licence workload list, e.g. "CRJLAB". Often empty. */
+  /** From the licence workload list, e.g. "cluster01". Often empty. */
   display_name: string;
   cluster_id: string | null;
   cluster_name: string;

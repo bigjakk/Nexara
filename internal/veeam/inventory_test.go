@@ -138,13 +138,13 @@ func TestJobStates_DecodesProgressAndSchedule(t *testing.T) {
 
 	var job *JobState
 	for i := range states {
-		if states[i].Name == "Onsite_Daily_Appliance" {
+		if states[i].Name == "Daily-Backup-Appliance" {
 			job = &states[i]
 			break
 		}
 	}
 	if job == nil {
-		t.Fatal("Onsite_Daily_Appliance not found")
+		t.Fatal("Daily-Backup-Appliance not found")
 	}
 
 	if job.Type != ProxmoxJobType {
@@ -563,9 +563,9 @@ func TestProxyStates_FindsProxmoxWorkerAppliances(t *testing.T) {
 	// Captured verbatim, mixed case and all — which is exactly why the guest
 	// resolution matches case-insensitively.
 	for name, wantHost := range map[string]string{
-		"veeam13-appliance01": "hv01.example.lan",
-		"Veeam13-appliance02": "hv02.example.lan",
-		"Veeam13-appliance03": "hv03.example.lan",
+		"veeam13-appliance01": "pve-01.example.com",
+		"Veeam13-appliance02": "pve-02.example.com",
+		"Veeam13-appliance03": "pve-03.example.com",
 	} {
 		if got, ok := names[name]; !ok {
 			t.Errorf("worker %q missing from the listing", name)
@@ -606,7 +606,7 @@ func TestManagedServers_IdentifiesTheBackupServer(t *testing.T) {
 	// The FQDN, which is what matches a Proxmox guest name when the VBR
 	// server runs on the cluster it protects. serverInfo.name is the SHORT
 	// name and matches nothing.
-	if got := backupServers[0].Name; got != "vbr01.example.lan" {
+	if got := backupServers[0].Name; got != "vbr01.example.com" {
 		t.Errorf("backup server name = %q, want the FQDN", got)
 	}
 }
@@ -617,7 +617,7 @@ func TestSession_ReadsOneRunByID(t *testing.T) {
 	f, srv := newFakeVBR(t)
 	f.respond("GET /api/v1/sessions/"+testSessionID, http.StatusOK, `{
 		"id": "`+testSessionID+`",
-		"name": "Onsite_Daily_Offsite_Linux",
+		"name": "Daily-Copy-Linux",
 		"sessionType": "PlatformBackupJob",
 		"platformName": "Proxmox",
 		"state": "Stopped",

@@ -13,7 +13,7 @@ import type { GuestToolsGuest } from "./types/guest-tools";
 export function guest(over: Partial<GuestToolsGuest> = {}): GuestToolsGuest {
   return {
     vmid: 100,
-    name: "server2022",
+    name: "win02",
     node: "pve1",
     status: "running",
     template: false,

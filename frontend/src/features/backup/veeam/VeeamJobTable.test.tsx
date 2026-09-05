@@ -27,7 +27,7 @@ describe("VeeamJobTable", () => {
   it("shows job state and result without expanding", () => {
     renderWithProviders(<VeeamJobTable serverId="srv-1" jobs={[job()]} />);
 
-    expect(screen.getByText("Onsite_Daily")).toBeInTheDocument();
+    expect(screen.getByText("Daily-Backup")).toBeInTheDocument();
     expect(screen.getByText("Success")).toBeInTheDocument();
     expect(screen.getByText("repo-nas-01")).toBeInTheDocument();
   });
@@ -52,7 +52,7 @@ describe("VeeamJobTable", () => {
     renderWithProviders(<VeeamJobTable serverId="srv-1" jobs={[job()]} />);
 
     expect(screen.queryByText("00:18:27")).not.toBeInTheDocument();
-    await user.click(screen.getByText("Onsite_Daily"));
+    await user.click(screen.getByText("Daily-Backup"));
 
     expect(screen.getByText("00:18:27")).toBeInTheDocument();
     expect(screen.getByText("268 MB")).toBeInTheDocument();
@@ -70,7 +70,7 @@ describe("VeeamJobTable", () => {
         jobs={[job({ bottleneck: "NotDefined", processing_rate: "N/A" })]}
       />,
     );
-    await user.click(screen.getByText("Onsite_Daily"));
+    await user.click(screen.getByText("Daily-Backup"));
 
     expect(screen.queryByText("NotDefined")).not.toBeInTheDocument();
     expect(screen.queryByText("N/A")).not.toBeInTheDocument();
@@ -135,7 +135,7 @@ describe("VeeamJobTable", () => {
     const { rerender } = renderWithProviders(
       <VeeamJobTable serverId="srv-1" jobs={[job()]} />,
     );
-    await user.click(screen.getByText("Onsite_Daily"));
+    await user.click(screen.getByText("Daily-Backup"));
     expect(screen.getByText("00:18:27")).toBeInTheDocument();
 
     // Server B, whose one job happens to carry the same row id.
@@ -151,7 +151,7 @@ describe("VeeamJobTable", () => {
     const { rerender } = renderWithProviders(
       <VeeamJobTable serverId="srv-1" jobs={[job()]} />,
     );
-    await user.click(screen.getByText("Onsite_Daily"));
+    await user.click(screen.getByText("Daily-Backup"));
     expect(screen.getByText("00:18:27")).toBeInTheDocument();
 
     rerender(<VeeamJobTable serverId="srv-2" jobs={[]} />);
@@ -211,7 +211,7 @@ describe("VeeamSessionTable", () => {
         sessions={[session({ result: "Failed" })]}
       />,
     );
-    await user.click(screen.getByText("Onsite_Daily"));
+    await user.click(screen.getByText("Daily-Backup"));
     expect(
       screen.getByText(/same way it records a genuine failure/i),
     ).toBeInTheDocument();

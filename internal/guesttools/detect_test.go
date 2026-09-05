@@ -537,20 +537,20 @@ func TestRestoreActionAlwaysRemovesTheISO(t *testing.T) {
 		{
 			name:      "drive that already held a virtio-win ISO is emptied, not removed",
 			placement: cdromPlacement{Key: "ide3"},
-			config:    map[string]any{"ide3": "synology:iso/virtio-win-0.1.285.iso,media=cdrom"},
+			config:    map[string]any{"ide3": "nas:iso/virtio-win-0.1.285.iso,media=cdrom"},
 			want:      cdromEject,
 		},
 		{
 			name:      "drive already holding the target ISO is still emptied",
 			placement: cdromPlacement{Key: "ide3", AlreadyAttached: true},
-			config:    map[string]any{"ide3": "synology:iso/virtio-win-0.1.302.iso,media=cdrom"},
+			config:    map[string]any{"ide3": "nas:iso/virtio-win-0.1.302.iso,media=cdrom"},
 			want:      cdromEject,
 		},
 		{
 			name:      "an operator's own media is put back verbatim",
 			placement: cdromPlacement{Key: "ide2"},
-			config:    map[string]any{"ide2": "synology:iso/Win2022.iso,media=cdrom"},
-			want:      "synology:iso/Win2022.iso,media=cdrom",
+			config:    map[string]any{"ide2": "nas:iso/Win2022.iso,media=cdrom"},
+			want:      "nas:iso/Win2022.iso,media=cdrom",
 		},
 	}
 	for _, tt := range tests {

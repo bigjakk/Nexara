@@ -149,15 +149,15 @@ func TestBuildVersionSupported(t *testing.T) {
 func TestProxmoxClusters(t *testing.T) {
 	lic := &License{}
 	lic.Summary.Workload = []LicenseWorkload{
-		{PlatformType: "LinuxServer", HostName: "Docker"},
-		{PlatformType: "Proxmox", HostName: "SITE-B"},
-		{PlatformType: "Proxmox", HostName: "SITE-A"},
-		{PlatformType: "Proxmox", HostName: "SITE-A"},
-		{PlatformType: "UnstructuredData", HostName: "192.168.1.250"},
+		{PlatformType: "LinuxServer", HostName: "Linux"},
+		{PlatformType: "Proxmox", HostName: "cluster02"},
+		{PlatformType: "Proxmox", HostName: "cluster01"},
+		{PlatformType: "Proxmox", HostName: "cluster01"},
+		{PlatformType: "UnstructuredData", HostName: "192.0.2.10"},
 	}
 
 	got := lic.ProxmoxClusters()
-	want := []ProxmoxCluster{{Name: "SITE-A", VMCount: 2}, {Name: "SITE-B", VMCount: 1}}
+	want := []ProxmoxCluster{{Name: "cluster01", VMCount: 2}, {Name: "cluster02", VMCount: 1}}
 	if len(got) != len(want) {
 		t.Fatalf("ProxmoxClusters = %+v, want %+v", got, want)
 	}

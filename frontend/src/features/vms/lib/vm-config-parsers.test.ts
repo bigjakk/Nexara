@@ -203,7 +203,7 @@ describe("parseDisk", () => {
   it("derives the format from the volume extension when format= is absent", () => {
     // How Proxmox actually writes file-based disks — the extension is the only
     // record of the image format.
-    expect(parseDisk("synology:121/vm-121-disk-0.qcow2,size=81G").format).toBe(
+    expect(parseDisk("nas:121/vm-121-disk-0.qcow2,size=81G").format).toBe(
       "qcow2",
     );
     expect(parseDisk("local:100/vm-100-disk-0.raw,size=32G").format).toBe(

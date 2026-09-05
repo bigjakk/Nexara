@@ -332,7 +332,7 @@ export function parseDisk(raw: string): ParsedDisk {
   }
 
   // File-based storages encode the format in the volume's file extension and
-  // usually omit format=, e.g. "synology:121/vm-121-disk-0.qcow2,size=81G".
+  // usually omit format=, e.g. "nas:121/vm-121-disk-0.qcow2,size=81G".
   // An explicit format= below still wins. Block-backed volumes have no
   // extension and are always raw, which callers treat as "storage decides".
   result.format = formatFromVolume(result.volume);

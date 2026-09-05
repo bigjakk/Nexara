@@ -80,7 +80,7 @@ type LicenseWorkload struct {
 
 // ProxmoxCluster is one Proxmox connection as the license reports it.
 type ProxmoxCluster struct {
-	// Name is the Veeam-side hostName, e.g. "CRJLAB". Not a platformId —
+	// Name is the Veeam-side hostName, e.g. "cluster01". Not a platformId —
 	// that only appears on sessions, restore points and backup objects, so
 	// Phase 1 cannot resolve one yet.
 	Name string `json:"name"`

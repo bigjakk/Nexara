@@ -118,8 +118,8 @@ describe("clearedSettings", () => {
     // edits cidr only, so listing them would put them in `delete` on every
     // single edit and rely on Proxmox re-deriving them.
     const existing = iface({
-      cidr: "192.168.90.236/24",
-      address: "192.168.90.236",
+      cidr: "192.0.2.40/24",
+      address: "192.0.2.40",
       netmask: "255.255.255.0",
       address6: "fd00::2",
       netmask6: "64",
@@ -128,7 +128,7 @@ describe("clearedSettings", () => {
     expect(
       clearedSettings(
         existing,
-        { cidr: "192.168.90.236/24", comments: "x" },
+        { cidr: "192.0.2.40/24", comments: "x" },
         "bridge",
       ),
     ).toEqual([]);

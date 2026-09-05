@@ -383,8 +383,8 @@ func TestProbe_HappyPath(t *testing.T) {
 	if len(res.ProxmoxClusters) != 1 {
 		t.Fatalf("ProxmoxClusters = %+v, want exactly one", res.ProxmoxClusters)
 	}
-	if got := res.ProxmoxClusters[0]; got.Name != "EXAMPLE" || got.VMCount != 14 {
-		t.Errorf("ProxmoxClusters[0] = %+v, want {EXAMPLE 14}", got)
+	if got := res.ProxmoxClusters[0]; got.Name != "cluster01" || got.VMCount != 14 {
+		t.Errorf("ProxmoxClusters[0] = %+v, want {cluster01 14}", got)
 	}
 
 	// Discovery must be the unauthenticated bootstrap, not a probe ladder:

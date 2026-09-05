@@ -8,7 +8,7 @@
 # See docs/contributing.md → "Testing against a disposable stack" for the full
 # procedure, including the mandatory safety cutouts.
 #
-#   TEST_HOST_IP=192.168.3.245 docker compose \
+#   TEST_HOST_IP=192.0.2.50 docker compose \
 #     --env-file .env -f docker/test/docker-compose.test.yml up -d
 name: nexara-test
 

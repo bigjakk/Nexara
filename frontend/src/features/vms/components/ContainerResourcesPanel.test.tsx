@@ -62,7 +62,7 @@ describe("ContainerResourcesPanel unused volumes", () => {
       cores: 2,
       memory: 1024,
       rootfs: "ceph:vm-200-disk-0,size=8G",
-      net0: "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:80:F0:95,ip=dhcp,type=veth",
+      net0: "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:00:00:01,ip=dhcp,type=veth",
       // What a move-volume without "delete source" leaves behind.
       unused0: "local-lvm:vm-200-disk-0",
     };
@@ -118,7 +118,7 @@ describe("ContainerResourcesPanel change tracking", () => {
       rootfs: "ceph:vm-200-disk-0,size=8G",
       // type=veth is on every Proxmox container NIC and the form has no field
       // for it; if the rebuild drops it the panel is dirty before you touch it.
-      net0: "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:80:F0:95,ip=dhcp,type=veth",
+      net0: "name=eth0,bridge=vmbr0,hwaddr=BC:24:11:00:00:01,ip=dhcp,type=veth",
     };
   });
 

@@ -15,7 +15,7 @@ export function job(over: Partial<VeeamJob> = {}): VeeamJob {
   return {
     id: "job-1",
     veeam_id: "3953c24f-bbe6-41fc-ae2f-a34e25bfd614",
-    name: "Onsite_Daily",
+    name: "Daily-Backup",
     job_type: "ProxmoxBackupJob",
     workload: "Vm",
     description: "",
@@ -47,7 +47,7 @@ export function session(over: Partial<VeeamSession> = {}): VeeamSession {
   return {
     id: "sess-1",
     veeam_id: "20ff3c43-65c0-414d-ae03-10cf59fd2faa",
-    name: "Onsite_Daily",
+    name: "Daily-Backup",
     state: "Stopped",
     result: "Success",
     result_message: "Success",

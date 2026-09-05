@@ -1059,7 +1059,7 @@ type VeeamInfrastructure struct {
 	Role     string    `json:"role"`
 	// The name Veeam knows the machine by, which is the ONLY key available for matching it to a guest: the proxy model carries no smbios uuid and no vmid. For the backup server this is the managedServers FQDN — serverInfo.name is the short form and matches no guest
 	Name string `json:"name"`
-	// The Proxmox node a worker was deployed to ("hv01.example.lan"), or the literal "This server" for a proxy role the VBR server fills itself. Informational: Veeam's node naming does not reliably match Nexara's, so it is not used to resolve the guest
+	// The Proxmox node a worker was deployed to ("pve-01.example.com"), or the literal "This server" for a proxy role the VBR server fills itself. Informational: Veeam's node naming does not reliably match Nexara's, so it is not used to resolve the guest
 	HostName   string `json:"host_name"`
 	IsDisabled bool   `json:"is_disabled"`
 	// Workers are normally OFFLINE between runs — Veeam powers them on for a job and off again — so false is the healthy steady state here, not a fault to surface
